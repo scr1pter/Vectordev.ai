@@ -1156,6 +1156,9 @@ export function PullRequests(props: {
               diff,
               ...(checks?.length ? { checks } : {}),
               ...(previous ? { previous } : {}),
+              // Who is signed in tells the owner's own pull requests from other people's, which choose what the
+              // reviewers hear of the owner's memory and where the posted review may link.
+              viewer: status()?.login,
             },
             controller,
             current,

@@ -3,13 +3,14 @@ import { createVectorClient } from "@vectordevai/sdk/v2/client"
 import { parseUnifiedDiff } from "@vectordevai/core/review/diff"
 import { noteTriageUnchecked } from "@vectordevai/core/review/format"
 import { reviewPermissionRules } from "@vectordevai/core/review/permission"
-import { buildFinalizePrompt } from "@vectordevai/core/review/prompt"
+import { buildFinalizePrompt, SCOPE } from "@vectordevai/core/review/prompt"
 import { REVIEW_REPORT_JSON_SCHEMA, VERIFY_JSON_SCHEMA } from "@vectordevai/core/review/schema"
 import {
   afterFixes,
   applyFix,
   applyReviewFix,
   askAgentPrompt,
+  authorship,
   buildDesktopReview,
   buildDesktopSummary,
   checksForReview,
@@ -1251,6 +1252,42 @@ test("OpenRouter free reviews have an explicit no-charge estimate", () => {
   expect(estimateText({ files: 51, model: "openrouter/acme/coder:free", costKind: "free" })).toBe(
     "This pull request changes 51 files. It runs on openrouter/acme/coder through OpenRouter at no charge.",
   )
+})
+
+// Section 6.4a: what the reviewers hear of the owner's memory, and where a posted review may link, follow who wrote
+// the pull request, never whether the checkout already holds it.
+describe("who wrote what is reviewed", () => {
+  test("only a pull request from this repository by the signed-in account is the owner's own", () => {
+    expect(authorship(undefined, undefined)).toBe("trusted")
+    expect(authorship({ ...pr, isCrossRepository: false }, "Alice")).toBe("trusted")
+    expect(authorship({ ...pr, isCrossRepository: true }, "alice")).toBe("untrusted")
+    expect(authorship({ ...pr, isCrossRepository: false }, "bob")).toBe("untrusted")
+    expect(authorship({ ...pr, isCrossRepository: false }, undefined)).toBe("untrusted")
+    expect(authorship(pr, "alice")).toBe("untrusted")
+  })
+
+  test("a fork's pull request checked out in place is still reviewed and posted as one Vector cannot trust", async () => {
+    const { client, calls } = fakeClient({ files: { "src/list.ts": HEAD } })
+    const outcome = (await run(client, { pr: { ...pr, isCrossRepository: true }, viewer: "alice" }))!
+    expect(outcome.checkout.mode).toBe("in-place")
+    expect(outcome.checkout.trust).toBe("trusted")
+    expect(outcome.authored).toBe("untrusted")
+    expect(calls.prompt.map((call) => call.parts?.[0]?.metadata?.[SCOPE])).toEqual(
+      calls.prompt.map(() => ({ paths: ["src/list.ts"], trust: "untrusted" })),
+    )
+    expect(buildDesktopReview(outcome, pr.url).untrusted).toBe(true)
+  })
+
+  test("another author's pull request is untrusted too, and the owner's own is not", async () => {
+    const theirs = fakeClient({ files: { "src/list.ts": HEAD } })
+    const other = (await run(theirs.client, { pr: { ...pr, isCrossRepository: false }, viewer: "bob" }))!
+    expect(theirs.calls.prompt[0]?.parts?.[0]?.metadata?.[SCOPE]).toMatchObject({ trust: "untrusted" })
+    expect(buildDesktopReview(other, pr.url).untrusted).toBe(true)
+    const mine = fakeClient({ files: { "src/list.ts": HEAD } })
+    const own = (await run(mine.client, { pr: { ...pr, isCrossRepository: false }, viewer: "alice" }))!
+    expect(mine.calls.prompt[0]?.parts?.[0]?.metadata?.[SCOPE]).toMatchObject({ trust: "trusted" })
+    expect(buildDesktopReview(own, pr.url).untrusted).toBe(false)
+  })
 })
 
 describe("buildDesktopReview", () => {

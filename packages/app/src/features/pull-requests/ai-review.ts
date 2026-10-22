@@ -206,6 +206,9 @@ export type ReviewOutcomeLite = {
   head: string
   baseRef: string
   checkout: ReviewCheckout
+  // Whether the owner wrote what was reviewed (authorship below). Absent on a review saved before it was recorded,
+  // which posts as one Vector cannot trust.
+  authored?: Trust
   label: string
   report: ModelReport
   selection: Selection
@@ -256,6 +259,8 @@ export type ReviewTarget =
       pr: ReviewPullRequest
       diff: string // the pull request's diff, for exactly pr.headRefOid
       checks?: CheckResult[] // GitHub's CI results for that commit
+      // The signed-in GitHub login, which tells the owner's own pull requests from other people's.
+      viewer?: string
     }
   | { uncommitted: true }
 
@@ -481,6 +486,19 @@ export async function chooseCheckout(
     headFiles.push({ path: entry.file.path, text: renderPatch([entry.file]), exact: false })
   }
   return { mode: "rebuilt", trust: "untrusted", headFiles, fromDiff }
+}
+
+/**
+ * Whether the owner wrote what is reviewed (section 6.4a): their own uncommitted changes, or a pull request from this
+ * repository opened by the signed-in GitHub account. A fork's pull request, another author's, or one Vector cannot tell
+ * about is untrusted, whatever the checkout holds, even after `gh pr checkout`: its reviewers then hear only the
+ * owner's preferences and review notes, and the posted review links and embeds only on GitHub.
+ */
+export function authorship(pr: ReviewPullRequest | undefined, viewer: string | undefined): Trust {
+  if (!pr) return "trusted"
+  return pr.isCrossRepository === false && viewer !== undefined && pr.author.toLowerCase() === viewer.toLowerCase()
+    ? "trusted"
+    : "untrusted"
 }
 
 export function checkoutLabel(checkout: ReviewCheckout, context: { branch?: string; baseRef: string }) {
@@ -770,7 +788,9 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
       : `Reviewing with ${modelName(model)}…`,
   )
   const subject = pr ? `#${pr.number}` : "uncommitted changes"
-  const scope: Scope = { paths: review.map((file) => file.path), trust: checkout.trust }
+  // Which of the owner's memory lines the reviewers hear follows who wrote the change, never what the checkout holds.
+  const authored = authorship(pr, "pr" in input ? input.viewer : undefined)
+  const scope: Scope = { paths: review.map((file) => file.path), trust: authored }
   const rules = reviewPermissionRules({})
   const timeoutMs = input.timeoutMs ?? REVIEW_TIMEOUT_MS
   const stop = stopWhen(input.signal, timeoutMs)
@@ -978,6 +998,7 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
   return {
     ...summary,
     checkout,
+    authored,
     label,
     report,
     selection,
@@ -1995,9 +2016,10 @@ export function buildDesktopReview(
     ),
     fallbackBody: redactSecrets(desktopSummaryBody({ ...outcome, selection }, url), []),
     comments,
-    // Posting checks all of it against the owner's memory, including what these sessions recalled (section 6.4a).
+    // Posting checks all of it against the owner's memory, including what these sessions recalled (section 6.4a). A
+    // review of a pull request the owner did not write links and embeds only on GitHub.
     sessionIDs: outcome.sessions,
-    untrusted: outcome.checkout.trust === "untrusted",
+    untrusted: outcome.checkout.trust === "untrusted" || outcome.authored !== "trusted",
   }
 }
 
