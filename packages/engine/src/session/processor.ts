@@ -38,7 +38,6 @@ import { providerCredentialAllowed, providerUsable } from "@vectordevai/core/pro
 import { isFreeModel } from "@vectordevai/schema/free-model"
 import { Auth } from "@/auth"
 import { ModelSlots } from "@vectordevai/core/local-mode/model-slots"
-import { ModelPlans } from "@vectordevai/core/model-plans"
 import { LocalErrors } from "@vectordevai/core/local-mode/errors"
 import { Token } from "@vectordevai/core/util/token"
 
@@ -169,23 +168,20 @@ const layer = Layer.effect(
       // The opening snapshot is taken while the request is built and sent rather than before it. The AI SDK may run
       // tools before it emits start-step, so tools are held until it lands instead (see `gate` in process).
       const opening = yield* enqueue(input.sessionID, snapshot.track())
-      const url = Provider.serverURL(input.model, yield* provider.getProvider(input.model.providerID))
-      // A model server someone hosts: its requests wait in line for the server's permits, the agent needs its fixed
-      // prompt to fit, and its errors come with their fix. Cloud APIs skip all of it.
-      const hosted =
-        input.model.freeModel ||
-        input.model.providerID === "vector" ||
-        input.model.providerID === ModelPlans.PROVIDER_ID
-          ? undefined
-          : ModelSlots.server(url)
-      const parentID = hosted
+      // The line this model's requests wait in at its server, read the way the provider holds them, so every request
+      // that waits in it is named: the user's turn, or a subagent's in a child session. On a server someone hosts the
+      // agent also needs its fixed prompt to fit, and its errors come with their fix. A cloud API with no configured
+      // `concurrency` has no line and skips all of it.
+      const line = yield* provider.line(input.model)
+      const hosted = line?.hosted ? line.origin : undefined
+      const parentID = line
         ? yield* session.get(input.sessionID).pipe(
             Effect.map((info) => info.parentID),
             Effect.catch(() => Effect.succeed(undefined)),
           )
         : undefined
       // The first step for a new prompt in a root session: helpers still waiting for a server can wait for the next.
-      if (hosted && !parentID && prompts.get(input.sessionID) !== input.assistantMessage.parentID) {
+      if (line && !parentID && prompts.get(input.sessionID) !== input.assistantMessage.parentID) {
         prompts.delete(input.sessionID)
         prompts.set(input.sessionID, input.assistantMessage.parentID)
         if (prompts.size > 500) prompts.delete(prompts.keys().next().value!)
@@ -193,13 +189,11 @@ const layer = Layer.effect(
       }
       // How this model's steps count against a run budget. A plan, such as a ChatGPT plan, pays for them only when
       // the credential llm.ts actually sends is the stored OAuth sign-in, so this applies the same credential rule.
-      // A server on this computer, or a private one the user listed, has no per-token price. The sign-in and the
-      // server list are read from disk while the request is sent, off the request path.
-      const costKind = yield* Effect.all([
-        auth.get(input.model.providerID).pipe(Effect.catch(() => Effect.succeed(undefined))),
-        hosted ? config.getGlobal().pipe(Effect.map((global) => global.local?.endpoints ?? [])) : Effect.succeed([]),
-      ]).pipe(
-        Effect.map(([signIn, listed]) =>
+      // A server on this computer, or a private one on the model server list, has no per-token price. The sign-in is
+      // read from disk while the request is sent, off the request path.
+      const costKind = yield* auth.get(input.model.providerID).pipe(
+        Effect.catch(() => Effect.succeed(undefined)),
+        Effect.map((signIn) =>
           SpendGuard.costKindOf({
             free: isFreeModel(input.model) || input.model.freeModel !== undefined,
             oauthPlan:
@@ -210,7 +204,7 @@ const layer = Layer.effect(
                 providerUsable(input.model.providerID, { npm: input.model.api.npm, api: input.model.api.url }),
               ),
             listed: input.model.cost.input > 0 || input.model.cost.output > 0,
-            local: ModelSlots.local(url, listed),
+            local: line?.local ?? false,
           }),
         ),
         Effect.forkIn(scope),
@@ -971,7 +965,7 @@ const layer = Layer.effect(
           yield* events.publish(Session.Event.Error, { sessionID: ctx.sessionID, error: ctx.assistantMessage.error })
           return "stop" as const
         }
-        const model = hosted
+        const model = line
           ? Provider.withPriority(streamInput.model, parentID ? "subagent" : "user")
           : streamInput.model
 

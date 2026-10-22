@@ -30,7 +30,9 @@ export function testProviderConfig(llmUrl: string) {
             options: {},
           },
         },
-        options: { apiKey: "test-key", baseURL: llmUrl },
+        // The fake server answers any number of requests at once. Without a count, Vector would send a server on
+        // this computer one request at a time, as it does a model server whose count nobody configured.
+        options: { apiKey: "test-key", baseURL: llmUrl, concurrency: 64 },
       },
     },
   }

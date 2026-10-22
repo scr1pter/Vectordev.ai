@@ -183,31 +183,68 @@ function requestOrigin(
   return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.origin : undefined
 }
 
-// The line a model's requests wait in at a server someone hosts. The session processor names the user's turn and its
-// subagents; any other request, such as a title, a summary or a generated agent, is a helper.
-const priorities = new WeakMap<Model, ModelSlots.Priority>()
+// The lane a model's requests take in a server's line. The session processor names the user's turn and its
+// subagents, and a title or a name is brief; any other request, such as a summary or a generated agent, is a helper.
+const lanes = new WeakMap<Model, { readonly priority: ModelSlots.Priority; readonly brief?: boolean }>()
 
 /** A copy of `model` whose requests to a model server someone hosts wait in line as `priority`. */
 export function withPriority(model: Model, priority: ModelSlots.Priority): Model {
   const copy = { ...model }
-  priorities.set(copy, priority)
+  lanes.set(copy, { priority })
   return copy
 }
 
-/**
- * Where a model's requests go as configured, its provider's base URL else the catalog's, without the variables the
- * SDK fills in later. Enough to tell a model server on this computer from a cloud API.
- */
-export function serverURL(model: Model, provider: Pick<Info, "options"> | undefined) {
-  const configured = provider?.options?.["baseURL"]
-  if (typeof configured === "string" && configured !== "") return configured
-  return model.api.url || SDK_ORIGINS[model.api.npm]
+/** The lane `model`'s requests wait in at a server's line: a helper unless the session processor named it. */
+export function priorityOf(model: Model): ModelSlots.Priority {
+  return lanes.get(model)?.priority ?? "helper"
 }
 
-// Holds each request to a server someone hosts to a permit, and keeps its reply inside the server's context. The permit
-// is taken before the SDK calls fetch, where the header timeout starts, and given back when the reply ends, fails, is
-// cancelled or its request is aborted. `context` is 0 for a server whose context is not known, or a cloud API that
-// configures `concurrency`: neither has its reply limit changed.
+/**
+ * A copy of `model` for a title or a name: a helper whose reply from a model server someone hosts stays within
+ * BRIEF_REPLY tokens, so it never holds a single-slot server through a long answer while the user's next step waits.
+ */
+export function brief(model: Model): Model {
+  const copy = { ...model }
+  lanes.set(copy, { priority: "helper", brief: true })
+  return copy
+}
+
+/** The most a title or a name may reply with on a model server someone hosts. */
+export const BRIEF_REPLY = 512
+
+// The most a model that lists no reply limit of its own may reply with on a model server someone hosts: what Check
+// models writes for a model (LocalProbe.output), so a model replies the same whether or not it was checked.
+const HOSTED_REPLY = 8_192
+
+/** The line a model's requests wait in at a model server. */
+export type Line = {
+  /** The server's origin, which every provider pointing at it shares. */
+  readonly origin: string
+  /**
+   * Whether someone hosts the server: it is on this computer, on the user's network or on the model server list. Such a
+   * server gets the slower timeouts, the context checks, a reply that fits its context and the fixes for its errors. A
+   * cloud API whose provider configures `concurrency` has a line too, and none of the rest.
+   */
+  readonly hosted: boolean
+  /** The smallest `concurrency` this provider or another one pointing at the same server configures. */
+  readonly permits?: number
+  /** Whether its steps have no per-token price (ModelSlots.local). */
+  readonly local: boolean
+}
+
+// The most a reply from a model server someone hosts may take: a title's or a name's few hundred tokens, and for a
+// model that lists no reply limit of its own what Check models would write for its context.
+function hostedCeiling(model: Model, brief: boolean) {
+  if (brief) return BRIEF_REPLY
+  if (model.limit.output > 0) return undefined
+  if (model.limit.context <= 0) return HOSTED_REPLY
+  return Math.max(1, Math.min(HOSTED_REPLY, Math.floor(model.limit.context / 4)))
+}
+
+// Holds each request to a model server to a permit, and on a server someone hosts keeps its reply inside the server's
+// context and within the reply limits above. The permit is taken before the SDK calls fetch, where the header timeout
+// starts, and given back when the reply ends, fails, is cancelled or its request is aborted. `context` is 0 for a server
+// whose context is not known, or a cloud API that configures `concurrency`: neither has its reply fitted to it.
 function fitted(
   language: LanguageModelV3,
   input: {
@@ -216,6 +253,8 @@ function fitted(
     readonly permits: number | undefined
     readonly priority: ModelSlots.Priority
     readonly context: number
+    /** The most the reply may take, or undefined to leave the caller's limit. */
+    readonly ceiling: number | undefined
   },
 ): LanguageModelV3 {
   const acquire = (options: LanguageModelV3CallOptions) =>
@@ -226,11 +265,15 @@ function fitted(
       signal: options.abortSignal,
     })
   const clamp = (options: LanguageModelV3CallOptions) => {
-    if (input.context <= 0 || options.maxOutputTokens === undefined) return options
-    const room = input.context - promptTokens(options)
+    const asked =
+      input.ceiling === undefined
+        ? options.maxOutputTokens
+        : Math.min(options.maxOutputTokens ?? input.ceiling, input.ceiling)
+    if (asked === undefined) return options
+    const room = input.context > 0 ? input.context - promptTokens(options) : 0
     // A request that does not fit at all keeps its limit; the server's refusal starts compaction.
-    if (room < 1) return options
-    return { ...options, maxOutputTokens: Math.min(options.maxOutputTokens, room) }
+    const limit = room >= 1 ? Math.min(asked, room) : asked
+    return limit === options.maxOutputTokens ? options : { ...options, maxOutputTokens: limit }
   }
   // Everything else, such as the model's name and supported URLs, reads through to the SDK's own model.
   const wrapped: LanguageModelV3 = Object.create(language)
@@ -240,7 +283,12 @@ function fitted(
       return Promise.resolve(language.doGenerate(clamp(options))).finally(release)
     },
     doStream: async (options: LanguageModelV3CallOptions) => {
-      const release = await acquire(options)
+      const held = await acquire(options)
+      // The release stops listening for the abort, so a signal that outlives the reply keeps nothing of it.
+      const release = () => {
+        options.abortSignal?.removeEventListener("abort", release)
+        held()
+      }
       options.abortSignal?.addEventListener("abort", release, { once: true })
       const result = await Promise.resolve(language.doStream(clamp(options))).catch((error: unknown) => {
         release()
@@ -1330,6 +1378,11 @@ export interface Interface {
   readonly getProvider: (providerID: ProviderV2.ID) => Effect.Effect<Info>
   readonly getModel: (providerID: ProviderV2.ID, modelID: ModelV2.ID) => Effect.Effect<Model, ModelNotFoundError>
   readonly getLanguage: (model: Model) => Effect.Effect<LanguageModelV3, ModelNotFoundError>
+  /**
+   * The line the model's requests wait in at its server, as getLanguage holds them: undefined for a cloud API that
+   * configures no `concurrency`, a free model and Vector Codium.
+   */
+  readonly line: (model: Model) => Effect.Effect<Line | undefined>
   /** Opens the connection the model's next request will use, so a session's first request does not wait for it. */
   readonly preconnect: (model: Model) => Effect.Effect<void>
   readonly closest: (
@@ -2336,14 +2389,18 @@ const layer = Layer.effect(
 
         const customFetch = options["fetch"]
         const hosted =
-          ModelSlots.server(typeof options["preconnect"] === "string" ? options["preconnect"] : baseURL) !== undefined
+          ModelSlots.server(
+            typeof options["preconnect"] === "string" ? options["preconnect"] : baseURL,
+            Config.local(),
+          ) !== undefined
         const chunkTimeout = options["chunkTimeout"] ?? (hosted ? LOCAL_CHUNK_TIMEOUT : undefined)
         const headerTimeout = options["headerTimeout"] ?? (hosted ? LOCAL_HEADER_TIMEOUT : undefined)
         delete options["chunkTimeout"]
         delete options["headerTimeout"]
         delete options["preconnect"]
-        // Read by getLanguage for the server's permits; the SDK has no use for it.
+        // Read by the model's line for the server's permits and its cost; the SDK has no use for them.
         delete options["concurrency"]
+        delete options["forwards"]
 
         options["fetch"] = async (input: any, init?: BunFetchRequestInit) => {
           const fetchFn = customFetch ?? fetch
@@ -2535,29 +2592,57 @@ const layer = Layer.effect(
               ? new ModelNotFoundError({ modelID: model.id, providerID: model.providerID, cause })
               : undefined,
         ))
+      const at = lineOf(model, s, envs)
+      if (!at) return language
+      return fitted(language, {
+        slots,
+        origin: at.origin,
+        permits: at.permits,
+        priority: priorityOf(model),
+        context: at.hosted ? model.limit.context : 0,
+        ceiling: at.hosted ? hostedCeiling(model, lanes.get(model)?.brief === true) : undefined,
+      })
+    })
+
+    // Where a model's requests wait, as getLanguage holds them and the session processor, Vectorscope and the
+    // document reader read it: undefined for a cloud API that configures no `concurrency`, a free model and Vector
+    // Codium. It reads the request's own origin (a plugin's `preconnect`, variables filled in) and the server list.
+    const lineOf = (model: Model, s: State, envs: Record<string, string | undefined>): Line | undefined => {
+      const provider = s.providers[model.providerID]
       // Free models and Vector Codium choose their route per request and are never on a server someone hosts.
-      if (!provider || model.providerID === "vector" || model.providerID === planID || model.freeModel) return language
+      if (!provider || model.providerID === "vector" || model.providerID === planID || model.freeModel) return undefined
       const origin = requestOrigin(model, provider.options, s.varsLoaders[model.providerID], envs)
-      const hosted = ModelSlots.server(origin)
+      if (!origin) return undefined
+      const policy = Config.local()
+      const hosted = ModelSlots.server(origin, policy)
       // How many requests the server takes: the smallest concurrency this provider or any other provider pointing at
       // the same server configures, since they share it. Undefined when none does.
       const counts = Object.values(s.providers).flatMap((item) => {
         const value = item.options["concurrency"]
         if (typeof value !== "number") return []
         if (item === provider) return [value]
-        const at = typeof item.options["baseURL"] === "string" ? LocalPolicy.origin(item.options["baseURL"]) : undefined
-        return at && origin && at === LocalPolicy.origin(origin) ? [value] : []
+        const other =
+          typeof item.options["baseURL"] === "string" ? LocalPolicy.origin(item.options["baseURL"]) : undefined
+        return other && other === LocalPolicy.origin(origin) ? [value] : []
       })
       const permits = counts.length ? Math.min(...counts) : undefined
       // A cloud API is left as it is unless a provider configures how many requests it takes.
-      if (!origin || (!hosted && permits === undefined)) return language
-      return fitted(language, {
-        slots,
+      if (!hosted && permits === undefined) return undefined
+      return {
         origin: hosted ?? origin,
+        hosted: hosted !== undefined,
         permits,
-        priority: priorities.get(model) ?? "helper",
-        context: hosted ? model.limit.context : 0,
-      })
+        local: ModelSlots.local(origin, {
+          policy,
+          model: model.api.id,
+          forwards: provider.options["forwards"] === true,
+        }),
+      }
+    }
+
+    const line = Effect.fn("Provider.line")(function* (model: Model) {
+      const s = yield* InstanceState.get(state)
+      return lineOf(model, s, yield* env.all())
     })
 
     const preconnect = Effect.fn("Provider.preconnect")(function* (model: Model) {
@@ -2755,6 +2840,7 @@ const layer = Layer.effect(
       getProvider,
       getModel,
       getLanguage,
+      line,
       preconnect,
       closest,
       getSmallModel,

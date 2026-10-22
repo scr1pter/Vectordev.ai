@@ -863,7 +863,7 @@ export type Patch = {
 }
 
 type ProviderPatch = {
-  readonly options?: { readonly concurrency?: number; readonly headerTimeout?: number }
+  readonly options?: { readonly concurrency?: number; readonly headerTimeout?: number; readonly forwards?: boolean }
   readonly models: Readonly<Record<string, ModelPatch>>
 }
 
@@ -873,8 +873,9 @@ type ModelPatch = {
   readonly modalities?: { readonly input: ("text" | "image")[]; readonly output: "text"[] }
 }
 
-// A model's first load can take minutes. Servers on this computer and the user's network get this wait already
-// (provider.ts); one at an internet address, such as a company's https endpoint, gets it written.
+// A model's first load can take minutes. Servers on this computer, on the user's network and on the model server list
+// get this wait already (provider.ts); one at an internet address, such as a company's https endpoint, gets it written
+// too, since it can be added without being listed.
 const HEADER_TIMEOUT = 600_000
 
 /**
@@ -919,6 +920,9 @@ export function patch(input: {
   const options = {
     ...(input.server.concurrency ? { concurrency: input.server.concurrency } : {}),
     ...(input.server.class === "internet" ? { headerTimeout: HEADER_TIMEOUT } : {}),
+    // A LiteLLM proxy passes every prompt on, so its steps are never counted as free local ones. An Ollama server
+    // forwards only its cloud models, which are told apart by name.
+    ...(input.server.forwards === "litellm" ? { forwards: true } : {}),
   }
   const endpoints = input.current?.endpoints ?? []
   const checked = Object.fromEntries(

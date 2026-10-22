@@ -1,36 +1,40 @@
 export * as ModelSlots from "./model-slots"
 
 import { Context, Effect, Layer, type Scope } from "effect"
+import type { LocalMode } from "@vectordevai/schema/local-mode"
 import { makeGlobalNode } from "../effect/app-node"
 import { LocalPolicy } from "./policy"
+import { OllamaServer } from "./servers/ollama"
 
 // Model servers people host answer a few requests at a time: Ollama and LM Studio one by default, llama.cpp as many as
-// it has slots, vLLM a handful. Once Vector knows the number (a provider's `concurrency`, which Check models writes),
-// it holds its model requests to such a server to that many, for the whole process and by origin, so two providers
-// that point at one server share its permits. The user's turn goes first, then subagents, then helpers (titles,
-// summaries), which run only while the server has nothing else to do and are dropped when a new prompt arrives; that
-// holds on a server whose number is not known too. A request starts its own timers only once it holds a permit, so
-// waiting in line never counts against its header timeout. Cloud providers get no line unless one configures
-// `concurrency`.
+// it has slots, vLLM a handful. Vector holds its model requests to such a server to that many, for the whole process
+// and by origin, so two providers that point at one server share its permits: the number a provider's `concurrency`
+// names (Check models writes it), else one for a server on this computer or the user's network. The user's turn goes
+// first, then subagents, then helpers (titles, summaries), which run only while the server has nothing else to do and
+// are dropped when a new prompt arrives. A request starts its own timers only once it holds a permit, so waiting in
+// line never counts against its header timeout. A company endpoint on the model server list gets a line with no limit
+// of its own, and a cloud API gets no line at all, unless its provider configures `concurrency`.
 
 export type Priority = "user" | "subagent" | "helper"
 
 const RANK: Record<Priority, number> = { user: 0, subagent: 1, helper: 2 }
 
 /**
- * Permits for a server whose number nothing configured: no limit for the user's turn and subagents, which the server
- * queues itself, so a server that answers several at once is never held to one. Helpers still wait for it to be idle.
+ * Permits for a server on this computer or the user's network whose number nothing configured: one, as Ollama and LM
+ * Studio take by default. Requests then wait in Vector's line, in priority order, rather than inside the server, where
+ * the wait would count against their header timeout.
  */
-export const DEFAULT_PERMITS = Number.POSITIVE_INFINITY
+export const DEFAULT_PERMITS = 1
 
 export type Request = {
   /** The server's origin, such as http://127.0.0.1:11434. */
   readonly origin: string
   /**
    * How many requests the server takes at once, when the caller's config says. The latest count named applies to
-   * everyone waiting and stays for the process; a request that names none waits by it, or by DEFAULT_PERMITS when no
-   * request ever named one. So a caller that does not read the config, such as the V2 runner on a provider configured
-   * another way, never lifts the limit for the rest.
+   * everyone waiting and stays for the process; a request that names none waits by it, or, when no request ever named
+   * one, by DEFAULT_PERMITS on this computer or the user's network and by no limit on the internet. So a caller that
+   * does not read the config, such as the V2 runner on a provider configured another way, never lifts the limit for the
+   * rest.
    */
   readonly permits?: number
   readonly priority: Priority
@@ -90,7 +94,7 @@ export function make(): Interface {
   const counts = new Map<string, number>()
   let order = 0
 
-  const permits = (origin: string) => counts.get(origin) ?? DEFAULT_PERMITS
+  const permits = (origin: string) => counts.get(origin) ?? defaultPermits(origin)
 
   const pump = (origin: string, server: Server) => {
     while (true) {
@@ -199,24 +203,49 @@ export const layer = Layer.sync(Service, () => Service.of(make()))
 
 export const node = makeGlobalNode({ service: Service, layer, deps: [] })
 
-/**
- * The origin of a model server on this computer or on the user's network, which gets permits and the slower timeouts
- * of hardware someone hosts. Undefined for anything else, such as a cloud API.
- */
-export function server(url: string | URL | undefined) {
-  const origin = url === undefined ? undefined : LocalPolicy.origin(url)
-  if (!origin) return undefined
-  return LocalPolicy.hostClass(new URL(origin).hostname) === "internet" ? undefined : origin
+// A company endpoint on the internet serves many people and sizes itself, so it is held to a count only once one is
+// configured.
+function defaultPermits(origin: string) {
+  if (!URL.canParse(origin) || LocalPolicy.hostClass(new URL(origin).hostname) === "internet")
+    return Number.POSITIVE_INFINITY
+  return DEFAULT_PERMITS
 }
 
 /**
- * Whether a model server's steps have no per-token price: one on this computer, or one at a private address on the
- * user's server list (`local.endpoints`). A server elsewhere on the network may pass requests on to a paid service, so
- * it counts only once it is listed, and a company endpoint on the internet never does.
+ * The origin of a model server someone hosts: one on this computer or on the user's network, or one on the model server
+ * list (`local.endpoints` in `policy`, the user's or the company's), such as a company's https endpoint. Its requests get
+ * a line, the slower timeouts of hardware someone hosts, the context checks and the fixes for its errors. Undefined for
+ * anything else, such as a cloud API.
  */
-export function local(url: string | URL | undefined, listed: readonly string[] = []) {
-  const origin = server(url)
-  if (!origin) return false
-  if (LocalPolicy.loopback(new URL(origin).hostname)) return true
-  return listed.some((item) => LocalPolicy.origin(item) === origin)
+export function server(url: string | URL | undefined, policy?: LocalMode.Policy) {
+  const origin = url === undefined ? undefined : LocalPolicy.origin(url)
+  if (!origin) return undefined
+  if (LocalPolicy.hostClass(new URL(origin).hostname) !== "internet") return origin
+  return policy && LocalPolicy.listed(policy, origin) ? origin : undefined
+}
+
+/**
+ * Whether a model's steps have no per-token price: it runs on a server on this computer, or on one at a private address
+ * on the model server list (the user's or the company's, ranges and wildcards included). A server elsewhere on the
+ * network may pass requests on to a paid service, so it counts only once it is listed, and a company endpoint on the
+ * internet never does. Nor does a model the server passes on to another service: an Ollama cloud model, told by its
+ * name, or any model on a server that passes everything on (`forwards`, which Check models records for a LiteLLM
+ * proxy). Their steps stay unpriced, so a dollar cap still stops them.
+ */
+export function local(
+  url: string | URL | undefined,
+  options: {
+    readonly policy?: LocalMode.Policy
+    /** The model's name on the server, such as gpt-oss:120b-cloud. */
+    readonly model?: string
+    readonly forwards?: boolean
+  } = {},
+) {
+  const origin = url === undefined ? undefined : LocalPolicy.origin(url)
+  if (!origin || options.forwards) return false
+  if (options.model !== undefined && OllamaServer.cloud({ name: options.model })) return false
+  const where = LocalPolicy.hostClass(new URL(origin).hostname)
+  if (where === "this-computer") return true
+  if (where === "internet") return false
+  return options.policy !== undefined && LocalPolicy.listed(options.policy, origin)
 }

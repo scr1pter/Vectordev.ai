@@ -532,6 +532,18 @@ describe("what Check models writes", () => {
     expect(LocalProbe.patch({ providerID: "x", server: found, list: false }).local.endpoints).toBeUndefined()
   })
 
+  test("a LiteLLM proxy is recorded as a server that forwards, so its steps never count as local", async () => {
+    const litellm = (await LocalProbe.probe((await fake("openai")).origin))!
+    expect(LocalProbe.patch({ providerID: "proxy", server: litellm }).provider["proxy"]?.options).toEqual({
+      forwards: true,
+    })
+    // Ollama forwards only its cloud models, which are left out of what it records and told apart by name.
+    const ollama = (await LocalProbe.probe((await fake("ollama")).origin))!
+    expect(LocalProbe.patch({ providerID: "ollama", server: ollama }).provider["ollama"]?.options).toEqual({
+      concurrency: 1,
+    })
+  })
+
   test("the strict guard saw only this computer", () => {
     expect(guard.outside()).toEqual([])
     expect(guard.attempts().length).toBeGreaterThan(0)

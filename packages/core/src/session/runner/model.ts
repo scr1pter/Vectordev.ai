@@ -190,8 +190,9 @@ export const spendStep = (
       oauthPlan: false,
       listed:
         reportedUsd(model, settlement.providerMetadata) !== undefined || (costUsd !== undefined && price !== undefined),
-      // V2 does not read the server list yet, so only a server on this computer counts.
-      local: ModelSlots.local(model.route.endpoint.baseURL),
+      // V2 does not read the server list yet, so only a server on this computer counts, and never for a model it passes
+      // on to another service.
+      local: ModelSlots.local(model.route.endpoint.baseURL, { model: model.id, forwards: forwarders.has(model) }),
     }),
     price,
     contextTokens,
@@ -237,7 +238,16 @@ const apiKey = (model: ModelV2.Info, credential?: Credential.Value) => {
 }
 
 /** The line a session's requests wait in at a model server someone hosts. */
-export type Slots = { readonly slots: ModelSlots.Interface; readonly priority: ModelSlots.Priority }
+export type Slots = {
+  readonly slots: ModelSlots.Interface
+  readonly priority: ModelSlots.Priority
+  /** Every provider, so one that points at the same server and configures a smaller count holds these requests to it. */
+  readonly providers?: readonly ProviderV2.Info[]
+}
+
+// Models whose provider passes every prompt on to other services (`forwards`, as Check models records for a LiteLLM
+// proxy), so their steps are never counted as free local ones.
+const forwarders = new WeakSet<Model>()
 
 const withDefaults = (
   model: ModelV2.Info,
@@ -289,15 +299,23 @@ const withoutUnconsentedTraining = (route: AnyRoute, modelID: string, mayTrain: 
   })
 
 // A request to a server on this computer or the user's network holds its place in the server's line until its reply
-// ends, fails or is interrupted, so helpers on that server wait for it. It waits for a permit when the provider's
-// `concurrency` setting, or a V1 provider pointing at the same server, says how many requests the server takes. A
-// cloud API gets a line only when its provider sets `concurrency`, as in V1.
+// ends, fails or is interrupted, so helpers on that server wait for it. It waits for a permit by the smallest
+// `concurrency` its own provider or another one pointing at the same server sets, as V1 does, so requests from the two
+// runners never take turns lifting the limit; with none set, ModelSlots holds the server to one. A cloud API gets a
+// line only when such a provider sets `concurrency`, as in V1.
 const withSlots = (route: AnyRoute, slots: Slots | undefined, model: ModelV2.Info) => {
-  const configured = model.api.settings?.["concurrency"]
-  const permits = typeof configured === "number" && configured > 0 ? configured : undefined
-  const origin =
-    ModelSlots.server(model.api.url) ??
-    (permits !== undefined && model.api.url !== undefined ? LocalPolicy.origin(model.api.url) : undefined)
+  const at = model.api.url === undefined ? undefined : LocalPolicy.origin(model.api.url)
+  const counts = [
+    model.api.settings,
+    ...(slots?.providers ?? []).flatMap((item) =>
+      at && item.api.url !== undefined && LocalPolicy.origin(item.api.url) === at ? [item.api.settings] : [],
+    ),
+  ].flatMap((settings) => {
+    const value = settings?.["concurrency"]
+    return typeof value === "number" && value > 0 ? [value] : []
+  })
+  const permits = counts.length ? Math.min(...counts) : undefined
+  const origin = ModelSlots.server(model.api.url) ?? (permits !== undefined ? at : undefined)
   if (!slots || !origin) return route
   return route.with({
     transport: {
@@ -355,6 +373,10 @@ export const fromCatalogModel = (
           Object.assign(draft.request.body, credential.metadata)
         })
   const key = apiKey(resolved, credential)
+  const settled = (built: Model) => {
+    if (resolved.api.settings?.["forwards"] === true) forwarders.add(built)
+    return withPricing(built, resolved.cost)
+  }
   if (resolved.api.url && !WorkspaceTrust.userRemoteUrlAllowed(resolved.api.url)) {
     return Effect.fail(
       new UnsafeEndpointError({ providerID: resolved.providerID, modelID: resolved.id, url: resolved.api.url }),
@@ -362,31 +384,28 @@ export const fromCatalogModel = (
   }
   if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/openai") {
     return Effect.succeed(
-      withPricing(
+      settled(
         withDefaults(resolved, OpenAIResponses.route, mayTrain, slots)
           .with({ auth: key === undefined ? Auth.none : Auth.bearer(key) })
           .model({ id: resolved.api.id }),
-        resolved.cost,
       ),
     )
   }
   if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/anthropic") {
     return Effect.succeed(
-      withPricing(
+      settled(
         withDefaults(resolved, AnthropicMessages.route, mayTrain, slots)
           .with({ auth: key === undefined ? Auth.none : Auth.header("x-api-key", key) })
           .model({ id: resolved.api.id }),
-        resolved.cost,
       ),
     )
   }
   if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/openai-compatible" && resolved.api.url) {
     return Effect.succeed(
-      withPricing(
+      settled(
         withDefaults(resolved, OpenAICompatibleChat.route, mayTrain, slots)
           .with({ auth: key === undefined ? Auth.none : Auth.bearer(key) })
           .model({ id: resolved.api.id }),
-        resolved.cost,
       ),
     )
   }
@@ -405,6 +424,8 @@ export const resolve = (
   credential?: Credential.Value,
   mayTrain?: Effect.Effect<boolean>,
   slots?: ModelSlots.Interface,
+  /** Every provider, for the smallest count a provider pointing at the same server configures. */
+  providers?: readonly ProviderV2.Info[],
 ) =>
   withVariant(model, session.model?.variant).pipe(
     Effect.flatMap((model) =>
@@ -412,7 +433,7 @@ export const resolve = (
         model,
         credential,
         mayTrain,
-        slots ? { slots, priority: session.parentID ? "subagent" : "user" } : undefined,
+        slots ? { slots, priority: session.parentID ? "subagent" : "user", providers } : undefined,
       ),
     ),
   )
@@ -480,6 +501,7 @@ export const locationLayer = Layer.effect(
             .marked(session.id)
             .pipe(Effect.flatMap((guest) => (guest ? Effect.succeed(false) : freeModels.trainingConsent()))),
           slots,
+          slots ? yield* catalog.provider.all() : undefined,
         )
       }),
     })

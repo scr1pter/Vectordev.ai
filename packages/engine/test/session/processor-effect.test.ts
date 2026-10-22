@@ -67,6 +67,8 @@ const cfg = {
       options: {
         apiKey: "test-key",
         baseURL: "http://localhost:1/v1",
+        // The fake server answers any number of requests at once, unlike a model server whose count nobody set.
+        concurrency: 64,
       },
     },
   },

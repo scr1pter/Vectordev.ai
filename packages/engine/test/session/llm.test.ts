@@ -12,6 +12,7 @@ import z from "zod"
 import { LLM } from "../../src/session/llm"
 import { LLMClient, RequestExecutor } from "@vectordevai/llm/route"
 import { Provider } from "@/provider/provider"
+import { ModelSlots } from "@vectordevai/core/local-mode/model-slots"
 import { ProviderTransform } from "@/provider/transform"
 import { ModelCatalog } from "@vectordevai/core/model-catalog"
 
@@ -53,6 +54,8 @@ const openAIConfig = (model: ModelCatalog.Provider["models"][string], baseURL: s
   }
 }
 
+const LINED_ORIGIN = "https://lined-openai.test"
+
 const it = testEffect(AppNodeBuilder.build(LayerNode.group([LLM.node, Provider.node])))
 const itReasoningContext = testEffect(
   AppNodeBuilder.build(LayerNode.group([LLM.node, Provider.node]), [
@@ -83,11 +86,14 @@ function llmLayerWithExecutor(
   options: {
     executor?: Layer.Layer<RequestExecutor.Service>
     flags?: Partial<RuntimeFlags.Info>
+    /** The model servers' lines, for a test that reads them. */
+    slots?: ModelSlots.Interface
   } = {},
 ) {
   return AppNodeBuilder.build(LLM.node, [
     [RuntimeFlags.node, RuntimeFlags.layer(options.flags)],
     ...(options.executor ? ([[LayerNodePlatform.requestExecutor, options.executor]] as const) : []),
+    ...(options.slots ? ([[ModelSlots.node, Layer.succeed(ModelSlots.Service, options.slots)]] as const) : []),
   ])
 }
 
@@ -1914,6 +1920,73 @@ describe("session.llm.stream", () => {
     {
       trusted: true,
       config: () => openAIConfig(loadFixture("openai", "gpt-5.2").model, "https://injected-openai.test/v1"),
+    },
+  )
+
+  it.instance(
+    "the native runtime waits in a server's line, as the AI SDK's requests do",
+    () =>
+      Effect.gen(function* () {
+        const model = loadFixture("openai", "gpt-5.2").model
+        const chunks = [
+          { type: "response.created", response: { id: "resp-native-line" } },
+          { type: "response.output_text.delta", item_id: "item-native-line", delta: "Hello" },
+          {
+            type: "response.completed",
+            response: { incomplete_details: null, usage: { input_tokens: 1, output_tokens: 1 } },
+          },
+        ]
+        const slots = ModelSlots.make()
+        // The line at the server as each request is sent.
+        const seen: ModelSlots.Queue[] = []
+        const executor = Layer.succeed(
+          RequestExecutor.Service,
+          RequestExecutor.Service.of({
+            execute: (request) =>
+              Effect.sync(() => {
+                seen.push(slots.queue(LINED_ORIGIN))
+                return HttpClientResponse.fromWeb(request, createEventResponse(chunks, true))
+              }),
+          }),
+        )
+        const resolved = yield* Provider.use.getModel(ProviderV2.ID.openai, ModelV2.ID.make(model.id))
+        const sessionID = SessionID.make("session-test-native-line")
+        const agent = {
+          name: "test",
+          mode: "primary",
+          options: {},
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        } satisfies Agent.Info
+
+        yield* drainWith(llmLayerWithExecutor({ executor, slots, flags: { experimentalNativeLlm: true } }), {
+          user: {
+            id: MessageID.make("msg_user-native-line"),
+            sessionID,
+            role: "user",
+            time: { created: Date.now() },
+            agent: agent.name,
+            model: { providerID: ProviderV2.ID.make("openai"), modelID: resolved.id },
+          } satisfies SessionV1.User,
+          sessionID,
+          model: resolved,
+          agent,
+          system: [],
+          messages: [{ role: "user", content: "Hello" }],
+          tools: {},
+        })
+
+        // The provider says its server takes one request at a time: the request held the permit while it was sent,
+        // and gave it back when its reply ended.
+        expect(seen).toEqual([{ permits: 1, running: 1, waiting: 0 }])
+        expect(slots.queue(LINED_ORIGIN)).toEqual({ permits: 1, running: 0, waiting: 0 })
+      }),
+    {
+      trusted: true,
+      config: () => {
+        const config = openAIConfig(loadFixture("openai", "gpt-5.2").model, `${LINED_ORIGIN}/v1`)
+        const openai = config.provider!.openai!
+        return { ...config, provider: { openai: { ...openai, options: { ...openai.options, concurrency: 1 } } } }
+      },
     },
   )
 

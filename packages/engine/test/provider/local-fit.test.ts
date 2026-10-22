@@ -1,4 +1,7 @@
-import { afterEach, expect } from "bun:test"
+import { afterEach, expect, jest } from "bun:test"
+import { rmSync, writeFileSync } from "node:fs"
+import path from "node:path"
+import type { LanguageModelV3CallOptions } from "@ai-sdk/provider"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import { streamText, tool } from "ai"
 import z from "zod"
@@ -13,6 +16,9 @@ import { testEffect } from "../lib/effect"
 import { Env } from "@/env"
 import { Plugin } from "@/plugin"
 import { Provider } from "@/provider/provider"
+import { ProviderError } from "@/provider/error"
+import { Config } from "@/config/config"
+import { Global } from "@vectordevai/core/global"
 import { ProviderTransform } from "@/provider/transform"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
 
@@ -32,6 +38,10 @@ const it = testEffect(
 const LOCAL = ProviderV2.ID.make("local")
 const OTHER = ProviderV2.ID.make("other")
 const CLOUD = ProviderV2.ID.make("cloud")
+const COMPANY = ProviderV2.ID.make("company")
+const CLOUD_ORIGIN = "https://api.cloud.invalid"
+const COMPANY_ORIGIN = "https://llm.corp.example.com"
+const BIG = ProviderV2.ID.make("big")
 const MODEL = ModelV2.ID.make("qwen")
 
 it.live("two providers that point at one server share its permit", () =>
@@ -58,24 +68,27 @@ it.live("two providers that point at one server share its permit", () =>
   ),
 )
 
-it.live("a server whose number nobody configured takes the user's turn and subagents at once", () =>
+it.live("four subagents on a server on this computer whose number nobody configured run one at a time", () =>
   withServer((server) =>
     provideTmpdirInstance(
       () =>
         Effect.gen(function* () {
           const provider = yield* Provider.Service
-          const replies = yield* Effect.all([
-            turn(provider, LOCAL, "user", "the user's turn"),
-            turn(provider, LOCAL, "subagent", "subagent 1"),
-            turn(provider, LOCAL, "subagent", "subagent 2"),
-          ])
-          // The server queues them itself; Vector holds none back.
-          yield* until(() => server.seen.length === 3)
-          server.release()
-          server.release()
-          server.release()
+          const replies: Promise<string>[] = []
+          for (const n of [1, 2, 3, 4]) {
+            replies.push(yield* turn(provider, LOCAL, "subagent", `subagent ${n}`))
+            yield* Effect.promise(() => server.idle(10))
+          }
+          // They wait in Vector's line, in the order they asked, instead of inside the server against their timeouts.
+          for (const n of [1, 2, 3, 4]) {
+            yield* until(() => server.seen.length === n)
+            yield* Effect.promise(() => server.idle(20))
+            expect(server.seen).toHaveLength(n)
+            server.release()
+          }
           yield* Effect.promise(() => Promise.all(replies))
-          expect(server.most).toBe(3)
+          expect(server.seen.map(said)).toEqual(["subagent 1", "subagent 2", "subagent 3", "subagent 4"])
+          expect(server.most).toBe(1)
         }),
       { trusted: true, config: config(server.url) },
     ),
@@ -321,7 +334,79 @@ it.live("a reply stays inside the context the server has left after the prompt",
   ),
 )
 
-it.live("a cloud API gets no permits, no new timeouts and no reply limit of its own", () =>
+it.live("a model that lists no reply limit replies within what Check models would write, and a title within 512", () =>
+  withServer((server) =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          server.auto = true
+          const provider = yield* Provider.Service
+          const big = Provider.withPriority(yield* provider.getModel(BIG, MODEL), "user")
+          // Any reply limit the caller asks for, as the session asks for a quarter of a 128K context.
+          expect(ProviderTransform.maxOutputTokens(big)).toBe(32_000)
+          const ask = (model: Provider.Model) =>
+            Effect.gen(function* () {
+              const language = yield* provider.getLanguage(model)
+              return yield* Effect.promise(
+                () =>
+                  streamText({
+                    model: language,
+                    maxOutputTokens: ProviderTransform.maxOutputTokens(model),
+                    messages: [{ role: "user", content: "hi" }],
+                  }).text,
+              )
+            })
+          yield* ask(big)
+          // A title or a name is brief, whatever the model's size.
+          yield* ask(Provider.brief(big))
+          expect(server.seen.map((body) => body.max_tokens)).toEqual([8_192, Provider.BRIEF_REPLY])
+        }),
+      { trusted: true, config: config(server.url, { big: true }) },
+    ),
+  ),
+)
+
+it.live("a server on this computer counts as local only for what it runs itself, not what it passes on", () =>
+  provideTmpdirInstance(
+    () =>
+      Effect.gen(function* () {
+        const provider = yield* Provider.Service
+        const local = (providerID: string, modelID: string) =>
+          provider
+            .getModel(ProviderV2.ID.make(providerID), ModelV2.ID.make(modelID))
+            .pipe(Effect.flatMap((model) => provider.line(model)))
+        expect(yield* local("ollama", "qwen2.5-coder:7b")).toMatchObject({ hosted: true, local: true })
+        // Ollama runs its cloud models on ollama.com; the daemon here only forwards the prompt.
+        expect(yield* local("ollama", "gpt-oss:120b-cloud")).toMatchObject({ hosted: true, local: false })
+        // A proxy Check models recorded as one that passes every prompt on, such as LiteLLM.
+        expect(yield* local("proxy", "gpt-4.1")).toMatchObject({ hosted: true, local: false })
+      }),
+    {
+      trusted: true,
+      config: {
+        provider: {
+          ollama: {
+            name: "Ollama",
+            npm: "@ai-sdk/openai-compatible",
+            models: {
+              "qwen2.5-coder:7b": { id: "qwen2.5-coder:7b", name: "qwen2.5-coder:7b", tool_call: true },
+              "gpt-oss:120b-cloud": { id: "gpt-oss:120b-cloud", name: "gpt-oss:120b-cloud", tool_call: true },
+            },
+            options: { apiKey: "test-key", baseURL: "http://127.0.0.1:11434/v1" },
+          },
+          proxy: {
+            name: "LiteLLM",
+            npm: "@ai-sdk/openai-compatible",
+            models: { "gpt-4.1": { id: "gpt-4.1", name: "gpt-4.1", tool_call: true } },
+            options: { apiKey: "test-key", baseURL: "http://127.0.0.1:4000/v1", forwards: true },
+          },
+        },
+      },
+    },
+  ),
+)
+
+it.live("a cloud API is left as it is: no line, so no permits and no reply limit of its own", () =>
   provideTmpdirInstance(
     () =>
       Effect.gen(function* () {
@@ -329,11 +414,115 @@ it.live("a cloud API gets no permits, no new timeouts and no reply limit of its 
         const cloud = yield* provider.getModel(CLOUD, MODEL)
         // The same language model comes back each time: nothing wraps it.
         expect(yield* provider.getLanguage(cloud)).toBe(yield* provider.getLanguage(cloud))
+        expect(yield* provider.line(cloud)).toBeUndefined()
         const local = yield* provider.getModel(LOCAL, MODEL)
         expect(yield* provider.getLanguage(local)).not.toBe(yield* provider.getLanguage(local))
         expect(guard.outside()).toEqual([])
       }),
     { trusted: true, config: config("http://127.0.0.1:1/v1", { cloud: true }) },
+  ),
+)
+
+it.live(
+  "a server someone hosts waits 10 minutes for headers and 2 between chunks, and a cloud API keeps the SDK's",
+  () =>
+    withStall((server) =>
+      provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const provider = yield* Provider.Service
+            const hosted = yield* provider.getLanguage(
+              Provider.withPriority(yield* provider.getModel(LOCAL, MODEL), "user"),
+            )
+            const cloud = yield* provider.getLanguage(yield* provider.getModel(CLOUD, MODEL))
+            // The timers run on a fake clock, so ten minutes pass at once; the requests themselves are real.
+            yield* Effect.promise(async () => {
+              jest.useFakeTimers()
+              try {
+                // No headers: a server someone hosts is given up on after ten minutes, and not before.
+                const first = watch(hosted.doStream(call("first")))
+                await server.arrived(1)
+                jest.advanceTimersByTime(Provider.LOCAL_HEADER_TIMEOUT - 1)
+                expect(await first.state()).toBe("pending")
+                jest.advanceTimersByTime(1)
+                expect(await first.state()).toBe("failed")
+                expect(ProviderError.unwrapTypedError(first.error())).toMatchObject({
+                  ms: Provider.LOCAL_HEADER_TIMEOUT,
+                })
+
+                // Headers and then nothing: it is given up on after two minutes without a chunk.
+                const second = hosted.doStream(call("second"))
+                await server.arrived(2)
+                server.headers(1)
+                const quiet = watch(drain((await second).stream))
+                // The comment that came with the headers is read first, so the wait for the next chunk has begun.
+                expect(await quiet.state()).toBe("pending")
+                jest.advanceTimersByTime(Provider.LOCAL_CHUNK_TIMEOUT - 1)
+                expect(await quiet.state()).toBe("pending")
+                jest.advanceTimersByTime(1)
+                expect(await quiet.state()).toBe("failed")
+                expect(ProviderError.unwrapTypedError(quiet.error())).toMatchObject({ message: "SSE read timed out" })
+
+                // The cloud API has neither: it waits as long as the reply takes.
+                const third = watch(cloud.doStream(call("third")))
+                await server.arrived(3)
+                jest.advanceTimersByTime(Provider.LOCAL_HEADER_TIMEOUT * 2)
+                expect(await third.state()).toBe("pending")
+                server.headers(2)
+                const waited = watch(drain((await third.done()).stream))
+                expect(await waited.state()).toBe("pending")
+                jest.advanceTimersByTime(Provider.LOCAL_CHUNK_TIMEOUT * 2)
+                expect(await waited.state()).toBe("pending")
+                server.end(2)
+                expect(await waited.done()).toBe("done")
+              } finally {
+                jest.useRealTimers()
+              }
+            })
+            expect(server.seen).toEqual(["first", "second", "third"])
+            expect(guard.outside()).toEqual([])
+          }),
+        { trusted: true, config: config(server.url, { cloud: server.url }) },
+      ),
+    ),
+)
+
+it.live("a company endpoint on the model server list is fitted like a server someone hosts, and still priced", () =>
+  withServer((server) =>
+    listed([COMPANY_ORIGIN], () =>
+      provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            server.auto = true
+            const provider = yield* Provider.Service
+            const company = Provider.withPriority(yield* provider.getModel(COMPANY, MODEL), "user")
+            const elsewhere = Provider.withPriority(yield* provider.getModel(CLOUD, MODEL), "user")
+            // Its name looks like any internet host's, but it is on the list: it is fitted, and its steps stay unpriced
+            // rather than local, so a dollar cap still stops them.
+            expect(yield* provider.line(company)).toMatchObject({ hosted: true, local: false })
+            expect(yield* provider.line(elsewhere)).toBeUndefined()
+            const ask = (model: Provider.Model) =>
+              Effect.gen(function* () {
+                const language = yield* provider.getLanguage(model)
+                return yield* Effect.promise(
+                  () =>
+                    streamText({ model: language, maxOutputTokens: 4_000, messages: [{ role: "user", content: "hi" }] })
+                      .text,
+                )
+              })
+            yield* ask(company)
+            yield* ask(elsewhere)
+            // The listed endpoint's reply fits its 4,096-token context, at what Check models would write for it; a
+            // cloud API nobody listed is left as the caller asked.
+            expect(server.seen.map((body) => body.max_tokens)).toEqual([1_024, 4_000])
+            expect(guard.outside()).toEqual([])
+          }),
+        {
+          trusted: true,
+          config: config(server.url, { company: true, cloud: server.url }),
+        },
+      ),
+    ),
   ),
 )
 
@@ -380,14 +569,22 @@ function config(
   url: string,
   options: {
     other?: boolean
-    cloud?: boolean
+    /**
+     * A cloud API at https://api.cloud.invalid, or, given a server, one whose requests a plugin sends to that server
+     * (`preconnect` names the cloud API's origin), so its requests reach a fake server while it counts as a cloud API.
+     */
+    cloud?: boolean | string
+    /** A company endpoint at https://llm.corp.example.com, whose requests go to this server the same way. */
+    company?: boolean
+    /** A model with a 128K context on the same server. */
+    big?: boolean
     concurrency?: number
     otherConcurrency?: number
     headerTimeout?: number
     output?: number
   } = {},
 ) {
-  const provider = (baseURL: string, output = 0, concurrency?: number) => ({
+  const provider = (baseURL: string, output = 0, concurrency?: number, context = 4_096, preconnect?: string) => ({
     name: "Model server",
     npm: "@ai-sdk/openai-compatible",
     models: {
@@ -395,7 +592,7 @@ function config(
         id: "qwen",
         name: "qwen",
         tool_call: true,
-        limit: { context: 4_096, output },
+        limit: { context, output },
         cost: { input: 0, output: 0 },
       },
     },
@@ -404,6 +601,7 @@ function config(
       baseURL,
       ...(concurrency ? { concurrency } : {}),
       ...(options.headerTimeout ? { headerTimeout: options.headerTimeout } : {}),
+      ...(preconnect ? { preconnect } : {}),
     },
   })
   return {
@@ -412,7 +610,16 @@ function config(
     provider: {
       local: provider(url, 0, options.concurrency),
       ...(options.other ? { other: provider(url, options.output, options.otherConcurrency) } : {}),
-      ...(options.cloud ? { cloud: provider("https://api.cloud.invalid/v1") } : {}),
+      ...(options.cloud
+        ? {
+            cloud:
+              typeof options.cloud === "string"
+                ? provider(options.cloud, 0, undefined, 4_096, CLOUD_ORIGIN)
+                : provider(`${CLOUD_ORIGIN}/v1`),
+          }
+        : {}),
+      ...(options.company ? { company: provider(url, 0, undefined, 4_096, COMPANY_ORIGIN) } : {}),
+      ...(options.big ? { big: provider(url, 0, undefined, 131_072) } : {}),
     },
   }
 }
@@ -504,4 +711,140 @@ async function modelServer() {
       http.close()
     },
   }
+}
+
+// Puts origins on the model server list in the user's own config for `body`, then takes them off again. A loosening
+// edit waits for the owner, who says yes here.
+function listed<A, E, R>(origins: readonly string[], body: () => Effect.Effect<A, E, R>) {
+  const file = path.join(Global.Path.config, "vector.json")
+  const apply = () => {
+    Config.refreshLocal()
+    Config.confirmLocal()
+  }
+  return Effect.acquireUseRelease(
+    Effect.sync(() => {
+      writeFileSync(file, JSON.stringify({ local: { endpoints: origins.map((item) => new URL(item).origin) } }))
+      apply()
+    }),
+    body,
+    () =>
+      Effect.sync(() => {
+        rmSync(file, { force: true })
+        apply()
+        rmSync(Config.localConfirmedFile(), { force: true })
+      }),
+  )
+}
+
+// A request to a model as the SDK makes it.
+function call(text: string): LanguageModelV3CallOptions {
+  return { prompt: [{ role: "user", content: [{ type: "text", text }] }] }
+}
+
+// Reads a reply to its end.
+async function drain(stream: ReadableStream<unknown>) {
+  const reader = stream.getReader()
+  while (!(await reader.read()).done) continue
+  return "done"
+}
+
+// Follows a promise while the timers run on a fake clock: `state` gives real I/O a few turns of the event loop to land,
+// with setImmediate, which the fake clock leaves alone.
+function watch<T>(promise: PromiseLike<T>) {
+  const seen: { state: "pending" | "done" | "failed"; error?: unknown } = { state: "pending" }
+  Promise.resolve(promise).then(
+    () => Object.assign(seen, { state: "done" }),
+    (error: unknown) => Object.assign(seen, { state: "failed", error }),
+  )
+  return {
+    state: async () => {
+      for (const _ of Array.from({ length: 50 })) {
+        if (seen.state !== "pending") break
+        await new Promise<void>((resolve) => setImmediate(resolve))
+      }
+      return seen.state
+    },
+    error: () => seen.error,
+    done: () => Promise.resolve(promise),
+  }
+}
+
+type Stall = {
+  readonly url: string
+  /** The last message of each request, in the order they arrived. */
+  readonly seen: string[]
+  /** Resolves once `count` requests have arrived. */
+  readonly arrived: (count: number) => Promise<void>
+  /** Sends the headers of the request at `index`, with an SSE comment, which carries no reply. */
+  readonly headers: (index: number) => void
+  /** Sends the rest of the reply of the request at `index`. */
+  readonly end: (index: number) => void
+}
+
+// A fake OpenAI-compatible server on 127.0.0.1 that answers nothing until told: first the headers, then the reply.
+function withStall<A, E, R>(body: (server: Stall) => Effect.Effect<A, E, R>) {
+  return Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const requests: { readonly respond: (response: Response) => void; readonly finish: Promise<void> }[] = []
+      const ends: (() => void)[] = []
+      const waits: { readonly count: number; readonly resolve: () => void }[] = []
+      const seen: string[] = []
+      const encoder = new TextEncoder()
+      const http = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        idleTimeout: 0,
+        async fetch(request) {
+          seen.push((await request.json()).messages.at(-1)?.content)
+          const finish = Promise.withResolvers<void>()
+          ends.push(finish.resolve)
+          const answer = Promise.withResolvers<Response>()
+          requests.push({ respond: answer.resolve, finish: finish.promise })
+          waits.filter((wait) => requests.length >= wait.count).forEach((wait) => wait.resolve())
+          return answer.promise
+        },
+      })
+      const stall: Stall = {
+        url: `http://127.0.0.1:${http.port}/v1`,
+        seen,
+        arrived: (count) =>
+          requests.length >= count
+            ? Promise.resolve()
+            : new Promise<void>((resolve) => {
+                waits.push({ count, resolve })
+              }),
+        headers: (index) => {
+          const request = requests[index]
+          request.respond(
+            new Response(
+              new ReadableStream({
+                async start(controller) {
+                  // Bun sends a streamed reply's headers with its first chunk.
+                  controller.enqueue(encoder.encode(": waiting\n\n"))
+                  await request.finish
+                  controller.enqueue(
+                    encoder.encode(
+                      `data: ${JSON.stringify({ choices: [{ delta: { content: "done" }, finish_reason: "stop" }] })}\n\n` +
+                        "data: [DONE]\n\n",
+                    ),
+                  )
+                  controller.close()
+                },
+              }),
+              { headers: { "content-type": "text/event-stream" } },
+            ),
+          )
+        },
+        end: (index) => ends[index]?.(),
+      }
+      return { stall, http, requests, ends }
+    }),
+    (started) => body(started.stall),
+    (started) =>
+      Effect.sync(() => {
+        started.ends.forEach((end) => end())
+        started.requests.forEach((request) => request.respond(new Response("closed", { status: 503 })))
+        void started.http.stop(true)
+      }),
+  )
 }
