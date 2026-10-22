@@ -20,7 +20,7 @@ import { SessionID, MessageID } from "../../src/session/schema"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { Plugin } from "../../src/plugin"
-import { testEffect } from "../lib/effect"
+import { awaitWithTimeout, testEffect } from "../lib/effect"
 import { Tool } from "@/tool/tool"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { InstanceStore } from "@/project/instance-store"
@@ -1007,7 +1007,9 @@ describe("tool.shell permissions", () => {
                   }
                   for (const [command, files] of cases[name].asked) {
                     requests.length = 0
-                    const error = (yield* fail({ command }, rejectRead)).message
+                    // A command that never finishes fails with its name, so a stalled Windows run says which one.
+                    const error = (yield* awaitWithTimeout(fail({ command }, rejectRead), `${name} hung on ${command}`, "20 seconds"))
+                      .message
                     const read = requests.find((r) => r.permission === "read")?.patterns.toSorted()
                     expect({ command, error, read }).toEqual({
                       command,
@@ -1020,14 +1022,14 @@ describe("tool.shell permissions", () => {
                   if (name === "pwsh") {
                     requests.length = 0
                     const command = "Get-Content $dir/.en?"
-                    yield* run({ command }, rejectRead)
+                    yield* awaitWithTimeout(run({ command }, rejectRead), `${name} hung on ${command}`, "20 seconds")
                     const bash = requests.find((r) => r.permission === "bash")
                     expect(bash?.patterns).toContain(UNREAD + command)
                     expect(bash?.always).toContain(UNREAD + command)
                   }
                   for (const command of cases[name].quiet) {
                     requests.length = 0
-                    yield* run({ command }, rejectRead)
+                    yield* awaitWithTimeout(run({ command }, rejectRead), `${name} hung on ${command}`, "20 seconds")
                     expect({ command, permissions: requests.map((r) => r.permission) }).toEqual({
                       command,
                       permissions: ["bash"],

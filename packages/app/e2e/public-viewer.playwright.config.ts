@@ -20,7 +20,8 @@ export default defineConfig({
     cwd: fileURLToPath(new URL("../", import.meta.url)),
     url: baseURL,
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    // The server starts only after a full site build, which passed two minutes on a Windows runner on 22 Oct.
+    timeout: 360_000,
     env: { PLAYWRIGHT_VIEWER_PORT: String(port) },
   },
   use: { baseURL, trace: "on-first-retry", screenshot: "only-on-failure", video: "retain-on-failure" },
