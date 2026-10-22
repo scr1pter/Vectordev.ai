@@ -3,6 +3,7 @@ import { EventV2 } from "../../event"
 import { Integration } from "../../integration"
 import { FreeModels } from "../../free-models"
 import { freeModelDataPolicy, sendsToOpenRouterFree } from "../../free-model-catalog"
+import { freeModelCatalogName } from "../../free-model-choice"
 import type { CatalogDraft } from "@vectordevai/plugin/v2/promise"
 import { define } from "../internal"
 
@@ -36,7 +37,7 @@ export const VectorPlugin = define({
           })
         for (const model of current.enabled ? current.models : []) {
           catalog.model.update("vector", model.id, (draft) => {
-            draft.name = model.name
+            draft.name = freeModelCatalogName(model)
             draft.api = {
               id: model.id,
               type: "aisdk",
@@ -53,7 +54,7 @@ export const VectorPlugin = define({
         }
         for (const model of owned) {
           catalog.model.update("openrouter", model.id, (draft) => {
-            draft.name = model.name
+            draft.name = freeModelCatalogName(model)
             draft.api = {
               id: model.id,
               type: "aisdk",

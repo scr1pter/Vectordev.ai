@@ -29,3 +29,11 @@ test("a build that cannot sign in to Vector itself says where to sign in, withou
     expect(en[key]).not.toMatch(/openrouter/i)
   }
 })
+
+// Owner, 22 October 2026: included models never name OpenRouter in the app. A connected OpenRouter account of the
+// user's own is still named where it is the one that runs ("Continue with connected OpenRouter").
+test("free-model copy about the included models never names OpenRouter", () => {
+  const own = ["freeModels.limit.resume", "freeModels.limit.resumed"]
+  const copy = Object.entries(en).filter(([key]) => key.startsWith("freeModels.") && !own.includes(key))
+  expect(copy.filter(([, text]) => /openrouter/i.test(text))).toEqual([])
+})

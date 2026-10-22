@@ -141,9 +141,9 @@ test("fresh profile is told how to sign in to Vector, then starts on the shared 
   await expect(card).toContainText("To use free models, sign in to Vector on the computer this page connects to")
   await expect(card).toContainText("run vector login there")
   await expect(card.getByRole("button", { name: "Sign in to Vector" })).toHaveCount(0)
-  // The card says who processes prompts on the shared allowance; naming OpenRouter there promotes nothing.
+  // Included models never name OpenRouter in the app (owner, 22 October 2026); the legal pages say who processes them.
   await expect(card).toContainText("Free models are provided by Vector at no cost to you")
-  await expect(card).toContainText("OpenRouter and the model's provider process your prompts.")
+  await expect(card).not.toContainText(/openrouter/i)
   // It never asks anyone to bring an OpenRouter account of their own.
   await expect(card).not.toContainText(/connect (?:your own )?(?:free )?openrouter/i)
   await expect(card).not.toContainText(/your own (?:free )?openrouter/i)
@@ -178,7 +178,8 @@ test("fresh profile is told how to sign in to Vector, then starts on the shared 
   await expect(card).toHaveCount(0)
   const picker = page.locator('[data-action="prompt-model"]').filter({ visible: true }).first()
   await expect(picker).toContainText("Maker Coder")
-  for (const other of ["Maker Big", "Free Models Router", "Paid Giant"]) await expect(picker).not.toContainText(other)
+  for (const other of ["Maker Big", "Free Models Router", "Auto (free)", "Paid Giant"])
+    await expect(picker).not.toContainText(other)
   await expect(editor).toHaveText(draft)
   expect(state.prompts).toEqual([])
   expect(state.methods).toEqual([])

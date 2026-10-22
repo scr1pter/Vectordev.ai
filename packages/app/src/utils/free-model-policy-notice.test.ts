@@ -2,41 +2,10 @@ import { describe, expect, test } from "bun:test"
 import { FREE_MODEL_TRAINING_OWNER_ONLY } from "@vectordevai/core/free-model-choice"
 import { createVectorClient } from "@vectordevai/sdk/v2/client"
 import {
-  FREE_MODEL_POLICY_NOTICE,
+  FREE_MODEL_TRAINING_QUESTION,
   acceptFreeModelTraining,
-  firstFreeModelPolicyNotice,
   freeModelTrainingGate,
-  freeModelTrainingNotice,
 } from "./free-model-policy-notice"
-
-describe("free model policy notice", () => {
-  test("shows once per device", () => {
-    const values = new Map<string, string>()
-    const storage = {
-      getItem: (key: string) => values.get(key) ?? null,
-      setItem: (key: string, value: string) => void values.set(key, value),
-    }
-    expect(firstFreeModelPolicyNotice(() => storage)).toBe(true)
-    expect(firstFreeModelPolicyNotice(() => storage)).toBe(false)
-  })
-
-  test("still shows when storage refuses access", () => {
-    const storage = {
-      getItem: () => {
-        throw new Error("blocked")
-      },
-      setItem: () => undefined,
-    }
-    expect(firstFreeModelPolicyNotice(() => storage)).toBe(true)
-    expect(firstFreeModelPolicyNotice(() => undefined)).toBe(true)
-  })
-
-  test("says Vector does not request zero data retention and that may-train models ask first", () => {
-    expect(FREE_MODEL_POLICY_NOTICE.title).toBe("How Free models inside of Vector handle your data")
-    expect(FREE_MODEL_POLICY_NOTICE.description).toContain("Vector doesn't request zero data retention")
-    expect(FREE_MODEL_POLICY_NOTICE.description).toContain('"May train on your prompts" ask before your first prompt')
-  })
-})
 
 describe("may-train consent gate", () => {
   const mayTrain = { freeModel: { source: "shared" as const, dataPolicy: "may-train" as const } }
@@ -92,25 +61,22 @@ describe("may-train consent gate", () => {
     expect(calls).toEqual(["consent", "ask"])
   })
 
-  test("the notice says what the provider may do and that Vector itself never trains", () => {
-    const notice = freeModelTrainingNotice(mayTrain)
-    expect(notice.title).toBe("May train on your prompts")
-    expect(notice.description).toContain("may log your prompts, code and outputs and use them to train its models")
-    expect(notice.description).toContain("Vector itself never trains on your prompts.")
-    expect(
-      freeModelTrainingNotice({ freeModel: { source: "openrouter", dataPolicy: "unreviewed" } }).description,
-    ).toContain("has not reviewed")
+  test("the question, the one place that explains the label, says what the provider may do and that Vector itself never trains", () => {
+    expect(FREE_MODEL_TRAINING_QUESTION.title).toBe("May train on your prompts")
+    expect(FREE_MODEL_TRAINING_QUESTION.description).toContain(
+      "may log your prompts, code and outputs and use them to train its models",
+    )
+    expect(FREE_MODEL_TRAINING_QUESTION.description).toContain("Vector itself never trains on your prompts.")
+    expect(FREE_MODEL_TRAINING_QUESTION.description).not.toMatch(/openrouter/i)
   })
 
   test("the question names one model but says the acceptance covers every labelled model, reviewed or not", () => {
     // The dialog shows the selected model's name, while one acceptance lets every labelled model, including unreviewed
-    // ones whose disclaimer the user never saw, receive prompts until it is withdrawn.
-    for (const dataPolicy of ["may-train", "unreviewed"] as const) {
-      const description = freeModelTrainingNotice({ freeModel: { source: "openrouter", dataPolicy } }).description
-      expect(description).toContain('Accepting covers every free model labelled "May train on your prompts"')
-      expect(description).toContain("including ones Vector has not reviewed yet")
-      expect(description).toContain("vector models --decline-training")
-    }
+    // ones and the free router, receive prompts until it is withdrawn.
+    const description = FREE_MODEL_TRAINING_QUESTION.description
+    expect(description).toContain('Accepting covers every free model labelled "May train on your prompts"')
+    expect(description).toContain("including ones Vector has not reviewed yet")
+    expect(description).toContain("vector models --decline-training")
   })
 })
 

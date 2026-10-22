@@ -1,10 +1,17 @@
-import {
-  freeModelSource,
-  freeModelTrainingDisclaimer,
-  freeModelTrainingLabel,
-} from "@vectordevai/core/free-model-choice"
+import { freeModelSource, freeModelTrainingLabel } from "@vectordevai/core/free-model-choice"
 import { Popover as Kobalte } from "@kobalte/core/popover"
-import { Component, ComponentProps, createMemo, createSignal, For, JSX, onMount, Show, ValidComponent } from "solid-js"
+import {
+  Component,
+  ComponentProps,
+  createMemo,
+  createSignal,
+  createUniqueId,
+  For,
+  JSX,
+  onMount,
+  Show,
+  ValidComponent,
+} from "solid-js"
 import { createStore } from "solid-js/store"
 import { useLocal } from "@/context/local"
 import { useServerSync } from "@/context/server-sync"
@@ -25,9 +32,16 @@ import {
   modelAriaLabel,
   modelDisplayName,
   modelTitle,
-  pickerKeys,
+  pickerHeaderKey,
+  pickerKeyAction,
   pickerModelKey,
+  pickerNavigation,
+  pickerSectionViews,
+  readOpenSections,
+  toggleOpenSection,
+  writeOpenSections,
   type PickerSection,
+  type PickerSectionView,
 } from "@/utils/provider-brand"
 
 type ModelState = ReturnType<typeof useLocal>["model"]
@@ -38,13 +52,15 @@ export type ModelSelectorModelState = Pick<ModelState, "list" | "visible" | "cur
   Partial<Pick<ModelState, "recent">>
 type ModelItem = ReturnType<ModelState["list"]>[number]
 type ModelSection = PickerSection<ModelItem>
+type ModelSectionView = PickerSectionView<ModelItem>
 
 const connectKey = "action:connect-provider"
 
-/** The models a picker can show, and the ordered sections both views render. Rows and
-    keyboard order both come from sections(), so they can't drift apart, and
-    buildModelSections leaves out models that can't hold a coding conversation for both
-    views and search alike. The picker never renders or logs provider.key or
+/** The models a picker can show, the ordered sections both views render, and which of
+    them are open. Rows and keyboard order both come from sections() through views(), so
+    they can't drift apart, and buildModelSections leaves out models that can't hold a
+    coding conversation for both views and search alike. Which sections are open is kept
+    for the next picker, in either view. The picker never renders or logs provider.key or
     provider.options. */
 function createModelSections(input: {
   model: ModelSelectorModelState
@@ -73,7 +89,21 @@ function createModelSections(input: {
       popular: popularProviders,
     }),
   )
-  return { current, sections }
+  const [open, setOpenSections] = createSignal(readOpenSections())
+  const views = createMemo(() => pickerSectionViews(sections(), open(), input.search()))
+  // Navigation order is render order: every visible header and row, then Connect provider.
+  const navigation = createMemo(() => {
+    const visible = pickerNavigation(views())
+    return { keys: [...visible.keys, connectKey], headers: visible.headers }
+  })
+  const toggle = (id: string) => {
+    const next = toggleOpenSection(open(), id)
+    setOpenSections(next)
+    writeOpenSections(next)
+  }
+  // Another picker may have opened or closed sections since this one last showed.
+  const reload = () => setOpenSections(readOpenSections())
+  return { current, sections, views, navigation, toggle, reload }
 }
 
 /** Pointer highlight that follows real movement only. Rows render under a resting
@@ -119,9 +149,10 @@ function SectionHeading(props: { section: ModelSection }) {
 }
 
 /** One model row, shared by both views: mark gutter, name, "New", and a quiet spec line
-    with the context size. A free model labelled "May train on your prompts" also shows its
-    disclaimer on a line of its own, so it is read before the model is chosen.
-    Everything else is in the row's tooltip (modelTitle), which the caller sets. */
+    with the context size. A free model whose provider may train on prompts shows only the
+    yellow "May train on your prompts" label there; the one-time acceptance question before
+    its first prompt says what that means. Everything else is in the row's tooltip
+    (modelTitle), which the caller sets. */
 function ModelRow(props: { item: ModelItem; section: ModelSection; now: number }) {
   // The top section mixes providers, so its rows carry their own mark; provider sections
   // carry it once, on the label.
@@ -163,10 +194,43 @@ function ModelRow(props: { item: ModelItem; section: ModelSection; now: number }
           </For>
         </span>
       </Show>
-      <Show when={freeModelTrainingDisclaimer(props.item)}>
-        {(disclaimer) => <span data-slot="model-row-training-detail">{disclaimer()}</span>}
-      </Show>
     </>
+  )
+}
+
+/** A section's header when it opens and closes the section: the label row as a button, with
+    a chevron that points down while the rows show. Pressing it keeps focus in search, so
+    typing and the arrow keys still drive the list. */
+function SectionToggle(props: {
+  view: ModelSectionView
+  rows: string
+  active: boolean
+  onHover: (event: MouseEvent) => void
+  onToggle: () => void
+}) {
+  return (
+    <button
+      type="button"
+      data-slot="menu-v2-group-label"
+      data-model-section-toggle=""
+      data-option-key={pickerHeaderKey(props.view.section)}
+      data-active={props.active ? "" : undefined}
+      // The short captions only: the policy caption's title is a whole sentence.
+      aria-label={[props.view.section.label, props.view.section.access?.label, props.view.section.policy?.label]
+        .filter(Boolean)
+        .join(", ")}
+      aria-expanded={props.view.open}
+      aria-controls={props.view.open ? props.rows : undefined}
+      // A cancelled mousedown never moves focus; a cancelled pointerdown still can.
+      onMouseDown={(event) => event.preventDefault()}
+      onMouseMove={(event) => props.onHover(event)}
+      onClick={() => props.onToggle()}
+    >
+      <SectionHeading section={props.view.section} />
+      <span data-slot="model-section-chevron" data-expanded={props.view.open ? "" : undefined} aria-hidden="true">
+        <Icon name="chevron-down" size="small" />
+      </span>
+    </button>
   )
 }
 
@@ -217,9 +281,10 @@ export function ModelSelectorPopoverV2(props: {
     now: () => store.now,
   })
   const sections = picker.sections
-  // Navigation order is render order: every row from sections(), then Connect provider.
-  const keys = createMemo(() => [...pickerKeys(sections()), connectKey])
-  // A stale highlight (the list changed under it) falls back to the current model, then the first row.
+  const keys = () => picker.navigation().keys
+  const uid = createUniqueId()
+  // A stale highlight (the list changed under it, or its section closed) falls back to the current model, then the
+  // first row or header.
   const active = createMemo(() => {
     const options = keys()
     if (options.includes(store.active)) return store.active
@@ -247,6 +312,7 @@ export function ModelSelectorPopoverV2(props: {
       void serverSync().refreshProviders()
       restoreTrigger = true
       pointerMoved = createPointerGuard()
+      picker.reload()
       setStore({ open: true, now: Date.now(), active: picker.current() ?? "" })
       setTimeout(() =>
         requestAnimationFrame(() => {
@@ -281,8 +347,7 @@ export function ModelSelectorPopoverV2(props: {
       })
     })
   }
-  const selectActive = () => {
-    const key = active()
+  const selectKey = (key: string) => {
     const item = sections()
       .flatMap((section) => section.items)
       .find((item) => pickerModelKey(item) === key)
@@ -292,13 +357,14 @@ export function ModelSelectorPopoverV2(props: {
     }
     if (key === connectKey) connectProvider()
   }
-  const moveActive = (delta: number) => {
-    const options = keys()
-    if (options.length === 0) return
-    const index = options.indexOf(active())
-    const start = index === -1 ? 0 : index
-    setStore("active", options[(start + delta + options.length) % options.length])
+  const moveTo = (key: string) => {
+    setStore("active", key)
     queueMicrotask(() => activeItem()?.scrollIntoView({ block: "nearest" }))
+  }
+  // The header stays highlighted, so Enter or Space toggles it straight back.
+  const toggleSection = (section: ModelSection) => {
+    picker.toggle(section.id)
+    moveTo(pickerHeaderKey(section))
   }
   const setSearch = (value: string) => {
     setStore("search", value)
@@ -346,20 +412,16 @@ export function ModelSelectorPopoverV2(props: {
                     return
                   }
                   if (event.altKey || event.metaKey) return
-                  if (event.key === "ArrowDown") {
-                    event.preventDefault()
-                    moveActive(1)
+                  const action = pickerKeyAction(event, picker.navigation(), active())
+                  if (!action) return
+                  event.preventDefault()
+                  if ("move" in action) return moveTo(action.move)
+                  if ("toggle" in action) {
+                    const section = sections().find((item) => item.id === action.toggle)
+                    if (section) toggleSection(section)
                     return
                   }
-                  if (event.key === "ArrowUp") {
-                    event.preventDefault()
-                    moveActive(-1)
-                    return
-                  }
-                  if (event.key === "Enter" && !event.isComposing) {
-                    event.preventDefault()
-                    selectActive()
-                  }
+                  selectKey(action.select)
                 }}
               />
               <Show when={store.search.trim()}>
@@ -379,36 +441,57 @@ export function ModelSelectorPopoverV2(props: {
           <ScrollView data-slot="model-selector-scroll" class="max-h-[440px] min-h-0">
             <div class="flex flex-col p-1 pt-0.5">
               <Show when={sections().length > 0} fallback={<PickerEmpty term={store.search} />}>
-                <For each={sections()}>
-                  {(section) => (
-                    <MenuV2.Group data-model-section={section.kind}>
-                      <MenuV2.GroupLabel>
-                        <SectionHeading section={section} />
-                      </MenuV2.GroupLabel>
-                      <MenuV2.RadioGroup value={picker.current()}>
-                        <For each={section.items}>
-                          {(item) => {
-                            const key = pickerModelKey(item)
-                            return (
-                              <MenuV2.RadioItem
-                                value={key}
-                                data-option-key={key}
-                                data-training-notice={freeModelTrainingDisclaimer(item) ? "" : undefined}
-                                data-active={active() === key ? "" : undefined}
-                                data-selected-model={picker.current() === key ? true : undefined}
-                                aria-label={modelAriaLabel(item, store.now)}
-                                title={modelTitle(item)}
-                                onMouseMove={(event: MouseEvent) => hover(event, key)}
-                                onSelect={() => selectModel(item)}
-                              >
-                                <ModelRow item={item} section={section} now={store.now} />
-                              </MenuV2.RadioItem>
-                            )
-                          }}
-                        </For>
-                      </MenuV2.RadioGroup>
-                    </MenuV2.Group>
-                  )}
+                <For each={picker.views()}>
+                  {(view) => {
+                    const section = view.section
+                    const rows = `${uid}-${section.id}`
+                    return (
+                      <MenuV2.Group
+                        data-model-section={section.kind}
+                        aria-label={view.toggle ? section.label : undefined}
+                      >
+                        <Show
+                          when={view.toggle}
+                          fallback={
+                            <MenuV2.GroupLabel>
+                              <SectionHeading section={section} />
+                            </MenuV2.GroupLabel>
+                          }
+                        >
+                          <SectionToggle
+                            view={view}
+                            rows={rows}
+                            active={active() === pickerHeaderKey(section)}
+                            onHover={(event) => hover(event, pickerHeaderKey(section))}
+                            onToggle={() => toggleSection(section)}
+                          />
+                        </Show>
+                        <Show when={view.open}>
+                          <MenuV2.RadioGroup id={rows} value={picker.current()}>
+                            <For each={section.items}>
+                              {(item) => {
+                                const key = pickerModelKey(item)
+                                return (
+                                  <MenuV2.RadioItem
+                                    value={key}
+                                    data-option-key={key}
+                                    data-active={active() === key ? "" : undefined}
+                                    data-selected-model={picker.current() === key ? true : undefined}
+                                    aria-label={modelAriaLabel(item, store.now)}
+                                    title={modelTitle(item)}
+                                    onMouseMove={(event: MouseEvent) => hover(event, key)}
+                                    onSelect={() => selectModel(item)}
+                                  >
+                                    <ModelRow item={item} section={section} now={store.now} />
+                                  </MenuV2.RadioItem>
+                                )
+                              }}
+                            </For>
+                          </MenuV2.RadioGroup>
+                        </Show>
+                      </MenuV2.Group>
+                    )
+                  }}
                 </For>
               </Show>
             </div>
@@ -453,10 +536,12 @@ export const DialogSelectModelV2: Component<{ provider?: string; model?: ModelSt
 
   const picker = createModelSections({ model, provider: () => props.provider, search, now: () => now })
   const sections = picker.sections
-  // Navigation order is render order, as in the popover: every row, then Connect provider.
-  const keys = createMemo(() => [...pickerKeys(sections()), connectKey])
-  // Unset or stale (providers still syncing at mount, or a search that removed the row):
-  // fall back to the current model, which is the first row, then to the first row.
+  // Navigation order is render order, as in the popover: every visible header and row, then Connect provider.
+  const keys = () => picker.navigation().keys
+  const uid = createUniqueId()
+  // Unset or stale (providers still syncing at mount, a search that removed the row, or a
+  // closed section): fall back to the current model, which is the first row, then to the
+  // first row or header.
   const active = createMemo(() => {
     const options = keys()
     if (options.includes(picked())) return picked()
@@ -483,16 +568,16 @@ export const DialogSelectModelV2: Component<{ provider?: string; model?: ModelSt
     model.set({ modelID: item.id, providerID: item.provider.id }, { recent: true })
     dialog.close()
   }
-  const moveActive = (delta: number) => {
-    const options = keys()
-    if (options.length === 0) return
-    const index = options.indexOf(active())
-    const start = index === -1 ? 0 : index
-    setPicked(options[(start + delta + options.length) % options.length])
+  const moveTo = (key: string) => {
+    setPicked(key)
     scrollToActive()
   }
-  const selectActive = () => {
-    const key = active()
+  // The header stays highlighted, so Enter or Space toggles it straight back.
+  const toggleSection = (section: ModelSection) => {
+    picker.toggle(section.id)
+    moveTo(pickerHeaderKey(section))
+  }
+  const selectKey = (key: string) => {
     const item = sections()
       .flatMap((section) => section.items)
       .find((item) => pickerModelKey(item) === key)
@@ -526,20 +611,16 @@ export const DialogSelectModelV2: Component<{ provider?: string; model?: ModelSt
             value={search()}
             onInput={(event) => updateSearch(event.currentTarget.value)}
             onKeyDown={(event) => {
-              if (event.key === "ArrowDown") {
-                event.preventDefault()
-                moveActive(1)
+              const action = pickerKeyAction(event, picker.navigation(), active())
+              if (!action) return
+              event.preventDefault()
+              if ("move" in action) return moveTo(action.move)
+              if ("toggle" in action) {
+                const section = sections().find((item) => item.id === action.toggle)
+                if (section) toggleSection(section)
                 return
               }
-              if (event.key === "ArrowUp") {
-                event.preventDefault()
-                moveActive(-1)
-                return
-              }
-              if (event.key === "Enter" && !event.isComposing) {
-                event.preventDefault()
-                selectActive()
-              }
+              selectKey(action.select)
             }}
             placeholder={language.t("dialog.model.search.placeholder")}
             spellcheck={false}
@@ -555,44 +636,66 @@ export const DialogSelectModelV2: Component<{ provider?: string; model?: ModelSt
         <ScrollView data-slot="select-model-scroll" class="min-h-0 flex-1 px-2 pb-2">
           <div ref={listRef} class="flex flex-col">
             <Show when={sections().length > 0} fallback={<PickerEmpty term={search()} />}>
-              <For each={sections()}>
-                {(section) => (
-                  <div data-model-section={section.kind} class="flex flex-col">
-                    <div data-slot="menu-v2-group-label">
-                      <SectionHeading section={section} />
-                    </div>
-                    <For each={section.items}>
-                      {(item) => {
-                        const key = pickerModelKey(item)
-                        const checked = () => picker.current() === key
-                        return (
-                          <button
-                            type="button"
-                            data-component="menu-v2-item"
-                            data-option-key={key}
-                            data-training-notice={freeModelTrainingDisclaimer(item) ? "" : undefined}
-                            data-active={active() === key ? "" : undefined}
-                            data-checked={checked() ? "" : undefined}
-                            aria-current={checked() ? "true" : undefined}
-                            aria-label={modelAriaLabel(item, now)}
-                            title={modelTitle(item)}
-                            onMouseMove={(event) => {
-                              if (pointerMoved(event)) setPicked(key)
+              <For each={picker.views()}>
+                {(view) => {
+                  const section = view.section
+                  const rows = `${uid}-${section.id}`
+                  return (
+                    <div data-model-section={section.kind} class="flex flex-col">
+                      <Show
+                        when={view.toggle}
+                        fallback={
+                          <div data-slot="menu-v2-group-label">
+                            <SectionHeading section={section} />
+                          </div>
+                        }
+                      >
+                        <SectionToggle
+                          view={view}
+                          rows={rows}
+                          active={active() === pickerHeaderKey(section)}
+                          onHover={(event) => {
+                            if (pointerMoved(event)) setPicked(pickerHeaderKey(section))
+                          }}
+                          onToggle={() => toggleSection(section)}
+                        />
+                      </Show>
+                      <Show when={view.open}>
+                        <div id={rows} role="group" aria-label={section.label} class="flex flex-col">
+                          <For each={section.items}>
+                            {(item) => {
+                              const key = pickerModelKey(item)
+                              const checked = () => picker.current() === key
+                              return (
+                                <button
+                                  type="button"
+                                  data-component="menu-v2-item"
+                                  data-option-key={key}
+                                  data-active={active() === key ? "" : undefined}
+                                  data-checked={checked() ? "" : undefined}
+                                  aria-current={checked() ? "true" : undefined}
+                                  aria-label={modelAriaLabel(item, now)}
+                                  title={modelTitle(item)}
+                                  onMouseMove={(event) => {
+                                    if (pointerMoved(event)) setPicked(key)
+                                  }}
+                                  onClick={() => select(item)}
+                                >
+                                  <span data-slot="menu-v2-item-content">
+                                    <ModelRow item={item} section={section} now={now} />
+                                  </span>
+                                  <span data-slot="model-row-check" aria-hidden="true">
+                                    <Icon name="check" size="small" />
+                                  </span>
+                                </button>
+                              )
                             }}
-                            onClick={() => select(item)}
-                          >
-                            <span data-slot="menu-v2-item-content">
-                              <ModelRow item={item} section={section} now={now} />
-                            </span>
-                            <span data-slot="model-row-check" aria-hidden="true">
-                              <Icon name="check" size="small" />
-                            </span>
-                          </button>
-                        )
-                      }}
-                    </For>
-                  </div>
-                )}
+                          </For>
+                        </div>
+                      </Show>
+                    </div>
+                  )
+                }}
               </For>
             </Show>
           </div>

@@ -866,8 +866,8 @@ describe("numbers and cost", () => {
   })
 })
 
-test("free review footer identifies OpenRouter without an unknown price", () => {
+test("free review footer says free, without an unknown price and without naming OpenRouter", () => {
   expect(costWording({ ...zeroCost, kind: "free", model: "vector/acme/coder:free" })).toBe(
-    "vector/acme/coder · free through OpenRouter (48.2k in / 3.1k out)",
+    "vector/acme/coder · free (48.2k in / 3.1k out)",
   )
 })

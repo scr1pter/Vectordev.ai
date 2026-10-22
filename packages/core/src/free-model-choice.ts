@@ -15,18 +15,24 @@ export const FREE_MODELS_DATA_POLICY =
   "Vector doesn't request zero data retention for these models, so their providers may keep prompts and outputs under their own policies. Every request to a no-training model asks that they are not used for training."
 /** The short label on every free model whose provider may train on prompts, or whose policy Vector has not reviewed. */
 export const FREE_MODEL_TRAINING_LABEL = "May train on your prompts"
+/**
+ * What the one-time acceptance question explains, before the first prompt to a free model labelled "May train on your
+ * prompts". Lists, rows and in-use notices show only the label; this sentence belongs to the question.
+ */
 export const FREE_MODEL_TRAINING_DISCLAIMER =
   "This free model's provider may log your prompts, code and outputs and use them to train its models. Vector itself never trains on your prompts. Don't use it with private repositories, secrets or personal data."
-/** OpenRouter's Free Models Router may pick any free model, so its notice says so and names the one gap Vector knows. */
-export const FREE_ROUTER_DISCLAIMER =
-  "OpenRouter's Free Models Router sends each request to a free model it picks at random, and that model's provider may log your prompts, code and outputs and use them to train its models. Vector asks OpenRouter to skip NVIDIA's trial endpoints, but OpenRouter doesn't say whether the router honours that. Vector itself never trains on your prompts. Don't use it with private repositories, secrets or personal data."
-export const FREE_MODEL_UNREVIEWED_DISCLAIMER =
-  "Vector has not reviewed this free model's data policy yet, so treat it as one whose provider may train on your prompts and code. Vector itself never trains on your prompts."
+/** Vector's own name for the free router, which sends each request to a free model it picks at random. */
+export const FREE_ROUTER_NAME = "Auto (free)"
 /**
  * Said wherever Vector asks: the question names one model, but one acceptance covers every labelled model, including
  * unreviewed ones, until it is withdrawn.
  */
 export const FREE_MODEL_TRAINING_SCOPE = `Accepting covers every free model labelled "${FREE_MODEL_TRAINING_LABEL}", including ones Vector has not reviewed yet, now and later. Withdraw it any time with "vector models --decline-training", or with Withdraw in the desktop app's Help panel.`
+/**
+ * What `vector models` says under its list while a labelled model is listed and the acceptance was never given: the
+ * label and the command, with no disclaimer. The explanation comes with the acceptance itself.
+ */
+export const FREE_MODEL_TRAINING_REFUSED_TERMINAL = `Prompts to models labelled "${FREE_MODEL_TRAINING_LABEL}" are refused until you run "vector models --accept-training".`
 /** Shown, and sent as the error, when a prompt to such a model is stopped because it was never accepted. */
 export const FREE_MODEL_TRAINING_CONSENT_REQUIRED = `${FREE_MODEL_TRAINING_DISCLAIMER} Nothing was sent. Accept it once when Vector asks, or run "vector models --accept-training", then send again.`
 /**
@@ -47,10 +53,10 @@ export const FREE_MODEL_TRAINING_BLOCKED =
  * such as a free model configured under another name: it would skip the guest rule, the training notice and
  * data_collection.
  */
-export const FREE_MODEL_UNLISTED = `This model runs on OpenRouter's free endpoints but isn't one of the ${FREE_MODELS_TITLE}, so Vector doesn't send it. Nothing was sent. Choose a model from ${FREE_MODELS_TITLE}.`
+export const FREE_MODEL_UNLISTED = `This model runs on free endpoints but isn't one of the ${FREE_MODELS_TITLE}, so Vector doesn't send it. Nothing was sent. Choose a model from ${FREE_MODELS_TITLE}.`
 /** Vector itself asks for no-training routing for a model it has not reviewed, so no account setting can lift it. */
 export const FREE_MODEL_UNREVIEWED_BLOCKED =
-  "Vector has not reviewed this free model's data policy yet, so it asks OpenRouter to route it only to providers that don't train on prompts, and none of this model's providers qualifies. Choose another free model."
+  "Vector has not reviewed this free model's data policy yet, so it routes it only to providers that don't train on prompts, and none of this model's providers qualifies. Choose another free model."
 /**
  * Free models run on Vector's shared allowance, on Vector's own OpenRouter account, for every signed-in Vector user
  * (owner decision, 17 October 2026). The free-model flow never asks anyone to connect an OpenRouter account of their
@@ -60,8 +66,9 @@ export const FREE_MODEL_UNREVIEWED_BLOCKED =
 export const FREE_MODELS_SIGN_IN = "Sign in to Vector to use free models."
 /** The same, where the way to sign in is the terminal: the TUI, the CLI and an engine without the desktop app. */
 export const FREE_MODELS_SIGN_IN_TERMINAL = "Sign in to Vector to use free models: run vector login."
+/** Included models never name OpenRouter in the app, the TUI or the CLI (owner, 22 October 2026); the legal pages do. */
 export const FREE_MODELS_SHARED_COPY =
-  "Free models are provided by Vector at no cost to you, within a daily limit for each account. Requests pass through vectordev.ai to OpenRouter, and OpenRouter and the model's provider process your prompts."
+  "Free models are provided by Vector at no cost to you, within a daily limit for each account."
 /** What to do when the shared allowance is used up or unavailable: the user's own provider keys, not one provider. */
 export const FREE_MODELS_OWN_KEYS =
   "To keep working now, choose a model from another provider you've connected, or add your own provider key in Settings → Providers."
@@ -81,8 +88,26 @@ export const OPENROUTER_ACCOUNT_COPY =
 export const OPENROUTER_REMOTE_COPY =
   "OpenRouter browser sign-in requires a callback on the engine's localhost. For a remote engine, use an OpenRouter API key or connect through a local engine with the callback port forwarded."
 
-export function freeModelName(model: Pick<FreeModelChoice, "name">) {
-  return model.name
+/**
+ * A catalog name as Vector lists it: the free router under Vector's own name, and any other name without OpenRouter's
+ * own prefix or suffix ("OpenRouter: …", "… (OpenRouter)"). The engine names its models with it, so every client shows
+ * the same name.
+ */
+export function freeModelCatalogName(model: Pick<FreeModelChoice, "id" | "name">) {
+  if (model.id === FREE_ROUTER_ID) return FREE_ROUTER_NAME
+  return (
+    model.name
+      .replace(/^\s*openrouter\s*:\s*/i, "")
+      .replace(/\s*\(openrouter\)\s*$/i, "")
+      .trim() || model.name
+  )
+}
+
+/** A row's name: the catalog name without a `:free` or "(free)" suffix, except on the router's own name. */
+export function freeModelName(model: Pick<FreeModelChoice, "name"> & { id?: string }) {
+  const name = freeModelCatalogName({ id: model.id ?? "", name: model.name })
+  if (name === FREE_ROUTER_NAME) return name
+  return name
     .replace(/:free\s*$/i, "")
     .replace(/\s*\(free\)\s*$/i, "")
     .trim()
@@ -110,24 +135,6 @@ export function freeModelTrainingLabel(model: Pick<FreeModelChoice, "freeModel">
  */
 export function freeModelTrainingRefusal(status: number | undefined) {
   return status === 403 ? FREE_MODEL_TRAINING_OWNER_ONLY : "Vector couldn't record your choice. Try again."
-}
-
-/** The longer disclaimer that goes with the label. */
-export function freeModelTrainingDisclaimer(model: Pick<FreeModelChoice, "freeModel"> & { id?: string }) {
-  if (model.freeModel?.dataPolicy === "may-train" && model.id === FREE_ROUTER_ID) return FREE_ROUTER_DISCLAIMER
-  if (model.freeModel?.dataPolicy === "unreviewed") return FREE_MODEL_UNREVIEWED_DISCLAIMER
-  if (model.freeModel?.dataPolicy === "may-train") return FREE_MODEL_TRAINING_DISCLAIMER
-  return undefined
-}
-
-/**
- * What stays in view while a free model labelled "May train on your prompts" is in use (the desktop composer, the TUI
- * prompt and `vector run`): its source and label, then its disclaimer. Nothing for a no-training or non-free model.
- */
-export function freeModelTrainingNotice(model: Pick<FreeModelChoice, "id" | "freeModel">) {
-  const disclaimer = freeModelTrainingDisclaimer(model)
-  if (!disclaimer) return
-  return { summary: [freeModelSource(model), FREE_MODEL_TRAINING_LABEL].filter(Boolean).join(" · "), disclaimer }
 }
 
 /**

@@ -16,7 +16,7 @@ export const dict = {
   "freeModels.start.unavailableShared":
     "Free models inside of Vector are unavailable right now. Try again later, or use an API key you already have.",
   "freeModels.start.note":
-    "Free models are provided by Vector at no cost to you, within a daily limit for each account. OpenRouter and the model's provider process your prompts.",
+    "Free models are provided by Vector at no cost to you, within a daily limit for each account.",
   "freeModels.start.ownKey": "Use my own API key",
   "command.category.suggested": "Suggested",
   "command.category.view": "View",

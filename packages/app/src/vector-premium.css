@@ -2650,30 +2650,12 @@ html[data-vector-navigation-resizing] * {
   min-width: 34px;
   text-align: right;
 }
-/* "May train on your prompts": a free model whose provider may train on prompts. */
-:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-row-training"] {
+/* "May train on your prompts": a free model whose provider may train on prompts. The label is
+   all the row says; the one-time acceptance question explains it. The composer shows the same
+   label while such a model is selected. */
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-row-training"],
+[data-component="free-model-training-notice"] {
   color: var(--vx-amber);
-}
-/* Such a row grows a second line, under the name, for its disclaimer. */
-:is(.vector-model-popover, .vector-select-model-dialog) [data-component="menu-v2-item"][data-training-notice] {
-  height: auto;
-  min-height: 32px;
-  padding-block: 6px;
-}
-:is(.vector-model-popover, .vector-select-model-dialog)
-  [data-component="menu-v2-item"][data-training-notice]
-  [data-slot="menu-v2-item-content"] {
-  flex-wrap: wrap;
-  min-width: 0;
-}
-:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-row-training-detail"] {
-  flex: 1 0 100%;
-  padding-left: 24px;
-  font-size: 11px;
-  line-height: 1.45;
-  white-space: normal;
-  text-align: left;
-  color: var(--vx-text-muted);
 }
 .vector-select-model-dialog [data-slot="model-row-check"] {
   display: inline-flex;
@@ -2702,6 +2684,53 @@ html[data-vector-navigation-resizing] * {
   font-weight: 400;
   color: var(--vx-text-muted);
   white-space: nowrap;
+}
+/* A provider's header, and the free models' one, opens and closes its rows. The chevron sits
+   in the rows' 16px check slot, so the access caption keeps its edge. */
+:is(.vector-model-popover, .vector-select-model-dialog) button[data-model-section-toggle] {
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+.vector-select-model-dialog button[data-model-section-toggle] {
+  border-radius: 8px;
+}
+:is(.vector-model-popover, .vector-select-model-dialog) button[data-model-section-toggle][data-active] {
+  background: color-mix(in srgb, var(--vx-text) 6%, transparent);
+  color: var(--vx-text);
+}
+:is(.vector-model-popover, .vector-select-model-dialog)
+  button[data-model-section-toggle]
+  [data-slot="model-section-access"] {
+  margin-right: 0;
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-section-chevron"] {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: auto;
+  color: var(--vx-text-muted);
+}
+:is(.vector-model-popover, .vector-select-model-dialog)
+  [data-slot="model-section-access"]
+  ~ [data-slot="model-section-chevron"] {
+  margin-left: 0;
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-section-chevron"] svg {
+  transition: transform 120ms ease;
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-section-chevron"]:not([data-expanded]) svg {
+  transform: rotate(-90deg);
 }
 :is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-picker-empty"] {
   display: flex;

@@ -1,6 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import { FREE_MODEL_TRAINING_DISCLAIMER, FREE_ROUTER_DISCLAIMER } from "@vectordevai/core/free-model-choice"
-import { EOL } from "os"
 import { freeModelRunNotice } from "@/cli/cmd/run/free-model-notice"
 
 describe("vector run's notice for a free model labelled May train on your prompts", () => {
@@ -26,16 +24,20 @@ describe("vector run's notice for a free model labelled May train on your prompt
     },
   ]
 
-  test("names the model, where it runs and its label, then the disclaimer", () => {
+  test("names the model and its label only, never OpenRouter", () => {
     expect(freeModelRunNotice(providers, { providerID: "vector", modelID: laguna.id })).toBe(
-      `Free models inside of Vector: Poolside: Laguna S 2.1 · Provided by Vector · May train on your prompts${EOL}${FREE_MODEL_TRAINING_DISCLAIMER}`,
+      "Free models inside of Vector: Poolside: Laguna S 2.1 · May train on your prompts",
     )
-    expect(freeModelRunNotice(providers, { providerID: "openrouter", modelID: laguna.id })).toContain(
-      "Your OpenRouter account · May train on your prompts",
+    // A copy on the user's own OpenRouter account is not one of the free models provided by Vector.
+    expect(freeModelRunNotice(providers, { providerID: "openrouter", modelID: laguna.id })).toBe(
+      "Poolside: Laguna S 2.1 · May train on your prompts",
     )
-    expect(freeModelRunNotice(providers, { providerID: "vector", modelID: router.id })).toEndWith(
-      FREE_ROUTER_DISCLAIMER,
+    // The free router runs under Vector's own name.
+    expect(freeModelRunNotice(providers, { providerID: "vector", modelID: router.id })).toBe(
+      "Free models inside of Vector: Auto (free) · May train on your prompts",
     )
+    for (const model of [laguna, router])
+      expect(freeModelRunNotice(providers, { providerID: "vector", modelID: model.id })).not.toMatch(/openrouter/i)
   })
 
   test("says nothing for a no-training, paid or unknown model, or when the model is not known yet", () => {

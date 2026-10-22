@@ -175,14 +175,28 @@ async function setup(
   await expect(page.locator("#vector-launch")).toHaveCount(0)
 }
 
-test("groups both copies of a free model, the shared one first, and hides the group when OFF", async ({
+/** A section's header opens and closes its rows. Every section below Recently used starts closed, and its header is a
+    button even when it is the only one. */
+async function openSection(page: Page, label: string) {
+  const header = page.locator("button[data-model-section-toggle]").filter({ hasText: label })
+  await expect(header).toBeVisible()
+  if ((await header.getAttribute("aria-expanded")) !== "true") await header.click()
+  await expect(header).toHaveAttribute("aria-expanded", "true")
+}
+
+const openFreeModels = (page: Page) => openSection(page, "Free models inside of Vector")
+
+test("lists both copies of a free model once each, under Recently used first, and hides the group when OFF", async ({
   page,
 }, testInfo) => {
   await setup(page, { enabled: true })
   await page.locator('[data-action="prompt-model"]').filter({ visible: true }).first().click()
-  await expect(
-    page.locator('[data-slot="model-section-name"]').filter({ hasText: "Free models inside of Vector" }),
-  ).toBeVisible()
+  // The current model's section comes first, above the free models and every provider.
+  const sections = await page
+    .locator("[data-model-section]")
+    .evaluateAll((items) => items.map((item) => item.getAttribute("data-model-section")))
+  expect(sections[0]).toBe("recent")
+  await openFreeModels(page)
   // A connected OpenRouter account no longer hides the shared copy, which stays on Vector's shared allowance.
   const shared = page.locator('[data-option-key="vector:maker/coder:free"]')
   await expect(shared).toHaveCount(1)
@@ -192,10 +206,6 @@ test("groups both copies of a free model, the shared one first, and hides the gr
   await expect(free).toHaveCount(1)
   await expect(free).toContainText("Maker Coder")
   await expect(free).toContainText("Your OpenRouter account")
-  const keys = await page
-    .locator('[data-option-key$=":maker/coder:free"]')
-    .evaluateAll((items) => items.map((item) => item.getAttribute("data-option-key")))
-  expect(keys.slice(0, 2)).toEqual(["vector:maker/coder:free", "openrouter:maker/coder:free"])
   await page.screenshot({ path: testInfo.outputPath("free-model-picker.png") })
   await page.keyboard.press("Escape")
   await page.unrouteAll({ behavior: "wait" })
@@ -204,26 +214,87 @@ test("groups both copies of a free model, the shared one first, and hides the gr
   await expect(
     page.locator('[data-slot="model-section-name"]').filter({ hasText: "Free models inside of Vector" }),
   ).toHaveCount(0)
+  // OpenRouter is now the only section with a header. It still starts closed and opens when clicked.
+  const lone = page.locator("button[data-model-section-toggle]").filter({ hasText: "OpenRouter" })
+  await expect(page.locator("button[data-model-section-toggle]")).toHaveCount(1)
+  await expect(lone).toHaveAttribute("aria-expanded", "false")
+  await openSection(page, "OpenRouter")
   await expect(page.locator('[data-option-key="openrouter:maker/coder:free"]')).toBeVisible()
+  await lone.click()
+  await expect(lone).toHaveAttribute("aria-expanded", "false")
+  await expect(page.locator('[data-option-key="openrouter:maker/coder:free"]')).toHaveCount(0)
 })
 
-test("a selected free model that may train keeps its disclaimer under the composer and on its picker rows", async ({
+test("clicking a provider's header shows its models, clicking it again hides them, and the picker remembers", async ({
+  page,
+}, testInfo) => {
+  await setup(page, { enabled: true, paidAgent: true })
+  const picker = page.locator('[data-action="prompt-model"]').filter({ visible: true }).first()
+  await picker.click()
+  const provider = page.locator("button[data-model-section-toggle]").filter({ hasText: "OpenRouter" })
+  const free = page.locator("button[data-model-section-toggle]").filter({ hasText: "Free models inside of Vector" })
+  const paid = page.locator('[data-option-key="openrouter:maker/paid"]')
+  // Sections below the current model start closed.
+  await expect(provider).toHaveAttribute("aria-expanded", "false")
+  await expect(free).toHaveAttribute("aria-expanded", "false")
+  await expect(paid).toHaveCount(0)
+  // Headers never take focus from search, so typing and the arrow keys keep driving the list.
+  const search = page.getByRole("searchbox").first()
+  await search.click()
+  await provider.click()
+  await expect(provider).toHaveAttribute("aria-expanded", "true")
+  await expect(paid).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath("model-picker-provider-open.png") })
+  await provider.click()
+  await expect(provider).toHaveAttribute("aria-expanded", "false")
+  await expect(paid).toHaveCount(0)
+  // The keyboard reaches the headers too: Enter or Space on one toggles it, and focus stays in search.
+  await expect(search).toBeFocused()
+  await expect(provider).toHaveAttribute("data-active", "")
+  await page.keyboard.press("Enter")
+  await expect(provider).toHaveAttribute("aria-expanded", "true")
+  await page.keyboard.press(" ")
+  await expect(provider).toHaveAttribute("aria-expanded", "false")
+  await expect(search).toHaveValue("")
+  await page.keyboard.press("ArrowUp")
+  await expect(free).toHaveAttribute("data-active", "")
+  await page.keyboard.press("Enter")
+  await expect(free).toHaveAttribute("aria-expanded", "true")
+  await page.keyboard.press("Enter")
+  await expect(free).toHaveAttribute("aria-expanded", "false")
+  // Searching opens every section with a match; clearing it restores what was open.
+  await provider.click()
+  await expect(paid).toBeVisible()
+  await search.fill("maker")
+  await expect(page.locator("button[data-model-section-toggle]")).toHaveCount(0)
+  await expect(page.locator('[data-option-key="vector:maker/coder:free"]')).toBeVisible()
+  await expect(paid).toBeVisible()
+  await search.fill("")
+  await expect(provider).toHaveAttribute("aria-expanded", "true")
+  await expect(free).toHaveAttribute("aria-expanded", "false")
+  // The next picker opens with the same sections open.
+  await page.keyboard.press("Escape")
+  await picker.click()
+  await expect(provider).toHaveAttribute("aria-expanded", "true")
+  await expect(paid).toBeVisible()
+})
+
+test("a selected free model that may train shows only its label, under the composer and on its picker rows", async ({
   page,
 }, testInfo) => {
   await setup(page, { enabled: true, mayTrain: true })
   const notice = page.locator('[data-component="free-model-training-notice"]')
   await expect(notice).toBeVisible()
-  await expect(notice).toContainText("Your OpenRouter account · May train on your prompts")
-  await expect(notice).toContainText("Vector itself never trains on your prompts.")
+  await expect(notice).toHaveText("May train on your prompts")
   await page.screenshot({ path: testInfo.outputPath("free-model-composer-notice.png") })
   await page.locator('[data-action="prompt-model"]').filter({ visible: true }).first().click()
+  await openFreeModels(page)
   for (const key of ["vector:maker/coder:free", "openrouter:maker/coder:free"]) {
     const row = page.locator(`[data-option-key="${key}"]`)
     await expect(row.locator('[data-slot="model-row-training"]')).toHaveText("May train on your prompts")
-    await expect(row.locator('[data-slot="model-row-training-detail"]')).toContainText(
-      "Don't use it with private repositories, secrets or personal data.",
-    )
+    await expect(row).not.toContainText("Vector itself never trains")
   }
+  await expect(page.locator('[data-slot="model-row-training-detail"]')).toHaveCount(0)
   await page.screenshot({ path: testInfo.outputPath("free-model-training-notice.png") })
 })
 
@@ -234,6 +305,7 @@ test("a no-training free model shows no training notice", async ({ page }) => {
   )
   await expect(page.locator('[data-component="free-model-training-notice"]')).toHaveCount(0)
   await page.locator('[data-action="prompt-model"]').filter({ visible: true }).first().click()
+  await openFreeModels(page)
   await expect(page.locator('[data-option-key="vector:maker/coder:free"]')).toBeVisible()
   await expect(page.locator('[data-slot="model-row-training-detail"]')).toHaveCount(0)
 })
@@ -249,6 +321,7 @@ test("switching agents preserves the selected free model until an explicit paid 
   await expect(picker).toContainText("Maker Coder")
 
   await picker.click()
+  await openSection(page, "OpenRouter")
   await page.locator('[data-option-key="openrouter:maker/paid"]').click()
   await expect(picker).toContainText("Paid Specialist")
 })

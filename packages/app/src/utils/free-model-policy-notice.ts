@@ -2,45 +2,22 @@ import {
   FREE_MODEL_TRAINING_DISCLAIMER,
   FREE_MODEL_TRAINING_LABEL,
   FREE_MODEL_TRAINING_SCOPE,
-  FREE_MODELS_DATA_POLICY,
-  FREE_MODELS_TITLE,
   freeModelMayTrain,
-  freeModelTrainingDisclaimer,
   freeModelTrainingRefusal,
   type FreeModelChoice,
 } from "@vectordevai/core/free-model-choice"
 import type { VectorClient } from "@vectordevai/sdk/v2/client"
 
-const STORAGE_KEY = "vector.notice.free-model-policy.v2"
-
-// Through 1.99.106 these models ran only on zero-data-retention providers, and through 1.99.108 only on no-training
-// ones. People who choose one are told once, the first time they send to one, how the providers treat their data.
-export const FREE_MODEL_POLICY_NOTICE = {
-  title: `How ${FREE_MODELS_TITLE} handle your data`,
-  description: `${FREE_MODELS_DATA_POLICY} Models labelled "${FREE_MODEL_TRAINING_LABEL}" ask before your first prompt to one.`,
-}
-
-/** True the first time on this device. Storage that refuses reads or writes shows the notice again rather than never. */
-export function firstFreeModelPolicyNotice(
-  storage: () => Pick<Storage, "getItem" | "setItem"> | undefined = () => globalThis.localStorage,
-) {
-  try {
-    if (storage()?.getItem(STORAGE_KEY)) return false
-    storage()?.setItem(STORAGE_KEY, "1")
-  } catch {
-    return true
-  }
-  return true
-}
-
-/** The one-time question before the first prompt to a free model whose provider may train on prompts. */
-export function freeModelTrainingNotice(model: Pick<FreeModelChoice, "freeModel">) {
-  return {
-    title: FREE_MODEL_TRAINING_LABEL,
-    description: `${freeModelTrainingDisclaimer(model) ?? FREE_MODEL_TRAINING_DISCLAIMER} ${FREE_MODEL_TRAINING_SCOPE}`,
-    accept: "Accept and send",
-    cancel: "Don't send",
-  }
+/**
+ * The one-time question before the first prompt to a free model whose provider may train on prompts. It is the one place
+ * that explains the label; every list and notice shows the label alone. The free router and unreviewed models are asked
+ * about the same way, since the acceptance covers every labelled model.
+ */
+export const FREE_MODEL_TRAINING_QUESTION = {
+  title: FREE_MODEL_TRAINING_LABEL,
+  description: `${FREE_MODEL_TRAINING_DISCLAIMER} ${FREE_MODEL_TRAINING_SCOPE}`,
+  accept: "Accept and send",
+  cancel: "Don't send",
 }
 
 /**
