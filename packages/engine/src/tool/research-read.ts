@@ -180,6 +180,16 @@ export const ResearchReadTool = Tool.define<
               ...(research.network.publicNames ? { publicNames: research.network.publicNames } : {}),
             },
           )
+          const signals = ResearchSignals.signals({
+            url: page.final,
+            meta: page.meta,
+            flagged: page.flagged.length,
+            paywalled: page.status === "paywalled",
+            corroborated: 0,
+            ...(found.plan.prefer_domains ? { prefer: found.plan.prefer_domains } : {}),
+            ...(found.plan.avoid_domains ? { avoid: found.plan.avoid_domains } : {}),
+            now: Date.now(),
+          })
           const added = yield* store.addSource(found.place, runID, {
             url: page.final,
             canonical: page.canonical,
@@ -193,16 +203,7 @@ export const ResearchReadTool = Tool.define<
             private: page.private,
             fingerprint: page.fingerprint,
             meta: { author: page.meta.author, published: page.meta.published },
-            signals: ResearchSignals.signals({
-              url: page.final,
-              meta: page.meta,
-              flagged: page.flagged.length,
-              paywalled: page.status === "paywalled",
-              corroborated: 0,
-              ...(found.plan.prefer_domains ? { prefer: found.plan.prefer_domains } : {}),
-              ...(found.plan.avoid_domains ? { avoid: found.plan.avoid_domains } : {}),
-              now: Date.now(),
-            }),
+            signals,
             fetchedAt: Date.now(),
           })
           const links = params.links
@@ -249,6 +250,7 @@ export const ResearchReadTool = Tool.define<
                 ...(passages ? { passages: passages.length ? passages : ["Nothing on this page matches."] } : {}),
                 outline: params.chunk === undefined && !passages,
               }),
+              ...signalLine(signals),
               ...(page.status === "paywalled" ? ["Paywalled: Vector kept the public excerpt only."] : []),
               ...(page.private
                 ? ["This page is on your own computer or network, so its text stays out of searches and addresses."]
@@ -268,6 +270,15 @@ export const ResearchReadTool = Tool.define<
     }
   }),
 )
+
+// What Vector noticed about the page, in its own words. A page's own strings (its author, an identifier) stay out of
+// this line, which is outside the fence.
+function signalLine(signal: Research.Signal) {
+  const labels = ResearchSignals.labels(signal).filter(
+    (label) => !label.startsWith("By ") && !/^(?:DOI|arXiv|PMID|Published) /.test(label),
+  )
+  return labels.length ? [`Signals: ${labels.join(" · ")}`] : []
+}
 
 // The links a read offers: the page's words, so fenced too.
 function linkList(url: string, links: readonly string[]) {

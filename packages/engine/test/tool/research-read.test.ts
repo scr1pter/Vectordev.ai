@@ -153,6 +153,8 @@ it.instance(
       // The hostile page's exfiltration link, whose query reads as encoded data, is not offered.
       expect(linksOf(first).some((link) => link.includes("evil.web.test"))).toBe(false)
       expect(output(first)).toContain("untrusted_web_page")
+      // What Vector noticed, in its own words beside the fence.
+      expect(output(first)).toMatch(/Signals: .*Contains text addressed to AI assistants/)
       // A link the article offered is read next, as a source of its own.
       expect(linksOf(second)).toContain(data)
       expect(third?.state.status).toBe("completed")
