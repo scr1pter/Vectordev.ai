@@ -207,7 +207,7 @@ test("the README names the release the brain ships in, as coming until it is pub
 test("the README's control line says what the brain lets you control, and the exception", () => {
   const paragraph = readme.slice(readme.indexOf(brainRelease.readme), readme.indexOf("Vector is free."))
   expect(paragraph).toContain(
-    'Your prompts, your data, your Vector: the brain lives on your computer, you choose which model sees each request, and you can see, undo or erase what it learned in Settings → Memory. Free models labelled "May train on your prompts" are the exception.',
+    'Your prompts, your data, your Vector: the brain lives on your computer, you choose who runs the model for each request, and you can see, undo or erase what it learned in Settings → Memory. Free models labelled "May train on your prompts" are the exception.',
   )
   expect(readme).not.toMatch(/\bfully\b|controlled only by you|only you control|your prompts never/i)
 })

@@ -170,7 +170,7 @@ test("the brain is labelled wherever the page opens with it", () => {
   const built = source.slice(source.indexOf("---", 3), source.indexOf("<style"))
   expect(built.replace(/\$?\{brainRelease\.\w+\}/g, "")).not.toMatch(/1\.99\.110/)
   // Prompts go to the model provider the user picks, so control is described, never claimed as total.
-  expect(markup).toContain("The brain lives on your computer, and you choose which model sees each request.")
+  expect(markup).toContain("The brain lives on your computer, and you choose who runs the model for each request.")
   expect(page).not.toMatch(/controlled only by you|only you control|never leaves your (computer|machine)/i)
 })
 
@@ -182,7 +182,7 @@ test("the brain is labelled wherever the page opens with it", () => {
 test("the investor page says whose prompts and data they are, and labels memory in every agent as in development", async () => {
   expect(await Bun.file(path.join(root, "packages/core/src/brain/database.ts")).text()).toContain("BrainPaths.directory(Global.Path.data)")
   expect(markup).toContain(
-    "Your prompts, your data, your Vector. The brain lives on your computer, and you choose which model sees each request.",
+    "Your prompts, your data, your Vector. The brain lives on your computer, and you choose who runs the model for each request.",
   )
   expect(markup).toMatch(/free models whose providers may train are labelled May train on your prompts/)
   expect(markup).not.toMatch(/\bfully\b|controlled only by you|your prompts never|never sees? your prompts/i)

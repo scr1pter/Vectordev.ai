@@ -10,7 +10,7 @@
 
 Vector is an agentic engineering workspace. It puts an editor, a terminal, a controlled browser and AI agents around the repository on your computer: you describe a change, watch agents edit files and run checks, and inspect the result before you merge or publish it.
 
-Coming in desktop 1.99.110: Vector becomes a self-evolving agentic harness. Give it your specs, PDFs and docs once. It reads them on your computer, links requirements, endpoints and decisions to the code that implements them, warns you when the two drift apart, keeps what proved useful in runs that passed, and spends tokens only where they matter. "hi" costs nothing extra. Your prompts, your data, your Vector: the brain lives on your computer, you choose which model sees each request, and you can see, undo or erase what it learned in Settings → Memory. Free models labelled "May train on your prompts" are the exception.
+Coming in desktop 1.99.110: Vector becomes a self-evolving agentic harness. Give it your specs, PDFs and docs once. It reads them on your computer, links requirements, endpoints and decisions to the code that implements them, warns you when the two drift apart, keeps what proved useful in runs that passed, and spends tokens only where they matter. "hi" costs nothing extra. Your prompts, your data, your Vector: the brain lives on your computer, you choose who runs the model for each request, and you can see, undo or erase what it learned in Settings → Memory. Free models labelled "May train on your prompts" are the exception.
 
 Vector is free. Create a free Vector account at [vectordev.ai](https://vectordev.ai) to download the desktop app; the same account signs in the terminal agent.
 

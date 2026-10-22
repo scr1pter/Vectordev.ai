@@ -103,7 +103,7 @@ test("the self-evolving section says whose prompts and data they are, and no mor
   expect(memory).toContain('action: "undo"')
   expect(memory).toContain("current.memory.erase(")
   expect(section).toContain(
-    "Your prompts, your data, your Vector: the brain lives on your computer, you choose which model sees each request, and you can see, undo or erase what it learned. Free models labelled May train on your prompts are the exception.",
+    "Your prompts, your data, your Vector: the brain lives on your computer, you choose who runs the model for each request, and you can see, undo or erase what it learned. Free models labelled May train on your prompts are the exception.",
   )
   expect(page).not.toMatch(/\bfully\b|controlled only by you|only you control|your prompts never/i)
   expect(section).not.toMatch(/every agent|Deep research|Vectorscope/i)
@@ -161,8 +161,8 @@ test("no picture of the session view shows a Publish button", () => {
 })
 
 // The page ships with desktop 1.99.109 and describes or draws two things due in that release: free models labelled
-// "May train on your prompts" behind a one-time question, and the sidebar's "Repositories" and "Repository tools"
-// labels. Once the published desktop version reaches 1.99.109, the app in the same tree must have both; if either
+// "May train on your prompts" behind a one-time question, and the sidebar's "Repository tools" label (its group
+// header became "Agents" on 20 Oct). Once the published desktop version reaches 1.99.109, the app in the same tree must have both; if either
 // slipped, put back the free models' status label or the old sidebar labels in the redraw.
 test.skipIf(Bun.semver.order(publishedDesktopVersion, "1.99.109") < 0)(
   "once desktop 1.99.109 is published, the app has what the page says that release brings",
