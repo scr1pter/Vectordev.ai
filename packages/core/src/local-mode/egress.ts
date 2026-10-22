@@ -216,7 +216,11 @@ export async function fetch(
     }
     await response.body?.cancel()
     if (mode === "error")
-      throw new TypeError(`${url.origin} answered a model call with a redirect, which Vector does not follow.`)
+      throw new TypeError(
+        inference
+          ? `${url.origin} answered a model call with a redirect, which Vector does not follow.`
+          : `${url.origin} answered with a redirect, and this request follows none.`,
+      )
     if (count >= EgressGuard.MAX_REDIRECTS)
       throw new TypeError(`Too many redirects: more than ${EgressGuard.MAX_REDIRECTS}.`)
     return hop(next, EgressGuard.redirectHop(current, response.status, url, next), count + 1)
