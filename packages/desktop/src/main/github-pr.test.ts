@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { BrainPosting } from "@vectordevai/core/brain/posting"
 import { buildWorkflowYaml } from "@vectordevai/core/review/workflow"
 
-import { createPullRequest as createWorkspacePullRequest } from "./github"
+import { createPullRequest } from "./github"
 import type { GithubAccess } from "./github-api"
 import {
   AUTO_REVIEW_BRANCH,
@@ -810,7 +810,7 @@ describe("the posting check before Vector posts", () => {
     reset()
     const dir = await mkdtemp(join(tmpdir(), "vector-workspace-"))
     try {
-      const result = await createWorkspacePullRequest({
+      const result = await createPullRequest({
         projectPath: dir,
         title: "Retry fix",
         body: `Fixed the retry loop.\n\nVector task: ${FACT}`,
