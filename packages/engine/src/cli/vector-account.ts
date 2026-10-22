@@ -6,6 +6,9 @@ import { truthy } from "@vectordevai/core/flag/flag"
 import { InstallationVersion } from "@vectordevai/core/installation/version"
 import { UI } from "./ui"
 import { VectorAccount } from "@vectordevai/core/vector-account"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import { LocalSources } from "@vectordevai/core/local-mode/sources"
 
 export const readVectorToken = VectorAccount.readVectorToken
 
@@ -61,7 +64,20 @@ export async function currentUser(): Promise<CliUser | undefined> {
   return (await load())?.user
 }
 
-type VerifyResult = { status: "ok"; user: CliUser } | { status: "invalid"; message?: string } | { status: "offline" }
+type VerifyResult =
+  | { status: "ok"; user: CliUser }
+  | { status: "invalid"; message?: string }
+  | { status: "offline" }
+  | { status: "local" }
+
+// With Vector Local on, Vector does not check the account with vectordev.ai unless the user allowed it: a CLI signed in
+// once keeps working, and no usage report is sent (owner question 1, option A).
+const ACCOUNT_SOURCE = LocalSources.get("vector-account")!
+const USAGE_SOURCE = LocalSources.get("usage-checkin")!
+const offline = (source: LocalSources.Source) =>
+  LocalPolicy.decide(Egress.policy(), { purpose: source.purpose, url: SITE, source: source.id }).decision !== "allow"
+const LOCAL_SIGN_IN =
+  "Vector Local blocks requests to vectordev.ai, so Vector cannot check a token now. Sign in once with Vector Local off, or allow the vector-account source."
 
 // Only a definitive answer from the Vector API counts as a rejection. Captive
 // portals, proxies, rate limits, and outages must never sign a user out.
@@ -70,7 +86,8 @@ const REJECTION_CODES = new Set(["CLI_TOKEN_INVALID", "CLI_TOKEN_EXPIRED"])
 // The verification at the first command of each UTC day doubles as the CLI's usage count: the server records one row
 // per account per UTC day from these headers unless VECTOR_DISABLE_USAGE turns that off. Nothing else is sent.
 async function verifyToken(token: string): Promise<VerifyResult> {
-  const response = await fetch(`${SITE}/api/account/cli-verify`, {
+  if (offline(ACCOUNT_SOURCE)) return { status: "local" }
+  const response = await Egress.fetch(ACCOUNT_SOURCE.id, `${SITE}/api/account/cli-verify`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -112,6 +129,7 @@ export function routeUsageReport(send: (input: { token: string; site: string }) 
 // fire-and-forget: the timer never keeps a finished command alive, and the report sends at most once per UTC day.
 export function scheduleUsageReport(token: string, delay = USAGE_REPORT_DELAY) {
   if (truthy("VECTOR_DISABLE_USAGE")) return
+  if (offline(USAGE_SOURCE)) return
   setTimeout(() => {
     usageReport.send({ token, site: SITE }).catch(() => undefined)
   }, delay).unref()
@@ -148,6 +166,10 @@ export async function login(provided?: string): Promise<CliUser | undefined> {
     return undefined
   }
   const verified = await verifyToken(token)
+  if (verified.status === "local") {
+    UI.error(LOCAL_SIGN_IN)
+    return undefined
+  }
   if (verified.status === "offline") {
     UI.error("Vector could not reach vectordev.ai to verify the token. Check your connection and try again.")
     return undefined
@@ -188,7 +210,7 @@ export async function ensureVectorAccount(): Promise<void> {
   if (envToken) {
     const verified = await verifyToken(envToken)
     if (verified.status === "ok") scheduleUsageReport(envToken)
-    if (verified.status === "ok" || verified.status === "offline") return
+    if (verified.status === "ok" || verified.status === "offline" || verified.status === "local") return
     UI.error("VECTOR_CLI_TOKEN is not valid. Generate a new token at " + `${SITE}/auth/cli`)
     process.exit(1)
   }
@@ -202,6 +224,8 @@ export async function ensureVectorAccount(): Promise<void> {
       return
     }
     const verified = await verifyToken(stored.token)
+    // Signed in once: with Vector Local on, the account is not checked again and the grace period does not run out.
+    if (verified.status === "local") return
     if (verified.status === "ok") {
       await save({ token: stored.token, user: verified.user, verifiedAt: Date.now() })
       scheduleUsageReport(stored.token)
@@ -215,6 +239,11 @@ export async function ensureVectorAccount(): Promise<void> {
     // token revoked or expired — fall through to a fresh login
     await signOut()
     UI.println(UI.Style.TEXT_WARNING_BOLD + "Your Vector session expired — sign in again.")
+  }
+
+  if (offline(ACCOUNT_SOURCE)) {
+    UI.error(`A free Vector account is required. ${LOCAL_SIGN_IN}`)
+    process.exit(1)
   }
 
   if (!process.stdin.isTTY) {

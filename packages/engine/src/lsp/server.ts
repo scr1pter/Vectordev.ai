@@ -14,6 +14,25 @@ import { Module } from "@vectordevai/core/util/module"
 import { spawn } from "./launch"
 import { Npm } from "@vectordevai/core/npm"
 import type { RuntimeFlags } from "@/effect/runtime-flags"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+
+function noDownload(flags: RuntimeFlags.Info) {
+  return flags.disableLspDownload || localBlocked()
+}
+
+// Vector Local implies VECTOR_DISABLE_LSP_DOWNLOAD, Npm.which included: a language server is installed (npm, go
+// install, gem install, a download) only when the user allowed the lsp-install source, since installing one reaches
+// registries on the internet. A download that runs is decided and logged as lsp-install; Vector does not see the
+// package managers' own connections, so with Vector Local on only an allowed source starts them.
+function localBlocked() {
+  const policy = Egress.policy()
+  return policy.enabled && !policy.allow.some((entry) => entry.source === "lsp-install")
+}
+
+// A language server download, decided and logged as lsp-install while Vector Local is on.
+function labelled(url: string, init?: RequestInit) {
+  return Egress.fetch("lsp-install", url, init)
+}
 
 const pathExists = async (p: string) =>
   fs
@@ -135,6 +154,7 @@ export const Typescript: Info = {
   async spawn(root, ctx) {
     const tsserver = Module.resolve("typescript/lib/tsserver.js", ctx.directory)
     if (!tsserver) return
+    if (localBlocked()) return
     const bin = await Npm.which("typescript-language-server")
     if (!bin) return
     const proc = spawn(bin, ["--stdio"], {
@@ -162,7 +182,7 @@ export const Vue: Info = {
     let binary = which("vue-language-server")
     const args: string[] = []
     if (!binary) {
-      if (flags.disableLspDownload) return
+      if (noDownload(flags)) return
       const resolved = await Npm.which("@vue/language-server")
       if (!resolved) return
       binary = resolved
@@ -192,8 +212,8 @@ export const ESLint: Info = {
     if (!eslint) return
     const serverPath = path.join(Global.Path.bin, "vscode-eslint", "server", "out", "eslintServer.js")
     if (!(await Filesystem.exists(serverPath))) {
-      if (flags.disableLspDownload) return
-      const response = await fetch("https://github.com/microsoft/vscode-eslint/archive/refs/heads/main.zip")
+      if (noDownload(flags)) return
+      const response = await labelled("https://github.com/microsoft/vscode-eslint/archive/refs/heads/main.zip")
       if (!response.ok) return
 
       const zipPath = path.join(Global.Path.bin, "vscode-eslint.zip")
@@ -358,6 +378,7 @@ export const Biome: Info = {
     if (!bin) {
       const resolved = Module.resolve("biome", root)
       if (!resolved) return
+      if (localBlocked()) return
       bin = await Npm.which("biome")
       if (!bin) return
       args = ["lsp-proxy", "--stdio"]
@@ -388,7 +409,7 @@ export const Gopls: Info = {
     let bin = which("gopls")
     if (!bin) {
       if (!which("go")) return
-      if (flags.disableLspDownload) return
+      if (noDownload(flags)) return
 
       const proc = Process.spawn(["go", "install", "golang.org/x/tools/gopls@latest"], {
         env: untrustedChildEnvironment(process.env, { GOBIN: Global.Path.bin }),
@@ -423,7 +444,7 @@ export const Rubocop: Info = {
       if (!ruby || !gem) {
         return
       }
-      if (flags.disableLspDownload) return
+      if (noDownload(flags)) return
       const proc = Process.spawn(["gem", "install", "rubocop", "--bindir", Global.Path.bin], {
         env: untrustedChildEnvironment(),
         exactEnv: true,
@@ -514,7 +535,7 @@ export const Pyright: Info = {
     let binary = which("pyright-langserver")
     const args = []
     if (!binary) {
-      if (flags.disableLspDownload) return
+      if (noDownload(flags)) return
       const resolved = await Npm.which("pyright", "pyright-langserver")
       if (!resolved) return
       binary = resolved
@@ -571,9 +592,9 @@ export const ElixirLS: Info = {
           return
         }
 
-        if (flags.disableLspDownload) return
+        if (noDownload(flags)) return
 
-        const response = await fetch("https://github.com/elixir-lsp/elixir-ls/archive/refs/heads/master.zip")
+        const response = await labelled("https://github.com/elixir-lsp/elixir-ls/archive/refs/heads/master.zip")
         if (!response.ok) return
         const zipPath = path.join(Global.Path.bin, "elixir-ls.zip")
         if (response.body) await Filesystem.writeStream(zipPath, response.body)
@@ -619,9 +640,9 @@ export const Zls: Info = {
         return
       }
 
-      if (flags.disableLspDownload) return
+      if (noDownload(flags)) return
 
-      const releaseResponse = await fetch("https://api.github.com/repos/zigtools/zls/releases/latest")
+      const releaseResponse = await labelled("https://api.github.com/repos/zigtools/zls/releases/latest")
       if (!releaseResponse.ok) {
         return
       }
@@ -668,7 +689,7 @@ export const Zls: Info = {
       }
 
       const downloadUrl = asset.browser_download_url
-      const downloadResponse = await fetch(downloadUrl)
+      const downloadResponse = await labelled(downloadUrl)
       if (!downloadResponse.ok) {
         return
       }
@@ -713,7 +734,7 @@ export const CSharp: Info = {
   root: NearestRoot([".slnx", ".sln", ".csproj", "global.json"]),
   extensions: [".cs", ".csx"],
   async spawn(root, _ctx, flags) {
-    const bin = await getRoslynLanguageServer(flags.disableLspDownload)
+    const bin = await getRoslynLanguageServer(noDownload(flags))
     if (!bin) return
 
     return {
@@ -729,7 +750,7 @@ export const Razor: Info = {
   root: NearestRoot([".slnx", ".sln", ".csproj", "global.json"]),
   extensions: [".razor", ".cshtml"],
   async spawn(root, _ctx, flags) {
-    const bin = await getRoslynLanguageServer(flags.disableLspDownload)
+    const bin = await getRoslynLanguageServer(noDownload(flags))
     if (!bin) return
 
     const razor = await findVscodeRazorExtension()
@@ -857,7 +878,7 @@ export const FSharp: Info = {
         return
       }
 
-      if (flags.disableLspDownload) return
+      if (noDownload(flags)) return
       const proc = Process.spawn(["dotnet", "tool", "install", "fsautocomplete", "--tool-path", Global.Path.bin], {
         env: untrustedChildEnvironment(),
         exactEnv: true,
@@ -999,9 +1020,9 @@ export const Clangd: Info = {
       }
     }
 
-    if (flags.disableLspDownload) return
+    if (noDownload(flags)) return
 
-    const releaseResponse = await fetch("https://api.github.com/repos/clangd/clangd/releases/latest")
+    const releaseResponse = await labelled("https://api.github.com/repos/clangd/clangd/releases/latest")
     if (!releaseResponse.ok) {
       return
     }
@@ -1043,7 +1064,7 @@ export const Clangd: Info = {
     }
 
     const name = asset.name
-    const downloadResponse = await fetch(asset.browser_download_url)
+    const downloadResponse = await labelled(asset.browser_download_url)
     if (!downloadResponse.ok) {
       return
     }
@@ -1102,7 +1123,7 @@ export const Svelte: Info = {
     let binary = which("svelteserver")
     const args: string[] = []
     if (!binary) {
-      if (flags.disableLspDownload) return
+      if (noDownload(flags)) return
       const resolved = await Npm.which("svelte-language-server")
       if (!resolved) return
       binary = resolved
@@ -1135,7 +1156,7 @@ export const Astro: Info = {
     let binary = which("astro-ls")
     const args: string[] = []
     if (!binary) {
-      if (flags.disableLspDownload) return
+      if (noDownload(flags)) return
       const resolved = await Npm.which("@astrojs/language-server")
       if (!resolved) return
       binary = resolved
@@ -1229,13 +1250,13 @@ export const JDTLS: Info = {
     const launcherDir = path.join(distPath, "plugins")
     const installed = await pathExists(launcherDir)
     if (!installed) {
-      if (flags.disableLspDownload) return
+      if (noDownload(flags)) return
       await fs.mkdir(distPath, { recursive: true })
       const releaseURL =
         "https://www.eclipse.org/downloads/download.php?file=/jdtls/snapshots/jdt-language-server-latest.tar.gz"
       const archiveName = "release.tar.gz"
 
-      const download = await fetch(releaseURL)
+      const download = await labelled(releaseURL)
       if (!download.ok || !download.body) {
         return
       }
@@ -1320,9 +1341,9 @@ export const KotlinLS: Info = {
       process.platform === "win32" ? path.join(distPath, "kotlin-lsp.cmd") : path.join(distPath, "kotlin-lsp.sh")
     const installed = await Filesystem.exists(launcherScript)
     if (!installed) {
-      if (flags.disableLspDownload) return
+      if (noDownload(flags)) return
 
-      const releaseResponse = await fetch("https://api.github.com/repos/Kotlin/kotlin-lsp/releases/latest")
+      const releaseResponse = await labelled("https://api.github.com/repos/Kotlin/kotlin-lsp/releases/latest")
       if (!releaseResponse.ok) {
         return
       }
@@ -1359,7 +1380,7 @@ export const KotlinLS: Info = {
 
       await fs.mkdir(distPath, { recursive: true })
       const archivePath = path.join(distPath, "kotlin-ls.zip")
-      const download = await fetch(releaseURL)
+      const download = await labelled(releaseURL)
       if (!download.ok || !download.body) {
         return
       }
@@ -1394,7 +1415,7 @@ export const YamlLS: Info = {
     let binary = which("yaml-language-server")
     const args: string[] = []
     if (!binary) {
-      if (flags.disableLspDownload) return
+      if (noDownload(flags)) return
       const resolved = await Npm.which("yaml-language-server")
       if (!resolved) return
       binary = resolved
@@ -1428,9 +1449,9 @@ export const LuaLS: Info = {
     let bin = which("lua-language-server")
 
     if (!bin) {
-      if (flags.disableLspDownload) return
+      if (noDownload(flags)) return
 
-      const releaseResponse = await fetch("https://api.github.com/repos/LuaLS/lua-language-server/releases/latest")
+      const releaseResponse = await labelled("https://api.github.com/repos/LuaLS/lua-language-server/releases/latest")
       if (!releaseResponse.ok) {
         return
       }
@@ -1475,7 +1496,7 @@ export const LuaLS: Info = {
       }
 
       const downloadUrl = asset.browser_download_url
-      const downloadResponse = await fetch(downloadUrl)
+      const downloadResponse = await labelled(downloadUrl)
       if (!downloadResponse.ok) {
         return
       }
@@ -1548,7 +1569,7 @@ export const PHPIntelephense: Info = {
     let binary = which("intelephense")
     const args: string[] = []
     if (!binary) {
-      if (flags.disableLspDownload) return
+      if (noDownload(flags)) return
       const resolved = await Npm.which("intelephense")
       if (!resolved) return
       binary = resolved
@@ -1629,7 +1650,7 @@ export const BashLS: Info = {
     let binary = which("bash-language-server")
     const args: string[] = []
     if (!binary) {
-      if (flags.disableLspDownload) return
+      if (noDownload(flags)) return
       const resolved = await Npm.which("bash-language-server")
       if (!resolved) return
       binary = resolved
@@ -1655,9 +1676,9 @@ export const TerraformLS: Info = {
     let bin = which("terraform-ls")
 
     if (!bin) {
-      if (flags.disableLspDownload) return
+      if (noDownload(flags)) return
 
-      const releaseResponse = await fetch("https://api.releases.hashicorp.com/v1/releases/terraform-ls/latest")
+      const releaseResponse = await labelled("https://api.releases.hashicorp.com/v1/releases/terraform-ls/latest")
       if (!releaseResponse.ok) {
         return
       }
@@ -1679,7 +1700,7 @@ export const TerraformLS: Info = {
         return
       }
 
-      const downloadResponse = await fetch(build.url)
+      const downloadResponse = await labelled(build.url)
       if (!downloadResponse.ok) {
         return
       }
@@ -1728,9 +1749,9 @@ export const TexLab: Info = {
     let bin = which("texlab")
 
     if (!bin) {
-      if (flags.disableLspDownload) return
+      if (noDownload(flags)) return
 
-      const response = await fetch("https://api.github.com/repos/latex-lsp/texlab/releases/latest")
+      const response = await labelled("https://api.github.com/repos/latex-lsp/texlab/releases/latest")
       if (!response.ok) {
         return
       }
@@ -1758,7 +1779,7 @@ export const TexLab: Info = {
         return
       }
 
-      const downloadResponse = await fetch(asset.browser_download_url)
+      const downloadResponse = await labelled(asset.browser_download_url)
       if (!downloadResponse.ok) {
         return
       }
@@ -1807,7 +1828,7 @@ export const DockerfileLS: Info = {
     let binary = which("docker-langserver")
     const args: string[] = []
     if (!binary) {
-      if (flags.disableLspDownload) return
+      if (noDownload(flags)) return
       const resolved = await Npm.which("dockerfile-language-server-nodejs")
       if (!resolved) return
       binary = resolved
@@ -1900,9 +1921,9 @@ export const Tinymist: Info = {
     let bin = which("tinymist")
 
     if (!bin) {
-      if (flags.disableLspDownload) return
+      if (noDownload(flags)) return
 
-      const response = await fetch("https://api.github.com/repos/Myriad-Dreamin/tinymist/releases/latest")
+      const response = await labelled("https://api.github.com/repos/Myriad-Dreamin/tinymist/releases/latest")
       if (!response.ok) {
         return
       }
@@ -1938,7 +1959,7 @@ export const Tinymist: Info = {
         return
       }
 
-      const downloadResponse = await fetch(asset.browser_download_url)
+      const downloadResponse = await labelled(asset.browser_download_url)
       if (!downloadResponse.ok) {
         return
       }

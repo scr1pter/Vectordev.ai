@@ -5,6 +5,7 @@ import { Global } from "@vectordevai/core/global"
 import { truthy } from "@vectordevai/core/flag/flag"
 import { InstallationVersion } from "@vectordevai/core/installation/version"
 import { UsageReport } from "@vectordevai/schema/usage-report"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 
 // The CLI's random install ID, which the check-in contract carries (the server keeps CLI reports per account and does
 // not store it), and the last UTC day a report was accepted.
@@ -47,7 +48,7 @@ export async function sendUsageReport(input: {
   const usage = UsageReport.fromSummary(await (input.summary ?? localSummary)().catch(() => undefined))
   if (!usage) return false
   const installId = stored?.installId ?? randomUUID()
-  const response = await fetch(`${input.site}/api/usage/checkin`, {
+  const response = await Egress.fetch("usage-checkin", `${input.site}/api/usage/checkin`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${input.token}` },
     body: JSON.stringify({

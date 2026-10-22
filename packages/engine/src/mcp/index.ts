@@ -8,6 +8,7 @@ import { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import { serviceUse } from "@vectordevai/core/effect/service-use"
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import type { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 import type { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
 import type { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import type { LoggingMessageNotification, Tool as MCPToolDef } from "@modelcontextprotocol/sdk/types.js"
@@ -199,6 +200,12 @@ function declaredMcp(mcp: ConfigMCPV1.Info, configured: unknown, onDisk: Record<
   return { ...mcp, command: onDisk.command, cwd: typeof onDisk.cwd === "string" ? onDisk.cwd : undefined }
 }
 
+// A remote MCP server's requests, labelled so Vector Local decides and logs each one (mcp-remote). With Vector Local
+// off they go out as they are.
+function remoteFetch(input: string | URL, init?: RequestInit) {
+  return Egress.fetch("mcp-remote", input, init)
+}
+
 function remoteURL(value: string) {
   if (!WorkspaceTrust.userRemoteUrlAllowed(value)) return
   const url = new URL(value)
@@ -331,6 +338,14 @@ const layer = Layer.effect(
           status: { status: "failed" as const, error: `Invalid MCP URL for "${key}"` },
         }
       }
+      // Vector Local decides a remote MCP server by its host before connecting: one on this computer or on the list,
+      // or a source the user allowed. Its requests, sign-in included, then go through the labelled fetch below.
+      const decided = Egress.decide({ source: "mcp-remote", url })
+      if (decided.decision !== "allow")
+        return {
+          client: undefined as MCPClient | undefined,
+          status: { status: "failed" as const, error: `Off in Vector Local: ${decided.reason}` },
+        }
       let authProvider: McpOAuthProvider | undefined
 
       if (!oauthDisabled) {
@@ -359,6 +374,7 @@ const layer = Layer.effect(
           transport: new sdk.StreamableHTTPClientTransport(url, {
             authProvider,
             requestInit: headers ? { headers } : undefined,
+            fetch: remoteFetch,
           }),
         },
         {
@@ -366,6 +382,7 @@ const layer = Layer.effect(
           transport: new sdk.SSEClientTransport(url, {
             authProvider,
             requestInit: headers ? { headers } : undefined,
+            fetch: remoteFetch,
           }),
         },
       ]
@@ -1115,6 +1132,9 @@ const layer = Layer.effect(
       if (mcpConfig.oauth === false) throw new Error(`MCP server ${mcpName} has OAuth explicitly disabled`)
       const url = remoteURL(mcpConfig.url)
       if (!url) throw new Error(`Invalid MCP URL for "${mcpName}"`)
+      const decided = Egress.decide({ source: "mcp-remote", url })
+      if (decided.decision !== "allow")
+        throw new Error(`MCP server ${mcpName} is off in Vector Local: ${decided.reason}`)
 
       // OAuth config is optional - if not provided, we'll use auto-discovery
       const oauthConfig = typeof mcpConfig.oauth === "object" ? mcpConfig.oauth : undefined
@@ -1162,6 +1182,7 @@ const layer = Layer.effect(
         requestInit: mcpConfig.headers
           ? { headers: resolveMcpHeaders(mcpConfig.headers, process.env, secrets) }
           : undefined,
+        fetch: remoteFetch,
       })
       const directory = yield* InstanceState.directory
 
