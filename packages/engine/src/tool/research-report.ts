@@ -100,7 +100,7 @@ export const ResearchReportTool = Tool.define<
           return {
             title: params.title,
             output: [
-              `Saved the report (version ${saved.version}). The user sees it with its citations, sources and method on the report card, so answer in a few lines rather than repeating it.`,
+              `Saved the report (version ${saved.version}) with its citations, sources and method. Now give the user the answer in a few lines, citing notes as [N3], rather than repeating the whole report.`,
               ...(confidence.length ? ["Vector's estimate of each section's confidence:", ...confidence] : []),
               ...(saved.rendered.removed.length
                 ? [`Left out after checking: ${saved.rendered.removed.join(", ")}.`]
