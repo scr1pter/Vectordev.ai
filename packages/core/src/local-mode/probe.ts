@@ -399,7 +399,7 @@ export type Checked = {
 export type CheckInput = {
   readonly server: Server
   readonly model: string
-  /** The role's tools, exactly as the agent sends them. */
+  /** The role's tools, as the agent sends them. */
   readonly tools: readonly Tool[]
   /** The context the role needs, in tokens (its fixed prompt plus headroom). */
   readonly required?: number
@@ -422,7 +422,7 @@ const LOAD_MARGIN = 1.1
 const GB = 1024 ** 3
 
 const SYSTEM =
-  "Vector is checking that you can call tools. When asked to call a tool, call it with exactly the arguments given and write nothing else."
+  "Vector is checking that you can call tools. When asked to call a tool, call it with the arguments given and write nothing else."
 
 /**
  * Runs a model through 2 or 3 requests with the role's tools: a call to a simple tool (which also times the first
