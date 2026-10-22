@@ -113,6 +113,11 @@ export interface ReviewGitHubOptions {
   sleep?: (ms: number) => Promise<void>
   log?: (line: string) => void
   signal?: AbortSignal
+  /**
+   * The posting check every write goes through first (section 6.4a), one post as one text: the parts to send, in the
+   * order given. A check that cannot run throws, and nothing is posted.
+   */
+  check?: (parts: readonly string[]) => Promise<readonly string[]>
 }
 
 // GraphQL reports a bot as "github-actions" where REST says "github-actions[bot]", so logins compare without it.
@@ -733,5 +738,28 @@ export function createReviewGitHub(options: ReviewGitHubOptions): ReviewGitHub {
       }
     },
   }
-  return api
+  return options.check ? checked(api, options.check) : api
+}
+
+// What a write sends, after the posting check: a review's body and its line comments as one text, a line comment that
+// lost all its words left out, and each comment, update and reply on its own.
+function checked(api: ReviewGitHub, check: NonNullable<ReviewGitHubOptions["check"]>): ReviewGitHub {
+  const one = async (body: string) => (await check([body]))[0] ?? ""
+  return {
+    ...api,
+    async createReview(n, payload) {
+      const parts = await check([payload.body, ...payload.comments.map((comment) => comment.body)])
+      return api.createReview(n, {
+        ...payload,
+        body: parts[0] ?? "",
+        comments: payload.comments
+          .map((comment, index) => ({ ...comment, body: parts[index + 1] ?? "" }))
+          .filter((comment) => comment.body.trim()),
+      })
+    },
+    createIssueComment: async (n, body) => api.createIssueComment(n, await one(body)),
+    updateIssueComment: async (id, body) => api.updateIssueComment(id, await one(body)),
+    updateReviewComment: async (id, body) => api.updateReviewComment(id, await one(body)),
+    replyToReviewComment: async (n, commentId, body) => api.replyToReviewComment(n, commentId, await one(body)),
+  }
 }

@@ -60,12 +60,15 @@ import type {
   Severity,
   SkippedFile,
   SummaryFinding,
+  Trust,
 } from "@vectordevai/core/review/types"
 import { Git } from "@/git"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { freeModelMayTrain } from "@vectordevai/core/free-model-choice"
 import { Provider } from "@/provider/provider"
+import { EffectBridge } from "@/effect/bridge"
 import { Instruction } from "@/session/instruction"
+import { SessionPosting } from "@/session/posting"
 import { ReviewContext } from "@/review/context"
 import type { ReviewModel, ResolvedModel } from "@/review/model"
 import type { Review } from "@/review/run"
@@ -133,6 +136,9 @@ export interface LocalReviewDeps<RunR = never, ModelR = never> {
     model: ResolvedModel
     shared: boolean
   }) => Effect.Effect<string | undefined>
+  // The posting check --post goes through (section 6.4a): what repeats the owner's memory is left out, and a check
+  // that cannot run posts nothing.
+  posting?: (input: { parts: readonly string[]; sessionIDs: readonly string[]; untrusted: boolean }) => Promise<readonly string[]>
 }
 
 // What --post needs from GitHub: a token for the remote's host, who it belongs to, and the two writes it makes.
@@ -505,6 +511,8 @@ export function executeLocalReview<RunR, ModelR>(
         access: deps.github ?? GITHUB,
         env,
         say,
+        ...(deps.posting ? { posting: deps.posting } : {}),
+        trust,
       })
     return { exitCode: failingFindings(selection, failOn) ? 1 : 0, target, outcome } satisfies LocalReviewResult
   }).pipe(
@@ -552,6 +560,8 @@ const postToPull = Effect.fnUntraced(function* (input: {
   access: GitHubAccess
   env: Record<string, string | undefined>
   say: (text: string) => void
+  posting?: LocalReviewDeps["posting"]
+  trust: Trust
 }) {
   // The configured URL, before any insteadOf rewriting, is what names the repository.
   const url = (yield* input.git.run(["config", "--get", `remote.${input.remote}.url`], { cwd: input.root }))
@@ -599,6 +609,7 @@ const postToPull = Effect.fnUntraced(function* (input: {
     new LocalReviewError({
       message: `Could not post to ${slug}: ${error instanceof Error ? error.message : String(error)}`,
     })
+  const posting = input.posting
   const gh = yield* Effect.tryPromise({
     try: () =>
       input.access.create({
@@ -607,6 +618,12 @@ const postToPull = Effect.fnUntraced(function* (input: {
         repo: where.repo,
         botLogin: login ?? "",
         ...(baseUrl ? { baseUrl } : {}),
+        ...(posting
+          ? {
+              check: (parts: readonly string[]) =>
+                posting({ parts, sessionIDs: input.outcome.sessions, untrusted: input.trust === "untrusted" }),
+            }
+          : {}),
       }),
     catch: failed,
   })
@@ -1234,6 +1251,7 @@ export const ReviewCommand = effectCmd({
     const knowledge = yield* BrainKnowledge.Service
     const instruction = yield* Instruction.Service
     const provider = yield* Provider.Service
+    const bridge = yield* EffectBridge.make()
     const result = yield* executeLocalReview(
       {
         directory: repositoryRoot(process.cwd()),
@@ -1261,6 +1279,17 @@ export const ReviewCommand = effectCmd({
         stdout: write,
         stderr: (text) => void process.stderr.write(text),
         color: process.stdout.isTTY === true && !process.env.NO_COLOR,
+        // What a posted review says is checked against the owner's memory first; it says how many sentences went.
+        posting: (input) =>
+          bridge.promise(
+            SessionPosting.headless({
+              parts: [...input.parts],
+              typed: false,
+              sessionIDs: input.sessionIDs,
+              untrusted: input.untrusted,
+              log: (line) => void process.stderr.write(`${line}\n`),
+            }),
+          ),
         // Private documents only for a review model that may not train on prompts, and never in a posted review.
         requirements: (input) =>
           Effect.gen(function* () {
