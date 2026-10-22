@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { rmSync, writeFileSync } from "node:fs"
 import path from "path"
-import { Cause, Effect, Exit, Layer } from "effect"
+import { Cause, DateTime, Effect, Exit, Fiber, Layer } from "effect"
 import { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import type { ConfigLocalV1 } from "@vectordevai/core/v1/config/local"
 import { SessionV1 } from "@vectordevai/core/v1/session"
@@ -17,10 +17,15 @@ import { Database } from "@vectordevai/core/database/database"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { Egress } from "@vectordevai/core/local-mode/egress"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
-import { Git as CoreGit } from "@vectordevai/core/git"
+import { LocalProbe } from "@vectordevai/core/local-mode/probe"
+import { Git } from "@vectordevai/core/git"
 import { SessionRunnerModel } from "@vectordevai/core/session/runner/model"
 import { makeShareTransport } from "@vectordevai/core/share/transport"
 import { FreeModels } from "@vectordevai/core/free-models"
+import { Catalog } from "@vectordevai/core/catalog"
+import { Location } from "@vectordevai/core/location"
+import { SessionV2 } from "@vectordevai/core/session"
+import { ProjectV2 } from "@vectordevai/core/project"
 import { AbsolutePath } from "@vectordevai/core/schema"
 import { httpClient } from "@vectordevai/core/effect/app-node-platform"
 import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
@@ -28,6 +33,8 @@ import { LSP } from "@/lsp/lsp"
 import { MCP } from "../../src/mcp"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Question } from "@/question"
+import { Permission } from "@/permission"
+import type { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { Session } from "@/session/session"
 import { Config } from "@/config/config"
 import { Env } from "../../src/env"
@@ -40,15 +47,23 @@ import { ReviewModel } from "../../src/review/model"
 import { SessionPrompt } from "../../src/session/prompt"
 import { SessionSummary } from "../../src/session/summary"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
-import { ShellTool } from "../../src/tool/shell"
+import { networked, ShellTool } from "../../src/tool/shell"
+import { BrowserTool } from "../../src/tool/browser"
 import { WebFetchTool } from "../../src/tool/webfetch"
 import { Truncate } from "@/tool/truncate"
 import { Tool } from "@/tool/tool"
-import { provideInstance, testInstanceStoreLayer, tmpdirScoped, TestInstance } from "../fixture/fixture"
+import {
+  provideInstance,
+  provideTmpdirInstance,
+  testInstanceStoreLayer,
+  tmpdirScoped,
+  TestInstance,
+} from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { reply, TestLLMServer } from "../lib/llm-server"
 import { FakeWeb } from "../../../core/test/lib/fake-web"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
+import { LocalServers } from "../../../core/test/fixture/local-servers/serve"
 
 // Vector Local in the engine, end to end, with nothing leaving this computer: the strict network guard throws on any
 // connection that is not to loopback, the model server is the fake one on 127.0.0.1, and the user's own config lists
@@ -92,7 +107,7 @@ const qwen = (id: string) => ({
 })
 
 describe("the provider under Vector Local", () => {
-  const it = testEffect(LayerNode.compile(LayerNode.group([Provider.node, Env.node, Plugin.node])))
+  const it = testEffect(LayerNode.compile(LayerNode.group([Provider.node, Env.node, Plugin.node, Auth.node])))
   const BOX = "http://127.0.0.1:9"
   const config: Partial<ConfigV1.Info> = {
     provider: {
@@ -204,6 +219,105 @@ describe("the provider under Vector Local", () => {
   )
 
   it.instance(
+    "a cloud API with a loopback preconnect still counts as the cloud API, for its cost and for the list",
+    () =>
+      Effect.gen(function* () {
+        const provider = yield* Provider.Service
+        const model = yield* provider.getModel(ProviderV2.ID.make("paid"), ModelV2.ID.make("big"))
+        // Its requests go to its base URL, so a dollar cap and the 40-unpriced-step stop still apply to its steps.
+        expect(yield* provider.line(model)).toMatchObject({ local: false })
+        yield* withLocal({ enabled: true, endpoints: ["http://127.0.0.1:1"] }, () =>
+          Effect.gen(function* () {
+            const refused = yield* provider
+              .getModel(ProviderV2.ID.make("paid"), ModelV2.ID.make("big"))
+              .pipe(Effect.flip)
+            expect(refused.unavailable).toEqual({
+              id: "paid",
+              reason: "off-in-local",
+              message:
+                "paid: off in Vector Local. https://api.together.xyz is a cloud AI service, not a server you host. Your company's policy can list it, or turn Vector Local off to use it.",
+            })
+          }),
+        )
+      }),
+    {
+      trusted: true,
+      config: {
+        provider: {
+          paid: {
+            name: "Paid",
+            npm: "@ai-sdk/openai-compatible",
+            models: { big: { id: "big", name: "big", tool_call: true } },
+            options: { apiKey: "test-key", baseURL: "https://api.together.xyz/v1", preconnect: "http://127.0.0.1:1" },
+          },
+        },
+      },
+    },
+  )
+
+  const pinned = testEffect(
+    LayerNode.compile(
+      LayerNode.group([Provider.node, Env.node, Plugin.node, LocalProbe.holdsNode, CrossSpawnSpawner.node]),
+    ),
+  )
+  pinned.live("refuses a model call to a server whose identity changed since it was added, before any request", () =>
+    Effect.gen(function* () {
+      const server = yield* Effect.acquireRelease(
+        Effect.promise(() => LocalServers.serve("vllm")),
+        (fake) => Effect.promise(() => fake.close()),
+      )
+      const added = yield* Effect.promise(() => LocalProbe.probe(server.origin))
+      expect(added).toBeDefined()
+      const holds = yield* LocalProbe.HoldsService
+      yield* provideTmpdirInstance(
+        () =>
+          withLocal({ enabled: true, endpoints: [server.origin] }, () =>
+            Effect.gen(function* () {
+              const provider = yield* Provider.Service
+              const language = yield* provider.getLanguage(
+                yield* provider.getModel(ProviderV2.ID.make("box"), ModelV2.ID.make("qwen")),
+              )
+              // Something else now answers on the server's port.
+              server.route("GET /v1/models", () =>
+                Response.json({ object: "list", data: [{ id: "other/model", max_model_len: 8192 }] }),
+              )
+              const verified = yield* Effect.promise(() =>
+                LocalProbe.verify({ origin: server.origin, pin: added!.pin, holds }),
+              )
+              expect(verified.status).toBe("changed")
+              const refused = yield* Effect.promise(() =>
+                language.doStream({ prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }] }).then(
+                  () => undefined,
+                  (error: unknown) => error,
+                ),
+              )
+              expect(refused instanceof Error ? refused.message : String(refused)).toContain(
+                `${new URL(server.origin).host} now answers as a different server. Check it before sending prompts.`,
+              )
+              expect(server.hits().filter((hit) => hit.path.endsWith("/chat/completions"))).toEqual([])
+              // Once the user confirms the server, its model calls go again.
+              holds.confirm(server.origin)
+              expect(guard.outside()).toEqual([])
+            }),
+          ),
+        {
+          trusted: true,
+          config: {
+            provider: {
+              box: {
+                name: "GPU box",
+                npm: "@ai-sdk/openai-compatible",
+                models: { qwen: qwen("qwen") },
+                options: { apiKey: "test-key", baseURL: `${server.origin}/v1` },
+              },
+            },
+          },
+        },
+      )
+    }),
+  )
+
+  it.instance(
     "changes nothing with Vector Local off",
     () =>
       Effect.gen(function* () {
@@ -223,13 +337,13 @@ describe("the provider under Vector Local", () => {
     () =>
       withLocal({ enabled: true, endpoints: [BOX] }, () =>
         Effect.gen(function* () {
-          const env = yield* Env.Service
-          const previous = process.env.VECTOR_AUTH_CONTENT
-          const signIn = JSON.stringify({
-            openai: { type: "oauth", access: "placeholder", refresh: "placeholder", expires: Date.now() + 60_000 },
+          const auth = yield* Auth.Service
+          yield* auth.set("openai", {
+            type: "oauth",
+            access: "placeholder",
+            refresh: "placeholder",
+            expires: Date.now() + 60_000,
           })
-          process.env.VECTOR_AUTH_CONTENT = signIn
-          yield* env.set("VECTOR_AUTH_CONTENT", signIn)
           const provider = yield* Provider.Service
           const outcome = yield* Effect.gen(function* () {
             const listed = yield* provider.list()
@@ -237,14 +351,7 @@ describe("the provider under Vector Local", () => {
               .getModel(ProviderV2.ID.openai, ModelV2.ID.make("gpt-5.1-codex"))
               .pipe(Effect.flip)
             return { listed: Object.keys(listed), refused }
-          }).pipe(
-            Effect.ensuring(
-              Effect.sync(() => {
-                if (previous === undefined) delete process.env.VECTOR_AUTH_CONTENT
-                else process.env.VECTOR_AUTH_CONTENT = previous
-              }),
-            ),
-          )
+          }).pipe(Effect.ensuring(auth.remove("openai").pipe(Effect.orDie)))
           expect(outcome.listed).not.toContain("openai")
           expect(outcome.refused.unavailable?.reason).toBe("off-in-local")
           // Nothing tried to reach chatgpt.com, auth.openai.com or api.openai.com.
@@ -319,6 +426,7 @@ describe("a Vector Local run", () => {
       LayerNode.group([
         SessionPrompt.node,
         Session.node,
+        Permission.node,
         Question.node,
         Ripgrep.node,
         FSUtil.node,
@@ -338,7 +446,7 @@ describe("a Vector Local run", () => {
   const allow = [{ permission: "*", pattern: "*", action: "allow" as const }]
 
   const setup = Effect.fn("test.setup")(function* () {
-    const { directory } = yield* TestInstance
+    const directory = (yield* TestInstance).directory
     const llm = yield* TestLLMServer
     const fs = yield* FSUtil.Service
     const file = path.join(directory, "vector.json")
@@ -382,61 +490,92 @@ describe("a Vector Local run", () => {
     }
   })
 
+  // What a request to the model server carries, for routing the fake server's replies by step.
+  const says = (text: string) => (hit: { body: Record<string, unknown> }) =>
+    JSON.stringify(hit.body.messages ?? []).includes(text)
+  const results = (hit: { body: Record<string, unknown> }) =>
+    (Array.isArray(hit.body.messages) ? hit.body.messages : []).filter(
+      (message) => typeof message === "object" && message !== null && "role" in message && message.role === "tool",
+    ).length
+
   it.instance(
     "sends a title, a compaction, the judge, a subagent and a Vectorscope review to the listed server, as the root session",
     () =>
       Effect.gen(function* () {
-        const { llm, origin, prompt, sessions, directory } = yield* setup()
-        yield* withLocal({ enabled: true, endpoints: [origin] }, () =>
+        const harness = yield* setup()
+        yield* withLocal({ enabled: true, endpoints: [harness.origin] }, () =>
           Effect.gen(function* () {
             yield* Effect.promise(() => Egress.erase())
             // A new session, so its first request gets a title.
-            const chat = yield* sessions.create({})
+            const chat = yield* harness.sessions.create({})
             // A Thorough request on a small context: a title, a write step that fills the context, the compaction it
             // brings, the step after it and the judge.
-            yield* llm.push(
+            yield* harness.llm.push(
               reply()
-                .tool("write", { filePath: path.join(directory, "router.ts"), content: "export {}\n" })
+                .tool("write", { filePath: path.join(harness.directory, "router.ts"), content: "export {}\n" })
                 .usage({ input: 19_000, output: 100 }),
             )
-            yield* llm.text("Summary of the work so far.")
-            yield* llm.text("Migrated the router.")
-            yield* llm.text("VERDICT: PASS")
-            yield* prompt.prompt({
+            yield* harness.llm.text("Summary of the work so far.")
+            yield* harness.llm.text("Migrated the router.")
+            yield* harness.llm.text("VERDICT: PASS")
+            yield* harness.prompt.prompt({
               sessionID: chat.id,
               agent: "build",
               model: small,
               parts: [{ type: "text", text: "be thorough: migrate the app to the new router across 40 files" }],
             })
-            const judge = (yield* sessions.children(chat.id)).map((child) => child.id)
+            const judge = (yield* harness.sessions.children(chat.id)).map((child) => child.id)
             expect(judge).toHaveLength(1)
-            const history = yield* sessions.messages({ sessionID: chat.id })
+            const history = yield* harness.sessions.messages({ sessionID: chat.id })
             expect(history.some((message) => message.parts.some((part) => part.type === "compaction"))).toBe(true)
 
-            // A subagent of the same session, and a Vectorscope reviewer it launched: both count in the root.
-            const child = yield* sessions.create({ title: "Child", parentID: chat.id, permission: allow })
-            yield* llm.text("Checked the router.")
-            yield* prompt.prompt({
-              sessionID: child.id,
-              agent: "general",
+            // A subagent the agent launches through the task tool counts in the root.
+            yield* harness.llm.pushMatch(
+              (hit) => says("CHECK_ROUTER")(hit) && !says("CHILD_CHECK")(hit),
+              reply().tool("task", {
+                description: "check the router",
+                prompt: "CHILD_CHECK: check the router.",
+                subagent_type: "general",
+                background: false,
+              }),
+            )
+            yield* harness.llm.pushMatch(
+              (hit) => says("CHILD_CHECK")(hit) && !says("CHECK_ROUTER")(hit),
+              reply().text("Checked the router."),
+            )
+            yield* harness.prompt.prompt({
+              sessionID: chat.id,
+              agent: "build",
               model: small,
-              parts: [{ type: "text", text: "check the router" }],
+              parts: [{ type: "text", text: "CHECK_ROUTER: have a subagent check the router" }],
+              // Only a Thorough request offers subagents.
+              size: "thorough",
+              judge: "off",
             })
-            const review = yield* sessions.create({
+            const child = (yield* harness.sessions.children(chat.id)).find((item) => !judge.includes(item.id))
+            expect(child).toBeDefined()
+            expect(
+              (yield* harness.sessions.messages({ sessionID: child!.id })).some((message) =>
+                message.parts.some((part) => part.type === "text" && part.text === "Checked the router."),
+              ),
+            ).toBe(true)
+
+            // A Vectorscope reviewer the session launched counts in it too.
+            const review = yield* harness.sessions.create({
               title: "Vectorscope review",
               parentID: chat.id,
               internal: "vectorscope.review",
               permission: allow,
             })
-            yield* llm.text("No findings.")
-            yield* prompt.prompt({
+            yield* harness.llm.text("No findings.")
+            yield* harness.prompt.prompt({
               sessionID: review.id,
               agent: "review",
               model: small,
               parts: [{ type: "text", text: "review the router change" }],
             })
 
-            const hits = yield* llm.hits
+            const hits = yield* harness.llm.hits
             const calls = Egress.events().filter((event) => event.purpose === "inference")
             // Every request the server answered was decided as a model call to it, for the root session.
             expect(calls).toHaveLength(hits.length)
@@ -445,17 +584,17 @@ describe("a Vector Local run", () => {
             for (const call of calls) {
               expect(call).toMatchObject({
                 source: "local-inference",
-                origin,
+                origin: harness.origin,
                 class: "listed",
                 decision: "allow",
                 root_session_id: chat.id,
               })
             }
             expect(new Set(calls.map((call) => call.session_id))).toEqual(
-              new Set([chat.id, ...judge, child.id, review.id]),
+              new Set([chat.id, ...judge, child!.id, review.id]),
             )
             const counted = Egress.summary(chat.id)
-            expect(counted.model_calls).toEqual({ [origin]: hits.length })
+            expect(counted.model_calls).toEqual({ [harness.origin]: hits.length })
             // The reviewer is a helper: its requests roll up into the session that launched it.
             expect(counted.helper_requests).toBe(calls.filter((call) => call.session_id === review.id).length)
             expect(counted.helper_requests).toBeGreaterThan(0)
@@ -472,11 +611,11 @@ describe("a Vector Local run", () => {
     "refuses a model whose server is not on the list before the provider is asked",
     () =>
       Effect.gen(function* () {
-        const { llm, prompt, sessions } = yield* setup()
+        const harness = yield* setup()
         yield* withLocal({ enabled: true, endpoints: ["http://127.0.0.1:9"] }, () =>
           Effect.gen(function* () {
-            const chat = yield* sessions.create({ title: "Pinned" })
-            const exit = yield* prompt
+            const chat = yield* harness.sessions.create({ title: "Pinned" })
+            const exit = yield* harness.prompt
               .prompt({
                 sessionID: chat.id,
                 agent: "build",
@@ -488,12 +627,135 @@ describe("a Vector Local run", () => {
             expect(refused instanceof Error ? refused.message : String(refused)).toBe(
               "Model unavailable: lmstudio/tiny-context. lmstudio: off in Vector Local, because its server is not on your list of model servers. Add the server to the list, or turn Vector Local off to use it.",
             )
-            expect(yield* llm.calls).toBe(0)
+            expect(yield* harness.llm.calls).toBe(0)
             expect(guard.outside()).toEqual([])
           }),
         )
       }),
     { git: true },
+  )
+
+  it.instance(
+    "counts the owner's rules the system prompt's memory carries in what a model call carries",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* setup()
+        const rules = path.join(Global.Path.config, "RULES.md")
+        yield* Effect.acquireUseRelease(
+          Effect.sync(() => writeFileSync(rules, "- Use tabs for indentation.\n- Never commit to main.\n")),
+          () =>
+            withLocal({ enabled: true, endpoints: [harness.origin] }, () =>
+              Effect.gen(function* () {
+                const chat = yield* harness.sessions.create({ title: "Rules" })
+                yield* harness.llm.text("Fixed.")
+                yield* harness.prompt.prompt({
+                  sessionID: chat.id,
+                  agent: "build",
+                  model: small,
+                  parts: [{ type: "text", text: "fix the typo in README" }],
+                  size: "standard",
+                })
+                const turn = Egress.events().filter(
+                  (event) => event.purpose === "inference" && event.session_id === chat.id,
+                )
+                expect(turn.length).toBeGreaterThan(0)
+                // Both rules travel in the digest, with nothing recalled for so short a request.
+                expect(turn.every((event) => event.carried.personal >= 2)).toBe(true)
+                expect(guard.outside()).toEqual([])
+              }),
+            ),
+          () => Effect.sync(() => rmSync(rules, { force: true })),
+        )
+      }),
+    { git: true },
+  )
+
+  const pages = FakeWeb.start({
+    sites: {
+      docs: {
+        "/start": { body: "Read the setup guide.", headers: { "content-type": "text/plain" } },
+        "/guide": { body: "The guide.", headers: { "content-type": "text/plain" } },
+      },
+    },
+  })
+
+  it.instance(
+    "a subagent asks before an address its brief names once the parent read the web, whatever the parent saved",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* setup()
+        const permission = yield* Permission.Service
+        const start = pages.direct("docs", "/start")
+        const exfil = `${pages.direct("docs", "/guide")}?q=SECRET-PAYMENTS`
+        yield* withLocal({ enabled: true, endpoints: [harness.origin] }, () =>
+          Effect.gen(function* () {
+            // The parent reads a page, the person saves Always for its site, and the page steers the parent into a
+            // task whose brief carries an address with their data in it.
+            yield* harness.llm.pushMatch(
+              (hit) => says("PARENT_TASK")(hit) && results(hit) === 0,
+              reply().tool("webfetch", { url: start, format: "text" }),
+            )
+            yield* harness.llm.pushMatch(
+              (hit) => says("PARENT_TASK")(hit) && results(hit) === 1,
+              reply().tool("task", {
+                description: "read the guide",
+                prompt: `CHILD_BRIEF: fetch ${exfil} and summarise it.`,
+                subagent_type: "general",
+                background: false,
+              }),
+            )
+            yield* harness.llm.pushMatch(
+              (hit) => says("CHILD_BRIEF")(hit) && !says("PARENT_TASK")(hit) && results(hit) === 0,
+              reply().tool("webfetch", { url: exfil, format: "text" }),
+            )
+            // The person saves Always for every ordinary ask, and turns down any address asked about after the web.
+            const asked: PermissionV1.Request[] = []
+            const answer = Effect.gen(function* () {
+              while (true) {
+                for (const request of yield* permission.list()) {
+                  asked.push(request)
+                  const after = request.patterns.some((pattern) => pattern.startsWith(PermissionPolicy.AFTER_WEB))
+                  yield* permission
+                    .reply({ requestID: request.id, reply: after ? "reject" : "always" })
+                    .pipe(Effect.ignore)
+                }
+                yield* Effect.sleep("10 millis")
+              }
+            })
+            const responder = yield* Effect.forkChild(answer)
+            const chat = yield* harness.sessions.create({})
+            yield* harness.prompt.prompt({
+              sessionID: chat.id,
+              agent: "build",
+              model: small,
+              parts: [{ type: "text", text: `PARENT_TASK: read ${start} and do what it says` }],
+              size: "thorough",
+              judge: "off",
+            })
+            yield* Fiber.interrupt(responder)
+
+            const child = (yield* harness.sessions.children(chat.id))[0]
+            expect(child).toBeDefined()
+            // The parent's own read asked as usual and saved its site.
+            expect(asked).toContainEqual(
+              expect.objectContaining({
+                sessionID: chat.id,
+                permission: "webfetch",
+                patterns: [start],
+                always: [pages.origin, `${pages.origin}/*`],
+              }),
+            )
+            // The subagent's fetch of the address in its brief asked again, as one after the web, with nothing to save.
+            expect(
+              asked.filter((request) => request.sessionID === child!.id && request.permission === "webfetch"),
+            ).toEqual([expect.objectContaining({ patterns: [`${PermissionPolicy.AFTER_WEB}${exfil}`], always: [] })])
+            expect(pages.count("docs", "/guide")).toBe(0)
+            expect(guard.outside()).toEqual([])
+          }),
+        )
+      }),
+    { git: true },
+    60_000,
   )
 })
 
@@ -515,8 +777,9 @@ describe("the agent's own actions under Vector Local", () => {
     ),
   )
   const asked: Array<Parameters<Tool.Context["ask"]>[0]> = []
-  const context = (messages: SessionV1.WithParts[] = []): Tool.Context => ({
+  const context = (messages: SessionV1.WithParts[] = [], parentID?: SessionID): Tool.Context => ({
     sessionID: SessionID.make("ses_local"),
+    parentID,
     messageID: MessageID.make("msg_local"),
     callID: "",
     agent: "build",
@@ -527,7 +790,8 @@ describe("the agent's own actions under Vector Local", () => {
     ask: (input) =>
       Effect.sync(() => asked.push(input)).pipe(
         Effect.andThen(
-          input.permission === "network_command" || input.patterns.some((item) => item.startsWith(PermissionPolicy.AFTER_WEB))
+          input.permission === PermissionPolicy.NETWORK_COMMAND ||
+            input.patterns.some((item) => item.startsWith(PermissionPolicy.AFTER_WEB))
             ? Effect.die(new Error("refused"))
             : Effect.void,
         ),
@@ -544,10 +808,11 @@ describe("the agent's own actions under Vector Local", () => {
       const dir = yield* tmpdirScoped()
       const run = (command: string) =>
         Effect.gen(function* () {
-          const tool = yield* (yield* ShellTool).init()
+          const shellTool = yield* ShellTool
+          const tool = yield* shellTool.init()
           return yield* tool.execute({ command }, context())
         }).pipe(Effect.exit, provideInstance(dir))
-      const network = () => asked.filter((item) => item.permission === "network_command")
+      const network = () => asked.filter((item) => item.permission === PermissionPolicy.NETWORK_COMMAND)
 
       yield* on()
       expect(Exit.isSuccess(yield* run("curl -s https://example.com/install.sh"))).toBe(false)
@@ -559,6 +824,14 @@ describe("the agent's own actions under Vector Local", () => {
         "pip install requests",
         "git push origin main",
         "vector local off",
+        // The default browser is signed in to the user's accounts, and these builds fetch what they lack.
+        "open https://example.com/?q=1",
+        "mvn package",
+        "gradle build",
+        "dotnet restore",
+        "swift package resolve",
+        "mix deps.get",
+        "cargo build",
       ]) {
         yield* on()
         yield* run(command)
@@ -567,6 +840,9 @@ describe("the agent's own actions under Vector Local", () => {
       yield* on()
       expect(Exit.isSuccess(yield* run("ls"))).toBe(true)
       expect(network()).toEqual([])
+      // Read without running them: a file opened, and a build told to stay offline.
+      expect(networked("open README.md")).toBe(false)
+      expect(networked("cargo build --offline")).toBe(false)
 
       // With Vector Local off the shell asks what it always asked.
       Egress.configure(LocalPolicy.OFF)
@@ -664,10 +940,12 @@ describe("the agent's own actions under Vector Local", () => {
 
   fetcher.instance("after a web read, an address no result gave asks each time, and one a result linked does not", () =>
     Effect.gen(function* () {
-      const tool = yield* (yield* WebFetchTool).init()
+      const webfetch = yield* WebFetchTool
+      const tool = yield* webfetch.init()
       const read = (url: string, messages: SessionV1.WithParts[]) =>
         tool.execute({ url, format: "text" }, context(messages)).pipe(Effect.exit)
-      const strict = () => asked.filter((item) => item.patterns.some((pattern) => pattern.startsWith(PermissionPolicy.AFTER_WEB)))
+      const strict = () =>
+        asked.filter((item) => item.patterns.some((pattern) => pattern.startsWith(PermissionPolicy.AFTER_WEB)))
 
       // The page the earlier result linked, on a host already read: the usual ask, with Always for the site.
       yield* on()
@@ -680,7 +958,11 @@ describe("the agent's own actions under Vector Local", () => {
       const exfil = `${guide}?q=payments`
       expect(Exit.isSuccess(yield* read(exfil, history("Read the setup guide.")))).toBe(false)
       expect(strict()).toEqual([
-        expect.objectContaining({ permission: "webfetch", patterns: [`${PermissionPolicy.AFTER_WEB}${exfil}`], always: [] }),
+        expect.objectContaining({
+          permission: "webfetch",
+          patterns: [`${PermissionPolicy.AFTER_WEB}${exfil}`],
+          always: [],
+        }),
       ])
 
       // An address the agent printed itself is not a result, so it asks too.
@@ -703,6 +985,41 @@ describe("the agent's own actions under Vector Local", () => {
       asked.length = 0
       yield* read(exfil, history("Read the setup guide."))
       expect(strict()).toEqual([])
+      expect(guard.outside()).toEqual([])
+    }),
+  )
+
+  fetcher.instance("a subagent's browser asks before an address its brief names, as one after the web", () =>
+    Effect.gen(function* () {
+      const browser = yield* BrowserTool
+      const tool = yield* browser.init()
+      const address = "https://docs.example.com/guide?q=SECRET-PAYMENTS"
+      // The brief another agent wrote is the subagent's only user message; it has not read the web itself.
+      const brief = history("")
+        .slice(0, 1)
+        .map((message) => ({
+          ...message,
+          parts: message.parts.map((part) => (part.type === "text" ? { ...part, text: `open ${address}` } : part)),
+        }))
+      const open = (parentID?: SessionID) =>
+        tool.execute({ action: "open_url", url: address }, context(brief, parentID)).pipe(Effect.exit)
+      const strict = () =>
+        asked.filter((item) => item.patterns.some((pattern) => pattern.startsWith(PermissionPolicy.AFTER_WEB)))
+
+      yield* on()
+      expect(Exit.isSuccess(yield* open(SessionID.make("ses_parent")))).toBe(false)
+      expect(strict()).toEqual([
+        expect.objectContaining({
+          permission: "browser_external",
+          patterns: [`${PermissionPolicy.AFTER_WEB}${address}`],
+          always: [],
+        }),
+      ])
+      // The same words typed by the person in a session of their own ask as usual, with Always for the site.
+      yield* on()
+      yield* open()
+      expect(strict()).toEqual([])
+      expect(asked.find((item) => item.permission === "browser_external")?.always).toEqual(["https://docs.example.com"])
       expect(guard.outside()).toEqual([])
     }),
   )
@@ -739,16 +1056,16 @@ describe("Vector's own services under Vector Local", () => {
 })
 
 describe("Vector's own git and the V2 runner under Vector Local", () => {
-  const git = testEffect(LayerNode.compile(LayerNode.group([CoreGit.node, CrossSpawnSpawner.node])))
+  const git = testEffect(LayerNode.compile(LayerNode.group([Git.node, CrossSpawnSpawner.node])))
 
   git.live("decides a git fetch to github.com before git starts, and blocks it with Web access None", () =>
     Effect.gen(function* () {
       const dir = yield* tmpdirScoped({ git: true })
-      const repo = yield* CoreGit.Service
+      const repo = yield* Git.Service
       const repository = yield* repo.repo.discover(AbsolutePath.make(dir))
       expect(repository).toBeDefined()
       Egress.configure(LocalPolicy.resolve({ global: { enabled: true, web: "none" } }))
-      expect(CoreGit.gitEnvironment()).toEqual({ GIT_ALLOW_PROTOCOL: "file" })
+      expect(Git.gitEnvironment()).toEqual({ GIT_ALLOW_PROTOCOL: "file" })
       const fetched = yield* repo.sync
         .fetchRemotes(repository!, { remoteUrl: "https://github.com/vectordevai/vector.git" })
         .pipe(Effect.flip)
@@ -764,27 +1081,55 @@ describe("Vector's own git and the V2 runner under Vector Local", () => {
         expect.objectContaining({ origin: "https://github.com", decision: "block", rule: "web-none" }),
       ])
       // A remote on this computer is never decided.
-      expect(CoreGit.remoteRefusal(path.join(dir, "other.git"))).toBeUndefined()
+      expect(Git.remoteRefusal(path.join(dir, "other.git"))).toBeUndefined()
+      expect(guard.outside()).toEqual([])
+    }),
+  )
+
+  git.live("reads a remote's name, a slash in it or not, and a url.insteadOf alias as the URL git would use", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const repo = yield* Git.Service
+      const repository = yield* repo.repo.discover(AbsolutePath.make(dir))
+      expect(repository).toBeDefined()
+      // .invalid names never resolve, so nothing could be reached even if a decision were missed.
+      yield* Effect.promise(() => Bun.$`git -C ${dir} remote add team/fork https://git.invalid/team/fork.git`.quiet())
+      yield* Effect.promise(() => Bun.$`git -C ${dir} config url.https://git.invalid/.insteadOf gh:`.quiet())
+      Egress.configure(LocalPolicy.resolve({ global: { enabled: true } }))
+      const named = yield* repo.sync.fetchBranch(repository!, { remote: "team/fork", branch: "main" }).pipe(Effect.flip)
+      expect(named.message).toBe(
+        "Vector Local blocked a git request to git.invalid. Vector Local blocks Vector's own git requests to internet servers unless you allow one.",
+      )
+      // Read as written, gh:org/repo would be a host named gh on the user's network.
+      expect(Git.remoteAddress("gh:org/repo")).toBe("https://gh/")
+      const aliased = yield* repo.repo
+        .clone({ remote: "gh:vectordevai/vector", directory: AbsolutePath.make(path.join(dir, "clone")) })
+        .pipe(Effect.flip)
+      expect(aliased.message).toContain("Vector Local blocked a git request to git.invalid.")
+      expect(Egress.events().filter((event) => event.source === "git-remote")).toEqual([
+        expect.objectContaining({ origin: "https://git.invalid", decision: "block", rule: "not-listed" }),
+        expect.objectContaining({ origin: "https://git.invalid", decision: "block", rule: "not-listed" }),
+      ])
       expect(guard.outside()).toEqual([])
     }),
   )
 
   git.effect("reads where a git remote connects", () =>
     Effect.sync(() => {
-      expect(CoreGit.remoteAddress("https://github.com/org/repo.git")).toBe("https://github.com/")
-      expect(CoreGit.remoteAddress("http://git.lan:8080/org/repo.git")).toBe("http://git.lan:8080/")
-      expect(CoreGit.remoteAddress("ssh://git@github.com:22/org/repo.git")).toBe("https://github.com:22/")
-      expect(CoreGit.remoteAddress("git@github.com:org/repo.git")).toBe("https://github.com/")
-      expect(CoreGit.remoteAddress("ext::ssh -o ProxyCommand=x host")).toBe("ext::ssh -o ProxyCommand=x host")
-      expect(CoreGit.remoteAddress("/srv/git/repo.git")).toBeUndefined()
-      expect(CoreGit.remoteAddress("file:///srv/git/repo.git")).toBeUndefined()
-      expect(CoreGit.remoteAddress("C:\\repos\\repo.git")).toBeUndefined()
+      expect(Git.remoteAddress("https://github.com/org/repo.git")).toBe("https://github.com/")
+      expect(Git.remoteAddress("http://git.lan:8080/org/repo.git")).toBe("http://git.lan:8080/")
+      expect(Git.remoteAddress("ssh://git@github.com:22/org/repo.git")).toBe("https://github.com:22/")
+      expect(Git.remoteAddress("git@github.com:org/repo.git")).toBe("https://github.com/")
+      expect(Git.remoteAddress("ext::ssh -o ProxyCommand=x host")).toBe("ext::ssh -o ProxyCommand=x host")
+      expect(Git.remoteAddress("/srv/git/repo.git")).toBeUndefined()
+      expect(Git.remoteAddress("file:///srv/git/repo.git")).toBeUndefined()
+      expect(Git.remoteAddress("C:\\repos\\repo.git")).toBeUndefined()
     }),
   )
 
   const model = (providerID: string, api: ModelV2.Info["api"]) =>
     ModelV2.Info.make({
-      id: ModelV2.ID.make("test-model"),
+      id: ModelV2.ID.make(api.id),
       providerID: ProviderV2.ID.make(providerID),
       name: "Test model",
       api,
@@ -798,14 +1143,8 @@ describe("Vector's own git and the V2 runner under Vector Local", () => {
       limit: { context: 100_000, output: 8_000 },
     })
 
-  git.effect("refuses a V2 runner turn on a model off in Vector Local before a route is built", () =>
+  git.effect("refuses a V2 runner turn on a model off in Vector Local before a route is built, and picks none", () =>
     Effect.gen(function* () {
-      const listed = model("box", {
-        id: ModelV2.ID.make("qwen"),
-        type: "aisdk",
-        package: "@ai-sdk/openai-compatible",
-        url: "http://127.0.0.1:9/v1",
-      })
       const cloud = model("anthropic", { id: ModelV2.ID.make("claude"), type: "aisdk", package: "@ai-sdk/anthropic" })
       const free = model("vector", {
         id: ModelV2.ID.make("north"),
@@ -813,25 +1152,80 @@ describe("Vector's own git and the V2 runner under Vector Local", () => {
         package: "@ai-sdk/openai-compatible",
         url: "https://vectordev.ai/api/free-models",
       })
-      const unlisted = model("box", {
-        id: ModelV2.ID.make("qwen"),
+      const unlisted = model("other-box", {
+        id: ModelV2.ID.make("llama"),
         type: "aisdk",
         package: "@ai-sdk/openai-compatible",
         url: "http://127.0.0.1:10/v1",
       })
-      // With Vector Local off, every model passes.
-      for (const item of [listed, cloud, free, unlisted]) yield* SessionRunnerModel.allowedInLocal(item)
+      const listed = model("box", {
+        id: ModelV2.ID.make("qwen"),
+        type: "aisdk",
+        package: "@ai-sdk/openai-compatible",
+        url: "http://127.0.0.1:9/v1",
+      })
+      const models = [cloud, free, unlisted, listed]
+      // The catalog has no default, so a session with no model of its own gets the automatic choice. A turn that gets
+      // past Vector Local would go on to the catalog's providers and the connections, which these tests never reach.
+      const catalog = Layer.mock(Catalog.Service, {
+        provider: {
+          get: () => Effect.succeed(undefined),
+          all: () => Effect.succeed([]),
+          available: () => Effect.succeed([]),
+        },
+        model: {
+          get: (providerID, modelID) =>
+            Effect.succeed(models.find((item) => item.providerID === providerID && item.id === modelID)),
+          all: () => Effect.succeed(models),
+          available: () => Effect.succeed(models),
+          default: () => Effect.succeed(undefined),
+          small: () => Effect.succeed(undefined),
+        },
+      })
+      const resolver = AppNodeBuilder.build(SessionRunnerModel.node, [
+        [Catalog.node, catalog],
+        [Location.node, Location.boundNode({ directory: AbsolutePath.make(yield* tmpdirScoped()) })],
+      ])
+      const session = (chosen?: ModelV2.Info) =>
+        SessionV2.Info.make({
+          id: SessionV2.ID.make("ses_v2_local"),
+          projectID: ProjectV2.ID.global,
+          title: "test",
+          ...(chosen ? { model: { id: chosen.id, providerID: chosen.providerID } } : {}),
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: DateTime.makeUnsafe(0), updated: DateTime.makeUnsafe(0) },
+          location: { directory: AbsolutePath.make("/repository") },
+        })
+      const refusal = (chosen: ModelV2.Info) =>
+        Effect.gen(function* () {
+          const runner = yield* SessionRunnerModel.Service
+          return yield* runner.resolve(session(chosen))
+        }).pipe(Effect.provide(resolver), Effect.flip)
+      const automatic = Effect.gen(function* () {
+        const service = yield* Catalog.Service
+        return yield* SessionRunnerModel.select(service, session())
+      }).pipe(Effect.provide(catalog))
+
+      // With Vector Local off, the first model that has a route is the automatic choice.
+      expect((yield* automatic).providerID).toBe(ProviderV2.ID.make("anthropic"))
 
       Egress.configure(LocalPolicy.resolve({ global: { enabled: true, endpoints: ["http://127.0.0.1:9"] } }))
-      yield* SessionRunnerModel.allowedInLocal(listed)
-      const refusal = (item: ModelV2.Info) => SessionRunnerModel.allowedInLocal(item).pipe(Effect.flip)
-      expect((yield* refusal(cloud)).message).toBe(
-        "anthropic/test-model is off in Vector Local. This service sends your work outside the servers you host, so Vector Local keeps it off.",
+      const refused = yield* refusal(cloud)
+      expect(refused.message).toBe(
+        "anthropic/claude is off in Vector Local. This service sends your work outside the servers you host, so Vector Local keeps it off.",
       )
-      expect((yield* refusal(free)).reason).toBe(
-        "Vector's free models and Vector Codium run on vectordev.ai, outside the model servers you host.",
-      )
-      expect((yield* refusal(unlisted)).reason).toBe("Model calls go only to the model servers on your list.")
+      expect(yield* refusal(free)).toMatchObject({
+        _tag: "SessionRunnerModel.OffInLocalError",
+        reason: "Vector's free models and Vector Codium run on vectordev.ai, outside the model servers you host.",
+      })
+      expect(yield* refusal(unlisted)).toMatchObject({
+        _tag: "SessionRunnerModel.OffInLocalError",
+        reason: "Model calls go only to the model servers on your list.",
+      })
+      // The automatic choice skips every model Vector Local keeps off.
+      expect(yield* automatic).toMatchObject({ providerID: "box", id: "qwen" })
+      expect(guard.outside()).toEqual([])
     }),
   )
 })
