@@ -569,8 +569,8 @@ export const SOURCES: readonly Source[] = [
     why: "Each Deep research agent reads pages in a browser of its own, with no cookies or sign-ins",
     local: "allowed",
     where: ["desktop"],
-    callSites: [],
-    planned: ["packages/core/src/local-mode/egress-proxy.ts", "packages/desktop/src/main/research-browser.ts"],
+    callSites: ["packages/core/src/local-mode/egress-proxy.ts"],
+    planned: ["packages/desktop/src/main/research-browser.ts"],
     note: "Goes through Vector's network guard, which never reaches private or cloud metadata addresses; follows Web access",
   },
   {
