@@ -766,6 +766,8 @@ async function job(
         waits.push(ms)
       },
       log: (line) => log.push(line),
+      // GitHub Actions has no brain to check against; these tests are about what the job posts and where.
+      check: async (parts) => parts,
     }),
     git: createReviewGit({ directory: runner, run: runGit }),
     runReview: review.run,

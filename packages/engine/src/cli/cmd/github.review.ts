@@ -1187,8 +1187,10 @@ export const githubReview = Effect.fn("Cli.github.review")(function* (args: {
                 botLogin,
                 ...(env["GITHUB_API_URL"] ? { baseUrl: env["GITHUB_API_URL"] } : {}),
                 log,
-                // Nobody answers questions in a review job: what repeats the owner's memory is dropped and counted.
-                check: (parts) => run(SessionPosting.headless({ parts: [...parts], typed: false, log })),
+                // Nobody answers questions in a review job: what repeats the owner's memory is dropped and counted,
+                // and a fork's review links and embeds only on GitHub.
+                check: (parts, pull) =>
+                  run(SessionPosting.headless({ parts: [...parts], typed: false, untrusted: pull.untrusted, log })),
               }),
               git: createReviewGit({
                 directory: instance.worktree,

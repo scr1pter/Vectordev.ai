@@ -529,11 +529,14 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
       }
       // Everything the task job posts or commits is checked against the owner's memory first (section 6.4a). Nobody
       // answers questions here, so what repeats it is dropped and counted, and a check that cannot run posts nothing.
+      // Once the job knows it is working on a fork's pull request, what it posts links and embeds only on GitHub.
+      const pulled = { fork: false }
       const checked = (parts: string[]) =>
         runLocalEffect(
           SessionPosting.headless({
             parts,
             typed: false,
+            untrusted: pulled.fork,
             sessionIDs: session ? [session.id] : [],
             log: (line) => console.log(line),
           }),
@@ -659,6 +662,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
           issueEvent?.issue.pull_request
         ) {
           const prData = await fetchPR()
+          pulled.fork = prData.headRepository.nameWithOwner !== prData.baseRepository.nameWithOwner
           if (resources.auth.source === "app" && prData.headRepository.nameWithOwner !== `${owner}/${repo}`)
             throw new Error("Vector App tasks cannot execute a fork pull request.")
           // Local PR

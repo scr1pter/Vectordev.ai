@@ -35,7 +35,7 @@ export const check = Effect.fn("SessionPosting.check")(function* (input: Input) 
         tokens,
         (token) =>
           git
-            .run(["grep", "-q", "-F", "-I", "-i", "-e", token, "--"], { cwd: place.root })
+            .run(["grep", "-q", "-w", "-F", "-I", "-i", "-e", token, "--"], { cwd: place.root })
             .pipe(
               Effect.map((result) => (result.exitCode === 0 ? [token] : [])),
               Effect.catchCause(() => Effect.succeed([] as string[])),

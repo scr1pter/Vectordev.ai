@@ -108,6 +108,37 @@ const OUTWARD_AGENTS = new Set(["researcher", "research-judge"])
 export function audienceOf(session: Pick<Session.Info, "internal">, agent: string): Brain.Audience {
   return session.internal?.startsWith(VECTORSCOPE) || OUTWARD_AGENTS.has(agent) ? "outward" : "owner"
 }
+
+/**
+ * The owner's own kinds of memory a role hears (section 6.4a), pinned in its digest and given to it to start with. A
+ * Vectorscope reviewer of a pull request Vector cannot trust hears preferences and review notes only, a research
+ * worker preferences only, and the research judge none until it has the sources facet (B1).
+ */
+export function habitsOf(
+  session: Pick<Session.Info, "internal">,
+  agent: string,
+  scope?: ReviewScope,
+): readonly Brain.HabitKind[] {
+  if (agent === "research-judge") return []
+  if (agent === "researcher") return ["preference"]
+  if (session.internal?.startsWith(VECTORSCOPE))
+    return scope?.trust === "trusted" ? [...Brain.HABIT_KINDS, "review"] : ["preference", "review"]
+  return Brain.HABIT_KINDS
+}
+
+/** What a Vectorscope reviewer's prompt says it reviews: the changed paths, and whether the owner wrote them. */
+type ReviewScope = NonNullable<ReturnType<typeof scopeOf>>
+
+/** The changed paths and the trust a Vectorscope reviewer's first prompt carries; untrusted when it carries none. */
+export function reviewScope(msgs: readonly SessionV1.WithParts[]): ReviewScope {
+  const first = msgs.find((message) => message.info.role === "user")
+  return (
+    first?.parts.flatMap((part) => (part.type === "text" ? [scopeOf(part.metadata)] : [])).find(Boolean) ?? {
+      paths: [],
+      trust: "untrusted",
+    }
+  )
+}
 const SUPPORTED_MCP_RESOURCE_ATTACHMENT_MIMES = new Set([
   "application/pdf",
   "image/gif",
@@ -236,10 +267,15 @@ const layer = Layer.effect(
       sessionID: SessionID,
       key: string,
       cold: boolean,
-      memory: { readonly personal: boolean; readonly index: boolean; readonly audience: Brain.Audience },
+      memory: {
+        readonly personal: boolean
+        readonly index: boolean
+        readonly audience: Brain.Audience
+        readonly kinds?: readonly Brain.HabitKind[]
+      },
     ) {
       const snapshot = instructionSnapshots.get(sessionID)
-      const full = `${key}|${memory.personal ? "personal" : "shared"}|${memory.index ? "index" : "plain"}|${memory.audience}`
+      const full = `${key}|${memory.personal ? "personal" : "shared"}|${memory.index ? "index" : "plain"}|${memory.audience}|${memory.kinds?.join(",") ?? "all"}`
       // Re-inserting keeps the most recently used sessions at the end; the oldest go once there are too many.
       instructionSnapshots.delete(sessionID)
       if (snapshot && snapshot.key === full && !cold) {
@@ -249,7 +285,10 @@ const layer = Layer.effect(
       const place = yield* instruction.place()
       // The repository's documents get one line beside the memory index, taken with the rest of the snapshot, and the
       // memory tool says how to open them for as long as the snapshot holds.
-      const documents = memory.index ? yield* knowledge.digest(place, { personal: memory.personal }) : undefined
+      // A role whose output leaves the machine is not told which private documents there are.
+      const documents = memory.index
+        ? yield* knowledge.digest(place, { personal: memory.personal && memory.audience === "owner" })
+        : undefined
       const digest = yield* brain.digest(place, { ...memory, ...(documents ? { documents } : {}) })
       const instructions = [...(yield* instruction.system()), ...(digest.text ? [digest.text] : [])]
       const next = { key: full, instructions, documents: documents !== undefined }
@@ -1935,8 +1974,11 @@ const layer = Layer.effect(
         // A subagent starts with how the owner works, and one a Thorough request launched with a brief besides, saved
         // on its first message as ids. A Vectorscope reviewer starts with how the owner reviews.
         if (session.parentID && !session.internal) msgs = yield* briefFor({ session, msgs, personal, agent: agent.name })
-        if (session.internal?.startsWith(VECTORSCOPE)) msgs = yield* reviewFor({ session, msgs, personal })
-        msgs = yield* withheldRecall(sessionID, msgs, personal)
+        if (session.internal?.startsWith(VECTORSCOPE)) msgs = yield* reviewFor({ session, msgs, personal, agent: agent.name })
+        // A role whose output leaves the machine gets back only what it was given to start with: what the memory tool
+        // found for it is not filled in from the owner's personal memory or private documents.
+        const audience = audienceOf(session, agent.name)
+        msgs = yield* withheldRecall(sessionID, msgs, personal, audience)
         msgs = yield* SessionReminders.apply({ messages: msgs, agent, session }).pipe(
           Effect.provideService(RuntimeFlags.Service, flags),
           Effect.provideService(FSUtil.Service, fsys),
@@ -1995,8 +2037,10 @@ const layer = Layer.effect(
             invokedAgents,
             messages: msgs,
             promptOps,
-            // A role whose output leaves the machine gets no pointer to a private document when it reads a linked file.
-            personal: personal && audienceOf(session, agent.name) === "owner",
+            // A role whose output leaves the machine gets no pointer to a private document when it reads a linked file,
+            // and its memory tool finds nothing personal.
+            personal: personal && audience === "owner",
+            outward: audience === "outward",
             ...(build
               ? { taskSize: { tier: build.tier, capped: SessionTaskSize.capped(build.result) } }
               : recoverable
@@ -2095,7 +2139,22 @@ const layer = Layer.effect(
                   `${msgs[0]?.info.id}|${model.providerID}/${model.id}`,
                   // Past the provider's cache lifetime the prefix is written again regardless.
                   Date.now() - (lastFinished?.time.completed ?? 0) > ProviderTransform.cacheLifetime(model),
-                  { personal, index: offered.includes("memory"), audience: audienceOf(session, agent.name) },
+                  {
+                    personal,
+                    index: offered.includes("memory"),
+                    audience,
+                    // An outward digest pins only the kinds the role hears: preferences alone for a pull request
+                    // Vector cannot trust.
+                    ...(audience === "outward"
+                      ? {
+                          kinds: habitsOf(
+                            session,
+                            agent.name,
+                            session.internal?.startsWith(VECTORSCOPE) ? reviewScope(msgs) : undefined,
+                          ),
+                        }
+                      : {}),
+                  },
                 ).pipe(Effect.orDie),
             quick ? Effect.succeed(undefined) : sys.mcp(agent, session.permission),
             // The quick lane sends this request's own messages; autocomplete only the newest one, below.
@@ -2309,7 +2368,7 @@ const layer = Layer.effect(
             query,
             budget: Brain.HABITS.subagent,
             audience: outward ? "outward" : "owner",
-            kinds: outward ? ["preference"] : Brain.HABIT_KINDS,
+            kinds: habitsOf(input.session, input.agent),
             sessionID: input.session.id,
             ...(requestID ? { requestID } : {}),
             tier: "brief",
@@ -2356,22 +2415,20 @@ const layer = Layer.effect(
       session: Session.Info
       msgs: SessionV1.WithParts[]
       personal: boolean
+      agent: string
     }) {
       const first = input.msgs.find((message) => message.info.role === "user")
       if (!first || !input.personal || SessionMemory.recalled(first) || recallsTried.has(first.info.id)) return input.msgs
       recallsTried.add(first.info.id)
       if (recallsTried.size > MAX_INSTRUCTION_SNAPSHOTS * 4) recallsTried.delete(recallsTried.values().next().value!)
-      const scope = first.parts.flatMap((part) => (part.type === "text" ? [scopeOf(part.metadata)] : [])).find(Boolean) ?? {
-        paths: [],
-        trust: "untrusted" as const,
-      }
+      const scope = reviewScope(input.msgs)
       const place = yield* instruction.place()
       const result = yield* brain.habits(place, {
         query: scopeQuery(scope.paths),
         files: scope.paths.map((file) => path.join(place.root, file)),
         budget: Brain.HABITS.review,
         audience: "outward",
-        kinds: scope.trust === "trusted" ? [...Brain.HABIT_KINDS, "review"] : ["preference", "review"],
+        kinds: habitsOf(input.session, input.agent, scope),
         wrap: ownerBlock,
         sessionID: input.session.id,
         tier: "review",
@@ -2459,7 +2516,11 @@ const layer = Layer.effect(
       sessionID: SessionID,
       msgs: SessionV1.WithParts[],
       personal: boolean,
+      audience: Brain.Audience = "owner",
     ) {
+      // What a tool found (memory search and reads, linked files' pointers) is filled in from personal memory and
+      // private documents only for a role whose output stays in the session.
+      const found = personal && audience === "owner"
       const parts = msgs.flatMap((message) => message.parts)
       const recalls = parts.flatMap((part) => {
         const recall = SessionMemory.recall(part)
@@ -2470,7 +2531,7 @@ const layer = Layer.effect(
         return value ? [value] : []
       })
       const kept = msgs.flatMap((message) => SessionMemory.remember(message))
-      const toolPersonal = personal ? parts.flatMap((part) => SessionMemory.personal(part)) : []
+      const toolPersonal = found ? parts.flatMap((part) => SessionMemory.personal(part)) : []
       const codeLinks = parts.flatMap((part) => Instruction.links(part))
       if (
         recalls.length === 0 &&
@@ -2488,7 +2549,7 @@ const layer = Layer.effect(
           (link.mode === "pointer" ? knowledge.pointers : knowledge.guard)(place, {
             file: link.file,
             ids: link.ids,
-            personal,
+            personal: found,
             exclude: new Set(),
             sessionID,
           }).pipe(Effect.map((line) => [linkKey(link), line.text ?? ""] as const)),
@@ -2528,21 +2589,21 @@ const layer = Layer.effect(
       const memory = entries.length ? yield* brain.lines(place, entries, { personal }) : new Map<string, string>()
       const cardIds = [...new Set([...recalls.flatMap((recall) => recall.cards), ...known.flatMap((item) => item.cards)])]
       const cards = cardIds.length
-        ? yield* knowledge.lines(place, cardIds, { personal, sessionID })
+        ? yield* knowledge.lines(place, cardIds, { personal: found, sessionID })
         : new Map<string, string>()
       const passages = new Map(
         yield* Effect.forEach(
           known.flatMap((item) => item.get),
           (item) =>
             knowledge
-              .get(place, { ...item, personal, sessionID })
+              .get(place, { ...item, personal: found, sessionID })
               .pipe(Effect.map((got) => [`${item.id}\0${item.part ?? ""}`, got?.text] as const)),
         ),
       )
       const outlines = new Map(
         yield* Effect.forEach(
           known.flatMap((item) => (item.document && item.part ? [item.document] : [])),
-          (id) => knowledge.outline(place, id, { personal }).pipe(Effect.map((text) => [id, text] as const)),
+          (id) => knowledge.outline(place, id, { personal: found }).pipe(Effect.map((text) => [id, text] as const)),
         ),
       )
       // A file kept instead of sending it is not sent: its outline and cards stand for it.
@@ -2570,7 +2631,7 @@ const layer = Layer.effect(
           if (part.type === "text" && value?.document && value.part)
             return [{ ...part, text: outlines.get(value.document) ?? part.text }]
           if (part.type !== "tool" || part.state.status !== "completed") return [part]
-          const withheld = personal ? SessionMemory.personal(part) : []
+          const withheld = found ? SessionMemory.personal(part) : []
           const own = Instruction.links(part)
           if (withheld.length === 0 && !value && own.length === 0) return [part]
           const filled = withheld.reduce(

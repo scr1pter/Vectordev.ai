@@ -80,23 +80,35 @@ describe("POST /memory/posting-check", () => {
     expect(response.status).toBe(403)
   })
 
-  test("takes out what repeats the owner's memory, keeps names the repository holds, and asks about typed text", async () => {
+  test("takes out what repeats the owner's memory, keeps a habit's host the repository names as a word, and asks about typed text", async () => {
     await using tmp = await tmpdir({ git: true, trusted: true, config: { formatter: false, lsp: false } })
-    await fs.writeFile(path.join(tmp.path, "billing.ts"), "export const host = 'pay.initech-billing.com'\n")
+    // The repository names a private fact's host, one habit host as a whole word, and the other only inside a longer
+    // name.
+    await fs.writeFile(
+      path.join(tmp.path, "billing.ts"),
+      "export const host = 'pay.initech-billing.com'\nexport const preview = 'preview.acme-staging.com'\nexport const old = 'xstatus.acme-staging.com'\n",
+    )
     execFileSync("git", ["add", "billing.ts"], { cwd: tmp.path })
-    const created = await send(tmp.path, "/memory", { kind: "fact", text: FACT, scope: "personal" })
-    expect(created.status).toBe(200)
+    for (const memory of [
+      { kind: "fact", text: FACT, scope: "personal" },
+      { kind: "preference", text: "Check preview.acme-staging.com and status.acme-staging.com before merging", scope: "personal" },
+    ])
+      expect((await send(tmp.path, "/memory", memory)).status).toBe(200)
     const parts = [
       `Fixes the retry loop. ${FACT} today.`,
       "Use account 99812345 for the test.",
       "It now calls pay.initech-billing.com once.",
+      "Previews are on preview.acme-staging.com.",
+      "Status is on status.acme-staging.com.",
     ]
     const checked = await send(tmp.path, "/memory/posting-check", { parts, typed: false })
     expect(checked.status).toBe(200)
     const result = (await checked.json()) as { status: string; parts: string[]; dropped: { part: number }[] }
     expect(result.status).toBe("changed")
-    expect(result.parts).toEqual(["Fixes the retry loop.", "", "It now calls pay.initech-billing.com once."])
-    expect(result.dropped.map((item) => item.part)).toEqual([0, 1])
+    // A private fact's host stays private although the repository holds it; a habit's host is public only where the
+    // repository names it as a word of its own.
+    expect(result.parts).toEqual(["Fixes the retry loop.", "", "", "Previews are on preview.acme-staging.com.", ""])
+    expect(result.dropped.map((item) => item.part)).toEqual([0, 1, 2, 4])
 
     const typed = await send(tmp.path, "/memory/posting-check", { parts, typed: true })
     const asked = (await typed.json()) as { status: string; parts: string[] }

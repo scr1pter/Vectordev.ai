@@ -115,9 +115,11 @@ export interface ReviewGitHubOptions {
   signal?: AbortSignal
   /**
    * The posting check every write goes through first (section 6.4a), one post as one text: the parts to send, in the
-   * order given. A check that cannot run throws, and nothing is posted.
+   * order given. `untrusted` says the pull request comes from a fork, whose posted text may link and embed only on
+   * GitHub. A check that cannot run throws, and nothing is posted. Required, so a new caller cannot post unchecked; a
+   * test that means to skip it passes one that sends every part as it is.
    */
-  check?: (parts: readonly string[]) => Promise<readonly string[]>
+  check: (parts: readonly string[], pull: { readonly untrusted: boolean }) => Promise<readonly string[]>
 }
 
 // GraphQL reports a bot as "github-actions" where REST says "github-actions[bot]", so logins compare without it.
@@ -738,17 +740,29 @@ export function createReviewGitHub(options: ReviewGitHubOptions): ReviewGitHub {
       }
     },
   }
-  return options.check ? checked(api, options.check) : api
+  return checked(api, options.check)
 }
 
 // What a write sends, after the posting check: a review's body and its line comments as one text, a line comment that
-// lost all its words left out, and each comment, update and reply on its own.
-function checked(api: ReviewGitHub, check: NonNullable<ReviewGitHubOptions["check"]>): ReviewGitHub {
-  const one = async (body: string) => (await check([body]))[0] ?? ""
+// lost all its words left out, and each comment, update and reply on its own. Whether the pull request is a fork comes
+// from GitHub as the job reads it; a write about one the job has not read, or an edit by comment id, counts as one
+// from a fork unless every pull request read so far came from the repository itself.
+function checked(api: ReviewGitHub, check: ReviewGitHubOptions["check"]): ReviewGitHub {
+  const forks = new Map<number, boolean>()
+  const untrusted = (n?: number) =>
+    n !== undefined && forks.has(n) ? forks.get(n) === true : forks.size === 0 || [...forks.values()].some(Boolean)
+  const one = async (body: string, n?: number) => (await check([body], { untrusted: untrusted(n) }))[0] ?? ""
   return {
     ...api,
+    async getPull(n) {
+      const pull = await api.getPull(n)
+      forks.set(n, pull.fork)
+      return pull
+    },
     async createReview(n, payload) {
-      const parts = await check([payload.body, ...payload.comments.map((comment) => comment.body)])
+      const parts = await check([payload.body, ...payload.comments.map((comment) => comment.body)], {
+        untrusted: untrusted(n),
+      })
       return api.createReview(n, {
         ...payload,
         body: parts[0] ?? "",
@@ -757,9 +771,9 @@ function checked(api: ReviewGitHub, check: NonNullable<ReviewGitHubOptions["chec
           .filter((comment) => comment.body.trim()),
       })
     },
-    createIssueComment: async (n, body) => api.createIssueComment(n, await one(body)),
+    createIssueComment: async (n, body) => api.createIssueComment(n, await one(body, n)),
     updateIssueComment: async (id, body) => api.updateIssueComment(id, await one(body)),
     updateReviewComment: async (id, body) => api.updateReviewComment(id, await one(body)),
-    replyToReviewComment: async (n, commentId, body) => api.replyToReviewComment(n, commentId, await one(body)),
+    replyToReviewComment: async (n, commentId, body) => api.replyToReviewComment(n, commentId, await one(body, n)),
   }
 }

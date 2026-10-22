@@ -137,8 +137,9 @@ export interface LocalReviewDeps<RunR = never, ModelR = never> {
     shared: boolean
   }) => Effect.Effect<string | undefined>
   // The posting check --post goes through (section 6.4a): what repeats the owner's memory is left out, and a check
-  // that cannot run posts nothing.
-  posting?: (input: { parts: readonly string[]; sessionIDs: readonly string[]; untrusted: boolean }) => Promise<readonly string[]>
+  // that cannot run posts nothing. Required, so a new caller cannot post unchecked; a test that means to skip it passes
+  // one that sends every part as it is.
+  posting: (input: { parts: readonly string[]; sessionIDs: readonly string[]; untrusted: boolean }) => Promise<readonly string[]>
 }
 
 // What --post needs from GitHub: a token for the remote's host, who it belongs to, and the two writes it makes.
@@ -511,7 +512,7 @@ export function executeLocalReview<RunR, ModelR>(
         access: deps.github ?? GITHUB,
         env,
         say,
-        ...(deps.posting ? { posting: deps.posting } : {}),
+        posting: deps.posting,
         trust,
       })
     return { exitCode: failingFindings(selection, failOn) ? 1 : 0, target, outcome } satisfies LocalReviewResult
@@ -560,7 +561,7 @@ const postToPull = Effect.fnUntraced(function* (input: {
   access: GitHubAccess
   env: Record<string, string | undefined>
   say: (text: string) => void
-  posting?: LocalReviewDeps["posting"]
+  posting: LocalReviewDeps["posting"]
   trust: Trust
 }) {
   // The configured URL, before any insteadOf rewriting, is what names the repository.
@@ -609,7 +610,6 @@ const postToPull = Effect.fnUntraced(function* (input: {
     new LocalReviewError({
       message: `Could not post to ${slug}: ${error instanceof Error ? error.message : String(error)}`,
     })
-  const posting = input.posting
   const gh = yield* Effect.tryPromise({
     try: () =>
       input.access.create({
@@ -618,12 +618,12 @@ const postToPull = Effect.fnUntraced(function* (input: {
         repo: where.repo,
         botLogin: login ?? "",
         ...(baseUrl ? { baseUrl } : {}),
-        ...(posting
-          ? {
-              check: (parts: readonly string[]) =>
-                posting({ parts, sessionIDs: input.outcome.sessions, untrusted: input.trust === "untrusted" }),
-            }
-          : {}),
+        check: (parts: readonly string[], pull: { readonly untrusted: boolean }) =>
+          input.posting({
+            parts,
+            sessionIDs: input.outcome.sessions,
+            untrusted: input.trust === "untrusted" || pull.untrusted,
+          }),
       }),
     catch: failed,
   })
