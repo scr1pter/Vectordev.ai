@@ -98,6 +98,8 @@ export type Found = {
   readonly run: Research.Run
   readonly plan: Research.Plan
   readonly detail: ResearchStore.Detail
+  /** The user approved the plan on its card; otherwise it was approved on its own (a child or a headless run). */
+  readonly approvedByUser: boolean
 }
 
 /** The run a call works in, or why there is none. */
@@ -235,7 +237,19 @@ const layer = Layer.effect(
         yield* store.guest(where, runID)
       const plan = detail.run.plan
       if (!plan) return refuse(NO_PLAN)
-      return { place: where, lead: leader, run: detail.run, plan, detail } satisfies Found as Current
+      // Approved on its own unless the user answered the card; a status-only call keeps the earlier approval.
+      const answers = messages
+        .flatMap((message) => message.parts)
+        .flatMap((part) =>
+          part.type === "tool" &&
+          part.tool === "research_plan" &&
+          part.state.status === "completed" &&
+          part.state.metadata[RUN] === runID
+            ? [part.state.metadata.answer]
+            : [],
+        )
+      const approvedByUser = answers.some((answer) => answer === "start" || answer === "start-deep")
+      return { place: where, lead: leader, run: detail.run, plan, detail, approvedByUser } satisfies Found as Current
     })
 
     const context = Effect.fn("ResearchRun.context")(function* (ctx: Tool.Context, found?: Found) {
@@ -323,9 +337,10 @@ const layer = Layer.effect(
         ].filter(Boolean),
         typed: yield* typedOf(ctx),
         public: [...results.flatMap((result) => [result.title, result.snippet]), ...sources.open],
+        // The user's own sites become site: filters. A plan's count only when the user approved it on its card: an
+        // agent that approved its own plan could otherwise clear any public host name it chose.
         domains: [
-          ...(found?.plan.prefer_domains ?? []),
-          ...(found?.plan.avoid_domains ?? []),
+          ...(found?.approvedByUser ? [...(found.plan.prefer_domains ?? []), ...(found.plan.avoid_domains ?? [])] : []),
           ...(cfg.research?.domains?.prefer ?? []),
           ...(cfg.research?.domains?.avoid ?? []),
         ],
@@ -447,18 +462,25 @@ const layer = Layer.effect(
             message: `This ${found.plan.depth} research has its ${cap} researcher${cap === 1 ? "" : "s"}. Research the rest yourself, or resume one with task_id.`,
           } satisfies Brief
       }
-      const checked = ResearchOutbound.check(text, yield* context(input.ctx, found))
+      const run = yield* context(input.ctx, found)
+      const checked = ResearchOutbound.check(text, run)
       if (!checked.ok) return { type: "refused", message: refusal(BRIEF_REFUSAL, checked) } satisfies Brief
-      // A researcher gets its sub-question and the run's public preferences, nothing else of the lead's context.
+      // A researcher gets its sub-question and the run's public preferences, nothing else of the lead's context. The
+      // plan's own words came from the lead too, so they go only when they pass the same check.
+      const open = (value: string | undefined) => (value && ResearchOutbound.check(value, run).ok ? value : undefined)
+      const question = open(found.plan.question)
+      const period = open(found.plan.time_window)
+      const prefer = (found.plan.prefer_domains ?? []).filter((domain) => open(domain))
+      const avoid = (found.plan.avoid_domains ?? []).filter((domain) => open(domain))
       return {
         type: "ok",
         prompt: [
           "<research_assignment>",
-          `Research question: ${found.plan.question}`,
+          ...(question ? [`Research question: ${question}`] : []),
           `Your sub-question: ${input.prompt.trim()}`,
-          ...(found.plan.prefer_domains?.length ? [`Prefer sources on: ${found.plan.prefer_domains.join(", ")}`] : []),
-          ...(found.plan.avoid_domains?.length ? [`Avoid sources on: ${found.plan.avoid_domains.join(", ")}`] : []),
-          ...(found.plan.time_window ? [`Time window: ${found.plan.time_window}`] : []),
+          ...(prefer.length ? [`Prefer sources on: ${prefer.join(", ")}`] : []),
+          ...(avoid.length ? [`Avoid sources on: ${avoid.join(", ")}`] : []),
+          ...(period ? [`Time window: ${period}`] : []),
           `Save what you find with research_note, then return at most ${RETURN_CHARS} characters with the note IDs you saved.`,
           "</research_assignment>",
         ].join("\n"),

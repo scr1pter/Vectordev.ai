@@ -1,5 +1,7 @@
 import { afterAll, expect } from "bun:test"
+import path from "path"
 import { Effect } from "effect"
+import { FSUtil } from "@vectordevai/core/fs-util"
 import { ResearchStore } from "@vectordevai/core/research/store"
 import type { SessionV1 } from "@vectordevai/core/v1/session"
 import { Question } from "../../src/question"
@@ -146,4 +148,31 @@ it.instance(
       expect(metadataOf(planned).to).toBeUndefined()
     }),
   60_000,
+)
+
+it.instance(
+  "a site the user approved on the plan card may be searched though the run read it in a file",
+  () =>
+    Effect.gen(function* () {
+      const { dir, llm } = yield* setup(web)
+      const fs = yield* FSUtil.Service
+      yield* fs.writeWithDirs(
+        path.join(dir, "notes", "hosts.md"),
+        "# Hosts\n\nOur status page is status.acmecorp.com.\n",
+      )
+      yield* answer(["Start"])
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({
+        title: "Research",
+        permission: [{ permission: "private_network", pattern: "*", action: "allow" }],
+      })
+      yield* llm.tool("research_plan", { ...plan(), prefer_domains: ["acmecorp.com"] })
+      yield* llm.tool("read", { filePath: path.join(dir, "notes", "hosts.md") })
+      yield* llm.tool("research_search", { query: "outage history", site: "status.acmecorp.com" })
+      yield* llm.text("Done.")
+      yield* send({ sessionID: session.id, agent: "research", text: "Research how often status pages report outages." })
+      const [search] = yield* calls(session.id, "research_search")
+      expect(output(search)).toContain("untrusted_web_page")
+    }),
+  90_000,
 )

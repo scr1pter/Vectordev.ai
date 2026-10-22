@@ -190,3 +190,28 @@ it.instance(
     }),
   120_000,
 )
+
+it.instance(
+  "a site the lead put in a plan it approved on its own does not clear a host name from what the run read",
+  () =>
+    Effect.gen(function* () {
+      const { dir, llm } = yield* setup(web)
+      const fs = yield* FSUtil.Service
+      yield* fs.writeWithDirs(
+        path.join(dir, "notes", "hosts.md"),
+        "# Hosts\n\nOur status page is status.acmecorp.com.\n",
+      )
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "Research", permission: allow })
+      yield* llm.tool("research_plan", { ...plan(), prefer_domains: ["acmecorp.com"] })
+      yield* llm.tool("read", { filePath: path.join(dir, "notes", "hosts.md") })
+      yield* llm.tool("research_search", { query: "outage history", site: "status.acmecorp.com" })
+      yield* llm.text("Done.")
+      const before = web.hits().filter((hit) => hit.site === "searxng").length
+      yield* send({ sessionID: session.id, agent: "research", text: "Research how often status pages report outages." })
+      const [search] = yield* calls(session.id, "research_search")
+      expect(output(search)).toBe(ResearchOutbound.REFUSAL)
+      expect(web.hits().filter((hit) => hit.site === "searxng").length).toBe(before)
+    }),
+  90_000,
+)
