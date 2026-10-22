@@ -15,7 +15,7 @@ export function directory(data: string) {
 
 function canonical(root: string) {
   try {
-    return realpathSync.native(root)
+    return realpathSync(root)
   } catch {
     return path.resolve(root)
   }
@@ -42,11 +42,13 @@ export function relative(root: string, file: string) {
 
 // Where a path really is, following links in it and in its parents. One that cannot be resolved (it does not exist
 // yet or any more, or it is a link loop) is its deepest resolvable parent's real path with the rest put back, so it
-// cannot pass for a file inside the root when a parent leads out. The native call also spells out Windows short names
-// (C:\Users\RUNNER~1), which git never gives, so a folder named both ways is one folder.
+// cannot pass for a file inside the root when a parent leads out. This runs for every file the brain names, so it
+// stays the JavaScript realpath: the native one opens each file, which on Windows (with antivirus scanning) made the
+// engine's Windows tests far slower. A Windows short name (RUNNER~1) is left as written; callers that take a path
+// from the user place it with git instead (see `vector memory links`).
 function real(target: string): string {
   try {
-    return realpathSync.native(target)
+    return realpathSync(target)
   } catch {
     const parent = path.dirname(target)
     return parent === target ? target : path.join(real(parent), path.basename(target))

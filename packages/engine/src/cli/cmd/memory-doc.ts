@@ -8,6 +8,7 @@ import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { BrainPaths } from "@vectordevai/core/brain/paths"
 import type { BrainSchema } from "@vectordevai/core/brain/schema"
 import { Flag } from "@vectordevai/core/flag/flag"
+import { UntrustedGit } from "@vectordevai/core/untrusted-git"
 import { Instruction } from "@/session/instruction"
 import { SessionDistill } from "@/session/distill"
 import { cmd } from "./cmd"
@@ -449,9 +450,15 @@ export const MemoryLinksCommand = effectCmd({
   handler: Effect.fn("Cli.memory.links")(function* (args) {
     const memory = yield* where
     const linked = args.relink ? yield* memory.knowledge.link(memory.place) : undefined
-    // The root comes from git, which spells it as it really is; the working folder may be a link to it or, on Windows,
-    // its short name, so the file is named the way the brain names files.
-    const file = BrainPaths.relative(memory.place.root, path.resolve(process.cwd(), args.file))
+    // The root comes from git in its full spelling, while the working folder may be spelled another way: through a
+    // link, or on Windows by its short name (RUNNER~1). Git's own prefix for the working folder places a relative file
+    // in the repository however the folder is spelled.
+    const prefix = path.isAbsolute(args.file)
+      ? undefined
+      : (yield* Effect.promise(() => UntrustedGit.run(process.cwd(), ["rev-parse", "--show-prefix"]))).trim()
+    const file = prefix
+      ? path.posix.normalize(prefix + args.file.split(path.sep).join("/"))
+      : BrainPaths.relative(memory.place.root, path.resolve(process.cwd(), args.file))
     const links = yield* memory.knowledge.links(memory.place, file, { personal: true })
     if (args.json) return print(linked ? { links, linked } : links)
     if (linked)
