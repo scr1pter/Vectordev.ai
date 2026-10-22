@@ -11,6 +11,8 @@ import { Heap } from "@/cli/heap"
 import { AppRuntime } from "@/effect/app-runtime"
 import { Effect } from "effect"
 import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import type { LocalMode } from "@vectordevai/schema/local-mode"
 
 Heap.start()
 
@@ -56,6 +58,10 @@ export const rpc = {
     if (server) await server.stop(true)
     server = await Server.listen(input)
     return { url: server.url.toString() }
+  },
+  // What the terminal UI's main thread and the Workers that follow it decided under Vector Local (TuiLocal.share).
+  egress(event: LocalMode.Event) {
+    Egress.report(event)
   },
   // The TUI renders on the main thread, so the day's usage report, which scans every message, is read and sent here.
   async usageReport(input: { token: string; site: string }) {

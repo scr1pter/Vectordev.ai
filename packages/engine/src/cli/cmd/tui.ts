@@ -211,7 +211,12 @@ export const TuiThreadCommand = cmd({
       const worker = new Worker(file)
       const client = Rpc.client<typeof rpc>(worker)
       const { routeUsageReport } = await import("@/cli/vector-account")
+      const { TuiLocal } = await import("@/cli/tui/local")
       routeUsageReport((report) => client.call("usageReport", report))
+      // This thread follows a Vector Local switch made while the terminal UI runs, and logs in the engine thread.
+      const unshare = TuiLocal.share((event) => {
+        client.call("egress", event).catch(() => {})
+      })
       const reload = () => {
         client.call("reload", undefined).catch(() => {})
       }
@@ -222,6 +227,7 @@ export const TuiThreadCommand = cmd({
         if (stopped) return
         stopped = true
         process.off("SIGUSR2", reload)
+        unshare()
         await withTimeout(client.call("shutdown", undefined), 5000).catch(() => {})
         worker.terminate()
       }
