@@ -27,6 +27,7 @@ import {
   requireWorkflowModel,
 } from "./github-pr-input"
 import { cleanLogLine, failedStepLog, MAX_LOG_BYTES } from "./ci-watch"
+import { checkPost } from "./posting-check"
 import { redactText } from "./security-redaction"
 
 // Pull requests through GitHub's API with the user's GitHub sign-in in Vector. Nothing has to be installed: the
@@ -266,8 +267,17 @@ export async function createPullRequest(input: {
   draft?: boolean
 }) {
   const cwd = requirePullRequestDirectory(input.cwd)
-  const title = requirePullRequestText(input.title, "Pull request title", 256, false)
-  const body = requirePullRequestText(input.body, "Pull request body", 1_000_000)
+  // The user typed the title and body, so the check only asks when they repeat what Vector knows about them.
+  const checked = await checkPost({
+    cwd,
+    parts: [
+      requirePullRequestText(input.title, "Pull request title", 256, false),
+      requirePullRequestText(input.body, "Pull request body", 1_000_000),
+    ],
+    typed: true,
+  })
+  if (!checked) throw new Error("Nothing was posted.")
+  const [title, body] = checked as [string, string]
   const { access, repo } = await pullRequestContext(cwd)
   const head = await pushedHead(cwd, repo)
   const base = input.base
@@ -303,6 +313,10 @@ export async function submitPullRequestReview(input: {
   comments?: PullRequestReviewComment[]
   // Posted instead of body, without line comments, if GitHub refuses the comments.
   fallbackBody?: string
+  // The review's sessions, whose recalled memory the posting check compares the text with.
+  sessionIDs?: string[]
+  // A pull request from someone Vector cannot trust: links and images then point only at GitHub.
+  untrusted?: boolean
 }) {
   const number = requirePullRequestNumber(input.number)
   const event = requireReviewEvent(input.event)
@@ -313,9 +327,16 @@ export async function submitPullRequestReview(input: {
     input.fallbackBody === undefined
       ? undefined
       : requirePullRequestText(input.fallbackBody, "Review fallback body", 1_000_000)
-  const { access, repo } = await pullRequestContext(requirePullRequestDirectory(input.cwd))
-  return postPullRequestReview(access, repo, number, { body, event, head, comments, fallbackBody })
+  const cwd = requirePullRequestDirectory(input.cwd)
+  const sessionIDs = (input.sessionIDs ?? []).filter((id) => typeof id === "string").slice(0, 50)
+  const { access, repo } = await pullRequestContext(cwd)
+  return postPullRequestReview(access, repo, number, { body, event, head, comments, fallbackBody }, (parts) =>
+    checkPost({ cwd, parts, typed: false, sessionIDs, untrusted: input.untrusted === true }),
+  )
 }
+
+/** The posting check a review goes through: the parts to post, or undefined when nothing is posted. */
+export type ReviewCheck = (parts: string[]) => Promise<string[] | undefined>
 
 export async function postPullRequestReview(
   access: GithubAccess,
@@ -328,13 +349,24 @@ export async function postPullRequestReview(
     comments?: PullRequestReviewComment[]
     fallbackBody?: string
   },
+  check: ReviewCheck,
 ) {
   const head = review.head
   if (head && (await currentHead(access, repo, number)) !== head) {
     throw new Error("This pull request changed after the review started. Run Review with Vector again before posting.")
   }
+  // Everything the review sends is checked as one text, so a sentence split across two comments is still found. A
+  // line comment that loses all its text is not sent.
+  const sent = head ? (review.comments ?? []) : []
+  const checked = await check([review.body, ...sent.map((comment) => comment.body), review.fallbackBody ?? review.body])
+  if (!checked) return { posted: false, inline: 0 }
+  const body = checked[0] ?? ""
+  const fallbackBody = checked.at(-1) ?? body
   // Line numbers belong to one commit's diff, so line comments are only sent pinned to the commit they were read on.
-  const comments = (head ? (review.comments ?? []) : []).map((comment) => ({
+  const comments = sent
+    .map((comment, index) => ({ ...comment, body: checked[index + 1] ?? "" }))
+    .filter((comment) => comment.body.trim())
+    .map((comment) => ({
     path: comment.path,
     line: comment.line,
     side: comment.side,
@@ -356,11 +388,11 @@ export async function postPullRequestReview(
     })
   // GitHub refuses the whole review when any one comment's line is outside the diff, so it is posted once more
   // without line comments, under a body that lists every finding instead.
-  const inline = await post(review.body, comments)
+  const inline = await post(body, comments)
     .then(() => comments.length)
     .catch((error: unknown) => {
       if (error instanceof GithubRequestError && error.status === 422 && comments.length) {
-        return post(review.fallbackBody ?? review.body, []).then(() => 0)
+        return post(fallbackBody, []).then(() => 0)
       }
       throw error
     })

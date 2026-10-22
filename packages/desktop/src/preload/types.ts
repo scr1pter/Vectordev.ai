@@ -295,6 +295,10 @@ export type PullRequestsAPI = {
     // using fallbackBody (or body) as its body.
     comments?: PullRequestReviewComment[]
     fallbackBody?: string
+    // The review's sessions, whose recalled memory the posting check compares the text with, and whether the pull
+    // request comes from someone Vector cannot trust (its links and images may then point only at GitHub).
+    sessionIDs?: string[]
+    untrusted?: boolean
   }) => Promise<{ posted: boolean; inline?: number }>
   merge: (input: {
     cwd: string

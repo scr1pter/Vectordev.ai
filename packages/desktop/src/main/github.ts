@@ -4,6 +4,7 @@ import { basename } from "node:path"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 
 import { createRepo, getGithubToken } from "./github-auth"
+import { checkPost } from "./posting-check"
 import { agentEnvironment, resolveAgentPath, shimmedCommand, type AgentEnvironment } from "./external-agents"
 
 // Push a Vector project straight to GitHub. Two paths share the git plumbing:
@@ -157,6 +158,15 @@ async function viewPullRequestUrl(projectPath: string): Promise<string | undefin
 export async function createPullRequest(input: GithubPullRequestInput): Promise<GithubPullRequestResult> {
   const stats = input.projectPath ? await stat(input.projectPath).catch(() => undefined) : undefined
   if (!stats?.isDirectory()) return { ok: false, log: "", error: "The isolated workspace no longer exists." }
+  // The title becomes the commit message too, and the body carries the agent's summary and the task, so all of it is
+  // checked against what Vector knows about the owner before anything is committed or posted.
+  const checked = await checkPost({
+    cwd: input.projectPath,
+    parts: [input.title, input.body?.trim() || "Created from an isolated Vector agent workspace."],
+    typed: false,
+  })
+  if (!checked) return { ok: false, log: "", error: "Nothing was posted." }
+  const [title, body] = checked as [string, string]
 
   const github = await detectGithub()
   if (!github.ghInstalled || !github.authenticated) {
@@ -199,11 +209,11 @@ export async function createPullRequest(input: GithubPullRequestInput): Promise<
 
   const staged = await run("git", ["diff", "--cached", "--quiet"], { cwd: input.projectPath })
   if (staged.failed) {
-    const commit = await run("git", await buildCommitArgs(input.projectPath, input.title), {
+    const commit = await run("git", await buildCommitArgs(input.projectPath, title || "Update from Vector"), {
       cwd: input.projectPath,
       timeoutMs: 30_000,
     })
-    record(`git commit -m "${input.title}"`, commit)
+    record(`git commit -m "${title}"`, commit)
     if (commit.failed) {
       return {
         ok: false,
@@ -228,16 +238,9 @@ export async function createPullRequest(input: GithubPullRequestInput): Promise<
 
   const existing = await viewPullRequestUrl(input.projectPath)
   if (existing) return { ok: true, url: existing, log: logs.join("\n") }
-  const args = [
-    "pr",
-    "create",
-    "--title",
-    input.title,
-    "--body",
-    input.body?.trim() || "Created from an isolated Vector agent workspace.",
-  ]
+  const args = ["pr", "create", "--title", title || "Vector agent workspace", "--body", body]
   const created = await run("gh", args, { cwd: input.projectPath, timeoutMs: 120_000 })
-  record(`gh pr create --title "${input.title}"`, created)
+  record(`gh pr create --title "${title}"`, created)
   const url = `${created.stdout}\n${created.stderr}`.match(/https:\/\/github\.com\/[^\s]+\/pull\/\d+/)?.[0]
   if (!created.failed && url) return { ok: true, url, log: logs.join("\n") }
   if (!created.failed) return { ok: true, url: await viewPullRequestUrl(input.projectPath), log: logs.join("\n") }
@@ -285,7 +288,12 @@ async function prepareCommit(
   const staged = await run("git", ["diff", "--cached", "--quiet"], { cwd: projectPath, timeoutMs: 15_000 })
   const dirty = staged.failed // `--quiet` exits non-zero when there are staged changes
   if (!hasCommits || dirty) {
-    const message = commitMessage?.trim() || (hasCommits ? "Update from Vector" : "Initial commit from Vector")
+    // A commit message is checked when the commit is made, since nothing posts it later. The user typed it, so the
+    // check only asks; Vector's own default needs no check.
+    const typed = commitMessage?.trim()
+    const checked = typed ? await checkPost({ cwd: projectPath, parts: [typed], typed: true }) : undefined
+    if (typed && !checked) return "Nothing was committed."
+    const message = checked?.[0] || (hasCommits ? "Update from Vector" : "Initial commit from Vector")
     const commit = await run("git", await buildCommitArgs(projectPath, message), {
       cwd: projectPath,
       timeoutMs: 30_000,

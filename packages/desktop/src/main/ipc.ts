@@ -125,6 +125,7 @@ import {
   type GithubCloneInput,
 } from "./github-clone"
 import { pushWithOauth as pushToGitlab, type GitlabOauthPushInput } from "./gitlab"
+import { usePostingEngine } from "./posting-check"
 import {
   cancelDeviceLogin as cancelGitlabLogin,
   completeDeviceLogin as completeGitlabLogin,
@@ -232,6 +233,8 @@ function on<T extends unknown[]>(channel: string, listener: (event: IpcMainEvent
 
 export function registerIpcHandlers(deps: Deps) {
   initializeVectorAccount(deps.awaitInitialization)
+  // Pull requests, reviews and commits Vector makes are checked against the owner's memory by the engine first.
+  usePostingEngine(deps.awaitInitialization)
   app.once("will-quit", initTaskRelay(deps.awaitInitialization))
   handle("vector-account-status", () => vectorAccount.status())
   handle("vector-account-start", () => vectorAccount.start())

