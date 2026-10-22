@@ -612,4 +612,169 @@ ${report}`,
     await worker.stop()
     expect(await logged()).toMatchObject({ decision: "block" })
   })
+
+  test("seals the workers a sealed worker starts, even where the test variables mean nothing", async () => {
+    await using dir = await tmpdir()
+    const source = (file: string) => JSON.stringify(path.join(import.meta.dir, "../../src/local-mode", file))
+    // The model server on your network that the main thread's policy lists, which only a sealed thread refuses.
+    const listed = "192.168.255.254"
+    const nested = path.join(dir.path, "nested.ts")
+    await Bun.write(
+      nested,
+      `import { EgressGuard } from ${source("guard.ts")}
+// Long enough for a guard that followed the main thread to hear its policy.
+await Bun.sleep(200)
+const connect = await Promise.race([
+  Bun.connect({ hostname: "${listed}", port: 9, socket: { data() {} } }).then(() => "connected", (error) => error.name),
+  Bun.sleep(1_000).then(() => "not refused"),
+])
+postMessage({ following: EgressGuard.followed() !== undefined, connect })
+`,
+    )
+    const sealed = path.join(dir.path, "sealed.ts")
+    await Bun.write(
+      sealed,
+      `import ${source("backstop-worker.ts")}
+const worker = new Worker(${JSON.stringify(nested)})
+worker.onmessage = (event) => postMessage(event.data)
+`,
+    )
+    const body = `Egress.backstop()
+Egress.configure(LocalPolicy.resolve({ env: process.env, global: { endpoints: ["http://${listed}:9"] } }))
+const worker = new Worker(${JSON.stringify(sealed)})
+const result = await new Promise((resolve) => (worker.onmessage = (event) => resolve(event.data)))
+console.log(JSON.stringify(result))
+process.exit(0)`
+    // With Vector Local on the test variables are not honoured, as in a build.
+    expect(await spawned(dir.path, body, { VECTOR_LOCAL: "1" })).toEqual({ following: false, connect: "EgressBlocked" })
+  })
+
+  test("never lets a worker's local model prompt reach the proxy, though a Bun worker's fetch ignores its own NO_PROXY", async () => {
+    // The company's proxy, in this process: the script below points HTTP_PROXY at it, with NO_PROXY empty.
+    const seenByProxy: string[] = []
+    const proxy = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: async (request) => {
+        seenByProxy.push(`${request.method} ${request.url} ${await request.text()}`)
+        return new Response("proxied")
+      },
+    })
+    await using dir = await tmpdir()
+    const source = (file: string) => JSON.stringify(path.join(import.meta.dir, "../../src/local-mode", file))
+    const call = `const call = (url, labelled) =>
+  (labelled
+    ? Egress.fetch("local-inference", url + "/v1/chat/completions", { method: "POST", body: "secret prompt" })
+    : fetch(url + "/v1/chat/completions", { method: "POST", body: "secret prompt" })
+  ).then((response) => response.text(), (error) => error.rule ?? error.name)`
+    // The terminal UI's engine thread: a worker whose entry decides its own policy, and lists one more server itself.
+    const engine = path.join(dir.path, "engine.ts")
+    await Bun.write(
+      engine,
+      `import ${source("backstop.ts")}
+import { Egress } from ${source("egress.ts")}
+import { LocalPolicy } from ${source("policy.ts")}
+${call}
+self.onmessage = async (event) => {
+  const { listed, later } = event.data
+  Egress.configure(LocalPolicy.resolve({ global: { enabled: true, endpoints: [...listed, later] } }))
+  const results = {}
+  for (const url of [...listed, later]) results[url] = [await call(url, true), await call(url, false)]
+  const events = Egress.events().filter((item) => item.origin === later).map((item) => [item.source, item.decision, item.rule])
+  postMessage({ results, events })
+}
+postMessage("ready")
+`,
+    )
+    // A worker that follows the policy of the thread that started it, as OpenTUI's parser worker does.
+    const follower = path.join(dir.path, "follower.ts")
+    await Bun.write(
+      follower,
+      `import { EgressGuard } from ${source("guard.ts")}
+self.onmessage = async (event) => {
+  const { listed, later } = event.data
+  for (let tries = 0; tries < 200 && !EgressGuard.followed()?.endpoints.some((item) => item.origin === later); tries++)
+    await Bun.sleep(10)
+  const results = {}
+  for (const url of [...listed, later])
+    results[url] = await fetch(url + "/v1/chat/completions", { method: "POST", body: "secret prompt" }).then(
+      (response) => response.text(),
+      (error) => error.rule ?? error.name,
+    )
+  postMessage(results)
+}
+postMessage("ready")
+`,
+    )
+    const body = `Egress.backstop()
+const model = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("completion") })
+const six = Bun.serve({ hostname: "::1", port: 0, fetch: () => new Response("completion on ::1") })
+const listed = [\`http://127.0.0.1:\${model.port}\`, \`http://[::1]:\${six.port}\`]
+// A server on your network listed only after the workers started: their fetch can no longer be sent around the proxy.
+const later = "http://192.168.255.254:9"
+const policy = (endpoints) => LocalPolicy.resolve({ global: { enabled: true, endpoints } })
+Egress.configure(policy(listed))
+const started = (file) =>
+  new Promise((resolve) => {
+    const worker = new Worker(file)
+    worker.onmessage = () => resolve(worker)
+  })
+const ask = (worker, message) =>
+  new Promise((resolve) => {
+    worker.onmessage = (event) => resolve(event.data)
+    worker.postMessage(message)
+  })
+const engine = await started(${JSON.stringify(engine)})
+const follower = await started(${JSON.stringify(follower)})
+Egress.configure(policy([...listed, later]))
+const result = {
+  listed,
+  engine: await ask(engine, { listed, later }),
+  follower: await ask(follower, { listed, later }),
+}
+for (let tries = 0; tries < 200 && !Egress.events({ blocked: true }).some((item) => item.origin === later); tries++)
+  await Bun.sleep(10)
+result.logged = Egress.events({ blocked: true }).filter((item) => item.origin === later).map((item) => [item.source, item.rule])
+console.log(JSON.stringify(result))
+process.exit(0)`
+    type Result = {
+      listed: [string, string]
+      engine: { results: Record<string, unknown>; events: unknown }
+      follower: Record<string, unknown>
+      logged: unknown
+    }
+    const run = async (env: Record<string, string>) =>
+      (await spawned(dir.path, body, { HTTP_PROXY: `http://127.0.0.1:${proxy.port}`, ...env })) as Result
+    const later = "http://192.168.255.254:9"
+    try {
+      // NO_PROXY unset when the process starts: what this thread puts on it before a worker starts reaches the worker.
+      const unset = await run({})
+      const [four, six] = unset.listed
+      expect(seenByProxy).toEqual([])
+      expect(unset.engine.results).toEqual({
+        [four]: ["completion", "completion"],
+        [six]: ["completion on ::1", "completion on ::1"],
+        [later]: ["proxy-environment", "proxy-environment"],
+      })
+      // Each refusal is logged once, as refused: never first as a model call that was sent.
+      expect(unset.engine.events).toEqual([
+        ["local-inference", "block", "proxy-environment"],
+        ["unlabelled", "block", "proxy-environment"],
+      ])
+      expect(unset.follower).toEqual({ [four]: "completion", [six]: "completion on ::1", [later]: "proxy-environment" })
+      // What the following worker refused is in the log of the thread it follows.
+      expect(unset.logged).toEqual([["unlabelled", "proxy-environment"]])
+
+      // NO_PROXY set, empty, when the process starts: a worker keeps reading it empty, so every call is refused.
+      const empty = await run({ NO_PROXY: "", no_proxy: "" })
+      const refused = Object.fromEntries([...empty.listed, later].map((url) => [url, "proxy-environment"]))
+      expect(seenByProxy).toEqual([])
+      expect(empty.engine.results).toEqual(
+        Object.fromEntries(Object.keys(refused).map((url) => [url, ["proxy-environment", "proxy-environment"]])),
+      )
+      expect(empty.follower).toEqual(refused)
+    } finally {
+      proxy.stop(true)
+    }
+  }, 30_000)
 })

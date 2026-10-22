@@ -36,7 +36,18 @@ import { LocalPolicy } from "./policy"
 //   both runtimes match, which fetch reads at each request, and the proxy is never granted to it, so a client that
 //   still sends it there (Node's node:http agent reads the environment once) is refused at the socket. Under Bun,
 //   whose fetch and node:http reach the proxy natively, a request NO_PROXY would still not send direct, read the way
-//   Bun reads it (`carried`), is refused before it is sent.
+//   Bun reads it (`carried`), is refused before it is sent, and logged as refused, never as sent.
+// - A Bun worker's fetch does not read the proxy settings its own process.env shows (Bun 1.3). It reads its starting
+//   thread's as they were when it started, except that a variable the process started with keeps the value it
+//   started with; and given an `env`, as every Worker the guard wraps is, it ignores both that and what the worker
+//   writes later. So in a worker `carried` reads the settings its starting thread worked out for it
+//   (`fetchEnvironment`), and `direct` there decides nothing. Before a Worker starts, its starting thread puts this
+//   computer, and while Vector Local is on the model servers on the list, on its NO_PROXY, which reaches the worker
+//   unless the process started with NO_PROXY set. A request the worker's settings would still send to a proxy, such
+//   as one for a server listed after it started, is refused there with the NO_PROXY advice.
+// - A model server on the list whose name is an internet name (`gpu.corp.example.com`) counts as the internet here, so
+//   it may go through the company's proxy like any other request for the internet. Whether a listed server should go
+//   direct whatever its name is the owner's decision; until then this is how it works.
 // - A name allowed because its name says where it is (`localhost`, `nas.local`, `box.tail1.ts.net`) must resolve
 //   there: a socket's lookup that answers outside is refused before anything connects, and fetch and Bun.connect
 //   look the name up first. A name on the model server list is decided on the list instead, since a company's
@@ -46,7 +57,8 @@ import { LocalPolicy } from "./policy"
 // - Under Bun, a Worker started through the global `Worker` or the `node:worker_threads` module object preloads these
 //   wraps (`guard-worker.ts`), which follow the policy of the thread that started it (`follow`): the policy in effect
 //   when it starts, then each one `announce` sends. What the worker decides comes back to that thread for its log. A
-//   worker entry that decides its own policy (the TUI's engine thread) takes over from them (`unfollow`).
+//   worker entry that decides its own policy (the TUI's engine thread) takes over from them (`unfollow`). A Worker
+//   started in a sealed thread (`backstop-worker.ts`, the brain's reader) is sealed too.
 // With Vector Local off, each wrap costs one call and logs nothing; a Worker still preloads the wraps, to follow.
 //
 // Strict mode, for tests (VECTOR_TEST_EGRESS=strict), refuses any connection off this computer and throws. Under Bun it
@@ -64,7 +76,8 @@ import { LocalPolicy } from "./policy"
 //   own; in strict mode a child that keeps the proxy environment has its HTTP refused, but not its raw sockets);
 // - Bun.fetch and a fetch or WebSocket class captured before install, outside strict mode (in strict mode Bun.fetch
 //   and a captured fetch go through the guard's proxy, but a captured WebSocket class connects directly, since Bun's
-//   WebSocket does not read the proxy environment);
+//   WebSocket does not read the proxy environment). Under Bun the `undici` package's fetch is Bun.fetch, so the
+//   requests of the libraries that use it, such as @actions/github's Octokit (`vector github`), are not seen either;
 // - a Bun.connect captured before install, including `import { connect } from "bun"`;
 // - Bun.SQL (postgres) and Bun.RedisClient, which connect natively;
 // - in strict mode, Bun.fetch once a test sets NO_PROXY or a proxy variable of its own after install;
@@ -223,9 +236,20 @@ type GuardState = {
   channel?: BroadcastChannel
   /** The policy a `follow` guard decides under. */
   following?: () => LocalMode.Policy
+  /**
+   * Under Bun, in a worker: the proxy settings its fetch reads, as they were when it started (`fetchEnvironment`). It
+   * outlives the guard, which the worker's own entry may install again.
+   */
+  environment?: ProxySettings
+  /** On the main thread: the proxy settings the process started with. */
+  started?: ProxySettings
 }
+type ProxySettings = Readonly<Record<string, string | undefined>>
 const holder = globalThis as unknown as { [KEY]?: GuardState }
 const state: GuardState = (holder[KEY] ??= {})
+// The proxy settings this process started with, which a Bun worker it starts reads whatever was written since
+// (`workerEnvironment`). This module is the first import, so nothing has written them yet.
+if (workerThreads.isMainThread) state.started ??= proxySettings(process.env)
 
 type Fetch = typeof globalThis.fetch
 type FetchInit = RequestInit & { readonly proxy?: string | { readonly url: string }; readonly unix?: string }
@@ -246,12 +270,27 @@ type Lookup = (
   callback: (error: NodeJS.ErrnoException | null, address: string | dns.LookupAddress[], family?: number) => void,
 ) => void
 type Judged = { readonly blocked?: EgressBlocked; readonly within?: EgressAttribution.Within }
-type Judge = (attempt: Omit<Attempt, "allowed">) => Judged
+/**
+ * Decides one connection. `refuse` may still refuse one the policy or a labelled scope allows, such as a request a
+ * proxy would carry (`around`); it runs only for an allowed one, and its refusal is what is logged.
+ */
+type Judge = (attempt: Omit<Attempt, "allowed">, refuse?: () => LocalPolicy.Verdict | undefined) => Judged
 type FollowMessage =
   | { readonly type: "ask"; readonly owner: number }
   | { readonly type: "policy"; readonly owner: number; readonly policy: LocalMode.Policy }
   | { readonly type: "recorded"; readonly owner: number; readonly recorded: Recorded }
-const Followed = Schema.Struct({ owner: Schema.Number, policy: LocalMode.Policy })
+// What a Worker wrap passes in FOLLOW.environment: the starting thread's guard, its policy and the proxy settings the
+// worker's fetch will read; or that the starting thread is sealed.
+const Followed = Schema.Union([
+  Schema.Struct({
+    owner: Schema.Number,
+    policy: LocalMode.Policy,
+    proxy: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  }),
+  Schema.Struct({ sealed: Schema.Literal(true) }),
+])
+// The names this computer's loopback goes by, which every Worker's proxy settings send direct (`direct`).
+const LOOPBACK = ["127.0.0.1", "localhost", "[::1]"]
 
 /**
  * Whether a host stays on this computer: a loopback name or address, or a name the caller pinned there. A name under
@@ -265,7 +304,7 @@ export function local(host: string, names: readonly string[] = []) {
  * The proxies a request to `target` may go through under this environment: every variable for its scheme and
  * ALL_PROXY, since clients differ on which spelling wins. Empty when NO_PROXY sends it direct.
  */
-export function environmentProxies(target: URL, env: Readonly<Record<string, string | undefined>> = process.env) {
+export function environmentProxies(target: URL, env: ProxySettings = fetchEnvironment()) {
   const secure = target.protocol === "https:" || target.protocol === "wss:"
   const proxies = [
     ...(secure ? [env.HTTPS_PROXY, env.https_proxy] : [env.HTTP_PROXY, env.http_proxy]),
@@ -335,7 +374,8 @@ export function destinations(
  * every form a client matches, unless both lists already hold each of them. An entry that only covers it by a pattern
  * (`*.corp`, a bare `::1`) does not count, since Bun honours neither. Bun and Node read them at each fetch, so a
  * corporate proxy never sees a local model's prompt. Only the strict guard's own proxy, in the thread that runs it, is
- * left to decide what it carries.
+ * left to decide what it carries. In a Bun worker this reaches only the programs the worker starts, not its own fetch
+ * (`fetchEnvironment`).
  */
 export function direct(host: string) {
   const name = LocalPolicy.host(host)
@@ -355,9 +395,10 @@ export function direct(host: string) {
  * node:http read it: entries split on commas, `*` on its own, a name with the names under it (a leading dot is
  * dropped), an optional port, and an IPv6 address only in brackets. Bun prefers `no_proxy` and falls back to
  * `NO_PROXY`, so here both must send it direct. The strict guard's own proxy does not count. Undefined when it goes
- * direct.
+ * direct. The settings are the ones this thread's fetch reads (`fetchEnvironment`): in a Bun worker, those it started
+ * with, which `direct` does not change.
  */
-export function carried(url: URL, env: Readonly<Record<string, string | undefined>> = process.env) {
+export function carried(url: URL, env: ProxySettings = fetchEnvironment()) {
   const secure = url.protocol === "https:" || url.protocol === "wss:"
   const proxy = [
     ...(secure ? [env.HTTPS_PROXY, env.https_proxy] : [env.HTTP_PROXY, env.http_proxy]),
@@ -382,13 +423,41 @@ export function carried(url: URL, env: Readonly<Record<string, string | undefine
 
 /**
  * Sends a request for this computer or your network direct (`direct`), and under Bun, whose fetch and node:http reach
- * the proxy themselves, says which proxy would still carry it (`carried`). A request with a proxy of its own, and one
- * for the internet, are left as they are.
+ * the proxy themselves, says which proxy would still carry it (`carried`), read from the settings this thread's fetch
+ * reads, so a Bun worker, where `direct` changes nothing for its fetch, is told the truth. A request with a proxy of
+ * its own, and one for the internet, are left as they are.
  */
 export function around(url: URL, proxy?: FetchInit["proxy"]) {
   direct(url.hostname)
   if (!process.versions.bun || proxy || LocalPolicy.hostClass(url.hostname) === "internet") return undefined
   return carried(url)
+}
+
+/**
+ * The proxy settings this thread's fetch and node:http read: process.env, read at each request, except in a Bun
+ * worker, whose fetch keeps the settings of the thread that started it as they were then. There they are the settings
+ * that thread sent along (`follow`), or else the worker's own as its guard first found them, before `direct` wrote
+ * anything.
+ */
+export function fetchEnvironment(): ProxySettings {
+  if (!process.versions.bun || workerThreads.isMainThread) return process.env
+  state.environment ??= proxySettings(process.env)
+  return state.environment
+}
+
+// The proxy settings a Bun Worker this thread starts now will read (`fetchEnvironment`): a variable the process
+// started with keeps that value there, and any other has its value now. A worker's own Workers get what it reads.
+function workerEnvironment(): ProxySettings {
+  if (!workerThreads.isMainThread) return fetchEnvironment()
+  return { ...proxySettings(process.env), ...state.started }
+}
+
+// The proxy variables and both NO_PROXY spellings of an environment, read one by one: Bun leaves a variable set while
+// it runs out of process.env's own keys.
+function proxySettings(env: ProxySettings) {
+  return Object.fromEntries(
+    [...PROXY_VARIABLES, ...NO_PROXY_VARIABLES].flatMap((key) => (env[key] === undefined ? [] : [[key, env[key]]])),
+  ) as Record<string, string>
 }
 
 /** How a request `around` would leave to a proxy is refused and logged. */
@@ -461,7 +530,7 @@ export function install(options: Options): Handle {
  * under the policy of the thread that decides it, which the Worker wrap passed in FOLLOW.environment, and then each
  * one it announces. What the worker decides goes back to that thread for its log. A worker started without the
  * variable (one that shares its parent's environment) follows the main thread, with only this computer reachable
- * until it answers.
+ * until it answers. A worker started in a sealed thread is sealed too: any connection off this computer fails.
  */
 export function follow(env: Record<string, string | undefined> = process.env): Handle {
   if (state.handle) throw new Error("The egress guard is already installed.")
@@ -470,8 +539,11 @@ export function follow(env: Record<string, string | undefined> = process.env): H
   delete env[FOLLOW.environment]
   const followed = Option.getOrElse(
     text ? Schema.decodeUnknownOption(Schema.fromJsonString(Followed))(text) : Option.none(),
-    () => ({ owner: 0, policy: LocalPolicy.PENDING }),
+    (): typeof Followed.Type => ({ owner: 0, policy: LocalPolicy.PENDING }),
   )
+  if ("sealed" in followed) return installStrict({ proxy: false, throws: false })
+  // What this worker's fetch reads, which the starting thread knows and this worker's own process.env may not show.
+  if (followed.proxy && !workerThreads.isMainThread) state.environment ??= followed.proxy
   const current = { policy: followed.policy }
   const channel = new BroadcastChannel(FOLLOW.channel)
   channel.onmessage = (event: MessageEvent) => {
@@ -512,12 +584,13 @@ export function announce(policy: LocalMode.Policy) {
 // The guard under a policy: Vector Local's, read at every connection.
 function decider(options: Options, owned: { readonly owner: number; readonly stop: () => void }): Handle {
   const attempts: Attempt[] = []
-  const judge: Judge = (attempt) => {
-    const policy = options.policy()
+  const judge: Judge = (attempt, refuse) => {
     const scope = EgressAttribution.current()
     const grant = scope?.grants?.find((item) => sameHost(item.host, attempt.host) && samePort(item.port, attempt.port))
-    if (grant) return keep(attempts, { ...attempt, allowed: true }, { within: grant.within })
-    const verdict = socketVerdict(policy, attempt)
+    const decided = grant ? undefined : socketVerdict(options.policy(), attempt)
+    const refusal = grant || decided?.decision === "allow" ? refuse?.() : undefined
+    if (grant && !refusal) return keep(attempts, { ...attempt, allowed: true }, { within: grant.within })
+    const verdict = refusal ?? decided!
     const allowed = verdict.decision === "allow"
     const outcome = { ...attempt, allowed }
     if (!allowed || verdict.class !== "this-computer")
@@ -585,13 +658,25 @@ function decider(options: Options, owned: { readonly owner: number; readonly sto
     socketJudge,
     proxied,
     outside,
-    carried: (attempt) => refused(attempt, carriedVerdict(attempt.host)),
     throws: false,
     attempts,
     ...(preload && {
-      worker: () => ({
-        [FOLLOW.environment]: JSON.stringify({ owner: owned.owner, policy: options.policy() }),
-      }),
+      worker: () => {
+        // The worker's fetch keeps this thread's proxy settings as they are when it starts (`fetchEnvironment`), so
+        // this computer, and while Vector Local is on the model servers on the list, go on NO_PROXY first.
+        const policy = options.policy()
+        const listed = policy.enabled ? policy.endpoints.map((item) => item.origin) : []
+        ;[...LOOPBACK, ...listed.filter((item) => URL.canParse(item)).map((item) => new URL(item).hostname)].forEach(
+          direct,
+        )
+        return {
+          [FOLLOW.environment]: JSON.stringify({
+            owner: owned.owner,
+            policy,
+            proxy: workerEnvironment(),
+          }),
+        }
+      },
     }),
     stop: owned.stop,
   })
@@ -602,13 +687,12 @@ export function installStrict(options: StrictOptions = {}): Handle {
   if (state.handle) throw new Error("The egress guard is already installed.")
   const names = options.names ?? []
   const attempts: Attempt[] = []
-  const judge: Judge = (attempt) => {
+  const judge: Judge = (attempt, refuse) => {
     const allowed = local(attempt.host, names)
-    return keep(
-      attempts,
-      { ...attempt, allowed },
-      allowed ? {} : { blocked: new EgressBlocked(attempt.host, attempt.kind) },
-    )
+    const refusal = allowed ? refuse?.() : undefined
+    const blocked =
+      !allowed || refusal ? new EgressBlocked(attempt.host, attempt.kind, refusal?.rule, refusal?.reason) : undefined
+    return keep(attempts, { ...attempt, allowed: !blocked }, blocked ? { blocked } : {})
   }
 
   const originalConnect = net.Socket.prototype.connect as unknown as Connect
@@ -646,7 +730,8 @@ export function installStrict(options: StrictOptions = {}): Handle {
       ...Object.fromEntries(NO_PROXY_VARIABLES.map((key) => [key, ""])),
     }),
   }
-  // A Worker writes its own copy too: its fetch reads the environment its thread holds, not the parent's.
+  // A Worker writes its own copy too, for the programs it starts; its own fetch already reads the proxy settings of the
+  // thread that started it, which point at this proxy.
   if (ownProxy) Object.assign(process.env, strictEnvironment)
 
   // Any proxy but the guard's own carries a request off this computer, whatever its target.
@@ -668,10 +753,14 @@ export function installStrict(options: StrictOptions = {}): Handle {
     socketJudge: judge,
     proxied,
     outside: (attempt) => new EgressBlocked(attempt.host, attempt.kind),
-    carried: (attempt) => new EgressBlocked(attempt.host, attempt.kind, "proxy-environment", PROXY_ENVIRONMENT),
     throws: options.throws !== false,
     attempts,
-    worker: () => strictEnvironment,
+    // A sealed thread (one that fails a refused connection rather than throwing: a worker that makes no connections of
+    // its own) seals the Workers it starts too, outside a test as well, where the test variables mean nothing.
+    worker: () =>
+      options.throws === false
+        ? { ...strictEnvironment, [FOLLOW.environment]: JSON.stringify({ sealed: true }) }
+        : strictEnvironment,
     stop: () => {
       proxy?.stop()
       // Bun's fetch reads the proxy environment at each request, and deleting a variable does not reach it, so a
@@ -737,8 +826,6 @@ type Wrap = {
   readonly socketJudge: Judge
   readonly proxied: (target: URL, init: FetchInit | undefined) => EgressBlocked | undefined
   readonly outside: (attempt: Omit<Attempt, "allowed">) => EgressBlocked
-  /** The refusal of an allowed request for this computer or your network that a proxy would still carry (`around`). */
-  readonly carried: (attempt: Omit<Attempt, "allowed">) => EgressBlocked
   readonly throws: boolean
   readonly attempts: Attempt[]
   /** The environment every Worker this guard sees started gets, with the guard preloaded; none when it has no preload. */
@@ -747,6 +834,8 @@ type Wrap = {
 }
 
 function wrap(input: Wrap): Handle {
+  // In a Bun worker, the proxy settings its fetch reads are taken now, before `direct` writes anything there.
+  fetchEnvironment()
   const originalFetch = globalThis.fetch
   // Bun's fetch has preconnect; Node's has none, and gets none.
   const originalPreconnect = (originalFetch as { preconnect?: Preconnect }).preconnect
@@ -758,20 +847,26 @@ function wrap(input: Wrap): Handle {
     if (!addresses) return undefined
     return addresses.every((item) => inside(item.address, place)) ? undefined : input.outside(attempt)
   }
+  // A request for this computer or your network goes direct, or is refused when a proxy would still carry it: unless a
+  // proxy it would go through is refused itself (`proxied`), which says more.
   const decide = (url: URL, init: FetchInit | undefined, method: string) => {
     const attempt = { kind: "fetch" as const, host: url.hostname, port: portOf(url), url: url.origin, method }
-    const judged = input.judge(attempt)
-    return { attempt, judged, blocked: judged.blocked ?? input.proxied(url, init) }
+    // Decided once, and only when it matters.
+    const proxy: { checked?: { readonly blocked?: EgressBlocked } } = {}
+    const viaProxy = () => (proxy.checked ??= { blocked: input.proxied(url, init) }).blocked
+    const judged = input.judge(attempt, () =>
+      !viaProxy() && around(url, init?.proxy) ? carriedVerdict(url.hostname) : undefined,
+    )
+    return { attempt, judged, blocked: judged.blocked ?? viaProxy() }
   }
   // An allowed unlabelled request runs with its own destinations granted, so the socket it opens through Node's fetch,
-  // or the proxy that carries it, passes as this request. A request for this computer or your network goes direct.
+  // or the proxy that carries it, passes as this request.
   const send = (
     target: URL,
     init: FetchInit | undefined,
     checked: { readonly attempt: Omit<Attempt, "allowed">; readonly judged: Judged },
     run: () => Promise<Response>,
   ) => {
-    if (around(target, init?.proxy)) return Promise.reject(input.carried(checked.attempt))
     const judged = checked.judged
     const scope = EgressAttribution.current()
     const [own, ...proxies] = destinations(target, { proxy: init?.proxy })
@@ -890,13 +985,12 @@ function wrap(input: Wrap): Handle {
       decided.add(this)
       const host = String(this.host ?? "localhost")
       const attempt = { kind: "http" as const, host, port: numberOf(this.port), method: this.method }
-      const judged = input.judge(attempt)
       // Bun's client reads the proxy environment the way its fetch does.
       const name = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host
       const address = `${this.protocol || "http:"}//${name}${attempt.port === undefined ? "" : `:${attempt.port}`}`
       const target = URL.canParse(address) ? new URL(address) : undefined
-      if (!target && !judged.blocked) direct(host)
-      const blocked = judged.blocked ?? (target && around(target) ? input.carried(attempt) : undefined)
+      const blocked = input.judge(attempt, () => (target && around(target) ? carriedVerdict(host) : undefined)).blocked
+      if (!target && !blocked) direct(host)
       if (!blocked) return original.apply(this, args)
       if (input.throws) throw blocked
       // Bun's request emits nothing when it is destroyed before it starts, so the refusal is its error event.
@@ -1023,9 +1117,10 @@ function socketVerdict(policy: LocalMode.Policy, attempt: Omit<Attempt, "allowed
   )
 }
 
+// A proxy this thread's environment names, or, in a Bun worker, the settings its fetch reads.
 function configuredProxy(host: string, port: number | undefined) {
-  return [...PROXY_VARIABLES]
-    .map((key) => process.env[key])
+  return [process.env, fetchEnvironment()]
+    .flatMap((env) => PROXY_VARIABLES.map((key) => env[key]))
     .filter((value): value is string => Boolean(value) && URL.canParse(value!))
     .map((value) => new URL(value))
     .some((proxy) => sameHost(proxy.hostname, host) && samePort(portOf(proxy), port))

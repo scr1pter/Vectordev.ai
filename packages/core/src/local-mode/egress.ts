@@ -22,9 +22,10 @@ import { LocalStartup } from "./startup"
 // start may turn it on (the environment, VECTOR_LOCAL=1, which Vector's children inherit, or a managed or user config
 // file: LocalStartup), `backstop` starts it pending instead, before any other module runs: only this computer is
 // reachable, for every purpose, until config sets the policy it resolves at start with `resolve` or `configure`
-// (Config.refreshLocal does, when the engine's config loads). From then on every decision reads it. While Vector Local
-// is on, each decision is an event: in memory (the last 2,000), on disk when a log directory is configured, and in the
-// counters the pane shows.
+// (Config.refreshLocal does, when the engine's config loads, and the desktop's main process resolves its own from the
+// desktop's folders with LocalStartup.policy). From then on every decision reads it. While Vector Local is on, each
+// decision is an event: in memory (the last 2,000), on disk when a log directory is configured, and in the counters
+// the pane shows.
 
 export type Request = {
   /** The registry source making the request (LocalSources). An id the registry does not have is purpose `unknown`. */
@@ -160,6 +161,12 @@ export function resolve(
 
 /** Whether a labelled request may go, and its log line while Vector Local is on. */
 export function decide(request: Request): Decided {
+  return settle(request)
+}
+
+// `decide`, where `refuse` may still refuse a request the policy allows, such as one a proxy would carry: the log then
+// has that refusal in place of the allow, and a one-time grant is kept for a request that is sent.
+function settle(request: Request, refuse?: () => LocalPolicy.Verdict | undefined): Decided {
   const purpose = LocalSources.get(request.source)?.purpose ?? "unknown"
   const verdict = LocalPolicy.decide(state.policy, {
     purpose,
@@ -168,10 +175,11 @@ export function decide(request: Request): Decided {
     manual: request.manual,
   })
   // A one-time grant answers one ask: a download, or a manual update check the user confirmed.
-  const final =
-    verdict.decision === "ask" && take(request.source)
-      ? { ...verdict, decision: "allow" as const, reason: "You allowed this once." }
-      : verdict
+  const granted = verdict.decision === "ask" && (state.grants.get(request.source) ?? 0) > 0
+  const allowed = granted ? { ...verdict, decision: "allow" as const, reason: "You allowed this once." } : verdict
+  const refusal = allowed.decision === "allow" ? refuse?.() : undefined
+  if (granted && !refusal) take(request.source)
+  const final = refusal ?? allowed
   return { ...final, purpose, event: record(request, final) }
 }
 
@@ -220,16 +228,13 @@ export async function fetch(
   const mode = inference ? "error" : (options.redirect ?? (input instanceof Request ? input.redirect : "follow"))
   const first = EgressGuard.firstHop(input, options)
   const hop = async (url: URL, current: EgressGuard.Hop, count: number): Promise<Response> => {
-    const decided = decide({ source, url, method: current.method, manual, tool, bytes: bodySize(current.body) })
+    // A request for this computer or your network, such as a local model's prompt, never goes through a proxy: it is
+    // sent direct, or refused (and logged as refused, not as sent) when the proxy settings would still carry it.
+    const decided = settle({ source, url, method: current.method, manual, tool, bytes: bodySize(current.body) }, () =>
+      EgressGuard.around(url, options.proxy) ? EgressGuard.carriedVerdict(url.hostname) : undefined,
+    )
     if (decided.decision !== "allow")
       throw new EgressGuard.EgressBlocked(url.hostname, "fetch", decided.rule, decided.reason)
-    // A request for this computer or your network, such as a local model's prompt, never goes through a proxy: it is
-    // sent direct, or refused when the proxy settings would still carry it.
-    if (EgressGuard.around(url, options.proxy)) {
-      const verdict = EgressGuard.carriedVerdict(url.hostname)
-      record({ source, url, method: current.method, tool }, verdict)
-      throw new EgressGuard.EgressBlocked(url.hostname, "fetch", verdict.rule, verdict.reason)
-    }
     const grants = EgressGuard.destinations(url, { proxy: options.proxy, listed: decided.class === "listed" })
     const response = await EgressAttribution.granted({ source, purpose: decided.purpose, grants }, () =>
       send(count === 0 ? input : url, count === 0 ? { ...options, redirect: "manual" } : current),

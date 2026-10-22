@@ -105,3 +105,71 @@ describe("LocalStartup.enabled", () => {
     expect(LocalStartup.enabled({ ...input, env: {}, platform: "linux" })).toBe(false)
   })
 })
+
+// The policy of a process whose config never resolves it, the desktop's main process: the user's own config and the
+// environment decide it, and every other source can only turn it on.
+describe("LocalStartup.policy", () => {
+  test("is the user's own policy, from the global folder and the desktop's own folder", async () => {
+    await using dir = await tmpdir()
+    const input = folders(dir.path)
+    const desktop = path.join(dir.path, "desktop")
+    const env = { VECTOR_CLIENT: "desktop", VECTOR_AGENT_CONFIG_DIR: desktop }
+    expect(LocalStartup.policy({ ...input, env })).toMatchObject({ enabled: false })
+    write(path.join(input.config, "vector.json"), JSON.stringify({ local: { web_domains: { deny: ["a.example"] } } }))
+    write(
+      path.join(desktop, "vector.json"),
+      JSON.stringify({ local: { enabled: true, web: "network", endpoints: ["http://127.0.0.1:11434"] } }),
+    )
+    const resolved = LocalStartup.policy({ ...input, env })
+    expect(resolved).toMatchObject({
+      enabled: true,
+      web: "network",
+      web_domains: { deny: ["a.example"] },
+      endpoints: [{ origin: "http://127.0.0.1:11434", from: "user" }],
+    })
+    expect(resolved.pending).toBeUndefined()
+    // A block Vector cannot decode keeps it on with no web.
+    write(path.join(desktop, "vector.json"), JSON.stringify({ local: { enabled: "yes" } }))
+    expect(LocalStartup.policy({ ...input, env })).toMatchObject({ enabled: true, web: "none" })
+  })
+
+  test("lets a company's file, an override and the confirmed block only turn it on and tighten Web access", async () => {
+    await using dir = await tmpdir()
+    const input = folders(dir.path)
+    write(path.join(input.config, "vector.json"), JSON.stringify({ local: { web: "ask" } }))
+    const company = path.join(input.managed[0]!, "vector.json")
+    write(
+      company,
+      JSON.stringify({
+        local: {
+          lock: true,
+          web: "network",
+          endpoints: ["http://10.0.0.5:8000"],
+          allow: [{ source: "usage", reason: "Counts", added_at: 1, added_by: "app" }],
+        },
+      }),
+    )
+    // Its owner is not checked here, so what it would let through does not apply.
+    expect(LocalStartup.policy({ ...input, env: {} })).toMatchObject({
+      enabled: true,
+      web: "network",
+      lock: false,
+      endpoints: [],
+      allow: [],
+    })
+    fs.rmSync(company)
+    expect(
+      LocalStartup.policy({ ...input, env: { VECTOR_CONFIG_CONTENT: `{"local":{"enabled":true}}` } }),
+    ).toMatchObject({ enabled: true, web: "ask" })
+    write(path.join(input.state, "local-confirmed-0123456789abcdef.json"), JSON.stringify({ local: { enabled: true } }))
+    expect(LocalStartup.policy({ ...input, env: {} })).toMatchObject({ enabled: true })
+  })
+
+  test("does not turn it on for a macOS profile, which it cannot read without running a program", async () => {
+    await using dir = await tmpdir()
+    const input = folders(dir.path)
+    write(path.join(input.preferences, "ai.vector.managed.plist"), "bplist00Ñ\u0001\u0002Ulocal")
+    expect(LocalStartup.enabled({ ...input, env: {}, platform: "darwin" })).toBe(true)
+    expect(LocalStartup.policy({ ...input, env: {}, platform: "darwin" })).toMatchObject({ enabled: false })
+  })
+})
