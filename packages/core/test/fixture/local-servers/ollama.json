@@ -43,7 +43,7 @@
         "headers": {
           "content-type": "application/json"
         },
-        "body": "{\"models\": [{\"name\": \"qwen3-coder:30b\", \"model\": \"qwen3-coder:30b\", \"modified_at\": \"2026-10-01T10:00:00.000000000Z\", \"size\": 18556700761, \"digest\": \"06c1097efce0431c2045fe7b2e5108366e43bee1b4603a7aded8f21689e90bca\", \"details\": {\"parent_model\": \"\", \"format\": \"gguf\", \"family\": \"qwen3moe\", \"families\": [\"qwen3moe\"], \"parameter_size\": \"30.5B\", \"quantization_level\": \"Q4_K_M\"}}, {\"name\": \"gemma3:12b\", \"model\": \"gemma3:12b\", \"modified_at\": \"2026-09-20T08:00:00.000000000Z\", \"size\": 8149190253, \"digest\": \"f4031aab637d1ffa37b42570452ae0e4fad0314754d17ded67322e4b95836f8a\", \"details\": {\"parent_model\": \"\", \"format\": \"gguf\", \"family\": \"gemma3\", \"families\": [\"gemma3\"], \"parameter_size\": \"12.2B\", \"quantization_level\": \"Q4_K_M\"}}, {\"name\": \"llama3.3:70b\", \"model\": \"llama3.3:70b\", \"modified_at\": \"2026-09-02T08:00:00.000000000Z\", \"size\": 42520413916, \"digest\": \"a6eb4748fd2990ad2952b2335a95a7f952d1a06119a0aa6a2df6cd052a93a3fa\", \"details\": {\"parent_model\": \"\", \"format\": \"gguf\", \"family\": \"llama\", \"families\": [\"llama\"], \"parameter_size\": \"70.6B\", \"quantization_level\": \"Q4_K_M\"}}, {\"name\": \"gpt-oss:120b-cloud\", \"model\": \"gpt-oss:120b-cloud\", \"remote_model\": \"gpt-oss:120b\", \"remote_host\": \"https://ollama.com:443\", \"modified_at\": \"2026-10-01T10:00:00.000000000Z\", \"size\": 384, \"digest\": \"569662207105a7a0a8b6ee3a2a2ac2a8cbbf1c8b6bb0f3a1e9d9fbbb3f6a5a43\", \"details\": {\"parent_model\": \"\", \"format\": \"\", \"family\": \"\", \"families\": null, \"parameter_size\": \"\", \"quantization_level\": \"\"}}]}"
+        "body": "{\"models\": [{\"name\": \"qwen3-coder:30b\", \"model\": \"qwen3-coder:30b\", \"modified_at\": \"2026-10-01T10:00:00.000000000Z\", \"size\": 18556700761, \"digest\": \"06c1097efce0431c2045fe7b2e5108366e43bee1b4603a7aded8f21689e90bca\", \"details\": {\"parent_model\": \"\", \"format\": \"gguf\", \"family\": \"qwen3moe\", \"families\": [\"qwen3moe\"], \"parameter_size\": \"30.5B\", \"quantization_level\": \"Q4_K_M\"}}, {\"name\": \"gemma3:12b\", \"model\": \"gemma3:12b\", \"modified_at\": \"2026-09-20T08:00:00.000000000Z\", \"size\": 8149190253, \"digest\": \"f4031aab637d1ffa37b42570452ae0e4fad0314754d17ded67322e4b95836f8a\", \"details\": {\"parent_model\": \"\", \"format\": \"gguf\", \"family\": \"gemma3\", \"families\": [\"gemma3\"], \"parameter_size\": \"12.2B\", \"quantization_level\": \"Q4_K_M\"}}, {\"name\": \"llama3.3:70b\", \"model\": \"llama3.3:70b\", \"modified_at\": \"2026-09-02T08:00:00.000000000Z\", \"size\": 42520413916, \"digest\": \"a6eb4748fd2990ad2952b2335a95a7f952d1a06119a0aa6a2df6cd052a93a3fa\", \"details\": {\"parent_model\": \"\", \"format\": \"gguf\", \"family\": \"llama\", \"families\": [\"llama\"], \"parameter_size\": \"70.6B\", \"quantization_level\": \"Q4_K_M\"}}, {\"name\": \"gpt-oss:120b-cloud\", \"model\": \"gpt-oss:120b-cloud\", \"remote_model\": \"gpt-oss:120b\", \"remote_host\": \"https://ollama.com:443\", \"modified_at\": \"2026-10-01T10:00:00.000000000Z\", \"size\": 384, \"digest\": \"569662207105a7a0a8b6ee3a2a2ac2a8cbbf1c8b6bb0f3a1e9d9fbbb3f6a5a43\", \"details\": {\"parent_model\": \"\", \"format\": \"\", \"family\": \"\", \"families\": null, \"parameter_size\": \"\", \"quantization_level\": \"\"}}, {\"name\": \"nomic-embed-text:latest\", \"model\": \"nomic-embed-text:latest\", \"modified_at\": \"2026-08-12T08:00:00.000000000Z\", \"size\": 274302450, \"digest\": \"0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f\", \"details\": {\"parent_model\": \"\", \"format\": \"gguf\", \"family\": \"nomic-bert\", \"families\": [\"nomic-bert\"], \"parameter_size\": \"137M\", \"quantization_level\": \"F16\"}}]}"
       }
     },
     {
@@ -98,6 +98,24 @@
           "content-type": "application/json"
         },
         "body": "{\"license\": \"LLAMA 3.3 COMMUNITY LICENSE AGREEMENT\", \"modelfile\": \"FROM llama3.3:70b\", \"parameters\": \"num_ctx                        32768\\nstop                           \\\"<|eot_id|>\\\"\", \"template\": \"{{ .Prompt }}\", \"details\": {\"parent_model\": \"\", \"format\": \"gguf\", \"family\": \"llama\", \"families\": [\"llama\"], \"parameter_size\": \"70.6B\", \"quantization_level\": \"Q4_K_M\"}, \"model_info\": {\"general.architecture\": \"llama\", \"general.parameter_count\": 70553706560, \"llama.context_length\": 131072}, \"capabilities\": [\"completion\", \"tools\"], \"modified_at\": \"2026-09-02T08:00:00.000000000Z\"}"
+      }
+    },
+    {
+      "transport": "http",
+      "request": {
+        "method": "POST",
+        "url": "http://127.0.0.1:11434/api/show",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"model\": \"nomic-embed-text:latest\"}"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"license\": \"Apache License Version 2.0\", \"modelfile\": \"FROM nomic-embed-text:latest\", \"parameters\": \"num_ctx                        8192\", \"template\": \"{{ .Prompt }}\", \"details\": {\"parent_model\": \"\", \"format\": \"gguf\", \"family\": \"nomic-bert\", \"families\": [\"nomic-bert\"], \"parameter_size\": \"137M\", \"quantization_level\": \"F16\"}, \"model_info\": {\"general.architecture\": \"nomic-bert\", \"general.parameter_count\": 136727040, \"nomic-bert.context_length\": 2048}, \"capabilities\": [\"embedding\"], \"modified_at\": \"2026-08-12T08:00:00.000000000Z\"}"
       }
     },
     {

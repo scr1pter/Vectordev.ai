@@ -69,6 +69,18 @@ describe("locate", () => {
     expect(LocalProbe.locate("http://LOCALHOST:8000/v1?x=1#y")?.origin).toBe("http://localhost:8000")
   })
 
+  test("takes a pasted request address back to the server's base", () => {
+    expect(LocalProbe.locate("http://127.0.0.1:8000/v1/chat/completions")?.baseURL).toBe("http://127.0.0.1:8000/v1")
+    expect(LocalProbe.locate("https://ml.corp.example.com/qwen/v1/models/")).toMatchObject({
+      root: "https://ml.corp.example.com/qwen",
+      baseURL: "https://ml.corp.example.com/qwen/v1",
+    })
+    expect(LocalProbe.locate("http://10.0.0.5:8000/v1/completions")?.baseURL).toBe("http://10.0.0.5:8000/v1")
+    // A path prefix that only looks like one stays: here /models is where the gateway serves its models.
+    expect(LocalProbe.locate("https://gw.corp.example.com/models/v1")?.root).toBe("https://gw.corp.example.com/models")
+    expect(LocalProbe.locate("https://gw.corp.example.com/models")?.root).toBe("https://gw.corp.example.com/models")
+  })
+
   test("refuses addresses that are not plain http or https, and addresses with credentials", () => {
     expect(LocalProbe.locate("ftp://127.0.0.1/")).toBeUndefined()
     expect(LocalProbe.locate("file:///etc/passwd")).toBeUndefined()
@@ -109,6 +121,15 @@ describe("probe a typed address", () => {
     found!.models
       .filter((model) => model.context)
       .forEach((model) => expect(model.output).toBe(Math.min(8192, Math.floor(model.context! / 4))))
+  })
+
+  test("keeps the version a server writes as plain text, since Vector shows and pins it", async () => {
+    const server = await fake("vllm", {
+      "GET /version": () => Response.json({ version: "0.11.0\u001b[2J <b>evil</b>\n" }),
+    })
+    const found = (await LocalProbe.probe(server.origin))!
+    expect(found.version).toBe("0.11.0 evil")
+    expect(found.pin.version).toBe("0.11.0 evil")
   })
 
   test("labels Ollama's cloud models and a LiteLLM proxy as servers that forward", async () => {
@@ -223,6 +244,46 @@ describe("identity pins", () => {
     expect(await LocalProbe.spki(plain.origin.replace("http:", "https:"), 1_000)).toBeNull()
   })
 })
+
+// MCP-style tools whose parameters refer to themselves.
+const FILTER: LocalProbe.Tool = {
+  name: "query",
+  description: "Queries a database with a filter.",
+  parameters: {
+    type: "object",
+    properties: { filter: { $ref: "#/$defs/Filter" } },
+    required: ["filter"],
+    $defs: {
+      Filter: {
+        anyOf: [
+          {
+            type: "object",
+            properties: { and: { type: "array", items: { $ref: "#/$defs/Filter" } } },
+            required: ["and"],
+          },
+          { type: "object", properties: { property: { type: "string" } }, required: ["property"] },
+        ],
+      },
+    },
+  },
+}
+
+const NODE: LocalProbe.Tool = {
+  name: "tree",
+  description: "Writes a tree.",
+  parameters: {
+    type: "object",
+    properties: { root: { $ref: "#/$defs/Node" } },
+    required: ["root"],
+    $defs: {
+      Node: {
+        type: "object",
+        properties: { name: { type: "string" }, child: { $ref: "#/$defs/Node" } },
+        required: ["name", "child"],
+      },
+    },
+  },
+}
 
 describe("Check models", () => {
   test("runs the role's tools over three requests: a simple call, the most nested call and a tool result", async () => {
@@ -437,11 +498,204 @@ describe("Check models", () => {
     expect(checked).toMatchObject({ result: "failed", requests: 0 })
     expect(server.hits().filter((hit) => hit.path.startsWith("/v1/chat"))).toEqual([])
   })
+
+  test("sends tools whose parameters refer to themselves, and asks for a call only to tools it can write out", async () => {
+    const server = await fake("vllm", { "POST /v1/chat/completions": LocalServers.chat() })
+    const tools = [...TOOLS, FILTER, NODE]
+    const checked = await LocalProbe.check({
+      server: (await LocalProbe.probe(server.origin))!,
+      model: "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+      tools,
+    })
+    expect(checked).toMatchObject({ result: "works", requests: 3 })
+    const bodies = server
+      .hits()
+      .filter((hit) => hit.path === "/v1/chat/completions")
+      .map((hit) => JSON.parse(hit.body) as LocalServers.ChatBody)
+    bodies.forEach((body) =>
+      expect(body.tools?.map((tool) => tool.function.name)).toEqual(tools.map((tool) => tool.name)),
+    )
+    const asked = bodies.map((body) => String(body.messages.findLast((message) => message.role === "user")?.content))
+    expect(asked.some((text) => text.startsWith("Call the tree tool"))).toBe(false)
+  })
+
+  test("does not check a typed cloud model that is not on the server's list either", async () => {
+    const server = await fake("ollama", { "POST /v1/chat/completions": LocalServers.chat() })
+    const found = (await LocalProbe.probe(server.origin))!
+    expect(found.models.some((model) => model.id === "kimi-k2:1t-cloud")).toBe(false)
+    const checked = await LocalProbe.check({ server: found, model: "kimi-k2:1t-cloud", tools: TOOLS })
+    expect(checked).toMatchObject({ result: "failed", requests: 0 })
+    expect(checked.message).toContain("runs on ollama.com")
+    expect(server.hits().filter((hit) => hit.path.startsWith("/v1/chat"))).toEqual([])
+  })
+
+  test("reads the context LM Studio loaded a model with after the first request", async () => {
+    const server = await fake("lmstudio", { "POST /v1/chat/completions": LocalServers.chat() })
+    const found = (await LocalProbe.probe(server.origin))!
+    expect(found.models.find((model) => model.id === "qwen2-vl-7b-instruct")?.context).toBeUndefined()
+    // The first request loads it, with the 4,096 tokens set in the app.
+    server.route("GET /api/v0/models", () =>
+      Response.json({
+        object: "list",
+        data: [{ id: "qwen2-vl-7b-instruct", type: "vlm", state: "loaded", loaded_context_length: 4096 }],
+      }),
+    )
+    const checked = await LocalProbe.check({
+      server: found,
+      model: "qwen2-vl-7b-instruct",
+      tools: TOOLS,
+      required: 19_000,
+    })
+    expect(checked).toMatchObject({ result: "context-too-small", requests: 1, context: 4096 })
+    expect(checked.offer).toBeUndefined()
+  })
+
+  test("leaves room for a reasoning model to think, and counts its first thought as the first token", async () => {
+    const encoder = new TextEncoder()
+    const line = (event: unknown) => encoder.encode(`data: ${JSON.stringify(event)}\n\n`)
+    const server = await fake("vllm", {
+      "POST /v1/chat/completions": LocalServers.chat((input) => {
+        if (!input.tool) return undefined
+        const call = input.tool
+        const args = input.args ?? "{}"
+        // It thinks at once, then calls the tool a moment later.
+        const body = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            controller.enqueue(line({ choices: [{ index: 0, delta: { reasoning: "The user wants a tool call." } }] }))
+            await Bun.sleep(400)
+            controller.enqueue(
+              line({
+                choices: [
+                  {
+                    index: 0,
+                    delta: { tool_calls: [{ index: 0, id: "c", function: { name: call, arguments: args } }] },
+                  },
+                ],
+              }),
+            )
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"))
+            controller.close()
+          },
+        })
+        return new Response(body, { headers: { "content-type": "text/event-stream" } })
+      }),
+    })
+    const checked = await LocalProbe.check({
+      server: (await LocalProbe.probe(server.origin))!,
+      model: "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+      tools: TOOLS,
+    })
+    expect(checked.result).toBe("works")
+    expect(checked.ttft_ms).toBeLessThan(300)
+    const bodies = server
+      .hits()
+      .filter((hit) => hit.path === "/v1/chat/completions")
+      .map((hit) => JSON.parse(hit.body) as { max_tokens: number })
+    bodies.forEach((body) => expect(body.max_tokens).toBe(2048))
+  })
+
+  test("a reply that runs out of tokens before any call is not a model without tools", async () => {
+    const server = await fake("vllm", {
+      "POST /v1/chat/completions": LocalServers.chat(() =>
+        LocalServers.sse([
+          { choices: [{ index: 0, delta: { reasoning_content: "Let me think about this carefully…" } }] },
+          { choices: [{ index: 0, delta: {}, finish_reason: "length" }] },
+        ]),
+      ),
+    })
+    const found = (await LocalProbe.probe(server.origin))!
+    const checked = await LocalProbe.check({ server: found, model: "Qwen/Qwen3-Coder-30B-A3B-Instruct", tools: TOOLS })
+    expect(checked).toMatchObject({ result: "failed", requests: 1 })
+    expect(checked.message).toBe(
+      "Qwen/Qwen3-Coder-30B-A3B-Instruct used its whole 2,048-token reply before it called a tool, so Vector could not tell whether it calls tools. Lower its reasoning effort, or pick another model.",
+    )
+    // So Check models writes nothing about its tool calling.
+    const patch = LocalProbe.patch({ providerID: "gpu", server: found, checks: [checked] })
+    expect(patch.provider["gpu"]?.models["Qwen/Qwen3-Coder-30B-A3B-Instruct"]?.tool_call).toBeUndefined()
+  })
+
+  test("the same reply cut off by a server that does not stream", async () => {
+    const server = await fake("vllm", {
+      "POST /v1/chat/completions": () =>
+        Response.json({ choices: [{ index: 0, message: { content: "" }, finish_reason: "length" }] }),
+    })
+    const checked = await LocalProbe.check({
+      server: (await LocalProbe.probe(server.origin))!,
+      model: "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+      tools: TOOLS,
+    })
+    expect(checked.result).toBe("failed")
+    expect(checked.message).toContain("used its whole 2,048-token reply")
+  })
+
+  test("stops reading an answer larger than 4 MB", async () => {
+    const chunk = new TextEncoder().encode(
+      `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "x".repeat(64 * 1024) } }] })}\n\n`,
+    )
+    // About 6.5 MB of reply text, with no tool call.
+    const server = await fake("vllm", {
+      "POST /v1/chat/completions": () =>
+        new Response(new Blob(Array.from({ length: 100 }, () => chunk)), {
+          headers: { "content-type": "text/event-stream" },
+        }),
+    })
+    const checked = await LocalProbe.check({
+      server: (await LocalProbe.probe(server.origin))!,
+      model: "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+      tools: TOOLS,
+    })
+    expect(checked).toMatchObject({ result: "failed", requests: 1 })
+    expect(checked.message).toBe("vLLM answered: More than 4 MB, which Vector stopped reading.")
+  })
+
+  test("shows the tool name a model wrote as plain text", async () => {
+    const server = await fake("vllm", {
+      "POST /v1/chat/completions": LocalServers.chat(() =>
+        LocalServers.sse([
+          {
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  tool_calls: [{ index: 0, id: "c", function: { name: "glob\u001b[31m<i>x</i>", arguments: "{}" } }],
+                },
+              },
+            ],
+          },
+        ]),
+      ),
+    })
+    const checked = await LocalProbe.check({
+      server: (await LocalProbe.probe(server.origin))!,
+      model: "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+      tools: TOOLS,
+    })
+    expect(checked.result).toBe("failed")
+    expect(checked.message).toStartWith("Qwen/Qwen3-Coder-30B-A3B-Instruct called glob x with arguments")
+    expect(checked.message).not.toContain("\u001b")
+    expect(checked.message).not.toContain("<i>")
+  })
 })
 
 describe("example arguments and their check", () => {
   test("every tool's example fits its own parameters", () => {
     TOOLS.forEach((tool) => expect(LocalProbe.fits(tool.parameters, LocalProbe.example(tool.parameters))).toBe(true))
+  })
+
+  test("a schema that refers to itself still gets an example, and the check never runs forever", () => {
+    // A filter made of filters, as some MCP tools have: the first alternative always needs another filter.
+    const filter = FILTER.parameters
+    const made = LocalProbe.example(filter)
+    expect(LocalProbe.fits(filter, made)).toBe(true)
+    expect(JSON.stringify(made)).toContain('"and":[]')
+    // A node that always needs a child cannot be written out, so its example does not fit.
+    expect(LocalProbe.fits(NODE.parameters, LocalProbe.example(NODE.parameters))).toBe(false)
+    // Refs that only lead back to themselves end too.
+    const loop = { $ref: "#/$defs/A", $defs: { A: { $ref: "#/$defs/B" }, B: { $ref: "#/$defs/A" } } }
+    expect(LocalProbe.example(loop)).toBe("check")
+    const alternatives = { $ref: "#/$defs/A", $defs: { A: { anyOf: [{ $ref: "#/$defs/A" }] } } }
+    expect(LocalProbe.fits(alternatives, "anything")).toBe(false)
+    expect(LocalProbe.depth(NODE.parameters)).toBeGreaterThan(0)
   })
 
   test("missing required fields and wrong types do not fit", () => {
@@ -541,6 +795,24 @@ describe("what Check models writes", () => {
     const ollama = (await LocalProbe.probe((await fake("ollama")).origin))!
     expect(LocalProbe.patch({ providerID: "ollama", server: ollama }).provider["ollama"]?.options).toEqual({
       concurrency: 1,
+    })
+  })
+
+  test("a count of requests someone set stays, and the server's is written only where none is set", async () => {
+    const ollama = (await LocalProbe.probe((await fake("ollama")).origin))!
+    // Ollama started with OLLAMA_NUM_PARALLEL=4, which its API does not report.
+    expect(LocalProbe.patch({ providerID: "ollama", server: ollama, concurrency: 4 }).provider["ollama"]?.options).toBe(
+      undefined,
+    )
+    expect(LocalProbe.patch({ providerID: "ollama", server: ollama }).provider["ollama"]?.options).toEqual({
+      concurrency: 1,
+    })
+    const vllm = (await LocalProbe.probe((await fake("vllm")).origin))!
+    const company = { ...vllm, origin: "https://ml.corp.example.com", class: "internet" as const }
+    expect(
+      LocalProbe.patch({ providerID: "company", server: company, concurrency: 8 }).provider["company"]?.options,
+    ).toEqual({
+      headerTimeout: 600_000,
     })
   })
 

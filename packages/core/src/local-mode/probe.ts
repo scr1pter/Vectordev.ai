@@ -116,7 +116,8 @@ export type Options = {
 
 /**
  * Where a typed address points: its origin, the root its paths hang off (an address may have a path prefix in front
- * of `/v1`) and the OpenAI-compatible base address. Undefined for anything that is not a plain http or https URL.
+ * of `/v1`) and the OpenAI-compatible base address, also from a pasted …/v1/chat/completions or …/v1/models. Undefined
+ * for anything that is not a plain http or https URL.
  */
 export function locate(input: string) {
   const text = input.trim()
@@ -126,7 +127,12 @@ export function locate(input: string) {
   if (url.username || url.password) return undefined
   const origin = LocalPolicy.origin(url)
   if (!origin) return undefined
-  const root = `${origin}${url.pathname.replace(/\/+$/, "").replace(/\/v1$/, "")}`
+  // People also paste the address they send requests to, such as …/v1/chat/completions, or the one listing models.
+  const path = url.pathname
+    .replace(/\/+$/, "")
+    .replace(/\/v1\/(?:chat\/completions|completions|models)$/, "/v1")
+    .replace(/\/v1$/, "")
+  const root = `${origin}${path}`
   return { origin, root, baseURL: `${root}/v1` }
 }
 
@@ -146,12 +152,15 @@ export async function probe(input: string, options: Options = {}): Promise<Serve
     .map((model) => (model.context ? { ...model, output: output(model.context) } : model))
     .toSorted((left, right) => left.id.localeCompare(right.id))
   const encrypted = place.origin.startsWith("https:")
+  // The server writes its version, and Vector shows it ("Ollama 0.12.6 on this computer") and pins it, so it is kept
+  // as plain text like a server's error.
+  const version = inspection.version === undefined ? undefined : LocalErrors.plain(inspection.version)
   return {
     kind: found.spec.kind,
     name: found.spec.name,
     origin: place.origin,
     baseURL: place.baseURL,
-    version: inspection.version,
+    version,
     class: LocalPolicy.hostClass(hostname),
     encrypted,
     concurrency: inspection.concurrency,
@@ -159,7 +168,7 @@ export async function probe(input: string, options: Options = {}): Promise<Serve
     models,
     pin: {
       kind: found.spec.kind,
-      version: inspection.version,
+      version,
       models: modelSet(models),
       spki: encrypted ? await spki(place.origin, options.timeout ?? IDENTIFY_TIMEOUT.remote) : null,
     },
@@ -437,7 +446,8 @@ export async function check(input: CheckInput): Promise<Checked> {
     server_version: input.server.version,
     requests: 0,
   }
-  if (info?.cloud)
+  // A model the user typed may not be on the server's list, so an Ollama cloud model is also told by its name.
+  if (info?.cloud || (input.server.kind === "ollama" && OllamaServer.cloud({ name: input.model })))
     return {
       ...base,
       result: "failed",
@@ -447,25 +457,31 @@ export async function check(input: CheckInput): Promise<Checked> {
   if (ask) return { ...base, result: "ask", message: ask }
   const small = tooSmall(input, info?.context)
   if (small) return { ...base, ...small }
-  if (input.tools.length === 0) return { ...base, result: "failed", message: "There are no tools to check with." }
+  // Every tool goes with each request, as the agent sends them, but the check asks for a call only to tools its own
+  // example fits, which leaves out one whose parameters refer to themselves too deeply to write out.
+  const callable = input.tools.filter((tool) => fits(tool.parameters, example(tool.parameters)))
+  if (callable.length === 0) return { ...base, result: "failed", message: "There are no tools to check with." }
 
-  const simple = simplest(input.tools)
+  const simple = simplest(callable)
   const first = await complete(input, call(simple))
   const done = { ...base, ttft_ms: first.ttft }
   if (first.error !== undefined) return { ...done, requests: 1, ...failure(input, first.error) }
 
-  // Ollama loads a model on its first request, so only now is the context it runs with known.
-  const context =
+  // Ollama and LM Studio load a model on its first request, so only now is the context it runs with known.
+  const loads =
     input.server.kind === "ollama"
-      ? ((await OllamaServer.loadedContext(reader(root(input.server), readOptions(input)), input.model)) ??
-        info?.context)
-      : info?.context
+      ? OllamaServer.loadedContext
+      : input.server.kind === "lmstudio"
+        ? LMStudioServer.loadedContext
+        : undefined
+  const context =
+    (loads ? await loads(reader(root(input.server), readOptions(input)), input.model) : undefined) ?? info?.context
   const loaded = tooSmall(input, context)
   if (loaded) return { ...done, requests: 1, context, ...loaded }
   const wrong = mismatch(input, simple, first)
   if (wrong) return { ...done, requests: 1, context, ...wrong }
 
-  const nested = deepest(input.tools)
+  const nested = deepest(callable)
   const separate = nested.name !== simple.name
   const second = separate ? await complete(input, call(nested)) : first
   const asked = separate ? 2 : 1
@@ -517,7 +533,17 @@ type Completion = {
   readonly ttft?: number
   /** The server's error text, or the connection error's message. */
   readonly error?: string
+  /** The reply stopped at its token limit (finish_reason "length"). */
+  readonly cut?: boolean
 }
+
+// The most a check's reply may take. A reasoning model (Qwen3 thinking, gpt-oss, Kimi K2 Thinking) reasons before it
+// calls the tool, which can take several hundred tokens even for this request, so the room is larger than the call
+// needs; a reply that still runs out says so rather than counting as a model that cannot call tools.
+const CHECK_REPLY = 2048
+
+// The error a check records for an answer larger than MAX_BYTES.
+const TOO_LARGE = "More than 4 MB, which Vector stopped reading."
 
 type Messages = readonly Readonly<Record<string, unknown>>[]
 
@@ -558,18 +584,22 @@ async function complete(input: CheckInput, messages: Messages): Promise<Completi
       })),
       tool_choice: "auto",
       stream: true,
-      max_tokens: 512,
+      max_tokens: CHECK_REPLY,
       temperature: 0,
     }),
     redirect: "error",
     signal: signal(input.signal, input.timeout ?? CHECK_TIMEOUT),
   }).catch((error: unknown) => (error instanceof Error ? error.message : String(error)))
   if (typeof response === "string") return { calls: [], text: "", error: response }
-  if (!response.ok)
-    return { calls: [], text: "", error: (await response.text().catch(() => "")) || `${response.status}` }
+  // A server someone else runs writes these answers, so no more than MAX_BYTES of one is read.
+  const text = () =>
+    limited(response, MAX_BYTES)
+      .then((value) => value ?? TOO_LARGE)
+      .catch(() => "")
+  if (!response.ok) return { calls: [], text: "", error: (await text()) || `${response.status}` }
   if (!(response.headers.get("content-type") ?? "").includes("event-stream")) {
     const ttft = Math.round(performance.now() - started)
-    return { ...whole(await response.text().catch(() => "")), ttft }
+    return { ...whole(await text()), ttft }
   }
   return stream(response, started)
 }
@@ -579,9 +609,12 @@ const Delta = Schema.Struct({
   choices: Schema.optional(
     Schema.Array(
       Schema.Struct({
+        finish_reason: Schema.optional(Schema.NullOr(Schema.String)),
         delta: Schema.optional(
           Schema.Struct({
             content: Schema.optional(Schema.NullOr(Schema.String)),
+            // Servers send a reasoning model's thinking under either name, depending on the server and its version.
+            reasoning: Schema.optional(Schema.NullOr(Schema.String)),
             reasoning_content: Schema.optional(Schema.NullOr(Schema.String)),
             tool_calls: Schema.optional(
               Schema.Array(
@@ -604,6 +637,7 @@ const Delta = Schema.Struct({
 const Whole = Schema.Struct({
   choices: Schema.Array(
     Schema.Struct({
+      finish_reason: Schema.optional(Schema.NullOr(Schema.String)),
       message: Schema.Struct({
         content: Schema.optional(Schema.NullOr(Schema.String)),
         tool_calls: Schema.optional(
@@ -624,20 +658,25 @@ const json = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
 function whole(text: string): Completion {
   const parsed = Option.getOrUndefined(Schema.decodeUnknownOption(Whole)(Option.getOrUndefined(json(text))))
   if (!parsed) return { calls: [], text: "", error: text }
-  const message = parsed.choices[0]?.message
+  const choice = parsed.choices[0]
   return {
-    text: message?.content ?? "",
-    calls: (message?.tool_calls ?? []).map((item, index) => ({
+    text: choice?.message.content ?? "",
+    calls: (choice?.message.tool_calls ?? []).map((item, index) => ({
       id: item.id ?? `call_${index}`,
       name: item.function.name,
       arguments: item.function.arguments ?? "",
     })),
+    cut: choice?.finish_reason === "length",
   }
 }
 
 async function stream(response: Response, started: number): Promise<Completion> {
   const calls = new Map<number, { id: string; name: string; arguments: string }>()
-  const state: { text: string; ttft?: number; error?: string; rest: string } = { text: "", rest: "" }
+  const state: { text: string; ttft?: number; error?: string; rest: string; size: number; finish?: string } = {
+    text: "",
+    rest: "",
+    size: 0,
+  }
   const decoder = new TextDecoder()
   const reader = response.body?.getReader()
   if (!reader) return { calls: [], text: "" }
@@ -651,9 +690,14 @@ async function stream(response: Response, started: number): Promise<Completion> 
       state.error = payload
       return
     }
-    const part = delta.choices?.[0]?.delta
+    const choice = delta.choices?.[0]
+    if (choice?.finish_reason) state.finish = choice.finish_reason
+    const part = choice?.delta
     if (!part) return
-    if (state.ttft === undefined && (part.content || part.reasoning_content || part.tool_calls?.length))
+    if (
+      state.ttft === undefined &&
+      (part.content || part.reasoning || part.reasoning_content || part.tool_calls?.length)
+    )
       state.ttft = Math.round(performance.now() - started)
     state.text += part.content ?? ""
     part.tool_calls?.forEach((item, position) => {
@@ -672,12 +716,24 @@ async function stream(response: Response, started: number): Promise<Completion> 
       return undefined
     })
     if (!next || next.done) break
+    state.size += next.value.byteLength
+    if (state.size > MAX_BYTES) {
+      await reader.cancel().catch(() => undefined)
+      state.error = TOO_LARGE
+      break
+    }
     const lines = (state.rest + decoder.decode(next.value, { stream: true })).split(/\r?\n/)
     state.rest = lines.pop() ?? ""
     lines.forEach(take)
   }
-  take(state.rest)
-  return { calls: [...calls.values()], text: state.text, ttft: state.ttft, error: state.error }
+  if (state.error !== TOO_LARGE) take(state.rest)
+  return {
+    calls: [...calls.values()],
+    text: state.text,
+    ttft: state.ttft,
+    error: state.error,
+    cut: state.finish === "length",
+  }
 }
 
 function failure(input: CheckInput, text: string, tool?: Tool) {
@@ -720,6 +776,13 @@ export function rejection(server: Pick<Server, "kind" | "name">, text: string, t
 
 function mismatch(input: CheckInput, tool: Tool, completion: Completion) {
   const made = completion.calls[0]
+  // A reply that ran out of tokens before any call says nothing about tool calling, so it does not mark the model as
+  // one without tools.
+  if (!made && completion.cut)
+    return {
+      result: "failed" as const,
+      message: `${input.model} used its whole ${CHECK_REPLY.toLocaleString("en-US")}-token reply before it called a tool, so Vector could not tell whether it calls tools. Lower its reasoning effort, or pick another model.`,
+    }
   if (!made)
     return {
       result: "no-tools" as const,
@@ -729,7 +792,8 @@ function mismatch(input: CheckInput, tool: Tool, completion: Completion) {
   if (made.name !== tool.name || !fits(tool.parameters, parsed, tool.parameters))
     return {
       result: "failed" as const,
-      message: `${input.model} called ${made.name || "a tool"} with arguments that do not match the ${tool.name} tool's parameters, so its tool calls may fail in Vector.`,
+      // The model wrote the name it called, so it is shown as plain text like a server's error.
+      message: `${input.model} called ${LocalErrors.plain(made.name) || "a tool"} with arguments that do not match the ${tool.name} tool's parameters, so its tool calls may fail in Vector.`,
     }
   return undefined
 }
@@ -740,14 +804,18 @@ function record(value: unknown): value is JsonSchema {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-// A schema with its $ref followed, against the tool's own $defs.
-function resolve(schema: unknown, root: JsonSchema): JsonSchema {
+const MAX_HOPS = 16
+
+// A schema with its $ref followed, against the tool's own $defs. A chain of refs that comes back to itself resolves to
+// an empty schema.
+function resolve(schema: unknown, root: JsonSchema, hops = 0): JsonSchema {
   if (!record(schema)) return {}
   const ref = schema["$ref"]
   if (typeof ref !== "string") return schema
+  if (hops >= MAX_HOPS) return {}
   const name = ref.replace(/^#\/(?:\$defs|definitions)\//, "")
   const defs = record(root["$defs"]) ? root["$defs"] : record(root["definitions"]) ? root["definitions"] : {}
-  return resolve(defs[name], root)
+  return resolve(defs[name], root, hops + 1)
 }
 
 function choice(schema: JsonSchema, root: JsonSchema) {
@@ -761,24 +829,40 @@ function kindOf(schema: JsonSchema) {
   return type
 }
 
-/** Arguments that satisfy a JSON schema: every required field, the first of each enum, one item of each list. */
-export function example(input: unknown, root: JsonSchema = record(input) ? input : {}): unknown {
+// How far example and fits follow a schema into itself. A tool's parameters can refer back to themselves (a filter
+// made of filters, as some MCP tools have), and with a required field on the way an example would never end. Vector's
+// own tools nest a few levels, far inside these.
+const EXAMPLE_DEPTH = 12
+const FITS_DEPTH = 64
+
+/**
+ * Arguments that satisfy a JSON schema: every required field, the first of each enum, one item of each list. Past
+ * EXAMPLE_DEPTH a list is empty and an object has no fields, so a schema that refers to itself still gets an example,
+ * which may then not fit it.
+ */
+export function example(
+  input: unknown,
+  root: JsonSchema = record(input) ? input : {},
+  budget = EXAMPLE_DEPTH,
+): unknown {
   const schema = resolve(input, root)
-  const alternative = choice(schema, root)
-  if (alternative) return example(alternative, root)
+  const alternative = budget > 0 ? choice(schema, root) : undefined
+  if (alternative) return example(alternative, root, budget - 1)
   if (Array.isArray(schema["enum"]) && schema["enum"].length > 0) return schema["enum"][0]
   if ("const" in schema) return schema["const"]
   const type = kindOf(schema)
   if (type === "object" || record(schema["properties"])) {
+    if (budget <= 0) return {}
     const properties = record(schema["properties"]) ? schema["properties"] : {}
     const required = Array.isArray(schema["required"])
       ? schema["required"].filter((key) => typeof key === "string")
       : []
-    return Object.fromEntries(required.map((key) => [key, example(properties[key], root)]))
+    return Object.fromEntries(required.map((key) => [key, example(properties[key], root, budget - 1)]))
   }
   if (type === "array") {
+    if (budget <= 0) return []
     const count = Math.max(1, typeof schema["minItems"] === "number" ? schema["minItems"] : 1)
-    return Array.from({ length: count }, () => example(schema["items"], root))
+    return Array.from({ length: count }, () => example(schema["items"], root, budget - 1))
   }
   if (type === "integer" || type === "number") return typeof schema["minimum"] === "number" ? schema["minimum"] : 1
   if (type === "boolean") return false
@@ -786,11 +870,21 @@ export function example(input: unknown, root: JsonSchema = record(input) ? input
   return "check"
 }
 
-/** Whether a value has the shape a JSON schema asks for: types and required fields, nested. Formats are not checked. */
-export function fits(input: unknown, value: unknown, root: JsonSchema = record(input) ? input : {}): boolean {
+/**
+ * Whether a value has the shape a JSON schema asks for: types and required fields, nested. Formats are not checked. A
+ * value nested past FITS_DEPTH does not fit, and neither does any value for a schema whose alternatives only lead back
+ * to itself.
+ */
+export function fits(
+  input: unknown,
+  value: unknown,
+  root: JsonSchema = record(input) ? input : {},
+  budget = FITS_DEPTH,
+): boolean {
+  if (budget <= 0) return false
   const schema = resolve(input, root)
   const options = [schema["anyOf"], schema["oneOf"]].find(Array.isArray)
-  if (options) return options.some((item) => fits(item, value, root))
+  if (options) return options.some((item) => fits(item, value, root, budget - 1))
   if (Array.isArray(schema["enum"])) return schema["enum"].some((item) => item === value)
   const types = Array.isArray(schema["type"]) ? schema["type"] : schema["type"] === undefined ? [] : [schema["type"]]
   if (types.length > 0 && !types.some((type) => typed(type, value))) return false
@@ -798,10 +892,12 @@ export function fits(input: unknown, value: unknown, root: JsonSchema = record(i
     const properties = record(schema["properties"]) ? schema["properties"] : {}
     const required = Array.isArray(schema["required"]) ? schema["required"] : []
     if (!required.every((key) => typeof key === "string" && key in value)) return false
-    return Object.entries(value).every(([key, item]) => !(key in properties) || fits(properties[key], item, root))
+    return Object.entries(value).every(
+      ([key, item]) => !(key in properties) || fits(properties[key], item, root, budget - 1),
+    )
   }
   if (Array.isArray(value) && schema["items"] !== undefined)
-    return value.every((item) => fits(schema["items"], item, root))
+    return value.every((item) => fits(schema["items"], item, root, budget - 1))
   return true
 }
 
@@ -879,16 +975,22 @@ type ModelPatch = {
 const HEADER_TIMEOUT = 600_000
 
 /**
- * The global config that records a server: the provider's concurrency and each model's tool calling, limits and
- * image input, and Vector Local's pin for the server, its place on the model server list and each check's result.
- * Lists and records keep what `current` (the global `local` block now) has, since a config update replaces lists.
- * Cloud models and checks that only asked are left out.
+ * The global config that records a server: the provider's concurrency (unless one is set) and each model's tool
+ * calling, limits and image input, and Vector Local's pin for the server, its place on the model server list and each
+ * check's result. Lists and records keep what `current` (the global `local` block now) has, since a config update
+ * replaces lists. Cloud models and checks that only asked are left out.
  */
 export function patch(input: {
   readonly providerID: string
   readonly server: Server
   readonly checks?: readonly Checked[]
   readonly current?: ConfigLocalV1.Info
+  /**
+   * The `concurrency` the provider's global config sets now. A count someone chose stays, such as 4 for an Ollama
+   * started with OLLAMA_NUM_PARALLEL=4, which its API does not report; the server's count is written only where none
+   * is set.
+   */
+  readonly concurrency?: number
   /** Put the server on the model server list. Default true: adding a server lists it. */
   readonly list?: boolean
 }): Patch {
@@ -918,7 +1020,7 @@ export function patch(input: {
       }),
   )
   const options = {
-    ...(input.server.concurrency ? { concurrency: input.server.concurrency } : {}),
+    ...(input.concurrency === undefined && input.server.concurrency ? { concurrency: input.server.concurrency } : {}),
     ...(input.server.class === "internet" ? { headerTimeout: HEADER_TIMEOUT } : {}),
     // A LiteLLM proxy passes every prompt on, so its steps are never counted as free local ones. An Ollama server
     // forwards only its cloud models, which are told apart by name.

@@ -179,6 +179,20 @@ describe("this computer's hardware", () => {
     expect(LocalHardware.parseNvidiaSmi("NVIDIA-SMI has failed")).toEqual([])
   })
 
+  test("a GPU that shares system memory counts like Apple silicon", () => {
+    // A unified-memory system reports no memory of its own for its GPU. "[N/A]" is how nvidia-smi writes a value it
+    // cannot report; this line is written by hand, not recorded from such a system.
+    const gpus = LocalHardware.parseNvidiaSmi("NVIDIA GB10, [N/A], [N/A]\n")
+    expect(gpus).toEqual([{ name: "NVIDIA GB10", total: 0, free: undefined }])
+    const spark = LocalHardware.summarize({ platform: "linux", arch: "arm64", total: 128 * GB, free: 100 * GB, gpus })
+    expect(spark).toMatchObject({ kind: "unified", usable: 96 * GB })
+    expect(LocalHardware.free(spark)).toBe(100 * GB)
+    expect(LocalHardware.describe(spark)).toBe(
+      "This computer has 128 GB of memory shared with its GPU; about 96 GB of it can hold a model.",
+    )
+    expect(LocalRecommend.recommend({ usable: spark.usable }).roles.agent?.key).toBe("gpt-oss-120b")
+  })
+
   test("describes it in plain words", () => {
     expect(
       LocalHardware.describe(LocalHardware.summarize({ platform: "darwin", arch: "arm64", total: 32 * GB, free: 0 })),
