@@ -16,6 +16,7 @@ import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 
 // A documentation address (TEST-NET-2): never routed.
 const OUTSIDE = "198.51.100.7"
+const CAPTURED_PORT = 8081
 // Taken before the guard is installed, as a module that kept its own copy would.
 const capturedFetch = globalThis.fetch
 const CapturedWebSocket = globalThis.WebSocket
@@ -121,11 +122,18 @@ const results: Record<string, unknown> = {
   https: await socketOutcome(https.get(`https://${OUTSIDE}/`)),
   net: await socketOutcome(net.connect(443, OUTSIDE)),
   webSocket: thrown(() => new WebSocket(`wss://${OUTSIDE}/`)),
+  // A refusal and an unreachable address both read as `error` to a WebSocket, so the guard's own list says which it
+  // was: its own port, so no other client's attempt counts.
   capturedWebSocket: await new Promise<string>((resolve) => {
-    const socket = new CapturedWebSocket(`ws://${OUTSIDE}/`)
+    const socket = new CapturedWebSocket(`ws://${OUTSIDE}:${CAPTURED_PORT}/`)
     socket.onerror = () => resolve("error")
     socket.onopen = () => resolve("reached")
-  }),
+  }).then((outcome) => ({
+    outcome,
+    refused: (handle?.attempts() ?? []).some(
+      (attempt) => attempt.host === OUTSIDE && attempt.port === CAPTURED_PORT && !attempt.allowed,
+    ),
+  })),
   here: await (await fetch(here)).text(),
   capturedHere: await (await capturedFetch(here)).text(),
   redirect: await outcome(fetch(`${here}/out`)),

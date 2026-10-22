@@ -69,7 +69,8 @@ const expected = {
   https: "EgressBlocked",
   net: "EgressBlocked",
   webSocket: "EgressBlocked",
-  capturedWebSocket: "error",
+  // Node's WebSocket connects through net too: the guard refused it, not the unrouted address.
+  capturedWebSocket: { outcome: "error", refused: true },
   here: "here",
   capturedHere: "here",
   redirect: "EgressBlocked",

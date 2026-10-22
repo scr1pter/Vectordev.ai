@@ -203,6 +203,8 @@ for (const item of targets) {
   const rootPath = path.resolve(dir, "../../node_modules/@opentui/core/parser.worker.js")
   const parserWorker = fs.realpathSync(fs.existsSync(localPath) ? localPath : rootPath)
   const workerPath = "./src/cli/tui/worker.ts"
+  // The egress guard's Worker preload, an entry point of its own so the guard can start every Worker with it.
+  const guardWorker = fs.realpathSync(path.resolve(dir, "../core/src/local-mode/guard-worker.ts"))
 
   // Use platform-specific bunfs root path based on target OS
   const bunfsRoot = item.os === "win32" ? "B:/~BUN/root/" : "/$bunfs/root/"
@@ -236,6 +238,7 @@ for (const item of targets) {
       "./src/index.ts",
       parserWorker,
       workerPath,
+      guardWorker,
       ...(embeddedFileMap ? ["vector-web-ui.gen.ts"] : []),
       "brain-worker.gen.ts",
     ],
@@ -246,6 +249,10 @@ for (const item of targets) {
       VECTOR_PLUGIN_VERSION: JSON.stringify(process.env.VECTOR_PLUGIN_VERSION ?? Script.version),
       VECTOR_MODEL_CATALOG: generated.modelsData,
       OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + workerRelativePath,
+      // Bundled as JavaScript beside the other entry points, at its path from this package.
+      VECTOR_GUARD_WORKER_PATH: JSON.stringify(
+        bunfsRoot + path.relative(dir, guardWorker).replaceAll("\\", "/").replace(/\.ts$/, ".js"),
+      ),
       VECTOR_WORKER_PATH: workerPath,
       VECTOR_CHANNEL: `'${Script.channel}'`,
       VECTOR_LIBC: item.os === "linux" ? `'${item.abi ?? "glibc"}'` : "",

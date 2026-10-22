@@ -1,9 +1,9 @@
 export * as Egress from "./egress"
 
 import { randomUUID } from "node:crypto"
-import { isMainThread } from "node:worker_threads"
-import { Context, Effect, Layer } from "effect"
-import type { LocalMode } from "@vectordevai/schema/local-mode"
+import { isMainThread, threadId } from "node:worker_threads"
+import { Context, Effect, Layer, Option, Schema } from "effect"
+import { LocalMode } from "@vectordevai/schema/local-mode"
 import { makeGlobalNode } from "../effect/app-node"
 import { isHelperName } from "../session/helper"
 import { EgressAttribution } from "./attribution"
@@ -19,11 +19,18 @@ import { LocalSources } from "./sources"
 //
 // The policy starts as Vector Local off: everything passes and nothing is logged. When the environment already turns
 // Vector Local on (VECTOR_LOCAL=1, which Vector's children inherit), it starts pending instead: only this computer is
-// reachable, for every purpose, until config sets the policy it resolves at start with `resolve` or `configure`. A
-// policy that only the company's file or the user's config turns on is not seen before then, so until the engine's
-// config module loads, and in the desktop's main process for now, Vector Local is off. From then on every decision
-// reads it. While Vector Local is on, each decision is an event: in memory (the last 2,000), on disk when a log
-// directory is configured, and in the counters the pane shows.
+// reachable, for every purpose, until config sets the policy it resolves at start with `resolve` or `configure`. The
+// engine's config resolves it synchronously when its module loads, before any layer or startup fetch, and hands each
+// later one here as it takes effect (engine config.ts, refreshLocal). A policy that only the company's file or the
+// user's config turns on is not seen before then, so until the engine's config module loads, and in the desktop's main
+// process for now, Vector Local is off. From then on every decision reads it. While Vector Local is on, each decision
+// is an event: in memory (the last 2,000), on disk when a log directory is configured, and in the counters the pane
+// shows.
+//
+// Each thread of a process holds its own copy of this state (the TUI's engine thread, a Worker the guard preloaded),
+// so the threads keep one between them over a BroadcastChannel, which never leaves the process: the policy set last
+// reaches every thread, a Worker starts with the one in effect, and every event reaches every thread's memory and
+// counters. Only the thread that configured the log last writes it to disk.
 
 export type Request = {
   /** The registry source making the request (LocalSources). An id the registry does not have is purpose `unknown`. */
@@ -80,8 +87,29 @@ type Totals = {
   blocked: Record<string, number>
 }
 
+// Which policy is the latest across the threads of a process: a count each `configure` raises past the highest it has
+// seen, then the thread's id, so two threads that set one at once agree on which wins.
+type Version = readonly [count: number, thread: number]
+
+// What the threads of a process tell each other (see the comment at the top). `log` says the sender now writes the
+// log, so a thread that wrote it stops.
+type Message =
+  | { readonly kind: "policy"; readonly policy: LocalMode.Policy; readonly version: Version; readonly log: boolean }
+  | { readonly kind: "ask" }
+  | {
+      readonly kind: "event"
+      readonly event: LocalMode.Event
+      readonly notify: boolean
+      readonly agent: string | undefined
+    }
+  | { readonly kind: "erase" }
+
 type State = {
   policy: LocalMode.Policy
+  version: Version
+  /** Whether this thread's policy was set by config or by another thread, rather than assumed at start. */
+  known: boolean
+  channel?: BroadcastChannel
   ring: EgressLogStore.Ring
   log?: LogOptions
   store?: EgressLogStore.Store
@@ -95,11 +123,14 @@ type State = {
   totals: Map<string, Totals>
 }
 
-// One state per process, shared by every copy of this module a bundle or a test loads, as the guard reads it.
+// One state per thread, shared by every copy of this module a bundle or a test loads, as the guard reads it.
 const KEY = Symbol.for("vector.egress.state")
+const CHANNEL = "vector.egress"
 const holder = globalThis as unknown as { [KEY]?: State }
 const state: State = (holder[KEY] ??= {
   policy: LocalPolicy.OFF,
+  version: [0, threadId],
+  known: false,
   ring: EgressLogStore.ring(),
   writing: Promise.resolve(),
   listeners: new Set(),
@@ -108,36 +139,91 @@ const state: State = (holder[KEY] ??= {
   grants: new Map(),
   totals: new Map(),
 })
+const decodePolicy = Schema.decodeUnknownOption(Schema.fromJsonString(LocalMode.Policy))
 
 export function policy() {
   return state.policy
 }
 
 /**
- * Holds every request but those to this computer until the policy is resolved: the backstop calls this when the
- * environment turns Vector Local on, and config then sets the policy it resolves.
+ * Holds every request but those to this computer, in every thread of this process, until config sets the policy it
+ * resolves. The backstop starts a thread pending itself when the environment turns Vector Local on.
  */
 export function pending() {
-  state.policy = LocalPolicy.PENDING
-  return state.policy
+  return configure(LocalPolicy.PENDING)
 }
 
 /**
- * Sets the policy in effect, and returns it. With a log directory, the log is written there while Vector Local is on;
- * turning Vector Local off stops writing it and keeps what was written until it is erased. A log directory Vector
- * cannot use (a file in its place, a folder another user owns, a read-only disk) changes nothing else: the policy
- * applies, every event stays in memory, the returned policy's warnings say so, and each later call tries again.
+ * Sets the policy in effect, for every thread of this process, and returns it. With a log directory, the log is
+ * written there while Vector Local is on; turning Vector Local off stops writing it and keeps what was written until
+ * it is erased. A log directory Vector cannot use (a file in its place, a folder another user owns, a read-only disk)
+ * changes nothing else: the policy applies, every event stays in memory, the returned policy's warnings say so, and
+ * each later call tries again.
  */
 export function configure(next: LocalMode.Policy, options: { readonly log?: LogOptions } = {}) {
-  if (state.store && (options.log || !next.enabled)) {
-    state.writing = Promise.all([state.writing, state.store.flush()]).then(() => undefined)
-    state.store = undefined
-  }
+  const applied = apply(next, options)
+  state.version = [state.version[0] + 1, threadId]
+  state.known = true
+  post({ kind: "policy", policy: applied, version: state.version, log: options.log !== undefined })
+  return applied
+}
+
+function apply(next: LocalMode.Policy, options: { readonly log?: LogOptions }) {
+  if (options.log || !next.enabled) release()
   if (options.log) state.log = options.log
   const opened = next.enabled && state.log && !state.store ? openLog(state.log) : undefined
   if (typeof opened === "object") state.store = opened
   state.policy = typeof opened === "string" ? { ...next, warnings: [...next.warnings, opened] } : next
   return state.policy
+}
+
+// Stops writing the log here; what was written stays until it is erased.
+function release() {
+  if (!state.store) return
+  state.writing = Promise.all([state.writing, state.store.flush()]).then(() => undefined)
+  state.store = undefined
+}
+
+/**
+ * Joins this thread to the others of its process (see the comment at the top), once, and asks for the policy in
+ * effect. The channel never keeps a thread alive.
+ */
+function join() {
+  if (state.channel) return
+  const channel = new BroadcastChannel(CHANNEL)
+  ;(channel as { unref?: () => void }).unref?.()
+  channel.onmessage = (event: MessageEvent<Message>) => receive(event.data)
+  state.channel = channel
+  post({ kind: "ask" })
+}
+
+function post(message: Message) {
+  state.channel?.postMessage(message)
+}
+
+function receive(message: Message) {
+  if (message.kind === "ask") {
+    if (state.known) post({ kind: "policy", policy: state.policy, version: state.version, log: false })
+    return
+  }
+  if (message.kind === "event") return remember(message.event, message.notify, message.agent)
+  if (message.kind === "erase") {
+    state.ring.clear()
+    state.totals.clear()
+    state.noticed.clear()
+    void state.writing.then(() => state.store?.clear())
+    return
+  }
+  const [count, thread] = message.version
+  if (count < state.version[0] || (count === state.version[0] && thread <= state.version[1])) return
+  state.version = message.version
+  state.known = true
+  // Another thread writes the log now.
+  if (message.log) {
+    release()
+    state.log = undefined
+  }
+  apply(message.policy, {})
 }
 
 /**
@@ -218,14 +304,24 @@ export async function fetch(
   if (!state.policy.enabled) return send(input, options)
   const inference = (LocalSources.get(source)?.purpose ?? "unknown") === "inference"
   const mode = inference ? "error" : (options.redirect ?? (input instanceof Request ? input.redirect : "follow"))
-  const first = EgressGuard.firstHop(input, options)
+  const first = mode === "follow" ? await EgressGuard.followedHop(input, options) : EgressGuard.firstHop(input, options)
   const hop = async (url: URL, current: EgressGuard.Hop, count: number): Promise<Response> => {
-    const decided = decide({ source, url, method: current.method, manual, tool, bytes: bodySize(current.body) })
+    const request = { source, url, method: current.method, manual, tool, bytes: bodySize(current.body) }
+    // A request for this computer or your network, such as a local model's prompt, never goes through a proxy: it
+    // goes direct, or, under Bun, is refused when the proxy environment would still carry it.
+    EgressGuard.direct(url.hostname)
+    if (EgressGuard.carried(url, options.proxy)) {
+      const refused = proxyRefusal(url)
+      record(request, refused)
+      throw new EgressGuard.EgressBlocked(url.hostname, "fetch", refused.rule, refused.reason)
+    }
+    const decided = decide(request)
     if (decided.decision !== "allow")
       throw new EgressGuard.EgressBlocked(url.hostname, "fetch", decided.rule, decided.reason)
-    // A request for this computer or your network, such as a local model's prompt, never goes through a proxy.
-    EgressGuard.direct(url.hostname)
-    const grants = EgressGuard.destinations(url, { proxy: options.proxy, listed: decided.class === "listed" })
+    const grants = EgressGuard.destinations(url, {
+      proxy: options.proxy,
+      exempt: decided.class === "listed" && LocalPolicy.exempt(state.policy, url),
+    })
     const response = await EgressAttribution.granted({ source, purpose: decided.purpose, grants }, () =>
       send(count === 0 ? input : url, count === 0 ? { ...options, redirect: "manual" } : current),
     )
@@ -278,11 +374,12 @@ export async function exported(filter: Filter = {}) {
   )
 }
 
-/** Erases the log: memory, counters and files. */
+/** Erases the log: memory, counters and files, in every thread of this process. */
 export async function erase() {
   state.ring.clear()
   state.totals.clear()
   state.noticed.clear()
+  post({ kind: "erase" })
   await state.writing
   const opened = state.store ?? (state.log ? openLog(state.log) : undefined)
   if (typeof opened === "object") await opened.clear()
@@ -337,23 +434,44 @@ export function notices(listener: (event: LocalMode.Event) => void) {
 export function report(event: LocalMode.Event) {
   if (!state.policy.enabled) return
   remember(event, false)
+  post({ kind: "event", event, notify: false, agent: undefined })
 }
 
 /**
- * Installs the backstop guard for this process with this service's policy and log. Strict mode (tests,
- * VECTOR_TEST_EGRESS=strict) installs the strict guard instead. Nothing happens when a guard is already installed.
- * When the environment turns Vector Local on, the policy starts pending until config resolves it.
+ * Installs the backstop guard for this thread with this service's policy and log. Strict mode (tests, in a source
+ * checkout only: EgressGuard.strictFromEnvironment) installs the strict guard instead. Nothing happens when a guard is
+ * already installed. When the environment turns Vector Local on, the policy starts pending until config resolves it.
+ * A Worker the guard started (guard-worker.ts) starts with the policy its parent handed it instead, and every thread
+ * then keeps the policy the others set.
  */
 export function backstop() {
   if (EgressGuard.installed()) return undefined
-  if (!state.policy.enabled && LocalPolicy.resolve({ env: process.env }).enabled) pending()
-  if (process.env[EgressGuard.ENVIRONMENT.strict] === "strict")
+  // Only a Worker the guard started reads a policy from its environment; one inherited from anywhere else is dropped,
+  // and neither is passed on to a child process.
+  const handed = isMainThread ? undefined : process.env[EgressGuard.WORKER_POLICY]
+  delete process.env[EgressGuard.WORKER_POLICY]
+  start(handed === undefined ? undefined : Option.getOrUndefined(decodePolicy(handed)))
+  const strict = EgressGuard.strictFromEnvironment()
+  if (strict)
     return EgressGuard.installStrict({
-      names: (process.env[EgressGuard.ENVIRONMENT.names] ?? "").split(",").filter(Boolean),
+      names: strict.names,
       // A worker, or a process a strict parent started, reaches the parent's proxy through the environment.
-      proxy: isMainThread && !process.env[EgressGuard.ENVIRONMENT.proxy],
+      proxy: isMainThread && !strict.proxy,
     })
+  join()
   return EgressGuard.install({ policy, record: recordAttempt })
+}
+
+// The policy a thread starts with: the one its parent handed it, which the environment can only tighten, or pending
+// when the environment turns Vector Local on.
+function start(handed: LocalMode.Policy | undefined) {
+  const floor = LocalPolicy.resolve({ env: process.env }).enabled
+  if (handed && (handed.enabled || !floor)) {
+    state.policy = handed
+    state.known = true
+    return
+  }
+  if (!state.policy.enabled && floor) state.policy = LocalPolicy.PENDING
 }
 
 // A connection the guard decided itself. A name that resolved outside where it said it was keeps the label of the
@@ -404,7 +522,9 @@ function push(
     carried: scope?.carried ?? ZERO,
     ...(input.frame ? { frame: input.frame } : {}),
   }
-  remember(event, notify || (event.decision !== "allow" && event.source === "unlabelled"), scope?.agent)
+  const told = notify || (event.decision !== "allow" && event.source === "unlabelled")
+  remember(event, told, scope?.agent)
+  post({ kind: "event", event, notify: told, agent: scope?.agent })
   return event
 }
 
@@ -450,6 +570,16 @@ function count(key: string, event: LocalMode.Event, agent: string | undefined) {
   totals.carried.personal += event.carried.personal
   totals.carried.documents += event.carried.documents
   totals.carried.repository += event.carried.repository
+}
+
+function proxyRefusal(url: URL): LocalPolicy.Verdict {
+  return {
+    decision: "block",
+    rule: "proxy-environment",
+    class: LocalPolicy.classify(state.policy, url),
+    reason: EgressGuard.PROXY_LOCAL,
+    allowable: false,
+  }
 }
 
 // A body's size in bytes when it is known without reading it: text, bytes, a Blob or form fields.

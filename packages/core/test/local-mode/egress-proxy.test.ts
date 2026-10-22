@@ -3,6 +3,7 @@ import type { LookupAddress } from "node:dns"
 import net from "node:net"
 import { Egress } from "../../src/local-mode/egress"
 import { EgressProxy } from "../../src/local-mode/egress-proxy"
+import { ForwardProxy } from "../../src/local-mode/forward-proxy"
 import { LocalPolicy } from "../../src/local-mode/policy"
 import { FakeWeb } from "../lib/fake-web"
 import { NetworkGuard } from "../lib/network-guard"
@@ -247,5 +248,97 @@ describe("EgressProxy", () => {
 
   test("refuses to start without a long secret", async () => {
     await expect(EgressProxy.start({ secret: "short" })).rejects.toThrow("long random secret")
+  })
+
+  test("reaches web ports only, deciding before any lookup, and logs the refusal under Vector Local", async () => {
+    Egress.configure(LocalPolicy.resolve({ global: { enabled: true } }))
+    const proxy = await EgressProxy.start({ secret: SECRET, resolver })
+    try {
+      asked.length = 0
+      const tunnel = await send(
+        proxy.port,
+        `CONNECT public.example:22 HTTP/1.1\r\nHost: public.example:22\r\n${AUTH}\r\n\r\n`,
+      )
+      const plain = await get(proxy.port, "http://public.example:25/")
+      expect([tunnel, plain].map((reply) => reply.split("\r\n")[0])).toEqual([
+        "HTTP/1.1 403 Forbidden",
+        "HTTP/1.1 403 Forbidden",
+      ])
+      expect(tunnel).toContain(EgressProxy.PORT_REASON)
+      expect(asked).toEqual([])
+      expect(Egress.events().map((event) => [event.origin, event.rule])).toEqual([
+        ["https://public.example:22", "web-port"],
+        ["http://public.example:25", "web-port"],
+      ])
+    } finally {
+      await proxy.stop()
+    }
+  })
+})
+
+describe("ForwardProxy", () => {
+  // A server that answers an upgrade with 101 and then echoes the new protocol's bytes back, as a WebSocket would.
+  const upgrading = async () => {
+    const received: Buffer[] = []
+    const server = net.createServer((socket) => {
+      socket.once("data", () => {
+        socket.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n")
+        socket.on("data", (chunk: Buffer) => {
+          received.push(chunk)
+          socket.write(chunk)
+        })
+      })
+    })
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+    return { server, port: (server.address() as net.AddressInfo).port, received }
+  }
+  const direct = (destination: ForwardProxy.Destination): ForwardProxy.Route => ({
+    connect: (connected) => net.connect(destination.port, destination.host, connected),
+  })
+
+  test("carries a plain-http upgrade both ways once its server answers 101", async () => {
+    const upstream = await upgrading()
+    const proxy = await ForwardProxy.start(direct)
+    try {
+      const echoed = await new Promise<string>((resolve) => {
+        const chunks: Buffer[] = []
+        const socket = net.connect(proxy.port, "127.0.0.1", () =>
+          socket.write(
+            `GET http://127.0.0.1:${upstream.port}/socket HTTP/1.1\r\nHost: 127.0.0.1:${upstream.port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n`,
+          ),
+        )
+        socket.on("data", (chunk: Buffer) => {
+          chunks.push(chunk)
+          const text = Buffer.concat(chunks).toString()
+          // The new protocol's bytes go on as they are, not read as another request.
+          if (text.endsWith("\r\n\r\n") && !text.includes("frame")) socket.write("frame-1 GET / HTTP/1.1")
+          if (text.includes("frame-1")) {
+            socket.destroy()
+            resolve(text)
+          }
+        })
+        setTimeout(() => resolve(Buffer.concat(chunks).toString()), 1_500)
+      })
+      expect(echoed).toStartWith("HTTP/1.1 101 Switching Protocols")
+      expect(echoed).toEndWith("frame-1 GET / HTTP/1.1")
+      expect(Buffer.concat(upstream.received).toString()).toBe("frame-1 GET / HTTP/1.1")
+    } finally {
+      await proxy.stop()
+      upstream.server.close()
+    }
+  })
+
+  test("closes a connection that does not send its first request in time", async () => {
+    const proxy = await ForwardProxy.start(direct, { headTimeout: 100 })
+    try {
+      const closed = await new Promise<string>((resolve) => {
+        const socket = net.connect(proxy.port, "127.0.0.1", () => socket.write("GET http://127.0.0.1/ HTTP/1.1\r\n"))
+        socket.on("close", () => resolve("closed"))
+        setTimeout(() => resolve("still open"), 1_500)
+      })
+      expect(closed).toBe("closed")
+    } finally {
+      await proxy.stop()
+    }
   })
 })

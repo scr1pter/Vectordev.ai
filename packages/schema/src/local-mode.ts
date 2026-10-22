@@ -80,6 +80,10 @@ export const Rule = Schema.Literals([
   "resolved-outside",
   // A research browser asked for a private, loopback or cloud metadata address, which its proxy never reaches.
   "private-destination",
+  // A research browser asked for a port that is not a web port.
+  "web-port",
+  // A request for this computer or the user's network that the proxy environment would still send through a proxy.
+  "proxy-environment",
 ]).annotate({ identifier: "EgressRule" })
 export type Rule = typeof Rule.Type
 

@@ -7,7 +7,8 @@ import net from "node:net"
 // kept-alive connection included: CONNECT tunnels (https, wss) and absolute-form http requests. A refused request is
 // answered with its status and a plain-text reason. An allowed one is connected where the decision says, and its
 // request and body are passed on and the response relayed. It never keeps a process alive. The strict test guard and
-// the research browsers' egress proxy are both built on it.
+// the research browsers' egress proxy are both built on it. A request that upgrades (a WebSocket over plain http)
+// becomes a tunnel once its server answers 101, and a client must send its first request within HEAD_TIMEOUT.
 //
 // With a secret, only a client that sends it may use the proxy: any program on this computer can reach loopback, the
 // ones the agent runs included, so an open proxy would be a way around the network guard.
@@ -46,11 +47,14 @@ export type Options = {
    * secret on a site's behalf.
    */
   readonly secret?: string
+  /** How long a client may take to send its first request's head before its connection is closed. */
+  readonly headTimeout?: number
 }
 
 type Decide = (destination: Destination) => Route | Promise<Route>
 
 const MAX_HEAD_BYTES = 64 * 1024
+const HEAD_TIMEOUT = 30_000
 const AUTHENTICATE = 'Proxy-Authenticate: Basic realm="Vector", charset="UTF-8"'
 
 export const FORBIDDEN = (message: string): Route => ({ refuse: { status: 403, reason: "Forbidden", message } })
@@ -130,6 +134,18 @@ function create(decide: Decide, options: Options) {
           upstream.on("end", () => {
             if (current.upstream === upstream) client.end()
           })
+          // A request that asks to upgrade (a WebSocket over plain http) becomes a tunnel to this destination once it
+          // answers 101: the client's bytes after the request are the new protocol's, not another request.
+          const upgrade: { asked: boolean; status?: string; next?: Buffer } = {
+            asked: fields.some((field) => /^upgrade\s*:/i.test(field)),
+          }
+          const settle = () => {
+            if (upgrade.status === undefined || upgrade.next === undefined) return
+            if (upgrade.status !== "101") return readHead(client, serve, upgrade.next)
+            if (upgrade.next.length > 0) upstream.write(upgrade.next)
+            client.pipe(upstream)
+            client.resume()
+          }
           statusLine(upstream, (status, read) => {
             // With a secret, a site's 407 would read as this proxy asking for it again.
             if (status === "407" && options.secret !== undefined) {
@@ -144,9 +160,16 @@ function create(decide: Decide, options: Options) {
             }
             client.write(read)
             upstream.pipe(client, { end: false })
+            if (!upgrade.asked) return
+            upgrade.status = status ?? ""
+            settle()
           })
           // Only this request's body goes on to this destination; the bytes after it are the client's next request.
-          forwardBody(client, upstream, fields, rest, (next) => readHead(client, serve, next))
+          forwardBody(client, upstream, fields, rest, (next) => {
+            if (!upgrade.asked) return readHead(client, serve, next)
+            upgrade.next = next
+            settle()
+          })
         })
         current.upstream = upstream
         upstream.on("error", (error: unknown) => {
@@ -170,7 +193,15 @@ function create(decide: Decide, options: Options) {
           () => refuse(client, { status: 502, reason: "Bad Gateway", message: `Could not reach ${destination.host}.` }),
         )
     }
-    readHead(client, serve)
+    // A client that never finishes its first request would hold its connection open; one with the secret has sent it
+    // in that request.
+    const waiting = setTimeout(() => client.destroy(), options.headTimeout ?? HEAD_TIMEOUT)
+    waiting.unref()
+    client.on("close", () => clearTimeout(waiting))
+    readHead(client, (head, rest) => {
+      clearTimeout(waiting)
+      serve(head, rest)
+    })
   })
   server.unref()
   return {
