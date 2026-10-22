@@ -15,6 +15,7 @@ import { BrainDatabase } from "./database"
 import { BrainLexical } from "./lexical"
 import { BrainParse } from "./parse"
 import { BrainPaths } from "./paths"
+import { BrainPrivate } from "./private"
 import { BrainScan } from "./scan"
 import type { BrainSchema } from "./schema"
 import {
@@ -96,6 +97,21 @@ export function recallText(lines: readonly string[], options?: { readonly newest
     "</vector_memory_recall>",
   ].join("\n")
 }
+
+/**
+ * Who a digest or how-you-work lines are for (section 6.4a). owner: an agent whose output stays in the session.
+ * outward: a role whose output leaves the machine or reaches the web (Vectorscope's reviewers and its judge, research
+ * workers), which gets how the owner works and nothing about them: no MEMORY.md, no fact, nothing learned beside a
+ * private document, and decisions and lessons only when they pass the outward screen (BrainPrivate.screened).
+ */
+export type Audience = "owner" | "outward"
+
+/** Personal entries that say how the owner works, and the review notes reviewers get besides. */
+export type HabitKind = "preference" | "decision" | "lesson" | "review"
+export const HABIT_KINDS: readonly HabitKind[] = ["preference", "decision", "lesson"]
+
+/** Tokens of how-you-work lines a role gets, its wrapper counted: a subagent at every size, and a reviewer. */
+export const HABITS = { subagent: 100, review: 300 } as const
 
 /** Tokens recalled for a request of each size. A greeting recalls nothing. */
 export function recallBudget(tier: "chat" | "light" | "standard" | "thorough") {
@@ -253,8 +269,45 @@ export interface Interface {
   /** `documents`: the line about the repository's documents, which goes in with the memory index. */
   readonly digest: (
     place: Place,
-    options: { readonly personal: boolean; readonly index: boolean; readonly documents?: string },
+    options: {
+      readonly personal: boolean
+      readonly index: boolean
+      readonly documents?: string
+      /** outward: no MEMORY.md, no pinned fact or private entry, and pinned decisions and lessons screened. */
+      readonly audience?: Audience
+    },
   ) => Effect.Effect<Injection>
+  /**
+   * How the owner works, for an agent beside the main one (section 6.4a): their own personal entries of `kinds`, never
+   * a fact, a MEMORY.md line or a pinned entry (the digest carries those). Lines that bear on `query` or cover one of
+   * `files` come first, then what the owner said in general; a line scoped to other files stays out. `budget` counts
+   * the lines as `wrap` renders them (recallText by default). outward: every line passes the outward screen.
+   */
+  readonly habits: (
+    place: Place,
+    input: {
+      readonly query: string
+      readonly files?: readonly string[]
+      readonly budget: number
+      readonly audience: Audience
+      readonly kinds: readonly HabitKind[]
+      readonly exclude?: ReadonlySet<string>
+      readonly wrap?: (lines: readonly string[]) => string
+      readonly sessionID?: string
+      readonly requestID?: string
+      /** Where the use is counted: a subagent's brief, or a review. */
+      readonly tier: "brief" | "review"
+    },
+  ) => Effect.Effect<Injection>
+  /**
+   * What the posting check compares a post with (BrainPosting): how the owner works (personal rules, preferences,
+   * decisions, lessons and review notes) and private facts (MEMORY.md, personal facts, and entries learned beside a
+   * private document here), whoever they reached, plus the document cards recalled in `sessionIDs`.
+   */
+  readonly posting: (
+    place: Place,
+    input: { readonly sessionIDs: readonly string[] },
+  ) => Effect.Effect<{ readonly habits: readonly string[]; readonly facts: readonly string[]; readonly cards: readonly string[] }>
   /** The scoring half of recall: entries that bear on a request, best first, before any budget. */
   readonly candidates: (
     place: Place,
@@ -621,20 +674,29 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
 
   const digest = Effect.fn("Brain.digest")(function* (
     place: Place,
-    options: { personal: boolean; index: boolean; documents?: string },
+    options: { personal: boolean; index: boolean; documents?: string; audience?: Audience },
   ) {
     yield* sync(place)
+    const outward = options.audience === "outward"
     const paths = [
       personalFiles.rules,
       ...place.sources.filter((source) => source.type === "rules").map((source) => source.path),
-      ...(options.personal ? [personalFiles.memory] : []),
+      ...(options.personal && !outward ? [personalFiles.memory] : []),
     ]
     const sources = new Map(
       (yield* db.select().from(BrainSourceTable).where(inArray(BrainSourceTable.path, paths)).all().pipe(Effect.orDie)).map(
         (row) => [row.path, row],
       ),
     )
-    const rows = yield* visibleRows(place, options.personal, ["active"])
+    // An outward role hears how the owner works, never about them: no MEMORY.md item, no fact and nothing learned
+    // beside a private document, and only the decisions and lessons with nothing particular in them.
+    const rows = (yield* visibleRows(place, options.personal, ["active"])).filter(
+      (row) =>
+        !outward ||
+        (row.source_file !== personalFiles.memory &&
+          row.kind !== "fact" &&
+          BrainPrivate.screened({ kind: row.kind, text: row.body, private: row.private })),
+    )
     const pinned = rows
       .filter((row) => row.pinned && !row.tier0 && row.kind !== "review" && !row.stale)
       .toSorted((a, b) => a.created_at - b.created_at)
@@ -808,6 +870,123 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
       tokens,
     )
     return { text, ids: picked.map((row) => row.id), tokens }
+  })
+
+  const habits = Effect.fn("Brain.habits")(function* (
+    place: Place,
+    input: {
+      query: string
+      files?: readonly string[]
+      budget: number
+      audience: Audience
+      kinds: readonly HabitKind[]
+      exclude?: ReadonlySet<string>
+      wrap?: (lines: readonly string[]) => string
+      sessionID?: string
+      requestID?: string
+      tier: "brief" | "review"
+    },
+  ) {
+    if (input.budget <= 0 || input.kinds.length === 0) return { ids: [], tokens: 0 }
+    yield* sync(place)
+    const exclude = input.exclude ?? new Set<string>()
+    const wrap = input.wrap ?? ((lines: readonly string[]) => recallText(lines))
+    const rows = (yield* db
+      .select()
+      .from(BrainEntryTable)
+      .where(
+        and(
+          eq(BrainEntryTable.repository_id, PERSONAL),
+          eq(BrainEntryTable.status, "active"),
+          inArray(BrainEntryTable.kind, [...input.kinds]),
+        ),
+      )
+      .all()
+      .pipe(Effect.orDie)).filter(
+      (row) =>
+        !row.pinned &&
+        !row.tier0 &&
+        !row.stale &&
+        row.source_file !== personalFiles.memory &&
+        !exclude.has(row.id) &&
+        (input.audience === "owner" || BrainPrivate.screened({ kind: row.kind, text: row.body, private: row.private })),
+    )
+    const files = (input.files ?? []).map((file) => BrainPaths.relative(place.root, file))
+    const scored = new Map(
+      BrainLexical.rank(
+        rows.map((row) => ({ id: row.id, terms: decode(row.terms) })),
+        BrainLexical.terms([input.query, ...files].join(" ")),
+      ).map((item) => [item.id, item.score]),
+    )
+    const picked = rows
+      .flatMap((row) => {
+        const covered = files.some((file) => row.paths.some((pattern) => matches(pattern, file)))
+        // A line scoped to files this work does not touch says nothing about it.
+        if (row.paths.length > 0 && !covered) return []
+        return [{ row, score: (scored.get(row.id) ?? 0) + (covered ? 5 : 0) }]
+      })
+      .toSorted(
+        (a, b) =>
+          b.score - a.score ||
+          b.row.uses - a.row.uses ||
+          b.row.updated_at - a.row.updated_at ||
+          a.row.id.localeCompare(b.row.id),
+      )
+      .reduce<Row[]>(
+        (kept, item) => (Token.estimate(wrap([...kept, item.row].map(line))) > input.budget ? kept : [...kept, item.row]),
+        [],
+      )
+    if (picked.length === 0) return { ids: [], tokens: 0 }
+    const text = wrap(picked.map(line))
+    const tokens = Token.estimate(text)
+    const ids = picked.map((row) => row.id)
+    yield* used(ids, input.sessionID, input.tier, tokens, input.requestID)
+    return { text, ids, tokens, personal: ids, shared: "" }
+  })
+
+  const posting = Effect.fn("Brain.posting")(function* (place: Place, input: { sessionIDs: readonly string[] }) {
+    yield* sync(place)
+    const rows = yield* db
+      .select()
+      .from(BrainEntryTable)
+      .where(
+        and(
+          eq(BrainEntryTable.status, "active"),
+          or(
+            eq(BrainEntryTable.repository_id, PERSONAL),
+            and(eq(BrainEntryTable.repository_id, place.repository), eq(BrainEntryTable.private, true)),
+          ),
+        ),
+      )
+      .all()
+      .pipe(Effect.orDie)
+    const fact = (row: Row) => row.private || row.source_file === personalFiles.memory || row.kind === "fact"
+    const seen = input.sessionIDs.length
+      ? (yield* db
+          .selectDistinct({ id: BrainUseTable.entry_id })
+          .from(BrainUseTable)
+          .where(inArray(BrainUseTable.session_id, [...input.sessionIDs]))
+          .all()
+          .pipe(Effect.orDie)).map((row) => row.id)
+      : []
+    const entries = seen.length
+      ? new Set(
+          (yield* db
+            .select({ id: BrainEntryTable.id })
+            .from(BrainEntryTable)
+            .where(inArray(BrainEntryTable.id, seen))
+            .all()
+            .pipe(Effect.orDie)).map((row) => row.id),
+        )
+      : new Set<string>()
+    return {
+      habits: rows
+        .filter((row) => !fact(row) && ["rule", ...HABIT_KINDS, "review"].includes(row.kind))
+        .map((row) => row.body),
+      facts: rows.filter(fact).map((row) => row.body),
+      // What else those sessions were shown is document cards: the caller checks which are private.
+      cards: seen.filter((id) => !entries.has(id)),
+    }
   })
 
   const search = Effect.fn("Brain.search")(function* (
@@ -2050,6 +2229,8 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
   return {
     sync,
     digest,
+    habits,
+    posting,
     candidates,
     used: (ids, input) => used(ids, input.sessionID, input.tier, input.tokens, input.requestID),
     credit,
