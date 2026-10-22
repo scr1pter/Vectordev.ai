@@ -63,10 +63,12 @@ import {
   buildReviewPrompt,
   buildSecurityPrompt,
   buildVerifyPrompt,
+  SCOPE,
   type CheckResult,
   type HeadFile,
   type PromptInput,
   type RelatedCode,
+  type Scope,
 } from "@vectordevai/core/review/prompt"
 import {
   decodeReport,
@@ -313,7 +315,7 @@ export interface ReviewClient {
       agent?: string
       model?: { providerID: string; modelID: string }
       format?: { type: "json_schema"; schema: { [key: string]: unknown }; retryCount?: number }
-      parts?: { type: "text"; text: string }[]
+      parts?: { type: "text"; text: string; metadata?: Record<string, unknown> }[]
     }): Result<ReviewMessage>
     update(input: { sessionID: string; directory?: string; permission?: PermissionRule[] }): Result<unknown>
     abort(input: { sessionID: string; directory?: string }): Result<unknown>
@@ -768,6 +770,7 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
       : `Reviewing with ${modelName(model)}…`,
   )
   const subject = pr ? `#${pr.number}` : "uncommitted changes"
+  const scope: Scope = { paths: review.map((file) => file.path), trust: checkout.trust }
   const rules = reviewPermissionRules({})
   const timeoutMs = input.timeoutMs ?? REVIEW_TIMEOUT_MS
   const stop = stopWhen(input.signal, timeoutMs)
@@ -781,6 +784,7 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
         name,
         title: `${REVIEW_SESSION_TITLE_PREFIX}${subject} · ${name}`,
         text: texts[name],
+        scope,
         model: first,
         rules,
         stop: stop.promise,
@@ -850,6 +854,7 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
           parentID: input.parentID,
           onSession: (sessionID) => input.onProgress?.({ type: "session", sessionID, costKind: model.costKind }),
           title: `${REVIEW_SESSION_TITLE_PREFIX}${subject} · verify`,
+          scope,
           text: buildVerifyPrompt({
             trust: checkout.trust,
             head,
@@ -1204,6 +1209,8 @@ async function runSpecialist(input: {
   name: Specialist
   title: string
   text: string
+  // The changed paths and the trust, which choose how the owner reviews; never the pull request's own text.
+  scope: Scope
   model?: ReviewModel
   rules: PermissionRule[]
   stop: Promise<StopReason>
@@ -1241,7 +1248,7 @@ async function runSpecialist(input: {
         agent: name,
         ...(input.model ? { model: { providerID: input.model.providerID, modelID: input.model.modelID } } : {}),
         format: FORMAT,
-        parts: [{ type: "text", text }],
+        parts: [{ type: "text", text, metadata: { [SCOPE]: input.scope } }],
       })
       .then(
         (result) => {
@@ -1328,6 +1335,7 @@ async function runVerify(input: {
   onSession: (sessionID: string) => void
   title: string
   text: string
+  scope: Scope
   model?: ReviewModel
   rules: PermissionRule[]
   stop: Promise<StopReason>
@@ -1352,7 +1360,7 @@ async function runVerify(input: {
       agent: "review",
       ...(input.model ? { model: { providerID: input.model.providerID, modelID: input.model.modelID } } : {}),
       format: VERIFY_FORMAT,
-      parts: [{ type: "text", text: input.text }],
+      parts: [{ type: "text", text: input.text, metadata: { [SCOPE]: input.scope } }],
     })
     .then(
       (result) => result.data,
@@ -1987,6 +1995,9 @@ export function buildDesktopReview(
     ),
     fallbackBody: redactSecrets(desktopSummaryBody({ ...outcome, selection }, url), []),
     comments,
+    // Posting checks all of it against the owner's memory, including what these sessions recalled (section 6.4a).
+    sessionIDs: outcome.sessions,
+    untrusted: outcome.checkout.trust === "untrusted",
   }
 }
 
