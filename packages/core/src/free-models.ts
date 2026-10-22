@@ -311,6 +311,8 @@ export const node = makeGlobalNode({
         consentFile: trainingConsentFile(),
         disabled: () => Flag.VECTOR_DISABLE_MODELS_FETCH,
         local: () => Egress.policy().enabled,
+        // Read only with Vector Local off (local, above), so OpenRouter's lists never need a source of their own.
+        request: (url, init) => Egress.fetch("free-models-catalog", url, init),
       }),
     ),
   ),

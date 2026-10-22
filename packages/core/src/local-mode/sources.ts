@@ -179,7 +179,12 @@ export const SOURCES: readonly Source[] = [
     why: "Runs the agent, subagents, the judge, Vectorscope, research and the helpers on the model servers you list",
     local: "allowed",
     where: ["engine"],
-    callSites: ["packages/engine/src/provider/provider.ts", "packages/llm/src/route/executor.ts"],
+    callSites: [
+      "packages/engine/src/provider/provider.ts",
+      "packages/llm/src/route/executor.ts",
+      "packages/core/src/local-mode/probe.ts",
+      "packages/core/src/local-mode/servers/ollama.ts",
+    ],
   },
   {
     id: "cloud-inference",
@@ -193,6 +198,9 @@ export const SOURCES: readonly Source[] = [
       "packages/engine/src/provider/provider.ts",
       "packages/llm/src/route/executor.ts",
       "packages/engine/src/plugin/openai/ws.ts",
+      "packages/core/src/plugin/provider/google-vertex.ts",
+      "packages/engine/src/plugin/snowflake-cortex.ts",
+      "packages/engine/src/plugin/github-copilot/models.ts",
     ],
     note: "Allowed only when your company's policy lists the host, labelled Company endpoint (listed by your company)",
   },
@@ -235,7 +243,11 @@ export const SOURCES: readonly Source[] = [
     why: "Sign in with ChatGPT",
     local: "not-allowable",
     where: ["engine"],
-    callSites: ["packages/engine/src/plugin/openai/ws.ts"],
+    callSites: [
+      "packages/engine/src/plugin/openai/ws.ts",
+      "packages/engine/src/plugin/openai/codex.ts",
+      "packages/core/src/plugin/provider/openai.ts",
+    ],
   },
   {
     id: "model-catalog",
@@ -369,6 +381,7 @@ export const SOURCES: readonly Source[] = [
       "packages/desktop/src/main/updater.ts",
       "packages/engine/src/cli/upgrade.ts",
       "packages/engine/src/installation/standalone.ts",
+      "packages/engine/src/installation/index.ts",
     ],
     note: "Automatic checks are off; a check you start asks each time, and a company mirror is allowed",
   },
@@ -451,7 +464,12 @@ export const SOURCES: readonly Source[] = [
     why: "Reads config and skills from addresses in your config",
     local: "allow-with-reason",
     where: ["engine"],
-    callSites: ["packages/engine/src/config/config.ts", "packages/core/src/skill/discovery.ts"],
+    callSites: [
+      "packages/engine/src/config/config.ts",
+      "packages/core/src/skill/discovery.ts",
+      "packages/engine/src/session/instruction.ts",
+      "packages/engine/src/cli/cmd/providers.ts",
+    ],
   },
   {
     id: "mcp-remote",
@@ -461,7 +479,7 @@ export const SOURCES: readonly Source[] = [
     why: "Remote MCP servers you configured",
     local: "allow-with-reason",
     where: ["engine"],
-    callSites: ["packages/engine/src/mcp/index.ts"],
+    callSites: ["packages/engine/src/mcp/index.ts", "packages/engine/src/cli/cmd/mcp.ts"],
   },
   {
     id: "github",
@@ -473,6 +491,7 @@ export const SOURCES: readonly Source[] = [
     where: ["engine", "desktop"],
     callSites: [
       "packages/engine/src/cli/cmd/github.handler.ts",
+      "packages/engine/src/cli/cmd/review.ts",
       "packages/desktop/src/main/github-pr.ts",
       "packages/desktop/src/main/github-api.ts",
     ],
@@ -521,7 +540,11 @@ export const SOURCES: readonly Source[] = [
     why: "Web search with your Exa key",
     local: "allow-with-reason",
     where: ["engine"],
-    callSites: ["packages/engine/src/tool/websearch.ts", "packages/core/src/tool/websearch.ts"],
+    callSites: [
+      "packages/engine/src/tool/websearch.ts",
+      "packages/engine/src/tool/mcp-websearch.ts",
+      "packages/core/src/tool/websearch.ts",
+    ],
     note: "Exa sees your search queries; billed by Exa on your key",
   },
   {
@@ -532,7 +555,11 @@ export const SOURCES: readonly Source[] = [
     why: "Web search with your Parallel key",
     local: "allow-with-reason",
     where: ["engine"],
-    callSites: ["packages/engine/src/tool/websearch.ts", "packages/core/src/tool/websearch.ts"],
+    callSites: [
+      "packages/engine/src/tool/websearch.ts",
+      "packages/engine/src/tool/mcp-websearch.ts",
+      "packages/core/src/tool/websearch.ts",
+    ],
     note: "Parallel sees your search queries; billed by Parallel on your key",
   },
   {
