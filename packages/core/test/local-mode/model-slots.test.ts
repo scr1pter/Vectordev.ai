@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { Effect, Exit, Fiber, Scope } from "effect"
 import { ModelSlots } from "../../src/local-mode/model-slots"
+import { LocalPolicy } from "../../src/local-mode/policy"
 import { SpendGuard } from "../../src/spend-guard"
 import { NetworkGuard } from "../lib/network-guard"
 
@@ -216,7 +217,12 @@ describe("ModelSlots servers", () => {
 
   test("prices nothing on this computer, and a private server only once it is listed", () => {
     const cost = (url: string, listed: string[] = [], priced = false) =>
-      SpendGuard.costKindOf({ free: false, oauthPlan: false, listed: priced, local: ModelSlots.local(url, listed) })
+      SpendGuard.costKindOf({
+        free: false,
+        oauthPlan: false,
+        listed: priced,
+        local: ModelSlots.local(url, LocalPolicy.resolve({ global: { endpoints: listed } })),
+      })
     expect(cost("http://127.0.0.1:11434/v1")).toBe("local")
     expect(cost("http://10.0.0.5:8000/v1")).toBe("unknown")
     expect(cost("http://10.0.0.5:8000/v1", ["http://10.0.0.5:8000"])).toBe("local")
@@ -224,5 +230,20 @@ describe("ModelSlots servers", () => {
     expect(cost("https://llm.corp.example.com/v1", ["https://llm.corp.example.com"])).toBe("unknown")
     // A configured price wins over the server being local.
     expect(cost("http://127.0.0.1:11434/v1", [], true)).toBe("priced")
+  })
+
+  test("a private server the company lists, by address, range or name, is priced as local", () => {
+    const company = LocalPolicy.resolve({
+      managed: {
+        endpoints: ["http://10.0.0.5:8000", "10.20.0.0/16", "https://*.ml.corp.internal"],
+      },
+    })
+    expect(ModelSlots.local("http://10.0.0.5:8000/v1", company)).toBe(true)
+    expect(ModelSlots.local("http://10.20.3.4:8000/v1", company)).toBe(true)
+    expect(ModelSlots.local("https://kimi.ml.corp.internal/v1", company)).toBe(true)
+    expect(ModelSlots.local("http://10.30.0.1:8000/v1", company)).toBe(false)
+    // A wildcard on the internet is listed, but such a server may pass requests on to a paid service.
+    const internet = LocalPolicy.resolve({ managed: { endpoints: ["https://*.corp.example.com"] } })
+    expect(ModelSlots.local("https://llm.corp.example.com/v1", internet)).toBe(false)
   })
 })
