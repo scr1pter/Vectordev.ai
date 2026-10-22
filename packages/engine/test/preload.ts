@@ -49,9 +49,13 @@ const testHome = path.join(dir, "home")
 await fs.mkdir(testHome, { recursive: true })
 process.env["VECTOR_TEST_HOME"] = testHome
 
-// Set test managed config directory to isolate tests from system managed settings
+// Set test managed config directory to isolate tests from system managed settings. Vector reads it only through
+// ConfigManaged.useTestDirectory, called here before anything resolves Vector Local; the variable only tells test files
+// where the folder is.
 const testManagedConfigDir = path.join(dir, "managed")
 process.env["VECTOR_TEST_MANAGED_CONFIG_DIR"] = testManagedConfigDir
+const { ConfigManaged } = await import("../src/config/managed")
+ConfigManaged.useTestDirectory(testManagedConfigDir)
 
 // Write the cache version file to prevent global/index.ts from clearing the cache
 const cacheDir = path.join(dir, "cache", "vector")

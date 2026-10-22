@@ -10,7 +10,10 @@ const PRIVATE_RUNTIME_ENVIRONMENT = new Set([
   "VECTOR_REQUIRE_SECURE_CREDENTIAL_STORE",
 ])
 
-/** Set in every untrusted child of a process that runs agents. `vector local off`, `allow` and `web` refuse under it. */
+/**
+ * Set in every untrusted child of a process that runs agents. `vector local off`, `allow` and `web` refuse under it.
+ * Its presence is what counts, whatever its value: a source's "0" is kept as it is and still marks the child.
+ */
 export const AGENT_MARKER = "VECTOR_AGENT_SESSION"
 
 // What untrusted children inherit from Vector itself, set by the process that resolved Vector Local. Nothing is added

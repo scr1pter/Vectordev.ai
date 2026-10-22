@@ -25,6 +25,7 @@ import { NetworkGuard } from "../../../core/test/lib/network-guard"
 const guard = NetworkGuard.use()
 
 const managedDirectory = process.env.VECTOR_TEST_MANAGED_CONFIG_DIR!
+const engineDirectory = path.resolve(import.meta.dir, "../..")
 
 const it = testEffect(
   LayerNode.compile(LayerNode.group([Config.node, FSUtil.node, Env.node, CrossSpawnSpawner.node]), [
@@ -107,36 +108,41 @@ describe("POSIX ownership", () => {
   const owners = [0]
 
   test("a root-owned file or folder no one else may write is trusted", () => {
-    expect(ConfigManaged.posixReason({ path: "/etc/vector/vector.json", uid: 0, gid: 0, mode: 0o100644 }, owners)).toBe(
+    expect(ConfigManaged.posixReason({ path: "/etc/vector/vector.json", uid: 0, mode: 0o100644 }, owners)).toBe(
       undefined,
     )
-    expect(ConfigManaged.posixReason({ path: "/etc/vector", uid: 0, gid: 0, mode: 0o040755 }, owners)).toBe(undefined)
-    // Root's own group may write: only root is in it.
-    expect(ConfigManaged.posixReason({ path: "/etc/vector", uid: 0, gid: 0, mode: 0o040775 }, owners)).toBe(undefined)
+    expect(ConfigManaged.posixReason({ path: "/etc/vector", uid: 0, mode: 0o040755 }, owners)).toBe(undefined)
   })
 
   test("a file owned by anyone but root is ignored", () => {
-    expect(
-      ConfigManaged.posixReason({ path: "/etc/vector/vector.json", uid: 501, gid: 20, mode: 0o100644 }, owners),
-    ).toBe("/etc/vector/vector.json is not owned by root.")
+    expect(ConfigManaged.posixReason({ path: "/etc/vector/vector.json", uid: 501, mode: 0o100644 }, owners)).toBe(
+      "/etc/vector/vector.json is not owned by root.",
+    )
   })
 
   test("a managed file writable by group or world is ignored", () => {
-    expect(
-      ConfigManaged.posixReason({ path: "/etc/vector/vector.json", uid: 0, gid: 20, mode: 0o100664 }, owners),
-    ).toBe("/etc/vector/vector.json can be changed by other users.")
-    expect(ConfigManaged.posixReason({ path: "/etc/vector/vector.json", uid: 0, gid: 0, mode: 0o100646 }, owners)).toBe(
+    expect(ConfigManaged.posixReason({ path: "/etc/vector/vector.json", uid: 0, mode: 0o100664 }, owners)).toBe(
       "/etc/vector/vector.json can be changed by other users.",
     )
-    expect(ConfigManaged.posixReason({ path: "/etc/vector", uid: 0, gid: 0, mode: 0o040777 }, owners)).toBe(
+    expect(ConfigManaged.posixReason({ path: "/etc/vector/vector.json", uid: 0, mode: 0o100646 }, owners)).toBe(
+      "/etc/vector/vector.json can be changed by other users.",
+    )
+    expect(ConfigManaged.posixReason({ path: "/etc/vector", uid: 0, mode: 0o040777 }, owners)).toBe(
+      "/etc/vector can be changed by other users.",
+    )
+  })
+
+  test("a group write counts even for root's own group, so a Linux access list's mask cannot hide a writer", () => {
+    // With an access control list, the group bits are the list's mask: any entry that lets another user write sets them.
+    expect(ConfigManaged.posixReason({ path: "/etc/vector", uid: 0, mode: 0o040775 }, owners)).toBe(
       "/etc/vector can be changed by other users.",
     )
   })
 
   test("a world-writable folder with the sticky bit is trusted, since only owners can replace its entries", () => {
-    expect(ConfigManaged.posixReason({ path: "/tmp", uid: 0, gid: 0, mode: 0o041777 }, owners)).toBe(undefined)
+    expect(ConfigManaged.posixReason({ path: "/tmp", uid: 0, mode: 0o041777 }, owners)).toBe(undefined)
     // The sticky bit means nothing on a file.
-    expect(ConfigManaged.posixReason({ path: "/tmp/vector.json", uid: 0, gid: 0, mode: 0o101666 }, owners)).toBe(
+    expect(ConfigManaged.posixReason({ path: "/tmp/vector.json", uid: 0, mode: 0o101666 }, owners)).toBe(
       "/tmp/vector.json can be changed by other users.",
     )
   })
@@ -271,19 +277,140 @@ describe("the Windows policy key", () => {
       ConfigManaged.parseRegistry(
         `\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Vector\r\n    Config    REG_SZ    ${text}\r\n\r\n`,
       ),
-    ).toBe(text)
+    ).toEqual({ text })
     expect(
       ConfigManaged.parseRegistry(
-        `\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Vector\n    Config    REG_EXPAND_SZ    {}\n`,
+        `\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Vector\n    Config    REG_EXPAND_SZ    {}\n    Other    REG_SZ    x\n`,
       ),
-    ).toBe("{}")
+    ).toEqual({ text: "{}" })
   })
 
   test("reads nothing from a key without the value", () => {
     expect(ConfigManaged.parseRegistry("\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Vector\r\n")).toBe(undefined)
     expect(ConfigManaged.parseRegistry("    Other    REG_SZ    {}\r\n")).toBe(undefined)
-    expect(ConfigManaged.parseRegistry("    Config    REG_DWORD    0x1\r\n")).toBe(undefined)
+    expect(ConfigManaged.parseRegistry("    Config    REG_SZ    \r\n")).toBe(undefined)
   })
+
+  test("refuses a value of another type or on several lines rather than reading part of it", () => {
+    expect(ConfigManaged.parseRegistry('    Config    REG_MULTI_SZ    {"local":\\0{"enabled":true}}\r\n')).toEqual({
+      reason: `${ConfigManaged.REGISTRY_KEY} holds Config as REG_MULTI_SZ. Vector reads it only as one line of JSON in a REG_SZ value.`,
+    })
+    expect(ConfigManaged.parseRegistry("    Config    REG_DWORD    0x1\r\n")).toEqual({
+      reason: `${ConfigManaged.REGISTRY_KEY} holds Config as REG_DWORD. Vector reads it only as one line of JSON in a REG_SZ value.`,
+    })
+    expect(
+      ConfigManaged.parseRegistry('    Config    REG_SZ    {\r\n  "local": { "enabled": true }\r\n}\r\n\r\n'),
+    ).toEqual({
+      reason: `${ConfigManaged.REGISTRY_KEY} holds Config on more than one line. Vector reads it only as one line of JSON.`,
+    })
+  })
+})
+
+describe("system tools and folders", () => {
+  test("the tools that read company policy are run by absolute path, never through PATH", () => {
+    expect(ConfigManaged.PLUTIL).toBe("/usr/bin/plutil")
+    expect(ConfigManaged.REG).toBe("C:\\Windows\\System32\\reg.exe")
+    expect(ConfigManaged.POWERSHELL).toBe("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe")
+  })
+
+  test("C:\\ProgramData\\vector is always checked, whatever ProgramData says", () => {
+    const previous = process.env.ProgramData
+    try {
+      process.env.ProgramData = "D:\\Empty"
+      expect(ConfigManaged.systemDirectories("win32")).toEqual(["C:\\ProgramData\\vector", "D:\\Empty\\vector"])
+      process.env.ProgramData = "c:\\programdata"
+      expect(ConfigManaged.systemDirectories("win32")).toEqual(["C:\\ProgramData\\vector"])
+      delete process.env.ProgramData
+      expect(ConfigManaged.systemDirectories("win32")).toEqual(["C:\\ProgramData\\vector"])
+    } finally {
+      if (previous === undefined) delete process.env.ProgramData
+      else process.env.ProgramData = previous
+    }
+    expect(ConfigManaged.systemDirectories("darwin")).toEqual(["/Library/Application Support/vector"])
+    expect(ConfigManaged.systemDirectories("linux")).toEqual(["/etc/vector"])
+  })
+
+  test("reads PowerShell's owner and access rules as SIDs, and leaves out a path it could not read", () => {
+    const paths = ["C:\\ProgramData\\vector", "C:\\ProgramData\\vector\\vector.json"]
+    expect(
+      ConfigManaged.parseAcl(
+        [
+          `U ${SOMEONE}`,
+          `O 0 ${ADMINISTRATORS}`,
+          `R 0 ${SYSTEM} ${FULL} 1 0`,
+          `R 0 ${CREATOR_OWNER} 268435456 1 1`,
+          `R 0 ${USERS} -1610612736 1 0`,
+          `R 0 ${EVERYONE} ${FULL} 0 0`,
+          "R 0 broken",
+          "",
+        ].join("\r\n"),
+        paths,
+      ),
+    ).toEqual({
+      user: SOMEONE,
+      entries: {
+        [paths[0]!]: {
+          owner: ADMINISTRATORS,
+          rules: [
+            { sid: SYSTEM, rights: FULL, allow: true, inheritOnly: false },
+            { sid: CREATOR_OWNER, rights: 0x10000000, allow: true, inheritOnly: true },
+            { sid: USERS, rights: -1610612736, allow: true, inheritOnly: false },
+            { sid: EVERYONE, rights: FULL, allow: false, inheritOnly: false },
+          ],
+        },
+        [paths[1]!]: undefined,
+      },
+    })
+  })
+
+  test.skipIf(process.platform !== "darwin")(
+    "reads the MDM profile with the system's plutil, after the trust check",
+    async () => {
+      await using dir = await tmpdir()
+      const root = path.join(dir.path, "Managed Preferences")
+      mkdirSync(root)
+      const plist = path.join(root, "ai.vector.managed.plist")
+      writeFileSync(
+        plist,
+        '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>model</key><string>company/model</string><key>PayloadUUID</key><string>x</string></dict></plist>\n',
+      )
+      const source = `mobileconfig:${plist}`
+      // A profile a standard user put there is not company policy.
+      expect(ConfigManaged.preferences(root)).toEqual({
+        source,
+        reason: `${realpathSync(plist)} is not owned by root.`,
+        kind: "untrusted",
+      })
+      chmodSync(plist, 0o666)
+      expect(ConfigManaged.preferences(root, { user: true })).toEqual({
+        source,
+        reason: `${realpathSync(plist)} can be changed by other users.`,
+        kind: "untrusted",
+      })
+      chmodSync(plist, 0o644)
+      // A plutil earlier in PATH that prints nothing useful is never run.
+      const bin = path.join(dir.path, "bin")
+      mkdirSync(bin)
+      writeFileSync(path.join(bin, "plutil"), "#!/bin/sh\necho '{}'\n", { mode: 0o755 })
+      const previous = process.env.PATH
+      process.env.PATH = `${bin}:${previous}`
+      try {
+        expect(ConfigManaged.preferences(root, { user: true })).toEqual({
+          source,
+          text: JSON.stringify({ model: "company/model" }),
+        })
+      } finally {
+        process.env.PATH = previous
+      }
+      // A profile plutil cannot convert is reported, not dropped.
+      writeFileSync(plist, "not a property list")
+      const unreadable = ConfigManaged.preferences(root, { user: true })
+      expect(unreadable).toMatchObject({ source, kind: "unreadable" })
+      expect(unreadable && "reason" in unreadable ? unreadable.reason : "").toStartWith(
+        `Vector could not read ${plist}: `,
+      )
+    },
+  )
 })
 
 describe("managed config", () => {
@@ -300,7 +427,7 @@ describe("managed config", () => {
     expect(ConfigManaged.read()).toEqual({
       files: [json],
       policies: [],
-      ignored: [{ source: jsonc, reason: `${realpathSync(jsonc)} can be changed by other users.` }],
+      ignored: [{ source: jsonc, reason: `${realpathSync(jsonc)} can be changed by other users.`, kind: "untrusted" }],
     })
   })
 
@@ -335,5 +462,101 @@ describe("managed config", () => {
       expect(Config.refreshLocal()).toMatchObject({ enabled: true, web: "none", warnings: [] })
     }),
     { trusted: true, config: { model: "repository/model" } },
+  )
+})
+
+describe("the test managed folder", () => {
+  test("a process that did not choose it reads the system's folders and ignores a user's file there", async () => {
+    await using dir = await tmpdir()
+    const folder = path.join(dir.path, "managed")
+    mkdirSync(folder)
+    writeFileSync(
+      path.join(folder, "vector.json"),
+      JSON.stringify({
+        local: {
+          endpoints: ["https://api.openai.com"],
+          allow: [{ source: "catalog", reason: "x", added_at: 1, added_by: "app" }],
+        },
+      }),
+    )
+    const url = (file: string) => JSON.stringify(new URL(file, import.meta.url).href)
+    // Only test/preload.ts chooses a test folder; the variable that tells test files where it is changes nothing.
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        "--eval",
+        `
+        const { ConfigManaged } = await import(${url("../../src/config/managed.ts")})
+        const { Config } = await import(${url("../../src/config/config.ts")})
+        process.stdout.write(JSON.stringify({ directories: ConfigManaged.directories(), files: ConfigManaged.read().files, policy: Config.local() }) + "\\n")
+        process.exit(0)
+        `,
+      ],
+      {
+        cwd: engineDirectory,
+        env: { ...process.env, VECTOR_TEST_MANAGED_CONFIG_DIR: folder },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    )
+    const [code, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ])
+    expect(stderr.includes("error:") ? stderr : "").toBe("")
+    expect(code).toBe(0)
+    const result = JSON.parse(stdout.trim().split("\n").at(-1) ?? "")
+    expect(result.directories).toEqual(ConfigManaged.systemDirectories())
+    expect(result.files).not.toContain(path.join(folder, "vector.json"))
+    expect(result.policy.endpoints.map((item: { origin: string }) => item.origin)).not.toContain(
+      "https://api.openai.com",
+    )
+    expect(result.policy.allow.map((item: { source: string }) => item.source)).not.toContain("catalog")
+  }, 30_000)
+
+  test("tests read company policy from the folder preload chose", () => {
+    expect(ConfigManaged.directories()).toEqual([managedDirectory])
+  })
+})
+
+describe("macOS access control lists", () => {
+  const listing = [
+    "drwxr-xr-x  23 root  wheel  736 Sep 24 00:10 /",
+    "drwxr-xr-x+  3 root  wheel   96 Oct 22 11:39 /Library/Application Support/vector",
+    " 0: group:everyone deny delete",
+    " 1: group:wheel allow add_file,delete_child",
+    "-rw-r--r--+  1 root  wheel    3 Oct 22 11:39 /Library/Application Support/vector/vector.json",
+    " 0: user:root allow write",
+    " 1: group:staff inherited allow read,readattr",
+  ]
+  const paths = ["/Library/Application Support/vector/vector.json", "/Library/Application Support/vector", "/"]
+
+  test("entries for root and wheel, deny entries and read rights do not count", () => {
+    expect(ConfigManaged.macAclReason(listing.join("\n"), paths)).toBe(undefined)
+  })
+
+  test("an entry that lets another user or group write or replace a file is caught", () => {
+    expect(ConfigManaged.macAclReason([...listing, " 2: user:nobody allow write,append"].join("\n"), paths)).toBe(
+      "/Library/Application Support/vector/vector.json lets user:nobody change it.",
+    )
+    const folder = [...listing.slice(0, 3), " 1: group:staff inherited allow add_file", ...listing.slice(4)]
+    expect(ConfigManaged.macAclReason(folder.join("\n"), paths)).toBe(
+      "/Library/Application Support/vector lets group:staff change it.",
+    )
+  })
+
+  test.skipIf(process.platform !== "darwin")(
+    "a real file's list is checked, though stat does not show it",
+    async () => {
+      const { dir, folder, file } = await managedFile()
+      await using _ = dir
+      expect(ConfigManaged.untrusted(file, { user: true })).toBe(undefined)
+      expect(Bun.spawnSync(["/bin/chmod", "+a", "user:nobody allow write", file]).exitCode).toBe(0)
+      expect(ConfigManaged.untrusted(file, { user: true })).toBe(`${realpathSync(file)} lets user:nobody change it.`)
+      expect(Bun.spawnSync(["/bin/chmod", "-N", file]).exitCode).toBe(0)
+      expect(Bun.spawnSync(["/bin/chmod", "+a", "group:everyone deny delete", folder]).exitCode).toBe(0)
+      expect(ConfigManaged.untrusted(file, { user: true })).toBe(undefined)
+    },
   )
 })

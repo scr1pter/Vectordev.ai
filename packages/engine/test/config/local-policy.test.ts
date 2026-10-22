@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs"
+import { chmodSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs"
 import path from "path"
 import { Effect, Layer } from "effect"
 import { HttpClient } from "effect/unstable/http"
@@ -30,11 +30,22 @@ const guard = NetworkGuard.use()
 const globalFile = path.join(Global.Path.config, "vector.json")
 const managedDirectory = process.env.VECTOR_TEST_MANAGED_CONFIG_DIR!
 const engineDirectory = path.resolve(import.meta.dir, "../..")
-const ENVIRONMENT = ["VECTOR_LOCAL", "VECTOR_LOCAL_WEB", "VECTOR_LOCAL_POLICY", "VECTOR_CONFIG_CONTENT"] as const
+const ENVIRONMENT = [
+  "VECTOR_LOCAL",
+  "VECTOR_LOCAL_WEB",
+  "VECTOR_LOCAL_POLICY",
+  "VECTOR_CONFIG_CONTENT",
+  "VECTOR_AGENT_CONFIG",
+  "VECTOR_AGENT_CONFIG_DIR",
+  "VECTOR_CLIENT",
+] as const
 const saved = Object.fromEntries(ENVIRONMENT.map((key) => [key, process.env[key]]))
 
 const SERVER = "http://127.0.0.1:11434"
 const GPU_BOX = "http://10.0.0.5:8000"
+const GITHUB = { source: "github", reason: "PRs", added_at: 1, added_by: "cli" as const }
+const CATALOG = { source: "catalog", reason: "Models", added_at: 1, added_by: "app" as const }
+const CONFIG = JSON.stringify(new URL("../../src/config/config.ts", import.meta.url).href)
 
 const it = testEffect(
   LayerNode.compile(LayerNode.group([Config.node, FSUtil.node, Env.node, CrossSpawnSpawner.node]), [
@@ -58,7 +69,10 @@ afterEach(() => {
   rmSync(globalFile, { force: true })
   rmSync(Config.localConfirmedFile(), { force: true })
   rmSync(managedDirectory, { recursive: true, force: true })
+  // Removing a test's config can loosen Vector Local, which waits for the owner; the owner here says yes.
   Config.refreshLocal()
+  Config.confirmLocal()
+  expect(Config.localPending()).toBe(undefined)
   expect(guard.outside()).toEqual([])
 })
 
@@ -72,20 +86,20 @@ function writeManaged(config: object) {
 }
 
 function nextChange(type: Config.LocalChange["type"]) {
-  const { promise, resolve, reject } = Promise.withResolvers<Config.LocalChange>()
-  const timer = setTimeout(() => reject(new Error(`no ${type} change within 5 seconds`)), 5_000)
-  const unsubscribe = Config.subscribeLocal((change) => {
-    if (change.type !== type) return
+  const change = Promise.withResolvers<Config.LocalChange>()
+  const timer = setTimeout(() => change.reject(new Error(`no ${type} change within 5 seconds`)), 5_000)
+  const unsubscribe = Config.subscribeLocal((next) => {
+    if (next.type !== type) return
     clearTimeout(timer)
     unsubscribe()
-    resolve(change)
+    change.resolve(next)
   })
-  return promise
+  return change.promise
 }
 
-async function run(script: string, env: Record<string, string | undefined>) {
+async function run(script: string, env: Record<string, string | undefined>, cwd = engineDirectory) {
   const child = Bun.spawn([process.execPath, "--eval", script], {
-    cwd: engineDirectory,
+    cwd,
     env: Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined)),
     stdout: "pipe",
     stderr: "pipe",
@@ -97,6 +111,19 @@ async function run(script: string, env: Record<string, string | undefined>) {
   ])
   if (code !== 0) throw new Error(`the child exited with ${code}: ${stderr}`)
   return JSON.parse(stdout.trim().split("\n").at(-1) ?? "")
+}
+
+// What a fresh process resolves at start, with this environment.
+function start(env: Record<string, string | undefined>, cwd?: string) {
+  return run(
+    `
+    const { Config } = await import(${CONFIG})
+    process.stdout.write(JSON.stringify({ policy: Config.local(), pending: Config.localPending()?.changes ?? null }) + "\\n")
+    process.exit(0)
+    `,
+    env,
+    cwd,
+  )
 }
 
 describe("resolved at start", () => {
@@ -119,6 +146,8 @@ describe("resolved at start", () => {
     // for. The floor children get is set when the policy is resolved, so it shows the policy was already in effect.
     const result = await run(
       `
+      const { ConfigManaged } = await import(${url("../../src/config/managed.ts")})
+      ConfigManaged.useTestDirectory(${JSON.stringify(managed)})
       const { untrustedChildEnvironment } = await import(${url("../../../core/src/child-environment.ts")})
       const { AppRuntime } = await import(${url("../../src/effect/app-runtime.ts")})
       const floor = untrustedChildEnvironment({})
@@ -134,7 +163,6 @@ describe("resolved at start", () => {
         XDG_STATE_HOME: path.join(dir.path, "state"),
         XDG_DATA_HOME: path.join(dir.path, "data"),
         XDG_CACHE_HOME: path.join(dir.path, "cache"),
-        VECTOR_TEST_MANAGED_CONFIG_DIR: managed,
         VECTOR_MODELS_URL: `http://127.0.0.1:${mirror.port}/models`,
         VECTOR_MODELS_PATH: undefined,
         VECTOR_DISABLE_MODELS_FETCH: undefined,
@@ -163,12 +191,18 @@ describe("repository config", () => {
         writeGlobal({ enabled: true, web: "network", endpoints: [SERVER] })
         Config.refreshLocal()
         const config = yield* Config.use.get()
-        expect(config.local).toEqual({ enabled: true, web: "network", endpoints: [SERVER] })
+        // Config.local() is the only reader: the merged config carries no local block at all.
+        expect(config.local).toBe(undefined)
         expect(Config.local()).toMatchObject({
           enabled: true,
           web: "network",
           endpoints: [{ origin: SERVER, from: "user" }],
         })
+        // The policy this repository reports says its own block was left out.
+        const policy = yield* Config.use.localPolicy()
+        expect(policy.warnings).toContain(LocalPolicy.REPOSITORY_IGNORED)
+        expect(policy).toMatchObject({ enabled: true, web: "network", endpoints: [{ origin: SERVER }] })
+        expect(Config.local().warnings).not.toContain(LocalPolicy.REPOSITORY_IGNORED)
       }),
       {
         trusted,
@@ -189,6 +223,14 @@ describe("repository config", () => {
       expect(Config.local().enabled).toBe(false)
     }),
     { trusted: true, config: { local: { enabled: true, web: "none" } } },
+  )
+
+  it.instance(
+    "a repository without a local block reports no warning",
+    Effect.gen(function* () {
+      expect((yield* Config.use.localPolicy()).warnings).toEqual([])
+    }),
+    { trusted: true, config: { model: "repository/model" } },
   )
 })
 
@@ -212,12 +254,13 @@ describe("the environment only tightens", () => {
 
   test("VECTOR_LOCAL_POLICY can add a server but cannot lock or allow a service", () => {
     writeGlobal({ enabled: true, endpoints: [SERVER] })
+    Config.refreshLocal()
     process.env.VECTOR_LOCAL_POLICY = JSON.stringify({
       enabled: true,
       web: "ask",
       endpoints: [GPU_BOX],
       lock: true,
-      allow: [{ source: "github", reason: "PRs", added_at: 1, added_by: "cli" }],
+      allow: [GITHUB],
     })
     const policy = Config.refreshLocal()
     expect(policy.lock).toBe(false)
@@ -237,7 +280,7 @@ describe("config overrides only tighten", () => {
         enabled: false,
         web: "ask",
         endpoints: [GPU_BOX],
-        allow: [{ source: "github", reason: "PRs", added_at: 1, added_by: "cli" }],
+        allow: [GITHUB],
         web_domains: { allow: ["docs.example.com"], deny: ["ads.example"] },
         lock: false,
       },
@@ -257,6 +300,7 @@ describe("config overrides only tighten", () => {
 
   test("VECTOR_CONFIG_CONTENT can tighten Vector Local", () => {
     writeGlobal({ endpoints: [SERVER] })
+    Config.refreshLocal()
     process.env.VECTOR_CONFIG_CONTENT = JSON.stringify({ local: { enabled: true, web: "none" } })
     expect(Config.refreshLocal()).toMatchObject({
       enabled: true,
@@ -274,7 +318,7 @@ describe("config overrides only tighten", () => {
       Config.refreshLocal()
       const config = yield* Config.use.get()
       expect(config.model).toBe("content/model")
-      expect(config.local).toEqual({ enabled: true, endpoints: [SERVER] })
+      expect(config.local).toBe(undefined)
       expect(Config.local().enabled).toBe(true)
     }),
   )
@@ -319,26 +363,128 @@ describe("children inherit the Local floor", () => {
     expect(untrustedChildEnvironment({ PATH: "/usr/bin" })).toEqual({ PATH: "/usr/bin", VECTOR_AGENT_SESSION: "1" })
   })
 
-  test("a nested vector keeps Local on whatever config it reads", async () => {
+  test("a nested vector keeps Local on whatever XDG_CONFIG_HOME it reads, and holds what that config adds", async () => {
     writeGlobal({ enabled: true, web: "network", endpoints: [SERVER] })
     Config.refreshLocal()
     await using dir = await tmpdir()
-    // The nested process reads another config folder, which turns Vector Local off.
+    // The nested process reads another config folder, which turns Vector Local off and adds to it, with a state
+    // folder of its own, so no copy of a block the owner let apply.
     mkdirSync(path.join(dir.path, "config", "vector"), { recursive: true })
-    writeFileSync(path.join(dir.path, "config", "vector", "vector.json"), JSON.stringify({ local: { enabled: false } }))
-    const environment = untrustedChildEnvironment(process.env, {
-      XDG_CONFIG_HOME: path.join(dir.path, "config"),
-      XDG_STATE_HOME: path.join(dir.path, "state"),
-    })
-    const policy = await run(
-      `
-      const { Config } = await import(${JSON.stringify(new URL("../../src/config/config.ts", import.meta.url).href)})
-      process.stdout.write(JSON.stringify(Config.local()) + "\\n")
-      process.exit(0)
-      `,
-      environment,
+    writeFileSync(
+      path.join(dir.path, "config", "vector", "vector.json"),
+      JSON.stringify({ local: { enabled: false, web: "ask", endpoints: [GPU_BOX], allow: [GITHUB] } }),
     )
-    expect(policy).toMatchObject({ enabled: true, web: "network" })
+    const next = await start(
+      untrustedChildEnvironment(process.env, {
+        XDG_CONFIG_HOME: path.join(dir.path, "config"),
+        XDG_STATE_HOME: path.join(dir.path, "state"),
+      }),
+    )
+    expect(next.policy).toMatchObject({ enabled: true, web: "network", endpoints: [], allow: [] })
+    expect(next.pending).toEqual([`adds the model server ${GPU_BOX}`, "allows github"])
+  }, 30_000)
+})
+
+describe("config-path overrides", () => {
+  test("VECTOR_AGENT_CONFIG only tightens", async () => {
+    await using dir = await tmpdir()
+    const file = path.join(dir.path, "agent.json")
+    writeFileSync(
+      file,
+      JSON.stringify({ local: { enabled: false, web: "none", endpoints: [GPU_BOX], allow: [GITHUB] } }),
+    )
+    writeGlobal({ enabled: true, web: "ask", endpoints: [SERVER] })
+    Config.refreshLocal()
+    // Vector reads VECTOR_AGENT_CONFIG once, when it starts.
+    const next = await start({ ...process.env, VECTOR_AGENT_CONFIG: file })
+    expect(next.policy).toMatchObject({
+      enabled: true,
+      web: "none",
+      endpoints: [{ origin: SERVER, from: "user" }],
+      allow: [],
+    })
+    expect(next.policy.warnings).toContain(
+      `Ignored enabled, endpoints, allow in the local block of ${file}: it can only make Vector Local stricter.`,
+    )
+    expect(next.pending).toBe(null)
+  }, 30_000)
+
+  test("a VECTOR_AGENT_CONFIG_DIR that is not the desktop's own config folder only tightens", async () => {
+    await using dir = await tmpdir()
+    const folder = path.join(dir.path, "agent")
+    mkdirSync(folder)
+    writeFileSync(
+      path.join(folder, "vector.json"),
+      JSON.stringify({ local: { enabled: false, web: "ask", allow: [CATALOG] } }),
+    )
+    writeGlobal({ enabled: true, web: "none" })
+    process.env.VECTOR_AGENT_CONFIG_DIR = folder
+    const policy = Config.refreshLocal()
+    expect(policy).toMatchObject({ enabled: true, web: "none", allow: [] })
+    expect(policy.warnings).toContain(
+      `Ignored enabled, web, allow in the local block of ${path.join(folder, "vector.json")}: it can only make Vector Local stricter.`,
+    )
+    expect(Config.localPending()).toBe(undefined)
+  })
+
+  test("the desktop's own config folder sets Vector Local, and what it adds later is held", async () => {
+    await using dir = await tmpdir()
+    const folder = path.join(dir.path, "userData", "config", "vector")
+    mkdirSync(folder, { recursive: true })
+    const file = path.join(folder, "vector.json")
+    writeFileSync(file, JSON.stringify({ local: { enabled: true, endpoints: [SERVER] } }))
+    process.env.VECTOR_CLIENT = "desktop"
+    process.env.VECTOR_AGENT_CONFIG_DIR = folder
+    try {
+      expect(Config.refreshLocal()).toMatchObject({ enabled: true, endpoints: [{ origin: SERVER, from: "user" }] })
+      writeFileSync(file, JSON.stringify({ local: { enabled: true, endpoints: [SERVER, GPU_BOX] } }))
+      expect(Config.refreshLocal().endpoints).toEqual([{ origin: SERVER, from: "user" }])
+      expect(Config.localPending()?.changes).toEqual([`adds the model server ${GPU_BOX}`])
+    } finally {
+      rmSync(file)
+      Config.refreshLocal()
+      Config.confirmLocal()
+      rmSync(Config.localConfirmedFile(), { force: true })
+    }
+  })
+
+  test("a config folder inside the repository Vector started in is not read", async () => {
+    await using dir = await tmpdir()
+    const repository = path.join(dir.path, "repository")
+    const folder = path.join(repository, "agentcfg")
+    mkdirSync(path.join(repository, ".git"), { recursive: true })
+    mkdirSync(folder)
+    writeFileSync(path.join(folder, "vector.json"), JSON.stringify({ local: { enabled: true, allow: [CATALOG] } }))
+    writeGlobal({ enabled: false })
+    // A repository's .envrc can name its own folder, and say the desktop started Vector.
+    process.env.VECTOR_CLIENT = "desktop"
+    process.env.VECTOR_AGENT_CONFIG_DIR = folder
+    const previous = process.cwd()
+    process.chdir(path.join(repository, ".git"))
+    try {
+      const policy = Config.refreshLocal()
+      // Not even to tighten: a repository cannot turn Vector Local on either.
+      expect(policy).toMatchObject({ enabled: false, allow: [] })
+      expect(policy.warnings).toEqual([
+        `Ignored ${folder}: it is inside the repository Vector started in, and only your user config and your company's policy set Vector Local.`,
+      ])
+    } finally {
+      process.chdir(previous)
+    }
+  })
+
+  test("a VECTOR_AGENT_CONFIG inside the repository Vector started in is not read", async () => {
+    await using dir = await tmpdir()
+    const repository = path.join(dir.path, "repository")
+    mkdirSync(path.join(repository, ".git"), { recursive: true })
+    const file = path.join(repository, "agent.json")
+    writeFileSync(file, JSON.stringify({ local: { enabled: true, web: "none" } }))
+    writeGlobal({ enabled: false })
+    const next = await start({ ...process.env, VECTOR_AGENT_CONFIG: file }, repository)
+    expect(next.policy).toMatchObject({ enabled: false, web: "ask" })
+    expect(next.policy.warnings).toEqual([
+      `Ignored ${file}: it is inside the repository Vector started in, and only your user config and your company's policy set Vector Local.`,
+    ])
   }, 30_000)
 })
 
@@ -362,7 +508,7 @@ describe("loosening edits wait for the owner", () => {
       expect(untrustedChildEnvironment({}).VECTOR_LOCAL).toBe("1")
       expect(Config.localPending()?.proposed.enabled).toBe(false)
       expect(toasts.map((event) => event.payload.properties.message)).toEqual([
-        "A change to your config would loosen Vector Local: it turns Vector Local off. Vector keeps the stricter setting until you confirm the change.",
+        "A change to your config would loosen Vector Local: it turns Vector Local off. Vector keeps the stricter setting. Confirming a change like this in the app or a terminal comes in the next release.",
       ])
 
       const applied = nextChange("updated")
@@ -406,7 +552,7 @@ describe("loosening edits wait for the owner", () => {
     }),
   )
 
-  test("an edit made while Vector is closed is held at the next start", () => {
+  test("an edit made while Vector is closed is held at the next start", async () => {
     writeGlobal({ enabled: true, web: "none", endpoints: [SERVER] })
     Config.refreshLocal()
     expect(JSON.parse(readFileSync(Config.localConfirmedFile(), "utf8"))).toEqual({
@@ -416,19 +562,70 @@ describe("loosening edits wait for the owner", () => {
       enabled: true,
       web: "ask",
       endpoints: [SERVER, GPU_BOX],
-      allow: [{ source: "github", reason: "PRs", added_at: 1, added_by: "cli" }],
+      allow: [GITHUB],
       web_domains: { allow: ["docs.example.com"] },
     })
-    // What a fresh process does when it loads.
-    const policy = Config.refreshLocal()
-    expect(policy).toMatchObject({ enabled: true, web: "none", endpoints: [{ origin: SERVER }], allow: [] })
-    expect(Config.localPending()?.changes).toEqual([
+    const next = await start(process.env)
+    expect(next.policy).toMatchObject({ enabled: true, web: "none", endpoints: [{ origin: SERVER }], allow: [] })
+    expect(next.pending).toEqual([
       "sets Web access to Ask",
       `adds the model server ${GPU_BOX}`,
       "allows github",
       "lets web pages reach docs.example.com",
     ])
+  }, 30_000)
+
+  test("at start, a missing or unreadable copy counts as no user block, which still holds what it adds", async () => {
+    writeGlobal({ endpoints: [GPU_BOX], allow: [CATALOG] })
+    for (const copy of [undefined, "garbage", JSON.stringify({ local: { enabled: "yes" } })]) {
+      rmSync(Config.localConfirmedFile(), { force: true })
+      if (copy) writeFileSync(Config.localConfirmedFile(), copy)
+      const next = await start({ ...process.env, VECTOR_LOCAL: "1" })
+      expect(next.policy).toMatchObject({ enabled: true, endpoints: [], allow: [] })
+      expect(next.pending).toEqual([`adds the model server ${GPU_BOX}`, "allows catalog"])
+    }
+  }, 60_000)
+
+  test("deleting or corrupting the saved copy while Vector runs changes nothing", () => {
+    writeGlobal({ enabled: true, web: "network", endpoints: [SERVER] })
+    Config.refreshLocal()
+    rmSync(Config.localConfirmedFile())
+    writeGlobal({ enabled: false })
+    expect(Config.refreshLocal()).toMatchObject({ enabled: true, web: "network" })
+    expect(Config.localPending()?.changes).toEqual(["turns Vector Local off"])
+    writeFileSync(Config.localConfirmedFile(), "garbage")
+    writeGlobal({ enabled: true, web: "ask", endpoints: [SERVER], allow: [GITHUB] })
+    expect(Config.refreshLocal()).toMatchObject({ enabled: true, web: "network", allow: [] })
+    expect(Config.localPending()?.changes).toEqual(["sets Web access to Ask", "allows github"])
   })
+
+  for (const via of ["VECTOR_LOCAL", "company policy"] as const)
+    test(`with Vector Local on through ${via} and no local block of the user's, what the user adds is held`, () => {
+      if (via === "VECTOR_LOCAL") {
+        process.env.VECTOR_LOCAL = "1"
+        process.env.VECTOR_LOCAL_WEB = "network"
+      }
+      if (via === "company policy") writeManaged({ local: { enabled: true, web: "network" } })
+      writeGlobal({ enabled: true })
+      Config.refreshLocal()
+      // Dropping a block that changed nothing applies, and the saved copy records that the user has none.
+      writeGlobal(undefined)
+      expect(Config.refreshLocal()).toMatchObject({ enabled: true, web: "network" })
+      expect(JSON.parse(readFileSync(Config.localConfirmedFile(), "utf8"))).toEqual({ local: null })
+      writeGlobal({ allow: [CATALOG], endpoints: [GPU_BOX], web_domains: { allow: ["*.example.com"] } })
+      expect(Config.refreshLocal()).toMatchObject({
+        enabled: true,
+        web: "network",
+        endpoints: [],
+        allow: [],
+        web_domains: { allow: [] },
+      })
+      expect(Config.localPending()?.changes).toEqual([
+        `adds the model server ${GPU_BOX}`,
+        "allows catalog",
+        "lets web pages reach *.example.com",
+      ])
+    })
 
   test("deleting the user's config is held too", () => {
     writeGlobal({ enabled: true, web: "network", endpoints: [SERVER] })
@@ -450,6 +647,46 @@ describe("loosening edits wait for the owner", () => {
     writeGlobal({ enabled: true, endpoints: [SERVER] })
     Config.refreshLocal()
     expect(statSync(Config.localConfirmedFile()).mode & 0o777).toBe(0o600)
+  })
+})
+
+// Root reads any file, and Windows has no mode bits to take away.
+const unreadable = process.platform === "win32" || process.getuid?.() === 0 ? test.skip : test
+
+describe("sources Vector cannot read", () => {
+  unreadable("a user config Vector cannot read keeps the last block in effect, with no web while Local is on", () => {
+    writeGlobal({ enabled: true, web: "ask", endpoints: [SERVER] })
+    Config.refreshLocal()
+    chmodSync(globalFile, 0o000)
+    try {
+      const policy = Config.refreshLocal()
+      expect(policy).toMatchObject({ enabled: true, web: "none", endpoints: [{ origin: SERVER }] })
+      expect(policy.warnings).toEqual([
+        `Vector could not read ${globalFile}.`,
+        `Vector Local stays on with Web access None until Vector can read ${globalFile}.`,
+      ])
+      expect(Config.localPending()).toBe(undefined)
+    } finally {
+      chmodSync(globalFile, 0o644)
+    }
+    expect(Config.refreshLocal()).toMatchObject({ enabled: true, web: "ask", warnings: [] })
+  })
+
+  unreadable("a company policy file Vector cannot read turns Local on with no web only where it was on", () => {
+    writeManaged({ local: { enabled: true } })
+    const file = path.join(managedDirectory, "vector.json")
+    chmodSync(file, 0o000)
+    try {
+      // Vector Local was off for this user: it stays off, and the pane says why.
+      const off = Config.refreshLocal()
+      expect(off.enabled).toBe(false)
+      expect(off.warnings).toHaveLength(1)
+      expect(off.warnings[0]).toStartWith(`Vector could not check who may change ${file}: `)
+      process.env.VECTOR_LOCAL = "1"
+      expect(Config.refreshLocal()).toMatchObject({ enabled: true, web: "none" })
+    } finally {
+      chmodSync(file, 0o644)
+    }
   })
 })
 

@@ -370,6 +370,8 @@ type Info = ConfigV1.Info & {
 
 type State = {
   config: Info
+  /** A repository's own local block was left out, which the Vector Local pane says. */
+  repositoryLocal: boolean
   directories: string[]
   configDirectory: string | undefined
   deps: Fiber.Fiber<void>[]
@@ -411,6 +413,11 @@ export interface Interface {
   readonly trust: () => Effect.Effect<TrustStatus>
   readonly approve: () => Effect.Effect<void>
   readonly permissionCeiling: () => Effect.Effect<PermissionCeiling | undefined>
+  /**
+   * The Vector Local policy in effect (Config.local()) as this instance reports it: with a note when the repository's
+   * own config has a local block, which never applies.
+   */
+  readonly localPolicy: () => Effect.Effect<LocalMode.Policy>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@vector/Config") {}
@@ -488,11 +495,16 @@ function writableGlobal(info: Info) {
 // Vector Local's policy for this process. It is process-global, not per repository, and it is resolved synchronously
 // when this module loads: before any layer is built, so before any startup fetch (the model catalog, the free-models
 // and plans catalogs), and with nothing to wait on, so a fetch that asks for it never waits. It comes from the managed
-// policy and the user's own config only: the global config folder and, for the desktop, VECTOR_AGENT_CONFIG_DIR, which
-// is its global config folder. The environment (LocalPolicy.resolve), VECTOR_CONFIG_CONTENT and VECTOR_AGENT_CONFIG can
-// only tighten it, and a repository's own local block is never read. A change to the user's config that would loosen
-// it waits for the owner to confirm it, across restarts too: the last block the owner let apply is kept in Vector's
-// state folder, so an edit made while Vector is closed is held back at the next start.
+// policy and the user's own config only: the global config folder and, for the desktop, its own config folder
+// (VECTOR_AGENT_CONFIG_DIR). The environment (LocalPolicy.resolve), VECTOR_CONFIG_CONTENT, VECTOR_AGENT_CONFIG and any
+// other VECTOR_AGENT_CONFIG_DIR can only tighten it, and a repository's own local block is never read. Config.local()
+// is the only reader of it: the merged config (Config.get()) carries no local block.
+//
+// A change to the user's config that would loosen it waits for the owner. It is compared with the user's block the
+// owner last let apply: the one in effect while this process runs, and at start the copy the last process saved in
+// Vector's state folder, so an edit made while Vector was closed is held too. That copy is the user's to change, so it
+// is read only at start and never watched, and a missing or unreadable copy counts as no user block, which still holds
+// back an edit that adds to what the environment or the company turned on.
 
 export type LocalChange =
   | { readonly type: "updated"; readonly policy: LocalMode.Policy }
@@ -505,12 +517,17 @@ export type LocalChange =
 
 const LOCAL_GLOBAL_FILES = ["config.json", "vector.json", "vector.jsonc"]
 const LOCAL_DIRECTORY_FILES = ["vector.json", "vector.jsonc", ...LOCAL_CONFIG_FILES]
-// A local block Vector cannot read keeps Vector Local on, with no web, until it is fixed.
+// A local block Vector cannot decode keeps Vector Local on, with no web, until it is fixed.
 const LOCAL_FAIL_CLOSED: ConfigLocalV1.Info = { enabled: true, web: "none" }
 const LOCAL_WEB_LABELS: Record<LocalMode.Web, string> = { ask: "Ask", network: "Your network only", none: "None" }
 const LocalConfirmed = Schema.Struct({ local: Schema.NullOr(ConfigLocalV1.Info) })
 
-type LocalBlock = { readonly source: string; readonly block?: ConfigLocalV1.Info; readonly unreadable?: true }
+type LocalBlock = {
+  readonly source: string
+  readonly block?: ConfigLocalV1.Info
+  /** "block": the file's local block does not decode. "file": Vector could not read the file at all. */
+  readonly unreadable?: "block" | "file"
+}
 type LocalPending = {
   readonly proposed: LocalMode.Policy
   readonly changes: readonly string[]
@@ -519,13 +536,25 @@ type LocalPending = {
 
 const localState: {
   policy: LocalMode.Policy
+  /** The user's block the owner last let apply, once the first resolution has run. */
+  confirmed: { readonly block: ConfigLocalV1.Info | undefined } | undefined
+  /** That block as the state folder holds it, as JSON, so it is written only when it changes. */
+  saved: string | undefined
   pending: LocalPending | undefined
   watchers: number
   stop: (() => void) | undefined
   readonly listeners: Set<(change: LocalChange) => void>
-} = { policy: LocalPolicy.PENDING, pending: undefined, watchers: 0, stop: undefined, listeners: new Set() }
+} = {
+  policy: LocalPolicy.PENDING,
+  confirmed: undefined,
+  saved: undefined,
+  pending: undefined,
+  watchers: 0,
+  stop: undefined,
+  listeners: new Set(),
+}
 
-/** The Vector Local policy in effect for this process. */
+/** The Vector Local policy in effect for this process. Nothing else may be read for Vector Local's settings. */
 export function local() {
   return localState.policy
 }
@@ -538,12 +567,12 @@ export function localPending() {
 }
 
 /**
- * Where the last local block the owner let apply is kept, one file per user config location, so the desktop and the
- * CLI, which read different config folders, never hold back each other's settings.
+ * Where the user's block the owner last let apply is kept between runs, one file per user config location, so the
+ * desktop and the CLI, which read different config folders, never hold back each other's settings.
  */
 export function localConfirmedFile() {
   const key = createHash("sha256")
-    .update(JSON.stringify([Global.Path.config, localPath(Flag.VECTOR_AGENT_CONFIG_DIR) ?? ""]))
+    .update(JSON.stringify([Global.Path.config, localFiles().desktop ?? ""]))
     .digest("hex")
     .slice(0, 16)
   return path.join(Global.Path.state, `local-confirmed-${key}.json`)
@@ -563,6 +592,8 @@ export function refreshLocal() {
       JSON.stringify(localState.pending && [localState.pending.changes, localState.pending.proposed])
   localState.policy = next.policy
   localState.pending = next.pending
+  localState.confirmed = { block: next.confirmed }
+  saveLocalConfirmed(next.confirmed)
   // Children inherit the floor of the policy in effect, and the agent marker: every untrusted child of this process
   // may be the agent or a program it started.
   ChildEnvironment.inherit({ local: next.policy, agent: true })
@@ -578,7 +609,8 @@ export function refreshLocal() {
         type: TuiEvent.ToastShow.type,
         properties: {
           title: "Vector Local change held",
-          message: `A change to your config would loosen Vector Local: it ${pending.changes.join(", ")}. Vector keeps the stricter setting until you confirm the change.`,
+          // Nothing can confirm it yet: the app's dialog and `vector local` come with the Local API (next release).
+          message: `A change to your config would loosen Vector Local: it ${pending.changes.join(", ")}. Vector keeps the stricter setting. Confirming a change like this in the app or a terminal comes in the next release.`,
           variant: "warning",
           duration: 15_000,
         },
@@ -594,7 +626,7 @@ export function refreshLocal() {
  */
 export function confirmLocal() {
   const pending = localState.pending
-  if (pending) writeLocalConfirmed(pending.block, readLocalConfirmed())
+  if (pending) localState.confirmed = { block: pending.block }
   return refreshLocal()
 }
 
@@ -623,69 +655,134 @@ export function watchLocal() {
   }
 }
 
-function evaluateLocal(): { policy: LocalMode.Policy; pending?: LocalPending } {
-  // Fail closed: a source that cannot be read at all must not leave Vector Local off, or looser than it is.
-  try {
-    const sources = readLocalSources()
-    const proposed = resolveLocal(sources, sources.user)
-    const confirmed = sources.readable ? readLocalConfirmed() : undefined
-    const kept = confirmed && resolveLocal(sources, confirmed.local ?? undefined)
-    const changes = kept ? loosening(kept, proposed) : []
-    if (kept && changes.length > 0) return { policy: kept, pending: { proposed, changes, block: sources.user } }
-    if (sources.readable) writeLocalConfirmed(sources.user, confirmed)
-    return { policy: proposed }
-  } catch (cause) {
-    return {
-      policy: {
-        ...LocalPolicy.OFF,
-        enabled: true,
-        web: "none",
-        warnings: [
-          `Vector could not read its Vector Local settings, so Vector Local stays on with Web access None: ${cause instanceof Error ? cause.message : String(cause)}`,
-        ],
-      },
-    }
+function evaluateLocal() {
+  const sources = readLocalSources()
+  const start = localState.confirmed === undefined
+  const confirmed = localState.confirmed ? localState.confirmed.block : startConfirmed()
+  const proposed = resolveLocal(sources, sources.user)
+  const kept = resolveLocal(sources, confirmed)
+  // A user block Vector cannot decode applies its fail-closed policy (proposed) at once, and while a user file cannot be
+  // read at all the block the owner last let apply stays in effect. Neither counts as let apply, so fixing it needs no
+  // confirmation.
+  const changes = sources.readable ? loosening(kept, proposed) : []
+  const held = changes.length > 0
+  const policy = held || (!sources.readable && !sources.failed) ? kept : proposed
+  // A source Vector could not read at all might say anything, so where Vector Local was on it stays on with no web.
+  const on = [policy, kept, ...(start ? [] : [localState.policy])].some((item) => item.enabled)
+  return {
+    policy:
+      sources.unread.length > 0 && on
+        ? {
+            ...policy,
+            enabled: true,
+            web: "none" as const,
+            warnings: [
+              ...policy.warnings,
+              `Vector Local stays on with Web access None until Vector can read ${sources.unread.join(", ")}.`,
+            ],
+          }
+        : policy,
+    confirmed: held || !sources.readable ? confirmed : sources.user,
+    pending: held ? { proposed, changes, block: sources.user } : undefined,
   }
+}
+
+// The block the last process let apply, read once, at start.
+function startConfirmed() {
+  const text = readLocalText(localConfirmedFile())
+  const saved = text
+    ? Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(LocalConfirmed))(text))
+    : undefined
+  localState.saved = saved && JSON.stringify(saved.local)
+  return saved?.local ?? undefined
 }
 
 function readLocalSources() {
   const managed = ConfigManaged.read()
+  const files = localFiles()
   const managedBlocks = [
-    ...managed.files.map((file) => localBlock(readLocalText(file), file)),
+    ...managed.files.map(localFile),
     ...managed.policies.map((policy) => localBlock(policy.text, policy.source)),
   ].filter((item) => item !== undefined)
-  const userBlocks = localUserFiles()
-    .map((file) => localBlock(readLocalText(file), file))
-    .filter((item) => item !== undefined)
-  const agentConfig = localPath(Flag.VECTOR_AGENT_CONFIG)
+  const userBlocks = files.user.map(localFile).filter((item) => item !== undefined)
   const overrides = [
     Flag.VECTOR_CONFIG_CONTENT ? localBlock(Flag.VECTOR_CONFIG_CONTENT, "VECTOR_CONFIG_CONTENT") : undefined,
-    agentConfig ? localBlock(readLocalText(agentConfig), agentConfig) : undefined,
+    ...files.overrides.map(localFile),
   ].filter((item) => item !== undefined)
-  const unreadable = [...managedBlocks, ...userBlocks].filter((item) => item.unreadable)
+  const undecodable = (blocks: readonly LocalBlock[]) => blocks.some((item) => item.unreadable === "block")
+  const unread = [...managedBlocks, ...userBlocks, ...overrides].filter((item) => item.unreadable === "file")
   return {
-    managed: managedBlocks.some((item) => item.unreadable) ? LOCAL_FAIL_CLOSED : mergeLocalBlocks(managedBlocks),
-    user: userBlocks.some((item) => item.unreadable) ? LOCAL_FAIL_CLOSED : mergeLocalBlocks(userBlocks),
-    // An unreadable user block never becomes the one the owner confirmed, so fixing it does not need a confirmation.
+    managed: undecodable(managedBlocks) ? LOCAL_FAIL_CLOSED : mergeLocalBlocks(managedBlocks),
+    user: undecodable(userBlocks) ? LOCAL_FAIL_CLOSED : mergeLocalBlocks(userBlocks),
+    failed: undecodable(userBlocks),
+    // While a user file cannot be read, the block the owner last let apply stays the one to compare with.
     readable: !userBlocks.some((item) => item.unreadable),
-    overrides,
+    unread: [
+      ...managed.ignored.filter((item) => item.kind === "unreadable").map((item) => item.source),
+      ...unread.map((item) => item.source),
+    ],
+    overrides: overrides.filter((item) => item.unreadable !== "file"),
     warnings: [
-      ...managed.ignored.map((item) => `${ConfigManaged.UNTRUSTED} ${item.reason}`),
-      ...unreadable.map(
-        (item) =>
-          `Vector could not read the local block in ${item.source}, so Vector Local stays on with Web access None until it is fixed.`,
+      ...managed.ignored.map((item) =>
+        item.kind === "untrusted" ? `${ConfigManaged.UNTRUSTED} ${item.reason}` : item.reason,
       ),
+      ...files.ignored.map(
+        (file) =>
+          `Ignored ${file}: it is inside the repository Vector started in, and only your user config and your company's policy set Vector Local.`,
+      ),
+      ...[...managedBlocks, ...userBlocks]
+        .filter((item) => item.unreadable === "block")
+        .map(
+          (item) =>
+            `Vector could not read the local block in ${item.source}, so Vector Local stays on with Web access None until it is fixed.`,
+        ),
+      ...unread.map((item) => `Vector could not read ${item.source}.`),
     ],
   }
 }
 
-/** The user's own config files that may set Vector Local, in the order the config loader merges them. */
-function localUserFiles() {
+/**
+ * The config files Vector Local reads. `user`: the user's own, in the order the config loader merges them, which set
+ * it. `overrides`: VECTOR_AGENT_CONFIG, and a VECTOR_AGENT_CONFIG_DIR that is not the desktop's own config folder
+ * (the desktop names itself with VECTOR_CLIENT=desktop), which may only tighten it. `ignored`: either of those inside
+ * the repository Vector started in, which the repository's .envrc can name, and which is not read at all.
+ */
+function localFiles() {
+  const repository = startRepository()
+  const inside = (file: string) => repository !== undefined && ConfigPaths.projectContains(file, repository)
+  const agentConfig = localPath(Flag.VECTOR_AGENT_CONFIG)
   const agentDirectory = localPath(Flag.VECTOR_AGENT_CONFIG_DIR)
-  return [
-    ...LOCAL_GLOBAL_FILES.map((file) => path.join(Global.Path.config, file)),
-    ...(agentDirectory ? LOCAL_DIRECTORY_FILES.map((file) => path.join(agentDirectory, file)) : []),
-  ]
+  const directoryFiles = agentDirectory ? LOCAL_DIRECTORY_FILES.map((file) => path.join(agentDirectory, file)) : []
+  const desktop =
+    agentDirectory && Flag.VECTOR_CLIENT === "desktop" && !inside(agentDirectory) ? agentDirectory : undefined
+  return {
+    desktop,
+    user: [
+      ...LOCAL_GLOBAL_FILES.map((file) => path.join(Global.Path.config, file)),
+      ...(desktop ? directoryFiles : []),
+    ],
+    overrides: [
+      ...(agentConfig && !inside(agentConfig) ? [agentConfig] : []),
+      ...(agentDirectory && !desktop && !inside(agentDirectory) ? directoryFiles : []),
+    ],
+    ignored: [agentConfig, agentDirectory].filter((item): item is string => item !== undefined && inside(item)),
+  }
+}
+
+// The folder Vector started in and the git worktree above it, leaving out a folder that holds the user's home: the
+// desktop starts in the filesystem root, and a home folder is not a repository.
+function startRepository() {
+  const directory = process.cwd()
+  if (FSUtil.contains(directory, Global.Path.home)) return undefined
+  const worktree = gitRoot(directory)
+  return { directory, worktree: worktree && !FSUtil.contains(worktree, Global.Path.home) ? worktree : undefined }
+}
+
+function gitRoot(directory: string): string | undefined {
+  if (existsSync(path.join(directory, ".git"))) return directory
+  const parent = path.dirname(directory)
+  if (parent === directory) return undefined
+  return gitRoot(parent)
 }
 
 // A path an environment variable names, spelled as the config loader spells it (ConfigPaths.environmentPath).
@@ -694,9 +791,21 @@ function localPath(input: string | undefined) {
   return path.resolve(FSUtil.windowsPath(input))
 }
 
+// A file's text, undefined when it does not exist, or null when the file system refuses to read it (no permission, a
+// folder in its place).
 function readLocalText(file: string) {
   if (!existsSync(file)) return undefined
-  return readFileSync(file, "utf8")
+  try {
+    return readFileSync(file, "utf8")
+  } catch {
+    return null
+  }
+}
+
+function localFile(file: string): LocalBlock | undefined {
+  const text = readLocalText(file)
+  if (text === null) return { source: file, unreadable: "file" }
+  return localBlock(text, file)
 }
 
 // The local block of one config text, without {env:} or {file:} substitution. A legacy TOML config predates it.
@@ -705,7 +814,7 @@ function localBlock(text: string | undefined, source: string): LocalBlock | unde
   const value: unknown = parse(text, [], { allowTrailingComma: true })
   if (!isRecord(value) || value.local === undefined) return undefined
   return Option.match(Schema.decodeUnknownOption(ConfigLocalV1.Info)(value.local), {
-    onNone: () => ({ source, unreadable: true as const }),
+    onNone: () => ({ source, unreadable: "block" as const }),
     onSome: (block) => ({ source, block }),
   })
 }
@@ -725,8 +834,8 @@ function resolveLocal(sources: ReturnType<typeof readLocalSources>, user: Config
   return { ...resolved, warnings: [...sources.warnings, ...resolved.warnings] }
 }
 
-// VECTOR_CONFIG_CONTENT and VECTOR_AGENT_CONFIG may turn Vector Local on, pick a stricter Web access and add sites to
-// deny. Everything else they say about it would loosen it, so it is left out with a warning.
+// VECTOR_CONFIG_CONTENT and the config-path overrides may turn Vector Local on, pick a stricter Web access and add
+// sites to deny. Everything else they say about it would loosen it, so it is left out with a warning.
 function tightenLocal(policy: LocalMode.Policy, override: LocalBlock): LocalMode.Policy {
   if (!override.block)
     return {
@@ -771,19 +880,21 @@ function tightenLocal(policy: LocalMode.Policy, override: LocalBlock): LocalMode
  * What `after` would loosen compared with `before`, in words for the owner: turning Vector Local off, a looser Web
  * access, a new model server, a newly allowed service or site, or a site no longer denied. Empty when it only tightens.
  */
-export function loosening(before: LocalMode.Policy, after: LocalMode.Policy): string[] {
+export function loosening(before: LocalMode.Policy, after: LocalMode.Policy) {
   if (!before.enabled) return []
   if (!after.enabled) return ["turns Vector Local off"]
-  const endpoints = new Set(before.endpoints.map(localEndpointKey))
-  const allowed = new Set(before.allow.map(localAllowKey))
+  const endpoint = (item: LocalMode.Endpoint) => `${item.from} ${LocalPolicy.origin(item.origin) ?? item.origin}`
+  const allowed = (item: LocalMode.Allowed) => JSON.stringify([item.source, [...(item.hosts ?? [])].sort()])
+  const endpoints = new Set(before.endpoints.map(endpoint))
+  const allows = new Set(before.allow.map(allowed))
   return [
     ...(LocalPolicy.stricter(after.web, before.web) !== after.web
       ? [`sets Web access to ${LOCAL_WEB_LABELS[after.web]}`]
       : []),
     ...after.endpoints
-      .filter((endpoint) => !endpoints.has(localEndpointKey(endpoint)))
-      .map((endpoint) => `adds the model server ${endpoint.origin}`),
-    ...after.allow.filter((entry) => !allowed.has(localAllowKey(entry))).map((entry) => `allows ${entry.source}`),
+      .filter((item) => !endpoints.has(endpoint(item)))
+      .map((item) => `adds the model server ${item.origin}`),
+    ...after.allow.filter((item) => !allows.has(allowed(item))).map((item) => `allows ${item.source}`),
     ...after.web_domains.allow
       .filter((pattern) => !before.web_domains.allow.includes(pattern))
       .map((pattern) => `lets web pages reach ${pattern}`),
@@ -793,33 +904,16 @@ export function loosening(before: LocalMode.Policy, after: LocalMode.Policy): st
   ]
 }
 
-function localEndpointKey(endpoint: LocalMode.Endpoint) {
-  return `${endpoint.from} ${LocalPolicy.origin(endpoint.origin) ?? endpoint.origin}`
-}
-
-function localAllowKey(entry: LocalMode.Allowed) {
-  return JSON.stringify([entry.source, [...(entry.hosts ?? [])].sort()])
-}
-
-function readLocalConfirmed() {
-  const text = readLocalText(localConfirmedFile())
-  if (!text) return undefined
-  return Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(LocalConfirmed))(text))
-}
-
-function writeLocalConfirmed(
-  block: ConfigLocalV1.Info | undefined,
-  confirmed: { readonly local: ConfigLocalV1.Info | null } | undefined,
-) {
-  if (block === undefined && confirmed === undefined) return
-  if (JSON.stringify(block ?? null) === JSON.stringify(confirmed?.local ?? null)) return
+function saveLocalConfirmed(block: ConfigLocalV1.Info | undefined) {
+  const text = JSON.stringify(block ?? null)
+  if (text === localState.saved) return
   const file = localConfirmedFile()
   const temporary = `${file}.${process.pid}.${Date.now()}.tmp`
-  // Best effort: when the state folder cannot be written, an edit that loosens Vector Local stays held, even one the
-  // owner confirmed, so a failure here never loosens it.
+  // Best effort: a copy that cannot be written only means the next start compares with an older block, or with none.
   try {
     writeFileSync(temporary, JSON.stringify({ local: block ?? null }, null, 2), { mode: 0o600 })
     renameSync(temporary, file)
+    localState.saved = text
   } catch {
     return
   }
@@ -832,16 +926,9 @@ function startLocalWatchers() {
     timer.current = setTimeout(refreshLocal, 50)
     timer.current.unref?.()
   }
-  const user = localUserFiles()
-  const targets = [
-    ...new Set([...user.map((file) => path.dirname(file)), ConfigManaged.managedConfigDir(), Global.Path.state]),
-  ]
-  const names = new Set([
-    ...user.map((file) => path.basename(file)),
-    "vector.json",
-    "vector.jsonc",
-    path.basename(localConfirmedFile()),
-  ])
+  const user = localFiles().user
+  const targets = [...new Set([...user.map((file) => path.dirname(file)), ...ConfigManaged.directories()])]
+  const names = new Set([...user.map((file) => path.basename(file)), "vector.json", "vector.jsonc"])
   const watchers = targets.flatMap((directory) => {
     if (!existsSync(directory)) return []
     // A folder that cannot be watched (removed, or out of watches) still applies at the next start.
@@ -983,7 +1070,8 @@ const layer = Layer.effect(
       result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "vector.json"), env))
       result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "vector.jsonc"), env))
 
-      return result
+      // Config.local() is the only reader of Vector Local's settings.
+      return omit(result, ["local"])
     })
 
     const [cachedGlobal, invalidateGlobal] = yield* Effect.cachedInvalidateWithTTL(
@@ -1256,21 +1344,20 @@ const layer = Layer.effect(
         // Repository files whose budget.run was dropped, for the notice once loading ends.
         const ignoredRunBudgets: string[] = []
 
-        // Vector Local is read once, at start, from the user's own config files and the company's policy
-        // (refreshLocal), so only those sources' local blocks reach the merged config. VECTOR_CONFIG_CONTENT's and
-        // VECTOR_AGENT_CONFIG's tightened the policy at start; a repository's, a remote config's or the integration
-        // store's never apply.
-        const localSources = new Set([Global.Path.config, ...managed.files, ...localUserFiles()])
-        const startOverrides = new Set([
-          "VECTOR_CONFIG_CONTENT",
-          ...(agentConfig && !agentConfig.project ? [agentConfig.path] : []),
-        ])
+        // Only Config.local() says what Vector Local is: it was resolved at start from the user's own config files and
+        // the company's policy (refreshLocal), so no source's local block reaches the merged config. A repository's is
+        // never read, and the policy this instance reports says so; VECTOR_CONFIG_CONTENT's and the config-path
+        // overrides' only tightened it.
+        const localConfig = localFiles()
+        const localSources = new Set([Global.Path.config, ...managed.files, ...localConfig.user])
+        const startOverrides = new Set(["VECTOR_CONFIG_CONTENT", ...localConfig.overrides])
+        const localDirectory = localConfig.desktop ?? Global.Path.config
+        let repositoryLocal = false
 
         const merge = (source: string, input: Info, kind?: ConfigPlugin.Scope) => {
           const scope = kind ?? (projectContains(source) ? "local" : "global")
           const projectSource = scope === "local" && source !== "VECTOR_CONFIG_CONTENT"
-          const dropLocal = input.local !== undefined && !localSources.has(source)
-          const next = dropLocal ? omit(input, ["local"]) : input
+          const next = input.local === undefined ? input : omit(input, ["local"])
           if (projectSource && next.budget?.run) ignoredRunBudgets.push(source)
           const safe = projectSource ? projectExecutableConfig(next, trusted, result) : next
           if (projectSource) projectGrants ||= grantsPermission(safe)
@@ -1283,16 +1370,17 @@ const layer = Layer.effect(
               ...(safe.agent && { agent: safe.agent }),
             })
           result = mergeConfigConcatArrays(result, safe)
-          const ignored = !dropLocal
-            ? Effect.void
-            : projectSource
-              ? Effect.logWarning(LocalPolicy.REPOSITORY_IGNORED, { source })
-              : startOverrides.has(source)
-                ? Effect.logDebug("this config's local block only tightened Vector Local at start", { source })
-                : Effect.logWarning(
-                    "Ignored a local block: only your user config and your company's policy set Vector Local",
-                    { source },
-                  )
+          if (projectSource && input.local !== undefined) repositoryLocal = true
+          const ignored =
+            input.local === undefined || localSources.has(source)
+              ? Effect.void
+              : projectSource
+                ? Effect.logWarning(LocalPolicy.REPOSITORY_IGNORED, { source })
+                : startOverrides.has(source)
+                  ? Effect.logDebug("this config's local block only tightened Vector Local at start", { source })
+                  : Effect.logWarning(
+                      `Ignored the local block in ${source}: Vector Local is read only from your user config in ${localDirectory} and from your company's policy.`,
+                    )
           return ignored.pipe(Effect.andThen(mergePluginOrigins(source, safe.plugin, scope)))
         }
 
@@ -1451,7 +1539,13 @@ const layer = Layer.effect(
         }
 
         // Company policy counts only where a standard user could not have written it (ConfigManaged.read).
-        if (managed.ignored.length > 0) yield* Effect.logWarning(ConfigManaged.UNTRUSTED, { ignored: managed.ignored })
+        if (managed.ignored.length > 0)
+          yield* Effect.logWarning(
+            "left out company policy that a standard user could change or Vector could not read",
+            {
+              ignored: managed.ignored,
+            },
+          )
         for (const source of managed.files) {
           yield* merge(source, yield* loadFile(source), "global")
         }
@@ -1467,7 +1561,7 @@ const layer = Layer.effect(
             ...(next.tools && { tools: next.tools }),
             ...(next.agent && { agent: next.agent }),
           })
-          result = mergeConfigConcatArrays(result, next)
+          result = mergeConfigConcatArrays(result, omit(next, ["local"]))
         }
 
         for (const [name, mode] of Object.entries(result.mode ?? {})) {
@@ -1548,6 +1642,7 @@ const layer = Layer.effect(
 
         return {
           config: result,
+          repositoryLocal,
           directories,
           configDirectory:
             agentConfigDir?.project && trustedSnapshot
@@ -1596,6 +1691,13 @@ const layer = Layer.effect(
 
     const permissionCeiling = Effect.fn("Config.permissionCeiling")(function* () {
       return yield* InstanceState.use(state, (s) => s.ceiling)
+    })
+
+    const localPolicy = Effect.fn("Config.localPolicy")(function* () {
+      const repository = yield* InstanceState.use(state, (s) => s.repositoryLocal)
+      const policy = local()
+      if (!repository) return policy
+      return { ...policy, warnings: [LocalPolicy.REPOSITORY_IGNORED, ...policy.warnings] }
     })
 
     const trustedPath = Effect.fn("Config.trustedPath")(function* (path: string) {
@@ -1788,6 +1890,7 @@ const layer = Layer.effect(
       trustedPath,
       approve,
       permissionCeiling,
+      localPolicy,
     })
   }),
 )
