@@ -13,15 +13,28 @@ const TRACKING = /^(?:utm_.*|fbclid|gclid|dclid|gbraid|wbraid|msclkid|mc_.*|ref)
 
 /** The canonical form of an http or https address, or undefined for anything else. */
 export function canonical(input: string) {
-  if (!URL.canParse(input)) return undefined
-  const url = new URL(input)
-  if (url.protocol !== "http:" && url.protocol !== "https:") return undefined
-  if (url.username || url.password) return undefined
-  url.hash = ""
-  url.hostname = url.hostname.replace(/\.$/, "")
-  const kept = [...url.searchParams].filter(([key]) => !TRACKING.test(key)).toSorted(compare)
-  url.search = kept.length === 0 ? "" : new URLSearchParams(kept).toString()
-  return url.toString()
+  return spelling(input, true)
+}
+
+/**
+ * An http or https address as it was written, apart from the host's case, a trailing dot and the order of the query:
+ * the fragment and tracking parameters stay. Provenance compares this form, since those can carry data as well as
+ * any other part of an address.
+ */
+export function exact(input: string) {
+  return spelling(input, false)
+}
+
+/**
+ * Percent escapes read as the UTF-8 they encode, so "%C2%AD" is a soft hyphen. Nothing throws: an escape that is not
+ * two hex digits stays as written, and bytes that are not UTF-8 read as U+FFFD.
+ */
+export function decoded(text: string) {
+  return text.replace(/(?:%[0-9a-f]{2})+/gi, (run) =>
+    new TextDecoder().decode(
+      Uint8Array.from(run.match(/%[0-9a-f]{2}/gi) ?? [], (escape) => Number.parseInt(escape.slice(1), 16)),
+    ),
+  )
 }
 
 /**
@@ -34,6 +47,19 @@ export function follow(page: string, declared: string | undefined) {
   const target = canonical(new URL(declared, own).toString())
   if (!target || ResearchDomain.site(target) !== ResearchDomain.site(own)) return own
   return target
+}
+
+function spelling(input: string, canonical: boolean) {
+  if (!URL.canParse(input)) return undefined
+  const url = new URL(input)
+  if (url.protocol !== "http:" && url.protocol !== "https:") return undefined
+  if (url.username || url.password) return undefined
+  // Set again either way, so an empty "#" is dropped like no fragment.
+  url.hash = canonical ? "" : url.hash
+  url.hostname = url.hostname.replace(/\.$/, "")
+  const kept = [...url.searchParams].filter(([key]) => !canonical || !TRACKING.test(key)).toSorted(compare)
+  url.search = kept.length === 0 ? "" : new URLSearchParams(kept).toString()
+  return url.toString()
 }
 
 function compare(left: readonly [string, string], right: readonly [string, string]) {

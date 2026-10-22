@@ -44,6 +44,22 @@ describe("ResearchCanonical.canonical", () => {
   })
 })
 
+describe("ResearchCanonical.exact and decoded", () => {
+  test("keeps the fragment and tracking parameters, and sets aside only host case, a trailing dot and query order", () => {
+    expect(ResearchCanonical.exact("https://Example.COM./a?utm_source=news&b=2&a=1#methods")).toBe(
+      "https://example.com/a?a=1&b=2&utm_source=news#methods",
+    )
+    expect(ResearchCanonical.exact("https://example.com/a#")).toBe("https://example.com/a")
+    expect(ResearchCanonical.exact("ftp://example.com/a")).toBeUndefined()
+  })
+
+  test("reads percent escapes as UTF-8, and never throws on a malformed one", () => {
+    expect(ResearchCanonical.decoded("reconcile%C2%ADLedger")).toBe(`reconcile${String.fromCodePoint(0xad)}Ledger`)
+    expect(ResearchCanonical.decoded("/doi/10.1000/%zz")).toBe("/doi/10.1000/%zz")
+    expect(ResearchCanonical.decoded("%FF%41")).toBe("\uFFFDA")
+  })
+})
+
 describe("ResearchCanonical.follow", () => {
   test("follows a page's rel=canonical on the same site, resolved against the page", () => {
     expect(ResearchCanonical.follow("https://www.example.com/a?print=1", "/a")).toBe("https://www.example.com/a")

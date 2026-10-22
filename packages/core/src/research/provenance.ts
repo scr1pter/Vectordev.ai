@@ -6,6 +6,11 @@ import { ResearchCanonical } from "./canonical"
 // typed message. The research agent chooses among these but cannot write an address of its own, so a hostile page
 // cannot steer it into putting private text in a URL. Links that look built to carry data (a long query string, or a
 // path or query value that reads as encoded data) are not offered at all.
+//
+// An address is accepted only as it was recorded (host case and the order of the query aside) or in its canonical
+// form, which only takes parts away. The canonical form alone is not enough to compare: it drops the fragment and
+// tracking parameters such as utm_source and ref, so an agent could add those with private text in them and still
+// match. `check` gives the address to read, and the caller reads that one, never the agent's own spelling.
 
 export const REFUSAL = "That address did not come from a search result, a page link or your message."
 
@@ -18,8 +23,11 @@ const ENCODED_CHARS = 16
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const ADDRESS = /\bhttps?:\/\/[^\s<>"'`]+|\bwww\.[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[^\s<>"'`]*)?/gi
 
-/** A run's addresses by canonical form, with where each came from. */
-export type Addresses = ReadonlyMap<string, From>
+/** One page in a run's set: where it first came from, and each spelling it was recorded with. */
+export type Entry = { readonly from: From; readonly urls: ReadonlySet<string> }
+
+/** A run's addresses by canonical form. */
+export type Addresses = ReadonlyMap<string, Entry>
 
 export function empty(): Addresses {
   return new Map()
@@ -30,18 +38,28 @@ export function add(set: Addresses, urls: readonly string[], from: From): Addres
   const next = new Map(set)
   for (const url of urls) {
     const canonical = ResearchCanonical.canonical(url)
-    if (!canonical || next.get(canonical) === "typed") continue
-    next.set(canonical, from)
+    const exact = ResearchCanonical.exact(url)
+    if (!canonical || !exact) continue
+    const entry = next.get(canonical)
+    next.set(canonical, {
+      from: entry?.from === "typed" ? "typed" : (entry?.from ?? from),
+      urls: new Set([...(entry?.urls ?? []), exact]),
+    })
   }
   return next
 }
 
-/** Whether research may read the address, and its canonical form when it may. */
+/**
+ * Whether research may read the address: as one of its recorded spellings or as its canonical form. When it may,
+ * `url` is the address to read.
+ */
 export function check(set: Addresses, url: string) {
   const canonical = ResearchCanonical.canonical(url)
-  const from = canonical ? set.get(canonical) : undefined
-  if (!canonical || !from) return { ok: false, message: REFUSAL } as const
-  return { ok: true, canonical, from } as const
+  const exact = ResearchCanonical.exact(url)
+  const entry = canonical ? set.get(canonical) : undefined
+  if (!canonical || !exact || !entry || (exact !== canonical && !entry.urls.has(exact)))
+    return { ok: false, message: REFUSAL } as const
+  return { ok: true, canonical, from: entry.from, url: exact } as const
 }
 
 /** The http and https addresses in the user's own text; "www." names are read as https. */
@@ -69,7 +87,7 @@ export function dataLike(url: string) {
   if (address.username || address.password) return true
   if (address.search.length - 1 > MAX_QUERY) return true
   const tokens = [
-    ...address.pathname.split("/").map(decode),
+    ...address.pathname.split("/").map(ResearchCanonical.decoded),
     ...[...address.searchParams].flatMap(([key, value]) => [key, value]),
   ].flatMap((token) => token.split("."))
   return tokens.some(encoded)
@@ -93,9 +111,4 @@ function entropy(value: string) {
     const share = count / value.length
     return sum - share * Math.log2(share)
   }, 0)
-}
-
-// Percent escapes read as the characters they stand for, byte by byte, so "%2B" is "+" and nothing can throw.
-function decode(segment: string) {
-  return segment.replace(/%([0-9a-f]{2})/gi, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)))
 }

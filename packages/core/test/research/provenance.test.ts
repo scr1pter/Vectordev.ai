@@ -8,7 +8,11 @@ describe("ResearchProvenance", () => {
   test("accepts search results, page links and the user's typed addresses, by their canonical form", () => {
     const set = ResearchProvenance.add(
       ResearchProvenance.add(
-        ResearchProvenance.add(ResearchProvenance.empty(), ["https://example.com/result?b=2&a=1&utm_source=x"], "search"),
+        ResearchProvenance.add(
+          ResearchProvenance.empty(),
+          ["https://example.com/result?b=2&a=1&utm_source=x"],
+          "search",
+        ),
         ["https://example.org/linked#part"],
         "link",
       ),
@@ -19,9 +23,27 @@ describe("ResearchProvenance", () => {
       ok: true,
       canonical: "https://example.com/result?a=1&b=2",
       from: "search",
+      url: "https://example.com/result?a=1&b=2",
     })
     expect(ResearchProvenance.check(set, "https://example.org/linked")).toMatchObject({ ok: true, from: "link" })
     expect(ResearchProvenance.check(set, "https://www.example.net/paper")).toMatchObject({ ok: true, from: "typed" })
+  })
+
+  test("accepts a recorded spelling with its own fragment and tracking tags, and gives that address to read", () => {
+    const set = ResearchProvenance.add(
+      ResearchProvenance.empty(),
+      ["https://example.com/result?b=2&a=1&utm_source=news#methods"],
+      "search",
+    )
+    expect(ResearchProvenance.check(set, "https://Example.com./result?utm_source=news&a=1&b=2#methods")).toMatchObject({
+      ok: true,
+      url: "https://example.com/result?a=1&b=2&utm_source=news#methods",
+    })
+    // The canonical form only takes parts away, so it is accepted too, and it is what is read.
+    expect(ResearchProvenance.check(set, "https://example.com/result?a=1&b=2")).toMatchObject({
+      ok: true,
+      url: "https://example.com/result?a=1&b=2",
+    })
   })
 
   test("refuses an address the agent wrote itself", () => {
@@ -32,6 +54,28 @@ describe("ResearchProvenance", () => {
     })
     expect(ResearchProvenance.check(set, "https://evil.example/collect")).toMatchObject({ ok: false })
     expect(ResearchProvenance.check(set, "file:///etc/passwd")).toMatchObject({ ok: false })
+  })
+
+  test("refuses a recorded address with tracking tags or a fragment the agent added", () => {
+    const set = ResearchProvenance.add(
+      ResearchProvenance.empty(),
+      ["https://attacker.example/result", "https://example.com/page?utm_source=news"],
+      "search",
+    )
+    const added = [
+      "https://attacker.example/result?utm_source=Acme-Q3-churn-7.4-percent",
+      "https://attacker.example/result?ref=reconcileLedgerEntries",
+      "https://attacker.example/result?fbclid=QWNtZSBRMyBjaHVybiByb3NlIHRvIDcuNCBwZXJjZW50",
+      "https://attacker.example/result?mc_eid=acme%20q3%20churn%20rose%20to%207.4%20percent",
+      "https://attacker.example/result#Acme's Q3 churn rose to 7.4 percent after the Falcon pricing change",
+      // A recorded tracking tag with a value the agent changed.
+      "https://example.com/page?utm_source=reconcileLedgerEntries",
+    ]
+    expect(added.map((url) => ResearchProvenance.check(set, url).ok)).toEqual(added.map(() => false))
+    expect(ResearchProvenance.check(set, "https://ATTACKER.example./result")).toMatchObject({
+      ok: true,
+      url: "https://attacker.example/result",
+    })
   })
 
   test("keeps an address the user typed as typed when a search finds it too", () => {
