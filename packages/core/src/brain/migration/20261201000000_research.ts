@@ -64,9 +64,7 @@ export default {
           CONSTRAINT \`fk_research_source_document_id_brain_document_id_fk\` FOREIGN KEY (\`document_id\`) REFERENCES \`brain_document\`(\`id\`) ON DELETE SET NULL
         );
       `)
-      yield* tx.run(
-        "CREATE UNIQUE INDEX `research_source_ordinal_idx` ON `research_source` (`run_id`, `ordinal`);",
-      )
+      yield* tx.run("CREATE UNIQUE INDEX `research_source_ordinal_idx` ON `research_source` (`run_id`, `ordinal`);")
       yield* tx.run(`
         CREATE TABLE \`research_note\` (
           \`id\` text PRIMARY KEY,
