@@ -1,0 +1,201 @@
+{
+  "date": "2026-10",
+  "label": "Examples, October 2026. Check each model's licence.",
+  "note": "Sizes are approximate. The release owner checks every entry, size and link against the publisher's pages each release.",
+  "servers": {
+    "ollama": { "name": "Ollama", "install": "https://ollama.com/download" },
+    "lmstudio": { "name": "LM Studio", "install": "https://lmstudio.ai" },
+    "llamacpp": { "name": "llama.cpp", "install": "https://github.com/ggml-org/llama.cpp" },
+    "vllm": { "name": "vLLM", "install": "https://docs.vllm.ai" },
+    "sglang": { "name": "SGLang", "install": "https://docs.sglang.ai" }
+  },
+  "models": {
+    "qwen3-4b": {
+      "name": "Qwen3 4B",
+      "publisher": "Qwen",
+      "licence": "Apache-2.0",
+      "quantization": "Q4_K_M",
+      "memory_gb": 2.5,
+      "context": 40960,
+      "tools": true,
+      "serve": ["ollama", "lmstudio", "llamacpp"],
+      "ollama": "qwen3:4b",
+      "links": ["https://ollama.com/library/qwen3", "https://huggingface.co/Qwen/Qwen3-4B"]
+    },
+    "qwen3-8b": {
+      "name": "Qwen3 8B",
+      "publisher": "Qwen",
+      "licence": "Apache-2.0",
+      "quantization": "Q4_K_M",
+      "memory_gb": 5.2,
+      "context": 40960,
+      "tools": true,
+      "serve": ["ollama", "lmstudio", "llamacpp"],
+      "ollama": "qwen3:8b",
+      "links": ["https://ollama.com/library/qwen3", "https://huggingface.co/Qwen/Qwen3-8B"]
+    },
+    "gpt-oss-20b": {
+      "name": "gpt-oss 20B",
+      "publisher": "OpenAI",
+      "licence": "Apache-2.0",
+      "quantization": "MXFP4",
+      "memory_gb": 14,
+      "context": 131072,
+      "tools": true,
+      "serve": ["ollama", "lmstudio", "llamacpp", "vllm"],
+      "ollama": "gpt-oss:20b",
+      "links": ["https://ollama.com/library/gpt-oss", "https://huggingface.co/openai/gpt-oss-20b"]
+    },
+    "devstral-small": {
+      "name": "Devstral Small 24B",
+      "publisher": "Mistral AI",
+      "licence": "Apache-2.0",
+      "quantization": "Q4_K_M",
+      "memory_gb": 14,
+      "context": 131072,
+      "tools": true,
+      "serve": ["ollama", "lmstudio", "llamacpp", "vllm"],
+      "ollama": "devstral:24b",
+      "links": ["https://ollama.com/library/devstral", "https://huggingface.co/mistralai/Devstral-Small-2507"]
+    },
+    "qwen3-coder-30b": {
+      "name": "Qwen3-Coder 30B-A3B",
+      "publisher": "Qwen",
+      "licence": "Apache-2.0",
+      "quantization": "Q4_K_M",
+      "memory_gb": 19,
+      "context": 262144,
+      "tools": true,
+      "serve": ["ollama", "lmstudio", "llamacpp", "vllm", "sglang"],
+      "ollama": "qwen3-coder:30b",
+      "links": ["https://ollama.com/library/qwen3-coder", "https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct"]
+    },
+    "gpt-oss-120b": {
+      "name": "gpt-oss 120B",
+      "publisher": "OpenAI",
+      "licence": "Apache-2.0",
+      "quantization": "MXFP4",
+      "memory_gb": 65,
+      "context": 131072,
+      "tools": true,
+      "serve": ["ollama", "llamacpp", "vllm", "sglang"],
+      "ollama": "gpt-oss:120b",
+      "links": ["https://ollama.com/library/gpt-oss", "https://huggingface.co/openai/gpt-oss-120b"]
+    },
+    "glm-4.6": {
+      "name": "GLM-4.6",
+      "publisher": "Z.ai",
+      "licence": "MIT",
+      "quantization": "FP8",
+      "memory_gb": 360,
+      "context": 202752,
+      "tools": true,
+      "serve": ["vllm", "sglang"],
+      "links": ["https://huggingface.co/zai-org/GLM-4.6"]
+    },
+    "qwen3-coder-480b": {
+      "name": "Qwen3-Coder 480B-A35B",
+      "publisher": "Qwen",
+      "licence": "Apache-2.0",
+      "quantization": "FP8",
+      "memory_gb": 482,
+      "context": 262144,
+      "tools": true,
+      "serve": ["vllm", "sglang"],
+      "links": ["https://huggingface.co/Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8"]
+    },
+    "kimi-k2-thinking": {
+      "name": "Kimi K2 Thinking",
+      "publisher": "Moonshot AI",
+      "licence": "Modified MIT",
+      "quantization": "INT4",
+      "memory_gb": 594,
+      "context": 262144,
+      "tools": true,
+      "serve": ["vllm", "sglang"],
+      "links": ["https://huggingface.co/moonshotai/Kimi-K2-Thinking"]
+    },
+    "deepseek-v3.1": {
+      "name": "DeepSeek-V3.1",
+      "publisher": "DeepSeek",
+      "licence": "MIT",
+      "quantization": "FP8",
+      "memory_gb": 690,
+      "context": 131072,
+      "tools": true,
+      "serve": ["vllm", "sglang"],
+      "links": ["https://huggingface.co/deepseek-ai/DeepSeek-V3.1"]
+    },
+    "kimi-k2-instruct": {
+      "name": "Kimi K2 Instruct",
+      "publisher": "Moonshot AI",
+      "licence": "Modified MIT",
+      "quantization": "FP8",
+      "memory_gb": 1030,
+      "context": 262144,
+      "tools": true,
+      "serve": ["vllm", "sglang"],
+      "links": ["https://huggingface.co/moonshotai/Kimi-K2-Instruct-0905"]
+    }
+  },
+  "tiers": [
+    {
+      "id": "under-8",
+      "min_gb": 0,
+      "summary": "Too small for Vector's agent.",
+      "note": "Vector's agent needs a larger model than this memory can hold. Add a model server on another computer, or use a cloud model. A small model can still write titles and summaries.",
+      "roles": { "small": "qwen3-4b" },
+      "alternatives": []
+    },
+    {
+      "id": "8",
+      "min_gb": 8,
+      "summary": "A small model for short tasks.",
+      "note": "An 8B model follows simple tool calls and is slow on long ones. Expect to steer it.",
+      "roles": { "agent": "qwen3-8b" },
+      "alternatives": ["qwen3-4b"]
+    },
+    {
+      "id": "16",
+      "min_gb": 16,
+      "summary": "A capable model for everyday coding.",
+      "roles": { "agent": "gpt-oss-20b" },
+      "alternatives": ["devstral-small", "qwen3-8b"]
+    },
+    {
+      "id": "24",
+      "min_gb": 24,
+      "summary": "A strong coding model with a long context.",
+      "roles": { "agent": "qwen3-coder-30b" },
+      "alternatives": ["gpt-oss-20b", "devstral-small"]
+    },
+    {
+      "id": "72",
+      "min_gb": 72,
+      "summary": "A large model for the agent, review and research.",
+      "roles": { "agent": "gpt-oss-120b" },
+      "alternatives": ["qwen3-coder-30b"]
+    },
+    {
+      "id": "server-400",
+      "min_gb": 400,
+      "summary": "A server with several data-centre GPUs, served with vLLM or SGLang.",
+      "roles": { "agent": "glm-4.6" },
+      "alternatives": ["gpt-oss-120b"]
+    },
+    {
+      "id": "server-640",
+      "min_gb": 640,
+      "summary": "A server of eight data-centre GPUs, served with vLLM or SGLang.",
+      "roles": { "agent": "kimi-k2-thinking" },
+      "alternatives": ["qwen3-coder-480b", "glm-4.6"]
+    },
+    {
+      "id": "server-1100",
+      "min_gb": 1100,
+      "summary": "A server of eight or more large data-centre GPUs, served with vLLM or SGLang.",
+      "roles": { "agent": "kimi-k2-instruct" },
+      "alternatives": ["deepseek-v3.1", "kimi-k2-thinking", "qwen3-coder-480b"]
+    }
+  ]
+}

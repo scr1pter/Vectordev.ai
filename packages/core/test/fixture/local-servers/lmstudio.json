@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "metadata": {
+    "server": "lmstudio",
+    "recorded": false,
+    "note": "Written by hand from the server's public API documentation, not recorded from a running server. Replace with a recording (packages/http-recorder) before relying on a field this does not show.",
+    "fallback": {
+      "status": 200,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "body": "{\"error\": \"Unexpected endpoint or method. (GET /). Returning 200 anyway\"}"
+    }
+  },
+  "interactions": [
+    {
+      "transport": "http",
+      "request": {
+        "method": "GET",
+        "url": "http://127.0.0.1:1234/api/v0/models",
+        "headers": {},
+        "body": ""
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"object\": \"list\", \"data\": [{\"id\": \"qwen2.5-coder-7b-instruct\", \"object\": \"model\", \"type\": \"llm\", \"publisher\": \"lmstudio-community\", \"arch\": \"qwen2\", \"compatibility_type\": \"gguf\", \"quantization\": \"Q4_K_M\", \"state\": \"loaded\", \"max_context_length\": 32768, \"loaded_context_length\": 4096, \"capabilities\": [\"tool_use\"]}, {\"id\": \"qwen2-vl-7b-instruct\", \"object\": \"model\", \"type\": \"vlm\", \"publisher\": \"lmstudio-community\", \"arch\": \"qwen2_vl\", \"compatibility_type\": \"gguf\", \"quantization\": \"Q4_K_M\", \"state\": \"not-loaded\", \"max_context_length\": 32768}, {\"id\": \"text-embedding-nomic-embed-text-v1.5\", \"object\": \"model\", \"type\": \"embeddings\", \"publisher\": \"nomic-ai\", \"arch\": \"nomic-bert\", \"compatibility_type\": \"gguf\", \"quantization\": \"Q4_K_M\", \"state\": \"not-loaded\", \"max_context_length\": 2048}]}"
+      }
+    }
+  ]
+}
