@@ -69,6 +69,18 @@ describe("locate", () => {
     expect(LocalProbe.locate("http://LOCALHOST:8000/v1?x=1#y")?.origin).toBe("http://localhost:8000")
   })
 
+  test("takes a pasted request address back to the server's base", () => {
+    expect(LocalProbe.locate("http://127.0.0.1:8000/v1/chat/completions")?.baseURL).toBe("http://127.0.0.1:8000/v1")
+    expect(LocalProbe.locate("https://ml.corp.example.com/qwen/v1/models/")).toMatchObject({
+      root: "https://ml.corp.example.com/qwen",
+      baseURL: "https://ml.corp.example.com/qwen/v1",
+    })
+    expect(LocalProbe.locate("http://10.0.0.5:8000/v1/completions")?.baseURL).toBe("http://10.0.0.5:8000/v1")
+    // A path prefix that only looks like one stays: here /models is where the gateway serves its models.
+    expect(LocalProbe.locate("https://gw.corp.example.com/models/v1")?.root).toBe("https://gw.corp.example.com/models")
+    expect(LocalProbe.locate("https://gw.corp.example.com/models")?.root).toBe("https://gw.corp.example.com/models")
+  })
+
   test("refuses addresses that are not plain http or https, and addresses with credentials", () => {
     expect(LocalProbe.locate("ftp://127.0.0.1/")).toBeUndefined()
     expect(LocalProbe.locate("file:///etc/passwd")).toBeUndefined()

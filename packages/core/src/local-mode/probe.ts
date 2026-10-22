@@ -116,7 +116,8 @@ export type Options = {
 
 /**
  * Where a typed address points: its origin, the root its paths hang off (an address may have a path prefix in front
- * of `/v1`) and the OpenAI-compatible base address. Undefined for anything that is not a plain http or https URL.
+ * of `/v1`) and the OpenAI-compatible base address, also from a pasted …/v1/chat/completions or …/v1/models. Undefined
+ * for anything that is not a plain http or https URL.
  */
 export function locate(input: string) {
   const text = input.trim()
@@ -126,7 +127,12 @@ export function locate(input: string) {
   if (url.username || url.password) return undefined
   const origin = LocalPolicy.origin(url)
   if (!origin) return undefined
-  const root = `${origin}${url.pathname.replace(/\/+$/, "").replace(/\/v1$/, "")}`
+  // People also paste the address they send requests to, such as …/v1/chat/completions, or the one listing models.
+  const path = url.pathname
+    .replace(/\/+$/, "")
+    .replace(/\/v1\/(?:chat\/completions|completions|models)$/, "/v1")
+    .replace(/\/v1$/, "")
+  const root = `${origin}${path}`
   return { origin, root, baseURL: `${root}/v1` }
 }
 
