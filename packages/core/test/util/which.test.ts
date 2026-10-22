@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
 import { which } from "@vectordevai/core/util/which"
-import { tmpdir } from "../fixture/tmpdir"
+import { tmpdir, tmpdirIn } from "../fixture/tmpdir"
 
 async function cmd(dir: string, name: string, exec = true) {
   const ext = process.platform === "win32" ? ".cmd" : ""
@@ -86,7 +86,7 @@ describe("util.which", () => {
         return fs.rm(this.path, { force: true })
       },
     }
-    await using repo = await tmpdir(process.cwd())
+    await using repo = await tmpdirIn(process.cwd())
     await cmd(repo.path, name)
     const relative = path.relative(process.cwd(), repo.path)
     expect(path.isAbsolute(relative)).toBe(false)

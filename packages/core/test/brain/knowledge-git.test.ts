@@ -5,7 +5,7 @@ import os from "node:os"
 import path from "node:path"
 import { Effect } from "effect"
 import { UntrustedGit } from "@vectordevai/core/untrusted-git"
-import { tmpdir } from "../fixture/tmpdir"
+import { tmpdir, tmpdirIn } from "../fixture/tmpdir"
 import { withKnowledge } from "./fixture/knowledge"
 
 // A repository that arrives with its own .git (an archive, a shared folder) can name programs in .git/config that git
@@ -109,7 +109,7 @@ describe("UntrustedGit.program", () => {
     await using tmp = await tmpdir()
     // The planted repository sits under the working directory, so its PATH entry stays relative and still reaches the
     // planted git. On Windows CI the temporary folder is on another drive, where path.relative returns an absolute path.
-    await using repo = await tmpdir(process.cwd())
+    await using repo = await tmpdirIn(process.cwd())
     const bin = path.join(tmp.path, "Git", "cmd")
     await fs.mkdir(bin, { recursive: true })
     await fs.writeFile(path.join(repo.path, "git.exe"), "planted")
