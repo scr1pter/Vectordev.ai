@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { Effect } from "effect"
+import { Brain } from "@vectordevai/core/brain/brain"
+import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { BrainPosting } from "@vectordevai/core/brain/posting"
 import { BrainPrivate } from "@vectordevai/core/brain/private"
 import { withKnowledge } from "./fixture/knowledge"
@@ -133,7 +135,7 @@ describe("BrainPrivate", () => {
 // owner's preferences, with the repository asked about tokens.
 describe("BrainPosting.run", () => {
   test("compares a post with MEMORY.md, personal facts and how the owner works", async () => {
-    const result = await withKnowledge(({ brain, place, dir }) =>
+    const result = await withKnowledge(({ brain, knowledge, place, dir }) =>
       Effect.gen(function* () {
         yield* Effect.promise(async () => {
           await fs.mkdir(path.join(dir, "config"), { recursive: true })
@@ -155,7 +157,7 @@ describe("BrainPosting.run", () => {
           typed: false,
           sessionIDs: [],
           known: (tokens) => Effect.sync(() => (asked.push([...tokens]), new Set<string>())),
-        })
+        }).pipe(Effect.provideService(Brain.Service, brain), Effect.provideService(BrainKnowledge.Service, knowledge))
         return { outcome, asked }
       }),
     )
