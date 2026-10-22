@@ -164,7 +164,13 @@ export const ResearchPlanTool = Tool.define<
             return run.id
           })
 
-          if (lead.parentID || !interactive) {
+          // A headless run (`vector run` denies the question tool) has no one to answer a card either.
+          const unanswerable =
+            !interactive ||
+            (ctx.deniedResources
+              ? (yield* ctx.deniedResources({ permission: "question", patterns: ["*"] })).length > 0
+              : false)
+          if (lead.parentID || unanswerable) {
             const runID = yield* start(proposed)
             return {
               title: `Research plan: ${proposed.subquestions.length} sub-question${proposed.subquestions.length === 1 ? "" : "s"}`,

@@ -123,3 +123,27 @@ it.instance(
     }),
   90_000,
 )
+
+it.instance(
+  "a headless run, which denies questions, has its plan approved within its size and never asks",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* setup(web)
+      const asked = yield* answer([])
+      const sessions = yield* Session.Service
+      // What `vector run` gives a session that no one can answer.
+      const session = yield* sessions.create({
+        title: "Research",
+        permission: [{ permission: "question", pattern: "*", action: "deny" }],
+      })
+      yield* llm.tool("research_plan", plan({ depth: "deep" }))
+      yield* llm.text("Done.")
+      yield* send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." })
+      expect(asked).toEqual([])
+      const [planned] = yield* calls(session.id, "research_plan")
+      expect(metadataOf(planned)).toMatchObject({ approved: true, answer: "automatic" })
+      // Only the user's own answer raises a run to Thorough.
+      expect(metadataOf(planned).to).toBeUndefined()
+    }),
+  60_000,
+)
