@@ -19,13 +19,15 @@ import { ResearchWords } from "./words"
 // - a run of 6 or more words from either kind, unless the user typed it or a public source in this run holds it;
 // - a run of 3 words from a line of private-fact prose (not code) with a name or a number in it, on the same terms,
 //   since "Acme's Q3 churn" is private in fewer than 6 words;
+// - a private number of 5 or more digits, read by its digits alone (below), unless the user typed it or a public
+//   source in this run holds it;
 // - a rare token from either kind: an identifier, a path, an email address, a host name (intranet names such as
-//   jira.acme.internal included), an IP address or a number of 5 or more digits (below); or a name from private-fact
-//   prose. An identifier, a host name or an email address of 3 or more parts still counts when the query splits it
-//   into words ("reconcile ledger entries"). Only the user's typing makes one of these safe to send. A public source
-//   does not, since a hostile page could list every host name or number of a company to clear them all. The domains
-//   the user prefers or avoids are the one exception for host names: they exist to become site: filters, so they may
-//   go out as a host name or a site: value, and nowhere else.
+//   jira.acme.internal included) or an IP address; or a name from private-fact prose. An identifier, a host name or
+//   an email address of 3 or more parts still counts when the query splits it into words ("reconcile ledger
+//   entries"). Only the user's typing makes one of these safe to send. A public source does not, since a hostile page
+//   could list every host name of a company to clear them all. The domains the user prefers or avoids are the one
+//   exception for host names: they exist to become site: filters, so they may go out as a host name or a site: value,
+//   and nowhere else.
 //
 // A name is a word of private-fact prose that the prose never writes in lower case and that is not a common word: a
 // capitalised word inside a sentence ("Acme", "Fremont"); a sentence's, a heading's or a label's first word when it is
@@ -40,15 +42,24 @@ import { ResearchWords } from "./words"
 //   "\u0410cme" with a Cyrillic "\u0410", Cherokee "\u13AAcme", Lisu "\uA4EEcme" and "Ac\u2C98e" with a Coptic
 //   "\u2C98" are all "Acme";
 // - for names and rare tokens, with ASCII's own look-alikes read alike (I, l and 1; 0 and O; rn and m; vv and w), so
-//   "GIobex", "Gl0bex" and "Acrne" are Globex and Acme;
-// - with numbers read by their digits. A digit of any script is its ASCII digit (Arabic-Indic \u0662 and Devanagari
-//   \u0968 are 2), and digit groups with one to three characters of space or punctuation between them are one number:
-//   2,400,000, 2.400.000, 2 400 000, 2, 400, 000, USD2,400,000 and 24,00,000 are all 2400000, and 415-555-0132,
-//   (415) 555-0132 and a card number in fours are one number each. A query is refused when one of its numbers holds
-//   a number of 5 or more digits from the private text, or is one of 5 or more digits inside one, so a phone number
-//   goes neither with its country code nor without it. Versions and IPv4 addresses (1.100.2, 192.168.1.20) are not
-//   numbers, and a group glued to a letter joins the next only as a group of three, so "Q3 2026" is two numbers. The
-//   cost is that two numbers written side by side are read as one: a private "2019, 2024" keeps "2019 2024" out.
+//   "GIobex", "Gl0bex" and "Acrne" are Globex and Acme.
+//
+// Numbers are compared by their digits only, every other character ignored, so no separator can hide one. A digit of
+// any script is its ASCII digit (Arabic-Indic \u0662 and Devanagari \u0968 are 2).
+// - The private side: each private number of 5 or more digits, and each stretch of whole groups in it of 5 or more
+//   (a phone number without its country code): digit groups with one to three characters that are not letters or
+//   digits between them make one number ("2,400,000", "+1 415-555-0132", "0044 0532 0130", a card in fours), and a
+//   group glued to a letter joins the next only as a group of three, so "Q3 2026" is two numbers. A version or an IPv4
+//   address (1.100.2, 192.168.1.20) is not a number; an IP address is a rare token of its own, as written.
+// - The query side: all its digits in order, read across everything between them: inside a word whatever stands
+//   between them ("4a417b203"), and across words with no letters ("4 - 417 / 203") and at most one word of letters
+//   ("4417 and 203").
+// - A query is refused when its digits hold a private number, or 7 or more digits in a row of a longer one. The user's
+//   typing clears a number its digits hold. A public source clears a number it holds as one of its own numbers, unless
+//   it holds more than 100 numbers of 5 or more digits: a page of every 5-digit number would otherwise clear them all.
+// The cost: two unrelated numbers written side by side read as one, so on rare occasions a fair query is refused
+// because its digits run into a private number ("iso 9001 2015" holds "12015"). A number spelled in words, or with
+// letters for digits ("24OOOOO"), is not read.
 //
 // It catches literal overlap only: a model can still paraphrase. The queries go to the search service the user set up
 // and are shown in the Sources tab, so a paraphrase is at least visible.
@@ -385,17 +396,24 @@ const UNSEEN = /[\p{M}\p{Default_Ignorable_Code_Point}]/gu
 // A decimal digit of any script. NFKD has made full-width, superscript and mathematical digits ASCII ones already.
 const DIGIT = /\p{Nd}/gu
 const ONE_DIGIT = /^\p{Nd}$/u
-// A group of digits, and what may stand between two groups of one number: one to three characters that are not
-// letters, digits, marks or line breaks (",", ".", " ", "-", ", ", ") ", a tab, "\u066C" in Arabic).
+// A group of digits, and what may stand between two groups of one private number: one to three characters that are
+// not letters, digits or marks (",", ".", " ", "-", ", ", ") ", a tab, a line break, "\u066C" in Arabic).
 const GROUP = /\d+/g
-const BETWEEN = /^[^\p{L}\p{N}\p{M}\n\r\u2028\u2029]{1,3}$/u
+const BETWEEN = /^[^\p{L}\p{N}\p{M}]{1,3}$/u
 const LETTER_BEFORE = /\p{L}$/u
 const LETTER_AFTER = /^\p{L}/u
 const DIGITS = /^\d+$/
-// The most groups one number is read from, so a long list of numbers costs a bounded amount per group.
+// The most groups one private number is read from, so a long list of numbers costs a bounded amount per group.
 const MAX_GROUPS = 8
-// The shortest number counted.
+// The shortest private number, and the run of a longer one's digits that is enough on its own ("8802 5671" of a card
+// written 4417880256719113).
 const NUMBER_DIGITS = 5
+const PART_DIGITS = 7
+// The words of letters a query's digits are read across: "4417 and 203" is 4417203, "top 10 heat pumps 2025" is 10 and
+// 2025.
+const GAP_WORDS = 1
+// A public text with more numbers of 5 or more digits than this clears none of them.
+const PUBLIC_NUMBERS = 100
 // A token split into words: it needs 3 to 8 parts and 12 or more letters and digits, and the query has to write one
 // word for each part. So "reconcile ledger entries" and "reconcile_ledger_entries" are reconcileLedgerEntries, while
 // "status code" is not statusCode and "openai responses" is not OpenAIResponses.
@@ -488,14 +506,12 @@ function inspect(query: string, context: Context, sites: boolean): Result {
   return { ok: true }
 }
 
-// A number of the private text inside one of the query's, or one of the query's of 5 or more digits inside one of the
-// private text's, by their digits alone: "+1 415-555-0132" holds the private 415-555-0132, and "0532 0130" is part of
-// the private 0044 0532 0130.
+// A private number the query's digits hold, or 7 digits in a row of a longer one (see the comment at the top).
 function numberIn(text: string, known: ReturnType<typeof build>) {
-  const numbers = runs(text).map((run) => run.groups.join(""))
+  const streams = digitStreams(text)
   return (
-    known.numbers.find((number) => numbers.some((digits) => digits.includes(number))) ??
-    numbers.find((digits) => figure(digits) && known.digits.includes(digits) && !known.typedDigits.includes(digits))
+    known.numbers.find((number) => streams.some((stream) => stream.includes(number))) ??
+    streams.flatMap((stream) => pieces(stream)).find((piece) => known.parts.has(piece))
   )
 }
 
@@ -609,6 +625,32 @@ function alike(text: string) {
   return text.toLowerCase().replace(/rn/g, "m").replace(/vv/g, "w").replace(/[i1]/g, "l").replace(/0/g, "o")
 }
 
+// The digits a query or an address sends, run together the way the comment at the top says: each word's digits with
+// everything else in it taken out, joined with the next word's across words that have neither letters nor digits and
+// at most GAP_WORDS words of letters.
+function digitStreams(text: string) {
+  return text
+    .split(/\s+/)
+    .filter(Boolean)
+    .reduce<{ streams: string[]; gap: number }>(
+      (state, word) => {
+        const digits = word.replace(/\D+/g, "")
+        if (!digits) return { streams: state.streams, gap: /\p{L}/u.test(word) ? state.gap + 1 : state.gap }
+        if (state.streams.length > 0 && state.gap <= GAP_WORDS) state.streams[state.streams.length - 1] += digits
+        else state.streams.push(digits)
+        return { streams: state.streams, gap: 0 }
+      },
+      { streams: [], gap: Number.POSITIVE_INFINITY },
+    ).streams
+}
+
+// Every run of PART_DIGITS digits in a string of digits.
+function pieces(digits: string) {
+  return Array.from({ length: Math.max(0, digits.length - PART_DIGITS + 1) }, (_, index) =>
+    digits.slice(index, index + PART_DIGITS),
+  )
+}
+
 type Run = { readonly groups: readonly string[]; readonly separators: readonly string[] }
 
 // The numbers of a folded text, as runs of digit groups. A group joins the one before it across what BETWEEN allows,
@@ -688,6 +730,16 @@ function figures(run: Run) {
 // files, 2,400,000 does.
 function figure(digits: string) {
   return digits.length >= NUMBER_DIGITS && !/^\d0+$/.test(digits)
+}
+
+// The numbers a public text holds as its own, or none when it holds more than PUBLIC_NUMBERS of them.
+function publicNumbers(text: string) {
+  const found = new Set(
+    runs(fold(text))
+      .filter((run) => !dotted(run))
+      .flatMap(figures),
+  )
+  return found.size > PUBLIC_NUMBERS ? [] : [...found]
 }
 
 function wordsOf(text: string) {
@@ -793,10 +845,10 @@ function build(context: Context) {
   const typedRaw = alike(context.typed.map(fold).join("\n"))
   const typedWords = new Set(context.typed.flatMap(wordsOf).map(alike))
   const typedSplit = context.typed.map((text) => alike(wordsOf(text).join(""))).join(" ")
-  const typedDigits = context.typed
-    .flatMap((text) => runs(fold(text)))
-    .map((run) => run.groups.join(""))
-    .join("\n")
+  // The numbers the user typed, read as a query's are, and the ones a public source holds as its own.
+  const typedStreams = context.typed.flatMap((text) => digitStreams(fold(text)))
+  const shown = new Set(context.public.flatMap(publicNumbers))
+  const cleared = (digits: string) => shown.has(digits) || typedStreams.some((stream) => stream.includes(digits))
   const counted = all.flatMap((text) => runs(fold(text))).filter((run) => !dotted(run))
   const found = names(context.private)
   const named = new Set(found)
@@ -820,10 +872,15 @@ function build(context: Context) {
     tokens: tokens
       .map((token) => ({ token: token.toLowerCase(), key: alike(token) }))
       .filter((item) => item.token.length >= 5 && !typedRaw.includes(item.key)),
-    // The rare numbers of the private text the user did not type, and the digits of all its numbers.
-    numbers: [...new Set(counted.flatMap(figures))].filter((number) => !typedDigits.includes(number)),
-    digits: counted.map((run) => run.groups.join("")).join("\n"),
-    typedDigits,
+    // The private numbers nobody cleared, and every run of PART_DIGITS digits of the longer ones.
+    numbers: [...new Set(counted.flatMap(figures))].filter((number) => !cleared(number)),
+    parts: new Set(
+      counted
+        .map((run) => run.groups.join(""))
+        .filter((digits) => digits.length > PART_DIGITS && !cleared(digits))
+        .flatMap(pieces)
+        .filter((piece) => !cleared(piece)),
+    ),
     split: new Map(
       tokens
         .filter(open)

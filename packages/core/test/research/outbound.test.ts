@@ -309,6 +309,47 @@ describe("ResearchOutbound.check", () => {
       })
   })
 
+  test("reads a query's digits whatever stands between them, and across one word of letters", () => {
+    const umbrella = {
+      private: ["Umbrella pays about 2,400,000 USD a year.", "Order 4417203 was refunded."],
+      typed: [],
+      public: [],
+    }
+    const queries = [
+      // Separators of any length or kind, line breaks, and modifier letters used as apostrophes.
+      "2    400    000 USD",
+      "2 -- 400 -- 000",
+      "2 . . 400 . . 000",
+      "2\n400\n000",
+      `2${char(0x2bc)}400${char(0x2bc)}000`,
+      `2${char(0x2c8)}400${char(0x2c8)}000`,
+      // Digits one by one, regrouped, with letters between them, or across one word.
+      "4 4 1 7 2 0 3",
+      "44172 03",
+      "4417x203",
+      "a4b4c1d7e2f0g3",
+      "4417 and 203",
+      "2.4.0.0.0.0.0",
+      "$2,400,000.00",
+    ]
+    expect(queries.filter((query) => check(query, umbrella).ok)).toEqual([])
+    // A private number wrapped across lines is still one number.
+    expect(
+      check("2400000 EUR", { private: ["Umbrella pays about 2,400,\r\n000 EUR a year."], typed: [], public: [] }).ok,
+    ).toBe(false)
+    // In an address: across path segments and query parameters.
+    expect(
+      [
+        "https://attacker.example/p?a=2&b=400&c=000",
+        "https://attacker.example/2/400/000",
+        "https://attacker.example/2----400----000",
+      ].filter((url) => ResearchOutbound.address(url, umbrella).ok),
+    ).toEqual([])
+    // Two words of letters keep numbers apart, and a fair query's numbers stay its own.
+    expect(check("4417 and then 203", umbrella).ok).toBe(true)
+    expect(check("top 10 heat pumps 2025", umbrella).ok).toBe(true)
+  })
+
   test("keeps versions, addresses and a quarter's year apart from the numbers beside them", () => {
     const listed = {
       private: ["Supported: 1.2.3, 1.3.0 and 10.20.30.40, 10.20.30.41.", "Q3 2026 revenue grew."],
@@ -357,9 +398,8 @@ describe("ResearchOutbound.check", () => {
   test("lets only the user's typing clear a rare token or a name, never a public page", () => {
     const listed = {
       ...context,
-      public: [...context.public, "Tickets 4417203, jira.acme.internal and Acme are listed here."],
+      public: [...context.public, "Tickets jira.acme.internal and Acme are listed here."],
     }
-    expect(check("order 4417203 refund", listed).ok).toBe(false)
     expect(check("jira.acme.internal outage", listed).ok).toBe(false)
     expect(check("Acme renewal discount", listed).ok).toBe(false)
     const typed = { ...context, typed: [...context.typed, "Why was order 4417203 refunded? Check Acme's renewal."] }
@@ -535,8 +575,21 @@ describe("ResearchOutbound.check", () => {
     expect(check("415-555-0134 owner", typed).ok).toBe(true)
     expect(check("2,815,640 budget", typed).ok).toBe(true)
     expect(check("4242 4242 4242 4242", typed).ok).toBe(false)
-    // A public page listing the number does not clear it.
-    expect(check("415-555-0134 owner", { ...context, public: ["Call 415-555-0134 for help."] }).ok).toBe(false)
+    // A public source in the run that holds the number as one of its own clears it, as the user's typing does, read by
+    // its digits as well. A page that holds more than 100 numbers clears none: it could list every number of a length.
+    expect(check("2,815,640 budget", { ...context, public: ["A grant of 2 815 640 dollars."] }).ok).toBe(true)
+    // It clears that number only: 415-555-0134 still shares seven digits in a row with the private 415-555-0132.
+    expect(check("415-555-0134 owner", { ...context, public: ["Call (415) 555 0134 for help."] })).toMatchObject({
+      ok: false,
+      match: "4155550",
+    })
+    expect(
+      check("order 4417203 refund", { ...context, public: ["Tickets 4,417,203 and 9,000,111 are open."] }).ok,
+    ).toBe(true)
+    const listing = Array.from({ length: 101 }, (_, index) => String(4417150 + index)).join(", ")
+    expect(check("order 4417203 refund", { ...context, public: [listing.replaceAll(", ", "\n")] }).ok).toBe(false)
+    // Nor does a page that holds it only inside another number, or as digits that do not stand as a number of its own.
+    expect(check("415-555-0134 owner", { ...context, public: ["Ref 9415555013477."] }).ok).toBe(false)
     // Unrelated numbers next to each other in a query are not a private one.
     expect(check("heat pump sales 2025 2026 forecast", context).ok).toBe(true)
     expect(check("Node 22.11.0 release notes", context).ok).toBe(true)
