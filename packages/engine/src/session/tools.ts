@@ -59,6 +59,8 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   // Whether the owner's personal memory and private documents may go to this step's model: no guest is in the
   // session and the model does not train on prompts. Absent, they stay out.
   personal?: boolean
+  // A role whose output leaves the machine or reaches the web (section 6.4a): its tools find nothing personal.
+  outward?: boolean
 }) {
   const tools: Record<string, AITool> = {}
   const run = yield* EffectBridge.make()
@@ -80,6 +82,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
       // Whether the model may train on prompts, for tools that keep the owner's personal memory away from such a model.
       mayTrain: freeModelMayTrain(input.model),
       personal: input.personal === true,
+      outward: input.outward === true,
       invokedAgents: input.invokedAgents,
       promptOps: input.promptOps,
       ...(input.taskSize ? { taskSize: input.taskSize } : {}),

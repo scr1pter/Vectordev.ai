@@ -8804,6 +8804,86 @@
         ]
       }
     },
+    "/memory/posting-check": {
+      "post": {
+        "tags": ["memory"],
+        "operationId": "memory.posting.check",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What may be posted, and what overlaps the owner's memory",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryPostingResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Compares text Vector is about to post or commit with the owner's memory: how they work, what they told Vector about themselves, and private documents the given sessions recalled. A sentence that repeats one is taken out of text Vector wrote, and only shown for text the user typed. A fork's links and images may point only at GitHub.",
+        "summary": "Check text before Vector posts it",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryPostingPayload"
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.posting.check({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/memory/knowledge": {
       "get": {
         "tags": ["memory"],
@@ -34599,6 +34679,73 @@
             "$ref": "#/components/schemas/MemoryEntry"
           }
         },
+        "additionalProperties": false
+      },
+      "MemoryPostingPayload": {
+        "type": "object",
+        "properties": {
+          "parts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sessionIDs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "typed": {
+            "type": "boolean"
+          },
+          "untrusted": {
+            "type": "boolean"
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["parts", "typed"],
+        "additionalProperties": false
+      },
+      "MemoryPostingResult": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["clean", "changed", "ask"]
+          },
+          "parts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dropped": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "part": {
+                  "type": "number"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": ["part", "text"],
+              "additionalProperties": false
+            }
+          },
+          "links": {
+            "type": "number"
+          }
+        },
+        "required": ["status", "parts", "dropped", "links"],
         "additionalProperties": false
       },
       "MemoryCard": {

@@ -50,6 +50,7 @@ import { prepareGithubGit } from "./github.git"
 import { appRequested, githubAppInstallation, verifyAppPullRequest } from "./github.app"
 import { downloadGithubAttachment } from "./github.attachment"
 import { withGithubCallbacks, withGithubSignals } from "./github.lifecycle"
+import { SessionPosting } from "@/session/posting"
 
 type GitHubAuthor = {
   login: string
@@ -526,8 +527,24 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
           }),
         )
       }
+      // Everything the task job posts or commits is checked against the owner's memory first (section 6.4a). Nobody
+      // answers questions here, so what repeats it is dropped and counted, and a check that cannot run posts nothing.
+      // Once the job knows it is working on a fork's pull request, what it posts links and embeds only on GitHub.
+      const pulled = { fork: false }
+      const checked = (parts: string[]) =>
+        runLocalEffect(
+          SessionPosting.headless({
+            parts,
+            typed: false,
+            untrusted: pulled.fork,
+            sessionIDs: session ? [session.id] : [],
+            log: (line) => console.log(line),
+          }),
+        )
       const commitChanges = async (summary: string, actor?: string) => {
-        const args = ["commit", "-m", summary]
+        // A commit message is checked when the commit is made, since nothing posts it later.
+        const [message] = await checked([summary])
+        const args = ["commit", "-m", message || "Update from Vector"]
         if (actor) args.push("-m", `Co-authored-by: ${actor} <${actor}@users.noreply.github.com>`)
         await gitRun(args)
       }
@@ -645,6 +662,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
           issueEvent?.issue.pull_request
         ) {
           const prData = await fetchPR()
+          pulled.fork = prData.headRepository.nameWithOwner !== prData.baseRepository.nameWithOwner
           if (resources.auth.source === "app" && prData.headRepository.nameWithOwner !== `${owner}/${repo}`)
             throw new Error("Vector App tasks cannot execute a fork pull request.")
           // Local PR
@@ -1305,14 +1323,16 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
         })
       }
 
-      async function createComment(body: string) {
+      async function createComment(draft: string) {
         // Only called for non-schedule events, so issueId is defined
         console.log("Creating comment...")
+        const body = (await checked([draft]))[0] ?? ""
         return await createTaskComment(octoRest, { owner, repo, issue: issueId!, body })
       }
 
-      async function createPR(base: string, branch: string, title: string, body: string): Promise<number | null> {
+      async function createPR(base: string, branch: string, draftTitle: string, draftBody: string): Promise<number | null> {
         console.log("Creating pull request...")
+        const [title, body] = (await checked([draftTitle, draftBody])) as [string, string]
 
         // Check if an open PR already exists for this head→base combination
         // This handles the case where the agent created a PR via gh pr create during its run

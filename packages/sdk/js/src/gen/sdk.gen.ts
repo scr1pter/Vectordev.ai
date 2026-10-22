@@ -273,6 +273,9 @@ import type {
   MemoryModelUpdateData,
   MemoryModelUpdateErrors,
   MemoryModelUpdateResponses,
+  MemoryPostingCheckData,
+  MemoryPostingCheckErrors,
+  MemoryPostingCheckResponses,
   MemoryRecordsGetData,
   MemoryRecordsGetErrors,
   MemoryRecordsGetResponses,
@@ -2519,6 +2522,24 @@ export class Review extends HeyApiClient {
   }
 }
 
+export class Posting extends HeyApiClient {
+  /**
+   * Check text before Vector posts it
+   *
+   * Compares text Vector is about to post or commit with the owner's memory: how they work, what they told Vector about themselves, and private documents the given sessions recalled. A sentence that repeats one is taken out of text Vector wrote, and only shown for text the user typed. A fork's links and images may point only at GitHub.
+   */
+  public check<ThrowOnError extends boolean = false>(options?: Options<MemoryPostingCheckData, ThrowOnError>) {
+    return (options?.client ?? this.client).post<MemoryPostingCheckResponses, MemoryPostingCheckErrors, ThrowOnError>({
+      url: "/memory/posting-check",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  }
+}
+
 export class Research extends HeyApiClient {
   /**
    * Forget all research in this repository
@@ -2769,6 +2790,11 @@ export class Memory extends HeyApiClient {
   private _review?: Review
   get review(): Review {
     return (this._review ??= new Review({ client: this.client }))
+  }
+
+  private _posting?: Posting
+  get posting(): Posting {
+    return (this._posting ??= new Posting({ client: this.client }))
   }
 
   private _research?: Research

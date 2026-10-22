@@ -3531,6 +3531,24 @@ export type MemoryReviewResult = {
   entry?: MemoryEntry
 }
 
+export type MemoryPostingPayload = {
+  parts: Array<string>
+  sessionIDs?: Array<string>
+  typed: boolean
+  untrusted?: boolean
+  hosts?: Array<string>
+}
+
+export type MemoryPostingResult = {
+  status: "clean" | "changed" | "ask"
+  parts: Array<string>
+  dropped: Array<{
+    part: number
+    text: string
+  }>
+  links: number
+}
+
 export type MemoryCard = {
   id: string
   kind:
@@ -13365,6 +13383,38 @@ export type MemoryReviewResolveResponses = {
 }
 
 export type MemoryReviewResolveResponse = MemoryReviewResolveResponses[keyof MemoryReviewResolveResponses]
+
+export type MemoryPostingCheckData = {
+  body?: MemoryPostingPayload
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/posting-check"
+}
+
+export type MemoryPostingCheckErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryPostingCheckError = MemoryPostingCheckErrors[keyof MemoryPostingCheckErrors]
+
+export type MemoryPostingCheckResponses = {
+  /**
+   * What may be posted, and what overlaps the owner's memory
+   */
+  200: MemoryPostingResult
+}
+
+export type MemoryPostingCheckResponse = MemoryPostingCheckResponses[keyof MemoryPostingCheckResponses]
 
 export type MemoryKnowledgeData = {
   body?: never

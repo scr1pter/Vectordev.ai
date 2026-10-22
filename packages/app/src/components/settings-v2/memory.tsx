@@ -176,7 +176,10 @@ export function SettingsMemoryV2(props: { repositoryPath?: string; sessionDirect
                   a failing check pass, or when a lasting decision is made, and uses it from the next request. Each one
                   is listed under Recently learned, where one click undoes it. It never writes rules: only you do. What
                   it learns in a session that read web pages or other outside content, ran MCP tools, or had a guest or
-                  a subagent in it waits for your review instead.
+                  a subagent in it waits for your review instead. Every agent uses what Vector has learned about you:
+                  coding, subagents and the Vectorscope reviews you run in Vector. Sessions with invited guests, and
+                  free models that may train on your prompts, get none of it. Reviews see how you work, not facts
+                  about you.
                 </div>
               </div>
               <div class="settings-v2-row-control settings-v2-row-control--compact">

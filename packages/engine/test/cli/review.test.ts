@@ -99,6 +99,7 @@ interface Fake {
   pull?: Awaited<ReturnType<NonNullable<LocalReviewDeps["pullInfo"]>>>
   resolveModel?: LocalReviewDeps["resolveModel"]
   github?: GitHubAccess
+  posting?: LocalReviewDeps["posting"]
 }
 
 // A Review.run stand-in that anchors and selects what it is told the model found, as the real one does.
@@ -180,6 +181,8 @@ function fake(options: Fake = {}) {
     },
     now: () => Date.UTC(2026, 8, 14),
     ...(options.github ? { github: options.github } : {}),
+    // These tests are about what a review says and where it goes, not the posting check, which sends it as it is here.
+    posting: options.posting ?? (async (input) => input.parts),
   }
   return { deps, calls, out: () => out.join(""), err: () => err.join(""), questions }
 }
@@ -705,6 +708,26 @@ describe("vector review: --post", () => {
       expect(github.comments[0]).not.toContain("<!-- vector-review:summary -->")
       expect(github.comments[0]).not.toContain("vector-review:state")
       expect(run.err()).toContain("Posted to acme/widgets#7: https://github.com/acme/widgets/pull/7#issuecomment-1")
+    }),
+  )
+
+  it.live("a posted review goes through the posting check with the review's sessions, as a review it cannot trust", () =>
+    Effect.gen(function* () {
+      const repo = yield* pullRequest
+      const github = fakeGitHub({ token: TOKEN })
+      const checked: Parameters<LocalReviewDeps["posting"]>[0][] = []
+      const run = fake({
+        github: github.access,
+        findings: two,
+        posting: async (input) => (checked.push(input), input.parts.map((part) => part.replace("one past", "past"))),
+      })
+      expect((yield* review({ directory: repo.dir, pr: 7, post: true, yes: true }, run.deps)).exitCode).toBe(0)
+      // The client GitHub writes go through is given the check, which calls the posting dependency.
+      const check = github.created[0]!.check
+      expect(yield* Effect.promise(() => check(["items[items.length] is one past the end."], { untrusted: false }))).toEqual([
+        "items[items.length] is past the end.",
+      ])
+      expect(checked.at(-1)).toMatchObject({ sessionIDs: ["ses_test"], untrusted: true })
     }),
   )
 

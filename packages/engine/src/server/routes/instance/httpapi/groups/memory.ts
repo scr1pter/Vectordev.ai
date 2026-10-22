@@ -439,6 +439,33 @@ const ReviewItemID = Schema.String.annotate({
   description: "A review item's id: v… for a conflict or drift, or the held passage, record or document's own id",
 })
 
+/** Characters one post may send for a check, every part together. */
+export const POSTING_CHARS = 2_000_000
+
+export const MemoryPostingPayload = Schema.Struct({
+  /** Everything one post sends, in order: a title and body, or a review's body, each line comment and its fallback. */
+  parts: Schema.Array(Schema.String),
+  /** Sessions whose recalled memory the text is compared with too, with the sessions they launched. */
+  sessionIDs: Schema.optional(Schema.Array(Schema.String)),
+  /** The user typed or edited the text: it is never changed, only asked about. */
+  typed: Schema.Boolean,
+  /** A pull request from someone Vector cannot trust: its links and images may point only at GitHub and `hosts`. */
+  untrusted: Schema.optional(Schema.Boolean),
+  /** The repository's own hosts, besides GitHub's. */
+  hosts: Schema.optional(Schema.Array(Schema.String)),
+}).annotate({ identifier: "MemoryPostingPayload" })
+
+export const MemoryPostingResult = Schema.Struct({
+  /** clean: nothing overlaps. changed: what overlaps was taken out. ask: the user's own text overlaps, unchanged. */
+  status: Schema.Literals(["clean", "changed", "ask"]),
+  /** The parts to post, in the order they were sent. */
+  parts: Schema.Array(Schema.String),
+  /** The sentences that overlap the owner's memory, by part, to show the owner before posting. */
+  dropped: Schema.Array(Schema.Struct({ part: Schema.Finite, text: Schema.String })),
+  /** Links and images taken out because they point off GitHub. */
+  links: Schema.Finite,
+}).annotate({ identifier: "MemoryPostingResult" })
+
 export const MemoryKnowledgeQuery = Schema.Struct({
   ...WorkspaceRoutingQueryFields,
   /** Record, passage and document ids, comma-separated, at most 50. */
@@ -860,6 +887,19 @@ export const MemoryApi = HttpApi.make("memory")
             summary: "Settle an item",
             description:
               "The user's decision on an item: dismiss it, keep the document or the code for drift (keeping the code saves a decision), keep one side of a conflict, or approve or reject held content. Vector never settles one itself.",
+          }),
+        ),
+        HttpApiEndpoint.post("postingCheck", `${root}/posting-check`, {
+          query: WorkspaceRoutingQuery,
+          payload: MemoryPostingPayload,
+          success: described(MemoryPostingResult, "What may be posted, and what overlaps the owner's memory"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.posting.check",
+            summary: "Check text before Vector posts it",
+            description:
+              "Compares text Vector is about to post or commit with the owner's memory: how they work, what they told Vector about themselves, and private documents the given sessions recalled. A sentence that repeats one is taken out of text Vector wrote, and only shown for text the user typed. A fork's links and images may point only at GitHub.",
           }),
         ),
         HttpApiEndpoint.get("knowledge", `${root}/knowledge`, {
