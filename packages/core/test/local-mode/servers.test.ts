@@ -106,6 +106,16 @@ describe("server parsers against their cassettes", () => {
     expect(OllamaServer.cloud({ name: "cloudy-model:7b" })).toBe(false)
   })
 
+  test("Ollama's larger-context copy keeps the model's own name and tag", () => {
+    expect(OllamaServer.copy("qwen3-coder:30b", 19_000)).toMatchObject({ model: "qwen3-coder:30b-32k", context: 32768 })
+    expect(OllamaServer.copy("gemma3", 4_000).model).toBe("gemma3:latest-4k")
+    expect(OllamaServer.copy("hf.co/Qwen/Qwen3-8B-GGUF:Q4_K_M", 40_000).model).toBe(
+      "hf.co/Qwen/Qwen3-8B-GGUF:Q4_K_M-64k",
+    )
+    expect(OllamaServer.copy("localhost:5000/coder:q4", 19_000).model).toBe("localhost:5000/coder:q4-32k")
+    expect(OllamaServer.copy("localhost:5000/coder", 19_000).model).toBe("localhost:5000/coder:latest-32k")
+  })
+
   test("LM Studio: answers every path with 200, so only its model list identifies it", async () => {
     const current = await cassette("lmstudio")
     const fallback = JSON.parse(current.decoded.metadata.fallback!.body)

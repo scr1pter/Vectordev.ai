@@ -145,7 +145,10 @@ export type Copy = {
 export function copy(model: string, required: number): Copy {
   // The next power of two at or above what is needed, so a 19K requirement gets a 32K copy.
   const context = 2 ** Math.ceil(Math.log2(Math.max(required, 2048)))
-  const [repository, tag] = model.includes(":") ? model.split(":", 2) : [model, "latest"]
+  // The tag follows the last colon after the last slash, so a registry with a port (localhost:5000/coder:q4) keeps it.
+  const colon = model.lastIndexOf(":")
+  const [repository, tag] =
+    colon > model.lastIndexOf("/") ? [model.slice(0, colon), model.slice(colon + 1)] : [model, "latest"]
   return {
     from: model,
     model: `${repository}:${tag}-${Math.round(context / 1024)}k`,
