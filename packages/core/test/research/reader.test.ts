@@ -13,6 +13,8 @@ const web = FakeWeb.start({
     ...FakeWeb.sites(),
     // A redirect off the fake web, which the caller's authorize has to see before anything is resolved.
     away: { "/": FakeWeb.redirect(302, () => "https://example.com/elsewhere") },
+    // A redirect whose target carries a query, which the hop's decision has to see.
+    query: { "/": FakeWeb.redirect(302, (context) => context.url("article", "/?id=7&lang=en")) },
     long: {
       "/": {
         headers: { "content-type": "text/html; charset=utf-8" },
@@ -156,6 +158,13 @@ describe("redirects", () => {
     expect(page.final).toBe(web.url("article", "/"))
     expect(page.url).toBe(web.url("moved", "/old"))
     expect(page.site).toBe("web.test")
+  })
+
+  test("decides a hop by its whole address, query included", async () => {
+    const asked: string[] = []
+    const page = await read(web.url("query", "/"), { authorize: (url) => Effect.sync(() => void asked.push(url)) })
+    expect(asked).toEqual([web.url("query", "/"), web.url("article", "/?id=7&lang=en")])
+    expect(page.final).toBe(web.url("article", "/?id=7&lang=en"))
   })
 
   test("follows a 307 to a PDF on another host", async () => {

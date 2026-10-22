@@ -1,7 +1,7 @@
 export * as WebFetchRequest from "./webfetch-request"
 
 import { Effect, Exit, Scope } from "effect"
-import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse, UrlParams } from "effect/unstable/http"
 import type { LookupAddress, LookupAllOptions, LookupOneOptions, LookupOptions } from "node:dns"
 import { lookup } from "node:dns/promises"
 import http from "node:http"
@@ -97,7 +97,12 @@ export const execute = (
         try: () => new URL(location, destination),
         catch: (cause) => new Error("Invalid redirect URL", { cause }),
       })
-      return yield* follow(HttpClientRequest.setUrl(request, next), redirects + 1)
+      // Set as a string with no separate parameters, so the next hop is decided by its whole address, query included.
+      // A URL object would move the query into the request's parameters, out of `request.url`.
+      return yield* follow(
+        HttpClientRequest.setUrl(HttpClientRequest.setUrlParams(request, UrlParams.empty), next.toString()),
+        redirects + 1,
+      )
     })
 
     return yield* follow(request, 0)
