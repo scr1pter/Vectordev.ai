@@ -25,6 +25,8 @@ import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { ShellPrompt, type Parameters } from "./shell/prompt"
 import { BashArity } from "@/permission/arity"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { SessionMemory } from "../session/memory"
 
 export { Parameters } from "./shell/prompt"
 
@@ -725,6 +727,22 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan,
     })
   }
 
+  // With Vector Local on, a command that may reach the network asks first, with the command shown: one whose output is
+  // not this computer's own (SessionMemory.local: a fetch, a push, a publish, a program Vector does not know), or a
+  // package install. Vector does not see where such a command connects, so nothing saves it for later; a rule in the
+  // user's config can allow one.
+  if (scan.patterns.size > 0 && Egress.policy().enabled && networked(input.command)) {
+    yield* ctx.ask({
+      permission: NETWORK_COMMAND,
+      patterns: [input.command],
+      always: [],
+      metadata: {
+        command: input.command,
+        reason: "Vector Local is on, and this command may connect to the network. Vector cannot see where it connects.",
+      },
+    })
+  }
+
   // The read tool's permission and patterns, so the read rules that ask for
   // `.env` files (and a session that may not read them) apply to the shell too.
   // Asked even when the command has no shell pattern: a statement whose only
@@ -761,6 +779,18 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan,
     })
   }
 })
+
+/** The permission a shell command that may reach the network asks under while Vector Local is on. */
+export const NETWORK_COMMAND = "network_command"
+
+// Package installs reach a registry, though what they print is this computer's own, so they count as network commands.
+const INSTALLS =
+  /(?:^|[\s;&|(])(?:(?:npm|pnpm|yarn|bun)\s+(?:install|i|add|ci|update|up|upgrade)|(?:pip3?|uv|poetry|pipenv)\s+(?:install|add|sync|lock|update)|uv\s+pip\s+install|gem\s+install|cargo\s+(?:install|fetch|update)|go\s+(?:get|install|mod\s+download)|brew\s+(?:install|upgrade|update)|(?:apt|apt-get|dnf|yum)\s+(?:install|update|upgrade))\b/
+
+/** Whether a shell command may reach the network: its output is not this computer's own, or it installs packages. */
+export function networked(command: string) {
+  return !SessionMemory.local(command) || INSTALLS.test(command)
+}
 
 const cmd = Effect.fn("ShellTool.cmd")(function* (
   shell: string,

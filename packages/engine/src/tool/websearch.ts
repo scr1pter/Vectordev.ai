@@ -7,6 +7,9 @@ import { InstallationVersion } from "@vectordevai/core/installation/version"
 import { WebFence } from "@vectordevai/core/research/fence"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Auth } from "@/auth"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { EgressHttpClient } from "@vectordevai/core/local-mode/http-client"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 
 export const Parameters = Schema.Struct({
   query: Schema.String.annotate({ description: "Websearch query" }),
@@ -92,7 +95,8 @@ function callProvider(
 export const WebSearchTool = Tool.define(
   "websearch",
   Effect.gen(function* () {
-    const http = yield* HttpClient.HttpClient
+    // Each search is decided and logged as its provider's source while Vector Local is on.
+    const http = EgressHttpClient.make(yield* HttpClient.HttpClient)
     const flags = yield* RuntimeFlags.Service
     const auth = yield* Auth.Service
 
@@ -117,6 +121,18 @@ export const WebSearchTool = Tool.define(
             return yield* Effect.die(new Error("Connect Exa or Parallel in Settings → Providers to enable web search."))
           const title = webSearchProviderLabel(provider)
           yield* ctx.metadata({ title: `${title} "${params.query}"`, metadata: { provider } })
+          // Vector Local: Web access None turns searches off, and a search service runs only once the user allows it,
+          // with its reason shown. A refusal is logged and the person is told; nothing is asked or sent.
+          const source = provider === "exa" ? "websearch-exa" : "websearch-parallel"
+          const endpoint = provider === "exa" ? McpWebSearch.EXA_URL : McpWebSearch.PARALLEL_URL
+          const policy = Egress.policy()
+          const verdict = policy.enabled
+            ? LocalPolicy.decide(policy, { purpose: "web-search", url: endpoint, source })
+            : undefined
+          if (verdict && verdict.decision !== "allow") {
+            Egress.record({ source, url: endpoint, tool: "websearch", notify: true }, verdict)
+            return yield* Effect.die(new Error(`Web search is off in Vector Local. ${verdict.reason}`))
+          }
 
           yield* ctx.ask({
             permission: "websearch",
@@ -133,6 +149,7 @@ export const WebSearchTool = Tool.define(
           })
 
           const result = yield* callProvider(http, provider, params, keys[provider]).pipe(
+            EgressHttpClient.labelled(source),
             Effect.mapError(() => new Error("Web search failed. Check the provider key and try again.")),
           )
 

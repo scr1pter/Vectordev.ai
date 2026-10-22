@@ -9,6 +9,12 @@ import { collectBoundedResponseBody } from "@vectordevai/core/tool/http-body"
 import { WebFence } from "@vectordevai/core/research/fence"
 import DESCRIPTION from "./webfetch.txt"
 import { isImageAttachment } from "@/util/media"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { EgressGuard } from "@vectordevai/core/local-mode/guard"
+import { EgressHttpClient } from "@vectordevai/core/local-mode/http-client"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import { SessionMemory } from "../session/memory"
+import type { SessionV1 } from "@vectordevai/core/v1/session"
 
 const MAX_RESPONSE_SIZE = 5 * 1024 * 1024 // 5MB
 const DEFAULT_TIMEOUT = 30 * 1000 // 30 seconds
@@ -30,7 +36,9 @@ export const Parameters = Schema.Struct({
 export const WebFetchTool = Tool.define(
   "webfetch",
   Effect.gen(function* () {
-    const http = yield* HttpClient.HttpClient
+    // Every hop is decided and logged as webfetch while Vector Local is on (Web access, the site lists), and sent through
+    // the pinned fetch WebFetchRequest provides.
+    const http = EgressHttpClient.make(yield* HttpClient.HttpClient)
     const truncate = yield* Truncate.Service
     const config = yield* Config.Service
 
@@ -68,21 +76,28 @@ export const WebFetchTool = Tool.define(
           }
 
           const request = HttpClientRequest.get(params.url).pipe(HttpClientRequest.setHeaders(headers))
+          webAccess("webfetch", params.url)
+          // The address the model chose is checked once; a redirect's next address is the server's, not the model's.
+          const strict = { first: newAddress(params.url, ctx.messages) }
 
           const { response, body } = yield* Effect.gen(function* () {
             const response = yield* WebFetchRequest.execute(http, request, {
               // "Always allow" covers the site asked about, never every site.
-              authorize: (url) =>
-                ctx.ask({
+              authorize: (url) => {
+                const after = strict.first
+                strict.first = false
+                return ctx.ask({
                   permission: "webfetch",
-                  patterns: [url],
-                  always: siteAlways(url),
+                  patterns: [after ? `${AFTER_WEB}${url}` : url],
+                  always: after ? [] : siteAlways(url),
                   metadata: {
                     url,
                     format: params.format,
                     timeout: params.timeout,
+                    ...(after ? { reason: AFTER_WEB_REASON } : {}),
                   },
-                }),
+                })
+              },
               // A dev server, an intranet page or a cloud metadata address is reached only with its own approval,
               // since a model reading a hostile page could otherwise be steered into the user's network.
               authorizePrivate: (url) =>
@@ -102,6 +117,7 @@ export const WebFetchTool = Tool.define(
           }).pipe(
             Effect.scoped,
             Effect.timeoutOrElse({ duration: timeout, orElse: () => Effect.die(new Error("Request timed out")) }),
+            EgressHttpClient.labelled("webfetch"),
           )
 
           const contentType = response.headers["content-type"] || ""
@@ -153,6 +169,58 @@ export const WebFetchTool = Tool.define(
     }
   }),
 )
+
+// The pattern prefix of an address asked about after the web: no saved "Always allow" for a site matches it, so the
+// person sees each one, and none is saved.
+export const AFTER_WEB = "after-web "
+export const AFTER_WEB_REASON =
+  "This conversation read the web, and this address is new: neither you nor an earlier result gave it. A page can steer the agent into putting your data in an address."
+
+/**
+ * Whether the agent's own choice of `address` asks again under Vector Local's rule for after the web (section 4.4):
+ * once the conversation read the web, an address on a host it has not reached asks, as does one that did not appear
+ * in an earlier result or link. An address the person typed never asks again for this. With Vector Local off it never
+ * applies.
+ */
+export function newAddress(address: string, messages: readonly SessionV1.WithParts[]) {
+  if (!Egress.policy().enabled || !URL.canParse(address)) return false
+  if (SessionMemory.taint(messages) !== "web") return false
+  const url = new URL(address)
+  const forms = [address.trim(), url.href, `${url.host}${url.pathname}${url.search}`]
+  const said = (text: string) => forms.some((form) => text.includes(form))
+  if (messages.some((message) => message.info.role === "user" && said(SessionMemory.typed(message)))) return false
+  const tools = messages.flatMap((message) => message.parts.flatMap((part) => (part.type === "tool" ? [part] : [])))
+  const reached = tools.some(
+    (part) =>
+      (part.tool === "webfetch" || part.tool === "browser") &&
+      part.state.status === "completed" &&
+      typeof part.state.input.url === "string" &&
+      URL.canParse(part.state.input.url) &&
+      new URL(part.state.input.url).host === url.host,
+  )
+  const listed = tools.some((part) => part.state.status === "completed" && said(part.state.output))
+  return !(reached && listed)
+}
+
+/**
+ * Refuses a web read that Web access does not allow while Vector Local is on (None reaches only this computer, Your
+ * network only your network and the sites your company lists), before anything is asked or sent. The refusal is logged
+ * and the person is told. The request itself is decided again, hop by hop, as it is sent.
+ */
+export function webAccess(source: "webfetch" | "agent-browser", address: string) {
+  const policy = Egress.policy()
+  if (!policy.enabled) return
+  const purpose = source === "webfetch" ? "web-page" : "browser"
+  const verdict = LocalPolicy.decide(policy, { purpose, url: address, source })
+  if (verdict.decision === "allow") return
+  Egress.record({ source, url: address, tool: source === "webfetch" ? "webfetch" : "browser", notify: true }, verdict)
+  throw new EgressGuard.EgressBlocked(
+    URL.canParse(address) ? new URL(address).hostname : address,
+    "fetch",
+    verdict.rule,
+    verdict.reason,
+  )
+}
 
 // The origin of a URL as the permission patterns an "Always allow" saves: the site itself and every page on it.
 function siteAlways(url: string) {
