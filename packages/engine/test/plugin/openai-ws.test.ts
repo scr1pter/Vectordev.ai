@@ -12,6 +12,7 @@ import { ProviderError } from "../../src/provider/error"
 import { OpenAIWebSocket } from "../../src/plugin/openai/ws"
 import { OpenAIWebSocketPool, TITLE_HEADER } from "../../src/plugin/openai/ws-pool"
 import { OpenAITransport } from "../../src/plugin/openai/transport"
+import { ProxyEnv } from "../../src/util/proxy-env"
 import { isRecord } from "../../src/util/record"
 
 describe("plugin.openai.ws", () => {
@@ -253,12 +254,38 @@ describe("plugin.openai.ws under Vector Local", () => {
       expect(messages).toBe(1)
       expect(overHttp).toEqual([])
       expect(Egress.events().map((event) => [event.source, event.decision])).toEqual([["local-inference", "block"]])
-      // Once it is listed, the next call goes, on a new socket.
+      // Once it is listed, the next call goes, on a new socket, and is logged once.
       Egress.configure(LocalPolicy.resolve({ global: { enabled: true, endpoints: [new URL(server.url).origin] } }))
       expect(await (await fetch(server.url, streamRequest())).text()).toContain("[DONE]")
       expect({ connections, messages }).toEqual({ connections: 2, messages: 2 })
+      expect(Egress.events().map((event) => [event.source, event.decision])).toEqual([
+        ["local-inference", "block"],
+        ["local-inference", "allow"],
+      ])
     } finally {
       fetch.close()
+      Egress.configure(LocalPolicy.OFF)
+      await Egress.erase()
+    }
+  })
+})
+
+describe("plugin.openai.ws route", () => {
+  // The strict guard puts its own proxy in the environment, so the proxy a route takes is that one, and nothing here
+  // connects.
+  NetworkGuard.use()
+
+  test("sends a model call to a listed server with an internet name as a local one, through the environment's proxy", async () => {
+    Egress.configure(LocalPolicy.resolve({ global: { enabled: true, endpoints: ["https://models.example.com"] } }))
+    try {
+      const routed = OpenAIWebSocket.route("wss://models.example.com/v1/responses")
+      const proxy = ProxyEnv.getProxyForUrl("https://models.example.com/v1/responses")
+      expect(proxy).toBeDefined()
+      expect(routed).toEqual({ proxy })
+      expect(Egress.events().map((event) => [event.source, event.decision, event.rule])).toEqual([
+        ["local-inference", "allow", "listed"],
+      ])
+    } finally {
       Egress.configure(LocalPolicy.OFF)
       await Egress.erase()
     }
