@@ -2,15 +2,19 @@
 
 # Vector
 
-**An AI coding workspace for planning, building, reviewing, and shipping software.**
+**The low-cost AI agentic harness for planning, building, reviewing and shipping software.**
+
+Self-evolving with Vector Brain, coming in desktop 1.99.110.
 
 [vectordev.ai](https://vectordev.ai) · [Docs](https://vectordev.ai/docs) · [Changelog](https://vectordev.ai/docs/changelog)
 
 </div>
 
-Vector is an agentic engineering workspace. It puts an editor, a terminal, a controlled browser and AI agents around the repository on your computer: you describe a change, watch agents edit files and run checks, and inspect the result before you merge or publish it.
+Vector is an AI agentic harness. It puts an editor, a terminal, a controlled browser and AI agents around the repository on your computer: you describe a change, watch agents edit files and run checks, and inspect the result before you merge or publish it. It is built on proprietary technology: the **tokenomics engine**, which prices Vector's own agent's runs from the tokens your provider reported wherever the model has a price and, in the desktop app, sizes each request so that "hi" gets one small, direct reply and stops a run within one step of the cap you set with the Run Guard (the terminal gets both with the next CLI release); the **subagent system**, nine built-in subagents that take on the parts of hard work; and **Vectorscope**, its code reviewer.
 
-Coming in desktop 1.99.110: Vector becomes a self-evolving agentic harness. Give it your specs, PDFs and docs once. It reads them on your computer, links requirements, endpoints and decisions to the code that implements them, warns you when the two drift apart, keeps what proved useful in runs that passed, and spends tokens only where they matter. "hi" costs nothing extra. Your prompts, your data, your Vector: the brain lives on your computer, you choose who runs the model for each request, and you can see, undo or erase what it learned in Settings → Memory. Free models labelled "May train on your prompts" are the exception.
+**Low cost, measured.** In Vector's [offline efficiency benchmark](docs/benchmarks/vector-efficiency-2026-10/README.md), Vector's runtime at an 11 October 2026 revision (commit 6f7f3c2ea) and Claude Code 2.1.215 performed identical scripted tool steps against a local fake model server, with the same number of model requests, in three fix tasks. Vector's modelled spend was 67–75% lower in a first session and 75% lower in a second, run as a new process: medians of three repetitions at the same list rates, with caching modelled and tokens estimated as characters ÷ 4. The benchmark measures what each agent sends, not the quality of answers or a provider's real bill, and it does not show that Vector is cheaper than other agents in general.
+
+Coming in desktop 1.99.110: Vector becomes a self-evolving agentic harness. **Vector Brain**, Vector's own retrieval built on a code graph, works offline on your computer. Give it your specs, PDFs and docs once. It reads them, links requirements, endpoints and decisions to the code that implements them, warns you when the two drift apart, keeps what proved useful in runs that passed, and recalls only what each request needs, within a budget set by the request's size. "hi" costs nothing extra. Your prompts, your data, your Vector: the brain lives on your computer, you choose who runs the model for each request, and you can see, undo or erase what it learned in Settings → Memory. Free models labelled "May train on your prompts" are the exception.
 
 Vector is free. Create a free Vector account at [vectordev.ai](https://vectordev.ai) to download the desktop app; the same account signs in the terminal agent.
 
