@@ -7,6 +7,7 @@ import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecy
 import { InstallationVersion } from "@vectordevai/core/installation/version"
 import { Redaction } from "@vectordevai/core/redaction"
 import { Effect, Queue, Schema } from "effect"
+import { omit } from "remeda"
 import * as Stream from "effect/Stream"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -92,7 +93,11 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     })
 
     const configGet = Effect.fn("GlobalHttpApi.configGet")(function* () {
-      return Redaction.redactConfig(yield* config.getGlobal())
+      const global = Redaction.redactConfig(yield* config.getGlobal())
+      // Vector Local's block is the owner's: their model servers' addresses, identities and the services they allowed.
+      // A guest loads the app from this route but cannot change it, so it gets the rest.
+      if ((yield* RequestPrincipal).kind !== "owner") return omit(global, ["local"])
+      return global
     })
 
     const configUpdate = Effect.fn("GlobalHttpApi.configUpdate")(function* (ctx) {
