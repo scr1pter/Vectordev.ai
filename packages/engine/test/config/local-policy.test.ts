@@ -392,6 +392,19 @@ describe("repository config", () => {
   )
 })
 
+describe("the egress guard", () => {
+  test("decides under the policy config resolves, from the moment it is resolved", () => {
+    writeGlobal({ enabled: true, endpoints: [GPU_BOX] })
+    const policy = Config.refreshLocal()
+    expect(Egress.policy()).toBe(policy)
+    expect(Egress.decide({ source: "local-inference", url: `${GPU_BOX}/v1` }).rule).toBe("listed")
+    rmSync(globalFile, { force: true })
+    Config.refreshLocal()
+    Config.confirmLocal()
+    expect(Egress.policy().enabled).toBe(false)
+  })
+})
+
 describe("the environment only tightens", () => {
   test("VECTOR_LOCAL and VECTOR_LOCAL_WEB add a floor", () => {
     writeGlobal({ enabled: false, web: "ask", endpoints: [SERVER] })

@@ -7,6 +7,8 @@
 // fails unless the PDF was read in a worker thread from the bundle, not on the main thread. It also asks the binary
 // for its search model; with VECTOR_TEST_EMBED_DIR (a folder of the pinned arctic-embed-xs files) it installs the
 // model from there, which loads ONNX Runtime's wasm embedded in the binary, keeps the PDF, and searches it by meaning.
+// First it checks that the reader as the build bundles it stays sealed under the egress test variables, which only a
+// test may honour.
 //
 //   bun script/verify-brain-worker.ts dist/<platform>/bin/vector    (build.ts runs this after each native build)
 //   bun script/verify-brain-worker.ts                                (compiles a binary for this machine first)
@@ -17,11 +19,15 @@
 
 import { spawnSync, type SpawnSyncReturns } from "node:child_process"
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
+import net from "node:net"
 import os from "node:os"
 import path from "node:path"
+import { Worker } from "node:worker_threads"
 import { createSolidTransformPlugin } from "@opentui/solid/bun-plugin"
 import { lines, pdf } from "../../core/test/brain/fixture/pdf"
+import { bundleBrainWorker } from "./brain-worker"
 
+const SMOKE = { version: "0.0.0-brain-worker-smoke", channel: "brain-worker-smoke" }
 const STARTED = "brain reader started in a worker thread"
 const FALLBACK = "brain reader runs on the main thread"
 const dir = path.resolve(import.meta.dirname, "..")
@@ -32,7 +38,7 @@ process.chdir(dir)
 const scratch = await mkdtemp(path.join(os.tmpdir(), "vector-brain-worker-"))
 try {
   const binary = given ?? (await compile(path.join(scratch, "bin")))
-  const failures = await smoke(binary, path.join(scratch, "home"))
+  const failures = [...(await sealed()), ...(await smoke(binary, path.join(scratch, "home")))]
   if (failures.length > 0) {
     console.error(`brain worker smoke FAILED (${binary}):`)
     for (const failure of failures) console.error(`  - ${failure}`)
@@ -122,6 +128,52 @@ async function smoke(binary: string, home: string) {
   ]
 }
 
+// The reader as the build bundles it knows it runs in a build of Vector, so it stays sealed whatever the test variables
+// say: a name they pin to this computer, answered there by its resolver, is still refused. Run under Bun, as the CLI
+// runs it, from its source as an eval worker.
+async function sealed() {
+  const sink = net.createServer((socket) => socket.end())
+  await new Promise<void>((resolve) => sink.listen(0, "127.0.0.1", resolve))
+  const port = (sink.address() as net.AddressInfo).port
+  const probe = `
+;(async () => {
+  const net = await import("node:net")
+  const { parentPort } = await import("node:worker_threads")
+  const lookup = (_host, options, callback) =>
+    options.all ? callback(null, [{ address: "127.0.0.1", family: 4 }]) : callback(null, "127.0.0.1", 4)
+  const named = await new Promise((resolve) => {
+    try {
+      const socket = net.connect({ host: "api.example.com", port: ${port}, lookup })
+      socket.on("connect", () => {
+        socket.destroy()
+        resolve("connected")
+      })
+      socket.on("error", (error) => resolve(error.name))
+    } catch (error) {
+      resolve(error.name)
+    }
+  })
+  parentPort.postMessage({ named })
+})()`
+  const worker = new Worker((await bundleBrainWorker(SMOKE)) + probe, {
+    eval: true,
+    env: { ...process.env, VECTOR_TEST_EGRESS: "strict", VECTOR_TEST_EGRESS_NAMES: "example.com" },
+  })
+  const answer = await new Promise<unknown>((resolve) => {
+    worker.on("message", (message) => {
+      if (message && typeof message === "object" && "named" in message) resolve(message.named)
+    })
+    worker.on("error", (error) => resolve(`the reader failed: ${error.message}`))
+    setTimeout(() => resolve("no answer in 20 seconds"), 20_000).unref()
+  }).finally(() => {
+    void worker.terminate()
+    sink.close()
+  })
+  return answer === "EgressBlocked"
+    ? []
+    : [`the bundled reader honoured the test variables, so its seal let a pinned name through: ${String(answer)}`]
+}
+
 // The search model in the binary: absent until asked for, and with the pinned files at hand, installed (its wasm
 // embedded in the binary, its load checked against the pinned canaries) and finding the PDF's sentence by meaning.
 async function meaning(run: (args: string[]) => SpawnSyncReturns<string>) {
@@ -159,13 +211,6 @@ async function meaning(run: (args: string[]) => SpawnSyncReturns<string>) {
 // A binary for this machine, built as build.ts builds one, minus what the smoke does not need.
 async function compile(out: string) {
   const started = Date.now()
-  const brainWorker = await Bun.build({
-    entrypoints: [path.join(dir, "../core/src/brain/worker/entry.ts")],
-    target: "node",
-    format: "esm",
-    minify: true,
-  })
-  if (!brainWorker.success) throw new AggregateError(brainWorker.logs, "The brain worker bundle failed to build")
   const local = path.join(dir, "node_modules/@opentui/core/parser.worker.js")
   const parserWorker = await realpath(local).catch(() => realpath(path.join(dir, "../../node_modules/@opentui/core/parser.worker.js")))
   const workerPath = "./src/cli/tui/worker.ts"
@@ -189,17 +234,17 @@ async function compile(out: string) {
       outfile,
     },
     files: {
-      "brain-worker.gen.ts": `export default ${JSON.stringify(await brainWorker.outputs[0]!.text())}`,
+      "brain-worker.gen.ts": `export default ${JSON.stringify(await bundleBrainWorker(SMOKE))}`,
     },
     entrypoints: ["./src/index.ts", parserWorker, workerPath, "brain-worker.gen.ts"],
     define: {
       FFF_LIBC: JSON.stringify("gnu"),
-      VECTOR_VERSION: `'0.0.0-brain-worker-smoke'`,
+      VECTOR_VERSION: JSON.stringify(SMOKE.version),
       VECTOR_CLI_STANDALONE: "true",
       VECTOR_PLUGIN_VERSION: JSON.stringify("0.0.0-brain-worker-smoke"),
       OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + path.relative(dir, parserWorker).replaceAll("\\", "/"),
       VECTOR_WORKER_PATH: workerPath,
-      VECTOR_CHANNEL: `'brain-worker-smoke'`,
+      VECTOR_CHANNEL: JSON.stringify(SMOKE.channel),
       VECTOR_LIBC: process.platform === "linux" ? `'glibc'` : "",
     },
   })

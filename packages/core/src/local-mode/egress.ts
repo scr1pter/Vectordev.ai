@@ -2,8 +2,8 @@ export * as Egress from "./egress"
 
 import { randomUUID } from "node:crypto"
 import { isMainThread, threadId } from "node:worker_threads"
-import { Context, Effect, Layer, Option, Schema } from "effect"
-import { LocalMode } from "@vectordevai/schema/local-mode"
+import { Context, Effect, Layer } from "effect"
+import type { LocalMode } from "@vectordevai/schema/local-mode"
 import { makeGlobalNode } from "../effect/app-node"
 import { isHelperName } from "../session/helper"
 import { EgressAttribution } from "./attribution"
@@ -11,21 +11,22 @@ import { EgressGuard } from "./guard"
 import { EgressLogStore } from "./log-store"
 import { LocalPolicy } from "./policy"
 import { LocalSources } from "./sources"
+import { LocalStartup } from "./startup"
 
 // Vector Local's egress service: the one place a labelled request is decided, logged and sent. It is process-global
 // and takes no session ID; who a request is for travels in EgressAttribution's scope. Every source in the registry has
 // one call site that asks `decide` or sends through `fetch` (or EgressHttpClient, which sends through `fetch`), and the
 // backstop guard (`backstop()`) decides whatever else connects.
 //
-// The policy starts as Vector Local off: everything passes and nothing is logged. When the environment already turns
-// Vector Local on (VECTOR_LOCAL=1, which Vector's children inherit), it starts pending instead: only this computer is
+// The policy starts as Vector Local off: everything passes and nothing is logged. When anything Vector Local reads at
+// start may turn it on (the environment, VECTOR_LOCAL=1, which Vector's children inherit, or a managed or user config
+// file: LocalStartup), `backstop` starts it pending instead, before any other module runs: only this computer is
 // reachable, for every purpose, until config sets the policy it resolves at start with `resolve` or `configure`. The
 // engine's config resolves it synchronously when its module loads, before any layer or startup fetch, and hands each
-// later one here as it takes effect (engine config.ts, refreshLocal). A policy that only the company's file or the
-// user's config turns on is not seen before then, so until the engine's config module loads, and in the desktop's main
-// process for now, Vector Local is off. From then on every decision reads it. While Vector Local is on, each decision
-// is an event: in memory (the last 2,000), on disk when a log directory is configured, and in the counters the pane
-// shows.
+// later one here as it takes effect (engine config.ts, refreshLocal); the desktop's main process resolves its own from
+// the desktop's folders with LocalStartup.policy. From then on every decision reads it. While Vector Local is on, each
+// decision is an event: in memory (the last 2,000), on disk when a log directory is configured, and in the counters
+// the pane shows.
 //
 // Each thread of a process holds its own copy of this state (the TUI's engine thread, a Worker the guard preloaded),
 // so the threads keep one between them over a BroadcastChannel, which never leaves the process: the policy set last
@@ -139,7 +140,6 @@ const state: State = (holder[KEY] ??= {
   grants: new Map(),
   totals: new Map(),
 })
-const decodePolicy = Schema.decodeUnknownOption(Schema.fromJsonString(LocalMode.Policy))
 
 export function policy() {
   return state.policy
@@ -202,8 +202,10 @@ function post(message: Message) {
 }
 
 function receive(message: Message) {
+  // The main thread always answers, so a worker that started without a policy of its own (one that shares this
+  // thread's environment) stops holding everything once it hears.
   if (message.kind === "ask") {
-    if (state.known) post({ kind: "policy", policy: state.policy, version: state.version, log: false })
+    if (state.known || isMainThread) post({ kind: "policy", policy: state.policy, version: state.version, log: false })
     return
   }
   if (message.kind === "event") return remember(message.event, message.notify, message.agent)
@@ -439,31 +441,35 @@ export function report(event: LocalMode.Event) {
 
 /**
  * Installs the backstop guard for this thread with this service's policy and log. Strict mode (tests, in a source
- * checkout only: EgressGuard.strictFromEnvironment) installs the strict guard instead. Nothing happens when a guard is
- * already installed. When the environment turns Vector Local on, the policy starts pending until config resolves it.
- * A Worker the guard started (guard-worker.ts) starts with the policy its parent handed it instead, and every thread
- * then keeps the policy the others set.
+ * checkout only, never with Vector Local on: EgressGuard.strictFromEnvironment) installs the strict guard instead.
+ * Nothing happens when a guard is already installed. When anything Vector Local reads at start may turn it on, the
+ * policy starts pending until config resolves it. A Worker the guard started (guard-worker.ts) starts with the policy
+ * its parent handed it instead, and every thread then keeps the policy the others set; one a sealed thread started is
+ * sealed.
  */
 export function backstop() {
   if (EgressGuard.installed()) return undefined
-  // Only a Worker the guard started reads a policy from its environment; one inherited from anywhere else is dropped,
-  // and neither is passed on to a child process.
-  const handed = isMainThread ? undefined : process.env[EgressGuard.WORKER_POLICY]
-  delete process.env[EgressGuard.WORKER_POLICY]
-  start(handed === undefined ? undefined : Option.getOrUndefined(decodePolicy(handed)))
-  const strict = EgressGuard.strictFromEnvironment()
+  // Only a Worker the guard started reads what it was handed from its environment (EgressGuard.handed); a value
+  // inherited from anywhere else is dropped, and neither is passed on to a child process.
+  const handed = EgressGuard.handed()
+  start(handed && "policy" in handed ? handed.policy : undefined)
+  // The test variables mean nothing once Vector Local may be on, from any source it reads at start.
+  const strict = EgressGuard.strictFromEnvironment(process.env, undefined, state.policy.enabled)
   if (strict)
     return EgressGuard.installStrict({
       names: strict.names,
       // A worker, or a process a strict parent started, reaches the parent's proxy through the environment.
       proxy: isMainThread && !strict.proxy,
+      parentProxy: strict.proxy,
     })
+  // A Worker started in a sealed thread (the brain's reader) is sealed too: any connection off this computer fails.
+  if (handed && "sealed" in handed) return EgressGuard.installStrict({ proxy: false, throws: false })
   join()
   return EgressGuard.install({ policy, record: recordAttempt })
 }
 
 // The policy a thread starts with: the one its parent handed it, which the environment can only tighten, or pending
-// when the environment turns Vector Local on.
+// when anything Vector Local reads at start may turn it on (LocalStartup).
 function start(handed: LocalMode.Policy | undefined) {
   const floor = LocalPolicy.resolve({ env: process.env }).enabled
   if (handed && (handed.enabled || !floor)) {
@@ -471,13 +477,17 @@ function start(handed: LocalMode.Policy | undefined) {
     state.known = true
     return
   }
-  if (!state.policy.enabled && floor) state.policy = LocalPolicy.PENDING
+  if (!state.policy.enabled && (floor || LocalStartup.enabled())) state.policy = LocalPolicy.PENDING
 }
 
-// A connection the guard decided itself. A name that resolved outside where it said it was keeps the label of the
-// request that made it; anything else is unlabelled.
+// A connection the guard decided itself. A refusal of a request the guard had allowed (a name that resolved outside
+// where it said it was, or one a proxy would still carry) keeps the label of the request that made it; anything else
+// is unlabelled.
 function recordAttempt(recorded: EgressGuard.Recorded) {
-  const labelled = recorded.verdict.rule === "resolved-outside" ? recorded.scope : undefined
+  const labelled =
+    recorded.verdict.rule === "resolved-outside" || recorded.verdict.rule === "proxy-environment"
+      ? recorded.scope
+      : undefined
   const attempt = recorded.attempt
   push({
     source: labelled?.source ?? "unlabelled",

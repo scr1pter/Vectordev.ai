@@ -781,6 +781,165 @@ describe("EgressGuard.install with Vector Local on", () => {
   })
 })
 
+describe("EgressGuard.install's own originals", () => {
+  test("restores the Worker classes it wraps to follow its policy", () => {
+    const original = { Worker: globalThis.Worker, ThreadWorker: workerThreads.Worker }
+    const handle = EgressGuard.install({ policy: () => LocalPolicy.OFF })
+    expect(globalThis.Worker).not.toBe(original.Worker)
+    expect(workerThreads.Worker).not.toBe(original.ThreadWorker)
+    handle.uninstall()
+    expect(globalThis.Worker).toBe(original.Worker)
+    expect(workerThreads.Worker).toBe(original.ThreadWorker)
+  })
+})
+
+describe("EgressGuard.carried", () => {
+  const KEYS = [
+    "HTTP_PROXY",
+    "http_proxy",
+    "HTTPS_PROXY",
+    "https_proxy",
+    "ALL_PROXY",
+    "all_proxy",
+    "NO_PROXY",
+    "no_proxy",
+  ]
+
+  test("reads NO_PROXY the way Bun's fetch does", async () => {
+    // In a process of its own: Bun's fetch never sees a proxy variable set again once it was deleted, as this file's
+    // other tests do.
+    const file = path.join(os.tmpdir(), `vector-guard-carried-${process.pid}.ts`)
+    await Bun.write(
+      file,
+      `import { EgressGuard } from ${JSON.stringify(path.join(import.meta.dir, "../../src/local-mode/guard.ts"))}
+const proxy = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("proxied") })
+const four = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("direct") })
+const six = Bun.serve({ hostname: "::1", port: 0, fetch: () => new Response("direct") })
+const urls = {
+  four: \`http://127.0.0.1:\${four.port}/\`,
+  six: \`http://[::1]:\${six.port}/\`,
+  name: \`http://localhost:\${four.port}/\`,
+}
+for (const key of ["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy", "http_proxy"]) process.env[key] = ""
+process.env.HTTP_PROXY = \`http://127.0.0.1:\${proxy.port}\`
+const rows = []
+for (const [list, which] of JSON.parse(process.argv[2])) {
+  const entry = list.replaceAll("FOUR", String(four.port)).replaceAll("SIX", String(six.port))
+  process.env.NO_PROXY = entry
+  process.env.no_proxy = entry
+  const bun = await (await fetch(urls[which])).text()
+  rows.push({ list, which, bun: bun === "proxied", guard: EgressGuard.carried(new URL(urls[which])) })
+}
+console.log(JSON.stringify(rows))
+proxy.stop(true)
+four.stop(true)
+six.stop(true)
+`,
+    )
+    const rows = [
+      ["", "four"],
+      ["127.0.0.1", "four"],
+      ["0.0.1", "four"],
+      [".0.0.1", "four"],
+      ["*.0.0.1", "four"],
+      ["*", "four"],
+      ["other.example, *", "four"],
+      ["127.0.0.1:FOUR", "four"],
+      ["127.0.0.1:9", "four"],
+      ["127.0.0.0/8", "four"],
+      ["other.example 127.0.0.1", "four"],
+      ["127.0.0.1.", "four"],
+      ["localhost", "name"],
+      [".localhost", "name"],
+      ["*.localhost", "name"],
+      ["LOCALHOST", "name"],
+      ["::1", "six"],
+      ["[::1]", "six"],
+      ["[::1]:SIX", "six"],
+      ["[::1]:9", "six"],
+      ["127.0.0.1,localhost,::1", "six"],
+    ]
+    const child = Bun.spawn([process.execPath, file, JSON.stringify(rows)], {
+      env: { PATH: process.env.PATH ?? "" },
+      stdout: "pipe",
+    })
+    const results = JSON.parse(await new Response(child.stdout).text()) as {
+      list: string
+      which: string
+      bun: boolean
+      guard: boolean
+    }[]
+    expect(results).toHaveLength(rows.length)
+    expect(results.filter((row) => row.bun !== row.guard)).toEqual([])
+    // Bun honours neither a `*.name` wildcard nor a bare IPv6 address.
+    expect(results.filter((row) => row.bun).map((row) => row.list)).toEqual([
+      "",
+      "*.0.0.1",
+      "127.0.0.1:9",
+      "127.0.0.0/8",
+      "other.example 127.0.0.1",
+      "127.0.0.1.",
+      "*.localhost",
+      "::1",
+      "[::1]:9",
+      "127.0.0.1,localhost,::1",
+    ])
+  })
+
+  test("reads no_proxy first as Bun does, and every proxy variable some client reads", () => {
+    const local = new URL("http://127.0.0.1:8000/")
+    const env = { HTTP_PROXY: "http://proxy.example:3128", NO_PROXY: "127.0.0.1", no_proxy: "" }
+    // An empty no_proxy counts as unset, so NO_PROXY applies; one that is set wins over NO_PROXY.
+    expect(EgressGuard.carried(local, undefined, env)).toBe(false)
+    expect(EgressGuard.carried(local, undefined, { ...env, no_proxy: "other.example" })).toBe(true)
+    expect(EgressGuard.carried(local, undefined, { ...env, NO_PROXY: "", no_proxy: "127.0.0.1" })).toBe(false)
+    // Bun 1.3 reads only the variable for the request's scheme; other clients fall back to HTTP_PROXY and ALL_PROXY,
+    // so a refusal here may be wider than Bun's own reading, never narrower.
+    const https = new URL("https://127.0.0.1:8000/")
+    expect(EgressGuard.carried(https, undefined, { HTTP_PROXY: "http://proxy.example:3128" })).toBe(true)
+    expect(EgressGuard.carried(local, undefined, { ALL_PROXY: "http://proxy.example:3128" })).toBe(true)
+  })
+
+  test("puts a local host on NO_PROXY in the forms Bun and Node match, whatever pattern already covers it", () => {
+    const saved = [...KEYS, "VECTOR_TEST_EGRESS_PROXY"].map((key) => [key, process.env[key]] as const)
+    try {
+      KEYS.forEach((key) => {
+        process.env[key] = ""
+      })
+      process.env.HTTP_PROXY = "http://127.0.0.1:3128"
+      // A company's wildcard and the desktop's bare ::1: other clients honour them, Bun does not.
+      process.env.NO_PROXY = "*.internal,::1"
+      EgressGuard.direct("gpu.internal")
+      EgressGuard.direct("[::1]")
+      expect(process.env.NO_PROXY).toBe("*.internal,::1,gpu.internal,[::1]")
+      expect(process.env.no_proxy).toBe(process.env.NO_PROXY)
+      expect(EgressGuard.carried(new URL("http://gpu.internal:8000/v1"))).toBe(false)
+      expect(EgressGuard.carried(new URL("http://[::1]:8000/v1"))).toBe(false)
+      // A request for the internet is the proxy's.
+      EgressGuard.direct("models.example")
+      expect(process.env.NO_PROXY).not.toContain("models.example")
+      // Outside strict mode no proxy is the guard's own, whatever the test variables say.
+      process.env.VECTOR_TEST_EGRESS_PROXY = process.env.HTTP_PROXY
+      EgressGuard.direct("nas.local")
+      expect(process.env.NO_PROXY).toEndWith(",nas.local")
+    } finally {
+      saved.forEach(([key, value]) => {
+        process.env[key] = value ?? ""
+      })
+    }
+  })
+})
+
+describe("EgressGuard.handed", () => {
+  test("never reads a handed policy on the main thread, and leaves none for the programs it starts", () => {
+    const env: Record<string, string | undefined> = {
+      [EgressGuard.WORKER_POLICY]: JSON.stringify({ policy: LocalPolicy.OFF }),
+    }
+    expect(EgressGuard.handed(env)).toBeUndefined()
+    expect(env).toEqual({})
+  })
+})
+
 describe("EgressGuard.environmentProxies", () => {
   const target = (url: string) => new URL(url)
   test("lists every proxy for the scheme and ALL_PROXY, and none for NO_PROXY's hosts", () => {
@@ -855,6 +1014,8 @@ describe("EgressGuard.strictFromEnvironment", () => {
       EgressGuard.strictFromEnvironment({ ...env, VECTOR_LOCAL_POLICY: JSON.stringify({ enabled: true }) }, true),
     ).toBeUndefined()
     expect(EgressGuard.strictFromEnvironment({ VECTOR_TEST_EGRESS: "on" }, true)).toBeUndefined()
+    // Nor once the backstop started pending because the user's config or the company's policy may turn it on.
+    expect(EgressGuard.strictFromEnvironment(env, true, true)).toBeUndefined()
   })
 })
 

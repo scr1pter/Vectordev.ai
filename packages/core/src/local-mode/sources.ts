@@ -179,7 +179,11 @@ export const SOURCES: readonly Source[] = [
     why: "Runs the agent, subagents, the judge, Vectorscope, research and the helpers on the model servers you list",
     local: "allowed",
     where: ["engine"],
-    callSites: ["packages/engine/src/provider/provider.ts", "packages/llm/src/route/executor.ts"],
+    callSites: [
+      "packages/engine/src/provider/provider.ts",
+      "packages/llm/src/route/executor.ts",
+      "packages/engine/src/plugin/openai/ws.ts",
+    ],
   },
   {
     id: "cloud-inference",
@@ -613,7 +617,7 @@ export const SOURCES: readonly Source[] = [
     local: "blocked",
     where: ["engine", "desktop"],
     callSites: ["packages/core/src/local-mode/guard.ts"],
-    note: "Reaches only this computer and the model servers on your list; anything else the guard sees is blocked and logged with the code that made it, in a worker thread too. Under Bun it does not see Bun.fetch, a fetch or WebSocket kept from before it started, or the ws package, whose one call site decides its own sockets",
+    note: "Reaches only this computer and the model servers on your list; anything else the guard sees is blocked and logged with the code that made it. That covers Vector's worker threads: the threads of a process share one policy and one log, so the blocks of the terminal UI's main thread and of its workers are in the engine's log. The brain's reader is sealed instead: it refuses every connection off this computer and logs none, since it makes none of its own. Worker threads are covered under Bun when started through the global Worker or the worker_threads module, and under Node when their first import is the guard, as the brain's reader's is. The guard does not see Bun.fetch, a fetch, WebSocket or Bun.connect kept from before it started, Bun.SQL or Bun.RedisClient, or under Bun the ws package, whose one use in Vector (the OpenAI WebSocket transport) decides each model call itself, pooled sockets included, and the undici package, whose fetch is Bun.fetch there, so the GitHub requests of vector github are not seen. A request for a model server on your list on this computer or your network goes direct: one the proxy settings would still send to a proxy is refused, with a note to add its host to NO_PROXY. A listed server with an internet name may go through your company's proxy. The terminal UI's syntax highlighting downloads grammars from github.com in a worker thread, so with Vector Local on, including when it is turned on while the terminal UI runs, those downloads are blocked and logged",
   },
   {
     id: "agent-programs",

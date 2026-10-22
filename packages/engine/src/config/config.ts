@@ -522,12 +522,11 @@ function writableGlobal(info: Info) {
 // the marker live in the environment, so a program that clears it (env -i) drops them: they are advisory, and the
 // network asks and the sandbox are the boundary.
 //
-// Known gaps, until later phases close them:
-// - A shell command that removes the copy and turns Vector Local off in the user's config reaches no network, so
-//   Vector Local asks nothing, and it is off at the next start. An ask on edits to the global config path closes it.
-// - Until this module is evaluated, Egress holds everything but this computer only when the environment turned Vector
-//   Local on (Egress.backstop). Where only the company's file or the user's config turns it on, the modules an entry
-//   point evaluates before this one run with Vector Local off. The desktop's main process resolves no policy yet.
+// Known gap, until a later phase closes it: a shell command that removes the copy and turns Vector Local off in the
+// user's config reaches no network, so Vector Local asks nothing, and it is off at the next start. An ask on edits to
+// the global config path closes it. Until this module is evaluated, Egress holds everything but this computer whenever
+// anything Vector Local reads at start may turn it on (LocalStartup, read by the backstop), and the desktop's main
+// process resolves its own policy from the desktop's folders.
 
 export type LocalChange =
   | { readonly type: "updated"; readonly policy: LocalMode.Policy }

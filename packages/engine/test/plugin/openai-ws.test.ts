@@ -197,6 +197,74 @@ describe("plugin.openai.ws", () => {
   })
 })
 
+describe("plugin.openai.ws under Vector Local", () => {
+  // Bun serves the ws package itself, past the egress guard; in strict mode a socket the gate let through would go to
+  // the strict guard's own proxy, which refuses anything off this computer, so nothing here leaves it.
+  NetworkGuard.use()
+
+  test("decides a model call over a WebSocket before it connects, and sends one to a listed server direct", async () => {
+    await using server = await createWebSocketServer(() => {})
+    Egress.configure(LocalPolicy.resolve({ global: { enabled: true, endpoints: [new URL(server.url).origin] } }))
+    try {
+      const refused = await OpenAIWebSocket.connectResponsesWebSocket({
+        url: "wss://198.51.100.7/v1/responses",
+        headers: {},
+        timeout: 2_000,
+      }).catch((error: unknown) => error)
+      expect(refused).toBeInstanceOf(EgressGuard.EgressBlocked)
+      expect((refused as EgressGuard.EgressBlocked).rule).toBe("not-allowable")
+      const socket = await OpenAIWebSocket.connectResponsesWebSocket({ url: server.wsUrl, headers: {} })
+      socket.terminate()
+      expect(Egress.events().map((event) => [event.source, event.decision])).toEqual([
+        ["cloud-inference", "block"],
+        ["local-inference", "allow"],
+      ])
+    } finally {
+      Egress.configure(LocalPolicy.OFF)
+      await Egress.erase()
+    }
+  })
+
+  test("refuses the next call on a socket the pool opened while Vector Local was off, before sending it", async () => {
+    let connections = 0
+    let messages = 0
+    await using server = await createWebSocketServer((socket) => {
+      connections += 1
+      socket.on("message", () => {
+        messages += 1
+        socket.send(JSON.stringify({ type: "response.completed", response: { id: `resp_${messages}` } }))
+      })
+    })
+    const overHttp: string[] = []
+    const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+      url: server.url,
+      httpFetch: (async (input: RequestInfo | URL) => {
+        overHttp.push(String(input))
+        return new Response("over http")
+      }) as typeof globalThis.fetch,
+    })
+    try {
+      expect(await (await fetch(server.url, streamRequest())).text()).toContain("[DONE]")
+      // Vector Local turns on, and this server is not on the list.
+      Egress.configure(LocalPolicy.resolve({ global: { enabled: true } }))
+      const refused = await fetch(server.url, streamRequest()).catch((error: unknown) => error)
+      expect(refused).toBeInstanceOf(EgressGuard.EgressBlocked)
+      // Nothing reached the server over the open socket, and nothing went over HTTP instead.
+      expect(messages).toBe(1)
+      expect(overHttp).toEqual([])
+      expect(Egress.events().map((event) => [event.source, event.decision])).toEqual([["local-inference", "block"]])
+      // Once it is listed, the next call goes, on a new socket.
+      Egress.configure(LocalPolicy.resolve({ global: { enabled: true, endpoints: [new URL(server.url).origin] } }))
+      expect(await (await fetch(server.url, streamRequest())).text()).toContain("[DONE]")
+      expect({ connections, messages }).toEqual({ connections: 2, messages: 2 })
+    } finally {
+      fetch.close()
+      Egress.configure(LocalPolicy.OFF)
+      await Egress.erase()
+    }
+  })
+})
+
 describe("plugin.openai.ws-pool", () => {
   test("reuses one healthy websocket for sequential requests", async () => {
     let connections = 0

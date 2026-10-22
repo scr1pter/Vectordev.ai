@@ -18,7 +18,12 @@ export interface ConnectResponsesWebSocketOptions {
   headers: Record<string, string>
   timeout?: number
   signal?: AbortSignal
+  /** The call's decision, when the caller has made it already (`route`); otherwise it is made here. */
+  route?: Route
 }
+
+/** A model call over a WebSocket that Egress let through, and the proxy it may use. */
+export type Route = { readonly proxy?: string }
 
 export interface StreamResponsesWebSocketOptions {
   socket: WebSocket
@@ -86,20 +91,31 @@ export function isAbortError(error: unknown): error is DOMException {
   return error instanceof DOMException && error.name === "AbortError"
 }
 
+/**
+ * Decides one model call over a WebSocket the way Egress decides any other, and logs it while Vector Local is on: Bun
+ * serves the ws package itself, past the egress guard (under Node the guard sees its socket too). It runs for every
+ * call, on a new socket or a pooled one, so a socket opened while Vector Local was off carries nothing once it is on.
+ * Returns the refusal, or the proxy the call may use: Bun does not apply HTTP(S)_PROXY to WebSockets unless the proxy
+ * is supplied explicitly, and with Vector Local on a model call for this computer or your network never goes through
+ * one.
+ */
+export function route(url: string): Route | EgressGuard.EgressBlocked {
+  const target = url.replace(/^wss:/i, "https:").replace(/^ws:/i, "http:")
+  const host = URL.canParse(target) ? new URL(target).hostname : ""
+  const place = LocalPolicy.hostClass(host)
+  // Only a model server on the list may get it, a listed one with an internet name included.
+  const cloud = LocalPolicy.classify(Egress.policy(), target) === "internet"
+  const decided = Egress.decide({ source: cloud ? "cloud-inference" : "local-inference", url: target })
+  if (decided.decision !== "allow")
+    return new EgressGuard.EgressBlocked(host, "websocket", decided.rule, decided.reason)
+  if (typeof Bun === "undefined" || (decided.rule !== "local-off" && place !== "internet")) return {}
+  return { proxy: ProxyEnv.getProxyForUrl(target) }
+}
+
 export function connectResponsesWebSocket(options: ConnectResponsesWebSocketOptions) {
   return new Promise<WebSocket>((resolve, reject) => {
     if (options.signal?.aborted) {
       reject(abortError(options.signal))
-      return
-    }
-
-    // Bun serves the ws package itself, past the egress guard, so Vector Local decides the socket here, before it
-    // opens, as the model call it carries: only a model server on the list may get it.
-    const target = options.url.replace(/^ws/i, "http")
-    const cloud = LocalPolicy.classify(Egress.policy(), target) === "internet"
-    const decided = Egress.decide({ source: cloud ? "cloud-inference" : "local-inference", url: target })
-    if (decided.decision !== "allow") {
-      reject(new EgressGuard.EgressBlocked(new URL(target).hostname, "websocket", decided.rule, decided.reason))
       return
     }
 
@@ -109,12 +125,12 @@ export function connectResponsesWebSocket(options: ConnectResponsesWebSocketOpti
     }
     delete headers["content-length"]
 
-    // Bun does not apply HTTP(S)_PROXY to WebSockets unless the proxy is supplied explicitly.
-    const proxy =
-      typeof Bun === "undefined"
-        ? undefined
-        : ProxyEnv.getProxyForUrl(options.url.replace(/^wss:/, "https:").replace(/^ws:/, "http:"))
-    const connect = { headers, ...(proxy ? { proxy } : {}) }
+    const routed = options.route ?? route(options.url)
+    if (routed instanceof EgressGuard.EgressBlocked) {
+      reject(routed)
+      return
+    }
+    const connect = { headers, ...(routed.proxy ? { proxy: routed.proxy } : {}) }
     const socket = new WebSocket(options.url, connect)
     const timeout = options.timeout
       ? setTimeout(() => {
