@@ -146,12 +146,15 @@ export async function probe(input: string, options: Options = {}): Promise<Serve
     .map((model) => (model.context ? { ...model, output: output(model.context) } : model))
     .toSorted((left, right) => left.id.localeCompare(right.id))
   const encrypted = place.origin.startsWith("https:")
+  // The server writes its version, and Vector shows it ("Ollama 0.12.6 on this computer") and pins it, so it is kept
+  // as plain text like a server's error.
+  const version = inspection.version === undefined ? undefined : LocalErrors.plain(inspection.version)
   return {
     kind: found.spec.kind,
     name: found.spec.name,
     origin: place.origin,
     baseURL: place.baseURL,
-    version: inspection.version,
+    version,
     class: LocalPolicy.hostClass(hostname),
     encrypted,
     concurrency: inspection.concurrency,
@@ -159,7 +162,7 @@ export async function probe(input: string, options: Options = {}): Promise<Serve
     models,
     pin: {
       kind: found.spec.kind,
-      version: inspection.version,
+      version,
       models: modelSet(models),
       spki: encrypted ? await spki(place.origin, options.timeout ?? IDENTIFY_TIMEOUT.remote) : null,
     },
@@ -437,7 +440,8 @@ export async function check(input: CheckInput): Promise<Checked> {
     server_version: input.server.version,
     requests: 0,
   }
-  if (info?.cloud)
+  // A model the user typed may not be on the server's list, so an Ollama cloud model is also told by its name.
+  if (info?.cloud || (input.server.kind === "ollama" && OllamaServer.cloud({ name: input.model })))
     return {
       ...base,
       result: "failed",
@@ -454,12 +458,15 @@ export async function check(input: CheckInput): Promise<Checked> {
   const done = { ...base, ttft_ms: first.ttft }
   if (first.error !== undefined) return { ...done, requests: 1, ...failure(input, first.error) }
 
-  // Ollama loads a model on its first request, so only now is the context it runs with known.
-  const context =
+  // Ollama and LM Studio load a model on its first request, so only now is the context it runs with known.
+  const loads =
     input.server.kind === "ollama"
-      ? ((await OllamaServer.loadedContext(reader(root(input.server), readOptions(input)), input.model)) ??
-        info?.context)
-      : info?.context
+      ? OllamaServer.loadedContext
+      : input.server.kind === "lmstudio"
+        ? LMStudioServer.loadedContext
+        : undefined
+  const context =
+    (loads ? await loads(reader(root(input.server), readOptions(input)), input.model) : undefined) ?? info?.context
   const loaded = tooSmall(input, context)
   if (loaded) return { ...done, requests: 1, context, ...loaded }
   const wrong = mismatch(input, simple, first)
@@ -517,7 +524,17 @@ type Completion = {
   readonly ttft?: number
   /** The server's error text, or the connection error's message. */
   readonly error?: string
+  /** The reply stopped at its token limit (finish_reason "length"). */
+  readonly cut?: boolean
 }
+
+// The most a check's reply may take. A reasoning model (Qwen3 thinking, gpt-oss, Kimi K2 Thinking) reasons before it
+// calls the tool, which can take several hundred tokens even for this request, so the room is larger than the call
+// needs; a reply that still runs out says so rather than counting as a model that cannot call tools.
+const CHECK_REPLY = 2048
+
+// The error a check records for an answer larger than MAX_BYTES.
+const TOO_LARGE = "More than 4 MB, which Vector stopped reading."
 
 type Messages = readonly Readonly<Record<string, unknown>>[]
 
@@ -558,18 +575,22 @@ async function complete(input: CheckInput, messages: Messages): Promise<Completi
       })),
       tool_choice: "auto",
       stream: true,
-      max_tokens: 512,
+      max_tokens: CHECK_REPLY,
       temperature: 0,
     }),
     redirect: "error",
     signal: signal(input.signal, input.timeout ?? CHECK_TIMEOUT),
   }).catch((error: unknown) => (error instanceof Error ? error.message : String(error)))
   if (typeof response === "string") return { calls: [], text: "", error: response }
-  if (!response.ok)
-    return { calls: [], text: "", error: (await response.text().catch(() => "")) || `${response.status}` }
+  // A server someone else runs writes these answers, so no more than MAX_BYTES of one is read.
+  const text = () =>
+    limited(response, MAX_BYTES)
+      .then((value) => value ?? TOO_LARGE)
+      .catch(() => "")
+  if (!response.ok) return { calls: [], text: "", error: (await text()) || `${response.status}` }
   if (!(response.headers.get("content-type") ?? "").includes("event-stream")) {
     const ttft = Math.round(performance.now() - started)
-    return { ...whole(await response.text().catch(() => "")), ttft }
+    return { ...whole(await text()), ttft }
   }
   return stream(response, started)
 }
@@ -579,9 +600,12 @@ const Delta = Schema.Struct({
   choices: Schema.optional(
     Schema.Array(
       Schema.Struct({
+        finish_reason: Schema.optional(Schema.NullOr(Schema.String)),
         delta: Schema.optional(
           Schema.Struct({
             content: Schema.optional(Schema.NullOr(Schema.String)),
+            // Servers send a reasoning model's thinking under either name, depending on the server and its version.
+            reasoning: Schema.optional(Schema.NullOr(Schema.String)),
             reasoning_content: Schema.optional(Schema.NullOr(Schema.String)),
             tool_calls: Schema.optional(
               Schema.Array(
@@ -604,6 +628,7 @@ const Delta = Schema.Struct({
 const Whole = Schema.Struct({
   choices: Schema.Array(
     Schema.Struct({
+      finish_reason: Schema.optional(Schema.NullOr(Schema.String)),
       message: Schema.Struct({
         content: Schema.optional(Schema.NullOr(Schema.String)),
         tool_calls: Schema.optional(
@@ -624,20 +649,25 @@ const json = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
 function whole(text: string): Completion {
   const parsed = Option.getOrUndefined(Schema.decodeUnknownOption(Whole)(Option.getOrUndefined(json(text))))
   if (!parsed) return { calls: [], text: "", error: text }
-  const message = parsed.choices[0]?.message
+  const choice = parsed.choices[0]
   return {
-    text: message?.content ?? "",
-    calls: (message?.tool_calls ?? []).map((item, index) => ({
+    text: choice?.message.content ?? "",
+    calls: (choice?.message.tool_calls ?? []).map((item, index) => ({
       id: item.id ?? `call_${index}`,
       name: item.function.name,
       arguments: item.function.arguments ?? "",
     })),
+    cut: choice?.finish_reason === "length",
   }
 }
 
 async function stream(response: Response, started: number): Promise<Completion> {
   const calls = new Map<number, { id: string; name: string; arguments: string }>()
-  const state: { text: string; ttft?: number; error?: string; rest: string } = { text: "", rest: "" }
+  const state: { text: string; ttft?: number; error?: string; rest: string; size: number; finish?: string } = {
+    text: "",
+    rest: "",
+    size: 0,
+  }
   const decoder = new TextDecoder()
   const reader = response.body?.getReader()
   if (!reader) return { calls: [], text: "" }
@@ -651,9 +681,14 @@ async function stream(response: Response, started: number): Promise<Completion> 
       state.error = payload
       return
     }
-    const part = delta.choices?.[0]?.delta
+    const choice = delta.choices?.[0]
+    if (choice?.finish_reason) state.finish = choice.finish_reason
+    const part = choice?.delta
     if (!part) return
-    if (state.ttft === undefined && (part.content || part.reasoning_content || part.tool_calls?.length))
+    if (
+      state.ttft === undefined &&
+      (part.content || part.reasoning || part.reasoning_content || part.tool_calls?.length)
+    )
       state.ttft = Math.round(performance.now() - started)
     state.text += part.content ?? ""
     part.tool_calls?.forEach((item, position) => {
@@ -672,12 +707,24 @@ async function stream(response: Response, started: number): Promise<Completion> 
       return undefined
     })
     if (!next || next.done) break
+    state.size += next.value.byteLength
+    if (state.size > MAX_BYTES) {
+      await reader.cancel().catch(() => undefined)
+      state.error = TOO_LARGE
+      break
+    }
     const lines = (state.rest + decoder.decode(next.value, { stream: true })).split(/\r?\n/)
     state.rest = lines.pop() ?? ""
     lines.forEach(take)
   }
-  take(state.rest)
-  return { calls: [...calls.values()], text: state.text, ttft: state.ttft, error: state.error }
+  if (state.error !== TOO_LARGE) take(state.rest)
+  return {
+    calls: [...calls.values()],
+    text: state.text,
+    ttft: state.ttft,
+    error: state.error,
+    cut: state.finish === "length",
+  }
 }
 
 function failure(input: CheckInput, text: string, tool?: Tool) {
@@ -720,6 +767,13 @@ export function rejection(server: Pick<Server, "kind" | "name">, text: string, t
 
 function mismatch(input: CheckInput, tool: Tool, completion: Completion) {
   const made = completion.calls[0]
+  // A reply that ran out of tokens before any call says nothing about tool calling, so it does not mark the model as
+  // one without tools.
+  if (!made && completion.cut)
+    return {
+      result: "failed" as const,
+      message: `${input.model} used its whole ${CHECK_REPLY.toLocaleString("en-US")}-token reply before it called a tool, so Vector could not tell whether it calls tools. Lower its reasoning effort, or pick another model.`,
+    }
   if (!made)
     return {
       result: "no-tools" as const,
@@ -729,7 +783,8 @@ function mismatch(input: CheckInput, tool: Tool, completion: Completion) {
   if (made.name !== tool.name || !fits(tool.parameters, parsed, tool.parameters))
     return {
       result: "failed" as const,
-      message: `${input.model} called ${made.name || "a tool"} with arguments that do not match the ${tool.name} tool's parameters, so its tool calls may fail in Vector.`,
+      // The model wrote the name it called, so it is shown as plain text like a server's error.
+      message: `${input.model} called ${LocalErrors.plain(made.name) || "a tool"} with arguments that do not match the ${tool.name} tool's parameters, so its tool calls may fail in Vector.`,
     }
   return undefined
 }
