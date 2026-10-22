@@ -18,11 +18,12 @@ import { LocalSources } from "./sources"
 // backstop guard (`backstop()`) decides whatever else connects.
 //
 // The policy starts as Vector Local off: everything passes and nothing is logged. When the environment already turns
-// Vector Local on (VECTOR_LOCAL=1, which Vector's children inherit), or config calls `pending` because its managed or
-// user config does, it starts pending instead: only this computer is reachable, for every purpose, until config sets
-// the policy it resolves at start with `resolve` or `configure`. From then on every decision reads it. While Vector
-// Local is on, each decision is an event: in memory (the last 2,000), on disk when a log directory is configured, and
-// in the counters the pane shows.
+// Vector Local on (VECTOR_LOCAL=1, which Vector's children inherit), it starts pending instead: only this computer is
+// reachable, for every purpose, until config sets the policy it resolves at start with `resolve` or `configure`. A
+// policy that only the company's file or the user's config turns on is not seen before then, so until the engine's
+// config module loads, and in the desktop's main process for now, Vector Local is off. From then on every decision
+// reads it. While Vector Local is on, each decision is an event: in memory (the last 2,000), on disk when a log
+// directory is configured, and in the counters the pane shows.
 
 export type Request = {
   /** The registry source making the request (LocalSources). An id the registry does not have is purpose `unknown`. */
@@ -113,8 +114,8 @@ export function policy() {
 }
 
 /**
- * Holds every request but those to this computer until the policy is resolved: config calls this before anything
- * else when its managed or user config turns Vector Local on, then `resolve` once it has read the rest.
+ * Holds every request but those to this computer until the policy is resolved: the backstop calls this when the
+ * environment turns Vector Local on, and config then sets the policy it resolves.
  */
 export function pending() {
   state.policy = LocalPolicy.PENDING
@@ -122,18 +123,21 @@ export function pending() {
 }
 
 /**
- * Sets the policy in effect. With a log directory, the log is written there while Vector Local is on; turning Vector
- * Local off stops writing it and keeps what was written until it is erased.
+ * Sets the policy in effect, and returns it. With a log directory, the log is written there while Vector Local is on;
+ * turning Vector Local off stops writing it and keeps what was written until it is erased. A log directory Vector
+ * cannot use (a file in its place, a folder another user owns, a read-only disk) changes nothing else: the policy
+ * applies, every event stays in memory, the returned policy's warnings say so, and each later call tries again.
  */
 export function configure(next: LocalMode.Policy, options: { readonly log?: LogOptions } = {}) {
-  state.policy = next
   if (state.store && (options.log || !next.enabled)) {
     state.writing = Promise.all([state.writing, state.store.flush()]).then(() => undefined)
     state.store = undefined
   }
   if (options.log) state.log = options.log
-  if (next.enabled && state.log && !state.store) state.store = EgressLogStore.open(state.log)
-  return next
+  const opened = next.enabled && state.log && !state.store ? openLog(state.log) : undefined
+  if (typeof opened === "object") state.store = opened
+  state.policy = typeof opened === "string" ? { ...next, warnings: [...next.warnings, opened] } : next
+  return state.policy
 }
 
 /**
@@ -261,7 +265,8 @@ export function events(filter: Filter = {}) {
 /** Every event on disk, for Export; the events in memory when no log directory is configured. */
 export async function exported(filter: Filter = {}) {
   await state.writing
-  const store = state.store ?? (state.log ? EgressLogStore.open(state.log) : undefined)
+  const opened = state.store ?? (state.log ? openLog(state.log) : undefined)
+  const store = typeof opened === "string" ? undefined : opened
   if (!store) return events(filter)
   const all = await store.read({ since: filter.since })
   return all.filter(
@@ -279,8 +284,8 @@ export async function erase() {
   state.totals.clear()
   state.noticed.clear()
   await state.writing
-  const store = state.store ?? (state.log ? EgressLogStore.open(state.log) : undefined)
-  await store?.clear()
+  const opened = state.store ?? (state.log ? openLog(state.log) : undefined)
+  if (typeof opened === "object") await opened.clear()
 }
 
 /** The counters for one root session (helpers roll into the session that launched them), or for the process. */
@@ -454,6 +459,17 @@ function bodySize(body: BodyInit | null | undefined) {
   if (body instanceof Blob) return body.size
   if (body instanceof URLSearchParams) return Buffer.byteLength(body.toString())
   return undefined
+}
+
+// The network log on disk, or why Vector cannot use its folder: opening it makes the folder and sets it to 0700
+// synchronously, which throws for a file in its place, a folder another user owns or a read-only disk.
+function openLog(log: LogOptions): EgressLogStore.Store | string {
+  try {
+    return EgressLogStore.open(log)
+  } catch (error) {
+    const code = error instanceof Error && "code" in error && typeof error.code === "string" ? ` (${error.code})` : ""
+    return `Vector could not write its network log in ${log.directory}${code}, so it keeps this session's log in memory only. It tries again the next time it reads its settings.`
+  }
 }
 
 function take(source: string) {

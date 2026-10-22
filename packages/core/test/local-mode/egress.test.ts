@@ -227,6 +227,25 @@ describe("the network log on disk", () => {
     expect(fs.readdirSync(directory)).toEqual([])
     expect(Egress.events()).toEqual([])
   })
+
+  test("a folder Vector cannot use keeps the policy, logs in memory, says so and is tried again", async () => {
+    await using dir = await tmpdir()
+    const directory = path.join(dir.path, "local")
+    fs.writeFileSync(directory, "not a folder")
+    const policy = Egress.configure(on(), { log: { directory } })
+    expect(policy).toMatchObject({ enabled: true, endpoints: [{ origin: MODEL }] })
+    expect(policy.warnings).toHaveLength(1)
+    expect(policy.warnings[0]).toStartWith(`Vector could not write its network log in ${directory}`)
+    expect(Egress.policy()).toBe(policy)
+    expect(Egress.decide({ source: "model-catalog", url: "https://models.dev/api.json" }).decision).toBe("block")
+    // Export falls back to the events in memory.
+    expect((await Egress.exported()).map((event) => event.source)).toEqual(["model-catalog"])
+
+    fs.rmSync(directory)
+    expect(Egress.configure(on()).warnings).toEqual([])
+    Egress.decide({ source: "local-inference", url: `${MODEL}/v1` })
+    expect((await Egress.exported()).map((event) => event.source)).toEqual(["local-inference"])
+  })
 })
 
 describe("Egress.fetch under the backstop guard", () => {
