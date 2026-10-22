@@ -20,7 +20,8 @@ export function status(code: number) {
 // Class and id names that the common paywall and metering services put on their walls.
 const METER =
   /\b(?:class|id)\s*=\s*["'][^"']*\b(?:paywall|paywalled|metered-?content|meter-?wall|subscriber-only|subscribers-only|premium-content|regwall|registration-wall|piano-(?:paywall|offer)|tp-modal|tp-container-inner|article-locked|locked-content)\b/i
-const TIER = /<meta[^>]+(?:property|name)\s*=\s*["']article:content_tier["'][^>]+content\s*=\s*["'](?:locked|metered)["']/i
+const TIER =
+  /<meta[^>]+(?:property|name)\s*=\s*["']article:content_tier["'][^>]+content\s*=\s*["'](?:locked|metered)["']/i
 
 /** Why a served page is paywalled, or undefined when nothing says it is. `structured` is its parsed JSON-LD. */
 export function marked(input: { readonly html: string; readonly structured: readonly unknown[] }): Reason | undefined {

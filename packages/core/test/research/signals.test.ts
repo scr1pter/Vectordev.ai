@@ -44,7 +44,8 @@ describe("ResearchSignals.signals", () => {
     expect(ResearchSignals.signals({ ...base, url: "https://www.energy.gov/eere" }).primary).toBe(true)
     expect(ResearchSignals.signals({ ...base, url: "https://www.rfc-editor.org/rfc/rfc9309" }).primary).toBe(true)
     expect(
-      ResearchSignals.signals({ ...base, url: "https://blog.example.com/", meta: { ...base.meta, data: true } }).primary,
+      ResearchSignals.signals({ ...base, url: "https://blog.example.com/", meta: { ...base.meta, data: true } })
+        .primary,
     ).toBe(true)
     expect(ResearchSignals.signals({ ...base, url: "https://blog.example.com/" }).primary).toBe(false)
     expect(ResearchSignals.signals({ ...base, url: "https://en.wikipedia.org/wiki/Heat_pump" })).toMatchObject({
@@ -75,7 +76,9 @@ describe("ResearchSignals.signals", () => {
   test("reads identifiers from an address alone", () => {
     expect(ResearchExtract.addressIds("https://arxiv.org/abs/2401.01234v2")).toEqual({ arxiv: "2401.01234v2" })
     expect(ResearchExtract.addressIds("https://pubmed.ncbi.nlm.nih.gov/31452104/")).toEqual({ pmid: "31452104" })
-    expect(ResearchExtract.addressIds("https://doi.org/10.1038/s41586-020-2649-2")).toEqual({ doi: "10.1038/s41586-020-2649-2" })
+    expect(ResearchExtract.addressIds("https://doi.org/10.1038/s41586-020-2649-2")).toEqual({
+      doi: "10.1038/s41586-020-2649-2",
+    })
     expect(ResearchExtract.addressIds("https://example.com/post")).toEqual({})
   })
 })

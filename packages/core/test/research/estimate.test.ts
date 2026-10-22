@@ -36,7 +36,9 @@ describe("ResearchEstimate.estimate", () => {
 
   test("assumes 0.4 notes per page when the plan does not say", () => {
     // 15 pages give 6 notes, 2 steps; with 8 searches and 4 of its own, 29 steps.
-    expect(ResearchEstimate.estimate({ pages: 15, searches: 8, prompt: 20_000, chunkTokens: 1_200, kind: "free" }).calls).toBe(29)
+    expect(
+      ResearchEstimate.estimate({ pages: 15, searches: 8, prompt: 20_000, chunkTokens: 1_200, kind: "free" }).calls,
+    ).toBe(29)
   })
 
   // Two researchers share 2 searches, 4 pages and 4 notes: 1 + 2 + 1 steps each, plus 2 of their own, on a 6,000-token
@@ -73,7 +75,9 @@ describe("ResearchEstimate.estimate", () => {
   })
 
   test("gives no time without a measured speed, and no price for a model without one", () => {
-    expect(ResearchEstimate.estimate({ pages: 1, searches: 1, prompt: 1_000, chunkTokens: 600, kind: "local" }).minutes).toBeUndefined()
+    expect(
+      ResearchEstimate.estimate({ pages: 1, searches: 1, prompt: 1_000, chunkTokens: 600, kind: "local" }).minutes,
+    ).toBeUndefined()
     expect(
       ResearchEstimate.estimate({ pages: 1, searches: 1, prompt: 1_000, chunkTokens: 600, kind: "unknown", price }).usd,
     ).toBeUndefined()
@@ -81,7 +85,10 @@ describe("ResearchEstimate.estimate", () => {
 })
 
 describe("ResearchEstimate.copy", () => {
-  const line = (kind: Parameters<typeof ResearchEstimate.copy>[0]["kind"], extra: Partial<Parameters<typeof ResearchEstimate.copy>[0]> = {}) =>
+  const line = (
+    kind: Parameters<typeof ResearchEstimate.copy>[0]["kind"],
+    extra: Partial<Parameters<typeof ResearchEstimate.copy>[0]> = {},
+  ) =>
     ResearchEstimate.copy({
       pages: 25,
       searches: 8,
@@ -92,7 +99,9 @@ describe("ResearchEstimate.copy", () => {
     })
 
   test("words each kind of model the way the plan card shows it, always as an estimate", () => {
-    expect(line("priced", { capUsd: 1 })).toBe("About 25 pages and 8 searches. Estimated $0.40–$1.10 at list prices. Cap $1.00.")
+    expect(line("priced", { capUsd: 1 })).toBe(
+      "About 25 pages and 8 searches. Estimated $0.40–$1.10 at list prices. Cap $1.00.",
+    )
     expect(line("priced")).toBe("About 25 pages and 8 searches. Estimated $0.40–$1.10 at list prices. Step cap 120.")
     expect(line("local")).toBe(
       "About 25 pages and 8 searches, about 60 calls to your local model. No per-token charge. Step cap 120. On this server that is about 9 minutes.",
@@ -113,7 +122,15 @@ describe("ResearchEstimate.copy", () => {
   })
 
   test("formats the single-agent estimate in dollars and cents", () => {
-    const estimate = ResearchEstimate.estimate({ pages: 2, searches: 1, notes: 3, prompt: 10_000, chunkTokens: 1_000, kind: "priced", price })
+    const estimate = ResearchEstimate.estimate({
+      pages: 2,
+      searches: 1,
+      notes: 3,
+      prompt: 10_000,
+      chunkTokens: 1_000,
+      kind: "priced",
+      price,
+    })
     expect(ResearchEstimate.copy({ pages: 2, searches: 1, estimate, kind: "priced", capUsd: 1, capSteps: 80 })).toBe(
       "About 2 pages and 1 search. Estimated $0.13–$0.34 at list prices. Cap $1.00.",
     )

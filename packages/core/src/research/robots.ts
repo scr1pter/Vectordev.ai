@@ -16,7 +16,10 @@ export const MAX_BYTES = 500 * 1024
 export type Rule = { readonly allow: boolean; readonly pattern: string }
 
 /** Every path allowed, every path disallowed, or the rules of the matching group. */
-export type Rules = { readonly type: "all" } | { readonly type: "none" } | { readonly type: "rules"; readonly rules: readonly Rule[] }
+export type Rules =
+  | { readonly type: "all" }
+  | { readonly type: "none" }
+  | { readonly type: "rules"; readonly rules: readonly Rule[] }
 
 /** What fetching an origin's robots.txt gave: a status and its text, or no answer at all. */
 export type Fetched = { readonly status: number; readonly text: string } | { readonly status: "unreachable" }
