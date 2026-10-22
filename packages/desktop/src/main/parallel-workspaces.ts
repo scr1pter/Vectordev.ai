@@ -27,6 +27,7 @@ import {
 import { getStore } from "./store"
 import { createStoreCache } from "./store-cache"
 import { createPullRequest } from "./github"
+import { checkPost } from "./posting-check"
 import {
   runExternalCodingAgent,
   type CodingAgentRuntime,
@@ -3251,12 +3252,17 @@ export async function mergeParallelWorkspace(id: string, force = false, commit?:
       } else if (await gitIsClean(record.sourcePath)) {
         commitNote = "Main working tree was already clean after the merge; nothing to commit."
       } else {
-        await runGit(["add", "-A"], record.sourcePath)
-        await runGit(await buildCommitArgs(record.sourcePath, commit.message.trim()), record.sourcePath)
-        const sha = (
-          await runGit(["rev-parse", "--short", "HEAD"], record.sourcePath, { allowFailure: true })
-        ).stdout.trim()
-        commitNote = sha ? `Committed to main: ${sha}` : "Committed to main."
+        // The user typed the message, so the posting check only asks when it repeats what Vector knows about them.
+        const [message] = (await checkPost({ cwd: record.sourcePath, parts: [commit.message.trim()], typed: true })) ?? []
+        if (!message) commitError = "Changes were merged, but nothing was committed."
+        if (message) {
+          await runGit(["add", "-A"], record.sourcePath)
+          await runGit(await buildCommitArgs(record.sourcePath, message), record.sourcePath)
+          const sha = (
+            await runGit(["rev-parse", "--short", "HEAD"], record.sourcePath, { allowFailure: true })
+          ).stdout.trim()
+          commitNote = sha ? `Committed to main: ${sha}` : "Committed to main."
+        }
       }
     } catch (error) {
       commitError = `Merge succeeded, but the git commit failed: ${error instanceof Error ? error.message : String(error)}`
