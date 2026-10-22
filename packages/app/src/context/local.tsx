@@ -80,7 +80,10 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const language = useLanguage()
 
     const id = createMemo(() => params.id || undefined)
-    const list = createMemo(() => sync().data.agent.filter((item) => item.mode !== "subagent" && !item.hidden))
+    // Deep research is a mode of the composer, not an agent to pick: the research lead is left out by name.
+    const list = createMemo(() =>
+      sync().data.agent.filter((item) => item.mode !== "subagent" && !item.hidden && item.name !== "research"),
+    )
     const connected = createMemo(() => new Set(providers.connected().map((item) => item.id)))
 
     const [saved, setSaved, , savedReady] = persisted(
