@@ -86,6 +86,7 @@ import { Egress } from "@vectordevai/core/local-mode/egress"
 import { EgressAttribution } from "@vectordevai/core/local-mode/attribution"
 import { EgressGuard } from "@vectordevai/core/local-mode/guard"
 import { OllamaServer } from "@vectordevai/core/local-mode/servers/ollama"
+import { LocalSources } from "@vectordevai/core/local-mode/sources"
 import type { LocalMode } from "@vectordevai/schema/local-mode"
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 10_000
@@ -189,10 +190,15 @@ function requestOrigin(
 }
 
 // The registry source a model call to `target` is decided as (LocalSources): an Ollama cloud model, which the server
-// passes on to ollama.com, a model server someone hosts, or a cloud AI service.
+// passes on to ollama.com, a cloud AI service no list holds, or a model server someone hosts, listed or not.
 function inferenceSource(model: Model, target: string, policy: LocalMode.Policy) {
   if (ModelSlots.server(target, policy) && OllamaServer.cloud({ name: model.api.id })) return "ollama-cloud-models"
-  return LocalPolicy.classify(policy, target) === "internet" ? "cloud-inference" : "local-inference"
+  if (LocalPolicy.classify(policy, target) !== "internet" || !URL.canParse(target)) return "local-inference"
+  const host = new URL(target).hostname
+  const cloud =
+    LocalSources.CLOUD_INFERENCE_HOSTS.some((pattern) => LocalPolicy.hostMatches(host, pattern)) ||
+    LocalSources.digestListed(host)
+  return cloud ? "cloud-inference" : "local-inference"
 }
 
 // The notice for a model Vector Local keeps off, or undefined when its requests go to a model server on the list. It
