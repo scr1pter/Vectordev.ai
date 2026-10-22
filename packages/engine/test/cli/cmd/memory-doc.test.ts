@@ -160,6 +160,13 @@ cliIt.concurrent(
       const links = yield* run(["links", "upload.ts", "--json"])
       fixture.vector.expectExit(links, 0, "vector memory links")
       const linked = JSON.parse(links.stdout) as { kind: string; anchor?: { method: string; symbol?: string } }[]
+      // Windows CI found no link here while macOS and Linux do; say what linking saw so the cause shows in the log.
+      if (!linked.some((link) => link.anchor?.symbol === "MAX_UPLOAD_BYTES")) {
+        const relinked = yield* run(["links", "upload.ts", "--relink", "--json"])
+        throw new Error(
+          `no link to MAX_UPLOAD_BYTES. links: ${links.stdout} ${links.stderr} | relink (exit ${relinked.exitCode}): ${relinked.stdout} ${relinked.stderr}`,
+        )
+      }
       expect(linked).toContainEqual(
         expect.objectContaining({ kind: "constraint", anchor: expect.objectContaining({ method: "constant", symbol: "MAX_UPLOAD_BYTES" }) }),
       )
