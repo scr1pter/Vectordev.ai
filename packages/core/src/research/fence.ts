@@ -2,6 +2,7 @@ export * as WebFence from "./fence"
 
 import path from "path"
 import { BrainScan } from "../brain/scan"
+import { ResearchConfusable } from "./confusable"
 
 // One fence for every web tool's output: webfetch, websearch and the browser in both runtimes, and research later.
 // Web text is what a page's author wrote, so it is placed in an `<untrusted_web_page nonce="…">` block. The nonce is
@@ -52,9 +53,12 @@ const SLASH = /[\\/\u2044\u2215\u2216\u2571\u29F5\u29F8\u29F9\uFE68\uFF0F\uFF3C]
 const SKIPPED_FIRST = /[\s\p{Default_Ignorable_Code_Point}]/u
 const DROPPED = /[\p{Default_Ignorable_Code_Point}\p{M}]/u
 
-// Letters from other scripts that look like the Latin ones Vector's tag names use. NFKC folds full-width and
-// mathematical letters already. Written by code point, so this file shows every character it holds.
-const LOOK_ALIKE: Readonly<Record<string, string>> = {
+// Letters from other scripts that look like Latin ones: Unicode's confusables data (ResearchConfusable, generated from
+// UTS #39), which covers whole alphabets such as Cherokee, Lisu and Coptic, and these, which win over it. They are
+// letters a reader takes for Latin ones whatever their size, which Unicode leaves out (small capitals, Cyrillic "\u043a"
+// and "\u0442", Greek "\u03ba" and "\u03c4"), and one it reads otherwise (Armenian "\u0584" as "q", not "f"). NFKC folds
+// full-width and mathematical letters already. Written by code point, so this file shows every character it holds.
+const READ_AS: Readonly<Record<string, string>> = {
   // Cyrillic
   "\u0430": "a",
   "\u0432": "b",
@@ -132,7 +136,48 @@ const LOOK_ALIKE: Readonly<Record<string, string>> = {
   "\u1d21": "w",
   "\u028f": "y",
   "\u1d22": "z",
+  // Cyrillic capitals
+  "\u0410": "A",
+  "\u0412": "B",
+  "\u0421": "C",
+  "\u0415": "E",
+  "\u041d": "H",
+  "\u04ba": "H",
+  "\u0406": "I",
+  "\u04c0": "I",
+  "\u0408": "J",
+  "\u041a": "K",
+  "\u041c": "M",
+  "\u041e": "O",
+  "\u0420": "P",
+  "\u051a": "Q",
+  "\u0405": "S",
+  "\u0422": "T",
+  "\u051c": "W",
+  "\u0425": "X",
+  "\u0423": "Y",
+  "\u04ae": "Y",
+  // Greek capitals
+  "\u0391": "A",
+  "\u0392": "B",
+  "\u0395": "E",
+  "\u0397": "H",
+  "\u0399": "I",
+  "\u039a": "K",
+  "\u039c": "M",
+  "\u039d": "N",
+  "\u039f": "O",
+  "\u03a1": "P",
+  "\u03a4": "T",
+  "\u03a7": "X",
+  "\u03a5": "Y",
+  "\u0396": "Z",
+  // Armenian capitals
+  "\u0555": "O",
+  "\u054d": "U",
 }
+const LOOK_ALIKE: Readonly<Record<string, string>> = { ...ResearchConfusable.LATIN, ...READ_AS }
+const LOOKS_LATIN = new RegExp(`[${Object.keys(LOOK_ALIKE).join("")}]`, "gu")
 
 // Characters a reader would not see: every default-ignorable code point (soft hyphen, zero-width space, direction
 // marks and overrides, word joiners, the byte order mark, variation selectors, the combining grapheme joiner, Hangul
@@ -187,6 +232,11 @@ export function clean(text: string) {
         ? mark
         : ""
     })
+}
+
+/** Text with each letter from another script that looks like a Latin one written as that Latin letter. */
+export function latin(text: string) {
+  return text.replace(LOOKS_LATIN, (char) => LOOK_ALIKE[char]!)
 }
 
 /** Web text with the "<" of every tag that reads as one of Vector's own escaped. */
@@ -279,9 +329,11 @@ function tagName(text: string, start: number) {
     chars.push(char)
   }
   const after = chars.join("")
+  // Look-alikes are read before and after lower case, since the confusables data has only the capitals of some
+  // alphabets (Cherokee).
   const folded = /^[\x00-\x7f]*$/.test(after)
     ? after.toLowerCase()
-    : [...after.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase()].map((char) => LOOK_ALIKE[char] ?? char).join("")
+    : latin(latin(after.normalize("NFKD").replace(/\p{M}/gu, "")).toLowerCase())
   return folded.replace(/[\s\u2010-\u2015\u2212\uFE58\uFE63-]+/g, "_")
 }
 

@@ -139,7 +139,14 @@ export type Saved = {
 }
 
 export type Quoted =
-  | { readonly ok: true; readonly chunk: number; readonly page?: number; readonly passage?: string }
+  | {
+      readonly ok: true
+      readonly chunk: number
+      readonly page?: number
+      readonly passage?: string
+      /** The source's own words for the quote. */
+      readonly quote: string
+    }
   | { readonly ok: false; readonly reason: "short" | "missing" | "no-source"; readonly message: string }
 
 export type NoteInput = {
@@ -991,10 +998,11 @@ function make(input: {
           claim,
           source_id: row.id,
           passage_id: checked.passage ?? null,
-          quote: request.quote.trim(),
+          // The source's own words, so the report shows what the source says, not the agent's copy of it.
+          quote: checked.quote,
           page: request.page ?? checked.page ?? null,
           stance: request.stance ?? ("supports" as const),
-          support: ResearchQuote.supports(claim, request.quote),
+          support: ResearchQuote.supports(claim, checked.quote),
           verdict: null,
           created_at: Date.now(),
         } satisfies typeof ResearchNoteTable.$inferInsert

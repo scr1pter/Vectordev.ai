@@ -273,12 +273,12 @@ describe("ResearchSearch.searxng", () => {
     expect(web.count("searxng")).toBe(before)
   })
 
-  test("sends a site filter on a domain the user prefers, though a private line names it", async () => {
+  test("sends a site filter on a domain the user prefers, though a private line names it, and checks every other host", async () => {
     // A learned preference names its domains, and they exist to become site: filters (section 6.4a).
     const preferring = {
       ...context,
-      work: ["Prefer primary sources such as nature.com and nejm.org."],
-      domains: ["nature.com", "nejm.org"],
+      work: ["Prefer primary sources such as nature.com and nejm.org, and avoid dailymail.co.uk."],
+      domains: ["nature.com", "nejm.org", "dailymail.co.uk"],
     }
     const before = web.count("searxng")
     const authorized: string[] = []
@@ -306,6 +306,21 @@ describe("ResearchSearch.searxng", () => {
     expect(
       failure(await search("searxng", { query: "Acme churn", site: "nejm.org" }, () => Effect.void, preferring)),
     ).toMatchObject({ _tag: "ResearchSearchRefused" })
+    // A preferred domain clears itself as a host name or a site: filter only: not an intranet name, nor an email
+    // address on it.
+    expect(
+      failure(
+        await search("searxng", { query: "outage reports", site: "jira.acme.internal" }, () => Effect.void, preferring),
+      ),
+    ).toMatchObject({ _tag: "ResearchSearchRefused", reason: "token" })
+    expect(
+      failure(
+        await search("searxng", { query: "jane@nature.com heat pumps" }, () => Effect.void, {
+          ...preferring,
+          work: [...preferring.work, "Ask jane@nature.com for the data."],
+        }),
+      ),
+    ).toMatchObject({ _tag: "ResearchSearchRefused", reason: "token" })
     expect(web.count("searxng")).toBe(before + 1)
     expect(guard.outside()).toEqual([])
   })

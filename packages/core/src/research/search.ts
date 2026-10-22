@@ -149,9 +149,11 @@ export function parseSearxng(body: string, limit = DEFAULT_RESULTS): readonly Re
 
 /**
  * Searches a SearXNG server. The words it sends, the query with its `site:` filter, pass the outbound check against
- * the run's `context` first, and the site has to be a host name. The request goes through WebFetchRequest like any
- * web read: the name is pinned and a server on the user's own network asks `authorizePrivate` once. `authorize` is
- * the caller's decision for the server's address (Vector Local's Web access); its failure is passed on unchanged.
+ * the run's `context` first, and the site has to be a host name. The caller puts the sources facet's preferred and
+ * avoided domains in `context.domains`, so one of them can be the site filter although the private context names it
+ * (section 6.4a). The request goes through WebFetchRequest like any web read: the name is pinned and a server on the
+ * user's own network asks `authorizePrivate` once. `authorize` is the caller's decision for the server's address
+ * (Vector Local's Web access); its failure is passed on unchanged.
  */
 export const searxng = Effect.fn("ResearchSearch.searxng")(
   function* (
