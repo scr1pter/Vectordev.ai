@@ -138,8 +138,11 @@ export type Format = typeof Format.Type
 export const Visibility = Schema.Literals(["private", "repository"])
 export type Visibility = typeof Visibility.Type
 
-/** How a document arrived. */
-export const DocumentOrigin = Schema.Literals(["upload", "chat", "agent", "repository", "cli"])
+/**
+ * How a document arrived. web: a page Deep research read, kept held under its run. research: a research run's report,
+ * held until the user keeps it.
+ */
+export const DocumentOrigin = Schema.Literals(["upload", "chat", "agent", "repository", "cli", "web", "research"])
 export type DocumentOrigin = typeof DocumentOrigin.Type
 
 /**

@@ -223,6 +223,8 @@ export function originLabel(origin: MemoryDocument["origin"]) {
     agent: "Vector kept this",
     repository: "From this repository's docs",
     cli: "Added from the command line",
+    web: "A page Deep research read",
+    research: "A Deep research report",
   }[origin]
 }
 

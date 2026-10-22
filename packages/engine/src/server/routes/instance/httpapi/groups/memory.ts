@@ -2,6 +2,7 @@ import { Schema } from "effect"
 import { Multipart } from "effect/unstable/http"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
 import { BrainSchema } from "@vectordevai/core/brain/schema"
+import { Research } from "@vectordevai/schema/research"
 import { RunBudget } from "@vectordevai/schema/run-budget"
 import { Authorization } from "../middleware/authorization"
 import { InstanceContextMiddleware } from "../middleware/instance-context"
@@ -444,6 +445,62 @@ export const MemoryKnowledgeQuery = Schema.Struct({
   ids: Schema.String,
 })
 
+// Deep research, kept in the repository's brain: runs, the pages they read and the notes they saved.
+
+const ResearchRunID = Schema.String.annotate({ description: "A research run's id, such as run_4k2q7m3x9abcd" })
+const ResearchSourceID = Schema.String.annotate({ description: "A source's number in its run, such as S3" })
+
+export const MemoryResearchRun = Schema.Struct({
+  run: Research.Run,
+  /** Sources the run read or skipped, and notes it saved. */
+  sources: Schema.Finite,
+  notes: Schema.Finite,
+  /** Bytes of page and report text the run keeps in the brain. */
+  bytes: Schema.Finite,
+}).annotate({ identifier: "MemoryResearchRun" })
+
+export const MemoryResearchList = Schema.Struct({
+  runs: Schema.Array(MemoryResearchRun),
+  /** Bytes all of the repository's research keeps, and the most it keeps before the oldest unkept runs go. */
+  bytes: Schema.Finite,
+  limit: Schema.Finite,
+  /** Days a run nobody kept stays. */
+  retain: Schema.Finite,
+}).annotate({ identifier: "MemoryResearchList" })
+
+export const MemoryResearchSource = Schema.Struct({
+  ...Research.Source.fields,
+  /** The page's text was forgotten since it was read; its notes say their quote is no longer in it. */
+  forgotten: Schema.optional(Schema.Boolean),
+}).annotate({ identifier: "MemoryResearchSource" })
+
+export const MemoryResearchDetail = Schema.Struct({
+  run: Research.Run,
+  sources: Schema.Array(MemoryResearchSource),
+  notes: Schema.Array(Research.Note),
+  /** Every query the run sent. */
+  queries: Schema.Array(Schema.String),
+  /** The latest report as Markdown, with no raw HTML or images in it. */
+  report: Schema.optional(Schema.String),
+  bytes: Schema.Finite,
+  /** An invited guest acted in the run's session, so the run is in this process's memory only and cannot be kept. */
+  guest: Schema.Boolean,
+}).annotate({ identifier: "MemoryResearchDetail" })
+
+export const MemoryResearchSourceText = Schema.Struct({
+  source: MemoryResearchSource,
+  /** The page's saved text, chunk by chunk. Plain text; never render it as markup. */
+  chunks: Schema.Array(Schema.Struct({ chunk: Schema.Finite, page: Schema.optional(Schema.Finite), text: Schema.String })),
+  /** Read from the user's own computer or network. */
+  private: Schema.Boolean,
+}).annotate({ identifier: "MemoryResearchSourceText" })
+
+export const MemoryResearchExportQuery = Schema.Struct({
+  ...WorkspaceRoutingQueryFields,
+  /** markdown (the default): the report with a bibliography. json: the run, its sources, notes and report. */
+  format: Schema.optional(Schema.Literals(["markdown", "json"])),
+})
+
 // Memory is the owner's own: every route is owner-only (ServerAuth), and a guest never reads it.
 export const MemoryApi = HttpApi.make("memory")
   .add(
@@ -815,6 +872,104 @@ export const MemoryApi = HttpApi.make("memory")
             summary: "Resolve citations",
             description:
               "The cards for record, passage and document ids an answer cited, for citation chips. Ids that are gone or held are left out.",
+          }),
+        ),
+        HttpApiEndpoint.get("research", `${root}/research`, {
+          query: WorkspaceRoutingQuery,
+          success: described(MemoryResearchList, "The repository's research runs, newest first"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.research.list",
+            summary: "List research runs",
+            description:
+              "Deep research runs this repository's brain keeps: question, date, sources, notes, size and whether you kept it. Runs nobody keeps are deleted after `retain` days, and past `limit` bytes the oldest of them go first.",
+          }),
+        ),
+        HttpApiEndpoint.delete("forgetAllResearch", `${root}/research`, {
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Finite, "How many runs were forgotten"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.research.forgetAll",
+            summary: "Forget all research in this repository",
+            description:
+              "Forget every research run of the repository: their pages, notes and reports. Vector does not keep those pages again on its own.",
+          }),
+        ),
+        HttpApiEndpoint.get("researchRun", `${root}/research/:runID`, {
+          params: { runID: ResearchRunID },
+          query: WorkspaceRoutingQuery,
+          success: described(MemoryResearchDetail, "One run with its sources, notes and report"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.research.get",
+            summary: "Get a research run",
+            description: "One run: its plan, the queries it sent, its sources (skipped ones too), its notes and its latest report.",
+          }),
+        ),
+        HttpApiEndpoint.delete("forgetResearch", `${root}/research/:runID`, {
+          params: { runID: ResearchRunID },
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Boolean, "The run was forgotten"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.research.forget",
+            summary: "Forget a research run",
+            description:
+              "Forget a run and everything it holds: its pages, notes and report. Vector does not keep those pages again on its own. The session keeps its messages.",
+          }),
+        ),
+        HttpApiEndpoint.post("keepResearch", `${root}/research/:runID/keep`, {
+          params: { runID: ResearchRunID },
+          query: WorkspaceRoutingQuery,
+          success: described(MemoryResearchDetail, "The run after it was kept"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.research.keep",
+            summary: "Keep a research run",
+            description:
+              "Keep the run past the retention, and its report in the brain, where the owner's requests can recall it like any private document. Sessions with invited guests and models that may train on your prompts never get it. Its pages stay held. A run an invited guest acted in cannot be kept.",
+          }),
+        ),
+        HttpApiEndpoint.get("exportResearch", `${root}/research/:runID/export`, {
+          params: { runID: ResearchRunID },
+          query: MemoryResearchExportQuery,
+          success: Schema.String.pipe(HttpApiSchema.asText({ contentType: "text/markdown" })),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.research.export",
+            summary: "Export a research run",
+            description:
+              "The run as an attachment: the report with a bibliography as Markdown, or with `format=json` the run, its queries, sources, notes and report.",
+          }),
+        ),
+        HttpApiEndpoint.get("researchSource", `${root}/research/:runID/sources/:sourceID`, {
+          params: { runID: ResearchRunID, sourceID: ResearchSourceID },
+          query: WorkspaceRoutingQuery,
+          success: described(MemoryResearchSourceText, "A source with the text Vector saved from it"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.research.source",
+            summary: "Read a research source",
+            description: "One source of a run and the text Vector saved from its page, chunk by chunk, as citations open it.",
+          }),
+        ),
+        HttpApiEndpoint.delete("forgetResearchSource", `${root}/research/:runID/sources/:sourceID`, {
+          params: { runID: ResearchRunID, sourceID: ResearchSourceID },
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Boolean, "The source's page was forgotten"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.research.forgetSource",
+            summary: "Forget a research source",
+            description:
+              "Forget the text Vector saved from one page of a run. The source stays listed as forgotten, and a report saved after this marks the notes that quoted it. Vector does not keep that page again on its own.",
           }),
         ),
       )

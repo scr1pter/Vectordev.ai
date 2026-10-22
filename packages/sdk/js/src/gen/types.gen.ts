@@ -92,6 +92,7 @@ export type Event =
   | EventQuestionReplied
   | EventQuestionRejected
   | EventSessionCompacted
+  | EventResearchUpdated
   | EventVcsBranchUpdated
   | EventWorkspaceReady
   | EventWorkspaceFailed
@@ -1753,6 +1754,16 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "research.updated"
+        properties: {
+          runID: string
+          sourceID?: string
+          noteID?: string
+          status: "planned" | "running" | "done" | "stopped" | "failed" | "forgotten"
+        }
+      }
+    | {
+        id: string
         type: "vcs.branch.updated"
         properties: {
           branch?: string
@@ -3060,7 +3071,7 @@ export type MemoryDocument = {
   name: string
   title: string
   format: "pdf" | "docx" | "pptx" | "xlsx" | "csv" | "markdown" | "html" | "json" | "yaml" | "openapi" | "text"
-  origin: "upload" | "chat" | "agent" | "repository" | "cli"
+  origin: "upload" | "chat" | "agent" | "repository" | "cli" | "web" | "research"
   visibility: "private" | "repository"
   status:
     | "queued"
@@ -3539,6 +3550,134 @@ export type MemoryCard = {
   page?: number
   section?: string
   text: string
+}
+
+export type ResearchScope = "web" | "web+brain" | "brain"
+
+export type ResearchDepth = "focused" | "deep"
+
+export type ResearchFormat = "brief" | "report" | "table" | "memo"
+
+export type ResearchSubquestionStatus = "open" | "answered" | "dropped"
+
+export type ResearchPlan = {
+  question: string
+  subquestions: Array<string>
+  scope: ResearchScope
+  depth: ResearchDepth
+  prefer_domains?: Array<string>
+  avoid_domains?: Array<string>
+  format?: ResearchFormat
+  time_window?: string
+  status?: Array<ResearchSubquestionStatus>
+}
+
+export type ResearchRunStatus = "planned" | "running" | "done" | "stopped" | "failed"
+
+export type ResearchRun = {
+  id: string
+  session_id: string
+  question: string
+  plan?: ResearchPlan
+  depth: ResearchDepth
+  scope: ResearchScope
+  status: ResearchRunStatus
+  report_document_id?: string
+  pages: number
+  searches: number
+  steps: number
+  cost_usd: number
+  kept: boolean
+  created_at: number
+  updated_at: number
+}
+
+export type MemoryResearchRun = {
+  run: ResearchRun
+  sources: number
+  notes: number
+  bytes: number
+}
+
+export type MemoryResearchList = {
+  runs: Array<MemoryResearchRun>
+  bytes: number
+  limit: number
+  retain: number
+}
+
+export type ResearchSourceStatus = "read" | "duplicate" | "robots" | "paywalled" | "needs-render" | "failed"
+
+export type ResearchSiteKind = "academic" | "government" | "standards" | "reference" | "forum" | "other"
+
+export type ResearchSignal = {
+  kind: ResearchSiteKind
+  primary: boolean
+  doi?: string
+  arxiv?: string
+  pmid?: string
+  published?: string
+  updated?: string
+  age_days?: number
+  author?: string
+  data: boolean
+  references: boolean
+  duplicate_of?: string
+  paywalled: boolean
+  addressed_to_ai: boolean
+  corroborated: number
+  preference?: "trusted" | "avoided"
+}
+
+export type MemoryResearchSource = {
+  id: string
+  url: string
+  canonical_url: string
+  title: string
+  site: string
+  status: ResearchSourceStatus
+  reason?: string
+  pages?: number
+  signals?: ResearchSignal
+  fetched_at?: number
+  forgotten?: boolean
+}
+
+export type ResearchStance = "supports" | "contradicts" | "context"
+
+export type ResearchVerdict = "supported" | "partial" | "unsupported" | "contradicted" | "not-judged"
+
+export type ResearchNote = {
+  id: string
+  subquestion: string
+  claim: string
+  source: string
+  quote: string
+  page?: number
+  stance: ResearchStance
+  support: boolean
+  verdict?: ResearchVerdict
+  created_at: number
+}
+
+export type MemoryResearchDetail = {
+  run: ResearchRun
+  sources: Array<MemoryResearchSource>
+  notes: Array<ResearchNote>
+  queries: Array<string>
+  report?: string
+  bytes: number
+  guest: boolean
+}
+
+export type MemoryResearchSourceText = {
+  source: MemoryResearchSource
+  chunks: Array<{
+    chunk: number
+    page?: number
+    text: string
+  }>
+  private: boolean
 }
 
 export type Project = {
@@ -4613,6 +4752,7 @@ export type V2Event =
   | QuestionReplied2
   | QuestionRejected2
   | SessionCompacted
+  | ResearchUpdated
   | VcsBranchUpdated
   | WorkspaceReady
   | WorkspaceFailed
@@ -8188,6 +8328,26 @@ export type SessionCompacted = {
   }
 }
 
+export type ResearchUpdated = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "research.updated"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    runID: string
+    sourceID?: string
+    noteID?: string
+    status: "planned" | "running" | "done" | "stopped" | "failed" | "forgotten"
+  }
+}
+
 export type VcsBranchUpdated = {
   id: string
   metadata?: {
@@ -9327,6 +9487,17 @@ export type EventSessionCompacted = {
   type: "session.compacted"
   properties: {
     sessionID: string
+  }
+}
+
+export type EventResearchUpdated = {
+  id: string
+  type: "research.updated"
+  properties: {
+    runID: string
+    sourceID?: string
+    noteID?: string
+    status: "planned" | "running" | "done" | "stopped" | "failed" | "forgotten"
   }
 }
 
@@ -13227,6 +13398,302 @@ export type MemoryKnowledgeResponses = {
 }
 
 export type MemoryKnowledgeResponse = MemoryKnowledgeResponses[keyof MemoryKnowledgeResponses]
+
+export type MemoryResearchForgetAllData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/research"
+}
+
+export type MemoryResearchForgetAllErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryResearchForgetAllError = MemoryResearchForgetAllErrors[keyof MemoryResearchForgetAllErrors]
+
+export type MemoryResearchForgetAllResponses = {
+  /**
+   * How many runs were forgotten
+   */
+  200: number
+}
+
+export type MemoryResearchForgetAllResponse = MemoryResearchForgetAllResponses[keyof MemoryResearchForgetAllResponses]
+
+export type MemoryResearchListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/research"
+}
+
+export type MemoryResearchListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryResearchListError = MemoryResearchListErrors[keyof MemoryResearchListErrors]
+
+export type MemoryResearchListResponses = {
+  /**
+   * The repository's research runs, newest first
+   */
+  200: MemoryResearchList
+}
+
+export type MemoryResearchListResponse = MemoryResearchListResponses[keyof MemoryResearchListResponses]
+
+export type MemoryResearchForgetData = {
+  body?: never
+  path: {
+    /**
+     * A research run's id, such as run_4k2q7m3x9abcd
+     */
+    runID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/research/{runID}"
+}
+
+export type MemoryResearchForgetErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryResearchForgetError = MemoryResearchForgetErrors[keyof MemoryResearchForgetErrors]
+
+export type MemoryResearchForgetResponses = {
+  /**
+   * The run was forgotten
+   */
+  200: boolean
+}
+
+export type MemoryResearchForgetResponse = MemoryResearchForgetResponses[keyof MemoryResearchForgetResponses]
+
+export type MemoryResearchGetData = {
+  body?: never
+  path: {
+    /**
+     * A research run's id, such as run_4k2q7m3x9abcd
+     */
+    runID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/research/{runID}"
+}
+
+export type MemoryResearchGetErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryResearchGetError = MemoryResearchGetErrors[keyof MemoryResearchGetErrors]
+
+export type MemoryResearchGetResponses = {
+  /**
+   * One run with its sources, notes and report
+   */
+  200: MemoryResearchDetail
+}
+
+export type MemoryResearchGetResponse = MemoryResearchGetResponses[keyof MemoryResearchGetResponses]
+
+export type MemoryResearchKeepData = {
+  body?: never
+  path: {
+    /**
+     * A research run's id, such as run_4k2q7m3x9abcd
+     */
+    runID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/research/{runID}/keep"
+}
+
+export type MemoryResearchKeepErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryResearchKeepError = MemoryResearchKeepErrors[keyof MemoryResearchKeepErrors]
+
+export type MemoryResearchKeepResponses = {
+  /**
+   * The run after it was kept
+   */
+  200: MemoryResearchDetail
+}
+
+export type MemoryResearchKeepResponse = MemoryResearchKeepResponses[keyof MemoryResearchKeepResponses]
+
+export type MemoryResearchExportData = {
+  body?: never
+  path: {
+    /**
+     * A research run's id, such as run_4k2q7m3x9abcd
+     */
+    runID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+    format?: "markdown" | "json"
+  }
+  url: "/memory/research/{runID}/export"
+}
+
+export type MemoryResearchExportErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryResearchExportError = MemoryResearchExportErrors[keyof MemoryResearchExportErrors]
+
+export type MemoryResearchExportResponses = {
+  /**
+   * Success
+   */
+  200: string
+}
+
+export type MemoryResearchExportResponse = MemoryResearchExportResponses[keyof MemoryResearchExportResponses]
+
+export type MemoryResearchForgetSourceData = {
+  body?: never
+  path: {
+    /**
+     * A research run's id, such as run_4k2q7m3x9abcd
+     */
+    runID: string
+    /**
+     * A source's number in its run, such as S3
+     */
+    sourceID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/research/{runID}/sources/{sourceID}"
+}
+
+export type MemoryResearchForgetSourceErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryResearchForgetSourceError = MemoryResearchForgetSourceErrors[keyof MemoryResearchForgetSourceErrors]
+
+export type MemoryResearchForgetSourceResponses = {
+  /**
+   * The source's page was forgotten
+   */
+  200: boolean
+}
+
+export type MemoryResearchForgetSourceResponse =
+  MemoryResearchForgetSourceResponses[keyof MemoryResearchForgetSourceResponses]
+
+export type MemoryResearchSourceData = {
+  body?: never
+  path: {
+    /**
+     * A research run's id, such as run_4k2q7m3x9abcd
+     */
+    runID: string
+    /**
+     * A source's number in its run, such as S3
+     */
+    sourceID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/research/{runID}/sources/{sourceID}"
+}
+
+export type MemoryResearchSourceErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryResearchSourceError = MemoryResearchSourceErrors[keyof MemoryResearchSourceErrors]
+
+export type MemoryResearchSourceResponses = {
+  /**
+   * A source with the text Vector saved from it
+   */
+  200: MemoryResearchSourceText
+}
+
+export type MemoryResearchSourceResponse = MemoryResearchSourceResponses[keyof MemoryResearchSourceResponses]
 
 export type ProjectListData = {
   body?: never

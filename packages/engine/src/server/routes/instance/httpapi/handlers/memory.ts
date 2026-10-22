@@ -7,6 +7,7 @@ import { BrainEmbed } from "@vectordevai/core/brain/embed"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import type { BrainSchema } from "@vectordevai/core/brain/schema"
 import { Flag } from "@vectordevai/core/flag/flag"
+import { ResearchStore } from "@vectordevai/core/research/store"
 import { Instruction } from "@/session/instruction"
 import { SessionDistill } from "@/session/distill"
 import { SessionID } from "@/session/schema"
@@ -48,6 +49,7 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
     const knowledge = yield* BrainKnowledge.Service
     const embed = yield* BrainEmbed.Service
     const distiller = yield* SessionDistill.Service
+    const research = yield* ResearchStore.Service
 
     const list = Effect.fn("MemoryHttpApi.list")(function* (ctx: {
       query: { scope?: "repository" | "personal"; filter?: Brain.Filter; query?: string }
@@ -103,10 +105,14 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
       return true
     })
 
+    // Research runs are the repository's, like its documents: erasing the repository or everything forgets them first.
     const erase = Effect.fn("MemoryHttpApi.erase")(function* (ctx: {
       payload: { scope: "repository" | "personal" | "all" }
     }) {
-      return yield* brain.erase(yield* instruction.place(), ctx.payload.scope)
+      const place = yield* instruction.place()
+      if (ctx.payload.scope !== "personal")
+        yield* research.forgetAll(place, ctx.payload.scope === "all" ? { everywhere: true } : {})
+      return yield* brain.erase(place, ctx.payload.scope)
     })
 
     const tidy = Effect.fn("MemoryHttpApi.tidy")(function* () {
@@ -507,6 +513,81 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
       return yield* knowledge.cards(yield* instruction.place(), ids, { personal: true })
     })
 
+    // --- Research -------------------------------------------------------------------------------------------------
+
+    const researchList = Effect.fn("MemoryHttpApi.research")(function* () {
+      const runs = yield* research.list(yield* instruction.place())
+      return {
+        runs,
+        bytes: runs.reduce((sum, run) => sum + run.bytes, 0),
+        limit: ResearchStore.LIMIT.repository,
+        retain: ResearchStore.LIMIT.retain,
+      }
+    })
+
+    const noRun = (id: string) => missing(id, `No research run ${id} here.`)
+
+    const researchRun = Effect.fn("MemoryHttpApi.researchRun")(function* (ctx: { params: { runID: string } }) {
+      const detail = yield* research.get(yield* instruction.place(), ctx.params.runID)
+      if (!detail) return yield* noRun(ctx.params.runID)
+      return detail
+    })
+
+    const keepResearch = Effect.fn("MemoryHttpApi.keepResearch")(function* (ctx: { params: { runID: string } }) {
+      const place = yield* instruction.place()
+      const kept = yield* research.keep(place, ctx.params.runID)
+      if (!kept) return yield* noRun(ctx.params.runID)
+      if (kept.type === "refused") return yield* refused(kept.message, "guest")
+      return (yield* research.get(place, ctx.params.runID))!
+    })
+
+    const forgetResearch = Effect.fn("MemoryHttpApi.forgetResearch")(function* (ctx: { params: { runID: string } }) {
+      if (!(yield* research.forget(yield* instruction.place(), ctx.params.runID))) return yield* noRun(ctx.params.runID)
+      return true
+    })
+
+    const forgetAllResearch = Effect.fn("MemoryHttpApi.forgetAllResearch")(function* () {
+      return yield* research.forgetAll(yield* instruction.place())
+    })
+
+    // An attachment, never something a browser renders.
+    const exportResearch = Effect.fn("MemoryHttpApi.exportResearch")(function* (ctx: {
+      params: { runID: string }
+      query: { format?: "markdown" | "json" }
+    }) {
+      const exported = yield* research.export(yield* instruction.place(), ctx.params.runID, ctx.query.format ?? "markdown")
+      if (!exported) return yield* noRun(ctx.params.runID)
+      return HttpServerResponse.text(exported.body, {
+        contentType: `${exported.type}; charset=utf-8`,
+        headers: {
+          "content-disposition": `attachment; filename="${exported.name.replace(/[^A-Za-z0-9._-]/g, "_")}"`,
+          "x-content-type-options": "nosniff",
+          "content-security-policy": "sandbox",
+          "cache-control": "no-store",
+        },
+      })
+    })
+
+    const researchSource = Effect.fn("MemoryHttpApi.researchSource")(function* (ctx: {
+      params: { runID: string; sourceID: string }
+    }) {
+      const saved = yield* research.source(yield* instruction.place(), ctx.params.runID, ctx.params.sourceID)
+      if (!saved) return yield* missing(ctx.params.sourceID, `No source ${ctx.params.sourceID} in run ${ctx.params.runID}.`)
+      return {
+        source: { ...saved.source, ...(saved.forgotten ? { forgotten: true } : {}) },
+        chunks: saved.chunks,
+        private: saved.private,
+      }
+    })
+
+    const forgetResearchSource = Effect.fn("MemoryHttpApi.forgetResearchSource")(function* (ctx: {
+      params: { runID: string; sourceID: string }
+    }) {
+      if (!(yield* research.forgetSource(yield* instruction.place(), ctx.params.runID, ctx.params.sourceID)))
+        return yield* missing(ctx.params.sourceID, `No source ${ctx.params.sourceID} in run ${ctx.params.runID}.`)
+      return true
+    })
+
     return handlers
       .handle("list", list)
       .handle("get", get)
@@ -538,5 +619,13 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
       .handle("review", review)
       .handle("resolveReview", resolveReview)
       .handle("knowledge", cited)
+      .handle("research", researchList)
+      .handle("forgetAllResearch", forgetAllResearch)
+      .handle("researchRun", researchRun)
+      .handle("forgetResearch", forgetResearch)
+      .handle("keepResearch", keepResearch)
+      .handle("exportResearch", exportResearch)
+      .handle("researchSource", researchSource)
+      .handle("forgetResearchSource", forgetResearchSource)
   }),
 )
