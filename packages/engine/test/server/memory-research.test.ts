@@ -213,9 +213,13 @@ describe("memory research routes", () => {
     const missing = await send(directory, `/memory/research/${run}/sources/S9`, "GET")
 
     expect(list).toMatchObject({ bytes: expect.any(Number), limit: 1024 * 1024 * 1024, retain: 30 })
-    expect(list.runs).toEqual([expect.objectContaining({ run: expect.objectContaining({ id: run }), sources: 1, notes: 1 })])
+    expect(list.runs).toEqual([
+      expect.objectContaining({ run: expect.objectContaining({ id: run }), sources: 1, notes: 1 }),
+    ])
     expect(detail.sources.map((item: { id: string }) => item.id)).toEqual(["S1"])
-    expect(detail.notes.map((item: { id: string; support: boolean }) => [item.id, item.support])).toEqual([["N1", true]])
+    expect(detail.notes.map((item: { id: string; support: boolean }) => [item.id, item.support])).toEqual([
+      ["N1", true],
+    ])
     expect(detail.report).toContain("# Heat pump savings")
     expect(detail.guest).toBe(false)
     expect(source.chunks.map((chunk: { text: string }) => chunk.text)).toEqual(STUDY)
@@ -245,7 +249,9 @@ describe("memory research routes", () => {
   test("keeping a run tells the app through the directory's event stream", async () => {
     await using tmp = await tmpdir({ git: true, trusted: true, config: { formatter: false, lsp: false } })
     const run = await seed(await place(tmp.path))
-    const event = await awaitEvent(tmp.path, "research.updated", () => send(tmp.path, `/memory/research/${run}/keep`, "POST"))
+    const event = await awaitEvent(tmp.path, "research.updated", () =>
+      send(tmp.path, `/memory/research/${run}/keep`, "POST"),
+    )
     expect(event).toMatchObject({ type: "research.updated", properties: { runID: run, status: "done" } })
   }, 30_000)
 
@@ -274,6 +280,8 @@ describe("memory research routes", () => {
     // Erasing only what Vector learned about the user keeps the repository's research.
     const run = await seed(where, "ses_four")
     expect((await erase("personal")).status).toBe(200)
-    expect((await get(directory, "/memory/research")).runs.map((item: { run: { id: string } }) => item.run.id)).toEqual([run])
+    expect((await get(directory, "/memory/research")).runs.map((item: { run: { id: string } }) => item.run.id)).toEqual(
+      [run],
+    )
   }, 30_000)
 })

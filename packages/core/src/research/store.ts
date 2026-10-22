@@ -70,7 +70,12 @@ export const LIMIT = {
   retain: 30,
 } as const
 
-export type Limits = { readonly sources: number; readonly bytes: number; readonly repository: number; readonly retain: number }
+export type Limits = {
+  readonly sources: number
+  readonly bytes: number
+  readonly repository: number
+  readonly retain: number
+}
 
 export const NO_RUN = "There is no such research run here. Start one with research_plan."
 export const GUEST =
@@ -205,7 +210,11 @@ export interface Interface {
     plan: Research.Plan,
     status?: Research.RunStatus,
   ) => Effect.Effect<Research.Run | undefined>
-  readonly status: (place: Brain.Place, runID: string, status: Research.RunStatus) => Effect.Effect<Research.Run | undefined>
+  readonly status: (
+    place: Brain.Place,
+    runID: string,
+    status: Research.RunStatus,
+  ) => Effect.Effect<Research.Run | undefined>
   /** Steps taken and money spent since the last count. */
   readonly count: (
     place: Brain.Place,
@@ -217,7 +226,9 @@ export interface Interface {
     place: Brain.Place,
     runID: string,
     query: string,
-  ) => Effect.Effect<{ readonly type: "counted"; readonly searches: number } | { readonly type: "refused"; readonly message: string }>
+  ) => Effect.Effect<
+    { readonly type: "counted"; readonly searches: number } | { readonly type: "refused"; readonly message: string }
+  >
   readonly addSource: (place: Brain.Place, runID: string, input: SourceInput) => Effect.Effect<Added>
   /** A source and its saved text, by "S3"; reading it again makes no network call. */
   readonly source: (place: Brain.Place, runID: string, ref: string) => Effect.Effect<Saved | undefined>
@@ -251,12 +262,20 @@ export interface Interface {
   readonly keep: (
     place: Brain.Place,
     runID: string,
-  ) => Effect.Effect<{ readonly type: "kept"; readonly run: Research.Run } | { readonly type: "refused"; readonly message: string } | undefined>
+  ) => Effect.Effect<
+    | { readonly type: "kept"; readonly run: Research.Run }
+    | { readonly type: "refused"; readonly message: string }
+    | undefined
+  >
   readonly forget: (place: Brain.Place, runID: string) => Effect.Effect<boolean>
   readonly forgetSource: (place: Brain.Place, runID: string, ref: string) => Effect.Effect<boolean>
   /** Every run of the repository, or with `everywhere` of every repository (Erase all); how many there were. */
   readonly forgetAll: (place: Brain.Place, options?: { readonly everywhere?: boolean }) => Effect.Effect<number>
-  readonly export: (place: Brain.Place, runID: string, format: "markdown" | "json") => Effect.Effect<Exported | undefined>
+  readonly export: (
+    place: Brain.Place,
+    runID: string,
+    format: "markdown" | "json",
+  ) => Effect.Effect<Exported | undefined>
   /** An invited guest acted in the run's session: what the run holds leaves the brain for this process's memory. */
   readonly guest: (place: Brain.Place, runID: string) => Effect.Effect<void>
   /** Deletes runs nobody kept that are older than the retention; how many went. */
@@ -443,7 +462,12 @@ function make(input: {
   const chunksOf = Effect.fnUntraced(function* (store: Database, document: string | null) {
     if (!document) return [] as (ResearchQuote.Part & { readonly passage: string })[]
     const rows = yield* store
-      .select({ id: BrainPassageTable.id, body: BrainPassageTable.body, ordinal: BrainPassageTable.ordinal, page: BrainPassageTable.page })
+      .select({
+        id: BrainPassageTable.id,
+        body: BrainPassageTable.body,
+        ordinal: BrainPassageTable.ordinal,
+        page: BrainPassageTable.page,
+      })
       .from(BrainPassageTable)
       .where(eq(BrainPassageTable.document_id, document))
       .orderBy(asc(BrainPassageTable.ordinal))
@@ -481,7 +505,12 @@ function make(input: {
   })
 
   const runOf = Effect.fnUntraced(function* (store: Database, runID: string) {
-    const row = yield* store.select().from(ResearchRunTable).where(eq(ResearchRunTable.id, runID)).get().pipe(Effect.orDie)
+    const row = yield* store
+      .select()
+      .from(ResearchRunTable)
+      .where(eq(ResearchRunTable.id, runID))
+      .get()
+      .pipe(Effect.orDie)
     return row ? toRun(row, yield* keptOf(store, row)) : undefined
   })
 
@@ -630,7 +659,8 @@ function make(input: {
         // An address the run read is free to read again. One it read with no text (skipped, failed, built by script) is
         // filled in, as the same S#, by a later read that has text, such as the desktop browser's.
         const same = sources.find((source) => source.canonical_url === page.canonical)
-        const blank = same !== undefined && same.document_id === null && !forgottenOf(same) && same.status !== "duplicate"
+        const blank =
+          same !== undefined && same.document_id === null && !forgottenOf(same) && same.status !== "duplicate"
         if (same && !(blank && readable)) return { type: "known" as const, source: toSource(same) }
         if (!same && sources.length >= limits.sources)
           return {
@@ -638,7 +668,8 @@ function make(input: {
             message: `This run has ${limits.sources} sources, the most one run keeps: write the report from what you have.`,
           }
         const budget = found.row.limits?.pages
-        if (readable && budget !== undefined && found.row.pages >= budget) return { type: "refused" as const, message: PAGES }
+        if (readable && budget !== undefined && found.row.pages >= budget)
+          return { type: "refused" as const, message: PAGES }
         const ordinal = same?.ordinal ?? (sources.at(-1)?.ordinal ?? 0) + 1
         const row = (extra: Partial<SourceRow>): typeof ResearchSourceTable.$inferInsert => ({
           id: `src_${BrainStructure.base32(randomBytes(8))}`,
@@ -670,7 +701,14 @@ function make(input: {
               .run()
               .pipe(Effect.orDie)
           else yield* store.insert(ResearchSourceTable).values(values).run().pipe(Effect.orDie)
-          return toSource((yield* store.select().from(ResearchSourceTable).where(eq(ResearchSourceTable.id, id)).get().pipe(Effect.orDie))!)
+          return toSource(
+            (yield* store
+              .select()
+              .from(ResearchSourceTable)
+              .where(eq(ResearchSourceTable.id, id))
+              .get()
+              .pipe(Effect.orDie))!,
+          )
         })
         // Skipped pages (robots.txt, built by script, failed) are kept as a line in Sources and the Method, with no text.
         if (!readable) {
@@ -699,7 +737,10 @@ function make(input: {
           yield* publish(place, runID, found.row.status, { sourceID: source.id })
           return { type: "added" as const, source }
         }
-        const copy = ResearchDedupe.duplicateOf({ ...fingerprint, canonical: page.canonical }, yield* knownOf(store, runID, sources))
+        const copy = ResearchDedupe.duplicateOf(
+          { ...fingerprint, canonical: page.canonical },
+          yield* knownOf(store, runID, sources),
+        )
         if (copy) {
           const of = `S${ordinalOf("S", copy) ?? ""}`
           const source = yield* insert(
@@ -774,9 +815,17 @@ function make(input: {
           { index: !found.guest },
         )
         const source = yield* insert(row({ document_id: document }))
-        yield* touch(store, runID, { pages: found.row.pages + 1, status: found.row.status === "planned" ? "running" : found.row.status })
-        fingerprinted(runID, [...(state.fingerprints.get(runID) ?? []), { ...fingerprint, id: source.id, canonical: page.canonical }])
-        yield* publish(place, runID, found.row.status === "planned" ? "running" : found.row.status, { sourceID: source.id })
+        yield* touch(store, runID, {
+          pages: found.row.pages + 1,
+          status: found.row.status === "planned" ? "running" : found.row.status,
+        })
+        fingerprinted(runID, [
+          ...(state.fingerprints.get(runID) ?? []),
+          { ...fingerprint, id: source.id, canonical: page.canonical },
+        ])
+        yield* publish(place, runID, found.row.status === "planned" ? "running" : found.row.status, {
+          sourceID: source.id,
+        })
         return { type: "added" as const, source, ...(room.evicted.length > 0 ? { evicted: room.evicted } : {}) }
       }),
     )
@@ -849,7 +898,11 @@ function make(input: {
     const chunks = yield* chunksOf(found.db, row.document_id)
     return {
       source: toSource(row),
-      chunks: chunks.map((chunk) => ({ text: chunk.text, chunk: chunk.chunk, ...(chunk.page === undefined ? {} : { page: chunk.page }) })),
+      chunks: chunks.map((chunk) => ({
+        text: chunk.text,
+        chunk: chunk.chunk,
+        ...(chunk.page === undefined ? {} : { page: chunk.page }),
+      })),
       private: row.private,
       forgotten: forgottenOf(row),
     } satisfies Saved
@@ -911,10 +964,15 @@ function make(input: {
         if (!found) return { type: "refused" as const, message: NO_RUN }
         const claim = request.claim.trim()
         const subquestion = request.subquestion.trim()
-        if (!claim || claim.length > 400) return { type: "refused" as const, message: "A claim is 1 to 400 characters." }
+        if (!claim || claim.length > 400)
+          return { type: "refused" as const, message: "A claim is 1 to 400 characters." }
         if (!subquestion || subquestion.length > 300)
-          return { type: "refused" as const, message: "Name the sub-question the note answers, in at most 300 characters." }
-        if (request.quote.length > 600) return { type: "refused" as const, message: "A quote is at most 600 characters." }
+          return {
+            type: "refused" as const,
+            message: "Name the sub-question the note answers, in at most 300 characters.",
+          }
+        if (request.quote.length > 600)
+          return { type: "refused" as const, message: "A quote is at most 600 characters." }
         const row = yield* sourceByRef(found.db, runID, request.source)
         if (!row) return { type: "refused" as const, message: `There is no ${request.source} in this run.` }
         const checked = yield* quotedIn(found.db, row, request.quote)
@@ -994,7 +1052,8 @@ function make(input: {
           notes,
           ...(found.row.plan ? { plan: found.row.plan } : {}),
         })
-        if (problems.errors.length > 0) return { type: "refused" as const, errors: problems.errors, uncited: problems.uncited }
+        if (problems.errors.length > 0)
+          return { type: "refused" as const, errors: problems.errors, uncited: problems.uncited }
         // Each quote is checked again: its source may have been forgotten since the note was saved.
         const unverified = new Set<string>()
         for (const item of notes) {
@@ -1025,11 +1084,19 @@ function make(input: {
           : 1
         const bytes = Buffer.byteLength(rendered.markdown)
         const room = found.guest ? { evicted: [] } : yield* roomFor(place, runID, bytes)
-        if (room.evicted === undefined) return { type: "refused" as const, errors: [room.message], uncited: problems.uncited }
+        if (room.evicted === undefined)
+          return { type: "refused" as const, errors: [room.message], uncited: problems.uncited }
         const previous = found.row.report_document_id
         // Only the latest version is kept: a new one is held again until the user keeps it.
         if (previous) yield* removeDocuments(place, found, [previous])
-        const document = yield* writeReport(found, place.repository, request.title, rendered.markdown, version, previous ?? undefined)
+        const document = yield* writeReport(
+          found,
+          place.repository,
+          request.title,
+          rendered.markdown,
+          version,
+          previous ?? undefined,
+        )
         yield* touch(found.db, runID, {
           report_document_id: document,
           report: rendered.markdown,
@@ -1064,7 +1131,9 @@ function make(input: {
       BrainDocument.read({ name: "report.md", bytes: new TextEncoder().encode(markdown) }, limits),
     )
     const structured =
-      extracted.type === "extracted" ? BrainStructure.structure(extracted, { repository, lineage, document: id, limits }) : undefined
+      extracted.type === "extracted"
+        ? BrainStructure.structure(extracted, { repository, lineage, document: id, limits })
+        : undefined
     yield* write(
       found.db,
       repository,
@@ -1180,7 +1249,11 @@ function make(input: {
   ) {
     if (ids.length === 0) return
     if (found.guest)
-      return yield* found.db.delete(BrainDocumentTable).where(inArray(BrainDocumentTable.id, [...ids])).run().pipe(Effect.orDie)
+      return yield* found.db
+        .delete(BrainDocumentTable)
+        .where(inArray(BrainDocumentTable.id, [...ids]))
+        .run()
+        .pipe(Effect.orDie)
     const rows = yield* db
       .select({ id: BrainDocumentTable.id, origin: BrainDocumentTable.origin })
       .from(BrainDocumentTable)
@@ -1203,7 +1276,11 @@ function make(input: {
       .pipe(Effect.orDie)
     for (const batch of chunks(pages, 500))
       yield* db.delete(BrainDocumentTable).where(inArray(BrainDocumentTable.id, batch)).run().pipe(Effect.orDie)
-    yield* frequencies(db, place.repository, terms.map((row) => row.term))
+    yield* frequencies(
+      db,
+      place.repository,
+      terms.map((row) => row.term),
+    )
     yield* totals(db, place.repository)
   })
 
@@ -1219,7 +1296,10 @@ function make(input: {
           .get()
           .pipe(
             Effect.orDie,
-            Effect.map((document) => [tombstone("url", row.canonical_url), ...(document ? [tombstone("text", document.hash)] : [])]),
+            Effect.map((document) => [
+              tombstone("url", row.canonical_url),
+              ...(document ? [tombstone("text", document.hash)] : []),
+            ]),
           ),
     )
     for (const hash of [...new Set(hashes.flat())])
@@ -1236,7 +1316,11 @@ function make(input: {
 
   // A run and everything it holds. The user's Forget leaves tombstones for its pages; the retention sweep and the
   // repository cap leave only the tombstones every forgotten document leaves, so a later run may read those pages again.
-  const drop = Effect.fnUntraced(function* (place: Brain.Place, runID: string, options: { readonly tombstones: boolean }) {
+  const drop = Effect.fnUntraced(function* (
+    place: Brain.Place,
+    runID: string,
+    options: { readonly tombstones: boolean },
+  ) {
     const found = yield* locate(place, runID)
     if (!found) return false
     if (options.tombstones && !found.guest) yield* tombstoneSources(place, yield* sourcesOf(db, runID))
@@ -1262,7 +1346,11 @@ function make(input: {
     return yield* lock.withPermit(drop(place, runID, { tombstones: true }))
   })
 
-  const forgetSource = Effect.fn("ResearchStore.forgetSource")(function* (place: Brain.Place, runID: string, ref: string) {
+  const forgetSource = Effect.fn("ResearchStore.forgetSource")(function* (
+    place: Brain.Place,
+    runID: string,
+    ref: string,
+  ) {
     return yield* lock.withPermit(
       Effect.gen(function* () {
         const found = yield* locate(place, runID)
@@ -1332,7 +1420,9 @@ function make(input: {
             return yield* drop(rootless(row.repository_id), row.id, { tombstones: false })
           }),
         )
-        const gone = yield* Effect.forEach(guests, (row) => drop(rootless(row.repository), row.id, { tombstones: false }))
+        const gone = yield* Effect.forEach(guests, (row) =>
+          drop(rootless(row.repository), row.id, { tombstones: false }),
+        )
         return [...swept, ...gone].filter(Boolean).length
       }),
     )
@@ -1357,13 +1447,28 @@ function make(input: {
         const memory = yield* input.ephemeral
         const run = found.row
         const sources = yield* sourcesOf(db, runID)
-        const notes = yield* db.select().from(ResearchNoteTable).where(eq(ResearchNoteTable.run_id, runID)).all().pipe(Effect.orDie)
-        const documents = yield* db.select().from(BrainDocumentTable).where(eq(BrainDocumentTable.run_id, runID)).all().pipe(Effect.orDie)
+        const notes = yield* db
+          .select()
+          .from(ResearchNoteTable)
+          .where(eq(ResearchNoteTable.run_id, runID))
+          .all()
+          .pipe(Effect.orDie)
+        const documents = yield* db
+          .select()
+          .from(BrainDocumentTable)
+          .where(eq(BrainDocumentTable.run_id, runID))
+          .all()
+          .pipe(Effect.orDie)
         const ids = documents.map((document) => document.id)
         const sections =
           ids.length === 0
             ? []
-            : yield* db.select().from(BrainSectionTable).where(inArray(BrainSectionTable.document_id, ids)).all().pipe(Effect.orDie)
+            : yield* db
+                .select()
+                .from(BrainSectionTable)
+                .where(inArray(BrainSectionTable.document_id, ids))
+                .all()
+                .pipe(Effect.orDie)
         const passages =
           ids.length === 0
             ? []
@@ -1378,7 +1483,10 @@ function make(input: {
         yield* memory
           .transaction((tx) =>
             Effect.gen(function* () {
-              yield* tx.insert(ResearchRunTable).values({ ...run, report_document_id: null }).run()
+              yield* tx
+                .insert(ResearchRunTable)
+                .values({ ...run, report_document_id: null })
+                .run()
               for (const document of documents)
                 yield* tx
                   .insert(BrainDocumentTable)
@@ -1390,8 +1498,15 @@ function make(input: {
               for (const section of sections) yield* tx.insert(BrainSectionTable).values(section).run()
               for (const row of passages) {
                 const { id: _, ...item } = row.item
-                const inserted = yield* tx.insert(BrainItemTable).values(item).returning({ id: BrainItemTable.id }).get()
-                yield* tx.insert(BrainPassageTable).values({ ...row.passage, item: inserted!.id }).run()
+                const inserted = yield* tx
+                  .insert(BrainItemTable)
+                  .values(item)
+                  .returning({ id: BrainItemTable.id })
+                  .get()
+                yield* tx
+                  .insert(BrainPassageTable)
+                  .values({ ...row.passage, item: inserted!.id })
+                  .run()
               }
               for (const source of sources) yield* tx.insert(ResearchSourceTable).values(source).run()
               for (const item of notes) yield* tx.insert(ResearchNoteTable).values(item).run()
@@ -1415,7 +1530,12 @@ function make(input: {
 
   // --- Writing documents ------------------------------------------------------------------------------------------
 
-  const write = Effect.fnUntraced(function* (store: Database, repository: string, document: Written, options: { readonly index: boolean }) {
+  const write = Effect.fnUntraced(function* (
+    store: Database,
+    repository: string,
+    document: Written,
+    options: { readonly index: boolean },
+  ) {
     const now = Date.now()
     const held = document.passages.filter((passage) => passage.hold).length
     const items = document.passages.map((passage) => ({
@@ -1454,7 +1574,9 @@ function make(input: {
                 sections: document.sections.length,
                 passages: document.passages.length,
                 records: 0,
-                kinds: Object.fromEntries(BrainSchema.RecordKind.literals.map((kind) => [kind, 0])) as BrainSchema.DocumentStats["kinds"],
+                kinds: Object.fromEntries(
+                  BrainSchema.RecordKind.literals.map((kind) => [kind, 0]),
+                ) as BrainSchema.DocumentStats["kinds"],
                 held,
                 linked: 0,
                 embedded: 0,
@@ -1562,7 +1684,11 @@ function make(input: {
     )
     for (const batch of chunks(postings, BrainKnowledge.LIMIT.batch))
       yield* store
-        .transaction((tx) => Effect.forEach(chunks(batch, 500), (rows) => tx.insert(BrainPostingTable).values(rows).run(), { discard: true }))
+        .transaction((tx) =>
+          Effect.forEach(chunks(batch, 500), (rows) => tx.insert(BrainPostingTable).values(rows).run(), {
+            discard: true,
+          }),
+        )
         .pipe(Effect.orDie)
     yield* frequencies(store, repository, [...termIds.values()])
     yield* totals(store, repository)
@@ -1574,13 +1700,21 @@ function make(input: {
     for (const batch of chunks(terms, 500)) {
       yield* store
         .update(BrainTermTable)
-        .set({ df: sql`(SELECT count(*) FROM ${BrainPostingTable} WHERE ${BrainPostingTable.term} = ${BrainTermTable.id})` })
+        .set({
+          df: sql`(SELECT count(*) FROM ${BrainPostingTable} WHERE ${BrainPostingTable.term} = ${BrainTermTable.id})`,
+        })
         .where(and(eq(BrainTermTable.repository_id, repository), inArray(BrainTermTable.id, batch)))
         .run()
         .pipe(Effect.orDie)
       yield* store
         .delete(BrainTermTable)
-        .where(and(eq(BrainTermTable.repository_id, repository), inArray(BrainTermTable.id, batch), eq(BrainTermTable.df, 0)))
+        .where(
+          and(
+            eq(BrainTermTable.repository_id, repository),
+            inArray(BrainTermTable.id, batch),
+            eq(BrainTermTable.df, 0),
+          ),
+        )
         .run()
         .pipe(Effect.orDie)
     }
@@ -1596,7 +1730,12 @@ function make(input: {
       .pipe(Effect.orDie)
     yield* store
       .insert(BrainStateTable)
-      .values({ repository_id: repository, knowledge_revision: 1, items: sums?.items ?? 0, item_length_sum: sums?.length ?? 0 })
+      .values({
+        repository_id: repository,
+        knowledge_revision: 1,
+        items: sums?.items ?? 0,
+        item_length_sum: sums?.length ?? 0,
+      })
       .onConflictDoUpdate({
         target: BrainStateTable.repository_id,
         set: {
@@ -1651,7 +1790,12 @@ function make(input: {
         norm_hash: next.hash,
         embedded_at: Date.now(),
       }
-      yield* db.insert(BrainVectorTable).values(values).onConflictDoUpdate({ target: BrainVectorTable.item, set: values }).run().pipe(Effect.orDie)
+      yield* db
+        .insert(BrainVectorTable)
+        .values(values)
+        .onConflictDoUpdate({ target: BrainVectorTable.item, set: values })
+        .run()
+        .pipe(Effect.orDie)
       done.count++
       // Idle work: rest as long as the passage took, so the model's machine stays free for a request.
       yield* Effect.sleep(Date.now() - started)
@@ -1691,7 +1835,11 @@ function make(input: {
     forget,
     forgetSource,
     forgetAll,
-    export: Effect.fn("ResearchStore.export")(function* (place: Brain.Place, runID: string, format: "markdown" | "json") {
+    export: Effect.fn("ResearchStore.export")(function* (
+      place: Brain.Place,
+      runID: string,
+      format: "markdown" | "json",
+    ) {
       const detail = yield* get(place, runID)
       if (!detail) return undefined
       const slug =
@@ -1806,7 +1954,9 @@ function merge(own: ReadonlyMap<string, number>, other: ReadonlyMap<string, numb
 }
 
 function chunks<T>(items: readonly T[], size: number) {
-  return Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, (index + 1) * size))
+  return Array.from({ length: Math.ceil(items.length / size) }, (_, index) =>
+    items.slice(index * size, (index + 1) * size),
+  )
 }
 
 // The Markdown export: the report as it was saved, then a bibliography of the pages it read.
@@ -1815,17 +1965,23 @@ function markdownOf(detail: Detail) {
   const date = (at: number | undefined) => (at === undefined ? "" : ` Read ${new Date(at).toISOString().slice(0, 10)}.`)
   // A page's title is its author's words: its backslashes, brackets and angle brackets are escaped, as the report's
   // Sources table escapes them, so a backslash before "<" cannot leave raw HTML live and "[" cannot start a link.
-  const escape = (text: string) => text.replace(/[\\[\]<]/g, "\\$&").replace(/\s+/g, " ").trim()
-  return [
-    detail.report?.trim() ?? `# ${escape(detail.run.question)}\n\nThis run has no report yet.`,
-    "## Bibliography",
-    read.length === 0
-      ? "No pages were read."
-      : read
-          .map(
-            (source) =>
-              `- ${source.id}. ${escape(source.title) || source.site}. ${source.site}. <${source.url.replace(/[<>\s]/g, encodeURIComponent)}>.${date(source.fetched_at)}${source.forgotten ? " Forgotten since." : ""}`,
-          )
-          .join("\n"),
-  ].join("\n\n") + "\n"
+  const escape = (text: string) =>
+    text
+      .replace(/[\\[\]<]/g, "\\$&")
+      .replace(/\s+/g, " ")
+      .trim()
+  return (
+    [
+      detail.report?.trim() ?? `# ${escape(detail.run.question)}\n\nThis run has no report yet.`,
+      "## Bibliography",
+      read.length === 0
+        ? "No pages were read."
+        : read
+            .map(
+              (source) =>
+                `- ${source.id}. ${escape(source.title) || source.site}. ${source.site}. <${source.url.replace(/[<>\s]/g, encodeURIComponent)}>.${date(source.fetched_at)}${source.forgotten ? " Forgotten since." : ""}`,
+            )
+            .join("\n"),
+    ].join("\n\n") + "\n"
+  )
 }

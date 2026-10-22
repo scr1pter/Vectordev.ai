@@ -47,7 +47,9 @@ function withStore<A, E>(
       }).pipe(
         Effect.provide(
           ResearchStore.layerWith(options.limits ? { limits: options.limits } : {}).pipe(
-            Layer.provide(Layer.succeed(BrainDatabase.Service, BrainDatabase.Service.of({ db: setup.db, file: ":memory:" }))),
+            Layer.provide(
+              Layer.succeed(BrainDatabase.Service, BrainDatabase.Service.of({ db: setup.db, file: ":memory:" })),
+            ),
             Layer.provide(Layer.succeed(BrainKnowledge.Service, setup.knowledge)),
             Layer.provide(Layer.succeed(BrainEmbed.Service, setup.embed)),
             Layer.provide(LayerNode.compile(EventV2.node)),
@@ -69,7 +71,11 @@ const REVIEW = [
   "Ventilation matters. Draughty terraced houses saw the smallest savings of every housing type in the review.",
 ]
 
-function page(name: string, chunks: readonly string[], extra: Partial<ResearchStore.SourceInput> = {}): ResearchStore.SourceInput {
+function page(
+  name: string,
+  chunks: readonly string[],
+  extra: Partial<ResearchStore.SourceInput> = {},
+): ResearchStore.SourceInput {
   return {
     url: `https://${name}.web.test/article`,
     canonical: `https://${name}.web.test/article`,
@@ -91,7 +97,9 @@ const RUN = {
 const REPORT: Research.ReportInput = {
   title: "Heat pump savings",
   answer: "Delivered heating energy fell by 61 percent against gas boilers in the field study [N1].",
-  sections: [{ heading: "Measured savings", body: "Delivered heating energy fell by 61 percent against gas boilers [N1]." }],
+  sections: [
+    { heading: "Measured savings", body: "Delivered heating energy fell by 61 percent against gas boilers [N1]." },
+  ],
   open_questions: ["How do savings hold up in draughty houses?"],
 }
 
@@ -122,7 +130,15 @@ const reported = (setup: Setup, start: Partial<ResearchStore.StartInput> = {}) =
   })
 
 const counts = (setup: Setup) =>
-  setup.db.get<{ runs: number; sources: number; notes: number; documents: number; passages: number; postings: number; vectors: number }>(
+  setup.db.get<{
+    runs: number
+    sources: number
+    notes: number
+    documents: number
+    passages: number
+    postings: number
+    vectors: number
+  }>(
     sql`SELECT (SELECT count(*) FROM research_run) AS runs, (SELECT count(*) FROM research_source) AS sources,
           (SELECT count(*) FROM research_note) AS notes, (SELECT count(*) FROM brain_document) AS documents,
           (SELECT count(*) FROM brain_passage) AS passages, (SELECT count(*) FROM brain_posting) AS postings,
@@ -186,8 +202,14 @@ describe("ResearchStore sources", () => {
         const look = () =>
           Effect.gen(function* () {
             return {
-              recall: yield* setup.knowledge.recall(setup.place, ask("smart meters read every fifteen minutes by the utility")),
-              search: yield* setup.knowledge.search(setup.place, { query: "smart meters fifteen minutes utility", personal: true }),
+              recall: yield* setup.knowledge.recall(
+                setup.place,
+                ask("smart meters read every fifteen minutes by the utility"),
+              ),
+              search: yield* setup.knowledge.search(setup.place, {
+                query: "smart meters fifteen minutes utility",
+                personal: true,
+              }),
               cards: yield* setup.knowledge.cards(setup.place, [detail!.passage], { personal: true }),
               get: yield* setup.knowledge.get(setup.place, { id: detail!.passage, budget: 600, personal: true }),
               documents: yield* setup.knowledge.documents(setup.place, { personal: true }),
@@ -240,11 +262,17 @@ describe("ResearchStore sources", () => {
         const run = yield* setup.store.start(setup.place, RUN)
         yield* setup.store.addSource(setup.place, run.id, page("homes", long))
         // More runs than dedupe keeps in memory, each reading a page of its own.
-        yield* Effect.forEach(Array.from({ length: 10 }, (_, index) => index), (index) =>
-          Effect.gen(function* () {
-            const other = yield* setup.store.start(setup.place, { ...RUN, sessionID: `ses_${index}` })
-            yield* setup.store.addSource(setup.place, other.id, page(`other${index}`, [`${REVIEW[index % 2]} Page ${index}.`]))
-          }),
+        yield* Effect.forEach(
+          Array.from({ length: 10 }, (_, index) => index),
+          (index) =>
+            Effect.gen(function* () {
+              const other = yield* setup.store.start(setup.place, { ...RUN, sessionID: `ses_${index}` })
+              yield* setup.store.addSource(
+                setup.place,
+                other.id,
+                page(`other${index}`, [`${REVIEW[index % 2]} Page ${index}.`]),
+              )
+            }),
         )
         return yield* setup.store.addSource(
           setup.place,
@@ -267,7 +295,13 @@ describe("ResearchStore sources", () => {
         })
         const rendered = yield* setup.store.addSource(setup.place, run.id, page("app", STUDY))
         const again = yield* setup.store.addSource(setup.place, run.id, page("app", REVIEW))
-        return { skipped, rendered, again, saved: yield* setup.store.source(setup.place, run.id, "S1"), detail: yield* setup.store.get(setup.place, run.id) }
+        return {
+          skipped,
+          rendered,
+          again,
+          saved: yield* setup.store.source(setup.place, run.id, "S1"),
+          detail: yield* setup.store.get(setup.place, run.id),
+        }
       }),
     )
     expect(result.skipped).toMatchObject({ type: "added", source: { id: "S1", status: "needs-render" } })
@@ -284,10 +318,22 @@ describe("ResearchStore sources", () => {
       (setup) =>
         Effect.gen(function* () {
           const run = yield* setup.store.start(setup.place, { ...RUN, budget: { pages: 2, searches: 1 } })
-          const one = yield* setup.store.addSource(setup.place, run.id, page("one", ["A first page with enough words in it to matter."]))
+          const one = yield* setup.store.addSource(
+            setup.place,
+            run.id,
+            page("one", ["A first page with enough words in it to matter."]),
+          )
           const big = yield* setup.store.addSource(setup.place, run.id, page("big", ["x".repeat(400)]))
-          const two = yield* setup.store.addSource(setup.place, run.id, page("two", ["A second page with other words in it entirely."]))
-          const three = yield* setup.store.addSource(setup.place, run.id, page("three", ["A third page that the budget leaves out."]))
+          const two = yield* setup.store.addSource(
+            setup.place,
+            run.id,
+            page("two", ["A second page with other words in it entirely."]),
+          )
+          const three = yield* setup.store.addSource(
+            setup.place,
+            run.id,
+            page("three", ["A third page that the budget leaves out."]),
+          )
           const skipped = yield* setup.store.addSource(setup.place, run.id, {
             ...page("script", []),
             status: "needs-render",
@@ -323,7 +369,10 @@ describe("ResearchStore notes", () => {
         const run = yield* setup.store.start(setup.place, RUN)
         yield* setup.store.addSource(setup.place, run.id, page("homes", STUDY))
         return {
-          missing: yield* setup.store.note(setup.place, run.id, { ...NOTE, quote: "Delivered heating energy fell by 75 percent" }),
+          missing: yield* setup.store.note(setup.place, run.id, {
+            ...NOTE,
+            quote: "Delivered heating energy fell by 75 percent",
+          }),
           short: yield* setup.store.note(setup.place, run.id, { ...NOTE, quote: "61 percent" }),
           nowhere: yield* setup.store.note(setup.place, run.id, { ...NOTE, source: "S9" }),
           stated: yield* setup.store.note(setup.place, run.id, NOTE),
@@ -336,10 +385,16 @@ describe("ResearchStore notes", () => {
         }
       }),
     )
-    expect(result.missing).toEqual({ type: "refused", message: "That quote is not in S1. Copy the words from S1 chunk 2." })
+    expect(result.missing).toEqual({
+      type: "refused",
+      message: "That quote is not in S1. Copy the words from S1 chunk 2.",
+    })
     expect(result.short).toMatchObject({ type: "refused" })
     expect(result.nowhere).toEqual({ type: "refused", message: "There is no S9 in this run." })
-    expect(result.stated).toMatchObject({ type: "saved", note: { id: "N1", source: "S1", support: true, stance: "supports" } })
+    expect(result.stated).toMatchObject({
+      type: "saved",
+      note: { id: "N1", source: "S1", support: true, stance: "supports" },
+    })
     expect(result.paraphrase).toMatchObject({ type: "saved", note: { id: "N2", support: false } })
     expect(result.focus.map((part) => part.chunk)).toEqual([3])
   })
@@ -405,7 +460,10 @@ describe("ResearchStore reports", () => {
     const result = await withStore((setup) =>
       Effect.gen(function* () {
         const { run } = yield* reported(setup)
-        const refused = yield* setup.store.report(setup.place, run.id, { ...REPORT, answer: "It fell by 61 percent [N4]." })
+        const refused = yield* setup.store.report(setup.place, run.id, {
+          ...REPORT,
+          answer: "It fell by 61 percent [N4].",
+        })
         yield* setup.store.keep(setup.place, run.id)
         const next = yield* setup.store.report(setup.place, run.id, { ...REPORT, title: "Heat pump savings, revised" })
         const documents = yield* setup.db.all<{ title: string; status: string; version: number }>(
@@ -432,10 +490,15 @@ describe("ResearchStore reports", () => {
         }
       }),
     )
-    expect(result.markdown).toMatchObject({ name: "research-how-much-do-heat-pumps-cut-heating-energy.md", type: "text/markdown" })
+    expect(result.markdown).toMatchObject({
+      name: "research-how-much-do-heat-pumps-cut-heating-energy.md",
+      type: "text/markdown",
+    })
     expect(result.markdown?.body).toContain("# Heat pump savings")
     expect(result.markdown?.body).toContain("## Bibliography")
-    expect(result.markdown?.body).toContain("- S1. homes field study. homes.web.test. <https://homes.web.test/article>.")
+    expect(result.markdown?.body).toContain(
+      "- S1. homes field study. homes.web.test. <https://homes.web.test/article>.",
+    )
     const json = JSON.parse(result.json!.body)
     expect(result.json?.type).toBe("application/json")
     expect(json.run.question).toBe(RUN.question)
@@ -452,7 +515,9 @@ describe("ResearchStore reports", () => {
         yield* setup.store.addSource(
           setup.place,
           run.id,
-          page("homes", STUDY, { title: "\\<img src=x onerror=alert(1)> ![x](https://evil.web.test/p.png) [click](https://evil.web.test)" }),
+          page("homes", STUDY, {
+            title: "\\<img src=x onerror=alert(1)> ![x](https://evil.web.test/p.png) [click](https://evil.web.test)",
+          }),
         )
         return yield* setup.store.export(setup.place, run.id, "markdown")
       }),
@@ -486,9 +551,14 @@ describe("ResearchStore forgetting", () => {
     expect(result.detail?.sources[0]).toMatchObject({ id: "S1", forgotten: true })
     expect(result.detail?.notes.map((note) => note.id)).toEqual(["N1"])
     expect(result.report.type === "saved" && result.report.rendered.removed).toEqual(["N1"])
-    expect(result.report.type === "saved" && result.report.rendered.markdown).toContain("Its quote is no longer in its source.")
+    expect(result.report.type === "saved" && result.report.rendered.markdown).toContain(
+      "Its quote is no longer in its source.",
+    )
     expect(result.again).toMatchObject({ type: "added", source: { status: "failed", reason: ResearchStore.FORGOTTEN } })
-    expect(result.elsewhere).toMatchObject({ type: "added", source: { status: "failed", reason: ResearchStore.FORGOTTEN } })
+    expect(result.elsewhere).toMatchObject({
+      type: "added",
+      source: { status: "failed", reason: ResearchStore.FORGOTTEN },
+    })
     expect(result.fresh).toMatchObject({ type: "added", source: { status: "read" } })
     // The study's page is gone: the review's page and the report are what is left.
     expect(result.after?.documents).toBe(2)
@@ -510,7 +580,16 @@ describe("ResearchStore forgetting", () => {
           sql`SELECT (SELECT count(*) FROM brain_term) AS terms, items, item_length_sum AS length FROM brain_state
               WHERE repository_id = ${setup.place.repository}`,
         )
-        return { forgot, one, all, tombstones, index, other: other.run.id, after: yield* counts(setup), list: yield* setup.store.list(setup.place) }
+        return {
+          forgot,
+          one,
+          all,
+          tombstones,
+          index,
+          other: other.run.id,
+          after: yield* counts(setup),
+          list: yield* setup.store.list(setup.place),
+        }
       }),
     )
     expect(result.forgot).toBe(true)
@@ -540,11 +619,24 @@ describe("ResearchStore forgetting", () => {
         const later = yield* setup.store.start(setup.place, { ...RUN, sessionID: "ses_later" })
         const again = yield* setup.store.addSource(setup.place, later.id, page("homes", STUDY))
         const runs = (yield* setup.store.list(setup.place)).map((summary) => summary.run.id)
-        return { swept, runs, again, ids: { old: old.run.id, kept: kept.run.id, approved: approved.run.id, recent: recent.run.id, later: later.id } }
+        return {
+          swept,
+          runs,
+          again,
+          ids: {
+            old: old.run.id,
+            kept: kept.run.id,
+            approved: approved.run.id,
+            recent: recent.run.id,
+            later: later.id,
+          },
+        }
       }),
     )
     expect(result.swept).toBe(1)
-    expect(result.runs.toSorted()).toEqual([result.ids.kept, result.ids.approved, result.ids.recent, result.ids.later].toSorted())
+    expect(result.runs.toSorted()).toEqual(
+      [result.ids.kept, result.ids.approved, result.ids.recent, result.ids.later].toSorted(),
+    )
     expect(result.runs).not.toContain(result.ids.old)
     expect(result.again).toMatchObject({ type: "added", source: { status: "read" } })
   })
@@ -566,7 +658,13 @@ describe("ResearchStore forgetting", () => {
           const second = yield* setup.store.addSource(setup.place, current.id, page("echo", text("echo")))
           const full = yield* setup.store.addSource(setup.place, current.id, page("foxtrot", text("foxtrot")))
           const left = (yield* setup.store.list(setup.place)).map((summary) => summary.run.id)
-          return { first, second, full, left, ids: { oldest: oldest.id, kept: kept.id, newer: newer.id, current: current.id } }
+          return {
+            first,
+            second,
+            full,
+            left,
+            ids: { oldest: oldest.id, kept: kept.id, newer: newer.id, current: current.id },
+          }
         }),
       // Each page is about 240 bytes: three fit, a fourth needs room.
       { limits: { repository: 800 } },
@@ -618,7 +716,15 @@ describe("ResearchStore guests", () => {
         const quoted = yield* setup.store.quoted(setup.place, run.id, "S1", NOTE.quote)
         const added = yield* setup.store.addSource(setup.place, run.id, page("review", REVIEW))
         const report = yield* setup.store.report(setup.place, run.id, REPORT)
-        return { before, moved, quoted, added, report, after: yield* counts(setup), detail: yield* setup.store.get(setup.place, run.id) }
+        return {
+          before,
+          moved,
+          quoted,
+          added,
+          report,
+          after: yield* counts(setup),
+          detail: yield* setup.store.get(setup.place, run.id),
+        }
       }),
     )
     expect(result.before).toMatchObject({ runs: 1, sources: 1, notes: 1, documents: 1 })
@@ -677,7 +783,15 @@ describe("research migration", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const db = yield* EffectDrizzleSqlite.makeWithDefaults()
-        yield* DatabaseMigration.applyOnly(db, [first, knowledgeMigration, privateMemory, tombstoneTerms, credit, code, creditedOnce])
+        yield* DatabaseMigration.applyOnly(db, [
+          first,
+          knowledgeMigration,
+          privateMemory,
+          tombstoneTerms,
+          credit,
+          code,
+          creditedOnce,
+        ])
         yield* db.run(sql`
           INSERT INTO brain_entry (id, scope, repository_id, kind, origin, status, body, paths, terms, norm_hash,
             confidence, created_at, updated_at, related)
@@ -764,7 +878,8 @@ function stored(db: Database, name: string) {
   type Index = { name: string; unique: number; origin: string }
   type Key = { id: number; table: string; from: string; on_delete: string }
   const columns = db.query(`PRAGMA table_info('${name}')`).all() as Column[]
-  const single = columns.filter((column) => column.pk > 0).length === 1 ? columns.find((column) => column.pk > 0)?.name : undefined
+  const single =
+    columns.filter((column) => column.pk > 0).length === 1 ? columns.find((column) => column.pk > 0)?.name : undefined
   const indexes = (db.query(`PRAGMA index_list('${name}')`).all() as Index[]).filter((index) => index.origin === "c")
   const keys = db.query(`PRAGMA foreign_key_list('${name}')`).all() as Key[]
   return {
@@ -779,7 +894,9 @@ function stored(db: Database, name: string) {
     indexes: indexes
       .map((index) => ({
         unique: index.unique === 1,
-        columns: (db.query(`PRAGMA index_info('${index.name}')`).all() as { name: string }[]).map((column) => column.name),
+        columns: (db.query(`PRAGMA index_info('${index.name}')`).all() as { name: string }[]).map(
+          (column) => column.name,
+        ),
       }))
       .toSorted((a, b) => a.columns.join().localeCompare(b.columns.join())),
     foreign: keys
