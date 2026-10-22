@@ -32,6 +32,9 @@ import { NEXT_STEP_SLACK } from "../../review/plan"
 import { isFreeModel } from "@vectordevai/schema/free-model"
 import { ModelSlots } from "../../local-mode/model-slots"
 import { LocalPolicy } from "../../local-mode/policy"
+import { Egress } from "../../local-mode/egress"
+import { OllamaServer } from "../../local-mode/servers/ollama"
+import type { LocalMode } from "@vectordevai/schema/local-mode"
 
 export class ModelNotSelectedError extends Schema.TaggedErrorClass<ModelNotSelectedError>()(
   "SessionRunnerModel.ModelNotSelectedError",
@@ -95,12 +98,23 @@ export class UnsafeEndpointError extends Schema.TaggedErrorClass<UnsafeEndpointE
   }
 }
 
+export class OffInLocalError extends Schema.TaggedErrorClass<OffInLocalError>()("SessionRunnerModel.OffInLocalError", {
+  providerID: ProviderV2.ID,
+  modelID: ModelV2.ID,
+  reason: Schema.String,
+}) {
+  override get message() {
+    return `${this.providerID}/${this.modelID} is off in Vector Local. ${this.reason}`
+  }
+}
+
 export type Error =
   | ModelNotSelectedError
   | ModelUnavailableError
   | VariantUnavailableError
   | UnsupportedApiError
   | UnsafeEndpointError
+  | OffInLocalError
   | Integration.AuthorizationError
 
 export interface Interface {
@@ -462,6 +476,39 @@ function requiresFreeRoute(model: ModelV2.Info) {
   )
 }
 
+// Where the SDK packages send a model's requests when the catalog names no address.
+const PACKAGE_ORIGINS: Record<string, string> = {
+  "@ai-sdk/openai": "https://api.openai.com",
+  "@ai-sdk/anthropic": "https://api.anthropic.com",
+}
+
+/**
+ * Vector Local keeps every model call on the model servers on the list, as the V1 provider does: a turn on any other
+ * model fails here, before a route is built or a stream starts. Nothing is logged, since no request is made.
+ */
+export const allowedInLocal = (model: ModelV2.Info) => {
+  const policy = Egress.policy()
+  if (!policy.enabled) return Effect.void
+  const reason = localRefusal(model, policy)
+  if (reason === undefined) return Effect.void
+  return Effect.fail(new OffInLocalError({ providerID: model.providerID, modelID: model.id, reason }))
+}
+
+// Why Vector Local refuses a model, or undefined when its requests go to a model server on the list. Vector's own
+// models (free models and Vector Codium) and an Ollama cloud model are never allowed, nor is one whose address is
+// unknown.
+function localRefusal(model: ModelV2.Info, policy: LocalMode.Policy) {
+  if (model.providerID === ModelPlans.PROVIDER_ID || requiresFreeRoute(model))
+    return "Vector's free models and Vector Codium run on vectordev.ai, outside the model servers you host."
+  const url = model.api.url ?? (model.api.type === "aisdk" ? PACKAGE_ORIGINS[model.api.package] : undefined)
+  if (!url) return "Vector cannot tell which server its requests go to."
+  if (ModelSlots.server(url, policy) && OllamaServer.cloud({ name: model.api.id }))
+    return "It is an Ollama cloud model: the Ollama app passes its prompts on to ollama.com."
+  const source = LocalPolicy.classify(policy, url) === "internet" ? "cloud-inference" : "local-inference"
+  const verdict = LocalPolicy.decide(policy, { purpose: "inference", url, source })
+  return verdict.decision === "allow" ? undefined : verdict.reason
+}
+
 // Whatever decides where a model's requests go.
 function destinations(model: ModelV2.Info) {
   return [model.api.url, model.request.body.baseURL, model.api.type === "aisdk" ? model.api.package : undefined]
@@ -482,6 +529,7 @@ export const locationLayer = Layer.effect(
     return Service.of({
       resolve: Effect.fn("SessionRunnerModel.resolve")(function* (session) {
         const selected = yield* select(catalog, session)
+        yield* allowedInLocal(selected)
         if (selected.providerID === ModelPlans.PROVIDER_ID)
           return withPricing(modelPlanRoute(selected, modelPlans, freeCredentials), selected.cost)
         // Configuration can overwrite API metadata or add a free ID after catalog validation.
@@ -562,5 +610,14 @@ export const select = Effect.fn("SessionRunnerModel.select")(function* (
 
 // Codium spends the account's credits, so it is never chosen automatically. Nor is a free model that may train on
 // prompts: its notice is accepted for a model someone chose, not for one picked for them.
-const automaticModel = (models: readonly ModelV2.Info[]) =>
-  models.find((model) => supported(model) && model.providerID !== ModelPlans.PROVIDER_ID && !freeModelMayTrain(model))
+// With Vector Local on, only a model on a server on the list is chosen.
+const automaticModel = (models: readonly ModelV2.Info[]) => {
+  const policy = Egress.policy()
+  return models.find(
+    (model) =>
+      supported(model) &&
+      model.providerID !== ModelPlans.PROVIDER_ID &&
+      !freeModelMayTrain(model) &&
+      (!policy.enabled || localRefusal(model, policy) === undefined),
+  )
+}
