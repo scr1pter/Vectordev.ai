@@ -1010,6 +1010,9 @@ function make(input: {
       created_at: now,
       updated_at: now,
       indexed_at: null,
+      source_url: null,
+      fetched_at: null,
+      run_id: null,
     } satisfies DocumentRow
     yield* db
       .transaction((tx) =>
