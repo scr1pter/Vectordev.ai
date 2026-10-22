@@ -698,6 +698,7 @@ const layer = Layer.effect(
     const loadInstanceState = Effect.fn("Config.loadInstanceState")(
       function* (ctx: InstanceContext) {
         const auth = yield* authSvc.all().pipe(Effect.orDie)
+        const managed = ConfigManaged.read()
         const projectFiles = Flag.VECTOR_DISABLE_PROJECT_CONFIG
           ? []
           : yield* ConfigPaths.files("vector", ctx.directory, ctx.worktree).pipe(Effect.orDie)
@@ -1040,20 +1041,17 @@ const layer = Layer.effect(
           yield* Effect.logDebug("loaded custom config from VECTOR_CONFIG_CONTENT")
         }
 
-        const managedDir = ConfigManaged.managedConfigDir()
-        if (existsSync(managedDir)) {
-          for (const file of ["vector.json", "vector.jsonc"]) {
-            const source = path.join(managedDir, file)
-            yield* merge(source, yield* loadFile(source), "global")
-          }
+        // Company policy counts only where a standard user could not have written it (ConfigManaged.read).
+        if (managed.ignored.length > 0) yield* Effect.logWarning(ConfigManaged.UNTRUSTED, { ignored: managed.ignored })
+        for (const source of managed.files) {
+          yield* merge(source, yield* loadFile(source), "global")
         }
 
-        // macOS managed preferences (.mobileconfig deployed via MDM) override everything
-        const managed = yield* Effect.promise(() => ConfigManaged.readManagedPreferences())
-        if (managed) {
-          const next = yield* loadConfig(managed.text, {
-            dir: path.dirname(managed.source),
-            source: managed.source,
+        // The macOS MDM profile and the Windows policy key override everything
+        for (const policy of managed.policies) {
+          const next = yield* loadConfig(policy.text, {
+            dir: path.dirname(policy.source),
+            source: policy.source,
           })
           userPermissions = mergeConfigConcatArrays(userPermissions, {
             ...(next.permission && { permission: next.permission }),
@@ -1301,7 +1299,7 @@ const layer = Layer.effect(
         ...(Flag.VECTOR_DISABLE_PROJECT_CONFIG
           ? []
           : [integrationStore(ctx.worktree === "/" ? ctx.directory : ctx.worktree)]),
-        ...["vector.json", "vector.jsonc"].map((file) => path.join(ConfigManaged.managedConfigDir(), file)),
+        ...ConfigManaged.read().files,
       ]
       const entries = yield* Effect.forEach(files, (file) =>
         readConfigFile(file).pipe(
