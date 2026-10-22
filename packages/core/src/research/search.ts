@@ -6,6 +6,7 @@ import { collectBoundedResponseBody } from "../tool/http-body"
 import { WebFetchRequest } from "../util/webfetch-request"
 import { ResearchCanonical } from "./canonical"
 import { WebFence } from "./fence"
+import { ResearchOutbound } from "./outbound"
 
 // Where research searches. SearXNG is a search server the user runs or chooses: Vector asks its JSON API
 // (`GET {url}/search?q=…&format=json`), which the server's settings have to allow. Exa and Parallel are the existing
@@ -35,6 +36,10 @@ export const JSON_OFF =
 export const BUSY = "The search server is limiting searches right now. Try again in a minute."
 export const FORWARDING =
   "This server may pass your prompts or queries on to services it is set up to use. Vector can't see past it."
+export const SITE = "The site filter has to be a host name, such as nature.com."
+
+// A host name: labels of letters, digits and hyphens, the last one starting with a letter.
+const HOST = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/i
 
 /** Why Vector Local lets a paid search service see the queries, shown beside the allow. */
 export function provided(provider: "exa" | "parallel") {
@@ -58,6 +63,11 @@ export type Query = {
 }
 
 export class SearchFailed extends Data.TaggedError("ResearchSearchFailed")<{ readonly message: string }> {}
+/** The outbound check refused the search: it would send private text. Nothing was sent. */
+export class QueryRefused extends Data.TaggedError("ResearchSearchRefused")<{
+  readonly reason: ResearchOutbound.Reason
+  readonly message: string
+}> {}
 // The caller's own refusal, carried through the request so it is passed on as it was.
 class Declined extends Data.TaggedError("ResearchSearchDeclined")<{ readonly cause: unknown }> {}
 
@@ -138,67 +148,75 @@ export function parseSearxng(body: string, limit = DEFAULT_RESULTS): readonly Re
 }
 
 /**
- * Searches a SearXNG server. The request goes through WebFetchRequest like any web read: the name is pinned and a
- * server on the user's own network asks `authorizePrivate` once. `authorize` is the caller's decision for the
- * server's address (Vector Local's Web access); its failure is passed on unchanged.
+ * Searches a SearXNG server. The words it sends, the query with its `site:` filter, pass the outbound check against
+ * the run's `context` first, and the site has to be a host name. The request goes through WebFetchRequest like any
+ * web read: the name is pinned and a server on the user's own network asks `authorizePrivate` once. `authorize` is
+ * the caller's decision for the server's address (Vector Local's Web access); its failure is passed on unchanged.
  */
-export const searxng = Effect.fn("ResearchSearch.searxng")(function* (
-  query: Query,
-  options: {
-    readonly http: HttpClient.HttpClient
-    readonly url: string
-    readonly authorize: (url: string) => Effect.Effect<void, unknown>
-    readonly authorizePrivate?: (url: string) => Effect.Effect<void, unknown>
-    readonly resolver?: WebFetchRequest.DestinationResolver
-  },
-) {
-  const address = searxngUrl(options.url, query)
-  const answer = yield* Effect.gen(function* () {
-    const response = yield* WebFetchRequest.execute(
-      options.http,
-      HttpClientRequest.get(address).pipe(HttpClientRequest.setHeaders({ Accept: "application/json" })),
-      {
-        authorize: (url) => options.authorize(url).pipe(Effect.mapError((cause) => new Declined({ cause }))),
-        authorizePrivate: options.authorizePrivate
-          ? (url) => options.authorizePrivate!(url).pipe(Effect.mapError((cause) => new Declined({ cause })))
-          : undefined,
-        resolver: options.resolver,
-      },
-    ).pipe(
+export const searxng = Effect.fn("ResearchSearch.searxng")(
+  function* (
+    query: Query,
+    options: {
+      readonly http: HttpClient.HttpClient
+      readonly url: string
+      readonly context: ResearchOutbound.Context
+      readonly authorize: (url: string) => Effect.Effect<void, unknown>
+      readonly authorizePrivate?: (url: string) => Effect.Effect<void, unknown>
+      readonly resolver?: WebFetchRequest.DestinationResolver
+    },
+  ) {
+    if (query.site !== undefined && !HOST.test(query.site)) return yield* new SearchFailed({ message: SITE })
+    const address = searxngUrl(options.url, query)
+    const checked = ResearchOutbound.check(new URL(address).searchParams.get("q") ?? "", options.context)
+    if (!checked.ok) return yield* new QueryRefused({ reason: checked.reason, message: checked.message })
+    const answer = yield* Effect.gen(function* () {
+      const response = yield* WebFetchRequest.execute(
+        options.http,
+        HttpClientRequest.get(address).pipe(HttpClientRequest.setHeaders({ Accept: "application/json" })),
+        {
+          authorize: (url) => options.authorize(url).pipe(Effect.mapError((cause) => new Declined({ cause }))),
+          authorizePrivate: options.authorizePrivate
+            ? (url) => options.authorizePrivate!(url).pipe(Effect.mapError((cause) => new Declined({ cause })))
+            : undefined,
+          resolver: options.resolver,
+        },
+      ).pipe(
+        Effect.catchIf(
+          (error): error is HttpClientError.HttpClientError =>
+            HttpClientError.isHttpClientError(error) && error.reason._tag === "StatusCodeError" && !!error.response,
+          (error) => Effect.succeed(error.response!),
+        ),
+      )
+      const body = yield* collectBoundedResponseBody(
+        response,
+        MAX_BYTES,
+        () => new SearchFailed({ message: "The search server sent more than Vector reads for one search." }),
+      )
+      return { status: response.status, body: new TextDecoder().decode(body) }
+    }).pipe(
+      Effect.scoped,
+      Effect.timeoutOrElse({
+        duration: TIMEOUT,
+        orElse: () => Effect.fail(new SearchFailed({ message: "The search server did not answer in time." })),
+      }),
       Effect.catchIf(
-        (error): error is HttpClientError.HttpClientError =>
-          HttpClientError.isHttpClientError(error) && error.reason._tag === "StatusCodeError" && !!error.response,
-        (error) => Effect.succeed(error.response!),
+        (error) => !(error instanceof Declined) && !(error instanceof SearchFailed),
+        () => Effect.fail(new SearchFailed({ message: "Vector could not reach the search server." })),
       ),
     )
-    const body = yield* collectBoundedResponseBody(
-      response,
-      MAX_BYTES,
-      () => new SearchFailed({ message: "The search server sent more than Vector reads for one search." }),
-    )
-    return { status: response.status, body: new TextDecoder().decode(body) }
-  }).pipe(
-    Effect.scoped,
-    Effect.timeoutOrElse({
-      duration: TIMEOUT,
-      orElse: () => Effect.fail(new SearchFailed({ message: "The search server did not answer in time." })),
-    }),
-    Effect.catchIf(
-      (error) => !(error instanceof Declined) && !(error instanceof SearchFailed),
-      () => Effect.fail(new SearchFailed({ message: "Vector could not reach the search server." })),
-    ),
-  )
-  // SearXNG answers 403 when its settings leave the json format off, and 429 when its limiter holds a client back.
-  if (answer.status === 403) return yield* new SearchFailed({ message: JSON_OFF })
-  if (answer.status === 429) return yield* new SearchFailed({ message: BUSY })
-  if (answer.status < 200 || answer.status >= 300)
-    return yield* new SearchFailed({ message: `The search server answered ${answer.status}.` })
-  if (Option.isNone(decodeAnswer(answer.body))) return yield* new SearchFailed({ message: JSON_OFF })
-  return parseSearxng(answer.body, query.limit)
-}, Effect.catchIf(
-  (error) => error instanceof Declined,
-  (error) => Effect.fail((error as Declined).cause),
-))
+    // SearXNG answers 403 when its settings leave the json format off, and 429 when its limiter holds a client back.
+    if (answer.status === 403) return yield* new SearchFailed({ message: JSON_OFF })
+    if (answer.status === 429) return yield* new SearchFailed({ message: BUSY })
+    if (answer.status < 200 || answer.status >= 300)
+      return yield* new SearchFailed({ message: `The search server answered ${answer.status}.` })
+    if (Option.isNone(decodeAnswer(answer.body))) return yield* new SearchFailed({ message: JSON_OFF })
+    return parseSearxng(answer.body, query.limit)
+  },
+  Effect.catchIf(
+    (error) => error instanceof Declined,
+    (error) => Effect.fail((error as Declined).cause),
+  ),
+)
 
 function text(value: string | null | undefined, max: number) {
   const cleaned = WebFence.clean(value ?? "")

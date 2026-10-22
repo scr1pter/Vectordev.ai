@@ -34,11 +34,26 @@ const http = Effect.runSync(
   }).pipe(Effect.provide(FetchHttpClient.layer)),
 )
 
-const search = (site: string, query: ResearchSearch.Query, authorize: (url: string) => Effect.Effect<void, unknown>) =>
+// What the run holds privately, for the outbound check every search passes.
+const context = {
+  private: [
+    "Acme's Q3 churn rose to 7.4 percent after the Falcon pricing change.",
+    "// Tickets are on jira.acme.internal.",
+  ],
+  typed: ["Research how heat pumps perform in cold climates."],
+  public: [],
+}
+const search = (
+  site: string,
+  query: ResearchSearch.Query,
+  authorize: (url: string) => Effect.Effect<void, unknown>,
+  using = context,
+) =>
   Effect.runPromiseExit(
     ResearchSearch.searxng(query, {
       http,
       url: web.url(site, "/"),
+      context: using,
       authorize,
       authorizePrivate: web.authorizePrivate,
       resolver: web.resolver,
@@ -169,15 +184,16 @@ describe("ResearchSearch.order", () => {
   })
 
   test("under Vector Local, Exa and Parallel are used only when the user allowed them", () => {
-    expect(
-      ResearchSearch.order({ provider: "auto", exa: true, parallel: true, local: { allowed: [] } }),
-    ).toEqual(["none"])
-    expect(
-      ResearchSearch.order({ provider: "auto", exa: true, parallel: true, local: { allowed: ["exa"] } }),
-    ).toEqual(["exa", "none"])
-    expect(ResearchSearch.order({ provider: "parallel", exa: false, parallel: true, local: { allowed: [] } })).toEqual(
-      ["none"],
-    )
+    expect(ResearchSearch.order({ provider: "auto", exa: true, parallel: true, local: { allowed: [] } })).toEqual([
+      "none",
+    ])
+    expect(ResearchSearch.order({ provider: "auto", exa: true, parallel: true, local: { allowed: ["exa"] } })).toEqual([
+      "exa",
+      "none",
+    ])
+    expect(ResearchSearch.order({ provider: "parallel", exa: false, parallel: true, local: { allowed: [] } })).toEqual([
+      "none",
+    ])
   })
 
   test("a chosen provider that is not set up falls back to none", () => {
@@ -191,7 +207,9 @@ describe("ResearchSearch.order", () => {
 
   test("says what a paid service sees under Vector Local", () => {
     expect(ResearchSearch.provided("exa")).toBe("Exa sees your search queries; billed by Exa on your key")
-    expect(ResearchSearch.provided("parallel")).toBe("Parallel sees your search queries; billed by Parallel on your key")
+    expect(ResearchSearch.provided("parallel")).toBe(
+      "Parallel sees your search queries; billed by Parallel on your key",
+    )
   })
 })
 
@@ -225,6 +243,7 @@ describe("ResearchSearch.searxng", () => {
         {
           http,
           url: web.url("proxied", "/searx"),
+          context,
           authorize: () => Effect.void,
           authorizePrivate: web.authorizePrivate,
           resolver: web.resolver,
@@ -236,6 +255,31 @@ describe("ResearchSearch.searxng", () => {
     expect(exit.value).toEqual([
       { url: web.url("article", "/"), title: "heat pumps site:nature.com", snippet: "month" },
     ])
+  })
+
+  test("checks the words it sends, the site filter included, and sends nothing private", async () => {
+    const before = web.count("searxng")
+    const leaked = failure(await search("searxng", { query: "Acme's Q3 churn" }, () => Effect.void))
+    expect(leaked).toMatchObject({
+      _tag: "ResearchSearchRefused",
+      reason: "words",
+      message: "That search would send text from your private files. Rephrase it with public terms.",
+    })
+    const filtered = failure(
+      await search("searxng", { query: "outage reports", site: "jira.acme.internal" }, () => Effect.void),
+    )
+    expect(filtered).toMatchObject({ _tag: "ResearchSearchRefused", reason: "token" })
+    expect(web.count("searxng")).toBe(before)
+  })
+
+  test("takes only a host name as the site filter", async () => {
+    const before = web.count("searxng")
+    for (const site of ["nature.com OR acme", "nature.com/path", "-site", ""]) {
+      expect(failure(await search("searxng", { query: "heat pumps", site }, () => Effect.void))).toMatchObject({
+        message: ResearchSearch.SITE,
+      })
+    }
+    expect(web.count("searxng")).toBe(before)
   })
 
   test("says how to turn on the json format when the server refuses it", async () => {
@@ -270,7 +314,10 @@ describe("ResearchSearch.searxng", () => {
       }),
     )
     expect(failure(exit)).toBe(refusal)
-    expect(authorized).toEqual([web.url("away", "/search?q=heat&format=json"), "https://search.example.com/search?q=heat"])
+    expect(authorized).toEqual([
+      web.url("away", "/search?q=heat&format=json"),
+      "https://search.example.com/search?q=heat",
+    ])
     expect(web.refused()).toEqual([])
     expect(guard.outside()).toEqual([])
   })
@@ -283,6 +330,7 @@ describe("ResearchSearch.searxng", () => {
         {
           http,
           url: web.url("searxng", "/"),
+          context,
           authorize: () => Effect.void,
           authorizePrivate: (url) =>
             Effect.sync(() => {
@@ -298,7 +346,7 @@ describe("ResearchSearch.searxng", () => {
     const refused = await Effect.runPromiseExit(
       ResearchSearch.searxng(
         { query: "heat pumps" },
-        { http, url: web.url("searxng", "/"), authorize: () => Effect.void, resolver: web.resolver },
+        { http, url: web.url("searxng", "/"), context, authorize: () => Effect.void, resolver: web.resolver },
       ),
     )
     expect(failure(refused)).toMatchObject({ _tag: "ResearchSearchFailed" })
