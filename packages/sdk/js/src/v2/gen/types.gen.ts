@@ -784,7 +784,7 @@ export type SessionStatus =
       type: "busy"
     }
 
-export type CostKind = "free" | "priced" | "plan" | "unknown"
+export type CostKind = "free" | "priced" | "plan" | "local" | "unknown"
 
 export type QuestionOption = {
   /**
@@ -852,7 +852,7 @@ export type GlobalEvent = {
         type: "provider.unavailable"
         properties: {
           id: string
-          reason: "sign-in-paused" | "provider-not-configured" | "disabled" | "no-models"
+          reason: "sign-in-paused" | "provider-not-configured" | "disabled" | "no-models" | "off-in-local"
           message: string
         }
       }
@@ -1969,6 +1969,7 @@ export type ProviderConfig = {
      */
     headerTimeout?: number | false
     chunkTimeout?: number
+    concurrency?: number
     [key: string]: unknown | string | boolean | number | false | number | false | number | undefined
   }
   models?: {
@@ -2098,6 +2099,101 @@ export type RunBudget = {
   steps?: number
   warnAt?: number
   unpricedSteps?: number
+}
+
+export type LocalWeb = "ask" | "network" | "none"
+
+export type LocalAllowed = {
+  source: string
+  hosts?: Array<string>
+  reason: string
+  added_at: number
+  added_by: "app" | "cli" | "managed"
+}
+
+export type LocalPinConfig = {
+  /**
+   * The kind of server Vector found, such as ollama or vllm
+   */
+  kind: string
+  version?: string
+  models?: string
+  spki?: string
+}
+
+export type LocalCheckedConfig = {
+  server_version?: string
+  checked_at: number
+  result: "works" | "no-tools" | "schema-rejected" | "context-too-small" | "failed"
+  message?: string
+  ttft_ms?: number
+}
+
+export type LocalConfig = {
+  enabled?: boolean
+  web?: LocalWeb
+  endpoints?: Array<string>
+  web_domains?: {
+    allow?: Array<string>
+    deny?: Array<string>
+  }
+  allow?: Array<LocalAllowed>
+  pins?: {
+    [key: string]: LocalPinConfig
+  }
+  checked?: {
+    [key: string]: LocalCheckedConfig
+  }
+  ca?: {
+    files?: Array<string>
+  }
+  log?: {
+    retain_days?: number
+  }
+  lock?: boolean
+  user_may?: Array<"endpoints" | "allow" | "web_domains" | "web">
+  locked_keys?: Array<string>
+  endpoint_domains?: Array<string>
+  updates?: {
+    url: string
+  }
+  models_dir?: string
+  catalog_path?: string
+  recommend?: unknown
+}
+
+export type ResearchSearchProvider = "auto" | "searxng" | "exa" | "parallel" | "browser" | "none"
+
+export type ResearchDepthConfig = "auto" | "focused" | "deep"
+
+export type ResearchToolConfig = "work" | "thorough" | "off"
+
+export type ResearchLimitsConfig = {
+  usd?: number
+  steps?: number
+  pages?: number
+  searches?: number
+  researchers?: number
+}
+
+export type ResearchConfig = {
+  search?: {
+    provider?: ResearchSearchProvider
+    url?: string
+  }
+  depth?: ResearchDepthConfig
+  tool?: ResearchToolConfig
+  limits?: {
+    focused?: ResearchLimitsConfig
+    deep?: ResearchLimitsConfig
+  }
+  domains?: {
+    prefer?: Array<string>
+    avoid?: Array<string>
+  }
+  robots?: boolean
+  browser_search?: boolean
+  retain_days?: number
 }
 
 export type Config = {
@@ -2249,6 +2345,8 @@ export type Config = {
     auto?: boolean
     judge?: TaskJudgeMode
   }
+  local?: LocalConfig
+  research?: ResearchConfig
   experimental?: {
     disable_paste_summary?: boolean
     batch_tool?: boolean
@@ -3420,6 +3518,24 @@ export type MemoryLink = {
 export type MemoryReviewResult = {
   item?: MemoryReviewItem
   entry?: MemoryEntry
+}
+
+export type MemoryPostingPayload = {
+  parts: Array<string>
+  sessionIDs?: Array<string>
+  typed: boolean
+  untrusted?: boolean
+  hosts?: Array<string>
+}
+
+export type MemoryPostingResult = {
+  status: "clean" | "changed" | "ask"
+  parts: Array<string>
+  dropped: Array<{
+    part: number
+    text: string
+  }>
+  links: number
 }
 
 export type MemoryCard = {
@@ -7157,7 +7273,7 @@ export type ProviderUnavailable = {
   location?: LocationRef
   data: {
     id: string
-    reason: "sign-in-paused" | "provider-not-configured" | "disabled" | "no-models"
+    reason: "sign-in-paused" | "provider-not-configured" | "disabled" | "no-models" | "off-in-local"
     message: string
   }
 }
@@ -8303,7 +8419,7 @@ export type EventProviderUnavailable = {
   type: "provider.unavailable"
   properties: {
     id: string
-    reason: "sign-in-paused" | "provider-not-configured" | "disabled" | "no-models"
+    reason: "sign-in-paused" | "provider-not-configured" | "disabled" | "no-models" | "off-in-local"
     message: string
   }
 }
@@ -10012,7 +10128,7 @@ export type ConfigProvidersResponses = {
     }
     unavailable?: Array<{
       id: string
-      reason: "sign-in-paused" | "provider-not-configured" | "disabled" | "no-models"
+      reason: "sign-in-paused" | "provider-not-configured" | "disabled" | "no-models" | "off-in-local"
       message: string
     }>
   }
@@ -13097,6 +13213,38 @@ export type MemoryReviewResolveResponses = {
 
 export type MemoryReviewResolveResponse = MemoryReviewResolveResponses[keyof MemoryReviewResolveResponses]
 
+export type MemoryPostingCheckData = {
+  body?: MemoryPostingPayload
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/posting-check"
+}
+
+export type MemoryPostingCheckErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryPostingCheckError = MemoryPostingCheckErrors[keyof MemoryPostingCheckErrors]
+
+export type MemoryPostingCheckResponses = {
+  /**
+   * What may be posted, and what overlaps the owner's memory
+   */
+  200: MemoryPostingResult
+}
+
+export type MemoryPostingCheckResponse = MemoryPostingCheckResponses[keyof MemoryPostingCheckResponses]
+
 export type MemoryKnowledgeData = {
   body?: never
   path?: never
@@ -13829,7 +13977,7 @@ export type ProviderListResponses = {
     connected: Array<string>
     unavailable?: Array<{
       id: string
-      reason: "sign-in-paused" | "provider-not-configured" | "disabled" | "no-models"
+      reason: "sign-in-paused" | "provider-not-configured" | "disabled" | "no-models" | "off-in-local"
       message: string
     }>
   }
