@@ -1,7 +1,7 @@
 export * as WebFetchRequest from "./webfetch-request"
 
 import { Effect, Exit, Scope } from "effect"
-import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse, UrlParams } from "effect/unstable/http"
 import type { LookupAddress, LookupAllOptions, LookupOneOptions, LookupOptions } from "node:dns"
 import { lookup } from "node:dns/promises"
 import http from "node:http"
@@ -21,6 +21,10 @@ export interface Options {
    * configured themselves allows it.
    */
   readonly authorizePrivate?: (url: string) => Effect.Effect<void, unknown>
+  /** Resolves each destination's name. Without it the system resolver does; tests pass the fake web's. */
+  readonly resolver?: DestinationResolver
+  /** The User-Agent sent first, in place of `userAgent`. A challenge page still gets one retry as `Vector/<version>`. */
+  readonly userAgent?: string
 }
 
 export type Destination = {
@@ -63,7 +67,7 @@ export const execute = (
       request: HttpClientRequest.HttpClientRequest,
       addresses: readonly string[],
     ) {
-      const first = yield* send(request, userAgent, addresses)
+      const first = yield* send(request, options?.userAgent ?? userAgent, addresses)
       if (first.response.status !== 403 || first.response.headers["cf-mitigated"]?.toLowerCase() !== "challenge")
         return first
       // Abort the challenge body before retrying, including bodies that never finish.
@@ -77,7 +81,7 @@ export const execute = (
     ): Effect.fn.Return<HttpClientResponse.HttpClientResponse, unknown, Scope.Scope> {
       const destination = yield* parseDestination(request.url)
       if (options) yield* options.authorize(request.url)
-      const resolved = yield* resolveDestination(destination)
+      const resolved = yield* resolveDestination(destination, options?.resolver)
       if (resolved.private) {
         if (!options?.authorizePrivate) return yield* Effect.fail(privateDestinationError())
         yield* options.authorizePrivate(request.url)
@@ -93,7 +97,12 @@ export const execute = (
         try: () => new URL(location, destination),
         catch: (cause) => new Error("Invalid redirect URL", { cause }),
       })
-      return yield* follow(HttpClientRequest.setUrl(request, next), redirects + 1)
+      // Set as a string with no separate parameters, so the next hop is decided by its whole address, query included.
+      // A URL object would move the query into the request's parameters, out of `request.url`.
+      return yield* follow(
+        HttpClientRequest.setUrl(HttpClientRequest.setUrlParams(request, UrlParams.empty), next.toString()),
+        redirects + 1,
+      )
     })
 
     return yield* follow(request, 0)
