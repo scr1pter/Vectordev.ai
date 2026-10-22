@@ -78,10 +78,17 @@ describe("ResearchProvenance", () => {
     })
   })
 
-  test("keeps an address the user typed as typed when a search finds it too", () => {
+  test("keeps an address the user typed as typed when a search finds it too, in either order", () => {
     const typed = ResearchProvenance.add(ResearchProvenance.empty(), ["https://example.com/a"], "typed")
     const searched = ResearchProvenance.add(typed, ["https://example.com/a"], "search")
     expect(ResearchProvenance.check(searched, "https://example.com/a")).toMatchObject({ ok: true, from: "typed" })
+    // A search found it first, then the user pasted it: it is still the user's own address, so it skips robots.txt
+    // and asks before a private network, as a typed address does.
+    const found = ResearchProvenance.add(ResearchProvenance.empty(), ["https://example.com/b"], "search")
+    const pasted = ResearchProvenance.add(found, ["https://example.com/b"], "typed")
+    expect(ResearchProvenance.check(pasted, "https://example.com/b")).toMatchObject({ ok: true, from: "typed" })
+    const linked = ResearchProvenance.add(ResearchProvenance.add(found, ["https://example.com/b"], "link"), [], "typed")
+    expect(ResearchProvenance.check(linked, "https://example.com/b")).toMatchObject({ ok: true, from: "search" })
   })
 
   test("finds the http and https addresses in the user's text, without trailing punctuation", () => {

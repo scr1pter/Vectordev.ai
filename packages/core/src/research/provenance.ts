@@ -33,7 +33,7 @@ export function empty(): Addresses {
   return new Map()
 }
 
-/** The set with these addresses added. An address the user typed keeps that origin when a search finds it too. */
+/** The set with these addresses added. An address the user typed counts as typed, whichever came first. */
 export function add(set: Addresses, urls: readonly string[], from: From): Addresses {
   const next = new Map(set)
   for (const url of urls) {
@@ -42,7 +42,7 @@ export function add(set: Addresses, urls: readonly string[], from: From): Addres
     if (!canonical || !exact) continue
     const entry = next.get(canonical)
     next.set(canonical, {
-      from: entry?.from === "typed" ? "typed" : (entry?.from ?? from),
+      from: entry?.from === "typed" || from === "typed" ? "typed" : (entry?.from ?? from),
       urls: new Set([...(entry?.urls ?? []), exact]),
     })
   }
