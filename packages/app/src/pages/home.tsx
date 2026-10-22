@@ -1118,10 +1118,10 @@ function HomeProjectDeck(props: {
   cloneFromGithub?: () => void
 }) {
   return (
-    <section class="vector-home-project-deck" aria-label="Repositories">
+    <section class="vector-home-project-deck" aria-label="Agents">
       <div class="vector-home-project-deck__heading">
         <div>
-          <span>Repositories</span>
+          <span>Agents</span>
           <strong>Pick up where you left off</strong>
         </div>
         <div class="vector-home-project-deck__actions">
@@ -1276,10 +1276,10 @@ function HomeProjectColumn(props: {
   return (
     <aside
       class="mt-6 flex min-h-0 min-w-0 flex-col gap-4 overflow-hidden lg:mt-14 lg:pt-[52px]"
-      aria-label="Repositories"
+      aria-label="Agents"
     >
       <div class="flex h-7 min-w-0 shrink-0 items-center justify-between pl-1.5 pr-3">
-        <div class={HOME_SECTION_LABEL}>Repositories</div>
+        <div class={HOME_SECTION_LABEL}>Agents</div>
         <Show when={global.servers.list().length === 1}>
           <TooltipV2 placement="bottom" value="Open repository">
             <IconButtonV2

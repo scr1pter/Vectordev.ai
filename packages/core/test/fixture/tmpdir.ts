@@ -2,8 +2,11 @@ import fs from "fs/promises"
 import { tmpdir as osTmpdir } from "os"
 import path from "path"
 
-export const tmpdir = async () => {
-  const dir = await fs.realpath(await fs.mkdtemp(path.join(osTmpdir(), "vector-core-test-")))
+// Takes no argument, so tests can hand it to Effect.promise, which passes an AbortSignal.
+export const tmpdir = () => tmpdirIn(osTmpdir())
+
+export const tmpdirIn = async (parent: string) => {
+  const dir = await fs.realpath(await fs.mkdtemp(path.join(parent, "vector-core-test-")))
   return {
     path: dir,
     async [Symbol.asyncDispose]() {

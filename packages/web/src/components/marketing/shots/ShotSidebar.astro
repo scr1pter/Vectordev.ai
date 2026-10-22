@@ -7,9 +7,8 @@
 // "compact" leaves out the repositories and connections, for a window too short to
 // hold the whole sidebar. "collapsible" makes the hide button at its top work,
 // for a window whose own controls can bring the sidebar back.
-// The group labels use "Repositories" and "Repository tools": Vector's visible text never says "project", and the
-// app's own two labels (workspace-navigation.tsx) are due the same rename in the 1.99.109 sweep. Until that lands,
-// no copy on the page sends a reader to look for either label by name.
+// The group labels match the app's (workspace-navigation.tsx): "Agents", the owner's name for each repository's
+// Vector since 20 Oct, and "Repository tools". Vector's visible text never says "project".
 import ShotIcon from "./ShotIcon.astro"
 
 interface Props {
@@ -63,7 +62,7 @@ const compact = Astro.props.compact ?? false
   </div>
 
   <div class="sb-projects" hidden={compact}>
-    <p class="sb-label sb-label-row"><span>Repositories</span><ShotIcon name="plus" size={13} /></p>
+    <p class="sb-label sb-label-row"><span>Agents</span><ShotIcon name="plus" size={13} /></p>
     <p class="sb-project">
       <ShotIcon name="caret" size={13} class="sb-caret" />
       <span class="sb-project-mark"><ShotIcon name="project" size={11} /></span>

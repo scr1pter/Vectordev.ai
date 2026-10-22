@@ -2282,12 +2282,14 @@ describe("tool.shell read-only allowlist", () => {
 describe("tool.shell statements the scan cannot read", () => {
   type Request = Omit<PermissionV1.Request, "id" | "sessionID" | "tool">
   // A stand-in of each name that only exits non-zero: the scan reads each command as that shell, and nothing runs.
+  // Windows cannot run a script without an extension, so there it is a batch file; Vector reads a shell's kind from
+  // its name without the extension.
   const standIns = Effect.fn("ShellToolTest.standIns")(function* () {
     const dir = yield* tmpdirScoped()
     return yield* Effect.forEach(["bash", "zsh"], (name) =>
       Effect.promise(async () => {
-        const shell = path.join(dir, name)
-        await Bun.write(shell, "#!/bin/sh\nexit 3\n")
+        const shell = path.join(dir, process.platform === "win32" ? `${name}.cmd` : name)
+        await Bun.write(shell, process.platform === "win32" ? "@exit /b 3\r\n" : "#!/bin/sh\nexit 3\n")
         await fs.chmod(shell, 0o755)
         return { label: name, shell }
       }),

@@ -50,7 +50,10 @@ describe("who may trust a repository", () => {
   // user's behalf after a clone, an open or any other flow, so every clone asks like any other repository.
   test("only the trust dialog and Settings approve trust, never a clone or any other flow", async () => {
     const root = path.join(import.meta.dir, "..")
-    const files = await Array.fromAsync(new Bun.Glob("**/*.{ts,tsx}").scan({ cwd: root }))
+    // The glob gives Windows separators on Windows; the paths below are written with forward slashes.
+    const files = (await Array.fromAsync(new Bun.Glob("**/*.{ts,tsx}").scan({ cwd: root }))).map((file) =>
+      file.replaceAll(path.sep, "/"),
+    )
     const sources = await Promise.all(
       files
         .filter((file) => !file.includes(".test."))

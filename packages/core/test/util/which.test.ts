@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
 import { which } from "@vectordevai/core/util/which"
-import { tmpdir } from "../fixture/tmpdir"
+import { tmpdir, tmpdirIn } from "../fixture/tmpdir"
 
 async function cmd(dir: string, name: string, exec = true) {
   const ext = process.platform === "win32" ? ".cmd" : ""
@@ -73,6 +73,31 @@ describe("util.which", () => {
     await cmd(bin, "noexec", false)
 
     expect(which("noexec", env(bin))).toBeNull()
+  })
+
+  // Vector runs inside the repository it works on, and Windows searches the working folder before PATH and reads a
+  // relative PATH entry against it, so a program committed to the repository would run in place of the installed one.
+  test("on Windows, takes a bare name from an absolute PATH entry only, never the working folder or a relative entry", async () => {
+    await using tmp = await tmpdir()
+    const name = `vector-planted-${path.basename(tmp.path)}`
+    await using planted = {
+      path: await cmd(process.cwd(), name),
+      [Symbol.asyncDispose]() {
+        return fs.rm(this.path, { force: true })
+      },
+    }
+    await using repo = await tmpdirIn(process.cwd())
+    await cmd(repo.path, name)
+    const relative = path.relative(process.cwd(), repo.path)
+    expect(path.isAbsolute(relative)).toBe(false)
+    expect(await Bun.file(planted.path).exists()).toBe(true)
+    expect(which(name, env(["", ".", relative].join(path.delimiter)), "win32")).toBeNull()
+
+    const bin = path.join(tmp.path, "bin")
+    await fs.mkdir(bin)
+    const installed = await cmd(bin, name)
+    same(which(name, env([".", relative, bin].join(path.delimiter)), "win32"), installed)
+    same(which(name, env(bin)), installed)
   })
 
   test("uses PATHEXT on windows", async () => {

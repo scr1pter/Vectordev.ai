@@ -95,7 +95,8 @@ test("the investor page counts the built-in subagents that ship and describes Ve
     .map((agent) => agent.slice(0, agent.indexOf('"')))
   const words = ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve"]
   expect(milestone("Subagent system")).toContain(`${words[subagents.length]} built-in subagents`)
-  ;["explore", "review", "security", "migration"].forEach((name) => expect(subagents).toContain(name))
+  ;["explore", "migration"].forEach((name) => expect(subagents).toContain(name))
+  expect(milestone("Subagent system")).toContain("from explore to migration")
   expect(DEFAULT_REVIEW_CONFIG.verify).toBe("blocking")
   expect(milestone("Vectorscope")).toContain("verify pass that re-checks blocking findings")
 })
@@ -108,6 +109,7 @@ test("every technology carries its status, and only the shipped ones say Today",
   expect(items.length).toBe(markup.match(/<div class="ip-milestone/g)?.length)
   expect(Object.fromEntries(items)).toEqual({
     "Vector Brain": brainRelease.stage,
+    "Memory of you in every agent": "In development",
     "Tokenomics engine": "Today",
     "Subagent system": "Today",
     Vectorscope: "Today",
@@ -168,8 +170,27 @@ test("the brain is labelled wherever the page opens with it", () => {
   const built = source.slice(source.indexOf("---", 3), source.indexOf("<style"))
   expect(built.replace(/\$?\{brainRelease\.\w+\}/g, "")).not.toMatch(/1\.99\.110/)
   // Prompts go to the model provider the user picks, so control is described, never claimed as total.
-  expect(markup).toContain("The brain lives on your computer, and you choose which model sees each request.")
+  expect(markup).toContain("The brain lives on your computer, and you choose who runs the model for each request.")
   expect(page).not.toMatch(/controlled only by you|only you control|never leaves your (computer|machine)/i)
+})
+
+// The owner's control line and moat (20 October 2026). The line is backed by what the code does: the brain is stored
+// on this computer (packages/core/src/brain/database.ts keeps brain.db in Vector's data folder), the model is the one
+// the user picks, and the Privacy footnote names the free models that may train on prompts. Memory of you in every
+// agent is only begun in this tree: the brain reaches the coding agent and a Thorough request's subagents, desktop
+// Vectorscope reviews get none of it yet, and Deep research is not on main, so the card says In development.
+test("the investor page says whose prompts and data they are, and labels memory in every agent as in development", async () => {
+  expect(await Bun.file(path.join(root, "packages/core/src/brain/database.ts")).text()).toContain("BrainPaths.directory(Global.Path.data)")
+  expect(markup).toContain(
+    "Your prompts, your data, your Vector. The brain lives on your computer, and you choose who runs the model for each request.",
+  )
+  expect(markup).toMatch(/free models whose providers may train are labelled May train on your prompts/)
+  expect(markup).not.toMatch(/\bfully\b|controlled only by you|your prompts never|never sees? your prompts/i)
+  const moat = milestone("Memory of you in every agent")
+  expect(moat).toContain('<span class="ip-stage">In development</span>')
+  expect(moat).toContain(
+    "The moat: coding agents, subagents, Vectorscope reviews and Deep research act on what Vector has learned about you.",
+  )
 })
 
 // The owner's positioning (19 October 2026), held so that taking the brain branch's older page back fails.
