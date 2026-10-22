@@ -1,3 +1,4 @@
+import { ResearchCanonical } from "@vectordevai/core/research/canonical"
 import { WebFence } from "@vectordevai/core/research/fence"
 import { ResearchOutbound } from "@vectordevai/core/research/outbound"
 import { ResearchProvenance } from "@vectordevai/core/research/provenance"
@@ -123,7 +124,9 @@ export const ResearchReadTool = Tool.define<
           // A page the run read is read again from what it saved.
           const known = found.detail.sources.find(
             (source) =>
-              source.canonical_url === checked.canonical && (source.status === "read" || source.status === "paywalled"),
+              (source.canonical_url === checked.canonical ||
+                ResearchCanonical.canonical(source.url) === checked.canonical) &&
+              (source.status === "read" || source.status === "paywalled"),
           )
           if (known) {
             const saved = yield* store.source(found.place, runID, known.id)
@@ -139,6 +142,13 @@ export const ResearchReadTool = Tool.define<
           }
           if (params.mode === "render")
             return { title: "Not read", output: RENDER, metadata: { runID, url: checked.url } }
+          // The store refuses a page past the budget too; asking it first spares the site a request.
+          if (found.run.pages >= (yield* research.limits(found.plan.depth)).pages)
+            return {
+              title: "Page budget used",
+              output: ResearchStore.PAGES,
+              metadata: { runID, url: checked.url, refused: "budget" as const },
+            }
 
           yield* research.approve(ctx, found, checked.url)
           yield* ctx.metadata({ title: `Reading ${checked.url}`, metadata: { runID, url: checked.url } })

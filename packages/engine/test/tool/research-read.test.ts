@@ -161,3 +161,27 @@ it.instance(
     }),
   90_000,
 )
+
+it.instance(
+  "past the run's page budget a read is refused before the site is asked, so the run ends with a report",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* setup(web, { research: { limits: { focused: { pages: 1 } } } })
+      const sessions = yield* Session.Service
+      yield* answer("once")
+      const session = yield* sessions.create({ title: "Research" })
+      const article = web.url("article", "/")
+      const pdf = web.url("docs", "/report.pdf")
+      yield* llm.tool("research_plan", plan())
+      yield* llm.tool("research_read", { url: article })
+      yield* llm.tool("research_read", { url: pdf })
+      yield* llm.text("Done.")
+      const before = web.count("docs", "/report.pdf")
+      yield* send({ sessionID: session.id, agent: "research", text: `Research heat pump savings: ${article} ${pdf}` })
+      const [first, second] = yield* calls(session.id, "research_read")
+      expect(output(first)).toContain("S1 · ")
+      expect(output(second)).toBe(ResearchStore.PAGES)
+      expect(web.count("docs", "/report.pdf")).toBe(before)
+    }),
+  90_000,
+)
