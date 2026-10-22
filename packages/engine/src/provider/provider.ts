@@ -230,7 +230,7 @@ function offInLocal(
 }
 
 /** Why Vector Local keeps a model off, after "<provider>: off in Vector Local." */
-export const LOCAL_OFF = {
+const LOCAL_OFF = {
   vector:
     "Vector's free models and Vector Codium run on vectordev.ai, outside the model servers you host. Turn Vector Local off to use them.",
   ollama:

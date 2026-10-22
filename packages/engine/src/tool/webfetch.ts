@@ -198,9 +198,21 @@ export function newAddress(address: string, messages: readonly SessionV1.WithPar
       URL.canParse(part.state.input.url) &&
       new URL(part.state.input.url).host === url.host,
   )
-  const listed = tools.some((part) => part.state.status === "completed" && said(part.state.output))
+  // Only what the web gave counts as a result: an address the agent wrote itself, in a command's output say, does not.
+  const listed = tools.some(
+    (part) => WEB_RESULTS.has(part.tool) && part.state.status === "completed" && said(part.state.output),
+  )
   return !(reached && listed)
 }
+
+const WEB_RESULTS = new Set([
+  "webfetch",
+  "websearch",
+  "browser",
+  "research_search",
+  "research_read",
+  "research_browser",
+])
 
 /**
  * Refuses a web read that Web access does not allow while Vector Local is on (None reaches only this computer, Your

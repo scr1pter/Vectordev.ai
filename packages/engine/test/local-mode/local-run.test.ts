@@ -587,7 +587,8 @@ describe("the agent's own actions under Vector Local", () => {
   const start = web.direct("docs", "/start")
   const guide = web.direct("docs", "/guide")
   // A conversation that read the web: the user asked, and a fetch of `start` returned a page that links `guide`.
-  const history = (output: string): SessionV1.WithParts[] => {
+  // `printed` is what a shell command the agent ran printed after the fetch.
+  const history = (output: string, printed?: string): SessionV1.WithParts[] => {
     const sessionID = SessionID.make("ses_local")
     const user = MessageID.make("msg_user")
     const assistant = MessageID.make("msg_assistant")
@@ -635,6 +636,26 @@ describe("the agent's own actions under Vector Local", () => {
               time: { start: 2, end: 3 },
             },
           },
+          ...(printed === undefined
+            ? []
+            : [
+                {
+                  id: PartID.make("prt_shell"),
+                  messageID: assistant,
+                  sessionID,
+                  type: "tool" as const,
+                  callID: "call_shell",
+                  tool: "bash",
+                  state: {
+                    status: "completed" as const,
+                    input: { command: `echo ${printed}` },
+                    output: printed,
+                    title: "echo",
+                    metadata: {},
+                    time: { start: 3, end: 4 },
+                  },
+                },
+              ]),
         ],
       },
     ]
@@ -660,6 +681,11 @@ describe("the agent's own actions under Vector Local", () => {
       expect(strict()).toEqual([
         expect.objectContaining({ permission: "webfetch", patterns: [`${AFTER_WEB}${exfil}`], always: [] }),
       ])
+
+      // An address the agent printed itself is not a result, so it asks too.
+      yield* on()
+      expect(Exit.isSuccess(yield* read(exfil, history("Read the setup guide.", exfil)))).toBe(false)
+      expect(strict()).toHaveLength(1)
 
       // A host the conversation never reached asks, even when a result named it.
       yield* on()
