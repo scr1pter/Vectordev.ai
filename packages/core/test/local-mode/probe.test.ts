@@ -710,6 +710,24 @@ describe("what Check models writes", () => {
     })
   })
 
+  test("a count of requests someone set stays, and the server's is written only where none is set", async () => {
+    const ollama = (await LocalProbe.probe((await fake("ollama")).origin))!
+    // Ollama started with OLLAMA_NUM_PARALLEL=4, which its API does not report.
+    expect(LocalProbe.patch({ providerID: "ollama", server: ollama, concurrency: 4 }).provider["ollama"]?.options).toBe(
+      undefined,
+    )
+    expect(LocalProbe.patch({ providerID: "ollama", server: ollama }).provider["ollama"]?.options).toEqual({
+      concurrency: 1,
+    })
+    const vllm = (await LocalProbe.probe((await fake("vllm")).origin))!
+    const company = { ...vllm, origin: "https://ml.corp.example.com", class: "internet" as const }
+    expect(
+      LocalProbe.patch({ providerID: "company", server: company, concurrency: 8 }).provider["company"]?.options,
+    ).toEqual({
+      headerTimeout: 600_000,
+    })
+  })
+
   test("the strict guard saw only this computer", () => {
     expect(guard.outside()).toEqual([])
     expect(guard.attempts().length).toBeGreaterThan(0)

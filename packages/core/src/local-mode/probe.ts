@@ -934,16 +934,22 @@ type ModelPatch = {
 const HEADER_TIMEOUT = 600_000
 
 /**
- * The global config that records a server: the provider's concurrency and each model's tool calling, limits and
- * image input, and Vector Local's pin for the server, its place on the model server list and each check's result.
- * Lists and records keep what `current` (the global `local` block now) has, since a config update replaces lists.
- * Cloud models and checks that only asked are left out.
+ * The global config that records a server: the provider's concurrency (unless one is set) and each model's tool
+ * calling, limits and image input, and Vector Local's pin for the server, its place on the model server list and each
+ * check's result. Lists and records keep what `current` (the global `local` block now) has, since a config update
+ * replaces lists. Cloud models and checks that only asked are left out.
  */
 export function patch(input: {
   readonly providerID: string
   readonly server: Server
   readonly checks?: readonly Checked[]
   readonly current?: ConfigLocalV1.Info
+  /**
+   * The `concurrency` the provider's global config sets now. A count someone chose stays, such as 4 for an Ollama
+   * started with OLLAMA_NUM_PARALLEL=4, which its API does not report; the server's count is written only where none
+   * is set.
+   */
+  readonly concurrency?: number
   /** Put the server on the model server list. Default true: adding a server lists it. */
   readonly list?: boolean
 }): Patch {
@@ -973,7 +979,7 @@ export function patch(input: {
       }),
   )
   const options = {
-    ...(input.server.concurrency ? { concurrency: input.server.concurrency } : {}),
+    ...(input.concurrency === undefined && input.server.concurrency ? { concurrency: input.server.concurrency } : {}),
     ...(input.server.class === "internet" ? { headerTimeout: HEADER_TIMEOUT } : {}),
     // A LiteLLM proxy passes every prompt on, so its steps are never counted as free local ones. An Ollama server
     // forwards only its cloud models, which are told apart by name.
