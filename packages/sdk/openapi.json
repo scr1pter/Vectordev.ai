@@ -1411,7 +1411,13 @@
                           },
                           "reason": {
                             "type": "string",
-                            "enum": ["sign-in-paused", "provider-not-configured", "disabled", "no-models"]
+                            "enum": [
+                              "sign-in-paused",
+                              "provider-not-configured",
+                              "disabled",
+                              "no-models",
+                              "off-in-local"
+                            ]
                           },
                           "message": {
                             "type": "string"
@@ -8881,6 +8887,638 @@
         ]
       }
     },
+    "/memory/research": {
+      "get": {
+        "tags": ["memory"],
+        "operationId": "memory.research.list",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The repository's research runs, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryResearchList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Deep research runs this repository's brain keeps: question, date, sources, notes, size and whether you kept it. Runs nobody keeps are deleted after `retain` days, and past `limit` bytes the oldest of them go first.",
+        "summary": "List research runs",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.research.list({\n  ...\n})"
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["memory"],
+        "operationId": "memory.research.forgetAll",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "How many runs were forgotten",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "number",
+                  "description": "How many runs were forgotten"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Forget every research run of the repository: their pages, notes and reports. Vector does not keep those pages again on its own.",
+        "summary": "Forget all research in this repository",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.research.forgetAll({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/research/{runID}": {
+      "get": {
+        "tags": ["memory"],
+        "operationId": "memory.research.get",
+        "parameters": [
+          {
+            "name": "runID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A research run's id, such as run_4k2q7m3x9abcd"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One run with its sources, notes and report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryResearchDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "One run: its plan, the queries it sent, its sources (skipped ones too), its notes and its latest report.",
+        "summary": "Get a research run",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.research.get({\n  ...\n})"
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["memory"],
+        "operationId": "memory.research.forget",
+        "parameters": [
+          {
+            "name": "runID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A research run's id, such as run_4k2q7m3x9abcd"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The run was forgotten",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "description": "The run was forgotten"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Forget a run and everything it holds: its pages, notes and report. Vector does not keep those pages again on its own. The session keeps its messages.",
+        "summary": "Forget a research run",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.research.forget({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/research/{runID}/keep": {
+      "post": {
+        "tags": ["memory"],
+        "operationId": "memory.research.keep",
+        "parameters": [
+          {
+            "name": "runID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A research run's id, such as run_4k2q7m3x9abcd"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The run after it was kept",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryResearchDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Keep the run past the retention, and its report in the brain, where the owner's requests can recall it like any private document. Sessions with invited guests and models that may train on your prompts never get it. Its pages stay held. A run an invited guest acted in cannot be kept.",
+        "summary": "Keep a research run",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.research.keep({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/research/{runID}/export": {
+      "get": {
+        "tags": ["memory"],
+        "operationId": "memory.research.export",
+        "parameters": [
+          {
+            "name": "runID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A research run's id, such as run_4k2q7m3x9abcd"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["markdown", "json"]
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "text/markdown": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "The run as an attachment: the report with a bibliography as Markdown, or with `format=json` the run, its queries, sources, notes and report.",
+        "summary": "Export a research run",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.research.export({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/research/{runID}/sources/{sourceID}": {
+      "get": {
+        "tags": ["memory"],
+        "operationId": "memory.research.source",
+        "parameters": [
+          {
+            "name": "runID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A research run's id, such as run_4k2q7m3x9abcd"
+            },
+            "required": true
+          },
+          {
+            "name": "sourceID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A source's number in its run, such as S3"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A source with the text Vector saved from it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryResearchSourceText"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "One source of a run and the text Vector saved from its page, chunk by chunk, as citations open it.",
+        "summary": "Read a research source",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.research.source({\n  ...\n})"
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["memory"],
+        "operationId": "memory.research.forgetSource",
+        "parameters": [
+          {
+            "name": "runID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A research run's id, such as run_4k2q7m3x9abcd"
+            },
+            "required": true
+          },
+          {
+            "name": "sourceID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A source's number in its run, such as S3"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The source's page was forgotten",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "description": "The source's page was forgotten"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Forget the text Vector saved from one page of a run. The source stays listed as forgotten, and a report saved after this marks the notes that quoted it. Vector does not keep that page again on its own.",
+        "summary": "Forget a research source",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.research.forgetSource({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/project": {
       "get": {
         "tags": ["project"],
@@ -10484,7 +11122,13 @@
                           },
                           "reason": {
                             "type": "string",
-                            "enum": ["sign-in-paused", "provider-not-configured", "disabled", "no-models"]
+                            "enum": [
+                              "sign-in-paused",
+                              "provider-not-configured",
+                              "disabled",
+                              "no-models",
+                              "off-in-local"
+                            ]
                           },
                           "message": {
                             "type": "string"
@@ -23404,6 +24048,9 @@
             "$ref": "#/components/schemas/EventSessionCompacted"
           },
           {
+            "$ref": "#/components/schemas/EventResearchUpdated"
+          },
+          {
             "$ref": "#/components/schemas/EventVcsBranchUpdated"
           },
           {
@@ -25494,7 +26141,7 @@
       },
       "CostKind": {
         "type": "string",
-        "enum": ["free", "priced", "plan", "unknown"]
+        "enum": ["free", "priced", "plan", "local", "unknown"]
       },
       "QuestionOption": {
         "type": "object",
@@ -25655,7 +26302,7 @@
                       },
                       "reason": {
                         "type": "string",
-                        "enum": ["sign-in-paused", "provider-not-configured", "disabled", "no-models"]
+                        "enum": ["sign-in-paused", "provider-not-configured", "disabled", "no-models", "off-in-local"]
                       },
                       "message": {
                         "type": "string"
@@ -28786,6 +29433,41 @@
                   },
                   "type": {
                     "type": "string",
+                    "enum": ["research.updated"]
+                  },
+                  "properties": {
+                    "type": "object",
+                    "properties": {
+                      "runID": {
+                        "type": "string"
+                      },
+                      "sourceID": {
+                        "type": "string"
+                      },
+                      "noteID": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": ["planned", "running", "done", "stopped", "failed", "forgotten"]
+                      }
+                    },
+                    "required": ["runID", "status"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["id", "type", "properties"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "type": {
+                    "type": "string",
                     "enum": ["vcs.branch.updated"]
                   },
                   "properties": {
@@ -29356,6 +30038,10 @@
               "chunkTimeout": {
                 "type": "integer",
                 "exclusiveMinimum": 0
+              },
+              "concurrency": {
+                "type": "integer",
+                "exclusiveMinimum": 0
               }
             },
             "additionalProperties": {}
@@ -29681,6 +30367,300 @@
             "maximum": 1
           },
           "unpricedSteps": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "LocalWeb": {
+        "type": "string",
+        "enum": ["ask", "network", "none"]
+      },
+      "LocalAllowed": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reason": {
+            "type": "string"
+          },
+          "added_at": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "added_by": {
+            "type": "string",
+            "enum": ["app", "cli", "managed"]
+          }
+        },
+        "required": ["source", "reason", "added_at", "added_by"],
+        "additionalProperties": false
+      },
+      "LocalPinConfig": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "The kind of server Vector found, such as ollama or vllm"
+          },
+          "version": {
+            "type": "string"
+          },
+          "models": {
+            "type": "string"
+          },
+          "spki": {
+            "type": "string"
+          }
+        },
+        "required": ["kind"],
+        "additionalProperties": false
+      },
+      "LocalCheckedConfig": {
+        "type": "object",
+        "properties": {
+          "server_version": {
+            "type": "string"
+          },
+          "checked_at": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "result": {
+            "type": "string",
+            "enum": ["works", "no-tools", "schema-rejected", "context-too-small", "failed"]
+          },
+          "message": {
+            "type": "string"
+          },
+          "ttft_ms": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": ["checked_at", "result"],
+        "additionalProperties": false
+      },
+      "LocalConfig": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "web": {
+            "$ref": "#/components/schemas/LocalWeb"
+          },
+          "endpoints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "web_domains": {
+            "type": "object",
+            "properties": {
+              "allow": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "deny": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "allow": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LocalAllowed"
+            }
+          },
+          "pins": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/LocalPinConfig"
+            }
+          },
+          "checked": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/LocalCheckedConfig"
+            }
+          },
+          "ca": {
+            "type": "object",
+            "properties": {
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "log": {
+            "type": "object",
+            "properties": {
+              "retain_days": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
+          "lock": {
+            "type": "boolean"
+          },
+          "user_may": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["endpoints", "allow", "web_domains", "web"]
+            }
+          },
+          "locked_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "endpoint_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "updates": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": ["url"],
+            "additionalProperties": false
+          },
+          "models_dir": {
+            "type": "string"
+          },
+          "catalog_path": {
+            "type": "string"
+          },
+          "recommend": {}
+        },
+        "additionalProperties": false
+      },
+      "ResearchSearchProvider": {
+        "type": "string",
+        "enum": ["auto", "searxng", "exa", "parallel", "browser", "none"]
+      },
+      "ResearchDepthConfig": {
+        "type": "string",
+        "enum": ["auto", "focused", "deep"]
+      },
+      "ResearchToolConfig": {
+        "type": "string",
+        "enum": ["work", "thorough", "off"]
+      },
+      "ResearchLimitsConfig": {
+        "type": "object",
+        "properties": {
+          "usd": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "steps": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "pages": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "searches": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "researchers": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4
+          }
+        },
+        "additionalProperties": false
+      },
+      "ResearchConfig": {
+        "type": "object",
+        "properties": {
+          "search": {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "$ref": "#/components/schemas/ResearchSearchProvider"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "depth": {
+            "$ref": "#/components/schemas/ResearchDepthConfig"
+          },
+          "tool": {
+            "$ref": "#/components/schemas/ResearchToolConfig"
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "focused": {
+                "$ref": "#/components/schemas/ResearchLimitsConfig"
+              },
+              "deep": {
+                "$ref": "#/components/schemas/ResearchLimitsConfig"
+              }
+            },
+            "additionalProperties": false
+          },
+          "domains": {
+            "type": "object",
+            "properties": {
+              "prefer": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "avoid": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "robots": {
+            "type": "boolean"
+          },
+          "browser_search": {
+            "type": "boolean"
+          },
+          "retain_days": {
             "type": "integer",
             "exclusiveMinimum": 0
           }
@@ -30141,6 +31121,12 @@
               }
             },
             "additionalProperties": false
+          },
+          "local": {
+            "$ref": "#/components/schemas/LocalConfig"
+          },
+          "research": {
+            "$ref": "#/components/schemas/ResearchConfig"
           },
           "experimental": {
             "type": "object",
@@ -32318,7 +33304,7 @@
           },
           "origin": {
             "type": "string",
-            "enum": ["upload", "chat", "agent", "repository", "cli"]
+            "enum": ["upload", "chat", "agent", "repository", "cli", "web", "research"]
           },
           "visibility": {
             "type": "string",
@@ -33654,6 +34640,426 @@
           }
         },
         "required": ["id", "kind", "document", "title", "text"],
+        "additionalProperties": false
+      },
+      "ResearchScope": {
+        "type": "string",
+        "enum": ["web", "web+brain", "brain"]
+      },
+      "ResearchDepth": {
+        "type": "string",
+        "enum": ["focused", "deep"]
+      },
+      "ResearchFormat": {
+        "type": "string",
+        "enum": ["brief", "report", "table", "memo"]
+      },
+      "ResearchSubquestionStatus": {
+        "type": "string",
+        "enum": ["open", "answered", "dropped"]
+      },
+      "ResearchPlan": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "subquestions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            },
+            "minItems": 1,
+            "maxItems": 8
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ResearchScope"
+          },
+          "depth": {
+            "$ref": "#/components/schemas/ResearchDepth"
+          },
+          "prefer_domains": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 253
+            },
+            "maxItems": 50
+          },
+          "avoid_domains": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 253
+            },
+            "maxItems": 50
+          },
+          "format": {
+            "$ref": "#/components/schemas/ResearchFormat"
+          },
+          "time_window": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "status": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ResearchSubquestionStatus"
+            },
+            "maxItems": 8
+          }
+        },
+        "required": ["question", "subquestions", "scope", "depth"],
+        "additionalProperties": false
+      },
+      "ResearchRunStatus": {
+        "type": "string",
+        "enum": ["planned", "running", "done", "stopped", "failed"]
+      },
+      "ResearchRun": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "question": {
+            "type": "string"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/ResearchPlan"
+          },
+          "depth": {
+            "$ref": "#/components/schemas/ResearchDepth"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ResearchScope"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ResearchRunStatus"
+          },
+          "report_document_id": {
+            "type": "string"
+          },
+          "pages": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "searches": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "steps": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "cost_usd": {
+            "type": "number"
+          },
+          "kept": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "updated_at": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "id",
+          "session_id",
+          "question",
+          "depth",
+          "scope",
+          "status",
+          "pages",
+          "searches",
+          "steps",
+          "cost_usd",
+          "kept",
+          "created_at",
+          "updated_at"
+        ],
+        "additionalProperties": false
+      },
+      "MemoryResearchRun": {
+        "type": "object",
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/ResearchRun"
+          },
+          "sources": {
+            "type": "number"
+          },
+          "notes": {
+            "type": "number"
+          },
+          "bytes": {
+            "type": "number"
+          }
+        },
+        "required": ["run", "sources", "notes", "bytes"],
+        "additionalProperties": false
+      },
+      "MemoryResearchList": {
+        "type": "object",
+        "properties": {
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryResearchRun"
+            }
+          },
+          "bytes": {
+            "type": "number"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "retain": {
+            "type": "number"
+          }
+        },
+        "required": ["runs", "bytes", "limit", "retain"],
+        "additionalProperties": false
+      },
+      "ResearchSourceStatus": {
+        "type": "string",
+        "enum": ["read", "duplicate", "robots", "paywalled", "needs-render", "failed"]
+      },
+      "ResearchSiteKind": {
+        "type": "string",
+        "enum": ["academic", "government", "standards", "reference", "forum", "other"]
+      },
+      "ResearchSignal": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ResearchSiteKind"
+          },
+          "primary": {
+            "type": "boolean"
+          },
+          "doi": {
+            "type": "string"
+          },
+          "arxiv": {
+            "type": "string"
+          },
+          "pmid": {
+            "type": "string"
+          },
+          "published": {
+            "type": "string"
+          },
+          "updated": {
+            "type": "string"
+          },
+          "age_days": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "author": {
+            "type": "string"
+          },
+          "data": {
+            "type": "boolean"
+          },
+          "references": {
+            "type": "boolean"
+          },
+          "duplicate_of": {
+            "type": "string"
+          },
+          "paywalled": {
+            "type": "boolean"
+          },
+          "addressed_to_ai": {
+            "type": "boolean"
+          },
+          "corroborated": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "preference": {
+            "type": "string",
+            "enum": ["trusted", "avoided"]
+          }
+        },
+        "required": ["kind", "primary", "data", "references", "paywalled", "addressed_to_ai", "corroborated"],
+        "additionalProperties": false
+      },
+      "MemoryResearchSource": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "canonical_url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "site": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ResearchSourceStatus"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "pages": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "signals": {
+            "$ref": "#/components/schemas/ResearchSignal"
+          },
+          "fetched_at": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "forgotten": {
+            "type": "boolean"
+          }
+        },
+        "required": ["id", "url", "canonical_url", "title", "site", "status"],
+        "additionalProperties": false
+      },
+      "ResearchStance": {
+        "type": "string",
+        "enum": ["supports", "contradicts", "context"]
+      },
+      "ResearchVerdict": {
+        "type": "string",
+        "enum": ["supported", "partial", "unsupported", "contradicted", "not-judged"]
+      },
+      "ResearchNote": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "subquestion": {
+            "type": "string"
+          },
+          "claim": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 400
+          },
+          "source": {
+            "type": "string"
+          },
+          "quote": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 600
+          },
+          "page": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "stance": {
+            "$ref": "#/components/schemas/ResearchStance"
+          },
+          "support": {
+            "type": "boolean"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/ResearchVerdict"
+          },
+          "created_at": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": ["id", "subquestion", "claim", "source", "quote", "stance", "support", "created_at"],
+        "additionalProperties": false
+      },
+      "MemoryResearchDetail": {
+        "type": "object",
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/ResearchRun"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryResearchSource"
+            }
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ResearchNote"
+            }
+          },
+          "queries": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "report": {
+            "type": "string"
+          },
+          "bytes": {
+            "type": "number"
+          },
+          "guest": {
+            "type": "boolean"
+          }
+        },
+        "required": ["run", "sources", "notes", "queries", "bytes", "guest"],
+        "additionalProperties": false
+      },
+      "MemoryResearchSourceText": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "$ref": "#/components/schemas/MemoryResearchSource"
+          },
+          "chunks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "chunk": {
+                  "type": "number"
+                },
+                "page": {
+                  "type": "number"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": ["chunk", "text"],
+              "additionalProperties": false
+            }
+          },
+          "private": {
+            "type": "boolean"
+          }
+        },
+        "required": ["source", "chunks", "private"],
         "additionalProperties": false
       },
       "Project": {
@@ -36989,6 +38395,9 @@
           },
           {
             "$ref": "#/components/schemas/SessionCompacted"
+          },
+          {
+            "$ref": "#/components/schemas/ResearchUpdated"
           },
           {
             "$ref": "#/components/schemas/VcsBranchUpdated"
@@ -45196,7 +46605,7 @@
               },
               "reason": {
                 "type": "string",
-                "enum": ["sign-in-paused", "provider-not-configured", "disabled", "no-models"]
+                "enum": ["sign-in-paused", "provider-not-configured", "disabled", "no-models", "off-in-local"]
               },
               "message": {
                 "type": "string"
@@ -47815,6 +49224,63 @@
         "required": ["id", "type", "data"],
         "additionalProperties": false
       },
+      "ResearchUpdated": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["research.updated"]
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateID": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": ["aggregateID", "seq", "version"],
+            "additionalProperties": false
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRef"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "runID": {
+                "type": "string"
+              },
+              "sourceID": {
+                "type": "string"
+              },
+              "noteID": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["planned", "running", "done", "stopped", "failed", "forgotten"]
+              }
+            },
+            "required": ["runID", "status"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "data"],
+        "additionalProperties": false
+      },
       "VcsBranchUpdated": {
         "type": "object",
         "properties": {
@@ -48392,7 +49858,7 @@
               },
               "reason": {
                 "type": "string",
-                "enum": ["sign-in-paused", "provider-not-configured", "disabled", "no-models"]
+                "enum": ["sign-in-paused", "provider-not-configured", "disabled", "no-models", "off-in-local"]
               },
               "message": {
                 "type": "string"
@@ -51363,6 +52829,41 @@
               }
             },
             "required": ["sessionID"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "properties"],
+        "additionalProperties": false
+      },
+      "EventResearchUpdated": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["research.updated"]
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "runID": {
+                "type": "string"
+              },
+              "sourceID": {
+                "type": "string"
+              },
+              "noteID": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["planned", "running", "done", "stopped", "failed", "forgotten"]
+              }
+            },
+            "required": ["runID", "status"],
             "additionalProperties": false
           }
         },

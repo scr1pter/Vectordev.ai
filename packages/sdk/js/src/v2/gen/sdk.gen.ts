@@ -214,6 +214,22 @@ import type {
   MemoryRecordsUpdateResponses,
   MemoryRemoveErrors,
   MemoryRemoveResponses,
+  MemoryResearchExportErrors,
+  MemoryResearchExportResponses,
+  MemoryResearchForgetAllErrors,
+  MemoryResearchForgetAllResponses,
+  MemoryResearchForgetErrors,
+  MemoryResearchForgetResponses,
+  MemoryResearchForgetSourceErrors,
+  MemoryResearchForgetSourceResponses,
+  MemoryResearchGetErrors,
+  MemoryResearchGetResponses,
+  MemoryResearchKeepErrors,
+  MemoryResearchKeepResponses,
+  MemoryResearchListErrors,
+  MemoryResearchListResponses,
+  MemoryResearchSourceErrors,
+  MemoryResearchSourceResponses,
   MemoryReviewListErrors,
   MemoryReviewListResponses,
   MemoryReviewResolveErrors,
@@ -4467,6 +4483,286 @@ export class Review extends HeyApiClient {
   }
 }
 
+export class Research extends HeyApiClient {
+  /**
+   * Forget all research in this repository
+   *
+   * Forget every research run of the repository: their pages, notes and reports. Vector does not keep those pages again on its own.
+   */
+  public forgetAll<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<
+      MemoryResearchForgetAllResponses,
+      MemoryResearchForgetAllErrors,
+      ThrowOnError
+    >({
+      url: "/memory/research",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * List research runs
+   *
+   * Deep research runs this repository's brain keeps: question, date, sources, notes, size and whether you kept it. Runs nobody keeps are deleted after `retain` days, and past `limit` bytes the oldest of them go first.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<MemoryResearchListResponses, MemoryResearchListErrors, ThrowOnError>({
+      url: "/memory/research",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Forget a research run
+   *
+   * Forget a run and everything it holds: its pages, notes and report. Vector does not keep those pages again on its own. The session keeps its messages.
+   */
+  public forget<ThrowOnError extends boolean = false>(
+    parameters: {
+      runID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "runID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<
+      MemoryResearchForgetResponses,
+      MemoryResearchForgetErrors,
+      ThrowOnError
+    >({
+      url: "/memory/research/{runID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get a research run
+   *
+   * One run: its plan, the queries it sent, its sources (skipped ones too), its notes and its latest report.
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters: {
+      runID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "runID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<MemoryResearchGetResponses, MemoryResearchGetErrors, ThrowOnError>({
+      url: "/memory/research/{runID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Keep a research run
+   *
+   * Keep the run past the retention, and its report in the brain, where the owner's requests can recall it like any private document. Sessions with invited guests and models that may train on your prompts never get it. Its pages stay held. A run an invited guest acted in cannot be kept.
+   */
+  public keep<ThrowOnError extends boolean = false>(
+    parameters: {
+      runID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "runID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<MemoryResearchKeepResponses, MemoryResearchKeepErrors, ThrowOnError>({
+      url: "/memory/research/{runID}/keep",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Export a research run
+   *
+   * The run as an attachment: the report with a bibliography as Markdown, or with `format=json` the run, its queries, sources, notes and report.
+   */
+  public export<ThrowOnError extends boolean = false>(
+    parameters: {
+      runID: string
+      directory?: string
+      workspace?: string
+      format?: "markdown" | "json"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "runID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "format" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      MemoryResearchExportResponses,
+      MemoryResearchExportErrors,
+      ThrowOnError
+    >({
+      url: "/memory/research/{runID}/export",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Forget a research source
+   *
+   * Forget the text Vector saved from one page of a run. The source stays listed as forgotten, and a report saved after this marks the notes that quoted it. Vector does not keep that page again on its own.
+   */
+  public forgetSource<ThrowOnError extends boolean = false>(
+    parameters: {
+      runID: string
+      sourceID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "runID" },
+            { in: "path", key: "sourceID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<
+      MemoryResearchForgetSourceResponses,
+      MemoryResearchForgetSourceErrors,
+      ThrowOnError
+    >({
+      url: "/memory/research/{runID}/sources/{sourceID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Read a research source
+   *
+   * One source of a run and the text Vector saved from its page, chunk by chunk, as citations open it.
+   */
+  public source<ThrowOnError extends boolean = false>(
+    parameters: {
+      runID: string
+      sourceID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "runID" },
+            { in: "path", key: "sourceID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      MemoryResearchSourceResponses,
+      MemoryResearchSourceErrors,
+      ThrowOnError
+    >({
+      url: "/memory/research/{runID}/sources/{sourceID}",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class Memory extends HeyApiClient {
   /**
    * List memory
@@ -4811,6 +5107,11 @@ export class Memory extends HeyApiClient {
   private _review?: Review
   get review(): Review {
     return (this._review ??= new Review({ client: this.client }))
+  }
+
+  private _research?: Research
+  get research(): Research {
+    return (this._research ??= new Research({ client: this.client }))
   }
 }
 
