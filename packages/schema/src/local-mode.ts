@@ -37,6 +37,7 @@ export const Purpose = Schema.Literals([
   "web-search",
   "browser",
   "research-reader",
+  "research-browser",
   "integration",
   "mcp",
   "config-remote",
@@ -75,6 +76,10 @@ export const Rule = Schema.Literals([
   "download-grant",
   "private-remote",
   "unlabelled",
+  // A name that counts as this computer or the user's network by its name alone answered with an internet address.
+  "resolved-outside",
+  // A research browser asked for a private, loopback or cloud metadata address, which its proxy never reaches.
+  "private-destination",
 ]).annotate({ identifier: "EgressRule" })
 export type Rule = typeof Rule.Type
 
@@ -159,5 +164,24 @@ export const Event = Schema.Struct({
   root_session_id: optional(Schema.String),
   tool: optional(Schema.String),
   carried: Carried,
+  // For a request no call site labelled: the first stack frame outside the network guard, so the code can be found.
+  frame: optional(Schema.String),
 }).annotate({ identifier: "EgressEvent" })
 export type Event = typeof Event.Type
+
+// The network log's counters for one root session, or for the whole process. A helper session (a Vectorscope reviewer,
+// `brain.learn`) rolls up into the session that launched it, and `helper_requests` says how many of these it made.
+export const Summary = Schema.Struct({
+  requests: NonNegativeInt,
+  helper_requests: NonNegativeInt,
+  // Model calls by origin.
+  model_calls: Schema.Record(Schema.String, NonNegativeInt),
+  // Web pages read, and the other hosts reached for web purposes.
+  pages: NonNegativeInt,
+  hosts: NonNegativeInt,
+  searches: NonNegativeInt,
+  carried: Carried,
+  // Blocked requests by source.
+  blocked: Schema.Record(Schema.String, NonNegativeInt),
+}).annotate({ identifier: "EgressSummary" })
+export type Summary = typeof Summary.Type

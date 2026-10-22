@@ -86,7 +86,7 @@ const VECTOR_SERVICES = new Set<LocalMode.Purpose>([
   "help",
   "share",
 ])
-const WEB = new Set<LocalMode.Purpose>(["web-page", "browser", "research-reader"])
+const WEB = new Set<LocalMode.Purpose>(["web-page", "browser", "research-reader", "research-browser"])
 const DOWNLOADS = new Set<LocalMode.Purpose>(["model-download", "tool-download", "plugin", "lsp-install"])
 const CONNECTED = new Set<LocalMode.Purpose>(["integration", "mcp", "config-remote"])
 // Vector's own inference (free models and Vector Codium) is never allowable under Vector Local.
@@ -102,15 +102,17 @@ export function stricter(left: LocalMode.Web, right: LocalMode.Web | undefined):
 
 /**
  * A host as a URL parser and the system resolver read it: lowercase, punycode, decimal, octal and hex IPv4 forms
- * written out, IPv6 without brackets or zone, and no trailing dot. Undefined when it is not a host at all.
+ * written out, IPv6 without brackets or zone, and no trailing dot. Undefined when it is not a host at all. Only an
+ * IPv6 address has a zone (`fe80::1%en0`); a `%` anywhere else is not a host, since a resolver would be asked for the
+ * whole name while the part before it was judged.
  */
 export function host(input: string) {
-  const raw =
-    input
-      .trim()
-      .toLowerCase()
-      .replace(/^\[|\]$/g, "")
-      .split("%", 1)[0] ?? ""
+  const bare = input
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "")
+  const [raw = "", zone, ...rest] = bare.split("%")
+  if (rest.length > 0 || (zone !== undefined && (!raw.includes(":") || !/^[\w.-]+$/.test(zone)))) return undefined
   if (!raw || /[\s/@?#\\]/.test(raw)) return undefined
   const address = raw.includes(":") ? `http://[${raw}]/` : `http://${raw}/`
   if (!URL.canParse(address)) return undefined
