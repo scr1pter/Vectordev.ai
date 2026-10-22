@@ -84,7 +84,11 @@ export type Network = {
   readonly publicNames?: readonly string[]
 }
 export class NetworkService extends Context.Service<NetworkService, Network>()("@vector/ResearchNetwork") {}
-export const networkNode = LayerNode.make({ service: NetworkService, layer: Layer.succeed(NetworkService, {}), deps: [] })
+export const networkNode = LayerNode.make({
+  service: NetworkService,
+  layer: Layer.succeed(NetworkService, {}),
+  deps: [],
+})
 
 /** The run a research tool call works in. */
 export type Found = {
@@ -161,7 +165,10 @@ const layer = Layer.effect(
     // The text of a run's pages, kept while its count of readable sources is the same.
     const pages = new Map<
       string,
-      { readonly count: number; readonly text: { readonly open: readonly string[]; readonly closed: readonly string[] } }
+      {
+        readonly count: number
+        readonly text: { readonly open: readonly string[]; readonly closed: readonly string[] }
+      }
     >()
 
     const place = () => instruction.place()
@@ -275,7 +282,8 @@ const layer = Layer.effect(
         knowledge.sources(where, [id]).pipe(
           Effect.map((found) => ({
             id,
-            private: found.documents.length === 0 || found.documents.some((document) => document.visibility === "private"),
+            private:
+              found.documents.length === 0 || found.documents.some((document) => document.visibility === "private"),
           })),
         ),
       )
@@ -284,7 +292,9 @@ const layer = Layer.effect(
 
       const outputs = (tools: readonly string[]) =>
         parts.flatMap((part) =>
-          part.type === "tool" && tools.includes(part.tool) && part.state.status === "completed" ? [part.state.output] : [],
+          part.type === "tool" && tools.includes(part.tool) && part.state.status === "completed"
+            ? [part.state.output]
+            : [],
         )
       const sources = found ? yield* sourceText(found) : { open: [] as string[], closed: [] as string[] }
       const results = parts.flatMap((part) => resultsOf(part, found?.run.id))
@@ -405,12 +415,17 @@ const layer = Layer.effect(
           type: "ok",
           prompt: input.prompt,
           // Research's default caps apply only when the user set none of their own.
-          ...(own?.usd === undefined && own?.steps === undefined ? { budget: { usd: caps.usd, steps: caps.steps } } : {}),
+          ...(own?.usd === undefined && own?.steps === undefined
+            ? { budget: { usd: caps.usd, steps: caps.steps } }
+            : {}),
         } satisfies Brief
       }
       if (input.agent !== RESEARCHER) return { type: "ok", prompt: input.prompt } satisfies Brief
       if (input.ctx.agent !== LEAD)
-        return { type: "refused", message: "Only the research lead launches researchers, inside its run." } satisfies Brief
+        return {
+          type: "refused",
+          message: "Only the research lead launches researchers, inside its run.",
+        } satisfies Brief
       const found = yield* current(input.ctx)
       if ("refused" in found) return { type: "refused", message: found.refused } satisfies Brief
       if (!input.resume) {
@@ -443,7 +458,9 @@ const layer = Layer.effect(
     })
 
     const returned = Effect.fn("ResearchRun.returned")(function* (sessionID: SessionID, text: string) {
-      const notes = (yield* sessions.messages({ sessionID }).pipe(Effect.catch(() => Effect.succeed([] as SessionV1.WithParts[]))))
+      const notes = (yield* sessions
+        .messages({ sessionID })
+        .pipe(Effect.catch(() => Effect.succeed([] as SessionV1.WithParts[]))))
         .flatMap((message) => message.parts)
         .flatMap((part) =>
           part.type === "tool" &&
@@ -528,7 +545,9 @@ function refuse(message: string): Current {
 }
 
 function refusal(message: string, checked: Extract<ResearchOutbound.Result, { ok: false }>) {
-  return checked.reason === "secret" ? `${message} It holds a password, key or token.` : `${message} It shares "${checked.match}".`
+  return checked.reason === "secret"
+    ? `${message} It holds a password, key or token.`
+    : `${message} It shares "${checked.match}".`
 }
 
 const text = (file: string) =>

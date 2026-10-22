@@ -338,13 +338,24 @@ const layer = Layer.effect(
             Permission.fromConfig({
               "*": "deny",
               ...Object.fromEntries(tools.map((tool) => [tool, "allow" as const])),
-              ...(tools.includes("research_read") ? { research_read: "ask" as const, private_network: "ask" as const } : {}),
+              ...(tools.includes("research_read")
+                ? { research_read: "ask" as const, private_network: "ask" as const }
+                : {}),
               ...(reads ? { read: readDefaults, external_directory: readonlyExternalDirectory } : {}),
               ...(browses
-                ? { browser_external: "ask" as const, browser_interact: "ask" as const, browser_sensitive: "ask" as const }
+                ? {
+                    browser_external: "ask" as const,
+                    browser_interact: "ask" as const,
+                    browser_sensitive: "ask" as const,
+                  }
                 : {}),
               ...(subagents.length
-                ? { task: { "*": "deny" as const, ...Object.fromEntries(subagents.map((item) => [item, "allow" as const])) } }
+                ? {
+                    task: {
+                      "*": "deny" as const,
+                      ...Object.fromEntries(subagents.map((item) => [item, "allow" as const])),
+                    },
+                  }
                 : {}),
             }),
             rules.flatMap((rule) => narrow(rule, tools, [], { subagents, external: reads })),
@@ -719,7 +730,9 @@ const layer = Layer.effect(
             Permission.fromConfig({
               "research_*": "deny",
               ...(name === "build" ? {} : { research: "deny" as const }),
-              ...(launches.length ? { task: Object.fromEntries(launches.map((agent) => [agent, "deny" as const])) } : {}),
+              ...(launches.length
+                ? { task: Object.fromEntries(launches.map((agent) => [agent, "deny" as const])) }
+                : {}),
             }),
           )
         }

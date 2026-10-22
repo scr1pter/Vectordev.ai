@@ -78,7 +78,11 @@ it.instance(
       yield* llm.tool("research_read", { source: "S1", find: "412 homes" })
       yield* llm.text("Done.")
       const before = web.count("article")
-      yield* send({ sessionID: session.id, agent: "research", text: `Research heat pump savings. Start with ${article} and ${pdf}.` })
+      yield* send({
+        sessionID: session.id,
+        agent: "research",
+        text: `Research heat pump savings. Start with ${article} and ${pdf}.`,
+      })
       const reads = yield* calls(session.id, "research_read")
       expect(reads.map((read) => read.state.status)).toEqual(["completed", "completed", "completed"])
       expect(output(reads[0])).toContain("S1 · ")
@@ -102,7 +106,11 @@ it.instance(
       yield* llm.tool("research_plan", plan({ question: "Which heat pumps work below minus 20 degrees?" }))
       yield* llm.tool("research_read", { url: web.url("docs", "/report.pdf") })
       yield* llm.text("Done.")
-      yield* send({ sessionID: session.id, agent: "research", text: "Now research which ones work in the coldest winters." })
+      yield* send({
+        sessionID: session.id,
+        agent: "research",
+        text: "Now research which ones work in the coldest winters.",
+      })
       expect(asked.filter((request) => request.permission === "research_read")).toHaveLength(2)
 
       // The pages are held, private web documents of the run, as the store keeps them.
@@ -134,7 +142,11 @@ it.instance(
       yield* llm.tool("research_read", { url: article, links: true })
       yield* llm.tool("research_read", { url: data })
       yield* llm.text("Done.")
-      yield* send({ sessionID: session.id, agent: "research", text: `Research what these pages link to: ${hostile} ${article}` })
+      yield* send({
+        sessionID: session.id,
+        agent: "research",
+        text: `Research what these pages link to: ${hostile} ${article}`,
+      })
       const [first, second, third] = yield* calls(session.id, "research_read")
       const linksOf = (part: typeof first) =>
         part?.state.status === "completed" ? ((part.state.metadata.links as string[] | undefined) ?? []) : []

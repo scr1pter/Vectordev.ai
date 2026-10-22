@@ -186,7 +186,11 @@ export function runtime(web: FakeWeb.Web, options: { readonly client?: string } 
       [MCP.node, mcp],
       [
         RuntimeFlags.node,
-        RuntimeFlags.layer({ experimentalEventSystem: true, backgroundSubagents: false, client: options.client ?? "sdk" }),
+        RuntimeFlags.layer({
+          experimentalEventSystem: true,
+          backgroundSubagents: false,
+          client: options.client ?? "sdk",
+        }),
       ],
       [Global.node, Global.layerWith({ config })],
       [
@@ -199,7 +203,11 @@ export function runtime(web: FakeWeb.Web, options: { readonly client?: string } 
 }
 
 /** The repository's config: the fake LLM server as the model, SearXNG on the fake web as research's search. */
-export function repositoryConfig(llm: string, web: FakeWeb.Web, extra: Partial<ConfigV1.Info> = {}): Partial<ConfigV1.Info> {
+export function repositoryConfig(
+  llm: string,
+  web: FakeWeb.Web,
+  extra: Partial<ConfigV1.Info> = {},
+): Partial<ConfigV1.Info> {
   return {
     provider: {
       lmstudio: {
@@ -281,7 +289,9 @@ export function output(part: SessionV1.ToolPart | undefined) {
 }
 
 /** A plan for the fake web's heat pump pages. */
-export const plan = (input: Partial<{ question: string; depth: "focused" | "deep"; scope: "web" | "web+brain" | "brain" }> = {}) => ({
+export const plan = (
+  input: Partial<{ question: string; depth: "focused" | "deep"; scope: "web" | "web+brain" | "brain" }> = {},
+) => ({
   question: input.question ?? "How much do heat pumps cut heating bills in cold climates?",
   subquestions: ["What did field studies measure?", "How large were the savings?"],
   scope: input.scope ?? "web",

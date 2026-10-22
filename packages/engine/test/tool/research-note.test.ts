@@ -55,7 +55,8 @@ it.instance(
       })
       yield* llm.tool("research_report", {
         title: "Heat pumps in cold climates",
-        answer: "A field study followed 412 homes through two winters [N2]. Another claim cites a note that was never saved [N9].",
+        answer:
+          "A field study followed 412 homes through two winters [N2]. Another claim cites a note that was never saved [N9].",
         sections: [{ heading: "What was measured", body: "The study followed 412 homes [N2]." }],
         open_questions: [],
       })
@@ -66,7 +67,11 @@ it.instance(
         open_questions: ["How do savings change below minus 20 degrees?"],
       })
       yield* llm.text("Done.")
-      yield* send({ sessionID: session.id, agent: "research", text: `Research heat pump savings, starting with ${article}` })
+      yield* send({
+        sessionID: session.id,
+        agent: "research",
+        text: `Research heat pump savings, starting with ${article}`,
+      })
 
       const notes = yield* calls(session.id, "research_note")
       expect(output(notes[0])).toContain("That quote is not in S1")

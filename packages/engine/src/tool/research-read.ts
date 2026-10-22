@@ -23,7 +23,9 @@ export const Parameters = Schema.Struct({
   url: Schema.optional(Schema.String).annotate({
     description: "An address from a search result, a link research_read offered, or the user's message",
   }),
-  source: Schema.optional(Schema.String).annotate({ description: 'A source this run saved, such as "S3", to read again' }),
+  source: Schema.optional(Schema.String).annotate({
+    description: 'A source this run saved, such as "S3", to read again',
+  }),
   chunk: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))).annotate({
     description: "Which chunk to show (1 by default); the first read shows the outline with each section's chunk",
   }),
@@ -91,7 +93,11 @@ export const ResearchReadTool = Tool.define<
             return show(saved)
           }
           if (!params.url)
-            return { title: "Not read", output: 'Give the address to read, or a saved source such as "S3".', metadata: { runID } }
+            return {
+              title: "Not read",
+              output: 'Give the address to read, or a saved source such as "S3".',
+              metadata: { runID },
+            }
           if (found.plan.scope === "brain")
             return {
               title: "Not read",
@@ -101,10 +107,18 @@ export const ResearchReadTool = Tool.define<
 
           const checked = ResearchProvenance.check(yield* research.provenance(ctx, found), params.url)
           if (!checked.ok)
-            return { title: "Not read", output: checked.message, metadata: { runID, url: params.url, refused: "provenance" as const } }
+            return {
+              title: "Not read",
+              output: checked.message,
+              metadata: { runID, url: params.url, refused: "provenance" as const },
+            }
           const outbound = ResearchOutbound.address(checked.url, yield* research.context(ctx, found))
           if (!outbound.ok)
-            return { title: "Not read", output: OUTBOUND, metadata: { runID, url: checked.url, refused: "outbound" as const } }
+            return {
+              title: "Not read",
+              output: OUTBOUND,
+              metadata: { runID, url: checked.url, refused: "outbound" as const },
+            }
 
           // A page the run read is read again from what it saved.
           const known = found.detail.sources.find(
@@ -116,7 +130,10 @@ export const ResearchReadTool = Tool.define<
             if (saved && !saved.forgotten) {
               const shown = show(saved)
               return params.links
-                ? { ...shown, output: `${shown.output}\n\nThis run read ${saved.source.id} before, so its links were offered then.` }
+                ? {
+                    ...shown,
+                    output: `${shown.output}\n\nThis run read ${saved.source.id} before, so its links were offered then.`,
+                  }
                 : shown
             }
           }
@@ -131,7 +148,9 @@ export const ResearchReadTool = Tool.define<
               url: checked.url,
               typed: checked.from === "typed",
               chunkTokens:
-                (model?.limit.context ?? Infinity) < 32_000 ? ResearchReader.COMPACT_TOKENS : ResearchReader.CHUNK_TOKENS,
+                (model?.limit.context ?? Infinity) < 32_000
+                  ? ResearchReader.COMPACT_TOKENS
+                  : ResearchReader.CHUNK_TOKENS,
             },
             {
               http,
@@ -182,7 +201,11 @@ export const ResearchReadTool = Tool.define<
                 .map((link) => link.url)
             : []
           if (added.type === "refused")
-            return { title: "Not read", output: added.message, metadata: { runID, url: page.final, refused: "budget" as const } }
+            return {
+              title: "Not read",
+              output: added.message,
+              metadata: { runID, url: page.final, refused: "budget" as const },
+            }
           if (added.type === "duplicate")
             return {
               title: `${added.source.id}: a copy of ${added.of}`,
@@ -256,7 +279,8 @@ function savedText(
     : params.find
       ? ResearchReader.find(saved.chunks, params.find).map((item) => `[chunk ${item.chunk}] ${item.snippet}`)
       : [saved.chunks[index - 1]!.text]
-  const where = params.focus || params.find ? `${body.length} passage${body.length === 1 ? "" : "s"}` : `chunk ${index} of ${total}`
+  const where =
+    params.focus || params.find ? `${body.length} passage${body.length === 1 ? "" : "s"}` : `chunk ${index} of ${total}`
   const header = [
     source.id,
     source.site,

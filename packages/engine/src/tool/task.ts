@@ -1114,7 +1114,10 @@ export const TaskTool = Tool.define(
           if (dependencies.length > 0) yield* transition({ status: "running" })
           // A brief is the parent model's text, so @names in it attach files but never invoke agents in the child.
           const parts = (yield* ops.resolvePromptParts(
-            [assignmentPrompt(briefed, subagentType === ResearchRun.RESEARCHER ? [] : ownedPaths), ...prerequisites].join("\n\n"),
+            [
+              assignmentPrompt(briefed, subagentType === ResearchRun.RESEARCHER ? [] : ownedPaths),
+              ...prerequisites,
+            ].join("\n\n"),
           )).filter((part) => part.type !== "agent")
           return yield* ops.prompt({
             messageID: MessageID.ascending(),

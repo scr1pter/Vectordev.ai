@@ -140,11 +140,7 @@ export const ResearchPlanTool = Tool.define<
           }
 
           // A child stays at its launcher's size, and a request the user capped at Work stays Focused.
-          const ceiling: Research.Depth = lead.parentID
-            ? yield* launcherDepth(lead)
-            : size?.capped
-              ? "focused"
-              : "deep"
+          const ceiling: Research.Depth = lead.parentID ? yield* launcherDepth(lead) : size?.capped ? "focused" : "deep"
           const proposed = { ...plan, depth: deeper(plan.depth, ceiling) }
           const provider = searchProvider(cfg.research)
           const estimate = yield* estimateLine(proposed, ctx, provider.provider)
@@ -187,7 +183,12 @@ export const ResearchPlanTool = Tool.define<
                   options: [
                     { label: START, description: `Research at this depth (${proposed.depth})` },
                     ...(ceiling === "deep" && proposed.depth !== "deep"
-                      ? [{ label: START_DEEP, description: "Up to 4 researchers and a judge that checks the citations" }]
+                      ? [
+                          {
+                            label: START_DEEP,
+                            description: "Up to 4 researchers and a judge that checks the citations",
+                          },
+                        ]
                       : []),
                     { label: CANCEL, description: "Stop without searching or reading anything" },
                   ],
@@ -226,7 +227,10 @@ export const ResearchPlanTool = Tool.define<
             output: approvedText({
               plan: decided.plan,
               runID,
-              estimate: decided.plan.depth === proposed.depth ? estimate : yield* estimateLine(decided.plan, ctx, provider.provider),
+              estimate:
+                decided.plan.depth === proposed.depth
+                  ? estimate
+                  : yield* estimateLine(decided.plan, ctx, provider.provider),
               automatic: false,
               provider: provider.provider,
             }),
@@ -246,7 +250,11 @@ export const ResearchPlanTool = Tool.define<
     }
 
     // The deepest a child's run may go: deep only when the request that launched it is Thorough.
-    function launcherDepth(lead: { readonly id: SessionID; readonly parentID?: SessionID; readonly metadata?: Record<string, unknown> }) {
+    function launcherDepth(lead: {
+      readonly id: SessionID
+      readonly parentID?: SessionID
+      readonly metadata?: Record<string, unknown>
+    }) {
       return Effect.gen(function* () {
         const record = SubagentLifecycle.read(lead)
         if (!record || !lead.parentID) return "focused" as const
@@ -314,7 +322,9 @@ function measured(ctx: Tool.Context) {
 
 // The plan's sites with the user's own, each once.
 function domains(key: "prefer_domains" | "avoid_domains", proposed?: readonly string[], own?: readonly string[]) {
-  const all = [...new Set([...(proposed ?? []), ...(own ?? [])].map((item) => item.trim().toLowerCase()).filter(Boolean))]
+  const all = [
+    ...new Set([...(proposed ?? []), ...(own ?? [])].map((item) => item.trim().toLowerCase()).filter(Boolean)),
+  ]
   return all.length ? { [key]: all.slice(0, 50) } : {}
 }
 
@@ -336,7 +346,12 @@ function deeper(depth: Research.Depth, ceiling: Research.Depth): Research.Depth 
 function decide(reply: string, plan: Research.Plan, ceiling: Research.Depth) {
   if (reply === START) return { type: "start", answer: "start", plan, always: [] } as const
   if (reply === START_DEEP)
-    return { type: "start", answer: "start-deep", plan: { ...plan, depth: deeper("deep", ceiling) }, always: [] } as const
+    return {
+      type: "start",
+      answer: "start-deep",
+      plan: { ...plan, depth: deeper("deep", ceiling) },
+      always: [],
+    } as const
   if (reply === CANCEL) return { type: "cancel" } as const
   if (!reply.startsWith(PREFIX)) return { type: "steer" } as const
   const decoded = decodeAnswer(reply.slice(PREFIX.length))

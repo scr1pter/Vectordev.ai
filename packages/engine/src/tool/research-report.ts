@@ -16,7 +16,9 @@ import DESCRIPTION from "./research-report.txt"
 
 const Section = Schema.Struct({
   heading: Schema.String.check(Schema.isLengthBetween(1, 200)),
-  body: Schema.String.check(Schema.isLengthBetween(1, 6_000)).annotate({ description: "The section, citing notes as [N3]" }),
+  body: Schema.String.check(Schema.isLengthBetween(1, 6_000)).annotate({
+    description: "The section, citing notes as [N3]",
+  }),
   subquestion: Schema.optional(Schema.String),
 })
 
@@ -26,7 +28,9 @@ export const Parameters = Schema.Struct({
     description: "The answer to the question, at most 1,500 characters, citing notes as [N3]",
   }),
   sections: Schema.Array(Section).check(Schema.isMaxLength(12)),
-  disagreements: Schema.optional(Schema.Array(Schema.String.check(Schema.isMaxLength(1_000))).check(Schema.isMaxLength(12))),
+  disagreements: Schema.optional(
+    Schema.Array(Schema.String.check(Schema.isMaxLength(1_000))).check(Schema.isMaxLength(12)),
+  ),
   open_questions: Schema.Array(Schema.String.check(Schema.isMaxLength(500))).check(Schema.isMaxLength(12)),
   method_notes: Schema.optional(Schema.String.check(Schema.isMaxLength(2_000))),
 })
@@ -63,7 +67,9 @@ export const ResearchReportTool = Tool.define<
           if (found.lead.id !== ctx.sessionID)
             return { title: "Not saved", output: "Only the research lead writes the report.", metadata: {} }
           // A lead the build agent started shares its launcher's run, whose spend is not the research's alone.
-          const spent = found.lead.parentID ? undefined : (yield* guard.snapshot(SessionID.make(ctx.sessionID)))?.spentUsd
+          const spent = found.lead.parentID
+            ? undefined
+            : (yield* guard.snapshot(SessionID.make(ctx.sessionID)))?.spentUsd
           const input: Research.ReportInput = {
             title: params.title,
             answer: params.answer,

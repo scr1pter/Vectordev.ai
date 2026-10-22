@@ -42,7 +42,13 @@ it.instance(
       yield* fs.writeWithDirs(path.join(dir, "notes", "plan.md"), `# Plan\n\n${NOTES}\n`)
       const brain = yield* Brain.Service
       const place = yield* (yield* Instruction.Service).place()
-      yield* brain.propose(place, { kind: "fact", text: FACT, scope: "personal", origin: "user", evidence: { type: "user" } })
+      yield* brain.propose(place, {
+        kind: "fact",
+        text: FACT,
+        scope: "personal",
+        origin: "user",
+        evidence: { type: "user" },
+      })
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research", permission: allow })
       yield* llm.tool("research_plan", plan())
@@ -53,11 +59,17 @@ it.instance(
       yield* llm.tool("research_search", { query: "heat pump savings near Whitfield cold climate" })
       yield* llm.text("Done.")
       // The user names the house's owner, so that name is theirs to send.
-      yield* send({ sessionID: session.id, agent: "research", text: "Research heat pump savings for the house of Mr Whitfield." })
+      yield* send({
+        sessionID: session.id,
+        agent: "research",
+        text: "Research heat pump savings for the house of Mr Whitfield.",
+      })
 
       // The memory tool found the fact; the transcript keeps its id only.
       const memory = (yield* calls(session.id, "memory"))[0]
-      expect(memory?.state.status === "completed" ? memory.state.metadata["vector.memory.personal"] : undefined).toHaveLength(1)
+      expect(
+        memory?.state.status === "completed" ? memory.state.metadata["vector.memory.personal"] : undefined,
+      ).toHaveLength(1)
       const searches = yield* calls(session.id, "research_search")
       expect(searches.map(output).slice(0, 2)).toEqual([ResearchOutbound.REFUSAL, ResearchOutbound.REFUSAL])
       expect(output(searches[2])).toContain("result")
@@ -98,7 +110,11 @@ it.instance(
       yield* llm.tool("research_plan", plan({ scope: "brain" }))
       yield* llm.tool("research_search", { query: "heat pump field study" })
       yield* llm.text("Done.")
-      yield* send({ sessionID: brainOnly.id, agent: "research", text: "Research what this repository knows about heat pumps." })
+      yield* send({
+        sessionID: brainOnly.id,
+        agent: "research",
+        text: "Research what this repository knows about heat pumps.",
+      })
       const [none] = yield* calls(brainOnly.id, "research_search")
       expect(output(none)).toContain("searches nothing on the web")
       expect(searched() - before).toBe(1)

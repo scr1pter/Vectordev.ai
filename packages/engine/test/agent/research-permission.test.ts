@@ -44,7 +44,14 @@ const RESEARCH_TOOLS = [
   "research_note",
   "research_report",
 ]
-const OTHER = ["mcp_github_create_or_update_file", "vector_cloud", "vector_cloud_publish", "lsp", "escalate", "my_plugin_tool"]
+const OTHER = [
+  "mcp_github_create_or_update_file",
+  "vector_cloud",
+  "vector_cloud_publish",
+  "lsp",
+  "escalate",
+  "my_plugin_tool",
+]
 
 it.instance(
   "a global allow, a repository allow and the agents' own allows reopen no coding tool in research",
@@ -93,25 +100,23 @@ it.instance(
   },
 )
 
-it.instance(
-  "by default the run's first read asks, a private address asks, and secret files keep asking",
-  () =>
-    Effect.gen(function* () {
-      const research = (yield* get("research"))!
-      const researcher = (yield* get("researcher"))!
-      for (const agent of [research, researcher]) {
-        expect(action(agent, "research_read", "run_1")).toBe("ask")
-        expect(action(agent, "private_network", "http://10.0.0.5")).toBe("ask")
-        expect(action(agent, "research_search")).toBe("allow")
-      }
-      expect(action(research, "read", "src/app.ts")).toBe("allow")
-      expect(action(research, "read", ".env")).toBe("ask")
-      expect(action(research, "read", "keys/server.pem")).toBe("ask")
-      expect(action(research, "external_directory", "/somewhere/else/*")).toBe("ask")
-      expect(action(research, "browser_external", "https://example.com")).toBe("ask")
-      expect(research.mode).toBe("all")
-      expect(researcher.mode).toBe("subagent")
-    }),
+it.instance("by default the run's first read asks, a private address asks, and secret files keep asking", () =>
+  Effect.gen(function* () {
+    const research = (yield* get("research"))!
+    const researcher = (yield* get("researcher"))!
+    for (const agent of [research, researcher]) {
+      expect(action(agent, "research_read", "run_1")).toBe("ask")
+      expect(action(agent, "private_network", "http://10.0.0.5")).toBe("ask")
+      expect(action(agent, "research_search")).toBe("allow")
+    }
+    expect(action(research, "read", "src/app.ts")).toBe("allow")
+    expect(action(research, "read", ".env")).toBe("ask")
+    expect(action(research, "read", "keys/server.pem")).toBe("ask")
+    expect(action(research, "external_directory", "/somewhere/else/*")).toBe("ask")
+    expect(action(research, "browser_external", "https://example.com")).toBe("ask")
+    expect(research.mode).toBe("all")
+    expect(researcher.mode).toBe("subagent")
+  }),
 )
 
 it.instance(

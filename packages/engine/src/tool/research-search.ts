@@ -24,7 +24,9 @@ export const Parameters = Schema.Struct({
   }),
   site: Schema.optional(Schema.String).annotate({ description: "Limit the search to one site, such as nature.com" }),
   recency: Schema.optional(ResearchSearch.Recency).annotate({ description: "day, week, month or year" }),
-  limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: ResearchSearch.MAX_RESULTS }))).annotate({
+  limit: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: ResearchSearch.MAX_RESULTS })),
+  ).annotate({
     description: `How many results, up to ${ResearchSearch.MAX_RESULTS} (default ${ResearchSearch.DEFAULT_RESULTS})`,
   }),
 })
@@ -77,7 +79,8 @@ export const ResearchSearchTool = Tool.define<
           if (found.plan.scope === "brain")
             return {
               title: "Not searched",
-              output: "This research's scope is the brain and the repository's files, so it searches nothing on the web.",
+              output:
+                "This research's scope is the brain and the repository's files, so it searches nothing on the web.",
               metadata: { runID, refused: "scope" as const },
             }
           const provider = searchProvider((yield* config.get()).research)
@@ -92,10 +95,18 @@ export const ResearchSearchTool = Tool.define<
           // Checked before it counts: a refused query was never sent.
           const checked = ResearchOutbound.check(params.site ? `${query} site:${params.site}` : query, context)
           if (!checked.ok)
-            return { title: "Search refused", output: checked.message, metadata: { runID, query, refused: "outbound" as const } }
+            return {
+              title: "Search refused",
+              output: checked.message,
+              metadata: { runID, query, refused: "outbound" as const },
+            }
           const counted = yield* store.searched(found.place, runID, query)
           if (counted.type === "refused")
-            return { title: "Search budget used", output: counted.message, metadata: { runID, query, refused: "budget" as const } }
+            return {
+              title: "Search budget used",
+              output: counted.message,
+              metadata: { runID, query, refused: "budget" as const },
+            }
           yield* ctx.metadata({ title: `Searching: ${query}`, metadata: { runID, query, provider: provider.provider } })
           const results = yield* ResearchSearch.searxng(
             {
@@ -131,7 +142,11 @@ export const ResearchSearchTool = Tool.define<
             ),
           )
           if (results.type === "failed")
-            return { title: "Search failed", output: results.message, metadata: { runID, query, provider: provider.provider } }
+            return {
+              title: "Search failed",
+              output: results.message,
+              metadata: { runID, query, provider: provider.provider },
+            }
           const read = new Map(found.detail.sources.map((source) => [source.canonical_url, source.id]))
           const listed = results.items.map((item, index) => {
             const known = read.get(ResearchCanonical.canonical(item.url) ?? "")
