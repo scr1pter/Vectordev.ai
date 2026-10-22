@@ -86,6 +86,8 @@ const TOMBSTONE = 180 * DAY
 const SWEEP_EVERY = 60 * 60 * 1000
 /** The background embedder looks again this often while it has nothing to do. */
 const IDLE = 30_000
+/** Runs whose pages dedupe keeps in memory; a page's shingles can run to tens of thousands. */
+const FINGERPRINTED = 8
 
 export type StartInput = {
   /** The root session: researchers launched from it write into the same run. */
@@ -372,7 +374,7 @@ function make(input: {
   const state = {
     // Runs a guest acted in, which live in the memory brain.
     guests: new Set<string>(),
-    // Each run's read pages as dedupe compares them, built from the saved text on first use.
+    // The latest runs' read pages as dedupe compares them, built again from the saved text when a run was pushed out.
     fingerprints: new Map<string, ResearchDedupe.Known[]>(),
     swept: 0,
     embedder: false,
@@ -773,10 +775,7 @@ function make(input: {
         )
         const source = yield* insert(row({ document_id: document }))
         yield* touch(store, runID, { pages: found.row.pages + 1, status: found.row.status === "planned" ? "running" : found.row.status })
-        state.fingerprints.set(runID, [
-          ...(state.fingerprints.get(runID) ?? []),
-          { ...fingerprint, id: source.id, canonical: page.canonical },
-        ])
+        fingerprinted(runID, [...(state.fingerprints.get(runID) ?? []), { ...fingerprint, id: source.id, canonical: page.canonical }])
         yield* publish(place, runID, found.row.status === "planned" ? "running" : found.row.status, { sourceID: source.id })
         return { type: "added" as const, source, ...(room.evicted.length > 0 ? { evicted: room.evicted } : {}) }
       }),
@@ -786,7 +785,7 @@ function make(input: {
   // The run's read pages as dedupe compares them: from the cache, or from their saved text.
   const knownOf = Effect.fnUntraced(function* (store: Database, runID: string, sources: readonly SourceRow[]) {
     const cached = state.fingerprints.get(runID)
-    if (cached) return cached
+    if (cached) return fingerprinted(runID, cached)
     const known = yield* Effect.forEach(
       sources.filter((source) => source.document_id !== null),
       (source) =>
@@ -798,9 +797,16 @@ function make(input: {
           })),
         ),
     )
-    state.fingerprints.set(runID, known)
-    return known
+    return fingerprinted(runID, known)
   })
+
+  // Kept for the runs used last only, so finished runs do not hold their pages' shingles for the life of the process.
+  const fingerprinted = (runID: string, known: ResearchDedupe.Known[]) => {
+    state.fingerprints.delete(runID)
+    state.fingerprints.set(runID, known)
+    if (state.fingerprints.size > FINGERPRINTED) state.fingerprints.delete(state.fingerprints.keys().next().value!)
+    return known
+  }
 
   // Room for `bytes` more in the repository's research: the oldest runs nobody kept go first, never this one.
   const roomFor = Effect.fnUntraced(function* (place: Brain.Place, runID: string, bytes: number) {

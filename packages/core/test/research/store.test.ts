@@ -233,6 +233,29 @@ describe("ResearchStore sources", () => {
     expect(result.detail?.run.pages).toBe(1)
   })
 
+  test("a copy is still found once later runs have pushed the run's pages out of memory", async () => {
+    const result = await withStore((setup) =>
+      Effect.gen(function* () {
+        const long = Array.from({ length: 12 }, (_, index) => `${STUDY[index % 3]} Paragraph ${index} of the article.`)
+        const run = yield* setup.store.start(setup.place, RUN)
+        yield* setup.store.addSource(setup.place, run.id, page("homes", long))
+        // More runs than dedupe keeps in memory, each reading a page of its own.
+        yield* Effect.forEach(Array.from({ length: 10 }, (_, index) => index), (index) =>
+          Effect.gen(function* () {
+            const other = yield* setup.store.start(setup.place, { ...RUN, sessionID: `ses_${index}` })
+            yield* setup.store.addSource(setup.place, other.id, page(`other${index}`, [`${REVIEW[index % 2]} Page ${index}.`]))
+          }),
+        )
+        return yield* setup.store.addSource(
+          setup.place,
+          run.id,
+          page("syndicated", [...long, "Republished with permission."], { title: "A copy" }),
+        )
+      }),
+    )
+    expect(result).toMatchObject({ type: "duplicate", of: "S1", source: { id: "S2", status: "duplicate" } })
+  })
+
   test("a page first skipped as built by script is filled in, as the same source, by a read that has its text", async () => {
     const result = await withStore((setup) =>
       Effect.gen(function* () {
