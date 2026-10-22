@@ -1,12 +1,15 @@
 export * as EgressGuard from "./guard"
 
 import dns from "node:dns"
+import { existsSync } from "node:fs"
 import http from "node:http"
 import { syncBuiltinESMExports } from "node:module"
 import net from "node:net"
 import { fileURLToPath } from "node:url"
 import workerThreads from "node:worker_threads"
-import type { LocalMode } from "@vectordevai/schema/local-mode"
+import { Option, Schema } from "effect"
+import { LocalMode } from "@vectordevai/schema/local-mode"
+import { InstallationVersion } from "../installation/version"
 import { EgressAttribution } from "./attribution"
 import { ForwardProxy } from "./forward-proxy"
 import { LocalPolicy } from "./policy"
@@ -29,23 +32,32 @@ import { LocalPolicy } from "./policy"
 //   as the internet, so an unlabelled request through a corporate proxy is still blocked. Node only uses the proxy
 //   environment once `http.setGlobalProxyFromEnv` ran; treating the proxy as the internet is right either way.
 // - Only a request for the internet may go through the proxy environment. One for this computer or your network (a
-//   local model's prompt included) goes direct: its host joins NO_PROXY before it is sent (`direct`), which fetch
-//   reads at each request, and the proxy is never granted to it, so a client that still sends it there (Node's
-//   node:http agent reads the environment once) is refused at the socket.
+//   local model's prompt included) goes direct: its host joins NO_PROXY before it is sent (`direct`), in the forms
+//   both runtimes match, which fetch reads at each request, and the proxy is never granted to it, so a client that
+//   still sends it there (Node's node:http agent reads the environment once) is refused at the socket. Under Bun,
+//   whose fetch and node:http reach the proxy natively, a request NO_PROXY would still not send direct, read the way
+//   Bun reads it (`carried`), is refused before it is sent.
 // - A name allowed because its name says where it is (`localhost`, `nas.local`, `box.tail1.ts.net`) must resolve
 //   there: a socket's lookup that answers outside is refused before anything connects, and fetch and Bun.connect
 //   look the name up first. A name on the model server list is decided on the list instead, since a company's
 //   `gpu.internal` may sit on its own public range; a loopback name must still resolve to loopback.
 // - fetch reaches only http, https, file, data and blob addresses; any other scheme (Bun's s3:, whose name is a bucket
 //   and not where it connects) is refused while the guard decides connections.
-// With Vector Local off, each wrap costs one call and logs nothing.
+// - Under Bun, a Worker started through the global `Worker` or the `node:worker_threads` module object preloads these
+//   wraps (`guard-worker.ts`), which follow the policy of the thread that started it (`follow`): the policy in effect
+//   when it starts, then each one `announce` sends. What the worker decides comes back to that thread for its log. A
+//   worker entry that decides its own policy (the TUI's engine thread) takes over from them (`unfollow`).
+// With Vector Local off, each wrap costs one call and logs nothing; a Worker still preloads the wraps, to follow.
 //
 // Strict mode, for tests (VECTOR_TEST_EGRESS=strict), refuses any connection off this computer and throws. Under Bun it
 // also runs a proxy of its own on 127.0.0.1 and points the proxy environment at it, so Bun.fetch, a fetch captured
 // before the guard was installed, node:http and a Worker's fetch are refused too, and it preloads its wraps in Workers
 // started through the global `Worker` or the `node:worker_threads` module object. Node needs no such proxy: its fetch,
 // node:http and WebSocket all connect through net, which the socket wrap decides. Node has no preload either, so a
-// Node worker is guarded when its entry imports `backstop-worker.ts` first, as the brain's reader does.
+// Node worker is guarded when its entry imports `backstop-worker.ts` first, as the brain's reader does. Only a test
+// may turn it on: a build of Vector and Electron ignore its variables, and so does a process with Vector Local on,
+// whose own guard applies (`testEnvironment`), so whatever starts Vector cannot use them to let a name through or to
+// stand in a proxy of its own for the guard's.
 //
 // Neither mode covers:
 // - UDP and DNS lookups themselves, and the connections of child processes (the programs the agent runs make their
@@ -57,16 +69,19 @@ import { LocalPolicy } from "./policy"
 // - Bun.SQL (postgres) and Bun.RedisClient, which connect natively;
 // - in strict mode, Bun.fetch once a test sets NO_PROXY or a proxy variable of its own after install;
 // - under Bun, a Worker class imported by name from node:worker_threads (`import { Worker } from ...`), even in a
-//   module loaded after install, since Bun does not update named imports of built-in modules. Its fetch still goes
-//   through the strict proxy. A worker entry that imports `backstop-worker.ts` first, as the brain's reader does, is
-//   guarded however it was started. Under Node, named imports loaded after install see the wrapped class;
+//   module loaded after install, since Bun does not update named imports of built-in modules. In strict mode its fetch
+//   still goes through the strict proxy. A worker entry that imports `backstop-worker.ts` first, as the brain's reader
+//   does, is guarded however it was started. Under Node, named imports loaded after install see the wrapped class;
+// - with Vector Local on under Node, a worker thread whose entry does not import `backstop-worker.ts` first (Node
+//   has no preload), and under Bun a Worker in a build whose worker preload is missing (the CLI's build carries it);
 // - under Bun, the lookup of a name a node:http client request uses: that request is decided by its name only;
 // - under Bun, the lookup fetch makes itself after the guard checked a name allowed by its name: Bun's fetch cannot be
 //   told to connect to the address the guard checked without changing the URL the caller sees, so a resolver that
 //   answers differently the second time is not caught there (Node's sockets connect to the address they checked);
 // - under Bun, the npm `ws` package: Bun replaces it with its own client, which keeps a WebSocket class of its own and
-//   reads no global, so a `ws` socket is never seen here. Its call sites (the OpenAI plugin's ws.ts and ws-pool.ts)
-//   are decided by their labelled gate instead (phase L5). Under Node, `ws` connects through net and is decided.
+//   reads no global, so a `ws` socket is never seen here. Its one call site, the OpenAI plugin's
+//   `connectResponsesWebSocket` (which ws-pool.ts opens its sockets through), decides each model call itself through
+//   Egress before it connects. Under Node, `ws` connects through net and is decided here too.
 
 export class EgressBlocked extends Error {
   override readonly name = "EgressBlocked"
@@ -121,6 +136,11 @@ export type StrictOptions = {
    */
   readonly proxy?: boolean
   /**
+   * The strict guard proxy of the process or thread that started this one, which its proxy environment points at and
+   * which therefore counts as this guard's own (`testEnvironment().proxy`).
+   */
+  readonly parentProxy?: string
+  /**
    * Whether a refused socket, node:http request or WebSocket throws where it is made (the default, for tests) or fails
    * the way a refused connection does, with an `error` event: a worker thread that makes no connections of its own
    * uses that.
@@ -135,12 +155,38 @@ export type Handle = {
   readonly uninstall: () => void
 }
 
-/** What a Worker reads to install strict mode too: on, the pinned names, and the parent's proxy. */
+/**
+ * What a Worker reads to install strict mode too: on, the pinned names, and the parent's proxy. Only a test honours
+ * them (`testEnvironment`).
+ */
 export const ENVIRONMENT = {
   strict: "VECTOR_TEST_EGRESS",
   names: "VECTOR_TEST_EGRESS_NAMES",
   proxy: "VECTOR_TEST_EGRESS_PROXY",
 } as const
+
+/**
+ * How a Worker started under Vector Local follows the policy of the thread that decides it (`follow`): the variable
+ * its Worker wrap sets to that policy and that thread's id, and the channel that thread announces each new policy on,
+ * which the worker sends what it decides back on.
+ */
+export const FOLLOW = { environment: "VECTOR_EGRESS_FOLLOW", channel: "vector.egress.follow" } as const
+
+/** The refusal of a request for this computer or your network that the proxy environment would still send to a proxy. */
+export const PROXY_ENVIRONMENT =
+  "It is on this computer or your network, and the proxy settings would still send it to a proxy, which Vector does not let carry such a request. Add its host to NO_PROXY as its address spells it."
+
+export type TestEnvironment = {
+  readonly strict: boolean
+  readonly names: readonly string[]
+  /** The strict guard proxy of the process or thread that started this one. */
+  readonly proxy?: string
+}
+
+declare global {
+  /** Where the compiled CLI carries the worker preload, which its build names. */
+  const VECTOR_EGRESS_WORKER_PATH: string
+}
 
 const PROXY_VARIABLES = ["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"]
 const NO_PROXY_VARIABLES = ["NO_PROXY", "no_proxy"]
@@ -151,7 +197,13 @@ const REDIRECTS = new Set([301, 302, 303, 307, 308])
 export const MAX_REDIRECTS = 20
 const MAX_ATTEMPTS = 2_000
 const BODY_HEADERS = ["content-type", "content-length", "content-encoding", "content-language", "content-location"]
-const WORKER_PRELOAD = fileURLToPath(new URL("./guard-worker.ts", import.meta.url))
+// From source the preload is the file beside this one; the compiled CLI carries it as an entry point of its own.
+const WORKER_PRELOAD =
+  typeof VECTOR_EGRESS_WORKER_PATH === "string"
+    ? VECTOR_EGRESS_WORKER_PATH
+    : fileURLToPath(new URL("./guard-worker.ts", import.meta.url))
+// A build of Vector (its version is set when it is built) or Electron, where no test runs.
+const BUILT = InstallationVersion !== "local" || process.versions.electron !== undefined
 const RESOLVED_OUTSIDE = "Its name says it is on this computer or your network, but it resolved to an address outside."
 const PROXY_HOP =
   "It is a proxy, which can pass a request anywhere; only a request for the internet that a part of Vector labelled may use it. A request for this computer or your network goes direct: add its host to NO_PROXY."
@@ -161,8 +213,19 @@ const OWN_FRAME = /local-mode[\\/](?:guard|attribution|egress|http-client|forwar
 // One guard per process, shared by every copy of this module a bundle loads: the desktop's engine carries its own copy
 // of core beside the one its entry point imports first.
 const KEY = Symbol.for("vector.egress.guard")
-const holder = globalThis as unknown as { [KEY]?: { handle?: Handle } }
-const state = (holder[KEY] ??= {})
+type GuardState = {
+  handle?: Handle
+  /** `local` decides under this thread's policy, `follow` under the policy of the thread that started this one. */
+  mode?: "local" | "follow" | "strict"
+  /** The strict guard's own proxy, which a request for this computer may go through. */
+  strictProxy?: string
+  /** A `local` guard's channel to the Workers that follow it. */
+  channel?: BroadcastChannel
+  /** The policy a `follow` guard decides under. */
+  following?: () => LocalMode.Policy
+}
+const holder = globalThis as unknown as { [KEY]?: GuardState }
+const state: GuardState = (holder[KEY] ??= {})
 
 type Fetch = typeof globalThis.fetch
 type FetchInit = RequestInit & { readonly proxy?: string | { readonly url: string }; readonly unix?: string }
@@ -184,6 +247,11 @@ type Lookup = (
 ) => void
 type Judged = { readonly blocked?: EgressBlocked; readonly within?: EgressAttribution.Within }
 type Judge = (attempt: Omit<Attempt, "allowed">) => Judged
+type FollowMessage =
+  | { readonly type: "ask"; readonly owner: number }
+  | { readonly type: "policy"; readonly owner: number; readonly policy: LocalMode.Policy }
+  | { readonly type: "recorded"; readonly owner: number; readonly recorded: Recorded }
+const Followed = Schema.Struct({ owner: Schema.Number, policy: LocalMode.Policy })
 
 /**
  * Whether a host stays on this computer: a loopback name or address, or a name the caller pinned there. A name under
@@ -263,24 +331,99 @@ export function destinations(
 
 /**
  * Sends requests for `host` around the proxy environment when it is on this computer or your network: the host joins
- * NO_PROXY and no_proxy (one list, the union of both, so a client that prefers either spelling keeps every entry). Bun
- * and Node read them at each fetch, so a corporate proxy never sees a local model's prompt. The strict guard's own
- * proxy is left to decide what it carries.
+ * NO_PROXY and no_proxy (one list, the union of both, so a client that prefers either spelling keeps every entry), in
+ * every form a client matches, unless both lists already hold each of them. An entry that only covers it by a pattern
+ * (`*.corp`, a bare `::1`) does not count, since Bun honours neither. Bun and Node read them at each fetch, so a
+ * corporate proxy never sees a local model's prompt. Only the strict guard's own proxy, in the thread that runs it, is
+ * left to decide what it carries.
  */
 export function direct(host: string) {
   const name = LocalPolicy.host(host)
   if (!name || LocalPolicy.hostClass(name) === "internet") return
-  const own = process.env[ENVIRONMENT.proxy]
-  if (!PROXY_VARIABLES.some((key) => process.env[key] && process.env[key] !== own)) return
-  const entry = name.includes(":") ? `[${name}]` : name
-  const list = NO_PROXY_VARIABLES.flatMap((key) => (process.env[key] ?? "").split(","))
-    .map((item) => item.trim())
-    .filter(Boolean)
-  if (bypassed(new URL(`http://${entry}`), "80", list.join(","))) return
-  const joined = [...new Set([...list, entry])].join(",")
+  if (!PROXY_VARIABLES.some((key) => process.env[key] && process.env[key] !== state.strictProxy)) return
+  const wanted = noProxyEntries(host)
+  const lists = NO_PROXY_VARIABLES.map((key) => noProxyList(process.env[key]))
+  if (lists.every((list) => wanted.every((entry) => list.some((item) => item.toLowerCase() === entry)))) return
+  const joined = [...new Set([...lists.flat(), ...wanted])].join(",")
   NO_PROXY_VARIABLES.forEach((key) => {
     process.env[key] = joined
   })
+}
+
+/**
+ * The proxy that the proxy environment would still send a request for `url` through, read the way Bun's fetch and
+ * node:http read it: entries split on commas, `*` on its own, a name with the names under it (a leading dot is
+ * dropped), an optional port, and an IPv6 address only in brackets. Bun prefers `no_proxy` and falls back to
+ * `NO_PROXY`, so here both must send it direct. The strict guard's own proxy does not count. Undefined when it goes
+ * direct.
+ */
+export function carried(url: URL, env: Readonly<Record<string, string | undefined>> = process.env) {
+  const secure = url.protocol === "https:" || url.protocol === "wss:"
+  const proxy = [
+    ...(secure ? [env.HTTPS_PROXY, env.https_proxy] : [env.HTTP_PROXY, env.http_proxy]),
+    env.ALL_PROXY,
+    env.all_proxy,
+  ].find((value) => value && value !== state.strictProxy)
+  if (!proxy) return undefined
+  const host = url.hostname.toLowerCase()
+  const port = url.port || (secure ? "443" : "80")
+  const direct = NO_PROXY_VARIABLES.every((key) =>
+    noProxyList(env[key]).some((entry) => {
+      if (entry === "*") return true
+      const parsed = /^(\[[^\]]+\]|[^:[\]]+)(?::(\d+))?$/.exec(entry.toLowerCase())
+      if (!parsed?.[1] || (parsed[2] !== undefined && parsed[2] !== port)) return false
+      if (parsed[1].startsWith("[")) return parsed[1] === host
+      const name = parsed[1].replace(/^\./, "")
+      return name !== "" && (host === name || host.endsWith(`.${name}`))
+    }),
+  )
+  return direct ? undefined : proxy
+}
+
+/**
+ * Sends a request for this computer or your network direct (`direct`), and under Bun, whose fetch and node:http reach
+ * the proxy themselves, says which proxy would still carry it (`carried`). A request with a proxy of its own, and one
+ * for the internet, are left as they are.
+ */
+export function around(url: URL, proxy?: FetchInit["proxy"]) {
+  direct(url.hostname)
+  if (!process.versions.bun || proxy || LocalPolicy.hostClass(url.hostname) === "internet") return undefined
+  return carried(url)
+}
+
+/** How a request `around` would leave to a proxy is refused and logged. */
+export function carriedVerdict(host: string): LocalPolicy.Verdict {
+  return {
+    decision: "block",
+    rule: "proxy-environment",
+    class: LocalPolicy.hostClass(host),
+    reason: PROXY_ENVIRONMENT,
+    allowable: false,
+  }
+}
+
+/**
+ * The test variables (ENVIRONMENT) this process honours. A build of Vector and Electron honour none: no test runs
+ * there, and whatever starts Vector (the agent running a nested `vector` included) could set them. Nor does a process
+ * with Vector Local on (`local`), whose own guard applies: strict mode's names would let hosts through, and a proxy it
+ * took for its own would carry local requests.
+ */
+export function testEnvironment(
+  input: {
+    readonly env?: Readonly<Record<string, string | undefined>>
+    readonly local?: boolean
+    readonly built?: boolean
+  } = {},
+): TestEnvironment {
+  const env = input.env ?? process.env
+  const off = { strict: false, names: [] }
+  if ((input.built ?? BUILT) || env[ENVIRONMENT.strict] !== "strict") return off
+  if (input.local ?? LocalPolicy.resolve({ env }).enabled) return off
+  return {
+    strict: true,
+    names: (env[ENVIRONMENT.names] ?? "").split(",").filter(Boolean),
+    proxy: env[ENVIRONMENT.proxy] || undefined,
+  }
 }
 
 export function installed() {
@@ -290,10 +433,84 @@ export function installed() {
 /**
  * Installs the backstop: every connection is decided under the policy `options.policy` returns at that moment. A
  * refused fetch or Bun.connect rejects with EgressBlocked; a refused socket or node:http request fails with it as its
- * `error` event, the way a refused connection does; a refused WebSocket throws.
+ * `error` event, the way a refused connection does; a refused WebSocket throws. Under Bun, the Workers this thread
+ * starts follow that policy (`follow`), and what they decide comes to `options.record` too.
  */
 export function install(options: Options): Handle {
   if (state.handle) throw new Error("The egress guard is already installed.")
+  const owner = workerThreads.threadId
+  const channel = process.versions.bun ? new BroadcastChannel(FOLLOW.channel) : undefined
+  if (channel) {
+    // A worker that has just started asks for the policy in case one was announced before it listened.
+    channel.onmessage = (event: MessageEvent) => {
+      const message = event.data as FollowMessage | undefined
+      if (message?.owner !== owner) return
+      if (message.type === "ask") channel.postMessage({ type: "policy", owner, policy: options.policy() })
+      if (message.type === "recorded") options.record?.(message.recorded)
+    }
+    unref(channel)
+  }
+  const handle = decider(options, { owner, stop: () => channel?.close() })
+  state.mode = "local"
+  state.channel = channel
+  return handle
+}
+
+/**
+ * Installs the backstop in a Worker the guard saw started, under Bun (the worker preload): connections are decided
+ * under the policy of the thread that decides it, which the Worker wrap passed in FOLLOW.environment, and then each
+ * one it announces. What the worker decides goes back to that thread for its log. A worker started without the
+ * variable (one that shares its parent's environment) follows the main thread, with only this computer reachable
+ * until it answers.
+ */
+export function follow(env: Record<string, string | undefined> = process.env): Handle {
+  if (state.handle) throw new Error("The egress guard is already installed.")
+  const text = env[FOLLOW.environment]
+  // The programs the worker starts are not Workers it follows for.
+  delete env[FOLLOW.environment]
+  const followed = Option.getOrElse(
+    text ? Schema.decodeUnknownOption(Schema.fromJsonString(Followed))(text) : Option.none(),
+    () => ({ owner: 0, policy: LocalPolicy.PENDING }),
+  )
+  const current = { policy: followed.policy }
+  const channel = new BroadcastChannel(FOLLOW.channel)
+  channel.onmessage = (event: MessageEvent) => {
+    const message = event.data as FollowMessage | undefined
+    if (message?.type === "policy" && message.owner === followed.owner) current.policy = message.policy
+  }
+  unref(channel)
+  channel.postMessage({ type: "ask", owner: followed.owner } satisfies FollowMessage)
+  const handle = decider(
+    {
+      policy: () => current.policy,
+      record: (recorded) =>
+        channel.postMessage({ type: "recorded", owner: followed.owner, recorded } satisfies FollowMessage),
+    },
+    { owner: followed.owner, stop: () => channel.close() },
+  )
+  state.mode = "follow"
+  state.following = () => current.policy
+  return handle
+}
+
+/** The policy this thread's guard follows when the worker preload installed it (`follow`). */
+export function followed() {
+  return state.mode === "follow" ? state.following?.() : undefined
+}
+
+/** Removes a guard the worker preload installed to follow (`follow`), so the worker's entry can install its own. */
+export function unfollow() {
+  if (state.mode === "follow") state.handle?.uninstall()
+}
+
+/** Tells the Workers that follow this thread's guard (`follow`) the policy now in effect. */
+export function announce(policy: LocalMode.Policy) {
+  if (state.mode !== "local") return
+  state.channel?.postMessage({ type: "policy", owner: workerThreads.threadId, policy } satisfies FollowMessage)
+}
+
+// The guard under a policy: Vector Local's, read at every connection.
+function decider(options: Options, owned: { readonly owner: number; readonly stop: () => void }): Handle {
   const attempts: Attempt[] = []
   const judge: Judge = (attempt) => {
     const policy = options.policy()
@@ -311,23 +528,25 @@ export function install(options: Options): Handle {
       })
     return keep(attempts, outcome, { within: checkedPlace(attempt.host, verdict.class === "listed") })
   }
-  // A name that resolved outside where it said it was is logged as its own refusal.
-  const outside = (attempt: Omit<Attempt, "allowed">) => {
-    const blocked = new EgressBlocked(attempt.host, attempt.kind, "resolved-outside", RESOLVED_OUTSIDE)
+  // A refusal the guard makes after the request was allowed, logged with the label of the request that made it.
+  const refused = (attempt: Omit<Attempt, "allowed">, verdict: LocalPolicy.Verdict) => {
     options.record?.({
       attempt: { ...attempt, allowed: false },
-      verdict: {
-        decision: "block",
-        rule: "resolved-outside",
-        class: LocalPolicy.hostClass(attempt.host),
-        reason: RESOLVED_OUTSIDE,
-        allowable: false,
-      },
+      verdict,
       scope: EgressAttribution.current(),
       frame: frame(),
     })
-    return blocked
+    return new EgressBlocked(attempt.host, attempt.kind, verdict.rule, verdict.reason)
   }
+  // A name that resolved outside where it said it was is logged as its own refusal.
+  const outside = (attempt: Omit<Attempt, "allowed">) =>
+    refused(attempt, {
+      decision: "block",
+      rule: "resolved-outside",
+      class: LocalPolicy.hostClass(attempt.host),
+      reason: RESOLVED_OUTSIDE,
+      allowable: false,
+    })
   // Only the explicit `proxy` option needs a decision of its own: the proxy environment is the user's, and the request
   // was decided on its target before it reaches that proxy.
   const proxied = (_target: URL, init: FetchInit | undefined) => {
@@ -358,14 +577,23 @@ export function install(options: Options): Handle {
     }
     return judge(attempt)
   }
+  // A worker preload a build left out would stop every Worker from starting, so a Worker then starts as it is.
+  const preload = process.versions.bun !== undefined && existsSync(WORKER_PRELOAD)
   return wrap({
     active: () => options.policy().enabled,
     judge,
     socketJudge,
     proxied,
     outside,
+    carried: (attempt) => refused(attempt, carriedVerdict(attempt.host)),
     throws: false,
     attempts,
+    ...(preload && {
+      worker: () => ({
+        [FOLLOW.environment]: JSON.stringify({ owner: owned.owner, policy: options.policy() }),
+      }),
+    }),
+    stop: owned.stop,
   })
 }
 
@@ -405,7 +633,7 @@ export function installStrict(options: StrictOptions = {}): Handle {
             },
           }
         })
-  const ownProxy = proxy?.url ?? process.env[ENVIRONMENT.proxy]
+  const ownProxy = proxy?.url ?? options.parentProxy
   const saved = [...PROXY_VARIABLES, ...NO_PROXY_VARIABLES, ...Object.values(ENVIRONMENT)].map(
     (key) => [key, process.env[key]] as const,
   )
@@ -440,9 +668,10 @@ export function installStrict(options: StrictOptions = {}): Handle {
     socketJudge: judge,
     proxied,
     outside: (attempt) => new EgressBlocked(attempt.host, attempt.kind),
+    carried: (attempt) => new EgressBlocked(attempt.host, attempt.kind, "proxy-environment", PROXY_ENVIRONMENT),
     throws: options.throws !== false,
     attempts,
-    worker: strictEnvironment,
+    worker: () => strictEnvironment,
     stop: () => {
       proxy?.stop()
       // Bun's fetch reads the proxy environment at each request, and deleting a variable does not reach it, so a
@@ -455,6 +684,8 @@ export function installStrict(options: StrictOptions = {}): Handle {
         })
     },
   })
+  state.mode = "strict"
+  state.strictProxy = ownProxy
   return handle
 }
 
@@ -506,10 +737,12 @@ type Wrap = {
   readonly socketJudge: Judge
   readonly proxied: (target: URL, init: FetchInit | undefined) => EgressBlocked | undefined
   readonly outside: (attempt: Omit<Attempt, "allowed">) => EgressBlocked
+  /** The refusal of an allowed request for this computer or your network that a proxy would still carry (`around`). */
+  readonly carried: (attempt: Omit<Attempt, "allowed">) => EgressBlocked
   readonly throws: boolean
   readonly attempts: Attempt[]
-  /** Strict mode's environment, which every Worker it sees started gets with the guard preloaded. */
-  readonly worker?: Readonly<Record<string, string>>
+  /** The environment every Worker this guard sees started gets, with the guard preloaded; none when it has no preload. */
+  readonly worker?: () => Readonly<Record<string, string>>
   readonly stop?: () => void
 }
 
@@ -532,8 +765,14 @@ function wrap(input: Wrap): Handle {
   }
   // An allowed unlabelled request runs with its own destinations granted, so the socket it opens through Node's fetch,
   // or the proxy that carries it, passes as this request. A request for this computer or your network goes direct.
-  const send = (target: URL, init: FetchInit | undefined, judged: Judged, run: () => Promise<Response>) => {
-    direct(target.hostname)
+  const send = (
+    target: URL,
+    init: FetchInit | undefined,
+    checked: { readonly attempt: Omit<Attempt, "allowed">; readonly judged: Judged },
+    run: () => Promise<Response>,
+  ) => {
+    if (around(target, init?.proxy)) return Promise.reject(input.carried(checked.attempt))
+    const judged = checked.judged
     const scope = EgressAttribution.current()
     const [own, ...proxies] = destinations(target, { proxy: init?.proxy })
     return EgressAttribution.granted(
@@ -559,7 +798,7 @@ function wrap(input: Wrap): Handle {
     const outside = await resolved(checked.attempt, checked.judged.within)
     if (outside) throw outside
     return follow(
-      await send(next, following, checked.judged, () => originalFetch(next, following)),
+      await send(next, following, checked, () => originalFetch(next, following)),
       next,
       following,
       count + 1,
@@ -584,9 +823,9 @@ function wrap(input: Wrap): Handle {
     const mode = init?.redirect ?? (target instanceof Request ? target.redirect : "follow")
     return resolved(checked.attempt, checked.judged.within).then((outside) => {
       if (outside) throw outside
-      if (mode !== "follow") return send(url, init, checked.judged, () => originalFetch(target, init))
-      return send(url, init, checked.judged, () => originalFetch(target, { ...init, redirect: "manual" })).then(
-        (response) => follow(response, url, first, 0),
+      if (mode !== "follow") return send(url, init, checked, () => originalFetch(target, init))
+      return send(url, init, checked, () => originalFetch(target, { ...init, redirect: "manual" })).then((response) =>
+        follow(response, url, first, 0),
       )
     })
   }) as Fetch
@@ -650,15 +889,17 @@ function wrap(input: Wrap): Handle {
       if (!input.active() || decided.has(this) || this.socketPath) return original.apply(this, args)
       decided.add(this)
       const host = String(this.host ?? "localhost")
-      const judged = input.judge({ kind: "http", host, port: numberOf(this.port), method: this.method })
-      if (!judged.blocked) {
-        // Bun's client reads the proxy environment the way its fetch does.
-        direct(host)
-        return original.apply(this, args)
-      }
-      if (input.throws) throw judged.blocked
+      const attempt = { kind: "http" as const, host, port: numberOf(this.port), method: this.method }
+      const judged = input.judge(attempt)
+      // Bun's client reads the proxy environment the way its fetch does.
+      const name = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host
+      const address = `${this.protocol || "http:"}//${name}${attempt.port === undefined ? "" : `:${attempt.port}`}`
+      const target = URL.canParse(address) ? new URL(address) : undefined
+      if (!target && !judged.blocked) direct(host)
+      const blocked = judged.blocked ?? (target && around(target) ? input.carried(attempt) : undefined)
+      if (!blocked) return original.apply(this, args)
+      if (input.throws) throw blocked
       // Bun's request emits nothing when it is destroyed before it starts, so the refusal is its error event.
-      const blocked = judged.blocked
       process.nextTick(() => {
         this.emit("error", blocked)
         this.destroy()
@@ -667,18 +908,23 @@ function wrap(input: Wrap): Handle {
     }
   })
 
-  // Strict mode preloads these same wraps in every Worker it sees started, with the names and the proxy it reads from
-  // its environment (Bun's `preload`; Node ignores it, and its workers get the environment). Node has no global
-  // Worker, only node:worker_threads' one, so only the classes this runtime has are wrapped.
+  // These same wraps are preloaded in every Worker this guard sees started (Bun's `preload`; Node ignores it, and its
+  // workers get the environment): strict mode's with the names and the proxy they read from it, Vector Local's
+  // following this thread's policy. Node has no global Worker, only node:worker_threads' one, so only the classes this
+  // runtime has are wrapped.
   const threads = workerThreads as unknown as { Worker?: typeof workerThreads.Worker }
   const OriginalWorker = globalThis.Worker as typeof globalThis.Worker | undefined
   const OriginalThreadWorker = threads.Worker
   const worker = input.worker
   if (worker) {
+    // A worker starts with a copy of the environment it is given, or of this thread's; one that shares this thread's
+    // (SHARE_ENV) reads what is set here.
     const guarded = (options: WorkerOptions | undefined) => ({
       ...options,
       preload: [WORKER_PRELOAD, ...[options?.preload ?? []].flat()],
-      ...(options?.env && typeof options.env === "object" ? { env: { ...options.env, ...worker } } : {}),
+      ...(options?.env === undefined || (options.env && typeof options.env === "object")
+        ? { env: { ...((options?.env as Record<string, string> | undefined) ?? process.env), ...worker() } }
+        : {}),
     })
     if (OriginalWorker)
       globalThis.Worker = class extends OriginalWorker {
@@ -711,6 +957,10 @@ function wrap(input: Wrap): Handle {
       )
       input.stop?.()
       state.handle = undefined
+      state.mode = undefined
+      state.strictProxy = undefined
+      state.channel = undefined
+      state.following = undefined
     },
   }
   state.handle = handle
@@ -863,6 +1113,32 @@ function replayable(body: BodyInit) {
     body instanceof URLSearchParams ||
     body instanceof FormData
   )
+}
+
+// One NO_PROXY variable's entries, as every client splits them: on commas, each trimmed.
+function noProxyList(value: string | undefined) {
+  return (value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+// The NO_PROXY entries that send a request for `host` direct in every client: the host as its address spells it, which
+// Bun matches, and as a resolver reads it (no trailing dot, IPv4 written out); an IPv6 address both in brackets, the
+// only form Bun matches, and bare, the form Node matches.
+function noProxyEntries(host: string) {
+  const spelled = host
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "")
+  return [...new Set([spelled, LocalPolicy.host(host) ?? spelled])].flatMap((item) =>
+    item.includes(":") ? [`[${item}]`, item] : [item],
+  )
+}
+
+// A channel the guard keeps open never keeps a process or a worker running by itself.
+function unref(channel: BroadcastChannel) {
+  ;(channel as unknown as { unref?: () => void }).unref?.()
 }
 
 // NO_PROXY's entries: `*`, a name (which covers the names under it), `.name` or `*.name`, each with an optional port.

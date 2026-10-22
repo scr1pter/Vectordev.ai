@@ -78,6 +78,8 @@ export const Rule = Schema.Literals([
   "unlabelled",
   // A name that counts as this computer or the user's network by its name alone answered with an internet address.
   "resolved-outside",
+  // A request for this computer or the user's network that the proxy environment would still send to a proxy.
+  "proxy-environment",
   // A research browser asked for a private, loopback or cloud metadata address, which its proxy never reaches.
   "private-destination",
 ]).annotate({ identifier: "EgressRule" })

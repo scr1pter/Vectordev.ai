@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
 import fs from "node:fs"
 import path from "node:path"
+import workerThreads from "node:worker_threads"
 import type { LocalMode } from "@vectordevai/schema/local-mode"
 import { EgressAttribution } from "../../src/local-mode/attribution"
 import { Egress } from "../../src/local-mode/egress"
@@ -50,7 +51,32 @@ const viaWeb = { proxy: web.origin }
 const state: { handle?: EgressGuard.Handle } = {}
 beforeAll(() => {
   state.handle = Egress.backstop()
+  // The backstop reads this machine's own config and company policy; these tests start from Vector Local off.
+  Egress.configure(LocalPolicy.OFF)
 })
+// Runs a script of its own with the egress service, in a fresh process with no config of the machine's own.
+const spawned = async (dir: string, body: string, env: Record<string, string> = {}) => {
+  const script = path.join(dir, `script-${Math.random().toString(36).slice(2)}.ts`)
+  const imports = [
+    `import { Egress } from ${JSON.stringify(path.join(import.meta.dir, "../../src/local-mode/egress.ts"))}`,
+    `import { LocalPolicy } from ${JSON.stringify(path.join(import.meta.dir, "../../src/local-mode/policy.ts"))}`,
+  ]
+  await Bun.write(script, [...imports, body].join("\n"))
+  const child = Bun.spawn([process.execPath, script], {
+    env: {
+      PATH: process.env.PATH ?? "",
+      XDG_CONFIG_HOME: path.join(dir, "config"),
+      XDG_STATE_HOME: path.join(dir, "state"),
+      ...env,
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
+  const line = stdout.trim().split("\n").at(-1) ?? ""
+  if (!line.startsWith("{")) throw new Error(`The script printed no result:\n${stdout}\n${stderr}`)
+  return JSON.parse(line) as Record<string, unknown>
+}
 afterEach(async () => {
   Egress.configure(LocalPolicy.OFF)
   await Egress.erase()
@@ -201,13 +227,84 @@ const after = Egress.decide({ source: "local-inference", url: "http://10.0.0.5:8
 console.log(JSON.stringify({ pending, before, after, enabled: Egress.policy().enabled }))
 `,
     )
+    // No config of the machine's own: the backstop reads the user's config folders too.
     const run = (env: Record<string, string>) =>
-      Bun.spawn([process.execPath, script], { env: { PATH: process.env.PATH ?? "", ...env }, stdout: "pipe" })
+      Bun.spawn([process.execPath, script], {
+        env: {
+          PATH: process.env.PATH ?? "",
+          XDG_CONFIG_HOME: path.join(dir.path, "config"),
+          XDG_STATE_HOME: path.join(dir.path, "state"),
+          ...env,
+        },
+        stdout: "pipe",
+      })
     const on = run({ VECTOR_LOCAL: "1" })
     const off = run({})
     const [started, plain] = await Promise.all([new Response(on.stdout).text(), new Response(off.stdout).text()])
     expect(JSON.parse(started)).toEqual({ pending: true, before: "pending", after: "listed", enabled: true })
     expect(JSON.parse(plain)).toMatchObject({ pending: false, before: "local-off" })
+  })
+
+  test("starts pending when the user's config turns Vector Local on, with nothing in the environment", async () => {
+    await using dir = await tmpdir()
+    const body = `import net from "node:net"
+Egress.backstop()
+const pending = Egress.policy().pending === true
+// Only tried while the guard holds connections: a guard that let it through would try a real address.
+const socket = pending
+  ? await new Promise((resolve) => {
+      const made = net.connect(443, "${OUTSIDE}")
+      made.on("error", (error) => resolve({ name: error.name, rule: error.rule }))
+      made.on("connect", () => resolve("connected"))
+    })
+  : "not tried"
+console.log(JSON.stringify({ pending, socket }))`
+    fs.mkdirSync(path.join(dir.path, "config", "vector"), { recursive: true })
+    fs.writeFileSync(
+      path.join(dir.path, "config", "vector", "vector.jsonc"),
+      `{\n  // Vector Local\n  "local": { "enabled": true },\n}`,
+    )
+    expect(await spawned(dir.path, body)).toEqual({
+      pending: true,
+      socket: { name: "EgressBlocked", rule: "pending" },
+    })
+    fs.writeFileSync(path.join(dir.path, "config", "vector", "vector.jsonc"), `{ "local": { "enabled": false } }`)
+    expect(await spawned(dir.path, body)).toEqual({ pending: false, socket: "not tried" })
+  })
+
+  test("cannot be loosened by the test variables once Vector Local is on", async () => {
+    await using dir = await tmpdir()
+    const body = `import net from "node:net"
+const seen = []
+const proxy = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: async (request) => { seen.push(await request.text()); return new Response("proxied") } })
+const model = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("direct") })
+process.env.HTTP_PROXY = \`http://127.0.0.1:\${proxy.port}\`
+process.env.VECTOR_TEST_EGRESS_PROXY = process.env.HTTP_PROXY
+const handle = Egress.backstop()
+const answer = (_host, options, callback) => options.all ? callback(null, [{ address: "127.0.0.1", family: 4 }]) : callback(null, "127.0.0.1", 4)
+// A name the test variables would pin to this computer, answered by a resolver that says so.
+const named = await new Promise((resolve) => {
+  try {
+    const socket = net.connect({ host: "api.openai.com", port: model.port, lookup: answer })
+    socket.on("connect", () => { socket.destroy(); resolve("connected") })
+    socket.on("error", (error) => resolve(error.name))
+  } catch (error) {
+    resolve(error.name)
+  }
+})
+Egress.configure(LocalPolicy.resolve({ env: process.env, global: { endpoints: [\`http://127.0.0.1:\${model.port}\`] } }))
+const prompt = await Egress.fetch("local-inference", \`http://127.0.0.1:\${model.port}/v1/chat/completions\`, { method: "POST", body: "secret prompt" }).then((response) => response.text(), (error) => error.name)
+console.log(JSON.stringify({ named, prompt, seen }))
+handle?.uninstall()
+proxy.stop(true)
+model.stop(true)`
+    expect(
+      await spawned(dir.path, body, {
+        VECTOR_LOCAL: "1",
+        VECTOR_TEST_EGRESS: "strict",
+        VECTOR_TEST_EGRESS_NAMES: "openai.com",
+      }),
+    ).toEqual({ named: "EgressBlocked", prompt: "direct", seen: [] })
   })
 })
 
@@ -355,9 +452,164 @@ describe("Egress.fetch under the backstop guard", () => {
     }
   })
 
+  test("sends a listed model's prompt direct when NO_PROXY covers it only in a form Bun does not honour", async () => {
+    const seenByProxy: string[] = []
+    const proxy = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: async (request) => {
+        seenByProxy.push(`${request.url} ${await request.text()}`)
+        return new Response("proxied")
+      },
+    })
+    const six = Bun.serve({ hostname: "::1", port: 0, fetch: () => new Response("completion on ::1") })
+    const saved = ["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "no_proxy"].map((key) => [key, process.env[key]] as const)
+    process.env.HTTP_PROXY = `http://127.0.0.1:${proxy.port}`
+    process.env.HTTPS_PROXY = `http://127.0.0.1:${proxy.port}`
+    const send = (url: string) =>
+      Egress.fetch("local-inference", url, { method: "POST", body: "secret prompt" }).then((response) =>
+        response.text(),
+      )
+    try {
+      // The desktop writes a bare ::1, which a CLI started from it inherits.
+      process.env.NO_PROXY = "localhost,127.0.0.1,::1"
+      process.env.no_proxy = "localhost,127.0.0.1,::1"
+      Egress.configure(on({ endpoints: [`http://[::1]:${six.port}`] }))
+      expect(await send(`http://[::1]:${six.port}/v1/chat/completions`)).toBe("completion on ::1")
+      expect(await (await fetch(`http://[::1]:${six.port}/v1`)).text()).toBe("completion on ::1")
+      // A company's wildcard.
+      process.env.NO_PROXY = "*.localhost"
+      process.env.no_proxy = "*.localhost"
+      Egress.configure(on({ endpoints: [`http://localhost:${model.port}`] }))
+      expect(await send(`http://localhost:${model.port}/v1/chat/completions`)).toBe("completion")
+      expect(seenByProxy).toEqual([])
+    } finally {
+      saved.forEach(([key, value]) => {
+        process.env[key] = value ?? ""
+      })
+      proxy.stop(true)
+      six.stop(true)
+    }
+  })
+
   test("passes straight through with Vector Local off", async () => {
     const response = await Egress.fetch("webfetch", web.url("page", "/"), viaWeb)
     expect(await response.text()).toBe("page")
     expect(Egress.events()).toEqual([])
+  })
+})
+
+describe("Workers under Vector Local", () => {
+  // A worker that fetches an address off this computer once its guard follows a policy with Vector Local on.
+  const body = `import { EgressGuard } from ${JSON.stringify(path.join(import.meta.dir, "../../src/local-mode/guard.ts"))}
+const { parentPort } = await import("node:worker_threads")
+const post = (value) => (parentPort ? parentPort.postMessage(value) : postMessage(value))
+const followed = () => EgressGuard.followed?.()?.enabled === true
+const on = async () => {
+  for (let tries = 0; tries < 200 && !followed(); tries++) await Bun.sleep(10)
+  return followed()
+}
+const run = async () => {
+  if (!(await on())) return "Vector Local never reached this worker"
+  return fetch("http://${OUTSIDE}/worker").then(() => "reached", (error) => error?.name ?? String(error))
+}
+const handle = (message) => message === "go" && run().then(post)
+if (parentPort) parentPort.on("message", handle)
+else self.onmessage = (event) => handle(event.data)
+post("ready")
+`
+  type Started = { send: (message: string) => void; next: () => Promise<unknown>; stop: () => unknown }
+  const start = (file: string, kind: "global" | "thread"): Started => {
+    const queue: unknown[] = []
+    const waiting: ((value: unknown) => void)[] = []
+    const deliver = (value: unknown) => (waiting.length ? waiting.shift()!(value) : queue.push(value))
+    const next = () => (queue.length ? Promise.resolve(queue.shift()) : new Promise((resolve) => waiting.push(resolve)))
+    if (kind === "global") {
+      const worker = new Worker(file)
+      worker.onmessage = (event) => deliver(event.data)
+      return { send: (message) => worker.postMessage(message), next, stop: () => worker.terminate() }
+    }
+    const worker = new workerThreads.Worker(file)
+    worker.on("message", deliver)
+    return { send: (message) => worker.postMessage(message), next, stop: () => worker.terminate() }
+  }
+  const logged = async () => {
+    for (let tries = 0; tries < 200; tries++) {
+      const found = Egress.events({ blocked: true }).find((event) => event.origin === `http://${OUTSIDE}`)
+      if (found) return found
+      await Bun.sleep(10)
+    }
+    return undefined
+  }
+
+  test("refuses a worker's connection off this computer and logs it here, from either Worker class", async () => {
+    await using dir = await tmpdir()
+    const file = path.join(dir.path, "worker.ts")
+    await Bun.write(file, body)
+    Egress.configure(on())
+    for (const kind of ["global", "thread"] as const) {
+      const worker = start(file, kind)
+      expect(await worker.next()).toBe("ready")
+      worker.send("go")
+      expect({ kind, outcome: await worker.next() }).toEqual({ kind, outcome: "EgressBlocked" })
+      await worker.stop()
+      const event = await logged()
+      expect(event).toMatchObject({ source: "unlabelled", purpose: "unknown", decision: "block", rule: "unlabelled" })
+      expect(event?.frame).toContain("worker.ts")
+      await Egress.erase()
+    }
+  })
+
+  test("lets a worker entry that decides its own policy, or seals itself, take over from the guard it followed", async () => {
+    await using dir = await tmpdir()
+    const source = (file: string) => JSON.stringify(path.join(import.meta.dir, "../../src/local-mode", file))
+    const report = `const { parentPort } = await import("node:worker_threads")
+parentPort.postMessage(result)
+`
+    const engine = path.join(dir.path, "engine.ts")
+    await Bun.write(
+      engine,
+      `import ${source("backstop.ts")}
+import { EgressGuard } from ${source("guard.ts")}
+import { Egress } from ${source("egress.ts")}
+const result = { following: EgressGuard.followed() !== undefined, installed: EgressGuard.installed(), enabled: Egress.policy().enabled }
+${report}`,
+    )
+    const sealed = path.join(dir.path, "sealed.ts")
+    await Bun.write(
+      sealed,
+      `import ${source("backstop-worker.ts")}
+import { EgressGuard } from ${source("guard.ts")}
+const following = EgressGuard.followed() !== undefined
+// Tried only once the worker's own guard is in place.
+const connect = following
+  ? "not tried"
+  : await Bun.connect({ hostname: "${OUTSIDE}", port: 80, socket: { data() {} } }).then(() => "reached", (error) => error.name)
+const result = { following, connect }
+${report}`,
+    )
+    const run = (file: string) => {
+      const worker = new workerThreads.Worker(file)
+      return new Promise<unknown>((resolve) => worker.once("message", resolve)).finally(() => worker.terminate())
+    }
+    Egress.configure(on())
+    expect(await run(engine)).toEqual({ following: false, installed: true, enabled: true })
+    // With Vector Local off a worker that makes no connections of its own still refuses every one off this computer.
+    Egress.configure(LocalPolicy.OFF)
+    expect(await run(sealed)).toEqual({ following: false, connect: "EgressBlocked" })
+  })
+
+  test("follows the policy as it changes after the worker started", async () => {
+    await using dir = await tmpdir()
+    const file = path.join(dir.path, "worker.ts")
+    await Bun.write(file, body)
+    const worker = start(file, "global")
+    expect(await worker.next()).toBe("ready")
+    // Started with Vector Local off; turned on afterwards.
+    Egress.configure(on())
+    worker.send("go")
+    expect(await worker.next()).toBe("EgressBlocked")
+    await worker.stop()
+    expect(await logged()).toMatchObject({ decision: "block" })
   })
 })

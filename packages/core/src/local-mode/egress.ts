@@ -11,18 +11,20 @@ import { EgressGuard } from "./guard"
 import { EgressLogStore } from "./log-store"
 import { LocalPolicy } from "./policy"
 import { LocalSources } from "./sources"
+import { LocalStartup } from "./startup"
 
 // Vector Local's egress service: the one place a labelled request is decided, logged and sent. It is process-global
 // and takes no session ID; who a request is for travels in EgressAttribution's scope. Every source in the registry has
 // one call site that asks `decide` or sends through `fetch` (or EgressHttpClient, which sends through `fetch`), and the
 // backstop guard (`backstop()`) decides whatever else connects.
 //
-// The policy starts as Vector Local off: everything passes and nothing is logged. When the environment already turns
-// Vector Local on (VECTOR_LOCAL=1, which Vector's children inherit), or config calls `pending` because its managed or
-// user config does, it starts pending instead: only this computer is reachable, for every purpose, until config sets
-// the policy it resolves at start with `resolve` or `configure`. From then on every decision reads it. While Vector
-// Local is on, each decision is an event: in memory (the last 2,000), on disk when a log directory is configured, and
-// in the counters the pane shows.
+// The policy starts as Vector Local off: everything passes and nothing is logged. When anything Vector Local reads at
+// start may turn it on (the environment, VECTOR_LOCAL=1, which Vector's children inherit, or a managed or user config
+// file: LocalStartup), `backstop` starts it pending instead, before any other module runs: only this computer is
+// reachable, for every purpose, until config sets the policy it resolves at start with `resolve` or `configure`
+// (Config.refreshLocal does, when the engine's config loads). From then on every decision reads it. While Vector Local
+// is on, each decision is an event: in memory (the last 2,000), on disk when a log directory is configured, and in the
+// counters the pane shows.
 
 export type Request = {
   /** The registry source making the request (LocalSources). An id the registry does not have is purpose `unknown`. */
@@ -118,6 +120,7 @@ export function policy() {
  */
 export function pending() {
   state.policy = LocalPolicy.PENDING
+  EgressGuard.announce(state.policy)
   return state.policy
 }
 
@@ -127,6 +130,7 @@ export function pending() {
  */
 export function configure(next: LocalMode.Policy, options: { readonly log?: LogOptions } = {}) {
   state.policy = next
+  EgressGuard.announce(next)
   if (state.store && (options.log || !next.enabled)) {
     state.writing = Promise.all([state.writing, state.store.flush()]).then(() => undefined)
     state.store = undefined
@@ -219,8 +223,13 @@ export async function fetch(
     const decided = decide({ source, url, method: current.method, manual, tool, bytes: bodySize(current.body) })
     if (decided.decision !== "allow")
       throw new EgressGuard.EgressBlocked(url.hostname, "fetch", decided.rule, decided.reason)
-    // A request for this computer or your network, such as a local model's prompt, never goes through a proxy.
-    EgressGuard.direct(url.hostname)
+    // A request for this computer or your network, such as a local model's prompt, never goes through a proxy: it is
+    // sent direct, or refused when the proxy settings would still carry it.
+    if (EgressGuard.around(url, options.proxy)) {
+      const verdict = EgressGuard.carriedVerdict(url.hostname)
+      record({ source, url, method: current.method, tool }, verdict)
+      throw new EgressGuard.EgressBlocked(url.hostname, "fetch", verdict.rule, verdict.reason)
+    }
     const grants = EgressGuard.destinations(url, { proxy: options.proxy, listed: decided.class === "listed" })
     const response = await EgressAttribution.granted({ source, purpose: decided.purpose, grants }, () =>
       send(count === 0 ? input : url, count === 0 ? { ...options, redirect: "manual" } : current),
@@ -335,26 +344,37 @@ export function report(event: LocalMode.Event) {
 }
 
 /**
- * Installs the backstop guard for this process with this service's policy and log. Strict mode (tests,
- * VECTOR_TEST_EGRESS=strict) installs the strict guard instead. Nothing happens when a guard is already installed.
- * When the environment turns Vector Local on, the policy starts pending until config resolves it.
+ * Installs the backstop guard for this process or thread with this service's policy and log. Strict mode (a test,
+ * VECTOR_TEST_EGRESS=strict; EgressGuard.testEnvironment) installs the strict guard instead. Nothing happens when a
+ * guard is already installed, except one the worker preload installed to follow the thread that started this one:
+ * this thread then decides its own policy, starting from the one it followed. When anything Vector Local reads at
+ * start may turn it on, the policy starts pending until config resolves it.
  */
 export function backstop() {
+  const followed = EgressGuard.followed()
+  EgressGuard.unfollow()
   if (EgressGuard.installed()) return undefined
-  if (!state.policy.enabled && LocalPolicy.resolve({ env: process.env }).enabled) pending()
-  if (process.env[EgressGuard.ENVIRONMENT.strict] === "strict")
+  if (followed?.enabled && !state.policy.enabled) state.policy = followed
+  if (!state.policy.enabled && LocalStartup.enabled()) pending()
+  const test = EgressGuard.testEnvironment({ local: state.policy.enabled })
+  if (test.strict)
     return EgressGuard.installStrict({
-      names: (process.env[EgressGuard.ENVIRONMENT.names] ?? "").split(",").filter(Boolean),
+      names: test.names,
       // A worker, or a process a strict parent started, reaches the parent's proxy through the environment.
-      proxy: isMainThread && !process.env[EgressGuard.ENVIRONMENT.proxy],
+      proxy: isMainThread && !test.proxy,
+      parentProxy: test.proxy,
     })
   return EgressGuard.install({ policy, record: recordAttempt })
 }
 
-// A connection the guard decided itself. A name that resolved outside where it said it was keeps the label of the
-// request that made it; anything else is unlabelled.
+// A connection the guard decided itself. A refusal of a request the guard had allowed (a name that resolved outside
+// where it said it was, or one a proxy would still carry) keeps the label of the request that made it; anything else
+// is unlabelled.
 function recordAttempt(recorded: EgressGuard.Recorded) {
-  const labelled = recorded.verdict.rule === "resolved-outside" ? recorded.scope : undefined
+  const labelled =
+    recorded.verdict.rule === "resolved-outside" || recorded.verdict.rule === "proxy-environment"
+      ? recorded.scope
+      : undefined
   const attempt = recorded.attempt
   push({
     source: labelled?.source ?? "unlabelled",

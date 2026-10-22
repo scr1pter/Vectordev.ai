@@ -1,0 +1,107 @@
+import { describe, expect, test } from "bun:test"
+import fs from "node:fs"
+import path from "node:path"
+import { LocalStartup } from "../../src/local-mode/startup"
+import { tmpdir } from "../fixture/tmpdir"
+
+// Whether the backstop starts Egress pending: every source Vector Local is read from at start can turn it on, and a
+// block Vector cannot decode counts as on, since config keeps it on too.
+
+const folders = (root: string) => ({
+  managed: [path.join(root, "managed")],
+  preferences: path.join(root, "preferences"),
+  config: path.join(root, "config"),
+  state: path.join(root, "state"),
+})
+const write = (file: string, text: string) => {
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, text)
+}
+
+describe("LocalStartup.enabled", () => {
+  test("is off when nothing turns Vector Local on", async () => {
+    await using dir = await tmpdir()
+    const input = folders(dir.path)
+    expect(LocalStartup.enabled({ ...input, env: {} })).toBe(false)
+    write(path.join(input.config, "vector.json"), JSON.stringify({ model: "a/b", local: { enabled: false } }))
+    write(path.join(input.managed[0]!, "vector.json"), JSON.stringify({ share: "disabled" }))
+    expect(LocalStartup.enabled({ ...input, env: {} })).toBe(false)
+  })
+
+  test("is on for the environment, the company's policy and the user's own config files", async () => {
+    await using dir = await tmpdir()
+    const input = folders(dir.path)
+    expect(LocalStartup.enabled({ ...input, env: { VECTOR_LOCAL: "1" } })).toBe(true)
+    const on = JSON.stringify({ local: { enabled: true } })
+    for (const file of [
+      path.join(input.managed[0]!, "vector.jsonc"),
+      path.join(input.config, "config.json"),
+      path.join(input.config, "vector.json"),
+      path.join(input.config, "vector.jsonc"),
+    ]) {
+      write(file, on)
+      expect({ file, enabled: LocalStartup.enabled({ ...input, env: {} }) }).toEqual({ file, enabled: true })
+      fs.rmSync(file)
+    }
+    // A company's lock forces it on.
+    write(path.join(input.managed[0]!, "vector.json"), JSON.stringify({ local: { lock: true } }))
+    expect(LocalStartup.enabled({ ...input, env: {} })).toBe(true)
+  })
+
+  test("is on for the desktop's config folder, the config overrides and VECTOR_CONFIG_CONTENT", async () => {
+    await using dir = await tmpdir()
+    const input = folders(dir.path)
+    const desktop = path.join(dir.path, "desktop")
+    write(path.join(desktop, "vector.local.jsonc"), `{ "local": { "enabled": true } }`)
+    expect(LocalStartup.enabled({ ...input, env: { VECTOR_AGENT_CONFIG_DIR: desktop } })).toBe(true)
+    const override = path.join(dir.path, "override.json")
+    write(override, JSON.stringify({ local: { enabled: true } }))
+    expect(LocalStartup.enabled({ ...input, env: { VECTOR_AGENT_CONFIG: override } })).toBe(true)
+    expect(LocalStartup.enabled({ ...input, env: { VECTOR_CONFIG_CONTENT: `{"local":{"enabled":true}}` } })).toBe(true)
+  })
+
+  test("reads JSON with comments and trailing commas, as config does", async () => {
+    await using dir = await tmpdir()
+    const input = folders(dir.path)
+    const file = path.join(input.config, "vector.jsonc")
+    write(
+      file,
+      `{\n  "$schema": "https://vectordev.ai/config.json", // the schema\n  /* Vector Local */ "local": { "enabled": true, "web": "none", },\n}`,
+    )
+    expect(LocalStartup.enabled({ ...input, env: {} })).toBe(true)
+    // A comment's or a bracket's characters inside a string are the string's.
+    write(file, `{ "$schema": "https://vectordev.ai/config.json", "share": "// ,} /*", "local": { "enabled": false } }`)
+    expect(LocalStartup.enabled({ ...input, env: {} })).toBe(false)
+    // Text that is not JSON counts when it names a local block, which config's lenient reader may still find.
+    write(file, `{ "local": { "enabled": true }`)
+    expect(LocalStartup.enabled({ ...input, env: {} })).toBe(true)
+    write(file, `{ "model": `)
+    expect(LocalStartup.enabled({ ...input, env: {} })).toBe(false)
+  })
+
+  test("is on for a local block Vector cannot decode, which config keeps on too", async () => {
+    await using dir = await tmpdir()
+    const input = folders(dir.path)
+    write(path.join(input.config, "vector.json"), JSON.stringify({ local: { enabled: "yes" } }))
+    expect(LocalStartup.enabled({ ...input, env: {} })).toBe(true)
+  })
+
+  test("is on while the block the owner last let apply still turns it on", async () => {
+    await using dir = await tmpdir()
+    const input = folders(dir.path)
+    // An edit that turned it off while Vector was closed waits for the owner; config keeps the confirmed block.
+    write(path.join(input.config, "vector.json"), JSON.stringify({ local: { enabled: false } }))
+    write(path.join(input.state, "local-confirmed-0123456789abcdef.json"), JSON.stringify({ local: { enabled: true } }))
+    expect(LocalStartup.enabled({ ...input, env: {} })).toBe(true)
+    write(path.join(input.state, "local-confirmed-0123456789abcdef.json"), JSON.stringify({ local: null }))
+    expect(LocalStartup.enabled({ ...input, env: {} })).toBe(false)
+  })
+
+  test("is on for a macOS profile that sets Vector Local, which it cannot convert without running a program", async () => {
+    await using dir = await tmpdir()
+    const input = folders(dir.path)
+    write(path.join(input.preferences, "ai.vector.managed.plist"), "bplist00Ñ\u0001\u0002Ulocal")
+    expect(LocalStartup.enabled({ ...input, env: {}, platform: "darwin" })).toBe(true)
+    expect(LocalStartup.enabled({ ...input, env: {}, platform: "linux" })).toBe(false)
+  })
+})

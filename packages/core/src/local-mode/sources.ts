@@ -163,7 +163,11 @@ export const SOURCES: readonly Source[] = [
     why: "Runs the agent, subagents, the judge, Vectorscope, research and the helpers on the model servers you list",
     local: "allowed",
     where: ["engine"],
-    callSites: ["packages/engine/src/provider/provider.ts", "packages/llm/src/route/executor.ts"],
+    callSites: [
+      "packages/engine/src/provider/provider.ts",
+      "packages/llm/src/route/executor.ts",
+      "packages/engine/src/plugin/openai/ws.ts",
+    ],
   },
   {
     id: "cloud-inference",
@@ -173,7 +177,11 @@ export const SOURCES: readonly Source[] = [
     why: "Runs models from cloud AI services you connected",
     local: "not-allowable",
     where: ["engine"],
-    callSites: ["packages/engine/src/provider/provider.ts", "packages/llm/src/route/executor.ts"],
+    callSites: [
+      "packages/engine/src/provider/provider.ts",
+      "packages/llm/src/route/executor.ts",
+      "packages/engine/src/plugin/openai/ws.ts",
+    ],
     note: "Allowed only when your company's policy lists the host, labelled Company endpoint (listed by your company)",
   },
   {
@@ -593,7 +601,7 @@ export const SOURCES: readonly Source[] = [
     local: "blocked",
     where: ["engine", "desktop"],
     callSites: ["packages/core/src/local-mode/guard.ts"],
-    note: "Reaches only this computer and the model servers on your list; anything else the guard sees is blocked and logged with the code that made it. Under Bun it does not see Bun.fetch, a fetch or WebSocket kept from before it started, or the ws package",
+    note: "Reaches only this computer and the model servers on your list; anything else the guard sees is blocked and logged with the code that made it, in Vector's worker threads too. It does not see Bun.fetch, a fetch, WebSocket or Bun.connect kept from before it started, Bun.SQL or Bun.RedisClient, or under Bun the ws package, whose one use in Vector (the OpenAI WebSocket transport) decides its model calls itself. Worker threads are covered under Bun when started through the global Worker or the worker_threads module, and under Node when their first import is the guard, as the brain's reader's is. The terminal UI's syntax highlighting downloads grammars from github.com in such a worker, so with Vector Local on those downloads are blocked and logged",
   },
   {
     id: "agent-programs",
