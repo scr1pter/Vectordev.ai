@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { chmodSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs"
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs"
 import path from "path"
 import { Effect, Layer } from "effect"
 import { HttpClient } from "effect/unstable/http"
@@ -10,6 +10,7 @@ import { Npm } from "@vectordevai/core/npm"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { Global } from "@vectordevai/core/global"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 import { Config } from "@/config/config"
 import { GlobalBus, type GlobalEvent } from "@/bus/global"
@@ -142,18 +143,23 @@ describe("resolved at start", () => {
       },
     })
     const url = (file: string) => JSON.stringify(new URL(file, import.meta.url).href)
-    // The engine's runtime is imported and nothing has run yet: no layer is built and the catalog has not been asked
-    // for. The floor children get is set when the policy is resolved, so it shows the policy was already in effect.
+    // The backstop comes first, as in the CLI's entry, then the engine's runtime, and nothing has run yet: no layer is
+    // built and the catalog has not been asked for. The floor children get and the policy Egress decides with are both
+    // set when the policy is resolved, so they show it was already in effect.
     const result = await run(
       `
+      await import(${url("../../../core/src/local-mode/backstop.ts")})
       const { ConfigManaged } = await import(${url("../../src/config/managed.ts")})
       ConfigManaged.useTestDirectory(${JSON.stringify(managed)})
       const { untrustedChildEnvironment } = await import(${url("../../../core/src/child-environment.ts")})
+      const { Egress } = await import(${url("../../../core/src/local-mode/egress.ts")})
       const { AppRuntime } = await import(${url("../../src/effect/app-runtime.ts")})
+      const { Config } = await import(${CONFIG})
       const floor = untrustedChildEnvironment({})
+      const egress = { same: Egress.policy() === Config.local(), policy: Egress.policy() }
       const { ModelCatalog } = await import(${url("../../../core/src/model-catalog.ts")})
       await AppRuntime.runPromise(ModelCatalog.Service.use((catalog) => catalog.get()))
-      process.stdout.write(JSON.stringify({ floor }) + "\\n")
+      process.stdout.write(JSON.stringify({ floor, egress }) + "\\n")
       await AppRuntime.dispose()
       process.exit(0)
       `,
@@ -169,7 +175,57 @@ describe("resolved at start", () => {
       },
     )
     expect(result.floor).toEqual({ VECTOR_AGENT_SESSION: "1", VECTOR_LOCAL: "1", VECTOR_LOCAL_WEB: "none" })
+    expect(result.egress.same).toBe(true)
+    expect(result.egress.policy).toMatchObject({ enabled: true, web: "none" })
+    expect(result.egress.policy.pending).toBe(undefined)
     expect(requests).toContain("/models/api.json")
+  }, 30_000)
+
+  test("Vector Local the environment turned on stops holding everything once its policy is resolved", async () => {
+    await using dir = await tmpdir()
+    const managed = path.join(dir.path, "managed")
+    mkdirSync(managed)
+    writeFileSync(path.join(managed, "vector.json"), JSON.stringify({ local: { endpoints: [GPU_BOX] } }))
+    const url = (file: string) => JSON.stringify(new URL(file, import.meta.url).href)
+    // VECTOR_LOCAL=1, as a nested vector inherits it: the backstop holds everything but this computer from the first
+    // import, and resolving the policy lets the company's model server through, which nothing else may reach.
+    const result = await run(
+      `
+      await import(${url("../../../core/src/local-mode/backstop.ts")})
+      const { Egress } = await import(${url("../../../core/src/local-mode/egress.ts")})
+      const inference = { source: "local-inference", url: ${JSON.stringify(`${GPU_BOX}/v1/chat/completions`)} }
+      const before = { pending: Egress.policy().pending, decision: Egress.decide(inference).decision }
+      const { ConfigManaged } = await import(${url("../../src/config/managed.ts")})
+      ConfigManaged.useTestDirectory(${JSON.stringify(managed)})
+      const { Config } = await import(${CONFIG})
+      const after = {
+        same: Egress.policy() === Config.local(),
+        policy: Egress.policy(),
+        decision: Egress.decide(inference).decision,
+        elsewhere: Egress.decide({ ...inference, url: "http://10.0.0.6:8000/v1/chat/completions" }).decision,
+      }
+      process.stdout.write(JSON.stringify({ before, after }) + "\\n")
+      process.exit(0)
+      `,
+      {
+        ...process.env,
+        VECTOR_LOCAL: "1",
+        XDG_CONFIG_HOME: path.join(dir.path, "config"),
+        XDG_STATE_HOME: path.join(dir.path, "state"),
+        XDG_DATA_HOME: path.join(dir.path, "data"),
+        XDG_CACHE_HOME: path.join(dir.path, "cache"),
+      },
+    )
+    expect(result.before).toEqual({ pending: true, decision: "block" })
+    expect(result.after.same).toBe(true)
+    expect(result.after.policy).toMatchObject({
+      enabled: true,
+      web: "ask",
+      endpoints: [{ origin: GPU_BOX, from: "managed" }],
+    })
+    expect(result.after.policy.pending).toBe(undefined)
+    expect(result.after.decision).toBe("allow")
+    expect(result.after.elsewhere).toBe("block")
   }, 30_000)
 
   test("resolving it is synchronous and waits on no other service", () => {
@@ -179,6 +235,66 @@ describe("resolved at start", () => {
     expect(policy.pending).toBe(undefined)
     expect(Config.local()).toBe(policy)
   })
+})
+
+describe("Egress decides with the policy in effect", () => {
+  const page = { source: "webfetch", url: "https://docs.example.com/guide" }
+
+  test("an edit that loosens Vector Local does not reach Egress until the owner confirms it", () => {
+    writeGlobal({ enabled: true, web: "none" })
+    Config.refreshLocal()
+    expect(Egress.policy()).toBe(Config.local())
+    expect(Egress.decide(page).decision).toBe("block")
+    writeGlobal({ enabled: true, web: "ask" })
+    Config.refreshLocal()
+    expect(Config.localPending()?.changes).toEqual(["sets Web access to Ask"])
+    expect(Egress.policy()).toBe(Config.local())
+    expect(Egress.decide(page).decision).toBe("block")
+    Config.confirmLocal()
+    expect(Egress.policy()).toMatchObject({ enabled: true, web: "ask" })
+    expect(Egress.decide(page).decision).toBe("allow")
+  })
+
+  test("turning Vector Local off reaches Egress at once when the company turned it on", () => {
+    writeManaged({ local: { enabled: true, web: "none" } })
+    Config.refreshLocal()
+    expect(Egress.decide(page).decision).toBe("block")
+    rmSync(managedDirectory, { recursive: true, force: true })
+    Config.refreshLocal()
+    expect(Config.localPending()).toBe(undefined)
+    expect(Egress.policy()).toBe(Config.local())
+    expect(Egress.decide(page)).toMatchObject({ decision: "allow", rule: "local-off" })
+  })
+
+  test.skipIf(process.platform === "win32")(
+    "while Vector Local is on, the network log is in Vector's data folder for the user only, kept as long as the company says",
+    async () => {
+      const DAY = 24 * 60 * 60 * 1000
+      const directory = path.join(Global.Path.data, "local")
+      const dated = (days: number) =>
+        path.join(directory, `egress-${new Date(Date.now() - days * DAY).toISOString().slice(0, 10)}.jsonl`)
+      mkdirSync(directory, { recursive: true })
+      writeFileSync(dated(10), "")
+      writeFileSync(dated(40), "")
+      writeGlobal({ enabled: true, web: "none" })
+      Config.refreshLocal()
+      Egress.decide({ source: "model-catalog", url: "https://models.dev/api.json" })
+      const logged = await Egress.exported()
+      expect(logged.at(-1)).toMatchObject({ source: "model-catalog", decision: "block", origin: "https://models.dev" })
+      expect(statSync(directory).mode & 0o777).toBe(0o700)
+      expect(statSync(dated(0)).mode & 0o777).toBe(0o600)
+      // 30 days by default.
+      expect(existsSync(dated(10))).toBe(true)
+      expect(existsSync(dated(40))).toBe(false)
+      // The company's policy shortens it, and the log applies it at once.
+      writeManaged({ local: { log: { retain_days: 5 } } })
+      Config.refreshLocal()
+      expect(existsSync(dated(10))).toBe(false)
+      expect(existsSync(dated(0))).toBe(true)
+      await Egress.erase()
+      rmSync(directory, { recursive: true, force: true })
+    },
+  )
 })
 
 describe("repository config", () => {

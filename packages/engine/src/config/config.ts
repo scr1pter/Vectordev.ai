@@ -45,6 +45,7 @@ import { withTransientReadRetry } from "@/util/effect-http-client"
 import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
 import type { LocalMode } from "@vectordevai/schema/local-mode"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 import { ConfigLocalV1 } from "@vectordevai/core/v1/config/local"
 import { ChildEnvironment } from "@vectordevai/core/child-environment"
 
@@ -498,7 +499,9 @@ function writableGlobal(info: Info) {
 // policy and the user's own config only: the global config folder and, for the desktop, its own config folder
 // (VECTOR_AGENT_CONFIG_DIR). The environment (LocalPolicy.resolve), VECTOR_CONFIG_CONTENT, VECTOR_AGENT_CONFIG and any
 // other VECTOR_AGENT_CONFIG_DIR can only tighten it, and a repository's own local block is never read. Config.local()
-// is the only reader of it: the merged config (Config.get()) carries no local block.
+// is the only reader of it: the merged config (Config.get()) carries no local block. Egress, which the labelled call
+// sites and the backstop guard ask, gets each policy as it takes effect; until the first one, it holds everything but
+// this computer if the environment turned Vector Local on, and otherwise lets everything pass.
 //
 // A change to the user's config that would loosen it waits for the owner. It is compared with the user's block the
 // owner last let apply: the one in effect while this process runs, and at start the copy the last process saved in
@@ -541,6 +544,8 @@ const localState: {
   /** That block as the state folder holds it, as JSON, so it is written only when it changes. */
   saved: string | undefined
   pending: LocalPending | undefined
+  /** The network log's options as last handed to Egress, as JSON, which reopens the log only when they change. */
+  log: string | undefined
   watchers: number
   stop: (() => void) | undefined
   readonly listeners: Set<(change: LocalChange) => void>
@@ -549,6 +554,7 @@ const localState: {
   confirmed: undefined,
   saved: undefined,
   pending: undefined,
+  log: undefined,
   watchers: 0,
   stop: undefined,
   listeners: new Set(),
@@ -594,6 +600,15 @@ export function refreshLocal() {
   localState.pending = next.pending
   localState.confirmed = { block: next.confirmed }
   saveLocalConfirmed(next.confirmed)
+  // Every request is decided with the policy in effect from here on. While Vector Local is on, the network log is
+  // written to <data>/local, kept 30 days unless the company's policy, or else the user's config, says otherwise.
+  const log = {
+    directory: path.join(Global.Path.data, "local"),
+    ...(next.retainDays === undefined ? {} : { retainDays: next.retainDays }),
+  }
+  const reopen = JSON.stringify(log) !== localState.log
+  localState.log = JSON.stringify(log)
+  Egress.configure(next.policy, reopen ? { log } : {})
   // Children inherit the floor of the policy in effect, and the agent marker: every untrusted child of this process
   // may be the agent or a program it started.
   ChildEnvironment.inherit({ local: next.policy, agent: true })
@@ -669,6 +684,7 @@ function evaluateLocal() {
   const policy = held || (!sources.readable && !sources.failed) ? kept : proposed
   // A source Vector could not read at all might say anything, so where Vector Local was on it stays on with no web.
   const on = [policy, kept, ...(start ? [] : [localState.policy])].some((item) => item.enabled)
+  const user = held || !sources.readable ? confirmed : sources.user
   return {
     policy:
       sources.unread.length > 0 && on
@@ -682,8 +698,9 @@ function evaluateLocal() {
             ],
           }
         : policy,
-    confirmed: held || !sources.readable ? confirmed : sources.user,
+    confirmed: user,
     pending: held ? { proposed, changes, block: sources.user } : undefined,
+    retainDays: sources.managed?.log?.retain_days ?? user?.log?.retain_days,
   }
 }
 
