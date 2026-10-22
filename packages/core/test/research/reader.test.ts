@@ -298,6 +298,11 @@ describe("the private network", () => {
       "http://100.100.100.200/latest/meta-data/",
       "http://[fd00:ec2::254]/latest/meta-data/",
       "http://[::ffff:169.254.169.254]/latest/meta-data/",
+      // Azure's WireServer, as written and as IPv6 (mapped, NAT64 and 6to4).
+      "http://168.63.129.16/machine?comp=goalstate",
+      "http://[::ffff:168.63.129.16]/machine?comp=goalstate",
+      "http://[64:ff9b::a83f:8110]/machine?comp=goalstate",
+      "http://[2002:a83f:8110::1]/machine?comp=goalstate",
       "http://[fe80::1]/",
       `http://imds.${FakeWeb.DOMAIN}:${web.port}/latest/meta-data/`,
     ]

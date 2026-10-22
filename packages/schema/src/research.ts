@@ -8,7 +8,8 @@ import { NonNegativeInt, optional, PositiveInt } from "./schema"
 // sub-questions, reads sources (S1, S2, ...), saves notes (N1, N2, ...) whose quotes were found in their source, and
 // writes a report that cites the notes. The rules live in core (`research/*`) and are pure where they can be.
 
-// Focused uses one agent. Deep adds researchers and the judge.
+// Focused uses one agent, plus up to 2 researchers when the question has independent parts. Deep adds up to 4
+// researchers and the judge.
 export const Depth = Schema.Literals(["focused", "deep"]).annotate({ identifier: "ResearchDepth" })
 export type Depth = typeof Depth.Type
 
@@ -66,15 +67,25 @@ export type PlanAnswer = typeof PlanAnswer.Type
 // What became of a source. `robots`: the site's robots.txt asks Vector not to read it. `paywalled`: only the public
 // excerpt was kept. `needs-render`: the page is built by script, so it needs the desktop browser. `failed` carries why,
 // a site's challenge page ("blocked by the site") included.
-export const SourceStatus = Schema.Literals(["read", "duplicate", "robots", "paywalled", "needs-render", "failed"]).annotate(
-  { identifier: "ResearchSourceStatus" },
-)
+export const SourceStatus = Schema.Literals([
+  "read",
+  "duplicate",
+  "robots",
+  "paywalled",
+  "needs-render",
+  "failed",
+]).annotate({ identifier: "ResearchSourceStatus" })
 export type SourceStatus = typeof SourceStatus.Type
 
 // What kind of site a source is on, from its address alone.
-export const SiteKind = Schema.Literals(["academic", "government", "standards", "reference", "forum", "other"]).annotate(
-  { identifier: "ResearchSiteKind" },
-)
+export const SiteKind = Schema.Literals([
+  "academic",
+  "government",
+  "standards",
+  "reference",
+  "forum",
+  "other",
+]).annotate({ identifier: "ResearchSiteKind" })
 export type SiteKind = typeof SiteKind.Type
 
 // What Vector noticed about a source, shown as chips beside it. These are observations, not verdicts: there is no

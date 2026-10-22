@@ -31,7 +31,9 @@ export function fingerprint(text: string): Fingerprint {
     .filter(Boolean)
     .slice(0, MAX_WORDS)
   const shingles = new Set(
-    words.length < SHINGLE ? [] : words.slice(0, words.length - SHINGLE + 1).map((_, index) => words.slice(index, index + SHINGLE).join(" ")),
+    words.length < SHINGLE
+      ? []
+      : words.slice(0, words.length - SHINGLE + 1).map((_, index) => words.slice(index, index + SHINGLE).join(" ")),
   )
   return { hash: createHash("sha256").update(words.join(" ")).digest("hex"), shingles }
 }

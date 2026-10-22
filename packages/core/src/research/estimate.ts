@@ -51,7 +51,12 @@ export type Input = {
   readonly speed?: Speed
 }
 
-export type Agent = { readonly role: "lead" | "researcher" | "judge"; readonly steps: number; readonly input: number; readonly uncached: number }
+export type Agent = {
+  readonly role: "lead" | "researcher" | "judge"
+  readonly steps: number
+  readonly input: number
+  readonly uncached: number
+}
 
 export type Estimate = {
   /** Model calls across every agent. */
@@ -138,7 +143,10 @@ export function copy(input: {
 }
 
 // One agent's steps: step i sends the base prompt and the share of `grows` read before it.
-function agent(role: Agent["role"], input: { readonly steps: number; readonly prompt: number; readonly grows: number }) {
+function agent(
+  role: Agent["role"],
+  input: { readonly steps: number; readonly prompt: number; readonly grows: number },
+) {
   const steps = Math.max(1, input.steps)
   const contexts = Array.from(
     { length: steps },

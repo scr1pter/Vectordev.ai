@@ -71,7 +71,8 @@ export function kind(input: string): Research.SiteKind {
   const host = hostOf(input)
   const named = NAMED[site(host)]
   if (named) return named
-  if (/\.(?:gov|mil)$/.test(host) || /\.gov\.[a-z]{2}$/.test(host) || /\.gouv\.[a-z]{2}$/.test(host)) return "government"
+  if (/\.(?:gov|mil)$/.test(host) || /\.gov\.[a-z]{2}$/.test(host) || /\.gouv\.[a-z]{2}$/.test(host))
+    return "government"
   if (/\.edu$/.test(host) || /\.(?:edu|ac)\.[a-z]{2}$/.test(host)) return "academic"
   return "other"
 }

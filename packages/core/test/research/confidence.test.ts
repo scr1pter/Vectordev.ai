@@ -16,12 +16,18 @@ const note = (id: string, fields: Partial<Research.Note> = {}): Research.Note =>
   created_at: 0,
   ...fields,
 })
-const cited = (id: string, site: string, primary: boolean, fields: Partial<Research.Note> = {}): ResearchConfidence.Cited => ({
+const cited = (
+  id: string,
+  site: string,
+  primary: boolean,
+  fields: Partial<Research.Note> = {},
+): ResearchConfidence.Cited => ({
   note: note(id, fields),
   site,
   primary,
 })
-const level = (items: readonly ResearchConfidence.Cited[], judged = false) => ResearchConfidence.section(items, { judged })
+const level = (items: readonly ResearchConfidence.Cited[], judged = false) =>
+  ResearchConfidence.section(items, { judged })
 
 describe("ResearchConfidence.section", () => {
   test("is High with stated quotes from 2 independent sites, one primary, and nothing against", () => {
@@ -55,7 +61,10 @@ describe("ResearchConfidence.section", () => {
     expect(level(items, true).level).toBe("medium")
     expect(
       level(
-        [cited("N1", "nature.com", true, { verdict: "supported" }), cited("N2", "bbc.co.uk", false, { verdict: "supported" })],
+        [
+          cited("N1", "nature.com", true, { verdict: "supported" }),
+          cited("N2", "bbc.co.uk", false, { verdict: "supported" }),
+        ],
         true,
       ).level,
     ).toBe("high")

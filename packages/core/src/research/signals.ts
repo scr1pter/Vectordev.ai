@@ -38,7 +38,12 @@ export function signals(input: Input): Research.Signal {
   const published = input.meta.published
   return {
     kind,
-    primary: !!(ids.doi || ids.arxiv || ids.pmid) || kind === "academic" || kind === "government" || kind === "standards" || input.meta.data,
+    primary:
+      !!(ids.doi || ids.arxiv || ids.pmid) ||
+      kind === "academic" ||
+      kind === "government" ||
+      kind === "standards" ||
+      input.meta.data,
     ...(ids.doi ? { doi: ids.doi } : {}),
     ...(ids.arxiv ? { arxiv: ids.arxiv } : {}),
     ...(ids.pmid ? { pmid: ids.pmid } : {}),
@@ -60,7 +65,13 @@ export function signals(input: Input): Research.Signal {
 export function labels(signal: Research.Signal) {
   return [
     signal.primary ? "Primary source" : undefined,
-    signal.doi ? `DOI ${signal.doi}` : signal.arxiv ? `arXiv ${signal.arxiv}` : signal.pmid ? `PMID ${signal.pmid}` : undefined,
+    signal.doi
+      ? `DOI ${signal.doi}`
+      : signal.arxiv
+        ? `arXiv ${signal.arxiv}`
+        : signal.pmid
+          ? `PMID ${signal.pmid}`
+          : undefined,
     signal.published ? `Published ${signal.published}` : undefined,
     signal.author ? `By ${signal.author}` : undefined,
     signal.data ? "Publishes data" : undefined,
@@ -68,7 +79,13 @@ export function labels(signal: Research.Signal) {
     signal.duplicate_of ? `Copy of ${signal.duplicate_of}` : undefined,
     signal.paywalled ? "Paywalled (excerpt only)" : undefined,
     signal.addressed_to_ai ? "Contains text addressed to AI assistants" : undefined,
-    signal.corroborated > 0 ? `Also said by ${signal.corroborated} other site${signal.corroborated === 1 ? "" : "s"}` : undefined,
-    signal.preference === "trusted" ? "You trust this site" : signal.preference === "avoided" ? "You avoid this site" : undefined,
+    signal.corroborated > 0
+      ? `Also said by ${signal.corroborated} other site${signal.corroborated === 1 ? "" : "s"}`
+      : undefined,
+    signal.preference === "trusted"
+      ? "You trust this site"
+      : signal.preference === "avoided"
+        ? "You avoid this site"
+        : undefined,
   ].filter((label): label is string => label !== undefined)
 }

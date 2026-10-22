@@ -13,7 +13,9 @@ import { ResearchSignals } from "./signals"
 //
 // Everything the model or a page wrote is made inert first: "<" and "![" are escaped, so no raw HTML and no image
 // survive into the Markdown. Whatever later renders the report (the session, a `--report` file, the brain's copy)
-// then fetches nothing, and an image address cannot carry text out.
+// then fetches nothing, and an image address cannot carry text out. Footnote and link reference definitions are
+// escaped too, so only Vector writes them: Markdown keeps a label's first definition, and a "[^N1]: ..." line in a
+// section would otherwise stand in for the checked quote of N1.
 
 export const CITE = /\[(N\d+(?:\s*,\s*N\d+)*)\]/g
 // The same, for testing whether a sentence cites any note (a global pattern keeps its place between tests).
@@ -256,9 +258,10 @@ function table(sources: readonly Research.Source[]) {
   if (sources.length === 0) return "No sources were read."
   const rows = sources.map((source) => {
     const signals = source.signals ? ResearchSignals.labels(source.signals).join(" · ") : ""
-    // A page's title is its author's words: its brackets are escaped so it cannot end the link text, and the
-    // address's brackets, spaces and angle brackets are percent-encoded so it cannot end the link.
-    const title = inert(cell(oneLine(source.title) || source.url)).replace(/[[\]]/g, "\\$&")
+    // A page's title is its author's words: its backslashes, brackets and angle brackets are escaped, so it cannot
+    // end the link text, start an image or hold HTML, and the address's brackets, spaces and angle brackets are
+    // percent-encoded so it cannot end the link.
+    const title = cell((oneLine(source.title) || source.url).replace(/[\\[\]<]/g, "\\$&"))
     const target = source.url.replace(
       /[()<>\s]/g,
       (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`,
@@ -306,9 +309,16 @@ function cell(text: string) {
   return text.replace(/\|/g, "\\|").replace(/\s+/g, " ").trim()
 }
 
-// Text Vector did not write, with no raw HTML or image left in it: "<" and "![" are escaped.
+// Text Vector did not write, with no raw HTML, image or definition left in it: "<", "![" and "[^" are escaped, and so
+// is a "[" that opens a link reference definition ("[label]: address", whose label may run over lines). A mark after
+// an odd run of backslashes is escaped already; after an even run (none included) the backslashes are literal, so the
+// mark is live and gets one more. A citation followed by a colon ("[N1]: ...") is left for `chips`, which turns it into
+// a source chip.
 function inert(text: string) {
-  return text.replace(/</g, "\\<").replace(/!\[/g, "!\\[")
+  return text.replace(
+    /(?<!\\)((?:\\\\)*)(<|!\[|\[(?=\^|(?!N\d+(?:\s*,\s*N\d+)*\])(?:[^[\]\\]|\\[\s\S])*\]:))/g,
+    (_, slashes: string, mark: string) => `${slashes}${mark === "![" ? "!\\[" : `\\${mark}`}`,
+  )
 }
 
 function oneLine(text: string) {

