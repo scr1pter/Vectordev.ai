@@ -463,7 +463,12 @@ describe("ResearchStore forgetting", () => {
         const one = yield* counts(setup)
         const all = yield* setup.store.forgetAll(setup.place)
         const tombstones = yield* setup.db.get<{ n: number }>(sql`SELECT count(*) AS n FROM brain_tombstone`)
-        return { forgot, one, all, tombstones, other: other.run.id, after: yield* counts(setup), list: yield* setup.store.list(setup.place) }
+        // The keyword index is counted again: no term is left with no passage, and BM25's totals are back to none.
+        const index = yield* setup.db.get<{ terms: number; items: number; length: number }>(
+          sql`SELECT (SELECT count(*) FROM brain_term) AS terms, items, item_length_sum AS length FROM brain_state
+              WHERE repository_id = ${setup.place.repository}`,
+        )
+        return { forgot, one, all, tombstones, index, other: other.run.id, after: yield* counts(setup), list: yield* setup.store.list(setup.place) }
       }),
     )
     expect(result.forgot).toBe(true)
@@ -471,6 +476,7 @@ describe("ResearchStore forgetting", () => {
     expect(result.all).toBe(2)
     expect(result.after).toMatchObject({ runs: 0, sources: 0, notes: 0, documents: 0, passages: 0, postings: 0 })
     expect(result.tombstones?.n).toBeGreaterThan(0)
+    expect(result.index).toEqual({ terms: 0, items: 0, length: 0 })
     expect(result.list).toEqual([])
   })
 

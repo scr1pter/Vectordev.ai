@@ -989,10 +989,9 @@ function make(input: {
           ...(found.row.plan ? { plan: found.row.plan } : {}),
         })
         if (problems.errors.length > 0) return { type: "refused" as const, errors: problems.errors, uncited: problems.uncited }
-        // Each cited quote is checked again: its source may have been forgotten since the note was saved.
-        const cited = new Set(ResearchReport.cited([request.answer, ...request.sections.map((section) => section.body)].join("\n")))
+        // Each quote is checked again: its source may have been forgotten since the note was saved.
         const unverified = new Set<string>()
-        for (const item of notes.filter((item) => cited.has(item.id))) {
+        for (const item of notes) {
           const row = rows.find((source) => `S${source.ordinal}` === item.source)
           const again = row ? yield* quotedIn(found.db, row, item.quote) : undefined
           if (!again?.ok) unverified.add(item.id)
@@ -1023,7 +1022,7 @@ function make(input: {
         if (room.evicted === undefined) return { type: "refused" as const, errors: [room.message], uncited: problems.uncited }
         const previous = found.row.report_document_id
         // Only the latest version is kept: a new one is held again until the user keeps it.
-        if (previous) yield* removeDocument(place, found, previous)
+        if (previous) yield* removeDocuments(place, found, [previous])
         const document = yield* writeReport(found, place.repository, request.title, rendered.markdown, version, previous ?? undefined)
         yield* touch(found.db, runID, {
           report_document_id: document,
@@ -1164,11 +1163,42 @@ function make(input: {
     return { type: "kept" as const, run: (yield* runOf(db, runID))! }
   })
 
-  // A document of a run, gone with everything read from it. In the brain, the knowledge store forgets it, so its uses,
-  // links and cached cards go too; the memory brain holds nothing else.
-  const removeDocument = Effect.fnUntraced(function* (place: Brain.Place, found: Found, id: string) {
-    if (!found.guest) return yield* knowledge.remove(place, id).pipe(Effect.asVoid)
-    yield* found.db.delete(BrainDocumentTable).where(eq(BrainDocumentTable.id, id)).run().pipe(Effect.orDie)
+  // Documents of a run, gone with everything read from them. A report may have been kept, recalled, cited and learned
+  // from, so the knowledge store forgets it, uses, links and cached cards included. A page was held whole and passage by
+  // passage, so nothing used, cited or linked it: its rows go at once (sections, passages, postings and vectors go with
+  // it), and the keyword index is counted again once. The memory brain holds nothing else.
+  const removeDocuments = Effect.fnUntraced(function* (
+    place: Brain.Place,
+    found: Pick<Found, "db" | "guest">,
+    ids: readonly string[],
+  ) {
+    if (ids.length === 0) return
+    if (found.guest)
+      return yield* found.db.delete(BrainDocumentTable).where(inArray(BrainDocumentTable.id, [...ids])).run().pipe(Effect.orDie)
+    const rows = yield* db
+      .select({ id: BrainDocumentTable.id, origin: BrainDocumentTable.origin })
+      .from(BrainDocumentTable)
+      .where(and(eq(BrainDocumentTable.repository_id, place.repository), inArray(BrainDocumentTable.id, [...ids])))
+      .all()
+      .pipe(Effect.orDie)
+    yield* Effect.forEach(
+      rows.filter((row) => row.origin === "research"),
+      (row) => knowledge.remove(place, row.id),
+      { discard: true },
+    )
+    const pages = rows.filter((row) => row.origin === "web").map((row) => row.id)
+    if (pages.length === 0) return
+    const terms = yield* db
+      .selectDistinct({ term: BrainPostingTable.term })
+      .from(BrainPostingTable)
+      .innerJoin(BrainItemTable, eq(BrainItemTable.id, BrainPostingTable.item))
+      .where(inArray(BrainItemTable.document_id, pages))
+      .all()
+      .pipe(Effect.orDie)
+    for (const batch of chunks(pages, 500))
+      yield* db.delete(BrainDocumentTable).where(inArray(BrainDocumentTable.id, batch)).run().pipe(Effect.orDie)
+    yield* frequencies(db, place.repository, terms.map((row) => row.term))
+    yield* totals(db, place.repository)
   })
 
   const tombstoneSources = Effect.fnUntraced(function* (place: Brain.Place, rows: readonly SourceRow[]) {
@@ -1210,7 +1240,11 @@ function make(input: {
       .where(eq(BrainDocumentTable.run_id, runID))
       .all()
       .pipe(Effect.orDie)
-    yield* Effect.forEach(documents, (document) => removeDocument(place, found, document.id), { discard: true })
+    yield* removeDocuments(
+      place,
+      found,
+      documents.map((document) => document.id),
+    )
     yield* found.db.delete(ResearchRunTable).where(eq(ResearchRunTable.id, runID)).run().pipe(Effect.orDie)
     state.guests.delete(runID)
     state.fingerprints.delete(runID)
@@ -1231,7 +1265,7 @@ function make(input: {
         if (!row) return false
         if (!found.guest) yield* tombstoneSources(place, [row])
         // The row stays without its page, so its notes can say their quote is no longer in it.
-        if (row.document_id) yield* removeDocument(place, found, row.document_id)
+        if (row.document_id) yield* removeDocuments(place, found, [row.document_id])
         yield* touch(found.db, runID, {})
         state.fingerprints.delete(runID)
         yield* publish(place, runID, found.row.status, { sourceID: `S${row.ordinal}` })
@@ -1351,7 +1385,7 @@ function make(input: {
           )
           .pipe(Effect.orDie)
         // Then out of the brain, with no tombstones: the owner did not forget these pages.
-        yield* Effect.forEach(ids, (id) => knowledge.remove(place, id), { discard: true })
+        yield* removeDocuments(place, { db, guest: false }, ids)
         yield* db.delete(ResearchRunTable).where(eq(ResearchRunTable.id, runID)).run().pipe(Effect.orDie)
         state.guests.add(runID)
         yield* publish(place, runID, run.status)
@@ -1514,15 +1548,22 @@ function make(input: {
     yield* totals(store, repository)
   })
 
-  // Each term's document frequency, counted again for the terms a write touched, as the knowledge store counts it.
+  // Each term's document frequency, counted again for the terms a write or a removal touched, as the knowledge store
+  // counts it; terms no item has any more go.
   const frequencies = Effect.fnUntraced(function* (store: Database, repository: string, terms: readonly number[]) {
-    for (const batch of chunks(terms, 500))
+    for (const batch of chunks(terms, 500)) {
       yield* store
         .update(BrainTermTable)
         .set({ df: sql`(SELECT count(*) FROM ${BrainPostingTable} WHERE ${BrainPostingTable.term} = ${BrainTermTable.id})` })
         .where(and(eq(BrainTermTable.repository_id, repository), inArray(BrainTermTable.id, batch)))
         .run()
         .pipe(Effect.orDie)
+      yield* store
+        .delete(BrainTermTable)
+        .where(and(eq(BrainTermTable.repository_id, repository), inArray(BrainTermTable.id, batch), eq(BrainTermTable.df, 0)))
+        .run()
+        .pipe(Effect.orDie)
+    }
   })
 
   // BM25's N and total length for the repository, and a new knowledge revision, so cached views read it again.
