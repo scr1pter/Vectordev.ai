@@ -191,10 +191,20 @@ const layer = Layer.effect(
       return session
     })
 
-    const history = (ctx: Tool.Context, sessionID: SessionID) =>
-      sessionID === ctx.sessionID
-        ? Effect.succeed(ctx.messages)
-        : sessions.messages({ sessionID }).pipe(Effect.catch(() => Effect.succeed([] as SessionV1.WithParts[])))
+    // A session's whole history. The calling session's messages are this step's, with the memory it was shown filled
+    // in; the stored ones before a compaction still count, since what was read then may be in its summary.
+    const history = Effect.fnUntraced(function* (ctx: Tool.Context, sessionID: SessionID) {
+      const stored = yield* sessions
+        .messages({ sessionID })
+        .pipe(Effect.catch(() => Effect.succeed([] as SessionV1.WithParts[])))
+      if (sessionID !== ctx.sessionID) return stored
+      const live = new Map(ctx.messages.map((message) => [message.info.id, message]))
+      const known = new Set(stored.map((message) => message.info.id))
+      return [
+        ...stored.map((message) => live.get(message.info.id) ?? message),
+        ...ctx.messages.filter((message) => !known.has(message.info.id)),
+      ]
+    })
 
     // Every session of the run: the lead and the research agents it launched.
     const members = Effect.fn("ResearchRun.members")(function* (ctx: Tool.Context, leader: Session.Info) {

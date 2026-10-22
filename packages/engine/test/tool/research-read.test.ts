@@ -5,6 +5,7 @@ import { ResearchStore } from "@vectordevai/core/research/store"
 import type { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { Permission } from "../../src/permission"
 import { Session } from "@/session/session"
+import { MessageID } from "../../src/session/schema"
 import { Instruction } from "../../src/session/instruction"
 import { ResearchRun } from "../../src/tool/research-run"
 import { calls, output, plan, runtime, send, setup } from "../lib/research"
@@ -184,6 +185,38 @@ it.instance(
       expect(output(first)).toContain("S1 · ")
       expect(output(second)).toBe(ResearchStore.PAGES)
       expect(web.count("docs", "/report.pdf")).toBe(before)
+    }),
+  90_000,
+)
+
+it.instance(
+  "after a compaction drops the plan from what the model sees, the run and what it may read are still found",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* setup(web)
+      yield* answer("once")
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "Research" })
+      yield* llm.tool("research_plan", plan())
+      yield* llm.tool("research_search", { query: "heat pump field study" })
+      yield* llm.text("Done.")
+      yield* send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." })
+      const research = yield* ResearchRun.Service
+      // What a step after a compaction gets: none of the messages before the summary.
+      const ctx = {
+        sessionID: session.id,
+        messageID: MessageID.make("msg_after_compaction"),
+        agent: "research",
+        abort: AbortSignal.any([]),
+        messages: [],
+        metadata: () => Effect.void,
+        ask: () => Effect.void,
+      }
+      const found = yield* research.current(ctx)
+      expect("refused" in found).toBe(false)
+      if ("refused" in found) return
+      const check = ResearchProvenance.check(yield* research.provenance(ctx, found), web.url("article", "/"))
+      expect(check.ok).toBe(true)
     }),
   90_000,
 )
