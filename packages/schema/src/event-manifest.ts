@@ -20,6 +20,7 @@ import { Pty } from "./pty"
 import { Question } from "./question"
 import { QuestionV1 } from "./question-v1"
 import { Reference } from "./reference"
+import { Research } from "./research"
 import { ServerEvent } from "./server-event"
 import { SessionCompactionEvent } from "./session-compaction-event"
 import { SessionEvent } from "./session-event"
@@ -75,6 +76,7 @@ export const Definitions = Event.inventory(
   ...SessionStatusEvent.Definitions,
   ...QuestionV1.Event.Definitions,
   ...SessionCompactionEvent.Definitions,
+  ...Research.Event.Definitions,
   ...VcsEvent.Definitions,
   ...WorkspaceEvent.Definitions,
   ...WorktreeEvent.Definitions,

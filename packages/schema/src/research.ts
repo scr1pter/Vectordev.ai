@@ -1,6 +1,7 @@
 export * as Research from "./research"
 
 import { Schema } from "effect"
+import { define, inventory } from "./event"
 import { NonNegativeInt, optional, PositiveInt } from "./schema"
 
 // Deep research: the shapes the research tools, the run store, the HTTP API and the app share. A run plans
@@ -180,3 +181,16 @@ export const ReportInput = Schema.Struct({
   method_notes: optional(Schema.String.check(Schema.isMaxLength(2_000))),
 }).annotate({ identifier: "ResearchReportInput" })
 export type ReportInput = typeof ReportInput.Type
+
+// A run changed: started, planned, read a source, saved a note or a report, was kept, or was forgotten (`forgotten`,
+// which a run never is in the store). The app reloads the run from GET /memory/research/:runID.
+export const Updated = define({
+  type: "research.updated",
+  schema: {
+    runID: Schema.String,
+    sourceID: optional(Schema.String),
+    noteID: optional(Schema.String),
+    status: Schema.Literals([...RunStatus.literals, "forgotten"]),
+  },
+})
+export const Event = { Updated, Definitions: inventory(Updated) }
