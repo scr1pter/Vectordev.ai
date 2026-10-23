@@ -70,8 +70,8 @@ export async function inspect(read: LocalProbe.Read, identified: unknown): Promi
     ]),
   )
   const listed = Option.getOrUndefined(Schema.decodeUnknownOption(Tags)(tags))?.models ?? []
-  const models = await Promise.all(
-    listed.map(async (tag): Promise<LocalProbe.Model> => {
+  const answered = await Promise.all(
+    listed.map(async (tag): Promise<LocalProbe.Model | undefined> => {
       const base = {
         id: tag.name,
         size: tag.size,
@@ -82,6 +82,9 @@ export async function inspect(read: LocalProbe.Read, identified: unknown): Promi
       if (cloud(tag)) return { ...base, cloud: true }
       const show = Option.getOrUndefined(Schema.decodeUnknownOption(Show)(await read("/api/show", { model: tag.name })))
       if (show && cloud(show)) return { ...base, cloud: true }
+      // An embedding model, such as nomic-embed-text, lists no `completion` capability and cannot answer a chat, so it
+      // is left out like LM Studio's embedding models. Older servers that list no capabilities keep every model.
+      if (show?.capabilities && !show.capabilities.includes("completion")) return undefined
       const architecture = show?.model_info?.["general.architecture"]
       const trained =
         typeof architecture === "string" ? show?.model_info?.[`${architecture}.context_length`] : undefined
@@ -97,6 +100,7 @@ export async function inspect(read: LocalProbe.Read, identified: unknown): Promi
       }
     }),
   )
+  const models = answered.filter((model): model is LocalProbe.Model => model !== undefined)
   return {
     version: Option.getOrUndefined(Schema.decodeUnknownOption(Version)(identified))?.version,
     models,
@@ -141,7 +145,10 @@ export type Copy = {
 export function copy(model: string, required: number): Copy {
   // The next power of two at or above what is needed, so a 19K requirement gets a 32K copy.
   const context = 2 ** Math.ceil(Math.log2(Math.max(required, 2048)))
-  const [repository, tag] = model.includes(":") ? model.split(":", 2) : [model, "latest"]
+  // The tag follows the last colon after the last slash, so a registry with a port (localhost:5000/coder:q4) keeps it.
+  const colon = model.lastIndexOf(":")
+  const [repository, tag] =
+    colon > model.lastIndexOf("/") ? [model.slice(0, colon), model.slice(colon + 1)] : [model, "latest"]
   return {
     from: model,
     model: `${repository}:${tag}-${Math.round(context / 1024)}k`,

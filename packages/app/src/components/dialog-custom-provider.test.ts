@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { ModelSlots } from "@vectordevai/core/local-mode/model-slots"
 import type { LocalProbe } from "@vectordevai/core/local-mode/probe"
 import { createVectorClient, type Config } from "@vectordevai/sdk/v2/client"
 import {
@@ -8,6 +9,7 @@ import {
   defaultOutput,
   type FormState,
   freeID,
+  identifyHeaders,
   identity,
   labels,
   PRESETS,
@@ -274,6 +276,38 @@ describe("labels", () => {
     // Hosted servers need each model's context; a cloud API's address does not.
     expect(labels({ baseURL: "http://10.0.0.5:8000/v1" }).hosted).toBe(true)
     expect(labels({ baseURL: "https://api.example.com/v1" }).hosted).toBe(false)
+  })
+
+  test("an empty Requests at once says what the engine does with it", () => {
+    const slots = ModelSlots.make()
+    const cases = [
+      ["http://127.0.0.1:11434/v1", "One at a time", 1],
+      ["http://10.0.0.5:8000/v1", "One at a time", 1],
+      ["https://ml.corp.example.com/v1", "No limit", Number.POSITIVE_INFINITY],
+    ] as const
+    cases.forEach(([baseURL, shown, permits]) => {
+      expect(COPY.concurrencyEmpty(labels({ baseURL }).hosted)).toBe(shown)
+      // The engine's own default for a server whose count nobody set.
+      expect(slots.queue(new URL(baseURL).origin).permits).toBe(permits)
+    })
+  })
+})
+
+describe("Identify", () => {
+  test("sends the typed API key and headers, so a server behind a key answers", () => {
+    const form = {
+      apiKey: " sk-company ",
+      headers: [
+        { row: "h0", key: "X-Team", value: "ml", err: {} },
+        { row: "h1", key: "", value: "", err: {} },
+      ],
+    }
+    expect(identifyHeaders(form)).toEqual({ authorization: "Bearer sk-company", "X-Team": "ml" })
+  })
+
+  test("leaves out a key that names an environment variable, which only the engine can read", () => {
+    expect(identifyHeaders({ apiKey: "{env:COMPANY_KEY}", headers: [] })).toEqual({})
+    expect(identifyHeaders({ apiKey: "", headers: [] })).toEqual({})
   })
 })
 

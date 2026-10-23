@@ -35,6 +35,16 @@ export function matches(json: unknown) {
   return Option.isSome(Schema.decodeUnknownOption(Models)(json))
 }
 
+/**
+ * The context LM Studio loaded a model with, from its model list, or undefined when it is not loaded. LM Studio loads
+ * a model on its first request, with the context set in the app, so Check models reads this after that request.
+ */
+export async function loadedContext(read: LocalProbe.Read, model: string) {
+  const data = Option.getOrUndefined(Schema.decodeUnknownOption(Models)(await read(identify)))?.data ?? []
+  const found = data.find((item) => item.id === model)
+  return found?.state === "loaded" ? found.loaded_context_length : undefined
+}
+
 export async function inspect(_read: LocalProbe.Read, identified: unknown): Promise<LocalProbe.Inspection> {
   const data = Option.getOrUndefined(Schema.decodeUnknownOption(Models)(identified))?.data ?? []
   return {

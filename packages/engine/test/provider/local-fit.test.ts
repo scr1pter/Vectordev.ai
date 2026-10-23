@@ -530,11 +530,13 @@ it.live("a company endpoint on the model server list is fitted like a server som
 it.live("a private server the company lists has no per-token price, and one an edit still held adds has one", () => {
   const globalFile = path.join(Global.Path.config, "vector.json")
   const managedDirectory = process.env.VECTOR_TEST_MANAGED_CONFIG_DIR!
-  const server = (baseURL: string) => ({
+  // A repository's config may not point a provider at the user's network, so, as a plugin can, `preconnect` names the
+  // server the provider's requests go to. Nothing is sent: only the line is read.
+  const server = (origin: string) => ({
     name: "Model server",
     npm: "@ai-sdk/openai-compatible",
     models: { qwen: { id: "qwen", name: "qwen", tool_call: true, cost: { input: 0, output: 0 } } },
-    options: { apiKey: "test-key", baseURL },
+    options: { apiKey: "test-key", baseURL: "http://127.0.0.1:9/v1", preconnect: origin },
   })
   return provideTmpdirInstance(
     () =>
@@ -571,7 +573,7 @@ it.live("a private server the company lists has no per-token price, and one an e
       ),
     {
       trusted: true,
-      config: { provider: { kimi: server("http://10.0.0.5:8000/v1"), held: server("http://10.0.0.9:8000/v1") } },
+      config: { provider: { kimi: server("http://10.0.0.5:8000"), held: server("http://10.0.0.9:8000") } },
     },
   )
 })

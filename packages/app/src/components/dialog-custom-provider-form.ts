@@ -50,7 +50,10 @@ export type FormState = {
   headers: HeaderRow[]
   /** The kind of server a preset or Detect chose. */
   kind?: LocalProbe.Kind
-  /** How many requests the server takes at once; empty leaves it unlimited. */
+  /**
+   * How many requests the server takes at once. Empty leaves it to the engine: one at a time on a server on this
+   * computer or the user's network, no limit elsewhere (COPY.concurrencyEmpty).
+   */
   concurrency?: string
   /** The server Detect or Identify read at this address, whose identity Vector pins when the provider is saved. */
   server?: LocalProbe.Server
@@ -133,6 +136,8 @@ export const COPY = {
     `Left out ${count} cloud ${count === 1 ? "model" : "models"}: Ollama sends their prompts to ollama.com.`,
   unknownContext: "Context unknown: set it here, or Vector's agent will refuse this model on a server you host.",
   changedAddress: "This address is not the server Vector found. Find it again to pin its identity.",
+  /** What an empty "Requests at once" means: the engine sends a server someone hosts one request at a time. */
+  concurrencyEmpty: (hosted: boolean) => (hosted ? "One at a time" : "No limit"),
 } as const
 
 /** The labels for the address being added: "Not encrypted" for plain http off this computer. */
@@ -167,6 +172,22 @@ function found(form: Pick<FormState, "baseURL" | "server">) {
   if (!form.server) return undefined
   const typed = URL.canParse(form.baseURL.trim()) ? LocalPolicy.origin(form.baseURL.trim()) : undefined
   return typed === form.server.origin ? form.server : undefined
+}
+
+/**
+ * The headers Identify sends with the typed address, so a server behind a key, such as a company's gateway, answers:
+ * the header rows the user filled in and the API key as a bearer token. A key that names an environment variable
+ * ({env:NAME}) is left out, since only the engine can read it.
+ */
+export function identifyHeaders(form: Pick<FormState, "apiKey" | "headers">): Record<string, string> {
+  const key = form.apiKey.trim()
+  const rows = form.headers
+    .map((h) => ({ key: h.key.trim(), value: h.value.trim() }))
+    .filter((h) => !!h.key && !!h.value)
+  return {
+    ...(key && !/^\{env:[^}]+\}$/.test(key) ? { authorization: `Bearer ${key}` } : {}),
+    ...Object.fromEntries(rows.map((h) => [h.key, h.value])),
+  }
 }
 
 /** A provider ID based on `base` that nothing else uses: ollama, then ollama-2, ollama-3… */

@@ -20,6 +20,7 @@ import {
   COPY,
   type FormState,
   headerRow,
+  identifyHeaders,
   identity,
   labels,
   modelRow,
@@ -38,8 +39,11 @@ type Props = {
    * caller passes it, since the search runs where the engine runs, not in this window.
    */
   detect?: () => Promise<readonly LocalProbe.Server[]>
-  /** Reads the server at a typed address through the engine, for Identify. */
-  identify?: (url: string) => Promise<LocalProbe.Server | undefined>
+  /** Reads the server at a typed address through the engine, for Identify, with the key and headers typed here. */
+  identify?: (input: {
+    readonly url: string
+    readonly headers: Readonly<Record<string, string>>
+  }) => Promise<LocalProbe.Server | undefined>
 }
 
 type Search = {
@@ -104,7 +108,9 @@ export function DialogCustomProvider(props: Props) {
   const identifyTyped = async () => {
     if (!props.identify || !form.baseURL.trim()) return
     setSearch({ status: "looking", message: undefined })
-    const server = await props.identify(form.baseURL.trim()).catch(() => undefined)
+    const server = await props
+      .identify({ url: form.baseURL.trim(), headers: identifyHeaders(form) })
+      .catch(() => undefined)
     if (!server) return setSearch({ status: "failed", message: "Nothing Vector recognises answered at this address." })
     setSearch({ status: "done", message: undefined })
     chooseServer(server)
@@ -379,7 +385,7 @@ export function DialogCustomProvider(props: Props) {
             <Show when={form.kind}>
               <TextField
                 label="Requests at once"
-                placeholder="No limit"
+                placeholder={COPY.concurrencyEmpty(label().hosted)}
                 description="How many requests Vector sends this server at once. The user's turn goes first, then subagents, then titles and summaries."
                 value={form.concurrency ?? ""}
                 onChange={(v) => setField("concurrency", v)}
