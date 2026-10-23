@@ -16,7 +16,14 @@ import { SessionPosting } from "@/session/posting"
 import { SessionID } from "@/session/schema"
 import { Session } from "@/session/session"
 import { InstanceHttpApi } from "../api"
-import { IMPORT_CHARS, MemoryApiError, MemoryTooLargeError, POSTING_CHARS, TEXT_BYTES, UPLOAD_BYTES } from "../groups/memory"
+import {
+  IMPORT_CHARS,
+  MemoryApiError,
+  MemoryTooLargeError,
+  POSTING_CHARS,
+  TEXT_BYTES,
+  UPLOAD_BYTES,
+} from "../groups/memory"
 
 const refused = (message: string, reason?: string, document?: BrainSchema.Document) =>
   new MemoryApiError({

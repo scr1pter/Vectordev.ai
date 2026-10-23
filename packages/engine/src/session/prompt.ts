@@ -2565,7 +2565,11 @@ const layer = Layer.effect(
                     // An outward digest pins only the kinds and facets the role hears: preferences alone for a pull
                     // request Vector cannot trust.
                     ...(audience === "outward"
-                      ? habitsOf(session, agent.name, session.internal?.startsWith(VECTORSCOPE) ? reviewScope(msgs) : undefined)
+                      ? habitsOf(
+                          session,
+                          agent.name,
+                          session.internal?.startsWith(VECTORSCOPE) ? reviewScope(msgs) : undefined,
+                        )
                       : {}),
                   },
                 ).pipe(Effect.orDie),
@@ -2736,19 +2740,22 @@ const layer = Layer.effect(
       taught: ReadonlyMap<MessageID, TaskSize.Tier>,
     ) {
       const none = Effect.void
-      if (session.parentID || session.internal || taught.size === 0) return none
-      if (yield* guests.marked(session.id)) return none
-      const settings = yield* brain.learnSettings()
-      if (!settings.learning) return none
+      if (session.parentID || session.internal || ![...taught.values()].some((tier) => tier !== "chat")) return none
       const msgs = yield* sessions.messages({ sessionID: session.id })
-      const tainted = SessionMemory.taint(msgs) !== undefined
-      const place = yield* instruction.place()
       const requests = msgs.flatMap((message, index) => {
         const tier = taught.get(message.info.id)
         if (message.info.role !== "user" || !tier || tier === "chat") return []
         const typed = SessionMemory.typed(message)
         return typed ? [{ message, typed, index }] : []
       })
+      // Most messages teach nothing, and finding that out is plain code: nothing else is read for them.
+      if (requests.every((request) => BrainLearn.learn(request.typed).length === 0 && !BrainLearn.gate(request.typed)))
+        return none
+      if (yield* guests.marked(session.id)) return none
+      const settings = yield* brain.learnSettings()
+      if (!settings.learning) return none
+      const tainted = SessionMemory.taint(msgs) !== undefined
+      const place = yield* instruction.place()
       const write = Effect.fnUntraced(function* (
         message: SessionV1.WithParts,
         items: readonly BrainLearn.Learned[],
@@ -2813,7 +2820,8 @@ const layer = Layer.effect(
       if (input.settings.modelLearner === "local-only" && !Egress.policy().enabled) return []
       const primary = yield* provider.getModel(input.user.model.providerID, input.user.model.modelID).pipe(Effect.option)
       if (Option.isNone(primary)) return []
-      const model = (yield* provider.getSmallModel(input.user.model.providerID, input.user.model.modelID)) ?? primary.value
+      const model =
+        (yield* provider.getSmallModel(input.user.model.providerID, input.user.model.modelID)) ?? primary.value
       if (freeModelMayTrain(primary.value) || freeModelMayTrain(model)) return []
       const title = yield* agents.get("title")
       if (!title) return []
