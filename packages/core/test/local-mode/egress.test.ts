@@ -299,6 +299,30 @@ model.stop(true)`
       await spawned(dir.path, body, { VECTOR_TEST_EGRESS: "strict", VECTOR_TEST_EGRESS_NAMES: "openai.com" }),
     ).toEqual({ named: "EgressBlocked", pending: true })
   })
+
+  test("answers another thread's ask only once its own policy is known, main thread included", async () => {
+    await using dir = await tmpdir()
+    // The main thread here starts with Vector Local off by default, which config has not confirmed yet: a worker that
+    // took that answer would stop holding connections it should hold.
+    const body = `const channel = new BroadcastChannel("vector.egress")
+const answers = []
+channel.onmessage = (event) => event.data.kind === "policy" && answers.push(event.data.policy.enabled)
+const settle = (count, left = 100) =>
+  answers.length >= count || left <= 0 ? Promise.resolve() : Bun.sleep(20).then(() => settle(count, left - 1))
+Egress.backstop()
+channel.postMessage({ kind: "ask" })
+await Bun.sleep(200)
+const before = answers.length
+Egress.configure(LocalPolicy.OFF)
+await settle(before + 1)
+const configured = answers.length - before
+channel.postMessage({ kind: "ask" })
+await settle(before + configured + 1)
+const after = answers.length - before - configured
+channel.close()
+console.log(JSON.stringify({ before, configured, after }))`
+    expect(await spawned(dir.path, body)).toEqual({ before: 0, configured: 1, after: 1 })
+  })
 })
 
 describe("Egress and the backstop in Workers", () => {

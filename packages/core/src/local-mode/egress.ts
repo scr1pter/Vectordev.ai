@@ -202,10 +202,8 @@ function post(message: Message) {
 }
 
 function receive(message: Message) {
-  // The main thread always answers, so a worker that started without a policy of its own (one that shares this
-  // thread's environment) stops holding everything once it hears.
   if (message.kind === "ask") {
-    if (state.known || isMainThread) post({ kind: "policy", policy: state.policy, version: state.version, log: false })
+    if (state.known) post({ kind: "policy", policy: state.policy, version: state.version, log: false })
     return
   }
   if (message.kind === "event") return remember(message.event, message.notify, message.agent)
