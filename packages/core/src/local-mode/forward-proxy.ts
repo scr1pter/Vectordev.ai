@@ -37,7 +37,16 @@ export type Route =
   | { readonly connect: (connected: () => void) => net.Socket; readonly refuse?: undefined }
   | { readonly refuse: Refusal; readonly connect?: undefined }
 
-export type Proxy = { readonly url: string; readonly port: number; readonly stop: () => Promise<void> }
+export type Proxy = {
+  readonly url: string
+  readonly port: number
+  /**
+   * The bytes this proxy has passed to its clients so far, its own answers and every site's included, counted as they
+   * arrive: a chunked or compressed answer counts as much as one with a Content-Length.
+   */
+  readonly received: () => number
+  readonly stop: () => Promise<void>
+}
 
 export type Options = {
   /**
@@ -86,12 +95,15 @@ export function startSync(decide: Decide, options: Options = {}): Proxy {
 function create(decide: Decide, options: Options) {
   // Every open connection, so stopping the proxy also ends the tunnels and requests it is carrying.
   const open = new Set<net.Socket>()
+  // What the connections that closed already received.
+  const delivered = { closed: 0 }
   const server = net.createServer((client) => {
     const current: { upstream?: net.Socket } = {}
     open.add(client)
     client.on("error", () => client.destroy())
     client.on("close", () => {
       open.delete(client)
+      delivered.closed += client.bytesWritten
       current.upstream?.destroy()
     })
     const serve = (head: string, rest: Buffer) => {
@@ -207,6 +219,7 @@ function create(decide: Decide, options: Options) {
       return {
         url: `http://127.0.0.1:${port}`,
         port,
+        received: () => [...open].reduce((sum, socket) => sum + socket.bytesWritten, delivered.closed),
         stop: () =>
           new Promise<void>((done) => {
             server.close(() => done())
