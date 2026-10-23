@@ -3,6 +3,7 @@
 import { Script } from "@vectordevai/script"
 import { prepareGitLab } from "../../../script/prepare-gitlab"
 import { unguardedBunReferences } from "./node-bundle-guard"
+import { brainWorkerModule } from "./brain-worker-module"
 import desktop from "../../desktop/package.json"
 import path from "path"
 import { fileURLToPath } from "url"
@@ -27,7 +28,6 @@ const brainWorker = await Bun.build({
   minify: true,
 })
 if (!brainWorker.success) throw new AggregateError(brainWorker.logs, "The brain worker bundle failed to build")
-const brainWorkerModule = `export default ${JSON.stringify(await brainWorker.outputs[0]!.text())}`
 
 const result = await Bun.build({
   target: "node",
@@ -49,7 +49,7 @@ const result = await Bun.build({
   files: {
     "vector-web-ui.gen.ts": "",
     // The brain's background reader, started from this string as an eval worker inside Electron's utility process.
-    "brain-worker.gen.ts": brainWorkerModule,
+    "brain-worker.gen.ts": brainWorkerModule(await brainWorker.outputs[0]!.text()),
   },
 })
 

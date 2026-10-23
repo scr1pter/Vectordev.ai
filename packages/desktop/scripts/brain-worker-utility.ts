@@ -55,9 +55,19 @@ const outcome = await Effect.runPromise(
     const embedded = yield* Effect.forEach(specs, (spec) =>
       Effect.gen(function* () {
         const started = performance.now()
-        const vectors = yield* worker.embed({ model: model(spec), texts: spec.texts, role: "passage", priority: "background" })
+        const vectors = yield* worker.embed({
+          model: model(spec),
+          texts: spec.texts,
+          role: "passage",
+          priority: "background",
+        })
         const check = (yield* worker.status()).check
-        return { name: spec.name, vectors: vectors.map((vector) => Array.from(vector)), check, ms: performance.now() - started }
+        return {
+          name: spec.name,
+          vectors: vectors.map((vector) => Array.from(vector)),
+          check,
+          ms: performance.now() - started,
+        }
       }).pipe(Effect.catch((error) => Effect.succeed({ name: spec.name, error: error.message }))),
     )
     return { result, status, embedded, after: yield* worker.status() }
@@ -87,5 +97,12 @@ const summary = outcome.ok
       after: outcome.after,
     }
   : outcome
-// A utility process does not end when its work does, so the smoke would wait for its timer; it ends once it has said so.
-process.stdout.write(`brain-worker-smoke ${JSON.stringify({ ...summary, versions: process.versions })}\n`, () => process.exit(0))
+const message = `brain-worker-smoke ${JSON.stringify({ ...summary, versions: process.versions })}\n`
+// Electron can end the utility's stdout before its final chunk reaches the parent. Wait for an explicit flush ack.
+if (process.parentPort) {
+  process.parentPort.on("message", (event) => {
+    if (event.data === "brain-worker-smoke-ack") process.exit(0)
+  })
+  process.parentPort.postMessage(message)
+}
+if (!process.parentPort) process.stdout.write(message, () => process.exit(0))

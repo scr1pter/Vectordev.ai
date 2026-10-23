@@ -26,11 +26,13 @@ import { BrainEmbedManifest } from "../../core/src/brain/embed-manifest"
 import golden from "../../core/src/brain/embed-golden.json"
 import * as Fixture from "../../core/test/brain/fixture/onnx"
 import { lines, pdf } from "../../core/test/brain/fixture/pdf"
+import { brainWorkerModule } from "../../engine/script/brain-worker-module"
 
 const MARK = "brain-worker-smoke "
 const desktop = path.resolve(import.meta.dirname, "..")
 
-const electron = process.env.ELECTRON_PATH ?? (await import("electron").then((module) => module.default as unknown as string))
+const electron =
+  process.env.ELECTRON_PATH ?? (await import("electron").then((module) => module.default as unknown as string))
 const scratch = await mkdtemp(path.join(os.tmpdir(), "vector-electron-brain-"))
 try {
   const outcome = await smoke(scratch)
@@ -60,7 +62,7 @@ async function smoke(scratch: string) {
     target: "node",
     format: "esm",
     outdir: path.join(scratch, "utility"),
-    files: { "brain-worker.gen.ts": `export default ${JSON.stringify(await reader.outputs[0]!.text())}` },
+    files: { "brain-worker.gen.ts": brainWorkerModule(await reader.outputs[0]!.text()) },
   })
   if (!utility.success) throw new AggregateError(utility.logs, "The utility process bundle failed to build")
   const document = path.join(scratch, "spec.pdf")
@@ -93,13 +95,27 @@ app.whenReady().then(() => {
   const child = utilityProcess.fork(${JSON.stringify(utility.outputs[0]!.path)}, [${JSON.stringify(document)}, ${JSON.stringify(specFile)}], { stdio: "pipe", serviceName: "vector-brain-smoke" })
   child.stdout.on("data", (chunk) => process.stdout.write(chunk))
   child.stderr.on("data", (chunk) => process.stderr.write(chunk))
-  child.on("exit", (code) => { clearTimeout(timer); app.exit(code ?? 1) })
+  // Acknowledge only after the summary is flushed: Electron may drop a utility's last stdout chunk on exit.
+  child.on("message", (message) => {
+    if (typeof message !== "string" || !message.startsWith(${JSON.stringify(MARK)})) return
+    process.stdout.write(message, () => child.postMessage("brain-worker-smoke-ack"))
+  })
+  child.on("exit", (code) => {
+    process.stdout.write("", () => process.stderr.write("", () => { clearTimeout(timer); app.exit(code ?? 1) }))
+  })
+}).catch((error) => {
+  console.error(error)
+  clearTimeout(timer)
+  app.exit(1)
 })
 `,
   )
   await mkdir(path.join(scratch, "user-data"), { recursive: true })
   const { ELECTRON_RUN_AS_NODE: _, ...environment } = process.env
-  const flags = [`--user-data-dir=${path.join(scratch, "user-data")}`, ...(process.platform === "linux" ? ["--no-sandbox"] : [])]
+  const flags = [
+    `--user-data-dir=${path.join(scratch, "user-data")}`,
+    ...(process.platform === "linux" ? ["--no-sandbox"] : []),
+  ]
   const result = spawnSync(electron, [main, ...flags], {
     encoding: "utf8",
     timeout: 120_000,
@@ -112,7 +128,10 @@ app.whenReady().then(() => {
   const inNode = node.error
     ? { failures: [`Node could not start: ${node.error.message}`] }
     : checked(node.stdout, node.stderr, node.status, specs, "Node")
-  return { failures: [...inElectron.failures, ...inNode.failures.map((failure) => `node: ${failure}`)], versions: inElectron.versions }
+  return {
+    failures: [...inElectron.failures, ...inNode.failures.map((failure) => `node: ${failure}`)],
+    versions: inElectron.versions,
+  }
 }
 
 type Spec = {
@@ -131,7 +150,9 @@ type Spec = {
 
 // The fixture model, written here, and the pinned arctic-embed-xs files when VECTOR_TEST_EMBED_DIR names a folder.
 async function models(dir: string): Promise<Spec[]> {
-  const wasm = fileURLToPath(import.meta.resolve("onnxruntime-web/ort-wasm-simd-threaded.wasm", path.join(desktop, "../core/package.json")))
+  const wasm = fileURLToPath(
+    import.meta.resolve("onnxruntime-web/ort-wasm-simd-threaded.wasm", path.join(desktop, "../core/package.json")),
+  )
   await Fixture.write(dir)
   const texts = ["refresh tokens expire after days", "the audit log keeps logs for years"]
   const fixture: Spec = {
@@ -141,7 +162,10 @@ async function models(dir: string): Promise<Spec[]> {
     graph: "onnx/model_quantized.onnx",
     wasm,
     settings: { dims: Fixture.DIMS, pooling: "cls", maxTokens: 320, queryTokens: 64, query: "" },
-    canaries: BrainEmbedManifest.CANARIES.map((canary) => ({ ...canary, vector: Array.from(Fixture.expected(canary.text)) })),
+    canaries: BrainEmbedManifest.CANARIES.map((canary) => ({
+      ...canary,
+      vector: Array.from(Fixture.expected(canary.text)),
+    })),
     threshold: BrainEmbedManifest.CHECK,
     texts,
     expected: texts.map((text) => Array.from(Fixture.expected(text))),
@@ -158,7 +182,13 @@ async function models(dir: string): Promise<Spec[]> {
       dir: real,
       graph: model.files.model.name,
       wasm,
-      settings: { dims: model.dims, pooling: "cls", maxTokens: model.maxTokens, queryTokens: model.queryTokens, query: model.query },
+      settings: {
+        dims: model.dims,
+        pooling: "cls",
+        maxTokens: model.maxTokens,
+        queryTokens: model.queryTokens,
+        query: model.query,
+      },
       canaries: pinned,
       threshold: BrainEmbedManifest.CHECK,
       texts: ["Refresh tokens expire after 14 days."],
@@ -167,7 +197,13 @@ async function models(dir: string): Promise<Spec[]> {
 }
 
 // What one run of the utility bundle printed, against what it had to do.
-function checked(stdout: string, stderr: string, status: number | null, specs: readonly Spec[], runtime: "Electron" | "Node") {
+function checked(
+  stdout: string,
+  stderr: string,
+  status: number | null,
+  specs: readonly Spec[],
+  runtime: "Electron" | "Node",
+) {
   const line = stdout.split("\n").find((item) => item.startsWith(MARK))
   const summary = line
     ? (JSON.parse(line.slice(MARK.length)) as {
@@ -191,11 +227,14 @@ function checked(stdout: string, stderr: string, status: number | null, specs: r
     return { failures: [`the utility process printed no result (exit ${status}):\n${(stdout + stderr).slice(-4_000)}`] }
   if (!summary.ok) return { failures: [`the reader failed: ${summary.cause}`], versions: summary.versions }
   const failures = [
+    ...(status === 0 ? [] : [`the utility process exited with ${status}: ${stderr.slice(-4_000)}`]),
     ...(runtime === "Node" || summary.versions.electron ? [] : ["the reader did not run inside Electron"]),
     ...(summary.type === "extracted" && summary.format === "pdf" && summary.pages === 2
       ? []
       : [`the PDF was not read as two pages: ${JSON.stringify(summary)}`]),
-    ...(summary.records?.some((card) => card.includes("retry at most 3 times")) ? [] : ["no record of the retry requirement"]),
+    ...(summary.records?.some((card) => card.includes("retry at most 3 times"))
+      ? []
+      : ["no record of the retry requirement"]),
     ...(summary.status?.mode === "worker" && summary.status.threads > 0
       ? []
       : [`the reader did not run in a worker thread: ${JSON.stringify(summary.status)}`]),
@@ -206,7 +245,9 @@ function checked(stdout: string, stderr: string, status: number | null, specs: r
       if (!ran.check?.passed || ran.check.key !== spec.key)
         return [`${spec.name}: its load failed its check: ${JSON.stringify(ran.check)}`]
       return (spec.expected ?? []).flatMap((vector, index) =>
-        cosine(ran.vectors?.[index] ?? [], vector) > 0.9999 ? [] : [`${spec.name}: "${spec.texts[index]}" gave other numbers`],
+        cosine(ran.vectors?.[index] ?? [], vector) > 0.9999
+          ? []
+          : [`${spec.name}: "${spec.texts[index]}" gave other numbers`],
       )
     }),
   ]
@@ -216,6 +257,8 @@ function checked(stdout: string, stderr: string, status: number | null, specs: r
 function cosine(a: readonly number[], b: readonly number[]) {
   if (a.length !== b.length) return 0
   const dot = a.reduce((sum, value, index) => sum + value * b[index]!, 0)
-  const norms = Math.sqrt(a.reduce((sum, value) => sum + value * value, 0) * b.reduce((sum, value) => sum + value * value, 0))
+  const norms = Math.sqrt(
+    a.reduce((sum, value) => sum + value * value, 0) * b.reduce((sum, value) => sum + value * value, 0),
+  )
   return norms > 0 ? dot / norms : 0
 }
