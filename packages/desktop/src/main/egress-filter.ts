@@ -59,7 +59,7 @@ export function decideChromium(input: {
   readonly kind: Kind
   readonly policy: LocalMode.Policy
   /** Origins this session may reach for now, such as the update feed of a check the user asked for. */
-  readonly granted?: ReadonlySet<string>
+  readonly granted?: Pick<ReadonlySet<string>, "has">
 }): Decision {
   const labelled = label(input.kind, input.url)
   const decision = (
@@ -148,7 +148,7 @@ export function createEgressFilter(deps: {
       url: details.url,
       kind: session.kind,
       policy,
-      granted: new Set(session.granted.keys()),
+      granted: session.granted,
     })
     if (policy.enabled) log(session.kind, details, decided)
     if (decided.decision !== "allow") return callback({ cancel: true })

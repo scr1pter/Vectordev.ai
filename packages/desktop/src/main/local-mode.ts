@@ -2,7 +2,8 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import tls from "node:tls"
 import type { App, CommandLine, Session, WebContents } from "electron"
-import type { LocalMode } from "@vectordevai/schema/local-mode"
+import { Option, Schema } from "effect"
+import { LocalMode } from "@vectordevai/schema/local-mode"
 import { Egress } from "@vectordevai/core/local-mode/egress"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import { LocalStartup } from "@vectordevai/core/local-mode/startup"
@@ -161,7 +162,9 @@ type PreloadTarget = Pick<Session, "registerPreloadScript">
 
 // Before a page's own scripts, in the page's world: no WebRTC peer connections, whose traffic no webRequest listener
 // sees. A sandboxed preload with context isolation reaches the page's world through executeInMainWorld; one without
-// isolation already runs there.
+// isolation already runs there. Electron runs a session's preloads in each page's main frame, so a frame a page's own
+// script makes still has RTCPeerConnection (the Electron smoke reports it); the IP handling policy holds that one to
+// no proxy at all.
 const PEER_CONNECTIONS_OFF = `"use strict"
 // Vector Local: the agent's browser makes no WebRTC peer connections. Written by Vector (local-mode.ts).
 const off = () => {
@@ -172,7 +175,7 @@ const off = () => {
 try { require("electron").contextBridge.executeInMainWorld({ func: off }) } catch { off() }
 `
 
-/** Registers the preload that turns WebRTC peer connections off in every frame of `target`. */
+/** Registers the preload that turns WebRTC peer connections off in the pages of `target`. */
 export function denyPeerConnections(target: PreloadTarget, directory: string) {
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   const filePath = join(directory, "no-peer-connections.js")
@@ -308,9 +311,12 @@ async function readEnginePolicy(engine: Engine, fetch: Fetch) {
     await response?.body?.cancel().catch(() => undefined)
     return undefined
   }
-  const body = (await response.json().catch(() => undefined)) as { policy?: LocalMode.Policy } | undefined
-  return body?.policy && typeof body.policy.enabled === "boolean" ? body.policy : undefined
+  return Option.getOrUndefined(Schema.decodeUnknownOption(EngineStatus)(await response.json().catch(() => undefined)))
+    ?.policy
 }
+
+// The part of GET /local's answer the comparison reads.
+const EngineStatus = Schema.Struct({ policy: LocalMode.Policy })
 
 function authorization(engine: Engine) {
   return { authorization: `Basic ${Buffer.from(`vector:${engine.password}`).toString("base64")}` }
