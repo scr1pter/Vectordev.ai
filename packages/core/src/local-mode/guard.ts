@@ -714,14 +714,17 @@ export function redirectTarget(response: Response, from: URL) {
   return next
 }
 
-/** The first hop of a fetch call, as `redirectHop` reads it. */
-export function firstHop(input: Parameters<Fetch>[0], init: FetchInit | undefined): Hop {
+/**
+ * The first hop of a fetch call, as `redirectHop` reads it. `body`, when given, is the body the hop carries instead of
+ * the call's own, which is then not read.
+ */
+export function firstHop(input: Parameters<Fetch>[0], init: FetchInit | undefined, body?: BodyInit | null): Hop {
   const request = input instanceof Request ? input : undefined
   return {
     ...init,
-    method: init?.method ?? request?.method ?? "GET",
+    method: methodOf(input, init),
     headers: new Headers(init?.headers ?? request?.headers),
-    body: init?.body ?? request?.body ?? null,
+    body: body !== undefined ? body : (init?.body ?? request?.body ?? null),
     signal: init?.signal ?? request?.signal,
     redirect: "manual",
   }
@@ -729,12 +732,19 @@ export function firstHop(input: Parameters<Fetch>[0], init: FetchInit | undefine
 
 /**
  * The first hop of a fetch call that follows redirects. A Request's own body is a stream the first send reads, so a
- * copy of it is kept, which a 307 or 308 resends as fetch would.
+ * copy of it is kept, which a 307 or 308 resends as fetch would. The Request is cloned before anything reads its body:
+ * Bun 1.3 sends an empty body for a Request whose `body` was read before it was cloned, once the Request carries Bun's
+ * own `timeout` option, as the SDK's requests do.
  */
 export async function followedHop(input: Parameters<Fetch>[0], init: FetchInit | undefined): Promise<Hop> {
-  const hop = firstHop(input, init)
-  if (!(input instanceof Request) || init?.body != null || input.body === null) return hop
-  return { ...hop, body: await input.clone().blob() }
+  if (!(input instanceof Request) || init?.body != null) return firstHop(input, init)
+  const copy = input.clone()
+  return firstHop(input, init, copy.body === null ? null : await copy.blob())
+}
+
+/** A fetch call's method, read without touching its body. */
+function methodOf(input: Parameters<Fetch>[0], init: FetchInit | undefined) {
+  return init?.method ?? (input instanceof Request ? input.method : "GET")
 }
 
 type Wrap = {
@@ -831,7 +841,7 @@ function wrap(input: Wrap): Handle {
         input.judge({ kind: "fetch", host: `${url.protocol}//${url.host}`, url: `${url.protocol}//${url.host}` })
           .blocked ?? new EgressBlocked(url.protocol, "fetch"),
       )
-    const checked = decide(url, init, firstHop(target, init).method)
+    const checked = decide(url, init, methodOf(target, init))
     if (checked.blocked) return Promise.reject(checked.blocked)
     const mode = init?.redirect ?? (target instanceof Request ? target.redirect : "follow")
     return resolved(checked.attempt, checked.judged.within).then(async (outside) => {

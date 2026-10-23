@@ -192,6 +192,28 @@ describe("EgressGuard.installStrict", () => {
     expect(await (await capturedFetch(at())).text()).toBe("here")
   })
 
+  test("sends the body of a Request that carries Bun's own timeout option, as the SDK's requests do", async () => {
+    // The SDK's client sets the option on the Request itself (createVectorClient). Bun then sent such a Request's body
+    // empty once the guard had read the body before it kept a copy for redirects.
+    const request = Object.assign(
+      new Request(at("/sdk"), { method: "POST", body: '{"parts":["hi"]}', headers: { "x-test-mark": "sdk" } }),
+      { timeout: false },
+    )
+    expect(await (await fetch(request)).text()).toBe("here")
+    const redirected = Object.assign(
+      new Request(at("/keep"), { method: "PUT", body: "kept", headers: { "x-test-mark": "sdk-redirect" } }),
+      { timeout: false },
+    )
+    expect(await (await fetch(redirected)).text()).toBe("here")
+    expect(
+      seen.filter((item) => item.mark?.startsWith("sdk")).map((item) => [item.path, item.method, item.body]),
+    ).toEqual([
+      ["/sdk", "POST", '{"parts":["hi"]}'],
+      ["/keep", "PUT", "kept"],
+      ["/landed", "PUT", "kept"],
+    ])
+  })
+
   test("decides each request on a kept-alive connection to its proxy on its own", async () => {
     seen.length = 0
     const proxy = new URL(process.env[EgressGuard.ENVIRONMENT.proxy]!)
