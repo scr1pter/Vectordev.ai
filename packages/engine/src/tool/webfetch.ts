@@ -185,6 +185,11 @@ export const WebFetchTool = Tool.define(
  *
  * A subagent works from a brief its launching agent wrote, which carries whatever that agent read: it counts as having
  * read the web from its first step, and nothing in its brief counts as typed by the person.
+ *
+ * An address with a user name or password in it asks unless the person typed it whole. The browser tool applies this
+ * rule to the addresses it opens only: a page it reaches by a click, typing or a form asks by origin alone
+ * (browser_interact). Where such a navigation may go is the desktop's to decide, by Web access rather than by this
+ * rule (Vector Local in the desktop, phase L7, not built yet).
  */
 export const newAddress = Effect.fn("WebFetchTool.newAddress")(function* (
   address: string,
@@ -199,10 +204,16 @@ export const newAddress = Effect.fn("WebFetchTool.newAddress")(function* (
 function unvouched(address: string, messages: readonly SessionV1.WithParts[], launched: boolean) {
   if (!launched && SessionMemory.taint(messages) === undefined) return false
   const url = new URL(address)
-  const forms = [address.trim(), url.href, `${url.host}${url.pathname}${url.search}`]
+  // A user name or password in an address is something the agent put there, which a page can steer it into, so only
+  // the person typing the whole address vouches for it.
+  const credentials = url.username !== "" || url.password !== ""
+  const forms = credentials
+    ? [address.trim(), url.href]
+    : [address.trim(), url.href, `${url.host}${url.pathname}${url.search}`]
   const said = (text: string) => forms.some((form) => text.includes(form))
   if (!launched && messages.some((message) => message.info.role === "user" && said(SessionMemory.typed(message))))
     return false
+  if (credentials) return true
   const tools = messages.flatMap((message) => message.parts.flatMap((part) => (part.type === "tool" ? [part] : [])))
   const reached = tools.some(
     (part) =>

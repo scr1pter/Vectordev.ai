@@ -203,8 +203,9 @@ export const node = makeLocationNode({
  * Whether the agent's own choice of `address` asks every time under Vector Local's rule for after the web, in a V2
  * conversation (`messages`, all of it): once it took in anything from outside (a tool other than the local file and
  * text tools, a shell command that is not local, a synthetic note, or, for a subagent, its brief), an address asks
- * unless a web result gave it and the conversation reached its host. The V2 runner cannot yet tell the person's
- * prompt from one another agent sent, so no prompt vouches for an address here, unlike the engine's rule.
+ * unless a web result gave it and the conversation reached its host, and one with a user name or password in it
+ * always asks. The V2 runner cannot yet tell the person's prompt from one another agent sent, so no prompt vouches for
+ * an address here, unlike the engine's rule.
  */
 export function newAddress(address: string, messages: readonly SessionMessage.Message[], launched: boolean) {
   const calls = messages.flatMap((message) =>
@@ -222,6 +223,8 @@ export function newAddress(address: string, messages: readonly SessionMessage.Me
     calls.some((call) => !LOCAL_TOOLS.has(call.name) || (call.name === "bash" && !LocalCommand.local(command(call))))
   if (!outside) return false
   const url = new URL(address)
+  // A user name or password in an address is something the agent put there, which a page can steer it into.
+  if (url.username !== "" || url.password !== "") return true
   const forms = [address.trim(), url.href, `${url.host}${url.pathname}${url.search}`]
   const completed = calls.flatMap((call) => (call.state.status === "completed" ? [{ ...call, state: call.state }] : []))
   const reached = completed.some(

@@ -1549,6 +1549,28 @@ describe("the agent's own actions under Vector Local", () => {
       expect(Exit.isSuccess(yield* read(exfil, history("Read the setup guide.", exfil)))).toBe(false)
       expect(strict()).toHaveLength(1)
 
+      // A user name or password the agent put in an address: webfetch refuses it before asking anything, and the
+      // browser asks each time, though a result linked the page on a host the conversation reached.
+      const signed = guide.replace("://", "://SECRET@")
+      yield* on()
+      expect(Exit.isSuccess(yield* read(signed, history(`Read the setup guide at ${guide}.`)))).toBe(false)
+      expect(asked).toEqual([])
+      // The same conversation on a site elsewhere, since the browser asks nothing for a page on this computer.
+      const site = "https://docs.example.com"
+      const elsewhere: SessionV1.WithParts[] = JSON.parse(
+        JSON.stringify(history(`Read the setup guide at ${guide}.`)).replaceAll(new URL(guide).origin, site),
+      )
+      const opened = `https://SECRET@docs.example.com${new URL(guide).pathname}`
+      yield* on()
+      const browser = yield* (yield* BrowserTool).init()
+      yield* browser.execute({ action: "open_url", url: opened }, context(elsewhere)).pipe(Effect.exit)
+      expect(strict()).toEqual([
+        expect.objectContaining({
+          permission: "browser_external",
+          patterns: [`${PermissionPolicy.AFTER_WEB}${opened}`],
+        }),
+      ])
+
       // A host the conversation never reached asks, even when a result named it.
       yield* on()
       const other = `http://localhost:${web.port}/docs/guide`

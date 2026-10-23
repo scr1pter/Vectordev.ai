@@ -456,6 +456,12 @@ describe("WebFetchTool under Vector Local", () => {
       expect(yield* fetch(guide)).toEqual(usual(guide))
       expect(yield* fetch(exfil)).toEqual(after(exfil))
 
+      // A user name or password the agent put in an address it reached and a page gave asks each time all the same.
+      const signed = "https://SECRET@1.1.1.1/guide"
+      expect(WebFetchTool.newAddress(signed, stored.all, false)).toBe(true)
+      expect(WebFetchTool.newAddress("https://user:SECRET@1.1.1.1/guide", stored.all, false)).toBe(true)
+      expect(WebFetchTool.newAddress(guide, stored.all, false)).toBe(false)
+
       // A teammate's message or a command's output is not a web result, and makes the conversation one from outside.
       stored.all = [ran("send_teammate_message", { message: "hi" }, `fetch ${exfil}`)]
       expect(yield* fetch(exfil)).toEqual(after(exfil))
