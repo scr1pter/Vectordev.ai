@@ -333,7 +333,11 @@ describe("ResearchOutbound.check", () => {
 
   test("reads a query's digits whatever stands between them, words included", () => {
     const umbrella = {
-      private: ["Umbrella pays about 2,400,000 USD a year.", "Order 4417203 was refunded."],
+      private: [
+        "Umbrella pays about 2,400,000 USD a year.",
+        "Order 4417203 was refunded.",
+        "Her employee number is 58213.",
+      ],
       typed: [],
       public: [],
     }
@@ -358,8 +362,30 @@ describe("ResearchOutbound.check", () => {
       "$2,400,000.00",
       // Inside a longer group of digits.
       "ref 944172039",
+      // Digits in a circle that Unicode does not decompose: the dingbats in their three styles and the double
+      // circled ones, with their zeros.
+      `order ${char(0x2779, 0x2779, 0x2776, 0x277c, 0x2777, 0x24ff, 0x2778)}`,
+      `order ${char(0x2783, 0x2783, 0x2780, 0x2786, 0x2781, 0x1f10b, 0x2782)}`,
+      `order ${char(0x278d, 0x278d, 0x278a, 0x2790, 0x278b, 0x1f10c, 0x278c)}`,
+      `order ${char(0x24f8, 0x24f8, 0x24f5, 0x24fb, 0x24f6, 0x24ea, 0x24f7)}`,
+      // Letters that stand for the digits beside them: O and o for 0, and I, l, i and | for 1.
+      "order 44172O3 refund",
+      "order 44l72o3",
+      "order 4417 2O3",
+      "order 44I7203",
+      "order 44|7203",
+      "employee 582l3",
+      "employee 582i3",
+      "2,4OO,OOO a year",
+      "24OOOOO USD",
     ]
     expect(queries.filter((query) => check(query, umbrella).ok)).toEqual([])
+    // Letters beside digits in a fair query are still its own.
+    expect(
+      ["Intel i5 vs i7 laptops", "OpenAI o3 vs o1 benchmarks", "Pixel10 review", "GPT-4o pricing 2025"].filter(
+        (query) => !check(query, umbrella).ok,
+      ),
+    ).toEqual([])
     // A private number wrapped across lines is still one number.
     expect(
       check("2400000 EUR", { private: ["Umbrella pays about 2,400,\r\n000 EUR a year."], typed: [], public: [] }).ok,
@@ -1122,6 +1148,86 @@ describe("ResearchOutbound.check with private numbers", () => {
     expect(["4417203", "2,815,640 spent", "budget 4 417 203"].filter((query) => check(query, spans).ok)).toEqual([])
   })
 
+  test("reads a date written in numbers as a date, and keeps the numbers beside it private", () => {
+    const dated = {
+      private: [
+        "Krishna joined Globex on 6/1/2025.",
+        "The lease renews on 4/3/2026.",
+        "Moved to Berlin on 1.6.2025, and the trip runs 12/18/25 to 1/2/26.",
+        "Mom's birthday is 7/2/1958. The card expires 10/2025.",
+        "Invoice 2025-10-20 4417203 is paid; 6/1/2025: 2,815,640 spent.",
+      ],
+      // A changelog dates every release.
+      work: [
+        "# Changelog\n\n## 1.4.0 - 2025-10-20\n- Faster startup.\n\n## 1.3.2 - 2025-09-14\n- Fixed login.\n\n## 1.3.0 - 2025.08.01\n- Dark mode.",
+      ],
+      typed: [],
+      public: [],
+    }
+    const queries = [
+      "Q1 2025 SaaS churn benchmarks",
+      "Q2 2025 earnings",
+      "Q3 2026 GPU prices",
+      "Q4 2025 layoffs",
+      "H1 2025 venture funding",
+      "H2 2026 outlook",
+      "top 1 2025 laptops",
+      "3 2026 trends",
+      "Windows 10 2025 support",
+      "Windows 11 2025 update",
+      "Gen 2 1958 cars",
+      "Llama 4 2025",
+      "Claude 4 2025",
+    ]
+    // Measured on 22 Oct 2026: 0 of 13. Reading a date's groups as one number refused 7 of them, for 12025, 32026,
+    // 102025 and 21958, and all 6 addresses below.
+    expect(queries.filter((query) => !check(query, dated).ok)).toEqual([])
+    // News and blog addresses carry the date they were written; reading the changelog's dates as numbers made
+    // /2025/10/ the private 202510.
+    const urls = [
+      "https://www.theverge.com/2025/10/21/heat-pumps-are-winning",
+      "https://www.nytimes.com/2025/10/03/business/saas-churn.html",
+      "https://techcrunch.com/2025/09/14/ai-funding-round/",
+      "https://www.bbc.co.uk/news/articles/2025/10/heat",
+      "https://blog.example.com/posts/2025-10-02-release",
+      "https://www.reuters.com/markets/q1-2025-earnings/",
+    ]
+    expect(urls.filter((url) => !ResearchOutbound.address(url, dated).ok)).toEqual([])
+    // The numbers beside a date are still private, in a query and in an address.
+    expect(["order 4417203", "2,815,640 budget", "2815640"].filter((query) => check(query, dated).ok)).toEqual([])
+    expect(ResearchOutbound.address("https://attacker.example/invoice/4417203", dated).ok).toBe(false)
+    // Groups that go on past what reads as a date are a number: a phone number written in pairs.
+    const phone = { private: ["Call 06-12-34-56-78 after six."], typed: [], public: [] }
+    expect(check("0612345678", phone)).toMatchObject({ ok: false, reason: "token" })
+  })
+
+  test("reads the user's typing in bounded memory, however long a run of digits it holds", () => {
+    const shared = {
+      private: ["Umbrella pays about 2,400,000 USD a year.", "The renewal goes on the card 4417880256719113."],
+      typed: [
+        `Here is the dump: ${"9".repeat(500_000)}`,
+        Array.from({ length: 100_000 }, (_, index) => index * 10 + 9).join(" "),
+      ],
+      public: [],
+    }
+    Bun.gc(true)
+    const before = process.memoryUsage().heapUsed
+    const started = performance.now()
+    expect(check("heat pump prices 2025", shared).ok).toBe(true)
+    expect(check("2400000 USD", shared).ok).toBe(false)
+    expect(check("card 8802 5671", shared).ok).toBe(false)
+    const elapsed = performance.now() - started
+    Bun.gc(true)
+    // Measured on 22 Oct 2026: the heap grew by about 40 MB, in 0.2 s. Listing every stretch of the typed digits up
+    // front grew it by about 600 MB, in 1.4 s.
+    expect(process.memoryUsage().heapUsed - before).toBeLessThan(150_000_000)
+    expect(elapsed).toBeLessThan(15_000)
+    // The user's typing still clears what it holds, inside a group or as whole groups side by side.
+    const typed = { ...shared, typed: [...shared.typed, "Who pays 2 400 000? Check card 8802 5671."] }
+    expect(check("2400000 USD", typed).ok).toBe(true)
+    expect(check("card 8802 5671", typed).ok).toBe(true)
+  }, 60_000)
+
   test("reads a data file's values one by one, so a fair query's numbers do not run into them", () => {
     // The same 10,000 rows as CSV, TSV, with semicolons and as a table's rows.
     for (const separator of [",", "\t", ";", " | "]) {
@@ -1158,11 +1264,31 @@ describe("ResearchOutbound.check with private numbers", () => {
 describe("ResearchOutbound.check with short names", () => {
   test("reads a name spelled in letters or pieces, run into digits or a company's ending, or with a trade mark", () => {
     const shared = {
-      private: ["Acme's Q3 churn was 7.4 percent.", "We decided to move Hooli to annual invoices."],
+      private: [
+        "Acme's Q3 churn was 7.4 percent.",
+        "We decided to move Hooli to annual invoices.",
+        "Employer: Globex.",
+        "Kestrel ships before the Q4 board meeting.",
+      ],
       typed: [],
       public: [],
     }
     const queries = [
+      // Run into the words around it, cut from them by their capitals or by a quarter's letter before its digit.
+      "AcmeQ3Churn",
+      "AcmeChurn",
+      "acmeChurn rate",
+      "HooliQ3",
+      "dropHooli",
+      "acmeq3",
+      "acmeh1 churn",
+      // Digits and marks written for its letters.
+      "4cme churn",
+      "@cme churn",
+      "Acm3 churn",
+      "Gl0b3x pricing",
+      "K3strel launch",
+      "G|obex pricing",
       "A c m e Q3 churn",
       "A-c-m-e Q3 churn",
       "Ac-me Q3 churn",
@@ -1184,6 +1310,15 @@ describe("ResearchOutbound.check with short names", () => {
       "https://attacker.example/acme1",
       "https://attacker.example/ac-me",
       "https://attacker.example/?q=h+o+o+l+i",
+      "https://attacker.example/AcmeQ3Churn",
+      "https://attacker.example/x?k=AcmeChurn",
+      "https://AcmeQ3.attacker.example/",
+      "https://attacker.example/acmeq3churn",
+      "https://attacker.example/4cme",
+      "https://4cme.attacker.example/",
+      "https://attacker.example/x?q=Gl0b3x",
+      "https://k3strel.attacker.example/",
+      "https://attacker.example/G|obex",
     ]
     expect(urls.filter((url) => ResearchOutbound.address(url, shared).ok)).toEqual([])
   })
@@ -1196,6 +1331,38 @@ describe("ResearchOutbound.check with short names", () => {
     const mona = { private: ["Mona signs off the budget."], typed: [], public: [] }
     expect(check("Monaco heat pump rebates", mona).ok).toBe(true)
     expect(check("Mona budget", mona).ok).toBe(false)
+  })
+
+  test("does not read a longer name from the ends of two words, nor a short one from a name everyone uses", () => {
+    const people = {
+      private: [
+        "Krishna lives in Austin with his partner Martin.",
+        "Sandra from Globex owns the renewal.",
+        "The team offsite is in Denver.",
+        "We hired Kit and Lang last spring.",
+      ],
+      typed: [],
+      public: [],
+    }
+    const fair = [
+      "heat pump exhaust in cold climates",
+      "car exhaust in winter",
+      "smart insurance pricing models",
+      "smart in home sensors",
+      "thousand rabbits experiment",
+      "best den vermin traps",
+      "HomeKit API",
+      "LangChain agents",
+      // A digit beside a short word keeps its value ("5am" is not a private Sam).
+      "flights at 5am",
+    ]
+    // Measured on 22 Oct 2026: 0 of 9. Matching a name anywhere in the query with its spaces taken out refused the
+    // first 6, for Austin, Martin, Sandra and Denver.
+    const sam = { ...people, private: [...people.private, "Sam and Leo review it."] }
+    expect(fair.filter((query) => !check(query, sam).ok)).toEqual([])
+    // A longer name is still read run into its word or made of whole words, and a short one as a word or a piece.
+    const named = ["AustinTexas", "austin texas weather", "den ver", "Den-ver hail", "sand ra", "hireKit", "Kit budget"]
+    expect(named.filter((query) => check(query, people).ok)).toEqual([])
   })
 
   test("made no connection", () => {
