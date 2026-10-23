@@ -14635,6 +14635,22 @@
                   "arguments": {
                     "type": "string"
                   },
+                  "pasted": {
+                    "type": "array",
+                    "items": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "integer"
+                        }
+                      ],
+                      "maxItems": 2,
+                      "minItems": 2
+                    }
+                  },
                   "command": {
                     "type": "string"
                   },

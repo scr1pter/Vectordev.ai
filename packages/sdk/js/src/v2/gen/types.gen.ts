@@ -15799,6 +15799,7 @@ export type SessionCommandData = {
     agent?: string
     model?: string
     arguments: string
+    pasted?: Array<[number, number]>
     command: string
     variant?: string
     executionMode?: "normal" | "fast"

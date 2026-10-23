@@ -7137,6 +7137,7 @@ export class Session2 extends HeyApiClient {
       agent?: string
       model?: string
       arguments?: string
+      pasted?: Array<[number, number]>
       command?: string
       variant?: string
       executionMode?: "normal" | "fast"
@@ -7166,6 +7167,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "agent" },
             { in: "body", key: "model" },
             { in: "body", key: "arguments" },
+            { in: "body", key: "pasted" },
             { in: "body", key: "command" },
             { in: "body", key: "variant" },
             { in: "body", key: "executionMode" },
