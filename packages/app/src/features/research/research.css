@@ -66,16 +66,17 @@
   line-height: 1.45;
 }
 
-[data-component="research-card"] [data-slot="research-muted"] {
+[data-slot="research-muted"] {
   color: var(--vx-text-muted);
   font-size: 12px;
 }
 
-[data-component="research-card"] [data-slot="research-row"] {
+[data-slot="research-row"] {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  min-width: 0;
 }
 
 [data-slot="research-button"] {
@@ -200,6 +201,8 @@
 
 [data-component="research-plan-card"] [data-slot="research-segments"] {
   display: inline-flex;
+  flex-wrap: wrap;
+  align-self: flex-start;
   padding: 2px;
   gap: 2px;
   border: 1px solid var(--vx-line);
@@ -227,6 +230,14 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
+}
+
+/* Two short fields side by side where the dock is wide enough, one above the other where it is not. */
+[data-component="research-plan-card"] [data-slot="research-pair"] {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
 }
 
 [data-component="research-plan-card"] [data-slot="research-always"] {
@@ -305,7 +316,7 @@
   background: var(--vx-surface);
 }
 
-[data-slot="research-source"] [data-slot="research-source-head"] {
+[data-slot="research-source-head"] {
   display: flex;
   align-items: baseline;
   gap: 8px;
@@ -416,7 +427,7 @@
 /* The source viewer */
 
 [data-component="research-viewer"] [data-slot="research-chunk"] {
-  margin: 0;
+  margin: 4px 0 0;
   padding: 10px 12px;
   border: 1px solid var(--vx-line);
   border-radius: 8px;

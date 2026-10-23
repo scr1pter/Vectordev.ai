@@ -127,8 +127,9 @@ export function ResearchPlanCard(props: { request: QuestionRequest; data: PlanCa
           </For>
           <input
             data-slot="research-input"
-            style={{ width: "160px" }}
-            placeholder="Add a site, such as nature.com"
+            style={{ width: "180px" }}
+            placeholder="Add a site, such as arxiv.org"
+            aria-label={`Add a site to ${input.label.toLowerCase()}`}
             value={adding[input.key]}
             disabled={sending()}
             onInput={(event) => setAdding(input.key, event.currentTarget.value)}
@@ -261,63 +262,6 @@ export function ResearchPlanCard(props: { request: QuestionRequest; data: PlanCa
             </div>
           </div>
 
-          <div data-slot="research-field">
-            <span data-slot="research-label">Scope</span>
-            <div data-slot="research-segments" role="group" aria-label="Scope">
-              <For each={SCOPES}>
-                {(item) => (
-                  <button
-                    type="button"
-                    aria-pressed={draft.scope === item.value}
-                    disabled={sending() || card()?.offline}
-                    onClick={() => setDraft("scope", item.value)}
-                  >
-                    {item.label}
-                  </button>
-                )}
-              </For>
-            </div>
-            <Show when={card()?.offline}>
-              <span data-slot="research-muted">
-                Vector Local's Web access is None, so this research uses your brain and files.
-              </span>
-            </Show>
-          </div>
-
-          <Sites key="prefer" label="Prefer" />
-          <Sites key="avoid" label="Avoid" />
-
-          <div data-slot="research-field">
-            <span data-slot="research-label">Format</span>
-            <div data-slot="research-segments" role="group" aria-label="Format">
-              <For each={FORMATS}>
-                {(item) => (
-                  <button
-                    type="button"
-                    aria-pressed={draft.format === item.value}
-                    disabled={sending()}
-                    onClick={() => setDraft("format", item.value)}
-                  >
-                    {item.label}
-                  </button>
-                )}
-              </For>
-            </div>
-            <Always field="format" />
-          </div>
-
-          <div data-slot="research-field">
-            <span data-slot="research-label">Time window</span>
-            <input
-              data-slot="research-input"
-              placeholder="Any time, or such as since 2023"
-              value={draft.time_window}
-              disabled={sending()}
-              aria-label="Time window"
-              onInput={(event) => setDraft("time_window", event.currentTarget.value)}
-            />
-          </div>
-
           <Show when={props.data.estimate}>
             <div data-slot="research-notice">
               <div>{props.data.estimate}</div>
@@ -355,6 +299,66 @@ export function ResearchPlanCard(props: { request: QuestionRequest; data: PlanCa
               </Show>
             </div>
           </Show>
+
+          <div data-slot="research-pair">
+            <div data-slot="research-field">
+              <span data-slot="research-label">Scope</span>
+              <div data-slot="research-segments" role="group" aria-label="Scope">
+                <For each={SCOPES}>
+                  {(item) => (
+                    <button
+                      type="button"
+                      aria-pressed={draft.scope === item.value}
+                      disabled={sending() || card()?.offline}
+                      onClick={() => setDraft("scope", item.value)}
+                    >
+                      {item.label}
+                    </button>
+                  )}
+                </For>
+              </div>
+              <Show when={card()?.offline}>
+                <span data-slot="research-muted">
+                  Vector Local's Web access is None, so this research uses your brain and files.
+                </span>
+              </Show>
+            </div>
+            <div data-slot="research-field">
+              <span data-slot="research-label">Format</span>
+              <div data-slot="research-segments" role="group" aria-label="Format">
+                <For each={FORMATS}>
+                  {(item) => (
+                    <button
+                      type="button"
+                      aria-pressed={draft.format === item.value}
+                      disabled={sending()}
+                      onClick={() => setDraft("format", item.value)}
+                    >
+                      {item.label}
+                    </button>
+                  )}
+                </For>
+              </div>
+              <Always field="format" />
+            </div>
+          </div>
+
+          <div data-slot="research-pair">
+            <Sites key="prefer" label="Prefer" />
+            <Sites key="avoid" label="Avoid" />
+          </div>
+
+          <div data-slot="research-field">
+            <span data-slot="research-label">Time window</span>
+            <input
+              data-slot="research-input"
+              placeholder="Any time, or such as since 2023"
+              value={draft.time_window}
+              disabled={sending()}
+              aria-label="Time window"
+              onInput={(event) => setDraft("time_window", event.currentTarget.value)}
+            />
+          </div>
 
           <Show when={problem()}>
             {(text) => (

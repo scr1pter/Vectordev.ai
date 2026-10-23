@@ -94,11 +94,11 @@ export function ResearchSourceViewer(props: {
                     Chunk {chunk.chunk}
                     {chunk.page ? ` · p.${chunk.page}` : ""}
                   </div>
-                  <pre data-slot="research-chunk">
+                  <div data-slot="research-chunk">
                     <For each={segments(chunk.text, highlights(chunk.text, quotes()))}>
                       {(segment) => (segment.mark ? <mark>{segment.text}</mark> : segment.text)}
                     </For>
-                  </pre>
+                  </div>
                 </div>
               )}
             </For>
