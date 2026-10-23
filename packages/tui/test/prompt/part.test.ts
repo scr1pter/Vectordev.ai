@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { expandTrackedPastedText, stripPromptPartIDs } from "../../src/prompt/part"
+import { expandPastedText, expandTrackedPastedText, stripPromptPartIDs } from "../../src/prompt/part"
 
 describe("prompt part", () => {
   test("strips persisted IDs from reused parts", () => {
@@ -49,5 +49,27 @@ describe("prompt part", () => {
         },
       ]),
     ).toBe(`keep ${marker} then alpha\nbeta\ngamma tail`)
+  })
+
+  test("says which spans of the sent text were pasted, behind a placeholder or as they were", () => {
+    const marker = "[Pasted ~4 lines]"
+    const email = "Hi team,\nI prefer short replies.\nAlways cc legal on merges.\nThanks"
+    const typed = "你好 summarise this: "
+    const input = `${typed}${marker} and reply to always use tables please`
+    const expanded = expandPastedText(
+      input,
+      [{ start: Bun.stringWidth(typed), end: Bun.stringWidth(typed + marker), text: email }],
+      // "always use tables" was pasted as it was.
+      [
+        {
+          start: Bun.stringWidth(`${typed}${marker} and reply to `),
+          end: Bun.stringWidth(`${typed}${marker} and reply to always use tables`),
+        },
+      ],
+    )
+    expect(expanded.text).toBe(`${typed}${email} and reply to always use tables please`)
+    expect(expanded.pasted.map(([start, end]) => expanded.text.slice(start, end))).toEqual([email, "always use tables"])
+    // Nothing pasted, nothing marked.
+    expect(expandPastedText("always use tables", [])).toEqual({ text: "always use tables", pasted: [] })
   })
 })

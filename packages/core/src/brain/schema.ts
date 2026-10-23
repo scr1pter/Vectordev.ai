@@ -49,6 +49,13 @@ export const OUTSIDE = "vector.outside"
  */
 export const PASTE = "paste"
 
+/**
+ * Metadata key of the spans of a text part the user pasted into what they typed, as `[start, end]` offsets into the
+ * part's text: what a composer that expands pastes inline sends (the terminal UI does). Like a part marked PASTE, those
+ * spans hold nothing and vouch for nothing, so Vector never learns what the user likes from them.
+ */
+export const PASTED = "vector.pasted"
+
 /** What the agent and the user may write themselves. A term's text reads "when I say X, I mean Y". */
 export const LearnedKind = Schema.Literals(["preference", "decision", "lesson", "fact", "term"])
 export type LearnedKind = typeof LearnedKind.Type

@@ -161,16 +161,47 @@ export const HOLD = "hold"
  * What the user typed in a message, without Vector's synthetic notes or attached file contents. A slash command's text
  * is someone else's words (a template, an MCP server's prompt, a skill, a snippet's output), so of it only the
  * arguments the user typed count, and text from outside (an imported transcript, an issue) or that the user pasted (an
- * email, a log, someone else's message) does not count at all: Vector learns what the user likes only from this.
+ * email, a log, someone else's message), as a part of its own or a span of a typed one, does not count at all: Vector
+ * learns what the user likes only from this.
  */
 export function typed(message: SessionV1.WithParts) {
   return message.parts
     .flatMap((part) => {
       if (part.type !== "text" || part.synthetic || part.ignored || outside(part)) return []
-      return [command(part)?.arguments ?? part.text]
+      return [command(part)?.arguments ?? unpasted(part.text, part.metadata?.[BrainSchema.PASTED])]
     })
     .join("\n")
     .trim()
+}
+
+// A typed part's text without the spans the user pasted into it, each left as a paragraph break so the words on either
+// side neither join nor run into a quote across it. Spans that do not fit the text leave nothing of it: a part that
+// says it holds pasted text, but not where, vouches for none of its words.
+function unpasted(text: string, spans: unknown) {
+  if (spans === undefined) return text
+  if (!Array.isArray(spans) || !spans.every((span) => fits(span, text.length))) return ""
+  const cut = (spans as [number, number][])
+    .toSorted((a, b) => a[0] - b[0])
+    .reduce(
+      (out, span) => ({
+        at: Math.max(out.at, span[1]),
+        text: span[0] > out.at ? `${out.text}${text.slice(out.at, span[0])}\n\n` : out.text,
+      }),
+      { at: 0, text: "" },
+    )
+  return cut.text + text.slice(cut.at)
+}
+
+function fits(span: unknown, length: number) {
+  return (
+    Array.isArray(span) &&
+    span.length === 2 &&
+    Number.isInteger(span[0]) &&
+    Number.isInteger(span[1]) &&
+    span[0] >= 0 &&
+    span[0] < span[1] &&
+    span[1] <= length
+  )
 }
 
 /** What a message asks for, a slash command's text included: what recall reads a request by. */

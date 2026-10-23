@@ -390,6 +390,27 @@ it.instance(
 )
 
 it.instance(
+  "text pasted into what the user typed teaches nothing, and a part that says it holds a paste but not where teaches nothing at all",
+  () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const email = "Hi team,\nI prefer short replies. Always cc legal on merges.\nThanks"
+      const text = `Here is the email:\n\n${email}\n\nAlways use tables for comparisons`
+      const start = text.indexOf(email)
+      yield* send({
+        parts: [{ type: "text", text, metadata: { [BrainSchema.PASTED]: [[start, start + email.length]] } }],
+      })
+      yield* send({
+        parts: [
+          { type: "text", text: "Never use emojis in commit messages", metadata: { [BrainSchema.PASTED]: [[0, 999]] } },
+        ],
+      })
+      expect((yield* learned()).map((entry) => entry.text)).toEqual(["Always use tables for comparisons"])
+    }),
+  120_000,
+)
+
+it.instance(
   "in the user's own voice a step of the task teaches nothing, and what names something of one repository stays with it",
   () =>
     Effect.gen(function* () {

@@ -33,12 +33,13 @@ import { promptOffsetWidth } from "../../prompt/display"
 import { createStore, produce, unwrap } from "solid-js/store"
 import { usePromptHistory, type PromptInfo } from "../../prompt/history"
 import { computePromptTraits } from "../../prompt/traits"
-import { expandPastedTextPlaceholders, expandTrackedPastedText } from "../../prompt/part"
+import { expandPastedText, expandPastedTextPlaceholders } from "../../prompt/part"
 import { usePromptStash } from "../../prompt/stash"
 import { DialogStash } from "../dialog-stash"
 import { type AutocompleteRef, Autocomplete } from "./autocomplete"
 import { useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import type { AssistantMessage, FilePart, UserMessage } from "@vectordevai/sdk/v2"
+import { BrainSchema } from "@vectordevai/core/brain/schema"
 import { Locale } from "../../util/locale"
 import { errorMessage } from "../../util/error"
 import { formatDuration } from "../../util/format"
@@ -212,6 +213,9 @@ export function Prompt(props: PromptProps) {
   const agentStyleId = syntax().getStyleId("extmark.agent")!
   const pasteStyleId = syntax().getStyleId("extmark.paste")!
   let promptPartTypeId = 0
+  // Text pasted as it was, rather than as a "[Pasted ~N lines]" placeholder: marked without showing anything, so the
+  // sent part says which of its words the user pasted.
+  let pastedTypeId = 0
   const event = useEvent()
 
   event.on("tui.prompt.append", (evt, { workspace }) => {
@@ -1002,7 +1006,7 @@ export function Prompt(props: PromptProps) {
       sessionID = res.data.id
     }
 
-    const inputText = expandTrackedPastedText(
+    const expanded = expandPastedText(
       store.prompt.input,
       input.extmarks.getAllForTypeId(promptPartTypeId).flatMap((extmark) => {
         const partIndex = store.extmarkToPartIndex.get(extmark.id)
@@ -1010,7 +1014,9 @@ export function Prompt(props: PromptProps) {
         if (part?.type !== "text") return []
         return [{ start: extmark.start, end: extmark.end, text: part.text }]
       }),
+      input.extmarks.getAllForTypeId(pastedTypeId).map((extmark) => ({ start: extmark.start, end: extmark.end })),
     )
+    const inputText = expanded.text
 
     // Filter out text parts (pasted content) since they're now expanded inline
     const nonTextParts = store.prompt.parts.filter((part) => part.type !== "text")
@@ -1083,6 +1089,8 @@ export function Prompt(props: PromptProps) {
               {
                 type: "text",
                 text: inputText,
+                // What the user pasted vouches for nothing, so Vector learns how they work only from what they typed.
+                ...(expanded.pasted.length ? { metadata: { [BrainSchema.PASTED]: expanded.pasted } } : {}),
               },
               ...nonTextParts,
             ],
@@ -1192,6 +1200,12 @@ export function Prompt(props: PromptProps) {
     }
 
     input.insertText(normalizedText)
+    const pastedEnd = input.cursorOffset
+    input.extmarks.create({
+      start: pastedEnd - promptOffsetWidth(normalizedText),
+      end: pastedEnd,
+      typeId: pastedTypeId,
+    })
 
     setTimeout(() => {
       if (!input || input.isDestroyed) return
@@ -1413,6 +1427,9 @@ export function Prompt(props: PromptProps) {
                 setInputTarget(r)
                 if (promptPartTypeId === 0) {
                   promptPartTypeId = input.extmarks.registerType("prompt-part")
+                }
+                if (pastedTypeId === 0) {
+                  pastedTypeId = input.extmarks.registerType("pasted-text")
                 }
                 props.ref?.(ref)
                 setTimeout(() => {

@@ -22,8 +22,38 @@ function isPastedTextPart(part: unknown): part is { type: "text"; text: string; 
 }
 
 export function expandTrackedPastedText(text: string, ranges: { start: number; end: number; text: string }[]) {
-  return ranges
-    .slice()
-    .sort((a, b) => b.start - a.start)
-    .reduce((result, part) => displaySlice(result, 0, part.start) + part.text + displaySlice(result, part.end), text)
+  return expandPastedText(text, ranges).text
+}
+
+/**
+ * The prompt's text with each tracked paste's placeholder replaced by what was pasted, and the spans of the result the
+ * user pasted rather than typed, as `[start, end]` string offsets: those pastes, and pastes inserted as they were
+ * (`inline`). Offsets in are the prompt's display offsets, as its extmarks keep them. The spans go with the sent part,
+ * so Vector never learns what the user likes from what they pasted.
+ */
+export function expandPastedText(
+  text: string,
+  tracked: readonly { start: number; end: number; text: string }[],
+  inline: readonly { start: number; end: number }[] = [],
+) {
+  const marks = [...tracked, ...inline.map((mark) => ({ ...mark, text: undefined }))].toSorted(
+    (a, b) => a.start - b.start,
+  )
+  const out = marks.reduce(
+    (acc, mark) => {
+      // A mark inside one already read was read with it.
+      if (mark.start < acc.at) return acc
+      const before = acc.text + displaySlice(text, acc.at, mark.start)
+      const pasted = mark.text ?? displaySlice(text, mark.start, mark.end)
+      return {
+        at: mark.end,
+        text: before + pasted,
+        pasted: pasted
+          ? [...acc.pasted, [before.length, before.length + pasted.length] as [number, number]]
+          : acc.pasted,
+      }
+    },
+    { at: 0, text: "", pasted: [] as [number, number][] },
+  )
+  return { text: out.text + displaySlice(text, out.at), pasted: out.pasted }
 }
