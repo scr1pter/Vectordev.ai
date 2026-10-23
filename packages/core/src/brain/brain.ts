@@ -1532,9 +1532,13 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
       (yield* quoted(repository, evidence.quote))
     )
       return refuse("forgotten", "The user took out a memory that says this, so it was not saved again.")
-    const hold = !agent
-      ? undefined
-      : (proposal.hold ?? (hiddenText ? "hidden-unicode" : BrainScan.instructionLike(text) ? "instruction-like" : undefined))
+    // A file the user imported can carry what anyone wrote into it, so it is held as the agent's writes are: what
+    // reads as instructions, or hid characters, waits apart from the rest of the import, which one click approves.
+    const hold =
+      !agent && !imported
+        ? undefined
+        : (proposal.hold ??
+          (hiddenText ? "hidden-unicode" : BrainScan.instructionLike(text) ? "instruction-like" : undefined))
     // A write that waits without being held: Vector's learner read it in a long message, a model suggested it in a
     // session that read outside content, or a file brought it in.
     const pending = hold ? undefined : imported ? ("review" as const) : proposal.pending
@@ -1559,7 +1563,7 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     if (exact) {
       // A held write never adds to an entry outside the review queue, so outside content cannot vouch for memory; nor
       // does a model's suggestion from such a session, or an imported file, change what is known.
-      if ((hold && exact.status !== "quarantined") || pending === "review")
+      if ((hold && exact.status !== "quarantined") || pending === "review" || imported)
         return { type: "merged" as const, entry: toEntry(exact) }
       // What the user put away stays away until they bring it back; the agent may restore only what it or tidying
       // put away.

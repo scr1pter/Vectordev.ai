@@ -11,7 +11,8 @@ import { BrainSchema } from "./schema"
 // brain keeps for this repository, for the user or both, as a Markdown page a person can read (a section per kind, each
 // entry with its evidence below it, then what Vector read from documents) or as JSON. An import reads either back, and
 // every entry it brings in waits for the user's approval ("Approve all" is one click), so a changed file cannot plant
-// memory in use. Forgotten entries are not imported again.
+// memory in use. What reads as instructions to the agent or hides characters is held apart from the rest, so that one
+// click does not put it in use either. Forgotten entries are not imported again.
 
 export type Scope = "personal" | "repository" | "all"
 export type Format = "markdown" | "json"
@@ -259,7 +260,7 @@ export const importText = Effect.fn("BrainExport.importText")(function* (input: 
       evidence: { type: "user" },
     }),
   )
-  const entries = results.flatMap((result) => (result.type === "added" ? [result.entry] : []))
+  const entries = results.flatMap((result) => (result.type === "added" || result.type === "held" ? [result.entry] : []))
   return {
     entries,
     known: results.filter((result) => result.type === "merged" || result.type === "promoted").length,
