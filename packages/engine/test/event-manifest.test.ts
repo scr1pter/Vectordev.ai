@@ -26,9 +26,10 @@ describe("public event manifest", () => {
     expect(EventManifest.Latest.has("global.disposed")).toBe(true)
   })
 
-  test("contains only the current step settlement versions", () => {
-    expect(EventManifest.Durable.size).toBe(40)
-    expect(EventManifest.Durable.get("session.next.ancillary.usage.1")).toBe(SessionEvent.AncillaryUsage)
+  test("contains only the current step settlement versions, and the version 1 ancillary usage builds before wrote", () => {
+    expect(EventManifest.Durable.size).toBe(41)
+    expect(EventManifest.Durable.get("session.next.ancillary.usage.2")).toBe(SessionEvent.AncillaryUsage)
+    expect(EventManifest.Durable.get("session.next.ancillary.usage.1")).toBe(SessionEvent.AncillaryUsageV1)
     expect(EventManifest.Durable.get("session.next.step.resumed.1")).toBe(SessionEvent.Step.Resumed)
     expect(EventManifest.Durable.has("session.next.step.ended.1")).toBe(false)
     expect(EventManifest.Durable.get("session.next.step.ended.2")).toBe(SessionEvent.Step.Ended)

@@ -896,7 +896,7 @@ it.instance("title generation sends only what the user typed", () =>
     yield* prompt.awaitTitles()
     const database = yield* Database.Service
     const recorded = yield* database.db.select().from(EventTable).where(eq(EventTable.aggregate_id, chat.id)).all()
-    const usage = recorded.filter((event) => event.type === `${SessionEvent.AncillaryUsage.type}.1`)
+    const usage = recorded.filter((event) => event.type === `${SessionEvent.AncillaryUsage.type}.2`)
     expect(usage).toHaveLength(1)
     // The server's automatic title reply reports no usage; keep its spend unknown rather than inventing tokens.
     expect(usage[0]?.data).toMatchObject({ incomplete: true, unpriced: true })
@@ -959,7 +959,7 @@ codiumPrompts.instance("a Codium session's title goes through the gateway and co
     expect((yield* sessions.get(chat.id)).title).toBe("Fix the login redirect")
     const database = yield* Database.Service
     const recorded = yield* database.db.select().from(EventTable).where(eq(EventTable.aggregate_id, chat.id)).all()
-    const usage = recorded.filter((event) => event.type === `${SessionEvent.AncillaryUsage.type}.1`)
+    const usage = recorded.filter((event) => event.type === `${SessionEvent.AncillaryUsage.type}.2`)
     expect(usage).toHaveLength(1)
     // Title spend counts toward the session in tokens; credits are a share of the plan, never dollars to add up.
     expect(usage[0]?.data).toMatchObject({
@@ -1114,7 +1114,7 @@ for (const ending of ["cancel", "reject"] as const)
         expect(yield* llm.hits).toHaveLength(1)
         const database = yield* Database.Service
         const recorded = yield* database.db.select().from(EventTable).where(eq(EventTable.aggregate_id, chat.id)).all()
-        expect(recorded.filter((event) => event.type === `${SessionEvent.AncillaryUsage.type}.1`)).toEqual([])
+        expect(recorded.filter((event) => event.type === `${SessionEvent.AncillaryUsage.type}.2`)).toEqual([])
       }),
     30_000,
   )

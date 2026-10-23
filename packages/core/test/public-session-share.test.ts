@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { createHash } from "node:crypto"
-import { Context, DateTime, Effect, Exit, Fiber, Layer, Schema } from "effect"
+import { Context, DateTime, Effect, Exit, Fiber, Layer, Option, Schema } from "effect"
 import { eq } from "drizzle-orm"
 import { PublicSession } from "@vectordevai/schema/public-session"
 import { AppNodeBuilder } from "../src/effect/app-node-builder"
@@ -727,6 +727,39 @@ for (const engine of ["v1", "v2"] as const) {
         })
         .pipe(Effect.exit)
       expect(Exit.isFailure(duplicate)).toBe(true)
+    }),
+  )
+
+  it.effect(`${engine} local archives keep the usage an older build wrote beside the model learner's`, () =>
+    Effect.gen(function* () {
+      const archives = yield* SessionArchive.Service
+      const events = yield* EventV2.Service
+      const original = yield* archives.import({
+        archive: source,
+        targetEngine: engine,
+        location: { directory: AbsolutePath.make("/tmp") },
+      })
+      const usage = {
+        sessionID: original.sessionID,
+        timestamp: DateTime.makeUnsafe(3),
+        model: { id: ModelV2.ID.make("small-model"), providerID: ProviderV2.ID.make("small-provider") },
+        tokens: { input: 4, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+      }
+      // A title's usage as builds before the model learner wrote it, version 1, and the learner's, version 2.
+      const older = { ...usage, usageID: EventV2.ID.create(), purpose: "title" as const, cost: 0.25 }
+      yield* events.publish(SessionEvent.AncillaryUsageV1, older, { id: older.usageID })
+      const learner = { ...usage, usageID: EventV2.ID.create(), purpose: "memory" as const, cost: 0.5 }
+      yield* events.publish(SessionEvent.AncillaryUsage, learner, { id: learner.usageID })
+      const exported = yield* archives.export(original)
+      expect(exported.ancillaryUsage?.map((item) => [item.purpose, item.cost])).toEqual([
+        ["title", 0.25],
+        ["memory", 0.5],
+      ])
+      // An older build decodes version 1 alone, so it skips the learner's usage rather than failing on it.
+      const encoded = Schema.encodeSync(SessionEvent.AncillaryUsage.data)(
+        SessionEvent.AncillaryUsage.data.make(learner),
+      )
+      expect(Option.isNone(Schema.decodeUnknownOption(SessionEvent.AncillaryUsageV1.data)(encoded))).toBe(true)
     }),
   )
 }

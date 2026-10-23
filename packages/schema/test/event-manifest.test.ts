@@ -26,11 +26,12 @@ describe("public event manifest", () => {
       SessionV1.Event.Error,
     ])
     expect(EventManifest.Latest.size).toBe(97)
-    expect(EventManifest.Durable.size).toBe(40)
+    expect(EventManifest.Durable.size).toBe(41)
   })
 
   test("uses canonical definitions for current public events", () => {
-    expect(EventManifest.Durable.get("session.next.ancillary.usage.1")).toBe(SessionEvent.AncillaryUsage)
+    expect(EventManifest.Durable.get("session.next.ancillary.usage.2")).toBe(SessionEvent.AncillaryUsage)
+    expect(EventManifest.Durable.get("session.next.ancillary.usage.1")).toBe(SessionEvent.AncillaryUsageV1)
     expect(EventManifest.Latest.get("session.next.ancillary.usage")).toBe(SessionEvent.AncillaryUsage)
     expect(Session.Event).toBe(SessionEvent)
     expect(Session.Event.Definitions).toBe(SessionEvent.Definitions)
