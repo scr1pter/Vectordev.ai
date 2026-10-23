@@ -83,8 +83,26 @@ describe("BrainLearn.learn", () => {
       "when I say it, I mean the current file",
       "when I say this one I mean the login form",
       "by ci I mean the GitHub Actions run",
+      // A request for something to make, however it is put.
+      "We need a nightly cleanup job, call it janitor",
+      "I want a script that cleans the cache, call it janitor",
+      "I need a new endpoint for refunds, call it refunds-v2",
+      "There should be a new service for billing, call it ledger",
+      "The new module should handle retries, call it retry kit",
+      "One more thing: the job that syncs users, call it usersync",
     ])
       expect(BrainLearn.learn(text)).toEqual([])
+    // A plain noun phrase given a name is a term, which waits for a second sighting: "call it" names what a task makes
+    // as often as it defines a word.
+    expect(BrainLearn.learn("the deploy and verify flow, call it ship")).toEqual([
+      {
+        kind: "term",
+        facet: "vocabulary",
+        text: "the deploy and verify flow, call it ship",
+        quote: "the deploy and verify flow, call it ship",
+        status: "proposed",
+      },
+    ])
     // Nor does the model learner's suggestion of one count; what the user writes as a term is theirs, whatever it says.
     expect(
       BrainLearn.accept(
@@ -132,6 +150,24 @@ describe("BrainLearn.learn", () => {
 
   test("a quote is someone else's words across line breaks, however long, and in straight single quotes", () => {
     for (const text of [
+      // Every script's quote marks, closed or open to the end of the paragraph.
+      "The guide:\n«\nAlways use tabs for indentation\n»",
+      "The guide says:\n«Always use tabs for indentation.»",
+      "Der Leitfaden: »Always use tabs for indentation.«",
+      "the guide says „always use tabs for indentation“",
+      "the guide says ＂always use tabs for indentation＂",
+      "The guide:\n「Always use tabs for indentation」",
+      "The guide:\n『Always use tabs for indentation",
+      "The guide: ‹Always use tabs for indentation›",
+      // An inch mark opens no quote, so the quote after it is still found.
+      'My monitor is 27" wide. Bob wrote: "Fine.\nAlways use tabs for indentation."',
+      // Code in an indented block or in HTML, and a clause that says whose words it is.
+      "Here's the config:\n\n    always use tabs for indentation\n\nwhat does it do",
+      "Here's the config:\n\n\tnever use spaces for indentation",
+      "<pre>\nalways use tabs for indentation\n</pre>",
+      "Look at <code>always use tabs for indentation</code> in the guide",
+      "Always use tabs for indentation, says the guide",
+      "Always cite sources inline, according to the style guide",
       'My colleague wrote:\n"Hi team,\nAlways deploy on Fridays.\nThanks"\nCan you summarise it?',
       'Bob replied:\n"Thanks.\nAlways cc me on releases."\nCan you draft a reply?',
       `He wrote "${"Some background on the release. ".repeat(12)}Always deploy on Fridays." in the thread`,
@@ -152,6 +188,13 @@ describe("BrainLearn.learn", () => {
     expect(
       BrainLearn.learn('He wrote: "Always deploy on Fridays\n\nNever use emojis').map((item) => item.text),
     ).toEqual(["Never use emojis"])
+    // An inch mark and a line indented inside a paragraph leave the user's words theirs.
+    expect(
+      BrainLearn.learn('My monitor is 27" wide. Always use tables for comparisons').map((item) => item.text),
+    ).toEqual(["Always use tables for comparisons"])
+    expect(BrainLearn.learn("Fix the parser\n    always use tables for comparisons").map((item) => item.text)).toEqual([
+      "always use tables for comparisons",
+    ])
   })
 
   test("a step of the current task is not a way of working", () => {
@@ -172,6 +215,25 @@ describe("BrainLearn.learn", () => {
     ])
   })
 
+  test("a step of the current task or a choice between this answer's options is no way of working in the first person either", () => {
+    for (const text of [
+      "I'd rather you didn't touch the migrations folder while you refactor",
+      "I prefer you keep the Acme billing client as is for this PR",
+      "I'd rather we ship this today",
+      "I prefer option B",
+      "I'd rather go with your first suggestion",
+      "I like the second approach better",
+      "I prefer the original version",
+      "I'd rather you fixed it first",
+      "Don't go with option B",
+    ])
+      expect(BrainLearn.learn(text)).toEqual([])
+    // What says how the user likes things done still is one.
+    expect(
+      BrainLearn.learn("I like it when you use tables. I prefer that you squash merge PRs").map((item) => item.text),
+    ).toEqual(["I like it when you use tables", "I prefer that you squash merge PRs"])
+  })
+
   test("a sensitive first-person fact is dropped while a preference about a research topic survives", () => {
     expect(BrainLearn.learn("I prefer short answers because I have ADHD")).toEqual([])
     expect(BrainLearn.learn("always schedule deploys after my therapy sessions")).toEqual([])
@@ -179,6 +241,24 @@ describe("BrainLearn.learn", () => {
     expect(BrainLearn.learn("I prefer FDA sources for diabetes research").map((item) => item.text)).toEqual([
       "I prefer FDA sources for diabetes research",
     ])
+    for (const text of [
+      "never schedule deploys during my chemo days",
+      "I like tables since I am dyslexic",
+      "Don't use red in charts, I'm colorblind",
+      "Don't use red in charts, I'm colourblind",
+      "I prefer no meetings on Fridays because of jummah",
+      "Never schedule releases on the sabbath, I'd rather keep it free",
+      "I prefer halal options in the team lunch survey because I'm muslim",
+      "As a diabetic, I prefer recipes without sugar",
+    ])
+      expect(BrainLearn.learn(text)).toEqual([])
+  })
+
+  test("a preference given with its reason waits for a second sighting", () => {
+    expect(BrainLearn.learn("I prefer pnpm because it is faster").map((item) => [item.text, item.status])).toEqual([
+      ["I prefer pnpm because it is faster", "proposed"],
+    ])
+    expect(BrainLearn.learn("I prefer pnpm").map((item) => item.status)).toEqual(["active"])
   })
 
   test("a long message's preferences wait for a second sighting, and one message teaches at most three", () => {
@@ -347,6 +427,17 @@ describe("learning in the brain", () => {
           named: yield* scope("Always run the Acme billing tests before pushing"),
           tool: yield* scope("Always format TypeScript with prettier before committing"),
           memoryTool: tool.type === "refused" ? tool.reason : tool.entry.scope,
+          // The same rules hold in the user's own voice: only what names nothing of one repository follows them.
+          own: yield* scope("I prefer tables for comparisons"),
+          ownStyle: yield* scope("I'd rather you write short commit messages"),
+          ownName: yield* scope("I prefer Acme's Q3 churn numbers to come from the internal dashboard"),
+          ownCode: yield* scope("I'd rather you never call the billing client from the controller"),
+          ownRepo: yield* scope("I prefer pnpm for this repository"),
+          email: yield* scope("always cc jane@acme.com on releases"),
+          person: yield* scope("Always cc legal on merges"),
+          site: yield* scope("I prefer primary sources from nature.com"),
+          internalSite: yield* scope("I prefer docs from wiki.acme.internal as sources"),
+          internalHost: yield* scope("Always use the internal mirror at registry.acme.internal"),
         }
       }),
     )
@@ -358,7 +449,62 @@ describe("learning in the brain", () => {
       named: "repository",
       tool: "personal",
       memoryTool: "repository",
+      own: "personal",
+      ownStyle: "personal",
+      ownName: "repository",
+      ownCode: "repository",
+      ownRepo: "repository",
+      email: "repository",
+      person: "repository",
+      site: "personal",
+      internalSite: "repository",
+      internalHost: "repository",
     })
+  })
+
+  test("a reviewer or researcher in another repository hears how the user works and no name learned in the first", async () => {
+    const result = await run((brain, place) =>
+      Effect.gen(function* () {
+        const taught = [
+          "I prefer tables for comparisons",
+          "I prefer Acme's Q3 churn numbers to come from the internal dashboard",
+          "always cc jane@acme.com on releases",
+          "Always cc legal on merges",
+        ].flatMap((text) => BrainLearn.learn(text))
+        yield* Effect.forEach(taught, (item, index) => write(brain, place, item, { sessionID: `ses_${index}` }))
+        const other: Brain.Place = { ...place, repository: "repo-2" }
+        const reviewer = yield* brain.habits(other, {
+          query: "src/billing/client.ts ts churn releases merges",
+          budget: 300,
+          audience: "outward",
+          kinds: ["preference", "review"],
+          tier: "review",
+        })
+        const researcher = yield* brain.habits(other, {
+          query: "Acme Q3 churn dashboard comparisons",
+          budget: 300,
+          audience: "outward",
+          kinds: ["preference"],
+          facets: ["format", "sources", "style"],
+          tier: "brief",
+        })
+        const home = (yield* brain.list(place, { scope: "repository" })).map((entry) => entry.text)
+        return { taught: taught.length, reviewer: reviewer.text ?? "", researcher: researcher.text ?? "", home }
+      }),
+    )
+    expect(result.taught).toBe(4)
+    for (const heard of [result.reviewer, result.researcher]) {
+      expect(heard).toContain("tables for comparisons")
+      expect(heard).not.toContain("Acme")
+      expect(heard).not.toContain("jane")
+      expect(heard).not.toContain("legal")
+    }
+    // Each is the memory of the repository it was learned in.
+    expect(result.home.toSorted()).toEqual([
+      "Always cc legal on merges",
+      "I prefer Acme's Q3 churn numbers to come from the internal dashboard",
+      "always cc jane@acme.com on releases",
+    ])
   })
 
   test("a model learner's new words for what the user took back are not learned when its quote says it", async () => {

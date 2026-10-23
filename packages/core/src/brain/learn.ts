@@ -14,14 +14,17 @@ import type { BrainSchema } from "./schema"
 //   ("always X", "never X", "don't X", "stop Xing"), filed under the facet its words name.
 //
 // Only what the user typed counts: the caller leaves out what they pasted, what a slash command wrote and text from
-// outside. A clause that starts inside quotes (across lines, and to the end of its paragraph when a quote never closes),
-// a code span or a quoted (">") line is someone else's words, so it is never learned. A step of the current task ("while
-// you refactor", "the payments API") is not a way of working, and a request to name what it makes ("add a helper, call
-// it parseDate") is not a term. The entry's text is the user's own clause and its evidence the same clause, so the
-// brain's quote check holds by construction. What a short message says briefly goes into use at once; anything longer
-// waits for a second sighting or one click. A clause that tells Vector something sensitive about the user themselves
-// (health, money, religion, politics, relationships, sexuality) is dropped, while a preference about a sensitive
-// research topic stays.
+// outside. A clause that starts inside quotes of any script's marks (across lines, and to the end of its paragraph when
+// a quote never closes), a code span or block (fenced, indented or in <pre> and <code>) or a quoted (">") line is
+// someone else's words, so it is never learned. A step of the current task ("while you refactor", "the payments API",
+// "for this PR"), in the user's own voice as much as in an instruction, and a choice between this answer's options
+// ("I prefer option B") are not ways of working, and a request to name what it makes ("add a helper, call it
+// parseDate", "we need a nightly job, call it janitor") is not a term. The entry's text is the user's own clause and its
+// evidence the same clause, so the brain's quote check holds by construction. What a short message says briefly goes
+// into use at once; anything longer, a clause that gives its reason ("because…", "since…") and a name given with
+// "call it" wait for a second sighting or one click. A clause that tells Vector something sensitive about the user
+// themselves (health, money, religion, politics, relationships, sexuality) is dropped, while a preference about a
+// sensitive research topic stays.
 
 export const LIMIT = {
   /** Characters of one learned entry: the user's own clause, trimmed. */
@@ -72,15 +75,10 @@ export function learn(text: string, options: { readonly facets?: Switches } = {}
     if (!entry || sensitive(entry)) return []
     const facet = kind === "term" ? "vocabulary" : facetOf(entry)
     if (options.facets?.[facet] === false) return []
-    return [
-      {
-        kind,
-        facet,
-        text: entry,
-        quote: entry,
-        status: short && entry.length <= LIMIT.statement ? "active" : "proposed",
-      },
-    ]
+    // A reason says more about the user than the preference does, and "call it" names what a task makes as often as it
+    // defines a word, so both wait for a second sighting.
+    const brief = short && entry.length <= LIMIT.statement && !term?.named && !REASON.test(entry)
+    return [{ kind, facet, text: entry, quote: entry, status: brief ? "active" : "proposed" }]
   })
   return found
     .filter((item, index) => found.findIndex((other) => normal(other.text) === normal(item.text)) === index)
@@ -100,10 +98,12 @@ export function scoped(text: string) {
 
 /**
  * Whether a clause names something in particular: a capitalised word after its first ("run the Acme billing tests"),
- * which is a company, a product or a person more often than not. A common acronym, a day or month, and a tool, format
- * or source the facets know by name ("TypeScript", "Markdown", "PubMed") name nothing of one repository.
+ * which is a company, a product or a person more often than not, or someone to copy or ping in any case ("always cc
+ * jane on releases"). A common acronym, a day or month, and a tool, format or source the facets know by name
+ * ("TypeScript", "Markdown", "PubMed") name nothing of one repository.
  */
 export function particular(text: string) {
+  if (ADDRESSED.test(text)) return true
   return text
     .split(/\s+/)
     .slice(1)
@@ -270,19 +270,32 @@ type Clause = {
   readonly rest: { readonly text: string; readonly masked: string }
 }
 
-// Masks someone else's words in place, keeping every offset: fenced and inline code, quoted (">") lines, and quoted
-// text. A double or curly quote runs to its closing mark across lines, however long, or to the end of its paragraph when
-// it never closes, so a pasted email's lines are all masked. A straight single quote opens after and closes before
-// something that is not a letter or digit, within a paragraph, so an apostrophe ("don't", "the users' settings") opens
-// or closes nothing and one inside a quote ('don't do that') does not end it. A masked character is no letter, space or
-// punctuation, so no pattern starts or matches in it.
+// Masks someone else's words in place, keeping every offset: code (fenced, indented four spaces or a tab after a blank
+// line as Markdown reads it, in <pre>, <code> and the like, and inline), quoted (">") lines, and quoted text. A double
+// quote of any script's marks (straight, curly, low-9 „…“, fullwidth, guillemets either way round, corner brackets) runs
+// to its closing mark across lines, however long, or to the end of its paragraph when it never closes, so a pasted
+// email's lines are all masked. A straight double quote right after a digit is an inch mark ('27" wide'), which opens
+// nothing. A straight single quote opens after and closes before something that is not a letter or digit, within a
+// paragraph, so an apostrophe ("don't", "the users' settings") opens or closes nothing and one inside a quote ('don't do
+// that') does not end it. A masked character is no letter, space or punctuation, so no pattern starts or matches in it.
 const MASK = "░"
 const OTHERS = [
   /```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)/g,
+  /(?<=^|\n[ \t]*\n)(?: {4}|\t)[^\n]*(?:\n(?: {4}|\t)[^\n]*)*/g,
+  /<(pre|code|samp|kbd|q|blockquote)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi,
   /`[^`\n]+`/g,
   /^[ \t]*>.*$/gm,
-  /"[^"]*"|"[^"]*?(?=\n[ \t]*\n|$)/g,
+  /(?<!\p{N})"[^"]*"|(?<!\p{N})"[^"]*?(?=\n[ \t]*\n|$)/gu,
+  /＂[^＂]*＂|＂[^＂]*?(?=\n[ \t]*\n|$)/g,
+  /„[^“”]*[“”]|„[^“”]*?(?=\n[ \t]*\n|$)/g,
   /“[^”]*”|“[^”]*?(?=\n[ \t]*\n|$)/g,
+  /«[^»]*»|«[^»]*?(?=\n[ \t]*\n|$)/g,
+  /»[^«]*«/g,
+  /‹[^›]*›|‹[^›]*?(?=\n[ \t]*\n|$)/g,
+  /›[^‹]*‹/g,
+  /「[^」]*」|「[^」]*?(?=\n[ \t]*\n|$)/g,
+  /『[^』]*』|『[^』]*?(?=\n[ \t]*\n|$)/g,
+  /‚[^‘’\n]*[‘’]/g,
   /‘(?:[^’]|’(?=[\p{L}\p{N}]))*?’(?![\p{L}\p{N}])|‘[\s\S]*?(?=\n[ \t]*\n|$)/gu,
   /(?<![\p{L}\p{N}])'(?:[^'\n]|\n(?![ \t]*\n)|(?<=[\p{L}\p{N}])'(?=\p{L}))+?'(?![\p{L}\p{N}])/gu,
 ]
@@ -365,13 +378,15 @@ function parseTerm(text: string, masked: string) {
     if (!termKey || termKey.length > 40 || termKey.split(" ").length > 5 || meaning.length < 3 || meaning.length > 250)
       return []
     // A key a request names by chance would come back with nearly every request: "it", "this one", "ci". And "Y, call
-    // it X" is also how a request names what it asks for ("add a helper, call it parseDate"), or an idiom ("call it a
-    // day", "call it from main"): a term only when X is plain words and Y is not a thing to make or change.
+    // it X" is also how a request names what it asks for ("add a helper, call it parseDate", "we need a nightly job,
+    // call it janitor"), or an idiom ("call it a day", "call it from main"): a term only when X is plain words and Y a
+    // plain noun phrase, not a thing to make or change.
+    const named = pattern === CALL_IT
     const chance =
       termKey.replaceAll(" ", "").length < 3 ||
       termKey.split(" ").every((word) => VAGUE.has(word)) ||
-      (pattern === CALL_IT && (CODE_NAME.test(name) || PHRASE.test(name) || TASK.test(meaning)))
-    return [{ key: termKey, meaning, chance }]
+      (named && (CODE_NAME.test(name) || PHRASE.test(name) || TASK.test(meaning) || REQUEST.test(meaning)))
+    return [{ key: termKey, meaning, chance, named }]
   })[0]
 }
 
@@ -391,34 +406,62 @@ const CODE_NAME = /[a-z][A-Z]|\w_\w|\w\.\w|[/\\()]|::/
 // What follows "call it" in a phrase that defines nothing: "call it from main", "call it a day", "call it done".
 const PHRASE =
   /^(?:a|an|from|with|on|in|at|by|via|into|inside|after|before|once|twice|again|when|if|as|using|through|for|to|off|out|up|quits|done|good|even|ok|okay)\b/i
+// A meaning that is no plain noun phrase but asks for something, which "call it" then names: one with a subject, a modal
+// or a verb of being ("we need a nightly job", "there should be a service", "the new module should handle retries"), a
+// relative clause ("the job that syncs users"), a lead-in ("one more thing:") or something new.
+const REQUEST =
+  /[:;]|\b(?:i|we|you|they|he|she|it|there|let's|lets|need|needs|want|wants|should|must|shall|will|would|could|can|may|might|has\s+to|have\s+to|is|are|was|were|be|been|that|which|who|whom|whose|where|new)\b/i
 // A meaning that asks for something to be made or changed, which "call it" then names.
 const TASK =
   /^(?:(?:please|pls|can you|could you|let's|lets|we need to|i need you to|i want you to)\s+)?(?:add|create|make|write|rename|fix|move|build|implement|generate|extract|define|declare|introduce|name|put|set\s+up|wrap|split|export|copy|duplicate|refactor|rewrite|update|change|replace|convert|delete|remove|spin\s+up|new|a|an|another)\b/i
 
 // "I prefer / I like / I'd rather X", and instructions to the agent at the start of a clause: "always X", "never X",
-// "don't X", "stop Xing". Feedback on this answer ("I like this", "don't worry") and one-off steps of the current task
-// ("don't change that file", "stop here", "don't touch the migrations folder while you refactor", "don't change the
-// public API") are not ways of working: an instruction about one of the repository's folders, files, APIs or other
-// parts of its code belongs to the task at hand far more often than it says how the user works.
+// "don't X", "stop Xing". Feedback on this answer ("I like this", "I prefer option B", "I'd rather go with your first
+// suggestion", "don't worry") and one-off steps of the current task ("don't change that file", "stop here", "don't
+// touch the migrations folder while you refactor", "I'd rather we ship this today", "I prefer you keep the client as is
+// for this PR") are not ways of working, whoever's voice they are in: an instruction about one of the repository's
+// folders, files, APIs or other parts of its code belongs to the task at hand far more often than it says how the user
+// works.
 const FIRST =
   /^i(?:'d|\s+would)\s+(?:much\s+)?(?:rather|prefer)\s+(.+)$|^i\s+(?:really\s+|usually\s+|generally\s+|always\s+|strongly\s+|much\s+)?(?:prefer|like|love|dislike|hate|don't\s+like|do\s+not\s+like|can't\s+stand)\s+(.+)$/i
 const IMPERATIVE =
   /^(?:you\s+should\s+|make\s+sure\s+(?:to\s+|you\s+)?|remember\s+to\s+)?(?:always|never|don't|dont|do\s+not)\s+(\S.+)$/i
 const STOP = /^stop\s+[a-z]+ing\b\s*\S/i
 const FEEDBACK =
-  /^(?:it|this|that|these|those|both|either|neither|yours|mine|the\s+(?:first|second|last|other|new)(?:\s+one)?)\b(?!\s+when\b)/i
+  /^(?:it|this|that|these|those|both|either|neither|yours|mine|the\s+(?:first|second|third|last|other|new|old|original|previous|earlier|current|latest)(?:\s+(?:one|ones|option|version|approach|draft|answer|suggestion|idea|plan))?|(?:option|choice|approach|plan|variant|alternative|version|draft|number)\s+(?:[a-z]|\d+|one|two|three)|go(?:ing)?\s+with|your\s+(?:(?:first|second|third|last|other|new|original|previous|earlier|latest)\s+)?(?:suggestion|idea|approach|version|answer|option|proposal|plan|draft|solution|fix|change|pick|choice)s?)\b(?!\s+when\b)/i
 const ONE_OFF =
-  /\b(?:it|that|these|those|here|now|yet|today|tonight|tomorrow|again|anymore|any\s+more|this\s+(?:time|one|file|function|line|test|change|pr|branch|bug|method|class|component|part|section|task|issue|ticket|commit)|that\s+one|for\s+now|while\s+(?:you|you're|you\s+are|we|we're|we\s+are|i'm|i\s+am)|as\s+part\s+of|the\s+(?:[\w.-]+\s+){1,2}?(?:folder|directory|dir|file|api|endpoint|route|module|controller|function|method|class|component|handler)\b(?!\s+(?:keys?|tokens?|secrets?|docs?|documentation|reference|version)\b))\b|^(?:don't|dont|do\s+not|never)\s+(?:worry|bother|know|mind|forget|think)\b/i
+  /\b(?:it|that|these|those|here|now|yet|today|tonight|tomorrow|again|anymore|any\s+more|as[\s-]is|this\s+(?:time|one|file|function|line|test|change|pr|branch|bug|method|class|component|part|section|task|issue|ticket|commit|week|sprint|release|version|draft|answer|plan|step)|that\s+one|for\s+now|while\s+(?:you|you're|you\s+are|we|we're|we\s+are|i'm|i\s+am)|as\s+part\s+of|(?:option|choice|approach|plan|variant|alternative)\s+(?:[a-z]|\d+|one|two|three)|the\s+(?:[\w.-]+\s+){1,2}?(?:folder|directory|dir|file|api|endpoint|route|module|controller|function|method|class|component|handler)\b(?!\s+(?:keys?|tokens?|secrets?|docs?|documentation|reference|version)\b))\b|^(?:don't|dont|do\s+not|never)\s+(?:worry|bother|know|mind|forget|think)\b/i
+// What a first-person preference may open with that names no thing of the task: a conjunction ("I prefer that you…") or
+// "it when" ("I like it when you use tables").
+const OPENER =
+  /^(?:that\s+(?=(?:you|we|i|they|he|she|everyone|everything|all|each|every)\b)|it\s+(?=(?:when|whenever|if)\b))/i
+// A clause that says whose words it is ("…, says the guide", "according to the docs") is theirs, not the user's.
+const ATTRIBUTED = /,\s*(?:says|said|writes|wrote)\b|\baccording\s+to\b/i
+// A clause that gives its reason.
+const REASON = /\b(?:because|since|due\s+to|given\s+(?:that|my)|as\s+i(?:'m|\s+am|\s+have|'ve)?)\b/i
+// Someone to copy, ping or loop in on something: a person or a team of one company, written in lowercase too.
+const ADDRESSED = /\b(?:b?cc|ping|loop\s+in|dm)\s+(?!(?:me|myself|you|yourself)\b)[\p{L}@]/iu
 // "in this repo", "for this codebase": an instruction for one repository, which follows the user nowhere else.
 const REPOSITORY =
   /\b(?:in|for|across|within|throughout|of)\s+(?:this|the|our)\s+(?:repo|repository|codebase|code\s+base|monorepo|workspace)\b/i
 
 function preference(masked: string) {
+  if (ATTRIBUTED.test(masked)) return false
   const first = FIRST.exec(masked)
-  if (first) return !FEEDBACK.test((first[1] ?? first[2]!).trim())
-  if (STOP.test(masked)) return !ONE_OFF.test(masked)
+  if (first) {
+    const said = (first[1] ?? first[2]!).trim().replace(OPENER, "")
+    return !FEEDBACK.test(said) && !step(said)
+  }
+  if (STOP.test(masked)) return !step(masked)
   const imperative = IMPERATIVE.exec(masked)
-  return imperative !== null && imperative[1]!.trim().split(/\s+/).length >= 2 && !ONE_OFF.test(masked)
+  return imperative !== null && imperative[1]!.trim().split(/\s+/).length >= 2 && !step(masked)
+}
+
+// A step of the current task, read without the reason a clause gives: "it" in "I prefer pnpm because it is faster" is
+// pnpm, not something of this task.
+function step(text: string) {
+  const reason = text.search(REASON)
+  return ONE_OFF.test(reason > 0 ? text.slice(0, reason) : text)
 }
 
 function trimmed(clause: string) {
@@ -437,6 +480,9 @@ function bare(text: string): string {
     (next.endsWith('"') && (before.match(/"/g)?.length ?? 0) % 2 === 0) ||
     (next.endsWith("”") && !before.includes("“")) ||
     (next.endsWith("’") && !before.includes("‘")) ||
+    (next.endsWith("»") && !before.includes("«")) ||
+    (next.endsWith("」") && !before.includes("「")) ||
+    (next.endsWith("』") && !before.includes("『")) ||
     (next.endsWith("'") && !/(?<![\p{L}\p{N}])'/u.test(before))
   return dangling ? bare(before) : next
 }
@@ -498,6 +544,24 @@ const SENSITIVE = [
   "sober",
   "doctor",
   "psychiatrist",
+  "chemo(?:therapy)?",
+  "dyslexi(?:a|c)",
+  "dyspraxi(?:a|c)",
+  "colou?r[- ]?blind(?:ness)?",
+  "deaf",
+  "blind(?![- ]?spots?)",
+  "hard of hearing",
+  "wheelchair",
+  "epilep(?:sy|tic)",
+  "seizures?",
+  "asthma(?:tic)?",
+  "allerg(?:y|ies|ic)",
+  "covid",
+  "hospital",
+  "fertility",
+  "ivf",
+  "mental health",
+  "burn(?:ed|t)?[- ]?out",
   // money
   "salary",
   "income",
@@ -526,6 +590,21 @@ const SENSITIVE = [
   "temple",
   "pray(?:er)?",
   "faith",
+  "worship",
+  "gurdwara",
+  "jumm?ah",
+  "jumu'?ah",
+  "sabbath",
+  "shabbat",
+  "shabbos",
+  "ramadan",
+  "eid",
+  "passover",
+  "yom kippur",
+  "diwali",
+  "kosher",
+  "halal",
+  "fasting",
   // politics
   "democrat",
   "republican",
@@ -560,10 +639,10 @@ const SENSITIVE = [
   "lgbtq?\\+?",
 ].join("|")
 
-// The user saying something about themselves: "my …", "I have / I am / I take / I earn …", up to a few words before the
-// sensitive word.
+// The user saying something about themselves: "my …", "I have / I am / I'd / I take / I earn …", or a reason ("because
+// of …", "due to …", "as a …"), up to a few words before the sensitive word.
 const SELF = new RegExp(
-  `\\b(?:my|i'm|i am|i've|i have|i had|i was|i've been|i take|i earn|i make|i owe|i vote|i voted|i pray|i'm on|i go to|i see a)\\b(?:\\s+[\\p{L}'-]+){0,4}?\\s+(?:${SENSITIVE})\\b`,
+  `\\b(?:my|i'm|i am|i'd|i've|i have|i had|i was|i've been|i take|i earn|i make|i owe|i vote|i voted|i pray|i'm on|i go to|i see a|because of|due to|as an?)\\b(?:\\s+[\\p{L}'-]+){0,4}?\\s+(?:${SENSITIVE})\\b`,
   "iu",
 )
 

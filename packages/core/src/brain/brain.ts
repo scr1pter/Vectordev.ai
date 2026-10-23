@@ -187,11 +187,12 @@ export type Proposal = {
    */
   readonly pending?: "sighting" | "review"
   /**
-   * Vector's learner (section 6.3) read it in what the owner typed in a top-level session, which only the engine's
-   * end-of-request learner says. Only such a write makes an instruction the owner gave about how they work anywhere
-   * ("always use tables") personal without a first-person quote, and its quote is checked against what the owner took
-   * back as well as its text. The memory tool's writes never are: a subagent's quote comes from the task its launching
-   * agent wrote.
+   * Vector's learner (section 6.3) read it in what the owner typed in a top-level session, or the owner ticked it on a
+   * plan card, which only the engine's end-of-request learner and the plan card say. Such a write is personal only when
+   * it names nothing of one repository, in the first person or not, so an instruction about how they work anywhere
+   * ("always use tables") is personal without a first-person quote and "I prefer Acme's numbers" stays with its
+   * repository; its quote is checked against what the owner took back as well as its text. The memory tool's writes
+   * never are: a subagent's quote comes from the task its launching agent wrote.
    */
   readonly learner?: boolean
   readonly sessionID?: string
@@ -1479,13 +1480,15 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
       !agent || (evidence !== undefined && evidence.type !== "user" && evidence.verified && supports(text, evidence))
     // The user's own words: what they wrote in Settings, or a checked quote of what they said in this conversation.
     const said = !agent || (verified && evidence?.type === "message")
-    // Personal memory follows the user into every repository, so it takes what they said about themselves, or, from
-    // Vector's learner, an instruction they gave in so many words about how they work anywhere ("always use tables").
+    // Personal memory follows the user into every repository, so it takes what they said about themselves. What Vector's
+    // learner read is held to more, whatever voice it is in: it follows them only when it names nothing of one
+    // repository, as "I prefer tables" and "always use tables" do and "I prefer Acme's churn numbers from the dashboard"
+    // or "always cc jane@acme.com" do not.
     const own =
       !agent ||
       (said &&
         evidence?.type === "message" &&
-        (FIRST_PERSON.test(evidence.quote) || (proposal.learner === true && general(text, evidence.quote, facet))))
+        (proposal.learner === true ? general(text, evidence.quote, facet) : FIRST_PERSON.test(evidence.quote)))
     const previous = proposal.supersedes ? yield* find(place, proposal.supersedes, true) : keyed
     if (proposal.supersedes && !previous) return refuse("not-found", `No memory ${proposal.supersedes} here.`)
     if (previous && !LEARNED.includes(previous.origin))
@@ -2771,25 +2774,43 @@ function overlap(own: ReadonlyMap<string, number>, other: ReadonlyMap<string, nu
 // Personal memory is what the user said about themselves.
 const FIRST_PERSON = /\b(?:i|me|my|mine|myself)\b/i
 
-// An instruction the user gave the agent, saved in their own words, about how they work anywhere: its words name a
-// facet that holds in every repository (format, workflow, tooling or sources, as "always use tables" and "never
-// squash merge" do), and no path, file or identifier of the code, no name ("the Acme billing tests"), nor this
-// repository alone ("in this repo"). An instruction of any other kind ("never call the billing client from the
-// controller") stays with its repository, where its names belong.
+// What Vector's learner read in the owner's typed words, about how they work anywhere. Neither its words nor the quote
+// may name anything of one repository or company: no path, file or identifier of the code, no email, no host name but
+// a public site a sources preference names ("prefer nature.com"), no long number, no name ("the Acme billing tests",
+// "cc jane"), nor this repository alone ("in this repo"). It is then what they said about themselves ("I prefer
+// tables"), unless it is a catch-all style line about parts of the code ("I'd rather you never call the billing client
+// from the controller"), or an instruction in so many words whose facet holds in every repository (format, workflow,
+// tooling or sources, as "always use tables" and "never squash merge" do). Anything else stays with its repository,
+// where its names belong.
 function general(text: string, quote: string, facet: BrainSchema.Facet | undefined) {
-  return (
-    normalise(text) === normalise(quote) &&
-    facet !== undefined &&
-    GENERAL_FACETS.has(facet) &&
-    BrainLearn.instruction(quote) &&
-    !BrainLearn.scoped(quote) &&
-    !BrainLearn.particular(quote) &&
-    BrainPrivate.tokens(quote, ["path", "identifier"]).every(
-      (token) => token.kind === "identifier" && BrainLearn.known(token.value),
-    )
+  if (facet === undefined) return false
+  const plain = [text, quote].every(
+    (value) =>
+      !BrainLearn.scoped(value) &&
+      !BrainLearn.particular(value) &&
+      BrainPrivate.tokens(value, ["path", "identifier", "email", "host", "number"]).every(
+        (token) =>
+          (token.kind === "identifier" && BrainLearn.known(token.value)) ||
+          (token.kind === "host" && facet === "sources" && publicHost(token.value)),
+      ),
   )
+  if (!plain) return false
+  if (FIRST_PERSON.test(quote)) return facet !== "style" || !CODE_PART.test(quote)
+  return normalise(text) === normalise(quote) && GENERAL_FACETS.has(facet) && BrainLearn.instruction(quote)
 }
 const GENERAL_FACETS: ReadonlySet<BrainSchema.Facet> = new Set(["format", "workflow", "tooling", "sources"])
+// Parts of a codebase a style line may name, which make it about that codebase.
+const CODE_PART =
+  /\b(?:clients?|controllers?|services?|modules?|components?|handlers?|functions?|methods?|class(?:es)?|endpoints?|routes?|apis?|files?|folders?|director(?:y|ies)|schemas?|migrations?|quer(?:y|ies)|databases?|config(?:s|uration)?|scripts?|jobs?|workers?|queues?|hooks?|utils?|helpers?|packages?|librar(?:y|ies)|dependenc(?:y|ies)|variables?|fields?|columns?|pages?|screens?|dashboards?|views?|buttons?|forms?)\b/i
+
+// A site anyone can reach: a host name under a public top-level domain, not a machine address or a name of a network
+// of one company ("wiki.acme.internal", "build.local").
+function publicHost(value: string) {
+  return (
+    !/^[\d.]+$|:/.test(value) &&
+    !/\.(?:internal|local|lan|corp|intra|home|test|example|localhost|invalid)$/i.test(value)
+  )
+}
 
 // A quote counts as evidence only for a memory it states whole and the same way round; a cited file's path counts as
 // part of its quote.

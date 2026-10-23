@@ -390,6 +390,25 @@ it.instance(
 )
 
 it.instance(
+  "in the user's own voice a step of the task teaches nothing, and what names something of one repository stays with it",
+  () =>
+    Effect.gen(function* () {
+      yield* setup()
+      yield* send({ text: "I'd rather you didn't touch the migrations folder while you refactor" })
+      yield* send({ text: "I prefer you keep the Acme billing client as is for this PR" })
+      yield* send({ text: "I prefer option B" })
+      expect(yield* learned()).toEqual([])
+      yield* send({ text: "I prefer Acme's Q3 churn numbers to come from the internal dashboard" })
+      yield* send({ text: "I prefer tables for comparisons" })
+      expect(Object.fromEntries((yield* learned()).map((entry) => [entry.text, entry.scope]))).toEqual({
+        "I prefer Acme's Q3 churn numbers to come from the internal dashboard": "repository",
+        "I prefer tables for comparisons": "personal",
+      })
+    }),
+  120_000,
+)
+
+it.instance(
   "a sensitive first-person fact is dropped while a research-topic preference survives",
   () =>
     Effect.gen(function* () {
