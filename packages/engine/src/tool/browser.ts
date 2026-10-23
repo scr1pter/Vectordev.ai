@@ -523,12 +523,17 @@ export const BrowserTool = Tool.define<typeof Parameters, Metadata, never>(
             (element) =>
               `${element.ref} ${element.role}${element.type ? ` (${element.type})` : ""} "${element.name}"${element.href ? ` → ${safeReportUrl(element.href)}` : ""}${element.disabled ? " (disabled)" : ""}`,
           )
+          // type takes a selector, so the fields are listed by theirs too.
+          const fields = (report.domSummary?.inputs ?? [])
+            .slice(0, 16)
+            .map((item) => `- ${item.selector} — ${item.type || item.placeholder || item.name || item.tag}`)
           return {
             title: `observe — ${report.title || url}`,
             output: fence(
               [
                 `Page text:\n${report.observed?.text ?? ""}`,
-                controls.length ? `Controls:\n${controls.join("\n")}` : "No controls.",
+                controls.length ? `Controls (click takes the ref):\n${controls.join("\n")}` : "No controls.",
+                ...(fields.length && !lead ? [`Fields (type takes the selector):\n${fields.join("\n")}`] : []),
               ].join("\n\n"),
             ),
             metadata,

@@ -50,6 +50,7 @@ const visible = (start = "") => {
       if (body.command === "observePage")
         return FakeBridge.visible({
           url: state.current,
+          domSummary: { textSample: "", interactives: [], inputs: [{ tag: "input", selector: "#search", type: "search" }] },
           observed: { title: "Docs", url: state.current, text: "Welcome to the docs", elements: [{ ref: "ref_1", role: "link", name: "Guides", tag: "a", href: "http://localhost:4000/guides" }] },
         })
       return FakeBridge.visible({ url: state.current, title: "Page", target: { found: true, label: "Guides" } })
@@ -157,6 +158,8 @@ it.instance(
       yield* send({ sessionID: session.id, agent: "build", text: "Look at the local docs." })
       const [observe, click, shot] = yield* calls(session.id, "browser")
       expect(output(observe)).toContain('ref_1 link "Guides" → http://localhost:4000/guides')
+      // type still takes a selector, so observe names the fields by theirs.
+      expect(output(observe)).toContain("- #search — search")
       expect(click?.state.status).toBe("completed")
       expect(output(shot)).toBe(NO_IMAGES)
       expect(commands(before)).toEqual(["inspectDom", "observePage", "inspectDom", "clickRef"])
