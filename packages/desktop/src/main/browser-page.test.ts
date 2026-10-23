@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { realpathSync } from "node:fs"
 import { createRequire } from "node:module"
 import path from "node:path"
@@ -165,6 +165,58 @@ describe("clickPoint", () => {
     // A click inside a link says where the link goes, for the navigation rule.
     expect(click(window, "ref_span")).toMatchObject({ ok: true, href: "https://journal.example/paper" })
     expect(click(window, "ref_99")).toMatchObject({ ok: false })
+  })
+})
+
+// Chromium lets a form's named fields shadow the form's own properties and methods, in Vector's isolated world too
+// (happy-dom does not), so this puts each named field on its form as Chromium shows it, and takes them off again.
+const shadow = (form: Element) => {
+  const names = Array.from(form.querySelectorAll("[name]")).map((field) => {
+    const name = field.getAttribute("name")!
+    Object.defineProperty(form, name, { value: field, configurable: true })
+    return name
+  })
+  return () => names.forEach((name) => Reflect.deleteProperty(form, name))
+}
+
+describe("a form whose fields shadow its own properties", () => {
+  const undo: (() => void)[] = []
+  afterEach(() => undo.splice(0).forEach((restore) => restore()))
+
+  test("hides no password field from the type check", () => {
+    page(`<body>
+      <form id="shadowed-signin"><input id="inside" name="elements"></form>
+      <input id="secret" type="password" form="shadowed-signin">
+    </body>`)
+    const form = document.getElementById("shadowed-signin")!
+    undo.push(shadow(form))
+    // As Chromium shows it: the form's collection is the field now.
+    expect((form as unknown as { elements: Element }).elements.id).toBe("inside")
+    ;(window as unknown as { __vectorRefs: Map<string, Element> }).__vectorRefs = new Map([
+      ["inside", document.getElementById("inside")!],
+    ])
+    expect(inPage(typeTarget)(window, "inside", isCredentialField)).toEqual({
+      ok: false,
+      reason: "Research browsers never type into a form that asks for a password or other credentials.",
+    })
+  })
+
+  // happy-dom's own code calls getAttribute and hasAttribute on a form, so this page leaves those names out; the code
+  // reads them through the prototypes as it does the others.
+  test("breaks no read or observe of the page, and its GET target is still found", () => {
+    page(`<body><main><h1>Find studies</h1><p>Search the archive of field studies.</p>
+      <form action="/find" method="get" role="search">
+        ${["elements", "querySelectorAll", "action", "method", "childNodes", "children", "textContent", "getBoundingClientRect", "shadowRoot", "ownerDocument", "localName", "nodeType"].map((name) => `<input type="hidden" name="${name}">`).join("")}
+        <p>Inside the form.</p><input id="q" type="search" name="q" aria-label="Query">
+      </form>
+    </main></body>`)
+    undo.push(shadow(document.querySelector("form")!))
+    const read = inPage(readPage)(window, { maxBytes: 1_000_000 })
+    const observed = inPage(observePage)(window, { maxText: 500, maxElements: 50 })
+    expect(read.html).toContain("Inside the form.")
+    expect(read.forms).toEqual(["https://journal.example/find"])
+    expect(observed.forms).toEqual(["https://journal.example/find"])
+    expect(observed.elements.map((element) => [element.role, element.name])).toEqual([["searchbox", "Query"]])
   })
 })
 

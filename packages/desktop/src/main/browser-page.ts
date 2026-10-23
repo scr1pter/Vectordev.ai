@@ -9,6 +9,10 @@
 // opened. Open shadow roots are read as they render, slots filled. Links are absolute. Observing names the controls a
 // person could use, each with a ref_N handle, in the top document, its open shadow roots and frames of its own origin
 // only, so a click or a keystroke never reaches a frame of another origin.
+//
+// A form's named fields shadow its own properties and methods in every world, the isolated one included: in a form
+// holding <input name="elements"> or name="getAttribute", form.elements and form.getAttribute are those fields. So what
+// these functions read of an element that may be a form goes through the DOM's prototypes.
 
 export type PageLink = {
   readonly url: string
@@ -101,6 +105,14 @@ export function readPage(win: Window, options: { readonly maxBytes: number }): P
     abbr: ["title"],
   }
   const top = win.document
+  // What the node's prototypes define under `key`, never a property of its own: an accessor read, or a method called.
+  const inherited = (owner: object, key: string): PropertyDescriptor =>
+    Object.getOwnPropertyDescriptor(owner, key) ?? inherited(Object.getPrototypeOf(owner), key)
+  const property = (target: object, key: string) => inherited(Object.getPrototypeOf(target), key).get!.call(target)
+  const invoke = (target: object, key: string, ...input: unknown[]) =>
+    (inherited(Object.getPrototypeOf(target), key).value as (...input: unknown[]) => unknown).apply(target, input)
+  const attribute = (element: Element, name: string) => invoke(element, "getAttribute", name) as string | null
+  const tagOf = (element: Element) => property(element, "localName") as string
   const out: string[] = []
   const state = { size: 0, truncated: false }
   const links: PageLink[] = []
@@ -123,9 +135,9 @@ export function readPage(win: Window, options: { readonly maxBytes: number }): P
   // "none": the element and what it holds are left out. "text": its own text is, but not its children, which may be
   // made visible again. "shown": kept.
   const shown = (element: Element) => {
-    const view = element.ownerDocument.defaultView ?? win
+    const view = (property(element, "ownerDocument") as Document).defaultView ?? win
     const style = view.getComputedStyle(element)
-    if (element.hasAttribute("hidden") || style.display === "none") return "none"
+    if (invoke(element, "hasAttribute", "hidden") || style.display === "none") return "none"
     if (
       (style.opacity !== "" && Number(style.opacity) === 0) ||
       style.fontSize === "0px" ||
@@ -133,7 +145,7 @@ export function readPage(win: Window, options: { readonly maxBytes: number }): P
     )
       return "none"
     if (laidOut) {
-      const rect = element.getBoundingClientRect()
+      const rect = invoke(element, "getBoundingClientRect") as DOMRect
       const placed = style.position === "absolute" || style.position === "fixed"
       if (placed && (rect.right + view.scrollX <= 0 || rect.bottom + view.scrollY <= 0)) return "none"
       if (
@@ -147,31 +159,31 @@ export function readPage(win: Window, options: { readonly maxBytes: number }): P
     return "shown"
   }
   const form = (element: Element) => {
-    const target = element as HTMLFormElement
-    if ((target.getAttribute("method") ?? "get").toLowerCase() !== "get") return
-    const action = target.action || element.ownerDocument.URL
+    if ((attribute(element, "method") ?? "get").toLowerCase() !== "get") return
+    const action = String(property(element, "action") || (property(element, "ownerDocument") as Document).URL)
     if (!web(action)) return
     const address = new URL(action)
     forms.push(`${address.origin}${address.pathname}`)
   }
   const walk = (node: Node, depth: number, text: boolean, main: boolean) => {
     if (state.truncated || depth > 200) return
-    if (node.nodeType === 3) {
+    const type = property(node, "nodeType")
+    if (type === 3) {
       if (text) push(escape(node.nodeValue ?? ""))
       return
     }
-    if (node.nodeType !== 1) return
+    if (type !== 1) return
     const element = node as Element
-    const tag = element.localName
+    const tag = tagOf(element)
     if (tag === "script") {
-      if ((element.getAttribute("type") ?? "").trim().toLowerCase() === "application/ld+json")
+      if ((attribute(element, "type") ?? "").trim().toLowerCase() === "application/ld+json")
         push(`<script type="application/ld+json">${(element.textContent ?? "").replace(/</g, "\\u003c")}</script>`)
       return
     }
     if (SKIP.has(tag)) return
     const how = shown(element)
     if (how === "none") return
-    const inside = main || tag === "main" || tag === "article" || element.getAttribute("role") === "main"
+    const inside = main || tag === "main" || tag === "article" || attribute(element, "role") === "main"
     if (tag === "form") form(element)
     if (tag === "iframe" || tag === "frame") {
       // Null for a frame of another origin, whose page is not the one the agent opened.
@@ -190,7 +202,7 @@ export function readPage(win: Window, options: { readonly maxBytes: number }): P
     const name = /^[a-z][a-z0-9]*$/.test(tag) ? tag : "div"
     const attributes = (KEEP[tag] ?? [])
       .flatMap((key) => {
-        const value = key === "href" ? (element as HTMLAnchorElement).href : element.getAttribute(key)
+        const value = key === "href" ? (element as HTMLAnchorElement).href : attribute(element, key)
         if (!value || (key === "href" && !web(value))) return []
         return [` ${key}="${quote(value)}"`]
       })
@@ -198,7 +210,12 @@ export function readPage(win: Window, options: { readonly maxBytes: number }): P
     push(`<${name}${attributes}>`)
     if (VOID.has(tag)) return
     const slot = tag === "slot" ? (element as HTMLSlotElement).assignedNodes({ flatten: true }) : []
-    const children = element.shadowRoot ? element.shadowRoot.childNodes : slot.length > 0 ? slot : element.childNodes
+    const shadow = property(element, "shadowRoot") as ShadowRoot | null
+    const children: NodeListOf<ChildNode> | Node[] = shadow
+      ? shadow.childNodes
+      : slot.length > 0
+        ? slot
+        : (property(element, "childNodes") as NodeListOf<ChildNode>)
     children.forEach((child) => walk(child, depth + 1, how === "shown", inside))
     push(`</${name}>`)
   }
@@ -258,6 +275,14 @@ export function observePage(
   ])
   const SKIP = new Set(["script", "style", "noscript", "template", "head", "svg", "math"])
   const top = win.document
+  // What the node's prototypes define under `key`, never a property of its own: an accessor read, or a method called.
+  const inherited = (owner: object, key: string): PropertyDescriptor =>
+    Object.getOwnPropertyDescriptor(owner, key) ?? inherited(Object.getPrototypeOf(owner), key)
+  const property = (target: object, key: string) => inherited(Object.getPrototypeOf(target), key).get!.call(target)
+  const invoke = (target: object, key: string, ...input: unknown[]) =>
+    (inherited(Object.getPrototypeOf(target), key).value as (...input: unknown[]) => unknown).apply(target, input)
+  const attribute = (element: Element, name: string) => invoke(element, "getAttribute", name) as string | null
+  const tagOf = (element: Element) => property(element, "localName") as string
   const refs = new Map<string, Element>()
   ;(win as unknown as { __vectorRefs?: Map<string, Element> }).__vectorRefs = refs
   const elements: ObservedElement[] = []
@@ -267,19 +292,20 @@ export function observePage(
   const line = (text: string | null | undefined) => (text ?? "").replace(/\s+/g, " ").trim()
   const laidOut = top.documentElement.getBoundingClientRect().width > 0
   const visible = (element: Element) => {
-    const view = element.ownerDocument.defaultView ?? win
+    const view = (property(element, "ownerDocument") as Document).defaultView ?? win
     const style = view.getComputedStyle(element)
-    if (element.hasAttribute("hidden") || style.display === "none" || style.visibility === "hidden") return false
+    if (invoke(element, "hasAttribute", "hidden") || style.display === "none" || style.visibility === "hidden")
+      return false
     if (style.opacity !== "" && Number(style.opacity) === 0) return false
     if (!laidOut) return true
-    const rect = element.getBoundingClientRect()
+    const rect = invoke(element, "getBoundingClientRect") as DOMRect
     return rect.width > 0 || rect.height > 0 || style.display === "contents"
   }
-  const typeOf = (element: Element) => (element.getAttribute("type") ?? "").toLowerCase()
+  const typeOf = (element: Element) => (attribute(element, "type") ?? "").toLowerCase()
   const roleOf = (element: Element) => {
-    const explicit = (element.getAttribute("role") ?? "").trim().split(/\s+/)[0] ?? ""
+    const explicit = (attribute(element, "role") ?? "").trim().split(/\s+/)[0] ?? ""
     if (explicit) return explicit
-    const tag = element.localName
+    const tag = tagOf(element)
     const type = typeOf(element)
     if (tag === "a") return "link"
     if (tag === "button" || tag === "summary") return "button"
@@ -292,22 +318,22 @@ export function observePage(
       if (type === "range") return "slider"
       return "textbox"
     }
-    if (element.getAttribute("contenteditable") === "true" || element.getAttribute("contenteditable") === "")
+    if (attribute(element, "contenteditable") === "true" || attribute(element, "contenteditable") === "")
       return "textbox"
     return "button"
   }
   const interactive = (element: Element) => {
-    const tag = element.localName
+    const tag = tagOf(element)
     if (tag === "a") return web((element as HTMLAnchorElement).href)
     if (tag === "button" || tag === "select" || tag === "textarea" || tag === "summary") return true
     if (tag === "input") return typeOf(element) !== "hidden"
-    if (ROLES.has((element.getAttribute("role") ?? "").trim().split(/\s+/)[0] ?? "")) return true
-    const editable = element.getAttribute("contenteditable")
+    if (ROLES.has((attribute(element, "role") ?? "").trim().split(/\s+/)[0] ?? "")) return true
+    const editable = attribute(element, "contenteditable")
     return editable === "true" || editable === ""
   }
   const nameOf = (element: Element) => {
-    const root = element.getRootNode() as Document | ShadowRoot
-    const labelled = (element.getAttribute("aria-labelledby") ?? "")
+    const root = invoke(element, "getRootNode") as Document | ShadowRoot
+    const labelled = (attribute(element, "aria-labelledby") ?? "")
       .split(/\s+/)
       .filter(Boolean)
       .map((id) => line(root.getElementById?.(id)?.textContent))
@@ -315,36 +341,36 @@ export function observePage(
     const labels = Array.from((element as HTMLInputElement).labels ?? [])
       .map((label) => line(label.textContent))
       .join(" ")
-    const tag = element.localName
+    const tag = tagOf(element)
     const value =
       tag === "input" && ["button", "submit", "reset"].includes(typeOf(element))
         ? (element as HTMLInputElement).value
         : ""
     return line(
-      element.getAttribute("aria-label") ||
+      attribute(element, "aria-label") ||
         labelled ||
         labels ||
-        element.getAttribute("alt") ||
-        element.getAttribute("title") ||
-        element.getAttribute("placeholder") ||
+        attribute(element, "alt") ||
+        attribute(element, "title") ||
+        attribute(element, "placeholder") ||
         value ||
-        (tag === "input" || tag === "select" || tag === "textarea" ? element.getAttribute("name") : "") ||
-        element.textContent,
+        (tag === "input" || tag === "select" || tag === "textarea" ? attribute(element, "name") : "") ||
+        (property(element, "textContent") as string | null),
     ).slice(0, 80)
   }
   const form = (element: Element) => {
-    if ((element.getAttribute("method") ?? "get").toLowerCase() !== "get") return
-    const action = (element as HTMLFormElement).action || element.ownerDocument.URL
+    if ((attribute(element, "method") ?? "get").toLowerCase() !== "get") return
+    const action = String(property(element, "action") || (property(element, "ownerDocument") as Document).URL)
     if (!web(action)) return
     const address = new URL(action)
     forms.push(`${address.origin}${address.pathname}`)
   }
   const walk = (root: ParentNode, depth: number, main: boolean) => {
     if (depth > 200) return
-    Array.from(root.children).forEach((element) => {
-      const tag = element.localName
+    Array.from(property(root, "children") as HTMLCollection).forEach((element) => {
+      const tag = tagOf(element)
       if (SKIP.has(tag) || !visible(element)) return
-      const inside = main || tag === "main" || tag === "article" || element.getAttribute("role") === "main"
+      const inside = main || tag === "main" || tag === "article" || attribute(element, "role") === "main"
       if (tag === "form") form(element)
       if (interactive(element) && elements.length < options.maxElements) {
         const ref = `ref_${elements.length + 1}`
@@ -368,7 +394,8 @@ export function observePage(
         if (inner?.body) walk(inner.body, depth + 1, inside)
         return
       }
-      if (element.shadowRoot) walk(element.shadowRoot, depth + 1, inside)
+      const shadow = property(element, "shadowRoot") as ShadowRoot | null
+      if (shadow) walk(shadow, depth + 1, inside)
       walk(element, depth + 1, inside)
     })
   }
@@ -477,11 +504,21 @@ export function typeTarget(win: Window, ref: string, isCredentialField: (field: 
     return { ok: false, reason: "Research browsers never type into a sign-in, contact or payment field." }
   const form = (element as HTMLInputElement).form ?? element.closest("form")
   // A form's elements include the fields outside it that join it through their `form` attribute; the ones inside it
-  // are read too, in case a page broke the collection.
+  // are read too, in case a page broke the collection. Both through the prototypes: a field named "elements" or
+  // "querySelectorAll" shadows the form's own.
+  const inherited = (owner: object, key: string): PropertyDescriptor =>
+    Object.getOwnPropertyDescriptor(owner, key) ?? inherited(Object.getPrototypeOf(owner), key)
   const fields = form
     ? [
-        ...Array.from(form.elements).filter((field) => field.localName === "input" || field.localName === "textarea"),
-        ...Array.from(form.querySelectorAll("input, textarea")),
+        ...Array.from(
+          inherited(Object.getPrototypeOf(form), "elements").get!.call(form) as HTMLFormControlsCollection,
+        ).filter((field) => field.localName === "input" || field.localName === "textarea"),
+        ...Array.from(
+          (inherited(Object.getPrototypeOf(form), "querySelectorAll").value as Element["querySelectorAll"]).call(
+            form,
+            "input, textarea",
+          ),
+        ),
       ]
     : []
   if (fields.some((field) => (field.getAttribute("type") ?? "").toLowerCase() === "password" || credential(field)))
