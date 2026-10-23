@@ -58,7 +58,7 @@ type Metadata = {
   query?: string
   provider?: string
   results?: ResearchRun.Result[]
-  refused?: "outbound" | "budget" | "scope" | "none"
+  refused?: "outbound" | "budget" | "scope" | "none" | "offline"
 }
 
 /** Where `vector run --research` puts its own choices for the run: a text part's metadata on its prompt. */
@@ -191,6 +191,13 @@ export const ResearchSearchTool = Tool.define<
           const found = yield* research.current(ctx)
           if ("refused" in found) return { title: "Not searched", output: found.refused, metadata: {} }
           const runID = found.run.id
+          // Not offered with Vector Local's Web access None; a run that began before it was set searches no more.
+          if (ResearchRun.offline())
+            return {
+              title: "Not searched",
+              output: ResearchRun.OFFLINE,
+              metadata: { runID, refused: "offline" as const },
+            }
           // A researcher works for its lead, so the lead's request holds the run's choices.
           const chosen = options(
             found.lead.id === ctx.sessionID

@@ -172,7 +172,8 @@ describe("EgressGuard.installStrict", () => {
       .handle!.attempts()
       .filter((attempt) => attempt.allowed)
       .map((attempt) => attempt.kind)
-    expect(new Set(kinds)).toEqual(new Set(["fetch", "proxied", "http", "socket"]))
+    // Loopback goes around the guard's own proxy, so a fetch here is seen as a fetch and never as a proxied request.
+    expect(new Set(kinds)).toEqual(new Set(["fetch", "http", "socket"]))
   })
 
   test("refuses Bun.fetch and a fetch taken before install through its own proxy", async () => {
@@ -190,6 +191,28 @@ describe("EgressGuard.installStrict", () => {
     // This computer still answers through it.
     expect(await (await Bun.fetch(at())).text()).toBe("here")
     expect(await (await capturedFetch(at())).text()).toBe("here")
+  })
+
+  test("sends the body of a Request that carries Bun's own timeout option, as the SDK's requests do", async () => {
+    // The SDK's client sets the option on the Request itself (createVectorClient). Bun then sent such a Request's body
+    // empty once the guard had read the body before it kept a copy for redirects.
+    const request = Object.assign(
+      new Request(at("/sdk"), { method: "POST", body: '{"parts":["hi"]}', headers: { "x-test-mark": "sdk" } }),
+      { timeout: false },
+    )
+    expect(await (await fetch(request)).text()).toBe("here")
+    const redirected = Object.assign(
+      new Request(at("/keep"), { method: "PUT", body: "kept", headers: { "x-test-mark": "sdk-redirect" } }),
+      { timeout: false },
+    )
+    expect(await (await fetch(redirected)).text()).toBe("here")
+    expect(
+      seen.filter((item) => item.mark?.startsWith("sdk")).map((item) => [item.path, item.method, item.body]),
+    ).toEqual([
+      ["/sdk", "POST", '{"parts":["hi"]}'],
+      ["/keep", "PUT", "kept"],
+      ["/landed", "PUT", "kept"],
+    ])
   })
 
   test("decides each request on a kept-alive connection to its proxy on its own", async () => {
@@ -288,14 +311,18 @@ describe("EgressGuard.installStrict", () => {
     await expect(fetch(at(), { proxy: "http://127.0.0.1:9" } as RequestInit)).rejects.toBeInstanceOf(
       EgressGuard.EgressBlocked,
     )
-    // Whichever spelling a client prefers, a proxy off this computer in any of them is refused.
+    // Whichever spelling a client prefers, a proxy off this computer in any of them is refused. The guard sends
+    // loopback around its own proxy (NO_PROXY), so that is emptied here for the proxy to carry this request at all.
+    const bypass = ["NO_PROXY", "no_proxy"].map((key) => [key, process.env[key]] as const)
     for (const key of ["HTTP_PROXY", "http_proxy", "ALL_PROXY"]) {
       const before = process.env[key]
       process.env[key] = `http://${OUTSIDE}:8080`
+      bypass.forEach(([name]) => (process.env[name] = ""))
       try {
         await expect(fetch(at())).rejects.toThrow(`connection to ${OUTSIDE}`)
       } finally {
         process.env[key] = before ?? ""
+        bypass.forEach(([name, value]) => (process.env[name] = value ?? ""))
       }
     }
     expect(await (await fetch(at())).text()).toBe("here")

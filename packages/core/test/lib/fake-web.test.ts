@@ -100,8 +100,8 @@ describe("FakeWeb", () => {
   })
 
   test("made no connection outside this computer", () => {
-    // Native HTTP went through the guard's own proxy, which counts what it passes on.
-    expect(new Set(guard.attempts().map((attempt) => attempt.kind))).toEqual(new Set(["fetch", "http", "proxied"]))
+    // The fake web is on 127.0.0.1, which goes around the guard's own proxy, so nothing here was proxied.
+    expect(new Set(guard.attempts().map((attempt) => attempt.kind))).toEqual(new Set(["fetch", "http"]))
     expect(guard.outside()).toEqual([])
   })
 })

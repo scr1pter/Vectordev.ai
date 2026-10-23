@@ -6,6 +6,7 @@ import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { BrainSchema } from "@vectordevai/core/brain/schema"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 import { EgressGuard } from "@vectordevai/core/local-mode/guard"
 import { EgressHttpClient } from "@vectordevai/core/local-mode/http-client"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
@@ -96,6 +97,29 @@ export const LEAD_ONLY =
   "A researcher takes its sub-question and any message from the research lead that launched it alone."
 export const WARNED =
   "Run Guard warned that this run is close to its cap, so no new researcher starts. Write the report from what the run has, or resume a researcher with task_id."
+
+export const OFFLINE =
+  "Vector Local's Web access is None, so this research uses this repository's brain and files only: it searches and reads nothing on the web."
+export const OFFLINE_RESEARCHERS =
+  "Vector Local's Web access is None, so research has no web workers. Answer the sub-question from this repository's brain and files yourself."
+
+/** The research tools that reach the web, which research is not offered while Vector Local's Web access is None. */
+export const NETWORK_TOOLS: readonly string[] = ["research_search", "research_read", "research_browser"]
+
+/**
+ * Whether Vector Local is on with Web access None, as it also is while the policy is still being resolved. Research
+ * then uses the brain and the repository's files only (section 5.9): its plan's scope is the brain whatever was
+ * proposed, its network tools are not offered, and the lead launches no researchers, whose work is the web.
+ */
+export function offline() {
+  const policy = Egress.policy()
+  return policy.enabled && policy.web === "none"
+}
+
+/** Whether a research tool is kept from research agents now: a network tool while Web access is None. */
+export function withheld(tool: string) {
+  return NETWORK_TOOLS.includes(tool) && offline()
+}
 
 // How long a run keeps its own rate limiter after its last read, and how many runs keep one.
 const LIMITERS = 16
@@ -596,6 +620,7 @@ const layer = Layer.effect(
           type: "refused",
           message: "Only the research lead launches researchers, inside its run.",
         } satisfies Brief
+      if (offline()) return { type: "refused", message: OFFLINE_RESEARCHERS } satisfies Brief
       const found = yield* current(input.ctx)
       if ("refused" in found) return { type: "refused", message: found.refused } satisfies Brief
       if (!input.resume) {

@@ -53,7 +53,7 @@ type Metadata = {
   /** Links this read offered, which join the run's provenance. */
   links?: string[]
   private?: boolean
-  refused?: "provenance" | "outbound" | "scope" | "budget"
+  refused?: "provenance" | "outbound" | "scope" | "budget" | "offline"
 }
 
 export const OUTBOUND =
@@ -100,6 +100,14 @@ export const ResearchReadTool = Tool.define<
               title: "Not read",
               output: 'Give the address to read, or a saved source such as "S3".',
               metadata: { runID },
+            }
+          // Not offered with Vector Local's Web access None; a run that began before it was set reads no more pages, though
+          // a saved source (above) is still read again, with no network call.
+          if (ResearchRun.offline())
+            return {
+              title: "Not read",
+              output: ResearchRun.OFFLINE,
+              metadata: { runID, refused: "offline" as const },
             }
           if (found.plan.scope === "brain")
             return {

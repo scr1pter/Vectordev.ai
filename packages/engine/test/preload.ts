@@ -43,6 +43,19 @@ process.env["VECTOR_BRAIN_EMBED"] = "off"
 process.env["VECTOR_EXPERIMENTAL_EVENT_SYSTEM"] = "true"
 process.env["VECTOR_EXPERIMENTAL_WORKSPACES"] = "true"
 
+// Every engine test runs under the strict network guard: a connection that would leave this computer throws
+// EgressBlocked before it is made, and a child process reaches the guard's own proxy, which refuses it too. It goes in
+// before any src/ module loads, so none keeps a fetch, WebSocket or socket class of its own from before it. A file that
+// pins names of its own (NetworkGuard.use) puts its guard in this one's place while it runs, then puts this one back.
+const { NetworkGuard } = await import("../../core/test/lib/network-guard")
+NetworkGuard.suite()
+// Without ripgrep on PATH Vector downloads it from GitHub, which the guard refuses, so the tests that search files
+// need it installed (CI installs it). Said here once, since each of them fails with "Install ripgrep (rg)".
+if (!Bun.which("rg"))
+  console.warn(
+    "ripgrep (rg) is not on PATH. The engine tests that search files need it: the strict network guard keeps Vector from downloading it.",
+  )
+
 // Set test home directory to isolate tests from user's actual home directory
 // This prevents tests from picking up real user configs/skills from ~/.claude/skills
 const testHome = path.join(dir, "home")

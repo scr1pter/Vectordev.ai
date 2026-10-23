@@ -64,14 +64,15 @@ import { LocalPolicy } from "./policy"
 // With Vector Local off, each wrap costs one call and logs nothing; a Worker still preloads the wraps, to follow.
 //
 // Strict mode, for tests (VECTOR_TEST_EGRESS=strict), refuses any connection off this computer and throws. Under Bun it
-// also runs a proxy of its own on 127.0.0.1 and points the proxy environment at it, so Bun.fetch, a fetch captured
-// before the guard was installed, node:http and a Worker's fetch are refused too, and it preloads its wraps in Workers
-// started through the global `Worker` or the `node:worker_threads` module object. Node needs no such proxy: its fetch,
-// node:http and WebSocket all connect through net, which the socket wrap decides. Node has no preload either, so a
-// Node worker is guarded when its entry imports `backstop-worker.ts` first, as the brain's reader does. The variables
-// that ask for strict mode (ENVIRONMENT) are read only from a source checkout, never in a release build or the desktop
-// app, and never where the environment turns Vector Local on (`strictFromEnvironment`): the agent can set them for a
-// nested `vector`, and they would loosen it.
+// also runs a proxy of its own on 127.0.0.1 and points the proxy environment at it for every name but loopback's
+// (`127.0.0.1`, `localhost`, `[::1]` go direct), so Bun.fetch, a fetch captured before the guard was installed,
+// node:http and a Worker's fetch are refused too, and it preloads its wraps in Workers started through the global
+// `Worker` or the `node:worker_threads` module object. Node needs no such proxy: its fetch, node:http and WebSocket
+// all connect through net, which the socket wrap decides. Node has no preload either, so a Node worker is guarded
+// when its entry imports `backstop-worker.ts` first, as the brain's reader does. The variables that ask for strict
+// mode (ENVIRONMENT) are read only from a source checkout, never in a release build or the desktop app, and never
+// where the environment turns Vector Local on (`strictFromEnvironment`): the agent can set them for a nested `vector`,
+// and they would loosen it.
 //
 // Neither mode covers:
 // - UDP and DNS lookups themselves, and the connections of child processes (the programs the agent runs make their
@@ -630,7 +631,9 @@ export function installStrict(options: StrictOptions = {}): Handle {
     ...(ownProxy && {
       [ENVIRONMENT.proxy]: ownProxy,
       ...Object.fromEntries(PROXY_VARIABLES.map((key) => [key, ownProxy])),
-      ...Object.fromEntries(NO_PROXY_VARIABLES.map((key) => [key, ""])),
+      // This computer's own names go direct, so a request to a server here fails or answers as it would without the
+      // guard: through a proxy a refused connection reads as the proxy's 502, and a connection is not the caller's own.
+      ...Object.fromEntries(NO_PROXY_VARIABLES.map((key) => [key, LOOPBACK.join(",")])),
     }),
   }
   // A Worker writes its own copy too, for the programs it starts; under Bun its own fetch already reads the proxy
@@ -714,14 +717,17 @@ export function redirectTarget(response: Response, from: URL) {
   return next
 }
 
-/** The first hop of a fetch call, as `redirectHop` reads it. */
-export function firstHop(input: Parameters<Fetch>[0], init: FetchInit | undefined): Hop {
+/**
+ * The first hop of a fetch call, as `redirectHop` reads it. `body`, when given, is the body the hop carries instead of
+ * the call's own, which is then not read.
+ */
+export function firstHop(input: Parameters<Fetch>[0], init: FetchInit | undefined, body?: BodyInit | null): Hop {
   const request = input instanceof Request ? input : undefined
   return {
     ...init,
-    method: init?.method ?? request?.method ?? "GET",
+    method: methodOf(input, init),
     headers: new Headers(init?.headers ?? request?.headers),
-    body: init?.body ?? request?.body ?? null,
+    body: body !== undefined ? body : (init?.body ?? request?.body ?? null),
     signal: init?.signal ?? request?.signal,
     redirect: "manual",
   }
@@ -729,12 +735,19 @@ export function firstHop(input: Parameters<Fetch>[0], init: FetchInit | undefine
 
 /**
  * The first hop of a fetch call that follows redirects. A Request's own body is a stream the first send reads, so a
- * copy of it is kept, which a 307 or 308 resends as fetch would.
+ * copy of it is kept, which a 307 or 308 resends as fetch would. The Request is cloned before anything reads its body:
+ * Bun 1.3 sends an empty body for a Request whose `body` was read before it was cloned, once the Request carries Bun's
+ * own `timeout` option, as the SDK's requests do.
  */
 export async function followedHop(input: Parameters<Fetch>[0], init: FetchInit | undefined): Promise<Hop> {
-  const hop = firstHop(input, init)
-  if (!(input instanceof Request) || init?.body != null || input.body === null) return hop
-  return { ...hop, body: await input.clone().blob() }
+  if (!(input instanceof Request) || init?.body != null) return firstHop(input, init)
+  const copy = input.clone()
+  return firstHop(input, init, copy.body === null ? null : await copy.blob())
+}
+
+/** A fetch call's method, read without touching its body. */
+function methodOf(input: Parameters<Fetch>[0], init: FetchInit | undefined) {
+  return init?.method ?? (input instanceof Request ? input.method : "GET")
 }
 
 type Wrap = {
@@ -831,7 +844,7 @@ function wrap(input: Wrap): Handle {
         input.judge({ kind: "fetch", host: `${url.protocol}//${url.host}`, url: `${url.protocol}//${url.host}` })
           .blocked ?? new EgressBlocked(url.protocol, "fetch"),
       )
-    const checked = decide(url, init, firstHop(target, init).method)
+    const checked = decide(url, init, methodOf(target, init))
     if (checked.blocked) return Promise.reject(checked.blocked)
     const mode = init?.redirect ?? (target instanceof Request ? target.redirect : "follow")
     return resolved(checked.attempt, checked.judged.within).then(async (outside) => {
