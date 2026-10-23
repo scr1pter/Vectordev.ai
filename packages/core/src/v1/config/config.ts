@@ -208,7 +208,7 @@ export const Info = Schema.Struct({
   }),
   research: Schema.optional(ConfigResearchV1.Info).annotate({
     description:
-      "Deep research (in development): where research searches go (a SearXNG server for now), when the build agent may research as a tool, what one run may spend and read, the sites it prefers or avoids, and robots.txt. depth, browser_search and retain_days do not apply yet. Read from your user config; a repository's config may only add sites to avoid and turn the research tool down.",
+      "Deep research (in development): where research searches go (a SearXNG server, or Exa or Parallel on your own key), when the build agent may research as a tool, what one run may spend and read, the sites it prefers or avoids, and robots.txt. depth, browser_search and retain_days do not apply yet. Read from your user config; a repository's config may only add sites to avoid and turn the research tool down.",
   }),
   experimental: Schema.optional(
     Schema.Struct({
