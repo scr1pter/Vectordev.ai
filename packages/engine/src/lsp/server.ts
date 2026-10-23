@@ -15,18 +15,25 @@ import { spawn } from "./launch"
 import { Npm } from "@vectordevai/core/npm"
 import type { RuntimeFlags } from "@/effect/runtime-flags"
 import { Egress } from "@vectordevai/core/local-mode/egress"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 
-function noDownload(flags: RuntimeFlags.Info) {
-  return flags.disableLspDownload || localBlocked()
+const NPM_REGISTRY = "https://registry.npmjs.org/"
+
+function noDownload(flags: RuntimeFlags.Info, reaches = NPM_REGISTRY) {
+  return flags.disableLspDownload || localBlocked(reaches)
 }
 
-// Vector Local implies VECTOR_DISABLE_LSP_DOWNLOAD, Npm.which included: a language server is installed (npm, go
-// install, gem install, a download) only when the user allowed the lsp-install source, since installing one reaches
-// registries on the internet. A download that runs is decided and logged as lsp-install; Vector does not see the
-// package managers' own connections, so with Vector Local on only an allowed source starts them.
-function localBlocked() {
+// With Vector Local on, a language server is installed (go install, gem install, dotnet tool install, npm, a download)
+// only when Vector Local lets lsp-install reach the registry the installer uses (`reaches`): the user allowed the source
+// for it, or it is on this computer or on the list, and Web access None comes first. A download that runs is decided
+// and logged again as lsp-install; Vector does not see the package managers' own connections, so they start only when
+// allowed. A server installed from npm earlier is used as it is (Npm.whichAs).
+function localBlocked(reaches = NPM_REGISTRY) {
   const policy = Egress.policy()
-  return policy.enabled && !policy.allow.some((entry) => entry.source === "lsp-install")
+  return (
+    policy.enabled &&
+    LocalPolicy.decide(policy, { purpose: "lsp-install", url: reaches, source: "lsp-install" }).decision !== "allow"
+  )
 }
 
 // A language server download, decided and logged as lsp-install while Vector Local is on.
@@ -154,8 +161,7 @@ export const Typescript: Info = {
   async spawn(root, ctx) {
     const tsserver = Module.resolve("typescript/lib/tsserver.js", ctx.directory)
     if (!tsserver) return
-    if (localBlocked()) return
-    const bin = await Npm.which("typescript-language-server")
+    const bin = await Npm.whichAs("lsp-install", "typescript-language-server")
     if (!bin) return
     const proc = spawn(bin, ["--stdio"], {
       cwd: root,
@@ -182,8 +188,8 @@ export const Vue: Info = {
     let binary = which("vue-language-server")
     const args: string[] = []
     if (!binary) {
-      if (noDownload(flags)) return
-      const resolved = await Npm.which("@vue/language-server")
+      if (flags.disableLspDownload) return
+      const resolved = await Npm.whichAs("lsp-install", "@vue/language-server")
       if (!resolved) return
       binary = resolved
     }
@@ -212,7 +218,8 @@ export const ESLint: Info = {
     if (!eslint) return
     const serverPath = path.join(Global.Path.bin, "vscode-eslint", "server", "out", "eslintServer.js")
     if (!(await Filesystem.exists(serverPath))) {
-      if (noDownload(flags)) return
+      // The download, then npm install for its dependencies.
+      if (noDownload(flags, "https://github.com/") || localBlocked()) return
       const response = await labelled("https://github.com/microsoft/vscode-eslint/archive/refs/heads/main.zip")
       if (!response.ok) return
 
@@ -378,8 +385,7 @@ export const Biome: Info = {
     if (!bin) {
       const resolved = Module.resolve("biome", root)
       if (!resolved) return
-      if (localBlocked()) return
-      bin = await Npm.which("biome")
+      bin = await Npm.whichAs("lsp-install", "biome")
       if (!bin) return
       args = ["lsp-proxy", "--stdio"]
     }
@@ -409,7 +415,7 @@ export const Gopls: Info = {
     let bin = which("gopls")
     if (!bin) {
       if (!which("go")) return
-      if (noDownload(flags)) return
+      if (noDownload(flags, "https://proxy.golang.org/")) return
 
       const proc = Process.spawn(["go", "install", "golang.org/x/tools/gopls@latest"], {
         env: untrustedChildEnvironment(process.env, { GOBIN: Global.Path.bin }),
@@ -444,7 +450,7 @@ export const Rubocop: Info = {
       if (!ruby || !gem) {
         return
       }
-      if (noDownload(flags)) return
+      if (noDownload(flags, "https://rubygems.org/")) return
       const proc = Process.spawn(["gem", "install", "rubocop", "--bindir", Global.Path.bin], {
         env: untrustedChildEnvironment(),
         exactEnv: true,
@@ -535,8 +541,8 @@ export const Pyright: Info = {
     let binary = which("pyright-langserver")
     const args = []
     if (!binary) {
-      if (noDownload(flags)) return
-      const resolved = await Npm.which("pyright", "pyright-langserver")
+      if (flags.disableLspDownload) return
+      const resolved = await Npm.whichAs("lsp-install", "pyright", "pyright-langserver")
       if (!resolved) return
       binary = resolved
     }
@@ -592,7 +598,7 @@ export const ElixirLS: Info = {
           return
         }
 
-        if (noDownload(flags)) return
+        if (noDownload(flags, "https://github.com/")) return
 
         const response = await labelled("https://github.com/elixir-lsp/elixir-ls/archive/refs/heads/master.zip")
         if (!response.ok) return
@@ -640,7 +646,7 @@ export const Zls: Info = {
         return
       }
 
-      if (noDownload(flags)) return
+      if (noDownload(flags, "https://api.github.com/")) return
 
       const releaseResponse = await labelled("https://api.github.com/repos/zigtools/zls/releases/latest")
       if (!releaseResponse.ok) {
@@ -734,7 +740,7 @@ export const CSharp: Info = {
   root: NearestRoot([".slnx", ".sln", ".csproj", "global.json"]),
   extensions: [".cs", ".csx"],
   async spawn(root, _ctx, flags) {
-    const bin = await getRoslynLanguageServer(noDownload(flags))
+    const bin = await getRoslynLanguageServer(noDownload(flags, "https://api.nuget.org/"))
     if (!bin) return
 
     return {
@@ -750,7 +756,7 @@ export const Razor: Info = {
   root: NearestRoot([".slnx", ".sln", ".csproj", "global.json"]),
   extensions: [".razor", ".cshtml"],
   async spawn(root, _ctx, flags) {
-    const bin = await getRoslynLanguageServer(noDownload(flags))
+    const bin = await getRoslynLanguageServer(noDownload(flags, "https://api.nuget.org/"))
     if (!bin) return
 
     const razor = await findVscodeRazorExtension()
@@ -878,7 +884,7 @@ export const FSharp: Info = {
         return
       }
 
-      if (noDownload(flags)) return
+      if (noDownload(flags, "https://api.nuget.org/")) return
       const proc = Process.spawn(["dotnet", "tool", "install", "fsautocomplete", "--tool-path", Global.Path.bin], {
         env: untrustedChildEnvironment(),
         exactEnv: true,
@@ -1020,7 +1026,7 @@ export const Clangd: Info = {
       }
     }
 
-    if (noDownload(flags)) return
+    if (noDownload(flags, "https://api.github.com/")) return
 
     const releaseResponse = await labelled("https://api.github.com/repos/clangd/clangd/releases/latest")
     if (!releaseResponse.ok) {
@@ -1123,8 +1129,8 @@ export const Svelte: Info = {
     let binary = which("svelteserver")
     const args: string[] = []
     if (!binary) {
-      if (noDownload(flags)) return
-      const resolved = await Npm.which("svelte-language-server")
+      if (flags.disableLspDownload) return
+      const resolved = await Npm.whichAs("lsp-install", "svelte-language-server")
       if (!resolved) return
       binary = resolved
     }
@@ -1156,8 +1162,8 @@ export const Astro: Info = {
     let binary = which("astro-ls")
     const args: string[] = []
     if (!binary) {
-      if (noDownload(flags)) return
-      const resolved = await Npm.which("@astrojs/language-server")
+      if (flags.disableLspDownload) return
+      const resolved = await Npm.whichAs("lsp-install", "@astrojs/language-server")
       if (!resolved) return
       binary = resolved
     }
@@ -1250,7 +1256,7 @@ export const JDTLS: Info = {
     const launcherDir = path.join(distPath, "plugins")
     const installed = await pathExists(launcherDir)
     if (!installed) {
-      if (noDownload(flags)) return
+      if (noDownload(flags, "https://www.eclipse.org/")) return
       await fs.mkdir(distPath, { recursive: true })
       const releaseURL =
         "https://www.eclipse.org/downloads/download.php?file=/jdtls/snapshots/jdt-language-server-latest.tar.gz"
@@ -1341,7 +1347,7 @@ export const KotlinLS: Info = {
       process.platform === "win32" ? path.join(distPath, "kotlin-lsp.cmd") : path.join(distPath, "kotlin-lsp.sh")
     const installed = await Filesystem.exists(launcherScript)
     if (!installed) {
-      if (noDownload(flags)) return
+      if (noDownload(flags, "https://api.github.com/")) return
 
       const releaseResponse = await labelled("https://api.github.com/repos/Kotlin/kotlin-lsp/releases/latest")
       if (!releaseResponse.ok) {
@@ -1415,8 +1421,8 @@ export const YamlLS: Info = {
     let binary = which("yaml-language-server")
     const args: string[] = []
     if (!binary) {
-      if (noDownload(flags)) return
-      const resolved = await Npm.which("yaml-language-server")
+      if (flags.disableLspDownload) return
+      const resolved = await Npm.whichAs("lsp-install", "yaml-language-server")
       if (!resolved) return
       binary = resolved
     }
@@ -1449,7 +1455,7 @@ export const LuaLS: Info = {
     let bin = which("lua-language-server")
 
     if (!bin) {
-      if (noDownload(flags)) return
+      if (noDownload(flags, "https://api.github.com/")) return
 
       const releaseResponse = await labelled("https://api.github.com/repos/LuaLS/lua-language-server/releases/latest")
       if (!releaseResponse.ok) {
@@ -1569,8 +1575,8 @@ export const PHPIntelephense: Info = {
     let binary = which("intelephense")
     const args: string[] = []
     if (!binary) {
-      if (noDownload(flags)) return
-      const resolved = await Npm.which("intelephense")
+      if (flags.disableLspDownload) return
+      const resolved = await Npm.whichAs("lsp-install", "intelephense")
       if (!resolved) return
       binary = resolved
     }
@@ -1650,8 +1656,8 @@ export const BashLS: Info = {
     let binary = which("bash-language-server")
     const args: string[] = []
     if (!binary) {
-      if (noDownload(flags)) return
-      const resolved = await Npm.which("bash-language-server")
+      if (flags.disableLspDownload) return
+      const resolved = await Npm.whichAs("lsp-install", "bash-language-server")
       if (!resolved) return
       binary = resolved
     }
@@ -1676,7 +1682,7 @@ export const TerraformLS: Info = {
     let bin = which("terraform-ls")
 
     if (!bin) {
-      if (noDownload(flags)) return
+      if (noDownload(flags, "https://api.releases.hashicorp.com/")) return
 
       const releaseResponse = await labelled("https://api.releases.hashicorp.com/v1/releases/terraform-ls/latest")
       if (!releaseResponse.ok) {
@@ -1749,7 +1755,7 @@ export const TexLab: Info = {
     let bin = which("texlab")
 
     if (!bin) {
-      if (noDownload(flags)) return
+      if (noDownload(flags, "https://api.github.com/")) return
 
       const response = await labelled("https://api.github.com/repos/latex-lsp/texlab/releases/latest")
       if (!response.ok) {
@@ -1828,8 +1834,8 @@ export const DockerfileLS: Info = {
     let binary = which("docker-langserver")
     const args: string[] = []
     if (!binary) {
-      if (noDownload(flags)) return
-      const resolved = await Npm.which("dockerfile-language-server-nodejs")
+      if (flags.disableLspDownload) return
+      const resolved = await Npm.whichAs("lsp-install", "dockerfile-language-server-nodejs")
       if (!resolved) return
       binary = resolved
     }
@@ -1921,7 +1927,7 @@ export const Tinymist: Info = {
     let bin = which("tinymist")
 
     if (!bin) {
-      if (noDownload(flags)) return
+      if (noDownload(flags, "https://api.github.com/")) return
 
       const response = await labelled("https://api.github.com/repos/Myriad-Dreamin/tinymist/releases/latest")
       if (!response.ok) {

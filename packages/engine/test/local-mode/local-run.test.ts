@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { rmSync, writeFileSync } from "node:fs"
+import { chmod, mkdtemp, rm } from "node:fs/promises"
+import os from "node:os"
 import path from "path"
 import { Cause, DateTime, Effect, Exit, Fiber, Layer } from "effect"
 import { ConfigV1 } from "@vectordevai/core/v1/config/config"
@@ -31,6 +33,7 @@ import { AbsolutePath } from "@vectordevai/core/schema"
 import { httpClient } from "@vectordevai/core/effect/app-node-platform"
 import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 import { LSP } from "@/lsp/lsp"
+import { Gopls } from "@/lsp/server"
 import { MCP } from "../../src/mcp"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Question } from "@/question"
@@ -1408,6 +1411,37 @@ describe("the agent's own actions under Vector Local", () => {
       expect(guard.outside()).toEqual([])
     }),
   )
+})
+
+describe("Vector's own installs under Vector Local", () => {
+  test("a language server installer starts only when Vector Local lets it reach its registry, Web access None first", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "vector-lsp-local-"))
+    const ran = path.join(dir, "ran.txt")
+    // A `go` that only notes it ran, as the only program on PATH, so no real installer can start.
+    await Bun.write(path.join(dir, "bin", "go"), `#!/bin/sh\necho "$@" >> "${ran}"\nexit 1\n`)
+    await chmod(path.join(dir, "bin", "go"), 0o755)
+    const flags = await Effect.runPromise(RuntimeFlags.Service.pipe(Effect.provide(RuntimeFlags.layer())))
+    const allowed = { source: "lsp-install", reason: "Code intelligence", added_at: 1, added_by: "app" as const }
+    const PATH = process.env.PATH
+    process.env.PATH = path.join(dir, "bin")
+    try {
+      // Allowed, but Web access None reaches no internet registry: nothing starts.
+      Egress.configure(LocalPolicy.resolve({ global: { enabled: true, web: "none", allow: [allowed] } }))
+      expect(await Gopls.spawn(dir, {} as never, flags)).toBeUndefined()
+      expect(await Bun.file(ran).exists()).toBe(false)
+      // Not allowed: nothing starts either.
+      Egress.configure(LocalPolicy.resolve({ global: { enabled: true } }))
+      expect(await Gopls.spawn(dir, {} as never, flags)).toBeUndefined()
+      expect(await Bun.file(ran).exists()).toBe(false)
+      // Allowed with Web access Ask: the installer runs.
+      Egress.configure(LocalPolicy.resolve({ global: { enabled: true, allow: [allowed] } }))
+      await Gopls.spawn(dir, {} as never, flags)
+      expect(await Bun.file(ran).text()).toContain("install golang.org/x/tools/gopls@latest")
+    } finally {
+      process.env.PATH = PATH
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
 })
 
 describe("Vector's own services under Vector Local", () => {

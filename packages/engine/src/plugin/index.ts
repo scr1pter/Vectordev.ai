@@ -33,9 +33,6 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { protectPluginOAuth } from "./oauth"
 import { InstallationChannel } from "@vectordevai/core/installation/version"
-import { Egress } from "@vectordevai/core/local-mode/egress"
-import { EgressAttribution } from "@vectordevai/core/local-mode/attribution"
-import { EgressGuard } from "@vectordevai/core/local-mode/guard"
 
 type State = {
   hooks: Hooks[]
@@ -72,8 +69,6 @@ export function webSocketTransport(input: { enabled: boolean; disabled: boolean;
     apiKey: input.enabled || ["local", "dev", "beta"].includes(input.channel ?? InstallationChannel),
   }
 }
-
-const NPM_REGISTRY = "https://registry.npmjs.org/"
 
 // Built-in plugins that are directly imported (not installed from npm)
 function internalPlugins(flags: RuntimeFlags.Info, bridge: EffectBridge.Shape): PluginInstance[] {
@@ -209,59 +204,41 @@ const layer = Layer.effect(
         const plugins = flags.pure ? [] : (cfg.plugin_origins ?? [])
         if (flags.pure && cfg.plugin_origins?.length) {
         }
-        // With Vector Local on, installing an npm plugin is a download the user decides (npm-plugins): one they allowed
-        // reaches the registry, and otherwise only plugins installed earlier load, since the backstop guard refuses
-        // the registry.
-        const npm =
-          plugins.length > 0 && Egress.policy().enabled
-            ? Egress.decide({ source: "npm-plugins", url: NPM_REGISTRY })
-            : undefined
-        const granted = <T>(load: () => Promise<T>) =>
-          npm?.decision === "allow"
-            ? EgressAttribution.granted(
-                {
-                  source: "npm-plugins",
-                  purpose: npm.purpose,
-                  grants: EgressGuard.destinations(new URL(NPM_REGISTRY)),
-                },
-                load,
-              )
-            : load()
+        // With Vector Local on, installing an npm plugin is a download the user decides (npm-plugins, Npm.addAs): a
+        // plugin installed earlier loads, and a missing one installs only when allowed. Only the install runs within
+        // the grant to the registry; the plugin's own code never does.
         const loaded = yield* Effect.promise(() =>
-          granted(() =>
-            PluginLoader.loadExternal({
-              items: plugins,
-              kind: "server",
-              report: {
-                start(candidate) {},
-                missing(candidate, _retry, message) {},
-                error(candidate, _retry, stage, error, resolved) {
-                  const spec = candidate.plan.spec
-                  const cause = error instanceof Error ? (error.cause ?? error) : error
-                  const message = stage === "load" ? errorMessage(error) : errorMessage(cause)
+          PluginLoader.loadExternal({
+            items: plugins,
+            kind: "server",
+            report: {
+              start(candidate) {},
+              missing(candidate, _retry, message) {},
+              error(candidate, _retry, stage, error, resolved) {
+                const spec = candidate.plan.spec
+                const cause = error instanceof Error ? (error.cause ?? error) : error
+                const message = stage === "load" ? errorMessage(error) : errorMessage(cause)
 
-                  if (stage === "install") {
-                    const parsed = parsePluginSpecifier(spec)
-                    const local = npm && npm.decision !== "allow" ? ` ${npm.reason}` : ""
-                    publishPluginError(`Failed to install plugin ${parsed.pkg}@${parsed.version}: ${message}${local}`)
-                    return
-                  }
+                if (stage === "install") {
+                  const parsed = parsePluginSpecifier(spec)
+                  publishPluginError(`Failed to install plugin ${parsed.pkg}@${parsed.version}: ${message}`)
+                  return
+                }
 
-                  if (stage === "compatibility") {
-                    publishPluginError(`Plugin ${spec} skipped: ${message}`)
-                    return
-                  }
+                if (stage === "compatibility") {
+                  publishPluginError(`Plugin ${spec} skipped: ${message}`)
+                  return
+                }
 
-                  if (stage === "entry") {
-                    publishPluginError(`Failed to load plugin ${spec}: ${message}`)
-                    return
-                  }
-
+                if (stage === "entry") {
                   publishPluginError(`Failed to load plugin ${spec}: ${message}`)
-                },
+                  return
+                }
+
+                publishPluginError(`Failed to load plugin ${spec}: ${message}`)
               },
-            }),
-          ),
+            },
+          }),
         )
         for (const load of loaded) {
           if (!load) continue

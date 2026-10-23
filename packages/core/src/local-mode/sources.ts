@@ -457,7 +457,7 @@ export const SOURCES: readonly Source[] = [
     why: "Installs language servers for code intelligence",
     local: "ask-once",
     where: ["engine"],
-    callSites: ["packages/engine/src/lsp/server.ts"],
+    callSites: ["packages/engine/src/lsp/server.ts", "packages/core/src/npm.ts"],
   },
   {
     id: "npm-plugins",
@@ -467,7 +467,7 @@ export const SOURCES: readonly Source[] = [
     why: "Installs plugins and provider packages you configured",
     local: "ask-once",
     where: ["engine"],
-    callSites: ["packages/core/src/npm.ts", "packages/engine/src/plugin/index.ts"],
+    callSites: ["packages/core/src/npm.ts"],
   },
   {
     id: "remote-config",

@@ -88,8 +88,6 @@ import { ResponseTerminal } from "./response-terminal"
 import { ModelSlots } from "@vectordevai/core/local-mode/model-slots"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import { Egress } from "@vectordevai/core/local-mode/egress"
-import { EgressAttribution } from "@vectordevai/core/local-mode/attribution"
-import { EgressGuard } from "@vectordevai/core/local-mode/guard"
 import { OllamaServer } from "@vectordevai/core/local-mode/servers/ollama"
 import { LocalSources } from "@vectordevai/core/local-mode/sources"
 import { LocalProbe } from "@vectordevai/core/local-mode/probe"
@@ -404,24 +402,6 @@ function preconnectOrigin(origin: string, envs: Record<string, string | undefine
   // client without resolving, connecting or sending anything.
   void fetch(origin, { signal: AbortSignal.abort() }).catch(() => undefined)
   fetch.preconnect(origin)
-}
-
-const NPM_REGISTRY = "https://registry.npmjs.org/"
-
-// A provider package from npm. With Vector Local on, the download is decided as one of the npm packages the config
-// names (npm-plugins): one the user allowed reaches the registry, and otherwise only a package installed earlier
-// loads, since the backstop guard refuses the registry, and the error says why.
-async function installProviderPackage(pkg: string) {
-  if (!Egress.policy().enabled) return Npm.add(pkg)
-  const decided = Egress.decide({ source: "npm-plugins", url: NPM_REGISTRY })
-  if (decided.decision === "allow")
-    return EgressAttribution.granted(
-      { source: "npm-plugins", purpose: decided.purpose, grants: EgressGuard.destinations(new URL(NPM_REGISTRY)) },
-      () => Npm.add(pkg),
-    )
-  return Npm.add(pkg).catch((cause: unknown) => {
-    throw new Error(`Vector Local did not install the provider package ${pkg}. ${decided.reason}`, { cause })
-  })
 }
 
 function googleVertexAnthropicBaseURL(project: string | undefined, location: string | undefined) {
@@ -2628,7 +2608,9 @@ const layer = Layer.effect(
           if (model.api.npm.startsWith("file://")) {
             return model.api.npm
           }
-          const item = await installProviderPackage(model.api.npm)
+          // Under Vector Local, a package the config names (npm-plugins): a copy installed earlier loads, and a missing
+          // one installs only when allowed, and the error says why.
+          const item = await Npm.addAs("npm-plugins", model.api.npm)
           if (!item.entrypoint) throw new Error(`Package ${model.api.npm} has no import entrypoint`)
           return item.entrypoint
         })()

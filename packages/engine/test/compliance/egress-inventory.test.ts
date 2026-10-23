@@ -54,8 +54,6 @@ const DECIDED_ELSEWHERE: Readonly<Record<string, string>> = {
     "Sends through the HTTP client LayerNodePlatform.requestExecutor gives it, which decides each request as a model call (EgressHttpClient.models).",
   "packages/core/src/plugin/provider/google-vertex.ts":
     "A V2 route's model calls are refused before the route is built (SessionRunnerModel.allowedInLocal); a V1 call goes through provider.ts's fetch first.",
-  "packages/core/src/npm.ts":
-    "Installs what its callers decided: plugin/index.ts and provider.ts (npm-plugins), and lsp/server.ts, which installs nothing under Vector Local (lsp-install).",
   "packages/engine/src/tool/mcp-websearch.ts":
     "Sends with the client tool/websearch.ts labels with the provider's source.",
   "packages/engine/src/git/index.ts":

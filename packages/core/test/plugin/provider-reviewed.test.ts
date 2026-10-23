@@ -72,8 +72,10 @@ for (const entry of [
           Npm.Service,
           Npm.Service.of({
             add: () => Effect.die("A reviewed provider must never install at runtime"),
+            addAs: () => Effect.die("A reviewed provider must never install at runtime"),
             install: () => Effect.die("A reviewed provider must never install at runtime"),
             which: () => Effect.succeed(undefined),
+            whichAs: () => Effect.succeed(undefined),
           }),
         ),
       )

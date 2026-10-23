@@ -217,7 +217,8 @@ export async function resolvePluginTarget(spec: string, options?: { unpinned?: b
   const hit = parse(spec)
   if (!options?.unpinned && !isPinnedPluginSpecifier(spec))
     throw new Error(`Plugin package ${spec} must use an exact version, such as ${hit?.name ?? spec}@1.2.3`)
-  const result = await Npm.add(hit?.name && hit.raw === hit.name ? `${hit.name}@latest` : spec)
+  // Under Vector Local only this install step runs within the grant to the registry (Npm.addAs), never the plugin.
+  const result = await Npm.addAs("npm-plugins", hit?.name && hit.raw === hit.name ? `${hit.name}@latest` : spec)
   return result.directory
 }
 
