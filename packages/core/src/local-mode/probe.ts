@@ -9,6 +9,7 @@ import { Egress } from "./egress"
 import { EgressAttribution } from "./attribution"
 import { EgressGuard } from "./guard"
 import { LocalErrors } from "./errors"
+import { ModelSlots } from "./model-slots"
 import { LocalPolicy } from "./policy"
 import { LlamaCppServer } from "./servers/llamacpp"
 import { LMStudioServer } from "./servers/lmstudio"
@@ -177,11 +178,16 @@ export function output(context: number) {
 
 /**
  * The registry source a server's answers about itself are read as: with Vector Local on they reach this computer and
- * the servers on the list, and a server elsewhere once the user lists it or allows the source.
+ * the servers on the list, and a server elsewhere once the user lists it or allows the source. A typed address on the
+ * user's network is therefore refused before it is listed: Add server (L6) must let its own probe of the typed origin
+ * through (a grant scoped to that origin, since `Egress.grant` counts requests per source and a probe makes several),
+ * then list the server and record its pin.
  */
 export const SERVER_CHECK = "local-server-check"
 
-function reader(root: string, options: Options & { readonly timeout: number }): Read {
+// `answered` is set once any read gets an answer, whatever its status, so a caller can tell a server that is down
+// from one that is not of the kind it asked.
+function reader(root: string, options: Options & { readonly timeout: number }, answered?: { any: boolean }): Read {
   return async (path, body) => {
     const response = await Egress.fetch(SERVER_CHECK, `${root}${path}`, {
       method: body === undefined ? "GET" : "POST",
@@ -195,6 +201,7 @@ function reader(root: string, options: Options & { readonly timeout: number }): 
       signal: signal(options.signal, options.timeout),
     }).catch(() => undefined)
     if (!response) return undefined
+    if (answered) answered.any = true
     if (!response.ok) {
       await response.body?.cancel().catch(() => undefined)
       return undefined
@@ -350,27 +357,75 @@ export interface Holds {
   /** Throws IdentityChanged while the server at `url` is held. Model requests call this before they are sent. */
   readonly gate: (url: string | URL) => void
   /**
-   * Reads the listed server `url` goes to again and compares it with its pin in `policy` (`verify`): before its first
-   * model call in this process, and again once the policy or the pin changes. Model requests wait for this before they
-   * are sent. A server that answers as a different one is held; one that does not answer is left to its request. A
-   * server with no pin, or one not on the list, is not read. Requests to one server share one check.
+   * Reads the listed server `url` goes to, and model requests wait for this before they are sent. A pinned server is
+   * compared with its pin in `policy` (`verify`) and held when it answers as a different one. Any listed server that
+   * answers as Ollama says which of its models run somewhere else (`forwards`), pinned or not: a server a company lists
+   * has no pin. It is read before its first model call in this process, again once the policy or the pin changes,
+   * again when a call names one of `models` the server did not list when it was read (once for each model under a
+   * policy), and again after a read or a model call found nothing answering (`recheck`), since another server may take
+   * the port. A server not on the list, or with Vector Local off, is not read. Requests to one server share one read.
    */
-  readonly check: (url: string | URL, policy: LocalMode.Policy) => Promise<void>
+  readonly check: (url: string | URL, policy: LocalMode.Policy, models?: readonly string[]) => Promise<void>
+  /** Reads the server at `url` again before its next model call: a model call to it found nothing answering. */
+  readonly recheck: (url: string | URL) => void
   /**
    * Whether the server at `url`, when it was checked, said `model` runs somewhere else: an Ollama cloud model, which
    * /api/show gives remote fields for whatever its name.
    */
   readonly forwards: (url: string | URL, model: string) => boolean
+  /**
+   * Whether a model call to `url` naming `models` (the model's own name, and the one its request body sends) reaches
+   * a model the server passes on to another service: an Ollama cloud model, told by its name or by what the server
+   * said when it was checked. Only a model server someone hosts passes models on (ModelSlots.server); a cloud API's
+   * model names say nothing here.
+   */
+  readonly passesOn: (url: string | URL, models: readonly string[], policy: LocalMode.Policy) => boolean
+  /**
+   * How many times a check learned something new about which models a server passes on, so a model list built before
+   * it can be built again.
+   */
+  readonly revision: () => number
 }
 
 export class HoldsService extends Context.Service<HoldsService, Holds>()("@vector/LocalProbeHolds") {}
 
 export function makeHolds(options: Options = {}): Holds {
   const held = new Map<string, string>()
-  // The checks made under each policy in effect, by server and pin, so a new policy or pin checks again.
-  const checks = new WeakMap<LocalMode.Policy, Map<string, Promise<void>>>()
-  const remote = new Map<string, ReadonlySet<string>>()
+  // The reads made under each policy in effect, by server and pin, so a new policy or pin reads again, and the models
+  // calls named that a server did not list, each read again once under that policy.
+  const checks = new WeakMap<
+    LocalMode.Policy,
+    { readonly done: Map<string, Promise<void>>; readonly unlisted: Set<string> }
+  >()
+  // What each server said when it was last read: the models it lists (when Vector knows them) and those it passes on.
+  const servers = new Map<string, { readonly models?: ReadonlySet<string>; readonly remote: ReadonlySet<string> }>()
+  const stale = new Set<string>()
+  const learned = { revision: 0 }
   const key = (url: string | URL) => LocalPolicy.origin(url) ?? String(url)
+  const learn = (origin: string, models: readonly Model[] | undefined, remote: readonly string[]) => {
+    const before = servers.get(origin)?.remote ?? new Set<string>()
+    const next = new Set(remote.map(modelName))
+    if (next.size !== before.size || [...next].some((model) => !before.has(model))) learned.revision++
+    servers.set(origin, { models: models && new Set(models.map((model) => modelName(model.id))), remote: next })
+  }
+  // Whether anything answered: a pinned server's identity, or what a server with no pin says about its models.
+  const read = async (origin: string, pin: Pin | undefined) => {
+    if (pin) {
+      const verified = await verify({ origin, pin, holds, options }).catch(() => undefined)
+      if (!verified || verified.status === "unreachable") return false
+      const models = verified.server.models
+      learn(
+        origin,
+        models,
+        models.filter((model) => model.cloud).map((model) => model.id),
+      )
+      return true
+    }
+    const ollama = await ollamaModels(origin, options)
+    if (!ollama) return false
+    learn(origin, ollama.models, ollama.models?.filter((model) => model.cloud).map((model) => model.id) ?? [])
+    return true
+  }
   const holds: Holds = {
     hold: (origin, message) => {
       held.set(key(origin), message)
@@ -384,29 +439,65 @@ export function makeHolds(options: Options = {}): Holds {
       const message = held.get(origin)
       if (message) throw new IdentityChanged(origin, message)
     },
-    check: (url, policy) => {
+    check: (url, policy, models = []) => {
       const origin = key(url)
-      const pin = policy.pins?.[origin]
       const listed = LocalPolicy.decide(policy, { purpose: "inference", url: origin, source: "local-inference" })
-      if (!policy.enabled || !pin || listed.decision !== "allow") return Promise.resolve()
-      const done = checks.get(policy) ?? new Map<string, Promise<void>>()
-      checks.set(policy, done)
-      const id = `${origin} ${JSON.stringify(pin)}`
-      const running =
-        done.get(id) ??
-        verify({ origin, pin, holds, options }).then(
-          (verified) => {
-            if (verified.status === "unreachable") return
-            remote.set(origin, new Set(verified.server.models.filter((model) => model.cloud).map((model) => model.id)))
-          },
-          () => undefined,
-        )
-      done.set(id, running)
+      if (!policy.enabled || listed.decision !== "allow") return Promise.resolve()
+      const pin = policy.pins?.[origin]
+      const state = checks.get(policy) ?? { done: new Map<string, Promise<void>>(), unlisted: new Set<string>() }
+      checks.set(policy, state)
+      const id = `${origin} ${JSON.stringify(pin ?? null)}`
+      const known = servers.get(origin)?.models
+      const unseen = known
+        ? models.map(modelName).filter((model) => !known.has(model) && !state.unlisted.has(`${origin} ${model}`))
+        : []
+      unseen.forEach((model) => state.unlisted.add(`${origin} ${model}`))
+      const again = stale.has(origin) || unseen.length > 0
+      stale.delete(origin)
+      if (again) state.done.delete(id)
+      const existing = state.done.get(id)
+      if (existing) return existing
+      const running: Promise<void> = read(origin, pin).then((answered) => {
+        // Nothing answered: the next model call reads it again, whatever answers on the port by then.
+        if (!answered && state.done.get(id) === running) state.done.delete(id)
+      })
+      state.done.set(id, running)
       return running
     },
-    forwards: (url, model) => remote.get(key(url))?.has(model) === true,
+    recheck: (url) => {
+      stale.add(key(url))
+    },
+    forwards: (url, model) => servers.get(key(url))?.remote.has(modelName(model)) === true,
+    passesOn: (url, models, policy) =>
+      ModelSlots.server(url, policy) !== undefined &&
+      models.some((model) => OllamaServer.cloud({ name: model }) || holds.forwards(url, model)),
+    revision: () => learned.revision,
   }
   return holds
+}
+
+// A model's name as Ollama resolves it, so a call that leaves out the tag or changes the case still names the model
+// the server listed: a name with no tag is `:latest`. Any other server's names are compared the same way.
+function modelName(model: string) {
+  const name = model.trim().toLowerCase()
+  return /:[^/]*$/.test(name) ? name : `${name}:latest`
+}
+
+// What a listed server with no pin says about its models: an Ollama server's models, each marked when it runs
+// somewhere else; no models for a server of another kind, which passes none on by name; or undefined when nothing
+// answered. An Ollama server that lists no models answered only in part, or has none to call, so it counts as not
+// answering.
+async function ollamaModels(origin: string, options: Options) {
+  const timeout =
+    options.timeout ??
+    (LocalPolicy.loopback(new URL(origin).hostname) ? IDENTIFY_TIMEOUT.loopback : IDENTIFY_TIMEOUT.remote)
+  const answered = { any: false }
+  const identified = await reader(origin, { ...options, timeout }, answered)(OllamaServer.identify)
+  if (!answered.any) return undefined
+  if (!OllamaServer.matches(identified)) return { models: undefined }
+  const inspection = await OllamaServer.inspect(reader(origin, { ...options, timeout: INSPECT_TIMEOUT }), identified)
+  if (inspection.models.length === 0) return undefined
+  return { models: inspection.models }
 }
 
 export const holdsLayer = Layer.sync(HoldsService, () => HoldsService.of(makeHolds()))

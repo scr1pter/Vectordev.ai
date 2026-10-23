@@ -232,6 +232,24 @@ describe("LocalPolicy.decide matrix", () => {
         source: "cloud-inference",
       }),
     ).toMatchObject({ decision: "allow", rule: "listed" })
+    // The company listed the server, not where these go: an Ollama server's cloud models and free models stay off.
+    const servers = LocalPolicy.resolve({
+      managed: { enabled: true, endpoints: ["http://gpu-box.internal:11434", "https://openrouter.ai"] },
+    })
+    expect(
+      LocalPolicy.decide(servers, {
+        purpose: "inference",
+        url: "http://gpu-box.internal:11434/v1/chat/completions",
+        source: "ollama-cloud-models",
+      }),
+    ).toMatchObject({ decision: "block", rule: "not-allowable" })
+    expect(
+      LocalPolicy.decide(servers, {
+        purpose: "inference",
+        url: "https://openrouter.ai/api/v1",
+        source: "vector-free-models",
+      }),
+    ).toMatchObject({ decision: "block", rule: "not-allowable" })
   })
 
   test("a deny entry blocks a site in every mode, and a company list opens it in your-network mode", () => {

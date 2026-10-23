@@ -496,7 +496,7 @@ export const allowedInLocal = (model: ModelV2.Info, holds?: LocalProbe.Holds) =>
     const policy = Egress.policy()
     if (!policy.enabled) return
     const url = address(model)
-    if (holds && url) yield* Effect.promise(() => holds.check(url, policy))
+    if (holds && url) yield* Effect.promise(() => holds.check(url, policy, [model.api.id]))
     const reason = localRefusal(model, policy, holds)
     if (reason === undefined) return
     return yield* new OffInLocalError({ providerID: model.providerID, modelID: model.id, reason })
@@ -510,8 +510,9 @@ function localRefusal(model: ModelV2.Info, policy: LocalMode.Policy, holds?: Loc
   const url = address(model)
   if (!url) return OFF_IN_LOCAL.unknown
   if (
-    ModelSlots.server(url, policy) &&
-    (OllamaServer.cloud({ name: model.api.id }) || holds?.forwards(url, model.api.id))
+    holds
+      ? holds.passesOn(url, [model.api.id], policy)
+      : ModelSlots.server(url, policy) && OllamaServer.cloud({ name: model.api.id })
   )
     return OFF_IN_LOCAL.ollama
   const held = holds?.held(url)

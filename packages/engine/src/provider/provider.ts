@@ -88,7 +88,7 @@ import { ResponseTerminal } from "./response-terminal"
 import { ModelSlots } from "@vectordevai/core/local-mode/model-slots"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import { Egress } from "@vectordevai/core/local-mode/egress"
-import { OllamaServer } from "@vectordevai/core/local-mode/servers/ollama"
+import { EgressGuard } from "@vectordevai/core/local-mode/guard"
 import { LocalSources } from "@vectordevai/core/local-mode/sources"
 import { LocalProbe } from "@vectordevai/core/local-mode/probe"
 import type { LocalMode } from "@vectordevai/schema/local-mode"
@@ -200,16 +200,21 @@ function requestOrigins(
   return named && named !== sent ? [named, sent] : [sent]
 }
 
-// The registry source a model call to `target` is decided as (LocalSources): an Ollama cloud model, which the server
-// passes on to ollama.com (known by its name, or by the remote fields the server gave when it was checked), a cloud AI
-// service by its host (listed by a company or not), or a model server someone hosts, listed or not.
-function inferenceSource(model: Model, target: string, policy: LocalMode.Policy, holds: LocalProbe.Holds) {
-  if (
-    ModelSlots.server(target, policy) &&
-    (OllamaServer.cloud({ name: model.api.id }) || holds.forwards(target, model.api.id))
-  )
-    return "ollama-cloud-models"
+// The registry source a model call to `target` naming `models` is decided as (LocalSources): an Ollama cloud model,
+// which the server passes on to ollama.com (known by its name, or by the remote fields the server gave when it was
+// checked), a cloud AI service by its host (listed by a company or not), or a model server someone hosts, listed or
+// not.
+function inferenceSource(models: readonly string[], target: string, policy: LocalMode.Policy, holds: LocalProbe.Holds) {
+  if (holds.passesOn(target, models, policy)) return "ollama-cloud-models"
   return LocalSources.inference(target)
+}
+
+// The model a model call's JSON body names (`model`, as OpenAI-compatible and Ollama requests send it): model and
+// provider options can replace the one the SDK was made for.
+function bodyModel(body: unknown) {
+  if (typeof body !== "string") return undefined
+  const sent = Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(body))
+  return isRecord(sent) && typeof sent.model === "string" ? sent.model : undefined
 }
 
 // The notice for a model Vector Local keeps off, or undefined when its requests go to a model server on the list. It
@@ -235,7 +240,7 @@ function offInLocal(
   if (origins.length === 0) return notice(OFF_IN_LOCAL.unknown)
   // The first address Vector Local would not let a model call reach decides the notice.
   const refused = origins.flatMap((origin) => {
-    const source = inferenceSource(model, origin, policy, holds)
+    const source = inferenceSource([model.api.id], origin, policy, holds)
     if (source === "ollama-cloud-models") return [notice(OFF_IN_LOCAL.ollama)]
     const verdict = LocalPolicy.decide(policy, { purpose: "inference", url: origin, source })
     if (verdict.decision === "allow") return []
@@ -1473,6 +1478,8 @@ interface State {
   // decided it.
   withheld: Map<string, ProviderUnavailable>
   local: LocalMode.Policy
+  // What the server checks had learned about the models servers pass on (Holds.revision) when it was decided.
+  revision: number
   // Every provider ID configuration or a plugin names, whether or not it loaded.
   declared: Set<string>
   catalogIDs: Record<string, true>
@@ -2287,6 +2294,7 @@ const layer = Layer.effect(
           unavailable,
           withheld,
           local: policy,
+          revision: holds.revision(),
           declared: new Set([
             ...Object.keys(cfg.provider ?? {}),
             ...(cfg.disabled_providers ?? []),
@@ -2316,13 +2324,14 @@ const layer = Layer.effect(
       Stream.runForEach(() => InstanceState.invalidateAll(state)),
       Effect.forkScoped({ startImmediately: true }),
     )
-    // Which models Vector Local keeps off follows the policy in effect: state built under another one is built again on
-    // its next read. With Vector Local off before and now, nothing is compared.
+    // Which models Vector Local keeps off follows the policy in effect and what server checks learned about the models
+    // servers pass on: state built under another policy, or before a check learned that a model is passed on, is built
+    // again on its next read. With Vector Local off before and now, nothing is compared.
     const providerState = Effect.gen(function* () {
       const s = yield* InstanceState.get(state)
       const policy = Config.local()
       if (!s.local.enabled && !policy.enabled) return s
-      if (JSON.stringify(policy) === JSON.stringify(s.local)) return s
+      if (JSON.stringify(policy) === JSON.stringify(s.local) && s.revision === holds.revision()) return s
       yield* InstanceState.invalidate(state)
       return yield* InstanceState.get(state)
     })
@@ -2483,9 +2492,11 @@ const layer = Layer.effect(
             ...model.headers,
           }
 
+        // One SDK per model: its fetch below decides each call by the model it was made for.
         const key = Hash.fast(
           JSON.stringify({
             providerID: model.providerID,
+            model: model.api.id,
             npm: model.api.npm,
             options,
           }),
@@ -2550,13 +2561,17 @@ const layer = Layer.effect(
               throw new Error("Plugin OAuth approval or credential changed. Reconnect to continue.")
             opts.redirect = "error"
           }
-          // With Vector Local on, a listed server's identity is checked against its pin before its first model call
-          // (and again once the policy changes), and no model call goes to a server whose identity changed since it
-          // was added until the user confirms the server. The check also learns which of its models the server passes
-          // on, which the decision below refuses.
+          // With Vector Local on, a listed server is read before its first model call (and again once the policy
+          // changes, a call names a model it did not list, or nothing answered): a pinned one is checked against its
+          // pin, and no model call goes to a server whose identity changed since it was added until the user confirms
+          // the server. The read also learns which of its models the server passes on, which the decision below
+          // refuses by this model's name and by the one the request sends.
           const target = input instanceof Request ? input.url : String(input)
-          if (Egress.policy().enabled) {
-            await holds.check(target, Egress.policy())
+          const policy = Egress.policy()
+          const sent = policy.enabled && ModelSlots.server(target, policy) ? bodyModel(opts.body) : undefined
+          const names = sent === undefined || sent === model.api.id ? [model.api.id] : [model.api.id, sent]
+          if (policy.enabled) {
+            await holds.check(target, policy, names)
             holds.gate(target)
           }
           const chunkAbortCtl = typeof chunkTimeout === "number" && chunkTimeout > 0 ? new AbortController() : undefined
@@ -2578,7 +2593,7 @@ const layer = Layer.effect(
           // follows no redirect. With Vector Local off it goes to fetchFn as it is.
           const res = ResponseTerminal.wrap(
             await Egress.fetch(
-              Egress.policy().enabled ? inferenceSource(model, target, Egress.policy(), holds) : "local-inference",
+              policy.enabled ? inferenceSource(names, target, policy, holds) : "local-inference",
               input,
               {
                 ...opts,
@@ -2586,7 +2601,21 @@ const layer = Layer.effect(
                 timeout: false,
               },
               fetchFn,
-            ).finally(() => headerTimeoutCtl?.clear()),
+            )
+              .then(
+                (response) => {
+                  // A proxy in front of the server could not reach it (Bad Gateway): it is read again, as below.
+                  if (policy.enabled && response.status === 502) holds.recheck(target)
+                  return response
+                },
+                (error: unknown) => {
+                  // Nothing answered, so another server may take the port: it is read again before the next call.
+                  if (policy.enabled && !combined?.aborted && !(error instanceof EgressGuard.EgressBlocked))
+                    holds.recheck(target)
+                  throw error
+                },
+              )
+              .finally(() => headerTimeoutCtl?.clear()),
           )
 
           if (!chunkAbortCtl) return res
@@ -2771,8 +2800,13 @@ const layer = Layer.effect(
         origin: hosted ?? origin,
         hosted: hosted !== undefined,
         permits,
+        // A model the server said it passes on (an Ollama cloud model, whatever its name) is never a free local one.
         local: origins.every((item) =>
-          ModelSlots.local(item, { policy, model: model.api.id, forwards: provider.options["forwards"] === true }),
+          ModelSlots.local(item, {
+            policy,
+            model: model.api.id,
+            forwards: provider.options["forwards"] === true || holds.forwards(item, model.api.id),
+          }),
         ),
       }
     }

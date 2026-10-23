@@ -32,6 +32,8 @@ import { ProjectV2 } from "@vectordevai/core/project"
 import { AbsolutePath } from "@vectordevai/core/schema"
 import { httpClient } from "@vectordevai/core/effect/app-node-platform"
 import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
+import { OFF_IN_LOCAL } from "@vectordevai/schema/provider-unavailable"
+import type { LanguageModelV3 } from "@ai-sdk/provider"
 import { LSP } from "@/lsp/lsp"
 import { Gopls } from "@/lsp/server"
 import { MCP } from "../../src/mcp"
@@ -392,6 +394,180 @@ describe("the provider under Vector Local", () => {
           },
         )
       }),
+  )
+
+  // One short streamed reply, as an OpenAI-compatible server sends it.
+  const completion = () =>
+    new Response(
+      'data: {"id":"x","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+      { headers: { "content-type": "text/event-stream" } },
+    )
+  // An Ollama server with a model of its own and a copy of a cloud model, which keeps the remote fields but loses the
+  // -cloud name, behind one provider.
+  const twoModels = () =>
+    Effect.acquireRelease(
+      Effect.promise(() =>
+        LocalServers.serve("ollama", {
+          routes: {
+            "GET /api/tags": () =>
+              Response.json({
+                models: [
+                  { name: "qwen3:8b", size: 1 },
+                  { name: "mymodel:latest", size: 1 },
+                ],
+              }),
+            "POST /api/show": (_request, body) =>
+              body.includes("mymodel")
+                ? Response.json({ remote_host: "https://ollama.com:443", remote_model: "gpt-oss:120b" })
+                : Response.json({ capabilities: ["completion", "tools"] }),
+            "POST /v1/chat/completions": completion,
+          },
+        }),
+      ),
+      (fake) => Effect.promise(() => fake.close()),
+    )
+  const ollamaProvider = (origin: string) => ({
+    trusted: true,
+    config: {
+      provider: {
+        ollama: {
+          name: "Ollama",
+          npm: "@ai-sdk/openai-compatible",
+          models: { "qwen3:8b": qwen("qwen3:8b"), "mymodel:latest": qwen("mymodel:latest") },
+          options: { apiKey: "ollama", baseURL: `${origin}/v1` },
+        },
+      },
+    },
+  })
+  const stream = (language: LanguageModelV3, text: string) =>
+    Effect.promise(() =>
+      language.doStream({ prompt: [{ role: "user", content: [{ type: "text", text }] }] }).then(
+        async (result) => {
+          const reader = result.stream.getReader()
+          while (!(await reader.read()).done) {}
+          return "streamed"
+        },
+        (error: unknown) => error,
+      ),
+    )
+  // Calls the server's own model, then the cloud copy, on one provider: the copy is refused before its prompt is sent,
+  // never counts as a free local model, and once the check has learned about it the provider no longer offers it.
+  const oneProvider = (completions: () => readonly LocalServers.Hit[]) =>
+    Effect.gen(function* () {
+      const provider = yield* Provider.Service
+      const id = ProviderV2.ID.make("ollama")
+      const copy = yield* provider.getModel(id, ModelV2.ID.make("mymodel:latest"))
+      expect(
+        yield* stream(yield* provider.getLanguage(yield* provider.getModel(id, ModelV2.ID.make("qwen3:8b"))), "hi"),
+      ).toBe("streamed")
+      expect(yield* stream(yield* provider.getLanguage(copy), "secret prompt")).toBeInstanceOf(Error)
+      expect(completions().filter((hit) => hit.body.includes("secret prompt"))).toEqual([])
+      expect((yield* provider.line(copy))?.local).toBe(false)
+      const offered = yield* provider.getModel(id, ModelV2.ID.make("mymodel:latest")).pipe(Effect.flip)
+      expect(offered).toBeInstanceOf(Provider.ModelNotFoundError)
+      expect(offered).toMatchObject({
+        unavailable: { reason: "off-in-local", message: `ollama: off in Vector Local. ${OFF_IN_LOCAL.ollama}` },
+      })
+      expect(
+        Egress.events()
+          .filter((event) => event.purpose === "inference")
+          .map((event) => [event.source, event.decision]),
+      ).toEqual([
+        ["local-inference", "allow"],
+        ["ollama-cloud-models", "block"],
+      ])
+      expect(guard.outside()).toEqual([])
+    })
+
+  pinned.live("refuses the cloud copy after another model of the same provider was called first", () =>
+    Effect.gen(function* () {
+      const server = yield* twoModels()
+      const added = yield* Effect.promise(() => LocalProbe.probe(server.origin))
+      const completions = () => server.hits().filter((hit) => hit.path.endsWith("/chat/completions"))
+      yield* provideTmpdirInstance(
+        () =>
+          withLocal({ enabled: true, endpoints: [server.origin], pins: { [server.origin]: added!.pin } }, () =>
+            oneProvider(completions),
+          ),
+        ollamaProvider(server.origin),
+      )
+    }),
+  )
+
+  pinned.live("refuses the cloud copy on a server the company lists, which has no pin", () =>
+    Effect.gen(function* () {
+      const server = yield* twoModels()
+      const completions = () => server.hits().filter((hit) => hit.path.endsWith("/chat/completions"))
+      yield* provideTmpdirInstance(
+        () =>
+          withLocal(
+            { enabled: true, endpoints: [server.origin] },
+            () =>
+              Effect.gen(function* () {
+                expect(Egress.policy().pins?.[server.origin]).toBeUndefined()
+                yield* oneProvider(completions)
+              }),
+            "managed",
+          ),
+        ollamaProvider(server.origin),
+      )
+    }),
+  )
+
+  // The model the vLLM cassette lists.
+  const CODER = "Qwen/Qwen3-Coder-30B-A3B-Instruct"
+  pinned.live("reads a server that stopped answering again, so one that takes its port gets no prompt", () =>
+    Effect.gen(function* () {
+      const real = yield* Effect.promise(() =>
+        LocalServers.serve("vllm", { routes: { "POST /v1/chat/completions": completion } }),
+      )
+      const added = yield* Effect.promise(() => LocalProbe.probe(real.origin))
+      const origin = real.origin
+      const port = real.port
+      yield* provideTmpdirInstance(
+        () =>
+          withLocal({ enabled: true, endpoints: [origin], pins: { [origin]: added!.pin } }, () =>
+            Effect.gen(function* () {
+              const provider = yield* Provider.Service
+              // A model the server lists, so only the failed call makes Vector read the server again.
+              const language = yield* provider.getLanguage(
+                yield* provider.getModel(ProviderV2.ID.make("box"), ModelV2.ID.make(CODER)),
+              )
+              // The server matches its pin, and its first model call goes.
+              expect(yield* stream(language, "hi")).toBe("streamed")
+              yield* Effect.promise(() => real.close())
+              // Then it is gone: the next model call fails to connect.
+              expect(yield* stream(language, "hi")).toBeInstanceOf(Error)
+              // Another program now answers on its port, as another user of this computer could start one.
+              const other = yield* Effect.acquireRelease(
+                Effect.promise(() => LocalServers.serve("ollama", { port })),
+                (fake) => Effect.promise(() => fake.close()),
+              )
+              const refused = yield* stream(language, "secret prompt")
+              expect(refused instanceof Error ? refused.message : String(refused)).toContain(
+                LocalProbe.changedMessage(origin),
+              )
+              expect(other.hits().filter((hit) => hit.path.endsWith("/chat/completions"))).toEqual([])
+              const holds = yield* LocalProbe.HoldsService
+              holds.confirm(origin)
+              expect(guard.outside()).toEqual([])
+            }),
+          ),
+        {
+          trusted: true,
+          config: {
+            provider: {
+              box: {
+                name: "GPU box",
+                npm: "@ai-sdk/openai-compatible",
+                models: { [CODER]: qwen(CODER) },
+                options: { apiKey: "test-key", baseURL: `${origin}/v1` },
+              },
+            },
+          },
+        },
+      )
+    }),
   )
 
   it.instance(

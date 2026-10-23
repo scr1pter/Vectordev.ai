@@ -250,14 +250,15 @@ export function decide(policy: LocalMode.Policy, request: Request): Verdict {
         )
   const allowed = allowEntry(policy, request.source, name)
   const offline = policy.web === "none" && place === "internet"
-  // A source the registry marks not allowable stays blocked whatever the user allows. Only a model server the company
-  // lists itself (a private cloud deployment) lets a cloud model through.
+  // A source the registry marks not allowable stays blocked whatever the user allows. Only a cloud AI service the
+  // company lists itself (a private cloud deployment) lets its model calls through; a listed Ollama server's cloud
+  // models, free models and Vector Codium stay off, since the company listed the server, not where they go.
   const registered = request.source === undefined ? undefined : LocalSources.get(request.source)
-  if (registered?.local === "not-allowable" && !(request.purpose === "inference" && companyListed(policy, url)))
+  if (registered?.local === "not-allowable" && !(request.source === "cloud-inference" && companyListed(policy, url)))
     return verdict(
       "block",
       "not-allowable",
-      "This service sends your work outside the servers you host, so Vector Local keeps it off.",
+      "This service sends your work outside the servers you listed, so Vector Local keeps it off.",
     )
 
   if (request.purpose === "inference") {
