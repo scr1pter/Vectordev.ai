@@ -7,6 +7,7 @@ import { afterAll, describe, expect, test } from "bun:test"
 import path from "node:path"
 import { Effect } from "effect"
 import { EgressGuard } from "@vectordevai/core/local-mode/guard"
+import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 import { runPermissionReply } from "../../src/cli/cmd/run"
 import { cliIt } from "../lib/cli-process"
 import { FakeWeb } from "../../../core/test/lib/fake-web"
@@ -26,10 +27,14 @@ const PLAN = {
 }
 
 test("--research answers the run's read approval, and nothing else without --auto", () => {
-  expect(runPermissionReply(false, "research_read", [], true)).toBe("once")
-  expect(runPermissionReply(false, "private_network", ["http://127.0.0.1:9"], true)).toBe("reject")
-  expect(runPermissionReply(false, "bash", ["*"], true)).toBe("reject")
+  expect(runPermissionReply(false, "research_read", [], undefined, true)).toBe("once")
+  expect(runPermissionReply(false, "private_network", ["http://127.0.0.1:9"], undefined, true)).toBe("reject")
+  expect(runPermissionReply(false, "bash", ["*"], undefined, true)).toBe("reject")
   expect(runPermissionReply(false, "research_read", [])).toBe("reject")
+  // An ask that asks every time is never answered for the user, --research or not.
+  expect(
+    runPermissionReply(false, "research_read", [], [`${PermissionPolicy.AFTER_WEB}https://example.com/`], true),
+  ).toBe("reject")
 })
 
 describe("vector run --research", () => {

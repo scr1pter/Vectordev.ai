@@ -1,8 +1,13 @@
 import { afterAll, describe, expect, test } from "bun:test"
+import { readFileSync, rmSync, writeFileSync } from "node:fs"
+import path from "node:path"
 import { Effect, Layer } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
+import { Global } from "@vectordevai/core/global"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 import type { SessionV1 } from "@vectordevai/core/v1/session"
 import { Auth } from "@/auth"
+import { Config } from "@/config/config"
 import { Session } from "@/session/session"
 import { McpWebSearch } from "../../src/tool/mcp-websearch"
 import {
@@ -302,6 +307,62 @@ it.instance(
       expect(read?.state.status === "completed" ? read.state.metadata.refused : "error").toBeUndefined()
       expect(output(read)).toContain("S1")
       expect(guard.outside()).toEqual([])
+    }),
+  60_000,
+)
+
+it.instance(
+  "with Vector Local on, research_search reaches Exa once the user allowed it there, decided and logged as Exa's",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web, { research: { search: { provider: "exa" } } })
+      const auth = yield* Auth.Service
+      yield* auth.set("exa", new Auth.Api({ type: "api", key: "exa-test-key" }))
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "Research" })
+      // Vector Local as the owner sets it in their own config, beside the research settings setup wrote there: the
+      // fake LLM server is the one model server on the list, and Exa is a service they allowed.
+      const file = path.join(Global.Path.config, "vector.json")
+      const written = JSON.parse(readFileSync(file, "utf8"))
+      writeFileSync(
+        file,
+        JSON.stringify({
+          ...written,
+          local: {
+            enabled: true,
+            endpoints: [new URL(test.llm.url).origin],
+            web: "ask",
+            allow: [{ source: "websearch-exa", reason: "Research searches", added_at: Date.now(), added_by: "app" }],
+          },
+        }),
+      )
+      Config.refreshLocal()
+      Config.confirmLocal()
+      yield* Effect.gen(function* () {
+        const since = Date.now()
+        const sent = asked.length
+        yield* test.llm.tool("research_plan", plan())
+        yield* test.llm.tool("research_search", { query: "heat pump field study savings" })
+        yield* test.llm.text("Done.")
+        yield* send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." })
+        const [searched] = yield* calls(session.id, "research_search")
+        expect(output(searched)).toContain(PAID.replaceAll("{name}", "Exa"))
+        expect(asked.slice(sent)).toHaveLength(1)
+        const decided = Egress.events({ since })
+          .filter((event) => event.source.startsWith("websearch-"))
+          .map((event) => [event.source, event.decision, event.rule])
+        expect(decided).toEqual([["websearch-exa", "allow", "allowed-source"]])
+        expect(guard.outside()).toEqual([])
+      }).pipe(
+        Effect.ensuring(
+          Effect.promise(async () => {
+            writeFileSync(file, JSON.stringify(written))
+            Config.refreshLocal()
+            rmSync(Config.localConfirmedFile(), { force: true })
+            await Egress.erase()
+          }),
+        ),
+      )
     }),
   60_000,
 )

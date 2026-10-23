@@ -566,6 +566,7 @@ export const SOURCES: readonly Source[] = [
     where: ["engine"],
     callSites: [
       "packages/engine/src/tool/websearch.ts",
+      "packages/engine/src/tool/research-search.ts",
       "packages/engine/src/tool/mcp-websearch.ts",
       "packages/core/src/tool/websearch.ts",
     ],
@@ -581,6 +582,7 @@ export const SOURCES: readonly Source[] = [
     where: ["engine"],
     callSites: [
       "packages/engine/src/tool/websearch.ts",
+      "packages/engine/src/tool/research-search.ts",
       "packages/engine/src/tool/mcp-websearch.ts",
       "packages/core/src/tool/websearch.ts",
     ],
