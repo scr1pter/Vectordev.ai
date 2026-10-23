@@ -575,3 +575,42 @@ test("with the browser's storage failing, the composer starts in Normal and Deep
   await expect(page.getByText("What should Vector research?").filter({ visible: true }).first()).toBeVisible()
   await expect(page.getByText("Something went wrong")).toHaveCount(0)
 })
+
+test("Settings > Memory > Research lists the repository's runs, opens a report and forgets one source", async ({
+  page,
+}) => {
+  await setup(page, { messages: [user, assistant(finished)] })
+  // After the mock engine's routes: the Memory page's own, and forgetting a source.
+  const forgotten: string[] = []
+  await page.route(new RegExp(`/memory/research/${runID}/sources/S1(?:\\?|$)`), (route) => {
+    if (route.request().method() !== "DELETE") return route.fallback()
+    forgotten.push("S1")
+    return route.fulfill({ json: true })
+  })
+  await page.route(/\/memory(?:\?|$)/, (route) =>
+    route.fulfill({
+      json: {
+        entries: [],
+        stats: { active: 0, review: 0, archived: 0, rules: 0, learned: 0, digestTokens: 0, learning: true },
+        files: { memory: "", rules: "", repository: [] },
+        held: false,
+      },
+    }),
+  )
+  await page.route(/\/memory\/settings(?:\?|$)/, (route) =>
+    route.fulfill({ json: { learning: true, repositoryDocs: true, keepOriginals: false } }),
+  )
+  await page.getByRole("button", { name: "Settings", exact: true }).click()
+  const settings = page.locator(".settings-v2-workspace")
+  await settings.getByRole("tab", { name: "Memory", exact: true }).click()
+  await settings.getByRole("tab", { name: "Research", exact: true }).click()
+  const row = settings.locator('[data-component="settings-memory-research-run"]')
+  await expect(row).toContainText(plan.question)
+  await expect(row).toContainText("1 source · 1 note · 4 KB")
+  await expect(row).toContainText("Not kept")
+  await row.getByRole("button", { name: "Open the report" }).click()
+  await expect(row).toContainText("Heat pumps in cold climates")
+  await row.getByRole("button", { name: "Forget source" }).click()
+  await expect.poll(() => forgotten).toEqual(["S1"])
+  await expect(settings).toContainText("Forgot S1.")
+})
