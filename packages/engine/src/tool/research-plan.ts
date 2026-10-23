@@ -74,6 +74,8 @@ const START = "Start"
 const START_DEEP = "Start deep"
 const CANCEL = "Cancel"
 const PREFIX = "vector-plan:"
+const APPROVAL =
+  /^(?:please[\s,]+)?(?:ok(?:ay)?|yes|yeah|yep|yup|sure|start(?: it)?|go(?: ahead)?|go for it|do it|sounds good|looks good|lgtm|approved?)(?:[\s,]+(?:please|thanks|thank you))?[\s.!]*$/i
 const decodeAnswer = Schema.decodeUnknownOption(Schema.fromJsonString(Research.PlanAnswer))
 // A base prompt to estimate with before the session has measured one on this model.
 const BASE_PROMPT = 12_000
@@ -157,7 +159,11 @@ export const ResearchPlanTool = Tool.define<
             : size?.capped || (unanswerable && !thorough(size, ctx))
               ? "focused"
               : "deep"
-          const proposed = { ...plan, depth: deeper(plan.depth, ceiling) }
+          // A Thorough request (the Depth chip's Deep, `--depth deep`, "be thorough") researches deep (section 5.2).
+          const proposed: Research.Plan = {
+            ...plan,
+            depth: !lead.parentID && thorough(size, ctx) ? ceiling : deeper(plan.depth, ceiling),
+          }
           const provider = searchProvider(
             cfg.research,
             yield* available().pipe(
@@ -388,6 +394,9 @@ function decide(reply: string, plan: Research.Plan, ceiling: Research.Depth) {
       always: [],
     } as const
   if (reply === CANCEL) return { type: "cancel" } as const
+  // A bare approval typed on the card ("ok", "yes", "go ahead") starts the plan as it is (section 5.2); a reply that asks
+  // for anything more is a steer.
+  if (APPROVAL.test(reply)) return { type: "start", answer: "start", plan, always: [] } as const
   if (!reply.startsWith(PREFIX)) return { type: "steer" } as const
   const decoded = decodeAnswer(reply.slice(PREFIX.length))
   if (Option.isNone(decoded)) return { type: "steer" } as const

@@ -87,6 +87,8 @@ import { TaskSize } from "@vectordevai/core/task-size"
 import { SessionTaskSize } from "./task-size"
 import { parseJudgeVerdict } from "./judge-verdict"
 import { isRecord } from "@/util/record"
+import { ResearchRun } from "@/tool/research-run"
+import { Research } from "@vectordevai/schema/research"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -100,6 +102,8 @@ const MAX_INSTRUCTION_SNAPSHOTS = 256
 const VECTORSCOPE = "vectorscope."
 // Agents whose output leaves the machine or reaches the web: research workers and the research judge.
 const OUTWARD_AGENTS = new Set(["researcher", "research-judge"])
+// The kinds of the owner's own entries that say how they work (section 6.4a), until B1's facets exist.
+const HOW_YOU_WORK = new Set<string>([...Brain.HABIT_KINDS, "rule"])
 
 /**
  * Who a session's memory is for (section 6.4a). A role whose output leaves the machine or reaches the web gets the
@@ -1691,8 +1695,37 @@ const layer = Layer.effect(
         }
         yield* guard.unlink(sessionID)
       }
-      yield* guard.begin(sessionID, (yield* config.get()).budget?.run)
-      return yield* steps.pipe(Effect.ensuring(guard.end(sessionID)))
+      // A root Deep research run gets research's default caps (section 11.2) only when the user set none of their own:
+      // none armed with a prompt, none in config. A Thorough request takes Deep's, any other Focused's, and a plan the
+      // user starts deep raises Focused's to Deep's (runSteps).
+      const own = (yield* config.get()).budget?.run
+      const caps = own || session.parentID || session.internal ? undefined : yield* researchCaps(sessionID)
+      yield* guard.begin(sessionID, own ?? caps?.budget)
+      const budget = (yield* guard.snapshot(sessionID))?.budget
+      if (caps && budget?.usd === caps.budget.usd && budget?.steps === caps.budget.steps)
+        researchDefaults.set(sessionID, caps.depth)
+      return yield* steps.pipe(
+        Effect.ensuring(guard.end(sessionID)),
+        Effect.ensuring(Effect.sync(() => researchDefaults.delete(sessionID))),
+      )
+    })
+
+    // Root research runs whose budget is research's default caps, by the depth they are for.
+    const researchDefaults = new Map<SessionID, Research.Depth>()
+
+    // Research's caps for a depth: the defaults, with the user's own limits for it laid over them.
+    const researchLimits = Effect.fn("SessionPrompt.researchLimits")(function* (depth: Research.Depth) {
+      const limits = { ...ResearchRun.LIMITS[depth], ...(yield* config.get()).research?.limits?.[depth] }
+      return { depth, budget: { usd: limits.usd, steps: limits.steps } satisfies RunBudget.Info }
+    })
+
+    // The default caps a run of this session takes when its newest request is Deep research.
+    const researchCaps = Effect.fn("SessionPrompt.researchCaps")(function* (sessionID: SessionID) {
+      const latest = yield* sessions
+        .findMessage(sessionID, (message) => message.info.role === "user")
+        .pipe(Effect.catch(() => Effect.succeed(Option.none<SessionV1.WithParts>())))
+      if (Option.isNone(latest) || latest.value.info.role !== "user" || !research(latest.value.info)) return undefined
+      return yield* researchLimits(latest.value.info.size === "thorough" ? "deep" : "focused")
     })
 
     // The top of a session's parent chain, or the last ancestor that could still be read.
@@ -1956,7 +1989,18 @@ const layer = Layer.effect(
             ? { ...quickAgent, permission: Permission.merge(quickAgent.permission, QUICK_LANE_TOOLS) }
             : quickAgent
           : agent
-        const build = sized && !chat && agent.name === "build" ? sized : undefined
+        // The build agent and the research lead take their tools, effort and caps from the request's size.
+        const build = sized && !chat && (agent.name === "build" || agent.name === ResearchRun.LEAD) ? sized : undefined
+        // The user started the plan deep, which raised the request to Thorough: research's Focused default caps become
+        // Deep's. A cap the user set stays as it is.
+        if (
+          build?.tier === "thorough" &&
+          agent.name === ResearchRun.LEAD &&
+          researchDefaults.get(sessionID) === "focused"
+        ) {
+          researchDefaults.set(sessionID, "deep")
+          yield* guard.arm(sessionID, (yield* researchLimits("deep")).budget)
+        }
         const maxSteps = agent.steps ?? Infinity
         const isLastStep = step >= maxSteps
         // The quick lane also carries Vector's lean helpers: autocomplete, and distill reading a document's sections.
@@ -1977,7 +2021,14 @@ const layer = Layer.effect(
         // Tier 1 recall: once per request message on the main agent, from what the user wrote and attached, within the
         // budget its size allows. It is saved on the message, so later steps send the same bytes and the cache holds.
         if (!quick && sized && sized.tier !== "chat" && !session.parentID && !session.internal)
-          msgs = yield* recallFor({ sessionID, msgs, user: lastUser, tier: sized.tier, personal })
+          msgs = yield* recallFor({
+            sessionID,
+            msgs,
+            user: lastUser,
+            tier: sized.tier,
+            personal,
+            habits: research(lastUser),
+          })
         // A subagent starts with how the owner works, and one a Thorough request launched with a brief besides, saved
         // on its first message as ids. A Vectorscope reviewer starts with how the owner reviews.
         if (session.parentID && !session.internal) msgs = yield* briefFor({ session, msgs, personal, agent: agent.name })
@@ -2072,6 +2123,16 @@ const layer = Layer.effect(
             for (const id of Object.keys(tools))
               if (!(recoverable && QUICK_LANE_TOOLS.some((rule) => rule.permission === id))) delete tools[id]
             if (tools.escalate) tools.escalate = { ...tools.escalate, description: QUICK_DESCRIPTION }
+          } else if (build && agent.name === ResearchRun.LEAD) {
+            // Deep research (sections 5.2, 5.6a and 11.2). A Focused run is Work, and it may still hand independent
+            // sub-questions to researchers, up to its own cap of 2 (a Deep run's is 4); the research run counts them,
+            // and the lead's permissions let it launch nothing else. The user's "no subagents" keeps the lead on its
+            // own, and once Run Guard warns no new researcher starts.
+            const capped = SessionTaskSize.capped(build.result)
+            for (const id of TaskSize.withheld(build.offered, build.result.agents.length))
+              if (capped || id !== "task") delete tools[id]
+            if ((yield* guard.snapshot(sessionID))?.warned === true) delete tools.task
+            delete tools.escalate
           } else if (build) {
             for (const id of TaskSize.withheld(build.offered, build.result.agents.length)) delete tools[id]
             // A thorough request has nothing to raise to, and the user kept a capped one at Work. On a caching provider
@@ -2463,12 +2524,15 @@ const layer = Layer.effect(
     })
 
     // A request message's recalled memory, saved on the message as a synthetic part (nothing when nothing is relevant).
+    // A Deep research request recalls, of the owner's own memory, only how they work (section 6.4): researching needs
+    // no fact about them, and nothing learned beside a private document. Its documents follow the usual rules.
     const recallFor = Effect.fn("SessionPrompt.recall")(function* (input: {
       sessionID: SessionID
       msgs: SessionV1.WithParts[]
       user: SessionV1.User
       tier: TaskSize.Tier
       personal: boolean
+      habits?: boolean
     }) {
       const message = input.msgs.find((item) => item.info.id === input.user.id)
       if (!message || SessionMemory.recalled(message) || recallsTried.has(message.info.id)) return input.msgs
@@ -2491,7 +2555,10 @@ const layer = Layer.effect(
         // Once Run Guard has warned, document context is halved.
         tight: (yield* guard.snapshot(input.sessionID))?.warned === true,
         personal: input.personal,
-        exclude: SessionMemory.injected(input.msgs),
+        exclude:
+          input.habits && input.personal
+            ? new Set([...SessionMemory.injected(input.msgs), ...(yield* notHabits(place))])
+            : SessionMemory.injected(input.msgs),
         sessionID: input.sessionID,
         requestID: message.info.id,
       })
@@ -2517,6 +2584,15 @@ const layer = Layer.effect(
       } satisfies SessionV1.TextPart)
       message.parts.push(part)
       return input.msgs
+    })
+
+    // The owner's own entries that do not say how they work: facts about them, and anything learned beside a private
+    // document whatever its kind. Until B1's facets exist, how they work is their preferences, decisions, lessons and
+    // rules.
+    const notHabits = Effect.fn("SessionPrompt.notHabits")(function* (place: Brain.Place) {
+      return (yield* brain.list(place, { scope: "personal" }))
+        .filter((entry) => entry.private === true || !HOW_YOU_WORK.has(entry.kind))
+        .map((entry) => entry.id)
     })
 
     // Personal memory and document knowledge are never saved in the transcript, whether recalled or returned by the
@@ -3058,10 +3134,16 @@ function isFreeSelection(model: { providerID: string; modelID: string }) {
   return isFreeModelRef(model)
 }
 
-// Sizing applies to the user's own requests to the build agent, and Plan mode's greetings. Subagents, Vector's hidden
-// helpers and custom agents keep their own setup.
+// Sizing applies to the user's own requests to the build agent and to Deep research, and Plan mode's greetings.
+// Subagents, Vector's hidden helpers and custom agents keep their own setup, and so does a research lead the build
+// agent started: it stays at its launcher's size (section 5.2).
 function sizable(session: Session.Info, user: SessionV1.User) {
-  return !session.parentID && !session.internal && (onBuild(user) || user.agent === "plan")
+  return !session.parentID && !session.internal && (onBuild(user) || user.agent === "plan" || research(user))
+}
+
+// A request in the Deep research mode: the composer sends every message of it to the research lead.
+function research(user: SessionV1.User) {
+  return user.agent === ResearchRun.LEAD
 }
 
 // A message for the build agent. An app sends a social message on the quick lane itself, so an engine that does not
