@@ -50,6 +50,8 @@ export type ResearchProxy = {
   readonly get: (url: string, maxBytes: number) => Promise<Fetched>
   /** The bytes this proxy has passed to its browser so far, counted as they arrive. */
   readonly received: () => number
+  /** Ends every connection the browser has through this proxy, an answer still arriving included. */
+  readonly drop: () => void
   readonly stop: () => Promise<void>
 }
 
@@ -109,6 +111,7 @@ export async function startResearchProxy(input: {
     robots: (url) => robotsThrough(proxy.port, authorization, url),
     get: (url, maxBytes) => getThrough(proxy.port, authorization, url, maxBytes),
     received: proxy.received,
+    drop: proxy.drop,
     stop: proxy.stop,
   }
 }

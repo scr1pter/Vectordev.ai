@@ -37,16 +37,23 @@ import { NEEDS_GUARD, startResearchProxy, type ResearchProxy } from "./research-
 //   Vector quits. A slot serves one agent at a time and shares no cookies, storage, cache or sign-in with the user's
 //   browser or another slot. When its browser closes, its pages close and then every storage type (service workers
 //   included), the cache, the auth cache, the host resolver cache and the open connections are cleared; a slot whose
-//   clearing fails is retired. The pool grows to the most browsers open at once and does not shrink; it is not a cap.
+//   clearing fails, or whose page is still alive 2 seconds after it was told to close, is retired. The pool grows to the
+//   most browsers open at once and does not shrink; it is not a cap. Known residual: Electron has no call that clears a
+//   session's HSTS entries, so a site that sets them can recognise the slot when a later agent's browser in it visits
+//   (it learns that the visits came from the same Vector, which the network address often tells it anyway).
 // - Sandbox, context isolation and web security on, Node off, no preload, dialogs off, no spellcheck, audio muted,
-//   WebRTC only through the proxy (and stubbed), no webview tags, no plugins (so a PDF is a download). Every document
+//   WebRTC only through the proxy (and stubbed), no webview tags, no plugins (so a PDF is a download), and no File
+//   System Access pickers (the Blink feature is off in every frame of the page, and stubbed too). Every document
 //   a research browser loads, each frame's included, gets a CSP `sandbox` without `allow-modals`, which a fresh frame
 //   inherits and cannot undo: no print dialog, alert, confirm or prompt. Vector never focuses one; typing goes to the
 //   field with the page told it has focus (DevTools focus emulation), so the user's window keeps the keyboard.
 // - Every permission is denied, fullscreen included, and there is no display-media handler, so screen capture is
 //   refused. Downloads are cancelled; a PDF is fetched again through the proxy into memory for the reader instead.
 // - No credentials of any kind: a client-certificate request gets none, `login` is answered only for the browser's own
-//   proxy, no domain may use ambient Windows sign-in (NTLM), and certificate errors are never overridden.
+//   proxy, a site's NTLM or Negotiate challenge is cancelled before Chromium can answer it with the user's own Windows
+//   or Kerberos sign-in, and certificate errors are never overridden. allowNTLMCredentialsForDomains is not used: Electron
+//   applies it to the whole app, and an empty list is no list, so on Windows the system's own zone settings would still
+//   decide which hosts get the user's sign-in.
 // - Service worker scripts are cancelled in the network stack (their request carries a `Service-Worker` header), since
 //   a script stub can be undone from a fresh frame; clearing a slot removes any registration.
 // - A popup or target=_blank link loads in the same page when the navigation rule allows it.
@@ -54,11 +61,12 @@ import { NEEDS_GUARD, startResearchProxy, type ResearchProxy } from "./research-
 //   hostile page cannot keep its scripts, timers or network callbacks running; file choosers are intercepted there, so
 //   none opens. After a load or an action the page runs until it has made no request for half a second (at most 3
 //   seconds), so a page built by script after its load event is built when it is held. A page that does not answer
-//   within the command deadline is closed.
+//   within the command deadline is closed, and so is a browser whose page the debugger cannot attach to.
 // - Fonts never load; images and media load only when the agent's model reads images. A page load may make at most
 //   150 other requests and receive 20 MB, counted by the browser's own proxy as the bytes arrive (chunked and
-//   compressed answers included), after which further requests are cancelled. An answer already arriving when the bound
-//   is passed is not cut.
+//   compressed answers included), after which further requests are cancelled. An answer already arriving then may
+//   finish, up to 40 MB for the page load, its own document included; past that the proxy ends the browser's
+//   connections, so one endless answer cannot keep downloading while the page waits for its next command.
 // - Every request goes through the browser's own proxy (research-proxy.ts). The navigation rule (research-navigation.ts)
 //   runs in onBeforeRequest on every main-frame and subframe request and redirect hop, with the run's provenance, the
 //   run's per-host rate limits for documents and robots.txt for what Vector discovered.
@@ -83,6 +91,10 @@ export const SETTLE_MS = 3_000
 export const TYPED_MS = 2_000
 export const MAX_SUBRESOURCES = 150
 export const MAX_SUBRESOURCE_BYTES = 20 * 1024 * 1024
+/** The most a page load receives in all, answers already arriving and its own document included. */
+export const MAX_PAGE_BYTES = 2 * MAX_SUBRESOURCE_BYTES
+/** How often a page load's bytes are checked against MAX_PAGE_BYTES. */
+const BOUND_MS = 200
 /** Roughly what observe shows of the page's text. */
 export const OBSERVE_TEXT = 1_200
 const OBSERVE_ELEMENTS = 80
@@ -93,6 +105,11 @@ export const DOWNLOADS_OFF = "Downloads are off in research browsers."
 export const PDF_OPENED = "That address is a PDF; Vector read it into memory instead of downloading it."
 export const SUBRESOURCES =
   "The page made more requests, or loaded more, than a research browser allows, so the rest were cancelled."
+export const PAGE_CUT =
+  "The page kept loading past the 40 MB a research browser allows, so Vector ended its connections; what loaded before stays."
+export const AMBIENT = "Research browsers never sign in to a site with your own Windows or Kerberos account."
+export const NO_DEVTOOLS =
+  "Vector could not attach to the research browser's page, so it closed the browser: without that it cannot hold the page's scripts between commands or keep file dialogs from opening."
 export const SERVICE_WORKER = "Research browsers do not run service workers."
 export const STOPPED = "The user stopped this research browser, so this agent browses no more in this research."
 /** The CSP every research browser document gets: scripts, its own origin and GET forms, and no dialogs of any kind. */
@@ -205,13 +222,16 @@ export function slotPool<S extends SlotSession>(make: (name: string) => S) {
       slots.push(slot)
       return slot
     },
-    /** Clears the slot for its next agent, or retires it when clearing fails. Whether it was cleared. */
-    release: async (slot: Slot<S>) => {
+    /**
+     * Clears the slot for its next agent, or retires it when clearing fails or `retire` says its page may still be
+     * alive. Whether it was cleared.
+     */
+    release: async (slot: Slot<S>, retire = false) => {
       const cleared = await clear(slot.session).then(
         () => true,
         () => false,
       )
-      slot.retired = slot.retired || !cleared
+      slot.retired = slot.retired || !cleared || retire
       slot.busy = false
       return cleared
     },
@@ -260,6 +280,8 @@ type Browser = {
   images: boolean
   state: State
   idle?: ReturnType<typeof setTimeout>
+  /** Checks the page load's bytes against MAX_PAGE_BYTES while the browser is open. */
+  watch?: ReturnType<typeof setInterval>
   debugger: boolean
   /** Links and GET form targets Vector read on the page at the agent's last read, links or observe. */
   links: Set<string>
@@ -279,8 +301,11 @@ type Browser = {
   readonly requests: Map<number, { readonly typedHost?: string }>
   /** Every request of the page in flight, for waiting until it is quiet. */
   inflight: Set<number>
-  /** This page load's other requests, what the proxy had received when it began, and whether it passed a bound. */
-  page: { requests: number; start: number; over: boolean }
+  /**
+   * This page load's other requests, what the proxy had received when it began, whether it passed the request bound,
+   * and whether its connections were ended at MAX_PAGE_BYTES.
+   */
+  page: { requests: number; start: number; over: boolean; cut: boolean }
   joined: string[]
   refused: { url: string; reason: string }[]
   download?: { readonly url: string; readonly mime: string }
@@ -450,6 +475,9 @@ async function open(key: string, input: ResearchInput, run: Run): Promise<Browse
       plugins: false,
       navigateOnDragDrop: false,
       autoplayPolicy: "document-user-activation-required",
+      // showOpenFilePicker, showSaveFilePicker and showDirectoryPicker, in every frame, a fresh one included: a native
+      // file dialog would open on the user's screen from a click the agent made.
+      disableBlinkFeatures: "FileSystemAccessLocal",
     },
   })
   hostWindow().contentView.addChildView(view)
@@ -478,7 +506,7 @@ async function open(key: string, input: ResearchInput, run: Run): Promise<Browse
     forms: new Set(),
     requests: new Map(),
     inflight: new Set(),
-    page: { requests: 0, start: proxy.received(), over: false },
+    page: { requests: 0, start: proxy.received(), over: false, cut: false },
     joined: [],
     refused: [],
   }
@@ -486,15 +514,31 @@ async function open(key: string, input: ResearchInput, run: Run): Promise<Browse
   byContents.set(contents.id, browser)
   run.browsers.set(input.sessionID, browser)
   wire(browser)
+  browser.watch = setInterval(() => bound(browser), BOUND_MS)
+  browser.watch.unref?.()
   // The first empty page, which the rule allows once: DevTools answers nothing about a page before there is one.
   await contents.loadURL("about:blank").catch(() => undefined)
   if (contents.isDestroyed()) {
     await closeBrowser(browser)
     return { error: "The research browser closed as it opened." }
   }
-  await devtools(browser)
+  if (!(await devtools(browser))) {
+    await closeBrowser(browser)
+    return { error: NO_DEVTOOLS }
+  }
   changed()
   return browser
+}
+
+// Ends the browser's connections once its page load has received MAX_PAGE_BYTES: the request bound stops new requests
+// only, and the network keeps reading an answer while the page's scripts are held.
+function bound(browser: Browser) {
+  if (browser.closed || browser.page.cut) return
+  if (browser.proxy.received() - browser.page.start <= MAX_PAGE_BYTES) return
+  browser.page.cut = true
+  browser.page.over = true
+  browser.proxy.drop()
+  note(browser, browser.decided ?? "", PAGE_CUT)
 }
 
 async function perform(browser: Browser, input: ResearchInput): Promise<Report> {
@@ -829,7 +873,6 @@ function harden(partition: Session) {
   partition.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
   partition.setPermissionCheckHandler(() => false)
   partition.setDevicePermissionHandler(() => false)
-  partition.allowNTLMCredentialsForDomains("")
   partition.setSpellCheckerEnabled(false)
   partition.on("will-download", (event, item, contents) => {
     event.preventDefault()
@@ -906,13 +949,24 @@ export const researchRequestHandlers = {
     }
     callback({ requestHeaders: details.requestHeaders })
   },
-  /** Every document a research browser loads is sandboxed with no dialogs; a frame it holds inherits that. */
+  /**
+   * Every answer a research browser gets: one that asks for ambient sign-in is cancelled, and every document is
+   * sandboxed with no dialogs, which a frame it holds inherits.
+   */
   headersReceived: (
     details: Electron.OnHeadersReceivedListenerDetails,
     callback: (response: Electron.HeadersReceivedResponse) => void,
   ) => {
-    if (details.resourceType !== "mainFrame" && details.resourceType !== "subFrame") return callback({})
     const headers = details.responseHeaders ?? {}
+    // A 401 that offers NTLM or Negotiate is cancelled here, before Chromium answers it. On Windows Chromium answers
+    // those with the user's own sign-in for hosts its zone policy calls local intranet, where enterprises put their
+    // sign-in servers, and those often have public addresses. Basic and Digest reach `login`, which cancels them.
+    if (details.statusCode === 401 && ambient(headers)) {
+      const browser = details.webContentsId === undefined ? undefined : byContents.get(details.webContentsId)
+      if (browser) note(browser, details.url, AMBIENT)
+      return callback({ cancel: true })
+    }
+    if (details.resourceType !== "mainFrame" && details.resourceType !== "subFrame") return callback({})
     const name = Object.keys(headers).find((key) => key.toLowerCase() === "content-security-policy")
     callback({
       responseHeaders: {
@@ -926,6 +980,14 @@ export const researchRequestHandlers = {
     browser?.requests.delete(details.id)
     browser?.inflight.delete(details.id)
   },
+}
+
+// Whether an answer's challenges include NTLM or Negotiate, which Chromium may answer with the user's own sign-in.
+function ambient(headers: Record<string, string[]>) {
+  return Object.entries(headers)
+    .filter(([name]) => name.toLowerCase() === "www-authenticate")
+    .flatMap(([, values]) => values)
+    .some((value) => /(?:^|[\s,])(?:negotiate|ntlm)(?:[\s,]|$)/i.test(value))
 }
 
 // A main-frame or subframe request: the navigation rule, then robots.txt for what Vector discovered, then the run's
@@ -963,7 +1025,7 @@ async function frame(browser: Browser, details: BeforeRequest) {
   const address = new URL(details.url)
   const typed = prior?.typedHost ?? (!decision.robots && decision.via === "provenance" ? address.hostname : undefined)
   browser.requests.set(details.id, typed ? { typedHost: typed } : {})
-  browser.page = { requests: 0, start: browser.proxy.received(), over: false }
+  browser.page = { requests: 0, start: browser.proxy.received(), over: false, cut: false }
   if (decision.join) {
     browser.run.provenance = addLinks(browser.run.provenance, [decision.join], "link")
     browser.joined = [...new Set([...browser.joined, decision.join])]
@@ -976,6 +1038,8 @@ function refused(browser: Browser, url: string, reason: string) {
   return false
 }
 
+// Whether the debugger attached. Without it the page runs unheld, with no file chooser interception, stubs or focus
+// emulation, so the caller closes the browser.
 async function devtools(browser: Browser) {
   const tools = browser.contents.debugger
   const attached = await Promise.resolve()
@@ -984,7 +1048,7 @@ async function devtools(browser: Browser) {
       () => true,
       () => false,
     )
-  if (!attached) return
+  if (!attached) return false
   browser.debugger = true
   const send = (method: string, params?: Record<string, unknown>) =>
     tools.sendCommand(method, params).catch(() => undefined)
@@ -995,8 +1059,9 @@ async function devtools(browser: Browser) {
   // keyboard from the user's own window.
   await send("Emulation.setFocusEmulationEnabled", { enabled: true })
   // Before the page's own scripts in every frame, a frame its script just made included (the Electron smoke checks it):
-  // no print dialog and no peer connections. What holds whatever a page does is the documents' sandbox for print() and
-  // dialogs, the proxy-only WebRTC policy, and the network stack's refusal of service workers.
+  // no print dialog, no peer connections and no file pickers. What holds whatever a page does is the documents' sandbox
+  // for print() and dialogs, the proxy-only WebRTC policy, the Blink feature turned off for file pickers, and the
+  // network stack's refusal of service workers.
   await send("Page.addScriptToEvaluateOnNewDocument", { source: STUBS, runImmediately: true })
   // For holding the page's scripts between commands (lifecycle).
   await send("Debugger.enable")
@@ -1004,6 +1069,7 @@ async function devtools(browser: Browser) {
   tools.on("message", (_event, method) => {
     if (method === "Page.javascriptDialogOpening") void send("Page.handleJavaScriptDialog", { accept: false })
   })
+  return true
 }
 
 const STUBS = `(() => {
@@ -1014,6 +1080,10 @@ const STUBS = `(() => {
   stub(window, "RTCPeerConnection", undefined);
   stub(window, "webkitRTCPeerConnection", undefined);
   stub(window, "RTCDataChannel", undefined);
+  const cancelled = () => Promise.reject(new DOMException("The user aborted a request.", "AbortError"));
+  ["showOpenFilePicker", "showSaveFilePicker", "showDirectoryPicker"].forEach((key) => {
+    if (key in window) stub(window, key, cancelled);
+  });
   try { Object.defineProperty(Navigator.prototype, "serviceWorker", { get: () => undefined, configurable: false }) } catch {}
 })()`
 
@@ -1063,6 +1133,7 @@ async function closeBrowser(browser: Browser) {
   if (browser.closed) return
   browser.closed = true
   if (browser.idle) clearTimeout(browser.idle)
+  if (browser.watch) clearInterval(browser.watch)
   browser.closing.abort()
   browsers.delete(browser.key)
   byContents.delete(browser.contentsID)
@@ -1083,8 +1154,12 @@ async function closeBrowser(browser: Browser) {
     })
     contents.close()
   })
+  // A page still alive after the wait would run beside the next agent's page in the slot, so its renderer is ended and
+  // the slot is never used again.
+  const alive = !contents.isDestroyed()
+  if (alive) contents.forcefullyCrashRenderer()
   await browser.proxy.stop().catch(() => undefined)
-  await pool.release(browser.slot)
+  await pool.release(browser.slot, alive)
   // A run waiting for room keeps its copy of the provenance for the agent that takes the room.
   const run = browser.run
   if (run.browsers.size === 0 && run.opening === 0 && run.waiters.size === 0) runs.delete(run.id)

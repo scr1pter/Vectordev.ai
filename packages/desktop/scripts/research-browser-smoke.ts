@@ -17,9 +17,13 @@
 // - alert() shows nothing and returns;
 // - print() returns at once without a dialog, from the page and from a frame the page's script just made;
 // - RTCPeerConnection from such a fresh frame gathers no address outside the proxy;
-// - a 401 Basic challenge gets no credentials, and a TLS site that asks for a client certificate gets none (the smoke
-//   trusts its own test certificate in the research slots, as a test CA would be; it needs openssl, and says skip
-//   without it);
+// - a 401 Basic challenge gets no credentials, an NTLM or Negotiate challenge is cancelled before Chromium answers it,
+//   and a TLS site that asks for a client certificate gets none (the smoke trusts its own test certificate in the
+//   research slots, as a test CA would be; it needs openssl, and says skip without it). Whether Windows would have
+//   sent the user's own sign-in to a local-intranet host is a manual check on Windows: this shows only that the
+//   challenge never reaches Chromium's answer;
+// - no File System Access picker opens after a trusted click, from the page or a frame its click made, on the TLS site
+//   (a page there has the pickers outside a research browser, which the smoke checks first);
 // - a meta refresh and a timer navigation to another site are refused;
 // - an iframe POST form is refused;
 // - top-level blob:, data: and javascript: navigations are refused;

@@ -33,6 +33,25 @@ const web = FakeWeb.start({
           }),
           { headers: { "content-type": "text/javascript" } },
         ),
+      // An answer that never ends, a megabyte at a time, until its reader goes away.
+      "/endless.js": () => {
+        const state = { open: true }
+        return new Response(
+          new ReadableStream({
+            pull: (controller) =>
+              new Promise<void>((resolve) =>
+                setTimeout(() => {
+                  if (state.open) controller.enqueue(new Uint8Array(1024 * 1024).fill(121))
+                  resolve()
+                }, 10),
+              ),
+            cancel: () => {
+              state.open = false
+            },
+          }),
+          { headers: { "content-type": "text/javascript" } },
+        )
+      },
     },
   },
 })
@@ -45,7 +64,9 @@ afterAll(async () => {
   await web.close()
 })
 
-type Listener = (...input: any[]) => unknown
+// A listener of any shape, as Electron's events take: a method's parameters are compared both ways, so a typed handler
+// is one, and the fakes can call it with what Electron would pass.
+type Listener = { listener(...input: unknown[]): unknown }["listener"]
 
 class Emitter {
   readonly listeners = new Map<string, Listener[]>()
@@ -124,6 +145,8 @@ class FakeSession extends Emitter {
 // What each page script returns, by the function the code runs.
 const scripts = new Map<Function, (contents: FakeContents) => unknown>()
 const ids = { contents: 0, request: 0 }
+// The next page made: its debugger cannot attach (another one holds it), or it does not close when told to.
+const next = { attachFails: false, hangs: false }
 
 class FakeContents extends Emitter {
   readonly id = ++ids.contents
@@ -133,13 +156,18 @@ class FakeContents extends Emitter {
   url = ""
   title = ""
   destroyed = false
+  crashed = false
+  readonly attachFails = next.attachFails
+  readonly hangs = next.hangs
   muted = false
   webrtc = ""
   openHandler?: Listener
   /** What the page does after a trusted mouse up. */
   onMouseUp?: () => void
   readonly debugger = {
-    attach: () => undefined,
+    attach: () => {
+      if (this.attachFails) throw new Error("Another debugger is already attached")
+    },
     sendCommand: async (method: string, params?: unknown) => void this.devtools.push({ method, params }),
     on: () => undefined,
   }
@@ -218,8 +246,12 @@ class FakeContents extends Emitter {
     return this.destroyed
   }
   close() {
+    if (this.hangs) return
     this.destroyed = true
     this.emit("destroyed")
+  }
+  forcefullyCrashRenderer() {
+    this.crashed = true
   }
   sendInputEvent(event: { type: string; x?: number; keyCode?: string }) {
     this.inputs.push(event)
@@ -344,6 +376,14 @@ describe("the slot pool", () => {
     expect(pool.acquire().name).toBe("vector-research-3")
   })
 
+  test("a slot whose page may still be alive is retired, though it was cleared", async () => {
+    const pool = research.slotPool(fake)
+    const first = pool.acquire()
+    expect(await pool.release(first, true)).toBe(true)
+    expect(first.retired).toBe(true)
+    expect(pool.acquire()).not.toBe(first)
+  })
+
   test("a slot whose clearing fails is retired and never used again; the pool grows and does not shrink", async () => {
     const pool = research.slotPool(fake)
     const first = pool.acquire()
@@ -461,7 +501,9 @@ describe("research browsers", () => {
     expect(answers).toEqual([false, false, false, false, false, false])
     expect(partition.check!(view.webContents, "fullscreen", ARTICLE, {})).toBe(false)
     expect(partition.device!({})).toBe(false)
-    expect(partition.ntlm).toEqual([""])
+    // Never called: Electron applies it to the whole app, and an empty list is no list on Windows. A challenge for
+    // ambient sign-in is cancelled in headersReceived instead.
+    expect(partition.ntlm).toEqual([])
     // L7's dispatcher must compose this listener, not replace it.
     expect(partition.web.beforeRequest).toBe(research.researchRequestHandlers.beforeRequest)
     expect(partition.web.beforeSendHeaders).toBe(research.researchRequestHandlers.beforeSendHeaders)
@@ -504,6 +546,11 @@ describe("research browsers", () => {
     )
     expect(methods).toContain("Page.setInterceptFileChooserDialog")
     expect(methods).toContain("Page.addScriptToEvaluateOnNewDocument")
+    // File System Access pickers are off in every frame, and stubbed for any frame that still has them.
+    expect(view.options.webPreferences.disableBlinkFeatures).toBe("FileSystemAccessLocal")
+    const stubs = view.webContents.devtools.find((item) => item.method === "Page.addScriptToEvaluateOnNewDocument")
+    for (const picker of ["showOpenFilePicker", "showSaveFilePicker", "showDirectoryPicker"])
+      expect((stubs?.params as { source: string }).source).toContain(picker)
     // Typing reaches a field with the page told it has focus, so Vector never focuses the browser.
     expect(methods).toContain("Emulation.setFocusEmulationEnabled")
     expect(methods.filter((method) => method.startsWith("Debugger."))).toEqual([
@@ -895,6 +942,114 @@ describe("research browsers", () => {
     await close("ses_lead")
     expect(guard.outside()).toEqual([])
     expect(LocalPolicy.hostClass("article.web.test")).toBe("internet")
+  })
+})
+
+describe("research browsers that misbehave", () => {
+  test("a site's NTLM or Negotiate challenge is cancelled before Chromium answers it, whatever asked for it", async () => {
+    await send({ command: "research.scroll", sessionID: "ses_lead" })
+    const view = latest()
+    const answer = (resourceType: string, statusCode: number, responseHeaders: Record<string, string[]>) =>
+      new Promise<Electron.HeadersReceivedResponse>((resolve) =>
+        research.researchRequestHandlers.headersReceived(
+          {
+            id: ++ids.request,
+            url: ARTICLE,
+            method: "GET",
+            webContentsId: view.webContents.id,
+            resourceType,
+            statusCode,
+            responseHeaders,
+          } as never,
+          resolve,
+        ),
+      )
+    expect(await answer("mainFrame", 401, { "WWW-Authenticate": ["Negotiate"] })).toEqual({ cancel: true })
+    expect(await answer("xhr", 401, { "www-authenticate": ['Basic realm="members", NTLM'] })).toEqual({ cancel: true })
+    expect(await answer("image", 401, { "www-authenticate": ["Negotiate oYH1MIHyoAMKAQ"] })).toEqual({ cancel: true })
+    // Basic goes on to `login`, which cancels it, and the document is sandboxed as any is.
+    expect(await answer("mainFrame", 401, { "www-authenticate": ['Basic realm="members"'] })).toEqual({
+      responseHeaders: { "www-authenticate": ['Basic realm="members"'], "Content-Security-Policy": [research.SANDBOX] },
+    })
+    // Only a 401 is a challenge.
+    expect(await answer("script", 200, { "www-authenticate": ["Negotiate"] })).toEqual({})
+    expect((await send({ command: "research.scroll", sessionID: "ses_lead" })).refused).toEqual([
+      { url: ARTICLE, reason: research.AMBIENT },
+    ])
+    await close("ses_lead")
+  })
+
+  test("one endless answer is cut once its page load has received 40 MB, and the next page load starts again", async () => {
+    await send({ command: "research.open", sessionID: "ses_lead", url: ARTICLE })
+    const view = latest()
+    const config = view.webContents.partition.proxies.at(-1) as { proxyRules: string }
+    const port = Number(config.proxyRules.split(":").at(-1))
+    const secret = await new Promise<string>((resolve) =>
+      view.webContents.emit(
+        "login",
+        { preventDefault: () => undefined },
+        {},
+        { isProxy: true, host: "127.0.0.1", port },
+        (_user: string, password: string) => resolve(password),
+      ),
+    )
+    const target = web.url("big", "/endless.js")
+    const received = await new Promise<number>((resolve) => {
+      const state = { bytes: 0 }
+      http
+        .get(
+          {
+            host: "127.0.0.1",
+            port,
+            path: target,
+            headers: {
+              host: new URL(target).host,
+              "proxy-authorization": `Basic ${Buffer.from(`${USER}:${secret}`).toString("base64")}`,
+            },
+          },
+          (response) => {
+            response.on("data", (chunk: Buffer) => (state.bytes += chunk.length))
+            response.on("error", () => undefined)
+            response.on("close", () => resolve(state.bytes))
+          },
+        )
+        .on("error", () => resolve(state.bytes))
+    })
+    // Cut soon after the bound: the check runs a few times a second.
+    expect(received).toBeGreaterThan(research.MAX_PAGE_BYTES)
+    expect(received).toBeLessThan(research.MAX_PAGE_BYTES + 32 * 1024 * 1024)
+    expect((await send({ command: "research.scroll", sessionID: "ses_lead" })).refused).toEqual([
+      { url: ARTICLE, reason: research.PAGE_CUT },
+    ])
+    await send({ command: "research.open", sessionID: "ses_lead", url: ARTICLE })
+    expect((await send({ command: "research.scroll", sessionID: "ses_lead" })).refused).toEqual([])
+    await close("ses_lead")
+  })
+
+  test("a page still alive after it was told to close has its renderer ended, and its slot is never used again", async () => {
+    next.hangs = true
+    await send({ command: "research.scroll", sessionID: "ses_lead" })
+    next.hangs = false
+    const hung = latest()
+    await close("ses_lead")
+    expect(hung.webContents.destroyed).toBe(false)
+    expect(hung.webContents.crashed).toBe(true)
+    await send({ command: "research.scroll", sessionID: "ses_lead" })
+    expect(latest().webContents.partition.name).not.toBe(hung.webContents.partition.name)
+    await close("ses_lead")
+  }, 10_000)
+
+  test("a browser whose page the debugger cannot attach to is closed, and says why", async () => {
+    next.attachFails = true
+    const result = await send({ command: "research.scroll", sessionID: "ses_lead" })
+    next.attachFails = false
+    expect(result).toMatchObject({ ok: false, error: research.NO_DEVTOOLS })
+    expect(latest().webContents.destroyed).toBe(true)
+    expect(research.ResearchWatch.list()).toEqual([])
+    // The next command opens a browser of its own, held as usual.
+    expect((await send({ command: "research.scroll", sessionID: "ses_lead" })).ok).toBe(true)
+    expect(latest().webContents.devtools.map((item) => item.method)).toContain("Debugger.pause")
+    await close("ses_lead")
   })
 })
 

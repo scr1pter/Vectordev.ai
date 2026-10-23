@@ -17,6 +17,7 @@ import path from "node:path"
 import type { TLSSocket } from "node:tls"
 import { app, BrowserWindow, nativeImage, session, webContents } from "electron"
 import {
+  AMBIENT,
   ResearchWatch,
   runResearchBrowser,
   type ResearchCommand,
@@ -27,6 +28,30 @@ import { useResearchNetwork } from "../src/main/research-proxy"
 
 // The prefix of the line the results go on, which research-browser-smoke.ts reads.
 const MARK = "research-smoke "
+
+// A secure page whose button calls every File System Access picker, from the page and from a frame its click makes,
+// and shows what each did: absent, rejected (and why), or still pending, which is a native dialog left open.
+const PICKER = `<button id="pick" style="position:fixed;left:40px;top:40px;width:240px;height:80px">Pick a file</button>
+<p id="result">pending</p>
+<script>
+const result = document.getElementById("result")
+document.getElementById("pick").addEventListener("click", () => {
+  const frame = document.createElement("iframe")
+  document.body.appendChild(frame)
+  const outcomes = {}
+  const show = () => { result.textContent = JSON.stringify(outcomes) }
+  for (const [place, target] of [["page", window], ["frame", frame.contentWindow]])
+    for (const name of ["showOpenFilePicker", "showSaveFilePicker", "showDirectoryPicker"]) {
+      const key = place + "." + name
+      if (typeof target[name] !== "function") { outcomes[key] = "absent"; continue }
+      outcomes[key] = "pending"
+      try {
+        target[name]().then(() => { outcomes[key] = "opened"; show() }, (error) => { outcomes[key] = "rejected " + error.name; show() })
+      } catch (error) { outcomes[key] = "rejected " + error.name }
+    }
+  show()
+})
+</script>`
 
 export type Check = {
   readonly name: string
@@ -80,6 +105,12 @@ async function main() {
       status: 401,
       headers: { "www-authenticate": 'Basic realm="smoke"' },
       body: "<p>Sign in</p>",
+    }),
+    // A challenge Chromium may answer with the user's own Windows or Kerberos sign-in.
+    "negotiate.web.test/": () => ({
+      status: 401,
+      headers: { "www-authenticate": "Negotiate, NTLM" },
+      body: "<p>Sign in with your account</p>",
     }),
     "refresh.web.test/": () => ({
       body: `<meta http-equiv="refresh" content="0;url=http://other.web.test:${port()}/"><p>Refreshing</p><script>setTimeout(() => { location.href = "http://elsewhere.web.test:${port()}/" }, 2_500)</script>`,
@@ -246,13 +277,64 @@ async function main() {
     auth.html.slice(0, 120),
   )
 
-  if (!tls) check("a TLS site that asks for a client certificate gets none", "skip", "openssl is not on this computer")
+  const negotiate = await page("negotiate")
+  check(
+    "an NTLM or Negotiate challenge is cancelled before Chromium answers it",
+    !hits.some((hit) => hit.host === "negotiate.web.test" && hit.authorization) &&
+      negotiate.report.refused.some((item) => item.reason === AMBIENT),
+    JSON.stringify(negotiate.report.refused.map((item) => item.reason.slice(0, 40))),
+  )
+
+  if (!tls) {
+    check("a TLS site that asks for a client certificate gets none", "skip", "openssl is not on this computer")
+    check(
+      "no File System Access picker opens after a trusted click, from the page or a frame it just made",
+      "skip",
+      "openssl is not on this computer",
+    )
+  }
   if (tls) {
     // The slots trust the smoke's own certificate, as they would a test CA; every other certificate is checked as usual.
     Array.from({ length: 5 }, (_, index) =>
       session
         .fromPartition(`vector-research-${index + 1}`)
         .setCertificateVerifyProc((request, callback) => callback(request.hostname === "tls.web.test" ? 0 : -3)),
+    )
+    // File System Access pickers exist only on a secure page, so they are checked on the TLS site. First that a page
+    // there has them at all outside a research browser (a hidden window of the smoke's own, which trusts the
+    // certificate and gives the site no client certificate), so that "absent" in a research browser means something.
+    const control = new BrowserWindow({ show: false, webPreferences: { partition: "smoke-control" } })
+    session
+      .fromPartition("smoke-control")
+      .setCertificateVerifyProc((request, callback) => callback(request.hostname === "127.0.0.1" ? 0 : -3))
+    control.webContents.on("select-client-certificate", (event, _url, _list, callback) => {
+      event.preventDefault()
+      ;(callback as (certificate?: Electron.Certificate) => void)()
+    })
+    await control.loadURL(`https://127.0.0.1:${new URL(tls.url).port}/picker`).catch(() => undefined)
+    const offered = String(
+      await control.webContents
+        .executeJavaScript("`${window.isSecureContext} ${typeof window.showOpenFilePicker}`")
+        .catch(() => "unknown"),
+    )
+    control.destroy()
+    const picker = `${tls.url}picker`
+    await command({ command: "research.open", sessionID: "ses_picker", url: picker, typed: [picker] })
+    const controls = await command({ command: "research.observe", sessionID: "ses_picker" })
+    const button = controls.observed?.elements.find((element) => element.tag === "button")
+    const clicked = button
+      ? await command({ command: "research.click", sessionID: "ses_picker", ref: button.ref })
+      : undefined
+    await wait(1_500)
+    const outcome = /<p>(\{[^<]*\})<\/p>/.exec(await text("ses_picker"))?.[1] ?? ""
+    await command({ command: "research.close", sessionID: "ses_picker" })
+    const outcomes = (outcome ? JSON.parse(outcome.replaceAll("&quot;", '"')) : {}) as Record<string, string>
+    check(
+      "no File System Access picker opens after a trusted click, from the page or a frame it just made",
+      offered === "true function" &&
+        Object.keys(outcomes).length === 6 &&
+        Object.values(outcomes).every((value) => value === "absent" || value.startsWith("rejected")),
+      `outside research: ${offered}; in research: ${outcome || clicked?.error || "no result"}`,
     )
     // As an address the user typed, so robots.txt, which the proxy's own fetch could not read past the test
     // certificate, does not apply.
@@ -417,6 +499,7 @@ async function main() {
         const peer = (request.socket as TLSSocket).getPeerCertificate()
         state.given = state.given || Boolean(peer && Object.keys(peer).length > 0)
         response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
+        if (request.url === "/picker") return response.end(PICKER)
         response.end(`<p>${state.given ? "A certificate came" : "No certificate"}</p>`)
       },
     )
