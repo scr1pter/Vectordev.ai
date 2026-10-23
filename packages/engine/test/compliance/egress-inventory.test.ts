@@ -150,6 +150,8 @@ const ADDRESSES: Readonly<Record<string, string>> = {
   "packages/engine/src/cli/cmd/github.git.ts": GIT,
   "packages/engine/src/cli/cmd/github.review.ts": GIT,
   "packages/engine/src/cli/cmd/pr.ts": GIT,
+  "packages/engine/src/config/local-settings.ts":
+    "Addresses vector local check asks Vector Local's decision about without connecting: a documentation address no network routes, and vectordev.ai.",
   "packages/engine/src/config/schema.ts": SHOWN,
   "packages/engine/src/config/tui-migrate.ts": SHOWN,
   "packages/engine/src/mcp/oauth-provider.ts":
