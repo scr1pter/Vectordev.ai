@@ -37,6 +37,7 @@ export const TYPED =
 export const NO_IMAGES = "This model does not read images, so research browsers take no screenshots for it."
 export const BROWSER_DOWN = "The desktop browser did not answer."
 const MAX_ADDRESSES = 5_000
+const MAX_URL = 8_192
 const MAX_BROWSERS = 9
 const RUNS = 32
 
@@ -129,8 +130,9 @@ export function available() {
   return Boolean(process.env.VECTOR_BROWSER_BRIDGE_URL && process.env.VECTOR_BROWSER_BRIDGE_TOKEN)
 }
 
+type Synced = { readonly generation: string; readonly sent: ReadonlySet<string> }
 // The copy of each run's provenance the desktop holds, by the generation it named, and what was sent to it.
-const synced = new Map<string, { readonly generation: string; readonly sent: ReadonlySet<string> }>()
+const synced = new Map<string, Synced>()
 // Each open browser, by run and session, for closing it when its agent's session finishes.
 const opened = new Map<string, { readonly runID: string; readonly sessionID: string; readonly agent: string; readonly max: number }>()
 // The source each browser's page was saved as, so a link followed from it reads as "via S#".
@@ -145,7 +147,10 @@ export const send = Effect.fnUntraced(function* (input: {
 }) {
   const runID = input.found.run.id
   const set = yield* input.research.provenance(input.ctx, input.found)
-  const all = [...set.values()].flatMap((entry) => [...entry.urls].map((url) => ({ url, typed: entry.from === "typed" })))
+  // The desktop takes addresses of 8,192 characters at most; a longer one could not be read anyway.
+  const all = [...set.values()]
+    .flatMap((entry) => [...entry.urls].map((url) => ({ url, typed: entry.from === "typed" })))
+    .filter((item) => item.url.length <= MAX_URL)
   const limits = yield* input.research.limits(input.found.plan.depth)
   const model = input.ctx.extra?.model as Provider.Model | undefined
   const common = {
@@ -156,22 +161,27 @@ export const send = Effect.fnUntraced(function* (input: {
     max: Math.min(MAX_BROWSERS, 1 + limits.researchers),
     images: model?.capabilities.input.image === true,
   }
-  const message = (known: { readonly generation: string; readonly sent: ReadonlySet<string> } | undefined) => {
+  const message = (known: Synced | undefined) => {
     const fresh = (known ? all.filter((item) => !known.sent.has(item.url)) : all).slice(-MAX_ADDRESSES)
     return {
-      ...common,
-      ...input.body,
-      ...(known ? { generation: known.generation } : {}),
-      provenance: fresh.filter((item) => !item.typed).map((item) => item.url),
-      typed: fresh.filter((item) => item.typed).map((item) => item.url),
+      sent: new Set([...(known?.sent ?? []), ...fresh.map((item) => item.url)]),
+      body: {
+        ...common,
+        ...input.body,
+        ...(known ? { generation: known.generation } : {}),
+        provenance: fresh.filter((item) => !item.typed).map((item) => item.url),
+        typed: fresh.filter((item) => item.typed).map((item) => item.url),
+      },
     }
   }
-  const first = yield* post(message(synced.get(runID)), input.ctx.abort)
+  const before = message(synced.get(runID))
+  const first = yield* post(before.body, input.ctx.abort)
   // The desktop's copy is another one (its browsers all closed since), so it gets the whole set.
-  const report = first.resync ? yield* post(message(undefined), input.ctx.abort) : first
+  const again = first.resync ? message(undefined) : undefined
+  const report = again ? yield* post(again.body, input.ctx.abort) : first
   if (report.generation) {
     synced.delete(runID)
-    synced.set(runID, { generation: report.generation, sent: new Set(all.map((item) => item.url)) })
+    synced.set(runID, { generation: report.generation, sent: (again ?? before).sent })
     if (synced.size > RUNS) synced.delete(synced.keys().next().value!)
   }
   const key = `${runID}:${input.ctx.sessionID}`

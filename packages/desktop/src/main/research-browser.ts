@@ -765,7 +765,8 @@ function harden(partition: Session) {
     if (!browser) return
     const url = item.getURL()
     const mime = item.getMimeType()
-    if (mime === "application/pdf" || /\.pdf$/i.test(new URL(url).pathname)) {
+    const web = /^https?:\/\//i.test(url) && URL.canParse(url)
+    if (web && (mime === "application/pdf" || /\.pdf$/i.test(new URL(url).pathname))) {
       browser.download = { url, mime }
       return
     }
