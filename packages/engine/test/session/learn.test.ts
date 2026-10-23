@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs"
 import os from "node:os"
 import path from "path"
 import { afterAll, expect } from "bun:test"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Stream } from "effect"
+import { LLMEvent } from "@vectordevai/llm"
 import { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Brain } from "@vectordevai/core/brain/brain"
@@ -20,7 +21,9 @@ import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
+import { FreeModels } from "@vectordevai/core/free-models"
 import { MemoryEvent } from "@vectordevai/schema/memory-event"
+import { SessionEvent } from "@vectordevai/schema/session-event"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Agent as AgentSvc } from "../../src/agent/agent"
 import { BackgroundJob } from "@/background/job"
@@ -58,7 +61,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Auth } from "@/auth"
 import { TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
-import { TestLLMServer } from "../lib/llm-server"
+import { reply, TestLLMServer } from "../lib/llm-server"
 import type { SessionID } from "../../src/session/schema"
 
 // Learning about you (section 6.3), end to end against the fake LLM server with no paid model call: what the user
@@ -172,13 +175,60 @@ const root = LayerNode.group([
   LayerNode.make({ service: TestLLMServer, layer: TestLLMServer.layer, deps: [] }),
 ])
 
-const it = testEffect(
+const replacements = [
+  [SessionSummary.node, summary],
+  [LSP.node, lsp],
+  [MCP.node, mcp],
+  [RuntimeFlags.node, RuntimeFlags.layer({ experimentalEventSystem: true })],
+  [Global.node, Global.layerWith({ config })],
+] as const
+const it = testEffect(LayerNode.compile(root, replacements))
+
+// The same stack where the user's own OpenRouter account lists a free model whose provider may train on prompts, the
+// owner accepted that, and each model call is answered here and kept by the agent it was for, instead of sent anywhere.
+const lagunaFree = {
+  id: "poolside/laguna-s-2.1:free",
+  name: "Poolside: Laguna S 2.1",
+  contextLength: 262144,
+  maxOutputTokens: 32768,
+  providers: [{ id: "poolside/fp4", name: "Poolside", retention: "", dataPolicy: "may-train" as const }],
+}
+const laguna = { providerID: ProviderV2.ID.openrouter, modelID: ModelV2.ID.make(lagunaFree.id) }
+const called: string[] = []
+const training = testEffect(
   LayerNode.compile(root, [
-    [SessionSummary.node, summary],
-    [LSP.node, lsp],
-    [MCP.node, mcp],
-    [RuntimeFlags.node, RuntimeFlags.layer({ experimentalEventSystem: true })],
-    [Global.node, Global.layerWith({ config })],
+    ...replacements,
+    [
+      FreeModels.node,
+      Layer.succeed(FreeModels.Service, {
+        catalog: () => Effect.succeed({ enabled: false, updatedAt: 0, models: [] }),
+        forKey: () => Effect.succeed([lagunaFree]),
+        trainingConsent: () => Effect.succeed(true),
+        setTrainingConsent: (accepted) => Effect.succeed(accepted),
+        changes: Stream.empty,
+      }),
+    ],
+    [
+      FreeModels.credentialsNode,
+      Layer.succeed(FreeModels.CredentialsService, {
+        get: (provider) => Effect.succeed(provider === "openrouter" ? "synthetic-key" : undefined),
+      }),
+    ],
+    [
+      LLM.node,
+      Layer.succeed(LLM.Service, {
+        stream: (input) => {
+          called.push(input.agent.name)
+          return Stream.make(
+            LLMEvent.textStart({ id: "reply" }),
+            LLMEvent.textDelta({ id: "reply", text: "Done." }),
+            LLMEvent.textEnd({ id: "reply" }),
+            LLMEvent.stepFinish({ index: 0, reason: "stop" }),
+            LLMEvent.finish({ reason: "stop" }),
+          )
+        },
+      }),
+    ],
   ]),
 )
 
@@ -434,6 +484,106 @@ it.instance(
         .filter((hit) => JSON.stringify(hit.body).includes("standing preference"))
       expect(asked).toEqual([])
       expect((yield* learned()).map((entry) => entry.text)).toEqual(["Always use pnpm for the workspace"])
+    }),
+  120_000,
+)
+
+it.instance(
+  "words inside a quote that spans lines, runs long or sits in single quotes teach nothing",
+  () =>
+    Effect.gen(function* () {
+      yield* setup()
+      yield* send({ text: 'Bob replied:\n"Thanks.\nAlways cc me on releases."\nCan you draft a reply?' })
+      yield* send({ text: "He said 'Always use tabs. Never use spaces.' in the doc. Can you check the style guide?" })
+      yield* send({
+        text: `The vendor wrote "${"Here is some background on the rollout. ".repeat(10)}Always deploy on Fridays." Summarise it for me.`,
+      })
+      expect(yield* learned()).toEqual([])
+    }),
+  120_000,
+)
+
+it.instance(
+  "a step of the task and a request to name what it makes teach nothing, and an instruction of no general kind stays with the repository",
+  () =>
+    Effect.gen(function* () {
+      yield* setup()
+      yield* send({ text: "Fix the flaky test, but don't change the public API" })
+      yield* send({ text: "Don't touch the migrations folder while you refactor" })
+      yield* send({ text: "Add a date helper, call it parseDate" })
+      expect(yield* learned()).toEqual([])
+      yield* send({ text: "Never call the billing client directly" })
+      yield* send({ text: "Always use tables for comparisons" })
+      const scopes = new Map((yield* learned()).map((entry) => [entry.text, entry.scope]))
+      expect(Object.fromEntries(scopes)).toEqual({
+        "Never call the billing client directly": "repository",
+        "Always use tables for comparisons": "personal",
+      })
+    }),
+  120_000,
+)
+
+// A model learner's request, by the instructions it carries.
+const learnerRequest = (hit: { body: unknown }) => JSON.stringify(hit.body).includes("standing preference")
+
+it.instance(
+  "the session's next prompt cancels the model learner still reading the last one, and a learner that runs counts as memory",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* setup()
+      const events = yield* EventV2Bridge.Service
+      const usage: unknown[] = []
+      const unsubscribe = yield* events.listen((event) => {
+        if (event.type === SessionEvent.AncillaryUsage.type) usage.push(event.data)
+        return Effect.void
+      })
+      const suggest = (text: string, quote: string) => JSON.stringify({ items: [{ kind: "preference", text, quote }] })
+      // The learner's answer waits until the session's next prompt has started.
+      const release = Promise.withResolvers<void>()
+      yield* llm.pushMatch(
+        (hit) => learnerRequest(hit) && JSON.stringify(hit.body).includes("pnpm"),
+        reply().wait(release.promise).text(suggest("Use pnpm for the workspace", "use pnpm for the workspace")).stop(),
+      )
+      const cancelled = yield* send({ text: "no, I meant use pnpm for the workspace" })
+      yield* settled(llm.hits.pipe(Effect.map((hits) => hits.some(learnerRequest))))
+      expect((yield* llm.hits).filter(learnerRequest)).toHaveLength(1)
+      yield* send({ sessionID: cancelled.sessionID, text: "thanks, now look at the failing build" })
+      release.resolve()
+      yield* Effect.sleep("300 millis")
+      expect(yield* learned()).toEqual([])
+      // A learner nothing cancels writes what it found, and its request counts in its own session, as memory.
+      yield* llm.textMatch(
+        (hit) => learnerRequest(hit) && JSON.stringify(hit.body).includes("yarn"),
+        suggest("Use yarn for the docs site", "use yarn for the docs site"),
+      )
+      const kept = yield* send({ text: "no, I meant use yarn for the docs site" })
+      yield* settled(learned().pipe(Effect.map((items) => items.length > 0)))
+      yield* unsubscribe
+      expect((yield* learned()).map((entry) => entry.text)).toEqual(["Use yarn for the docs site"])
+      expect(usage).toContainEqual(expect.objectContaining({ sessionID: kept.sessionID, purpose: "memory" }))
+    }),
+  120_000,
+)
+
+training.instance(
+  "the model learner never runs on a free model that may train on prompts",
+  () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const sessions = yield* Session.Service
+      const prompt = yield* SessionPrompt.Service
+      const session = yield* sessions.create({ title: "Learn", permission: allow })
+      called.length = 0
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        model: laguna,
+        parts: [{ type: "text", text: "no, I meant use pnpm for the workspace" }],
+      })
+      yield* Effect.sleep("300 millis")
+      expect(called).toContain("build")
+      expect(called).not.toContain("brain.learn")
+      expect(yield* learned()).toEqual([])
     }),
   120_000,
 )

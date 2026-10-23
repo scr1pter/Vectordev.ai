@@ -178,6 +178,7 @@ export function markdown(file: File) {
         return [
           `- **${entry.id}** ${oneLine(entry.text)} _(${marks.join(", ")})_`,
           ...(entry.file ? [`  - from ${path.basename(entry.file)}`] : []),
+          ...(entry.paths.length ? [`  - paths: ${entry.paths.map((item) => `\`${oneLine(item)}\``).join(", ")}`] : []),
           ...entry.evidence.map(
             (item) =>
               `  - ${new Date(item.createdAt).toISOString().slice(0, 10)} | ${item.type}${item.quote ? `: "${oneLine(item.quote)}"` : ""}${item.command ? `: \`${oneLine(item.command)}\`` : ""}`,
@@ -207,6 +208,10 @@ export type Incoming = {
   readonly text: string
   readonly scope: BrainSchema.Scope
   readonly facet?: BrainSchema.Facet
+  /** The files it is about, so it is recalled for them alone as before. */
+  readonly paths?: readonly string[]
+  /** It was withheld where a private document is (see `Entry.private`), and stays so once imported. */
+  readonly private?: boolean
 }
 
 /**
@@ -231,7 +236,11 @@ export type Imported = {
   readonly over: number
 }
 
-/** Imports a file's entries into the brain, each one waiting for the user's approval. */
+/**
+ * Imports a file's entries into the brain, each one waiting for the user's approval, with the files it is about and
+ * its private mark. An import never makes anything less private: an entry it holds again is left as it is, and a pin
+ * is the user's to give again once they approve it, so a changed file cannot put a line in every request.
+ */
 export const importText = Effect.fn("BrainExport.importText")(function* (input: {
   readonly brain: Brain.Interface
   readonly place: Brain.Place
@@ -244,6 +253,8 @@ export const importText = Effect.fn("BrainExport.importText")(function* (input: 
       text: item.text,
       scope: item.scope,
       ...(item.facet ? { facet: item.facet } : {}),
+      ...(item.paths?.length ? { paths: item.paths } : {}),
+      ...(item.private ? { private: true } : {}),
       origin: "import",
       evidence: { type: "user" },
     }),
@@ -290,6 +301,8 @@ function fromJson(file: File): Incoming[] {
             text: entry.text,
             scope: entry.scope,
             ...(entry.facet ? { facet: entry.facet } : {}),
+            ...(entry.paths.length ? { paths: entry.paths } : {}),
+            ...(entry.private ? { private: true } : {}),
           },
         ]
       : [],
@@ -297,20 +310,31 @@ function fromJson(file: File): Incoming[] {
 }
 
 // Markdown: a "## Preferences" (or Terms, Decisions, Lessons, Facts) heading, then one entry per top-level bullet,
-// with the export's id and marks when it has them. Indented bullets are evidence, and the rest is ignored.
+// with the export's id and marks when it has them, "private" among them. An indented "paths:" bullet gives the files
+// the entry above it is about; other indented bullets are evidence, and the rest is ignored.
 function fromMarkdown(text: string): Incoming[] {
   const kinds = new Map(
     Object.entries(HEADINGS).map(([kind, heading]) => [heading.toLowerCase(), kind as BrainSchema.Kind]),
   )
-  return text.split(/\r?\n/).reduce<{ kind?: BrainSchema.Kind; items: Incoming[] }>(
+  return text.split(/\r?\n/).reduce<{ kind?: BrainSchema.Kind; items: Incoming[]; open?: boolean }>(
     (state, line) => {
       const heading = /^##\s+(.+?)\s*$/.exec(line)
       if (heading) return { kind: kinds.get(heading[1]!.toLowerCase()), items: state.items }
       if (/^#\s/.test(line)) return { items: state.items }
+      const paths = /^\s+[-*]\s+paths:\s+(.+?)\s*$/.exec(line)
+      if (paths) {
+        const last = state.items.at(-1)
+        if (!state.open || !last) return state
+        const files = [...paths[1]!.matchAll(/`([^`]+)`/g)].map((match) => match[1]!.trim()).filter(Boolean)
+        return { ...state, items: [...state.items.slice(0, -1), { ...last, paths: [...(last.paths ?? []), ...files] }] }
+      }
       const bullet = /^[-*]\s+(?:\*\*[^*\s]+\*\*\s+)?(.+?)(?:\s+_\(([^)]*)\)_)?\s*$/.exec(line)
-      if (!bullet || !state.kind || !IMPORTED.has(state.kind)) return state
+      // A bullet left out leaves out what is indented below it too.
+      if (bullet && (!state.kind || !IMPORTED.has(state.kind))) return { ...state, open: false }
+      if (!bullet || !state.kind) return state
       const marks = (bullet[2] ?? "").split(",").map((mark) => mark.trim())
-      if (marks.some((mark) => mark === "archived" || mark === "superseded" || mark === "quarantined")) return state
+      if (marks.some((mark) => mark === "archived" || mark === "superseded" || mark === "quarantined"))
+        return { ...state, open: false }
       const kind = state.kind as BrainSchema.LearnedKind
       const facet = marks.find((mark): mark is BrainSchema.Facet =>
         BrainLearn.FACETS.includes(mark as BrainSchema.Facet),
@@ -322,7 +346,17 @@ function fromMarkdown(text: string): Incoming[] {
           : ("repository" as const)
       return {
         kind: state.kind,
-        items: [...state.items, { kind, text: bullet[1]!, scope, ...(facet ? { facet } : {}) }],
+        open: true,
+        items: [
+          ...state.items,
+          {
+            kind,
+            text: bullet[1]!,
+            scope,
+            ...(facet ? { facet } : {}),
+            ...(marks.includes("private") ? { private: true } : {}),
+          },
+        ],
       }
     },
     { items: [] },

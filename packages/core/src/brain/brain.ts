@@ -64,6 +64,8 @@ export const LIMIT = {
   /** Entries waiting for review (proposed or held) that one session may leave, and that one scope may hold. */
   pendingPerSession: 50,
   pending: 200,
+  /** Imported entries waiting for review in one scope, counted apart from the rest: a whole export's worth. */
+  imported: 500,
   /** Bytes read from one mirrored file. */
   file: 256 * 1024,
   /** Evidence rows and history events one entry keeps, newest first. */
@@ -184,6 +186,14 @@ export type Proposal = {
    * only the user puts it in use.
    */
   readonly pending?: "sighting" | "review"
+  /**
+   * Vector's learner (section 6.3) read it in what the owner typed in a top-level session, which only the engine's
+   * end-of-request learner says. Only such a write makes an instruction the owner gave about how they work anywhere
+   * ("always use tables") personal without a first-person quote, and its quote is checked against what the owner took
+   * back as well as its text. The memory tool's writes never are: a subagent's quote comes from the task its launching
+   * agent wrote.
+   */
+  readonly learner?: boolean
   readonly sessionID?: string
   /** Entries this session's current request message may still make active, counted by the caller. */
   readonly since?: number
@@ -1269,15 +1279,21 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     return rows.length
   })
 
-  // What waits for review in one scope, and how much of it one session left there.
-  const waiting = Effect.fnUntraced(function* (repository: string, sessionID: string | undefined) {
+  // What waits for review in one scope, of the origins given, and how much of it one session left there. Imports are
+  // counted apart from what Vector learned and the user wrote, so a large import neither stops Vector learning nor is
+  // cut short by what already waits.
+  const waiting = Effect.fnUntraced(function* (
+    repository: string,
+    sessionID: string | undefined,
+    origins: readonly BrainSchema.Origin[],
+  ) {
     const rows = yield* db
       .select({ session: BrainEntryTable.origin_session_id })
       .from(BrainEntryTable)
       .where(
         and(
           eq(BrainEntryTable.repository_id, repository),
-          inArray(BrainEntryTable.origin, [...LEARNED]),
+          inArray(BrainEntryTable.origin, [...origins]),
           inArray(BrainEntryTable.status, ["proposed", "quarantined"]),
         ),
       )
@@ -1356,6 +1372,38 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     return row !== undefined && row.until > Date.now()
   })
 
+  // Whether a quote of the user's words is, or holds, an entry they forgot in this repository or their own: the same
+  // words, or every term of it with each of its turns ("always", "never" and what they apply to).
+  const quoted = Effect.fnUntraced(function* (repository: string, quote: string) {
+    const hash = normHash(quote)
+    if ((yield* tombstoned(repository, hash)) || (yield* tombstoned(PERSONAL, hash))) return true
+    const terms = BrainLexical.terms(quote)
+    const turns = new Set(BrainLexical.polarity(quote).split(" ").filter(Boolean))
+    const forgotten = yield* db
+      .select({ terms: BrainTombstoneTable.terms, polarity: BrainTombstoneTable.polarity })
+      .from(BrainTombstoneTable)
+      .where(
+        and(
+          inArray(BrainTombstoneTable.repository_id, [...new Set([repository, PERSONAL])]),
+          gt(BrainTombstoneTable.until, Date.now()),
+          isNotNull(BrainTombstoneTable.terms),
+        ),
+      )
+      .all()
+      .pipe(Effect.orDie)
+    return forgotten.some((row) => {
+      const own = decode(row.terms!)
+      return (
+        own.size > 0 &&
+        [...own].every(([term, count]) => (terms.get(term) ?? 0) >= count) &&
+        (row.polarity ?? "")
+          .split(" ")
+          .filter(Boolean)
+          .every((turn) => turns.has(turn))
+      )
+    })
+  })
+
   // A replacement that waited for review replaces its entry once it is approved. Only the user's approval replaces what
   // the user wrote.
   const settle = Effect.fnUntraced(function* (id: string, actor: "user" | "agent" | "vector") {
@@ -1431,13 +1479,13 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
       !agent || (evidence !== undefined && evidence.type !== "user" && evidence.verified && supports(text, evidence))
     // The user's own words: what they wrote in Settings, or a checked quote of what they said in this conversation.
     const said = !agent || (verified && evidence?.type === "message")
-    // Personal memory follows the user into every repository, so it takes what they said about themselves, or an
-    // instruction they gave in so many words with nothing of one repository in it ("always use tables").
+    // Personal memory follows the user into every repository, so it takes what they said about themselves, or, from
+    // Vector's learner, an instruction they gave in so many words about how they work anywhere ("always use tables").
     const own =
       !agent ||
       (said &&
         evidence?.type === "message" &&
-        (FIRST_PERSON.test(evidence.quote) || general(text, evidence.quote)))
+        (FIRST_PERSON.test(evidence.quote) || (proposal.learner === true && general(text, evidence.quote, facet))))
     const previous = proposal.supersedes ? yield* find(place, proposal.supersedes, true) : keyed
     if (proposal.supersedes && !previous) return refuse("not-found", `No memory ${proposal.supersedes} here.`)
     if (previous && !LEARNED.includes(previous.origin))
@@ -1471,6 +1519,16 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     // What the user took out of their own memory is not learned for a repository instead either, nor imported again.
     if ((agent || imported) && ((yield* tombstoned(repository, hash)) || (yield* tombstoned(PERSONAL, hash))))
       return refuse("forgotten", "The user took this out of memory, so it was not saved again.")
+    // A model learner writes its own words for what the user typed, so what the user took back is found in the quote
+    // too: the same words, or a quote that says all of an entry they forgot, the same way round.
+    if (
+      agent &&
+      proposal.learner === true &&
+      evidence?.type === "message" &&
+      normalise(evidence.quote) !== normalise(text) &&
+      (yield* quoted(repository, evidence.quote))
+    )
+      return refuse("forgotten", "The user took out a memory that says this, so it was not saved again.")
     const hold = !agent
       ? undefined
       : (proposal.hold ?? (hiddenText ? "hidden-unicode" : BrainScan.instructionLike(text) ? "instruction-like" : undefined))
@@ -1593,8 +1651,13 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
 
     const status: BrainSchema.Status = hold ? "quarantined" : pending ? "proposed" : "active"
     if (status !== "active") {
-      const queue = yield* waiting(repository, proposal.sessionID)
-      if (queue.session >= LIMIT.pendingPerSession || queue.all >= LIMIT.pending)
+      const queue = yield* waiting(repository, proposal.sessionID, imported ? ["import"] : ["agent", "user"])
+      if (imported && queue.all >= LIMIT.imported)
+        return refuse(
+          "limit",
+          "Enough imported memory already waits for the user's review. Approve or reject it in Settings > Memory before importing more.",
+        )
+      if (!imported && (queue.session >= LIMIT.pendingPerSession || queue.all >= LIMIT.pending))
         return refuse(
           "limit",
           "Enough memory already waits for the user's review. Ask them to go through Settings > Memory before saving more.",
@@ -2708,15 +2771,25 @@ function overlap(own: ReadonlyMap<string, number>, other: ReadonlyMap<string, nu
 // Personal memory is what the user said about themselves.
 const FIRST_PERSON = /\b(?:i|me|my|mine|myself)\b/i
 
-// An instruction the user gave the agent, saved in their own words, that names no path, file or identifier of the code:
-// it says how they work anywhere.
-function general(text: string, quote: string) {
+// An instruction the user gave the agent, saved in their own words, about how they work anywhere: its words name a
+// facet that holds in every repository (format, workflow, tooling or sources, as "always use tables" and "never
+// squash merge" do), and no path, file or identifier of the code, no name ("the Acme billing tests"), nor this
+// repository alone ("in this repo"). An instruction of any other kind ("never call the billing client from the
+// controller") stays with its repository, where its names belong.
+function general(text: string, quote: string, facet: BrainSchema.Facet | undefined) {
   return (
     normalise(text) === normalise(quote) &&
+    facet !== undefined &&
+    GENERAL_FACETS.has(facet) &&
     BrainLearn.instruction(quote) &&
-    BrainPrivate.tokens(quote, ["path", "identifier"]).length === 0
+    !BrainLearn.scoped(quote) &&
+    !BrainLearn.particular(quote) &&
+    BrainPrivate.tokens(quote, ["path", "identifier"]).every(
+      (token) => token.kind === "identifier" && BrainLearn.known(token.value),
+    )
   )
 }
+const GENERAL_FACETS: ReadonlySet<BrainSchema.Facet> = new Set(["format", "workflow", "tooling", "sources"])
 
 // A quote counts as evidence only for a memory it states whole and the same way round; a cited file's path counts as
 // part of its quote.

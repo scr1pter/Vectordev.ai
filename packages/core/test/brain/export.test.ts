@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Effect } from "effect"
+import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainExport } from "@vectordevai/core/brain/export"
 import { SPEC_V1 } from "./fixture/documents"
 import { added, text, withKnowledge, type Setup } from "./fixture/knowledge"
@@ -25,6 +26,7 @@ const fill = (setup: Setup) =>
       scope: "personal",
       origin: "agent",
       evidence: { type: "message", quote: "Always run bun test before committing", verified: true },
+      learner: true,
       sessionID: "ses_1",
     })
     yield* added(setup, text("Auth spec.md", SPEC_V1))
@@ -152,5 +154,85 @@ describe("BrainExport.importText", () => {
       ["lesson", "Run the migrations before the seed", "repository", "proposed"],
     ])
     expect(result.refused).toBe(1)
+  })
+
+  test("a private entry stays private through an export and back, in JSON and in Markdown, with the files it is about", async () => {
+    const exported = await withKnowledge((setup) =>
+      Effect.gen(function* () {
+        yield* setup.brain.propose(setup.place, {
+          kind: "decision",
+          text: "Keep the vendor contract terms out of the billing worker",
+          scope: "repository",
+          paths: ["src/billing/**"],
+          origin: "user",
+          evidence: { type: "user" },
+          private: true,
+        })
+        const render = (format: "json" | "markdown") =>
+          BrainExport.render({
+            brain: setup.brain,
+            knowledge: setup.knowledge,
+            place: setup.place,
+            scope: "all",
+            format,
+          })
+        return { json: yield* render("json"), markdown: yield* render("markdown") }
+      }),
+    )
+    expect(exported.markdown).toContain("  - paths: `src/billing/**`")
+    for (const text of [exported.json, exported.markdown]) {
+      expect(BrainExport.parse(text)).toEqual([
+        {
+          kind: "decision",
+          text: "Keep the vendor contract terms out of the billing worker",
+          scope: "repository",
+          paths: ["src/billing/**"],
+          private: true,
+        },
+      ])
+      const imported = await withKnowledge((setup) =>
+        Effect.gen(function* () {
+          const result = yield* BrainExport.importText({ brain: setup.brain, place: setup.place, text })
+          const [entry] = result.entries
+          yield* setup.brain.update(setup.place, entry!.id, { action: "approve" }, "user")
+          return (yield* setup.brain.list(setup.place, { filter: "all" })).find((item) => item.id === entry!.id)
+        }),
+      )
+      // Approved, it is still withheld where private entries are, and still about those files alone.
+      expect(imported).toMatchObject({ status: "active", private: true, paths: ["src/billing/**"] })
+    }
+  })
+
+  test("a whole export's worth of entries waits for review, and Vector still learns while it waits", async () => {
+    const count = Brain.LIMIT.pending + 50
+    const result = await withKnowledge((setup) =>
+      Effect.gen(function* () {
+        const imported = yield* BrainExport.importText({
+          brain: setup.brain,
+          place: setup.place,
+          text: [
+            "## Preferences",
+            ...Array.from(
+              { length: count },
+              (_, index) => `- I prefer report layout number ${index} for weekly summaries`,
+            ),
+          ].join("\n"),
+        })
+        const learned = yield* setup.brain.propose(setup.place, {
+          kind: "preference",
+          text: "I prefer tables for the summary",
+          scope: "personal",
+          origin: "agent",
+          evidence: { type: "message", quote: "I prefer tables for the summary", verified: true },
+          learner: true,
+          pending: "sighting",
+          sessionID: "ses_1",
+        })
+        return { imported, learned }
+      }),
+    )
+    expect(result.imported.entries).toHaveLength(count)
+    expect(result.imported.refused).toBe(0)
+    expect(result.learned.type === "added" && result.learned.entry.status).toBe("proposed")
   })
 })

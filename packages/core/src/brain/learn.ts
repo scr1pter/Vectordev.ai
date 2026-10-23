@@ -14,11 +14,14 @@ import type { BrainSchema } from "./schema"
 //   ("always X", "never X", "don't X", "stop Xing"), filed under the facet its words name.
 //
 // Only what the user typed counts: the caller leaves out what they pasted, what a slash command wrote and text from
-// outside. A clause that starts inside quotes, a code span or a quoted (">") line is someone else's words, so it is never
-// learned. The entry's text is the user's own clause and its evidence the same clause, so the brain's quote check holds
-// by construction. What a short message says briefly goes into use at once; anything longer waits for a second sighting
-// or one click. A clause that tells Vector something sensitive about the user themselves (health, money, religion,
-// politics, relationships, sexuality) is dropped, while a preference about a sensitive research topic stays.
+// outside. A clause that starts inside quotes (across lines, and to the end of its paragraph when a quote never closes),
+// a code span or a quoted (">") line is someone else's words, so it is never learned. A step of the current task ("while
+// you refactor", "the payments API") is not a way of working, and a request to name what it makes ("add a helper, call
+// it parseDate") is not a term. The entry's text is the user's own clause and its evidence the same clause, so the
+// brain's quote check holds by construction. What a short message says briefly goes into use at once; anything longer
+// waits for a second sighting or one click. A clause that tells Vector something sensitive about the user themselves
+// (health, money, religion, politics, relationships, sexuality) is dropped, while a preference about a sensitive
+// research topic stays.
 
 export const LIMIT = {
   /** Characters of one learned entry: the user's own clause, trimmed. */
@@ -57,9 +60,12 @@ export function learn(text: string, options: { readonly facets?: Switches } = {}
     // A term runs to the end of its sentence, so the clauses it swallowed teach nothing of their own.
     const swallowed = all
       .slice(0, index)
-      .some((earlier) => earlier.rest.text.endsWith(clause.text) && parseTerm(earlier.rest.text, earlier.rest.masked))
+      .some(
+        (earlier) =>
+          earlier.rest.text.endsWith(clause.text) && learnable(parseTerm(earlier.rest.text, earlier.rest.masked)),
+      )
     if (swallowed) return []
-    const term = parseTerm(clause.rest.text, clause.rest.masked)
+    const term = learnable(parseTerm(clause.rest.text, clause.rest.masked))
     const kind = term ? ("term" as const) : preference(clause.masked) ? ("preference" as const) : undefined
     if (!kind) return []
     const entry = trimmed(term ? clause.rest.text : clause.text)
@@ -87,12 +93,43 @@ export function instruction(text: string) {
   return STOP.test(masked) || IMPERATIVE.test(masked)
 }
 
+/** Whether a clause says it holds for this repository alone: "always use pnpm in this repo", "for this codebase". */
+export function scoped(text: string) {
+  return REPOSITORY.test(text)
+}
+
+/**
+ * Whether a clause names something in particular: a capitalised word after its first ("run the Acme billing tests"),
+ * which is a company, a product or a person more often than not. A common acronym, a day or month, and a tool, format
+ * or source the facets know by name ("TypeScript", "Markdown", "PubMed") name nothing of one repository.
+ */
+export function particular(text: string) {
+  return text
+    .split(/\s+/)
+    .slice(1)
+    .map((word) => word.replace(/^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu, "").replace(/['’]s$/, ""))
+    .some(
+      (word) =>
+        /^\p{Lu}/u.test(word) &&
+        !COMMON_NAMES.has(word.toLowerCase()) &&
+        !COMMON_NAMES.has(word.toLowerCase().replace(/s$/, "")) &&
+        !known(word),
+    )
+}
+
+/** Whether a word is a tool, format, source or way of working the facets know by name ("TypeScript", "PubMed"). */
+export function known(word: string) {
+  return Object.values(KEYWORDS).some((pattern) => word.match(pattern)?.[0]?.length === word.length)
+}
+
 /**
  * A term's word or phrase and what the user means by it, read from a term entry's text ("when I say ship it, I mean
- * open a PR, wait for CI, then merge"). Nothing for text that names no term.
+ * open a PR, wait for CI, then merge"). Nothing for text that names no term. What the user writes as a term is theirs,
+ * so it is read whatever its key; only what Vector would learn on its own is held to more.
  */
 export function term(text: string) {
-  return parseTerm(text, mask(text))
+  const found = parseTerm(text, mask(text))
+  return found ? { key: found.key, meaning: found.meaning } : undefined
 }
 
 /** A term's key as recall compares it with a request: lowercase, with punctuation and runs of spaces as one space. */
@@ -191,10 +228,10 @@ const Reply = Schema.fromJsonString(
 
 /**
  * A model learner's suggestion as something learned, or nothing when it fails a check: its quote has to be the user's
- * own typed words (normalised), and neither its text nor its quote may hold a secret, read as instructions to the agent,
- * or say something sensitive about the user. In a session that read outside content it only ever waits for the user,
- * so outside text cannot steer a model into writing memory that is in use; elsewhere it goes into use when its quote
- * states it.
+ * own typed words (normalised), outside every quote, code span and quoted line of them, as the rules read them, and
+ * neither its text nor its quote may hold a secret, read as instructions to the agent, or say something sensitive about
+ * the user. In a session that read outside content it only ever waits for the user, so outside text cannot steer a
+ * model into writing memory that is in use; elsewhere it goes into use when its quote states it.
  */
 export function accept(
   suggestion: Suggestion,
@@ -203,12 +240,13 @@ export function accept(
   if (suggestion.kind !== "preference" && suggestion.kind !== "term") return undefined
   const text = trimmed(BrainScan.stripHidden(suggestion.text))
   const quote = BrainScan.stripHidden(suggestion.quote).replace(/\s+/g, " ").trim()
-  if (!text || quote.length < 3 || quote.length > LIMIT.text) return undefined
-  if (!normal(input.typed).includes(normal(quote))) return undefined
+  if (!text || quote.length < 3 || quote.length > LIMIT.text || quote.includes(MASK)) return undefined
+  // Someone else's words the user quoted ("the vendor email says: …") are masked, so a quote of them is not found.
+  if (!normal(mask(input.typed)).includes(normal(quote))) return undefined
   if ([text, quote].some((value) => BrainScan.credential(value) || BrainScan.redact(value, {}).redacted))
     return undefined
   if ([text, quote].some((value) => BrainScan.instructionLike(value) || sensitive(value))) return undefined
-  if (suggestion.kind === "term" && !term(text)) return undefined
+  if (suggestion.kind === "term" && !learnable(parseTerm(text, mask(text)))) return undefined
   const facet = suggestion.kind === "term" ? "vocabulary" : facetOf(text)
   if (input.facets?.[facet] === false) return undefined
   return {
@@ -232,20 +270,28 @@ type Clause = {
   readonly rest: { readonly text: string; readonly masked: string }
 }
 
-// Masks someone else's words in place, keeping every offset: fenced and inline code, quoted (">") lines, and text in
-// double or curly quotes. A masked character is no letter, space or punctuation, so no pattern starts or matches in it.
+// Masks someone else's words in place, keeping every offset: fenced and inline code, quoted (">") lines, and quoted
+// text. A double or curly quote runs to its closing mark across lines, however long, or to the end of its paragraph when
+// it never closes, so a pasted email's lines are all masked. A straight single quote opens after and closes before
+// something that is not a letter or digit, within a paragraph, so an apostrophe ("don't", "the users' settings") opens
+// or closes nothing and one inside a quote ('don't do that') does not end it. A masked character is no letter, space or
+// punctuation, so no pattern starts or matches in it.
 const MASK = "░"
 const OTHERS = [
   /```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)/g,
   /`[^`\n]+`/g,
   /^[ \t]*>.*$/gm,
-  /"[^"\n]{1,300}"|“[^”\n]{1,300}”|‘[^’\n]{1,300}’(?![\p{L}\p{N}])/gu,
+  /"[^"]*"|"[^"]*?(?=\n[ \t]*\n|$)/g,
+  /“[^”]*”|“[^”]*?(?=\n[ \t]*\n|$)/g,
+  /‘(?:[^’]|’(?=[\p{L}\p{N}]))*?’(?![\p{L}\p{N}])|‘[\s\S]*?(?=\n[ \t]*\n|$)/gu,
+  /(?<![\p{L}\p{N}])'(?:[^'\n]|\n(?![ \t]*\n)|(?<=[\p{L}\p{N}])'(?=\p{L}))+?'(?![\p{L}\p{N}])/gu,
 ]
 
+// An apostrophe written as a curly quote ("don’t") reads as one, so it neither opens nor closes a quote.
 function mask(text: string) {
   return OTHERS.reduce(
     (masked, pattern) => masked.replace(pattern, (match) => match.replace(/[^\n]/g, MASK)),
-    text.replace(/[‘’](?=[\p{L}])/gu, "'"),
+    text.replace(/(?<=[\p{L}\p{N}])[‘’](?=\p{L})/gu, "'"),
   )
 }
 
@@ -300,6 +346,7 @@ const TERMS = [
   /^by\s+(?<key>.+?)\s*,?\s+i\s+mean\s+(?:that\s+)?(?<meaning>.+)$/dis,
   /^(?<meaning>.+?)\s*(?:,|:|\s[-\u2013\u2014]{1,2})\s*(?:let's\s+|we'll\s+|i'll\s+)?call\s+(?:it|this|that|them)\s+(?<key>.+)$/dis,
 ]
+const CALL_IT = TERMS[2]
 
 function parseTerm(text: string, masked: string) {
   return TERMS.flatMap((pattern) => {
@@ -317,13 +364,42 @@ function parseTerm(text: string, masked: string) {
       .replace(/[.,;:!]+$/, "")
     if (!termKey || termKey.length > 40 || termKey.split(" ").length > 5 || meaning.length < 3 || meaning.length > 250)
       return []
-    return [{ key: termKey, meaning }]
+    // A key a request names by chance would come back with nearly every request: "it", "this one", "ci". And "Y, call
+    // it X" is also how a request names what it asks for ("add a helper, call it parseDate"), or an idiom ("call it a
+    // day", "call it from main"): a term only when X is plain words and Y is not a thing to make or change.
+    const chance =
+      termKey.replaceAll(" ", "").length < 3 ||
+      termKey.split(" ").every((word) => VAGUE.has(word)) ||
+      (pattern === CALL_IT && (CODE_NAME.test(name) || PHRASE.test(name) || TASK.test(meaning)))
+    return [{ key: termKey, meaning, chance }]
   })[0]
 }
 
+// A term Vector may learn on its own: one whose words a request would not name by chance.
+function learnable(found: ReturnType<typeof parseTerm>) {
+  return found && !found.chance ? found : undefined
+}
+
+// Words that name nothing on their own.
+const VAGUE = new Set(
+  "it its this that these those them they he she him her we us you i me my our here there now then so ok okay yes no one ones thing things stuff the a an and or do done go way".split(
+    " ",
+  ),
+)
+// A name in the shape of code: camelCase, snake_case, a file name or dotted path, a call or a path.
+const CODE_NAME = /[a-z][A-Z]|\w_\w|\w\.\w|[/\\()]|::/
+// What follows "call it" in a phrase that defines nothing: "call it from main", "call it a day", "call it done".
+const PHRASE =
+  /^(?:a|an|from|with|on|in|at|by|via|into|inside|after|before|once|twice|again|when|if|as|using|through|for|to|off|out|up|quits|done|good|even|ok|okay)\b/i
+// A meaning that asks for something to be made or changed, which "call it" then names.
+const TASK =
+  /^(?:(?:please|pls|can you|could you|let's|lets|we need to|i need you to|i want you to)\s+)?(?:add|create|make|write|rename|fix|move|build|implement|generate|extract|define|declare|introduce|name|put|set\s+up|wrap|split|export|copy|duplicate|refactor|rewrite|update|change|replace|convert|delete|remove|spin\s+up|new|a|an|another)\b/i
+
 // "I prefer / I like / I'd rather X", and instructions to the agent at the start of a clause: "always X", "never X",
 // "don't X", "stop Xing". Feedback on this answer ("I like this", "don't worry") and one-off steps of the current task
-// ("don't change that file", "stop here") are not ways of working.
+// ("don't change that file", "stop here", "don't touch the migrations folder while you refactor", "don't change the
+// public API") are not ways of working: an instruction about one of the repository's folders, files, APIs or other
+// parts of its code belongs to the task at hand far more often than it says how the user works.
 const FIRST =
   /^i(?:'d|\s+would)\s+(?:much\s+)?(?:rather|prefer)\s+(.+)$|^i\s+(?:really\s+|usually\s+|generally\s+|always\s+|strongly\s+|much\s+)?(?:prefer|like|love|dislike|hate|don't\s+like|do\s+not\s+like|can't\s+stand)\s+(.+)$/i
 const IMPERATIVE =
@@ -332,7 +408,10 @@ const STOP = /^stop\s+[a-z]+ing\b\s*\S/i
 const FEEDBACK =
   /^(?:it|this|that|these|those|both|either|neither|yours|mine|the\s+(?:first|second|last|other|new)(?:\s+one)?)\b(?!\s+when\b)/i
 const ONE_OFF =
-  /\b(?:it|that|these|those|here|now|yet|today|tonight|tomorrow|again|anymore|any\s+more|this\s+(?:time|one|file|function|line|test|change|pr|branch|bug|method|class|component|part|section)|that\s+one)\b|^(?:don't|dont|do\s+not|never)\s+(?:worry|bother|know|mind|forget|think)\b/i
+  /\b(?:it|that|these|those|here|now|yet|today|tonight|tomorrow|again|anymore|any\s+more|this\s+(?:time|one|file|function|line|test|change|pr|branch|bug|method|class|component|part|section|task|issue|ticket|commit)|that\s+one|for\s+now|while\s+(?:you|you're|you\s+are|we|we're|we\s+are|i'm|i\s+am)|as\s+part\s+of|the\s+(?:[\w.-]+\s+){1,2}?(?:folder|directory|dir|file|api|endpoint|route|module|controller|function|method|class|component|handler)\b(?!\s+(?:keys?|tokens?|secrets?|docs?|documentation|reference|version)\b))\b|^(?:don't|dont|do\s+not|never)\s+(?:worry|bother|know|mind|forget|think)\b/i
+// "in this repo", "for this codebase": an instruction for one repository, which follows the user nowhere else.
+const REPOSITORY =
+  /\b(?:in|for|across|within|throughout|of)\s+(?:this|the|our)\s+(?:repo|repository|codebase|code\s+base|monorepo|workspace)\b/i
 
 function preference(masked: string) {
   const first = FIRST.exec(masked)
@@ -343,13 +422,23 @@ function preference(masked: string) {
 }
 
 function trimmed(clause: string) {
-  const text = clause
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/[.,;:!]+$/, "")
+  const text = bare(clause.replace(/\s+/g, " ").trim())
   if (text.length <= LIMIT.text) return text
   const cut = text.slice(0, LIMIT.text)
-  return cut.slice(0, cut.lastIndexOf(" ") > 0 ? cut.lastIndexOf(" ") : LIMIT.text).replace(/[.,;:!]+$/, "")
+  return bare(cut.slice(0, cut.lastIndexOf(" ") > 0 ? cut.lastIndexOf(" ") : LIMIT.text))
+}
+
+// A clause without the punctuation it ends on, nor a closing quote mark it does not open: the end of a quote that
+// opened before the clause did ("… Never use spaces.'").
+function bare(text: string): string {
+  const next = text.replace(/[\s.,;:!]+$/, "")
+  const before = next.slice(0, -1)
+  const dangling =
+    (next.endsWith('"') && (before.match(/"/g)?.length ?? 0) % 2 === 0) ||
+    (next.endsWith("”") && !before.includes("“")) ||
+    (next.endsWith("’") && !before.includes("‘")) ||
+    (next.endsWith("'") && !/(?<![\p{L}\p{N}])'/u.test(before))
+  return dangling ? bare(before) : next
 }
 
 function normal(text: string) {
@@ -366,6 +455,19 @@ const KEYWORDS: Record<"format" | "workflow" | "sources" | "tooling", RegExp> = 
   tooling:
     /\b(?:package managers?|npm|pnpm|yarn|bun|deno|node|pip|pipenv|poetry|uv|cargo|gradle|maven|editors?|vim|neovim|nvim|vs ?code|emacs|ides?|typescript|javascript|python|rust|golang|java|kotlin|swift|ruby|php|c\+\+|c#|haskell|elixir|linters?|formatters?|prettier|eslint|biome|docker|terminal|shell|zsh|bash|fish|frameworks?|react|vue|svelte|angular|tailwind)\b/gi,
 }
+
+// Capitalised words that name nothing of one repository: the pronoun, acronyms engineers write anywhere, days and
+// months, languages, and the hosts, platforms and products most repositories share.
+const COMMON_NAMES = new Set(
+  `i i'm i'd i've i'll ok ci cd pr api json yaml toml sql http https url uri ui ux cli sdk css html js ts jsx tsx ide os
+  db id todo fixme readme lgtm ai llm mcp pdf csv utf ascii rest rpc dns tls ssh ssl jwt oauth e2e md
+  monday tuesday wednesday thursday friday saturday sunday january february march april may june july august september
+  october november december english british american us uk
+  git github gitlab bitbucket jira linear slack kubernetes aws gcp azure vercel netlify sentry postgres postgresql
+  mysql sqlite redis mongodb chrome firefox safari mac macos linux windows ios android`
+    .split(/\s+/)
+    .filter(Boolean),
+)
 
 const SENSITIVE = [
   // health

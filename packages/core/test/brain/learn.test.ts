@@ -44,6 +44,7 @@ const write = (
     facet: item.facet,
     origin: "agent",
     evidence: { type: "message", quote: item.quote, verified: true },
+    learner: true,
     sessionID: input.sessionID,
     since: input.since ?? 0,
     ...(item.status === "proposed" ? { pending: "sighting" as const } : {}),
@@ -67,6 +68,37 @@ describe("BrainLearn.learn", () => {
     expect(BrainLearn.term("the deploy and verify flow, call it ship")).toEqual({
       key: "ship",
       meaning: "the deploy and verify flow",
+    })
+  })
+
+  test("a request that names what it makes, an idiom and a key any request names are not terms", () => {
+    for (const text of [
+      "Add a helper function, call it parseDate",
+      "Add a date helper, call it the formatter",
+      "Create a new branch, call it release",
+      "Write the cleanup script, call it clean_cache",
+      "Fix the bug in the parser, call it from main",
+      "Finish the tests, then call it a day",
+      "the helper for dates, call it dates.ts",
+      "when I say it, I mean the current file",
+      "when I say this one I mean the login form",
+      "by ci I mean the GitHub Actions run",
+    ])
+      expect(BrainLearn.learn(text)).toEqual([])
+    // Nor does the model learner's suggestion of one count; what the user writes as a term is theirs, whatever it says.
+    expect(
+      BrainLearn.accept(
+        {
+          kind: "term",
+          text: "When I say it, I mean the current file",
+          quote: "when I say it, I mean the current file",
+        },
+        { typed: "no, when I say it, I mean the current file", tainted: false },
+      ),
+    ).toBeUndefined()
+    expect(BrainLearn.term("when I say it, I mean the current file")).toEqual({
+      key: "it",
+      meaning: "the current file",
     })
   })
 
@@ -96,6 +128,48 @@ describe("BrainLearn.learn", () => {
       "don't worry about the flaky test",
     ])
       expect(BrainLearn.learn(text)).toEqual([])
+  })
+
+  test("a quote is someone else's words across line breaks, however long, and in straight single quotes", () => {
+    for (const text of [
+      'My colleague wrote:\n"Hi team,\nAlways deploy on Fridays.\nThanks"\nCan you summarise it?',
+      'Bob replied:\n"Thanks.\nAlways cc me on releases."\nCan you draft a reply?',
+      `He wrote "${"Some background on the release. ".repeat(12)}Always deploy on Fridays." in the thread`,
+      "He said 'Always use tabs. Never use spaces.' in the doc",
+      "Their guide says ‘Always squash merge. Never rebase.’ on page two",
+      // A quote that never closes is someone else's words to the end of its paragraph.
+      'The vendor wrote: "Always deploy on Fridays.\nNever run the tests',
+    ])
+      expect(BrainLearn.learn(text)).toEqual([])
+    // An apostrophe opens no quote, and a quote inside the user's own clause leaves the clause theirs.
+    expect(
+      BrainLearn.learn("Don't use the users' config. Always run lint before you commit").map((item) => item.text),
+    ).toEqual(["Don't use the users' config", "Always run lint before you commit"])
+    expect(BrainLearn.learn("I'd rather you use 'pnpm' than npm").map((item) => item.text)).toEqual([
+      "I'd rather you use 'pnpm' than npm",
+    ])
+    // After a blank line the user speaks again.
+    expect(
+      BrainLearn.learn('He wrote: "Always deploy on Fridays\n\nNever use emojis').map((item) => item.text),
+    ).toEqual(["Never use emojis"])
+  })
+
+  test("a step of the current task is not a way of working", () => {
+    for (const text of [
+      "Fix the flaky test, but don't change the public API",
+      "Don't touch the migrations folder while you refactor",
+      "Never call the payments API directly from the controller",
+      "Don't edit the billing module for now",
+      "Never rename the parse function as part of this",
+    ])
+      expect(BrainLearn.learn(text)).toEqual([])
+    // A general instruction naming such a word still is one.
+    expect(BrainLearn.learn("Always end the file with a newline").map((item) => item.text)).toEqual([
+      "Always end the file with a newline",
+    ])
+    expect(BrainLearn.learn("Never commit the Stripe API key").map((item) => item.text)).toEqual([
+      "Never commit the Stripe API key",
+    ])
   })
 
   test("a sensitive first-person fact is dropped while a preference about a research topic survives", () => {
@@ -140,6 +214,29 @@ describe("BrainLearn.accept", () => {
     }
     expect(BrainLearn.accept(suggestion, { typed, tainted: false })?.facet).toBe("workflow")
     expect(BrainLearn.accept(suggestion, { typed, tainted: true })?.status).toBe("proposed")
+  })
+
+  test("a quote of words the user quoted from someone else is dropped, as the rules would skip them", () => {
+    const quoting = 'no, I meant do what the vendor email says: "always deploy on Fridays after lunch"'
+    expect(BrainLearn.learn(quoting)).toEqual([])
+    expect(BrainLearn.gate(quoting)).toBe(true)
+    expect(
+      BrainLearn.accept(
+        {
+          kind: "preference",
+          text: "Always deploy on Fridays after lunch",
+          quote: "always deploy on Fridays after lunch",
+        },
+        { typed: quoting, tainted: false },
+      ),
+    ).toBeUndefined()
+    // The user's own words beside the quote still count.
+    expect(
+      BrainLearn.accept(
+        { kind: "preference", text: "Do what the vendor email says", quote: "do what the vendor email says" },
+        { typed: quoting, tainted: false },
+      )?.status,
+    ).toBe("active")
   })
 
   test("a quote the user never typed, instructions, secrets and sensitive facts are dropped", () => {
@@ -221,6 +318,84 @@ describe("learning in the brain", () => {
     )
     expect(result.first.type).toBe("added")
     expect(result.again).toMatchObject({ type: "refused", reason: "forgotten" })
+  })
+
+  test("only the learner makes an instruction personal, and only one about how the user works anywhere", async () => {
+    const result = await run((brain, place) =>
+      Effect.gen(function* () {
+        const scope = (text: string) =>
+          Effect.gen(function* () {
+            const [item] = BrainLearn.learn(text)
+            const written = yield* write(brain, place, item!, { sessionID: `ses_${text.length}` })
+            return written.type === "refused" ? written.reason : written.entry.scope
+          })
+        // The memory tool's write, even with the same words, needs a first-person quote to be personal: a subagent's
+        // quote is the task its launching agent wrote.
+        const tool = yield* brain.propose(place, {
+          kind: "preference",
+          text: "Always cite sources inline",
+          scope: "personal",
+          origin: "agent",
+          evidence: { type: "message", quote: "Always cite sources inline", verified: true },
+          sessionID: "ses_tool",
+        })
+        return {
+          format: yield* scope("Always use tables for comparisons"),
+          workflow: yield* scope("Never squash merge"),
+          style: yield* scope("Never call the billing client directly"),
+          repo: yield* scope("Always use pnpm in this repo"),
+          named: yield* scope("Always run the Acme billing tests before pushing"),
+          tool: yield* scope("Always format TypeScript with prettier before committing"),
+          memoryTool: tool.type === "refused" ? tool.reason : tool.entry.scope,
+        }
+      }),
+    )
+    expect(result).toEqual({
+      format: "personal",
+      workflow: "personal",
+      style: "repository",
+      repo: "repository",
+      named: "repository",
+      tool: "personal",
+      memoryTool: "repository",
+    })
+  })
+
+  test("a model learner's new words for what the user took back are not learned when its quote says it", async () => {
+    const result = await run((brain, place) =>
+      Effect.gen(function* () {
+        const [item] = BrainLearn.learn("Always use tables for comparisons")
+        const first = yield* write(brain, place, item!, { sessionID: "ses_1" })
+        if (first.type === "refused") return { first, again: first, plain: first }
+        yield* brain.update(place, first.entry.id, { action: "undo" }, "user")
+        const suggestion = (text: string, quote: string, sessionID: string) =>
+          brain.propose(place, {
+            kind: "preference",
+            text,
+            scope: "personal",
+            origin: "agent",
+            evidence: { type: "message", quote, verified: true },
+            learner: true,
+            sessionID,
+          })
+        // "no, I meant always use tables for comparisons": the model writes its own words, the quote is the user's.
+        const again = yield* suggestion(
+          "Lay out every option grid as tables",
+          "no, I meant always use tables for comparisons",
+          "ses_2",
+        )
+        const plain = yield* suggestion(
+          "Lay out every option grid as tables",
+          "lay out every option grid as tables",
+          "ses_3",
+        )
+        return { first, again, plain }
+      }),
+    )
+    expect(result.first.type).toBe("added")
+    expect(result.again).toMatchObject({ type: "refused", reason: "forgotten" })
+    // A quote that does not say what was taken back is learned as usual.
+    expect(result.plain.type).toBe("added")
   })
 
   test("what waits for a second sighting goes into use when another session says it again, and not from the same one", async () => {

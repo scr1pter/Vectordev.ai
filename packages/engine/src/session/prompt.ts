@@ -2132,7 +2132,7 @@ const layer = Layer.effect(
       // Every message this run writes sorts after this ID, which is how the judge finds the requests the run answered.
       const since = MessageID.ascending()
       // The user messages this run answered and the size of the request each was in, for the learner once it is over.
-      const taught = new Map<MessageID, TaskSize.Tier>()
+      const taught = new Map<MessageID, { readonly message: SessionV1.WithParts; readonly tier: TaskSize.Tier }>()
       // The judge's rounds in this run; a compaction may summarise earlier verdicts out of view.
       let judged = 0
       // Before the first request, so a prompt arriving after the cache expired sends the cleared history.
@@ -2224,7 +2224,7 @@ const layer = Layer.effect(
             })
           : []
         const sized = requests.at(-1)
-        for (const user of sized?.users ?? []) taught.set(user.info.id, sized!.tier)
+        for (const user of sized?.users ?? []) taught.set(user.info.id, { message: user, tier: sized!.tier })
 
         if (step === 1 && !resumed) {
           const background = yield* InstanceState.get(backgroundTasks)
@@ -2736,27 +2736,28 @@ const layer = Layer.effect(
     // an invited guest is in, a subagent or Vector's own helpers, whose messages Vector or another agent wrote. Each
     // message keeps the per-message cap and the facets the user turned off; what a short message says goes into use at
     // once and the rest waits for a second sighting. A correction the rules found nothing in goes to the optional model
-    // learner, returned to run in the background (nothing when it has no work). Each message's writes are announced for
-    // the app's "Learned" chip.
+    // learner, returned to run in the background (nothing when it has no work or may not run), and only then is the
+    // session read. Every write says it is the learner's, which alone may make an instruction personal without a
+    // first-person quote. Each message's writes are announced for the app's "Learned" chip.
     const learnRun = Effect.fn("SessionPrompt.learnRun")(function* (
       session: Session.Info,
-      taught: ReadonlyMap<MessageID, TaskSize.Tier>,
+      taught: ReadonlyMap<MessageID, { readonly message: SessionV1.WithParts; readonly tier: TaskSize.Tier }>,
     ) {
-      if (session.parentID || session.internal || ![...taught.values()].some((tier) => tier !== "chat")) return undefined
-      const msgs = yield* sessions.messages({ sessionID: session.id })
-      const requests = msgs.flatMap((message, index) => {
-        const tier = taught.get(message.info.id)
-        if (message.info.role !== "user" || !tier || tier === "chat") return []
-        const typed = SessionMemory.typed(message)
-        return typed ? [{ message, typed, index }] : []
-      })
-      // Most messages teach nothing, and finding that out is plain code: nothing else is read for them.
+      if (session.parentID || session.internal) return undefined
+      // The run already holds the messages it answered, so nothing is read to learn from them.
+      const requests = [...taught.values()]
+        .filter((item) => item.tier !== "chat" && item.message.info.role === "user")
+        .toSorted((a, b) => (a.message.info.id < b.message.info.id ? -1 : 1))
+        .flatMap((item) => {
+          const typed = SessionMemory.typed(item.message)
+          return typed ? [{ message: item.message, typed }] : []
+        })
+      // Most messages teach nothing, and finding that out is plain code.
       if (requests.every((request) => BrainLearn.learn(request.typed).length === 0 && !BrainLearn.gate(request.typed)))
         return undefined
       if (yield* guests.marked(session.id)) return undefined
       const settings = yield* brain.learnSettings()
       if (!settings.learning) return undefined
-      const tainted = SessionMemory.taint(msgs) !== undefined
       const place = yield* instruction.place()
       const write = Effect.fnUntraced(function* (
         message: SessionV1.WithParts,
@@ -2771,6 +2772,7 @@ const layer = Layer.effect(
             facet: item.facet,
             origin: "agent",
             evidence: { type: "message", quote: item.quote, verified: true },
+            learner: true,
             sessionID: session.id,
             since: message.info.time.created,
             ...(item.status === "proposed" ? { pending } : {}),
@@ -2791,13 +2793,21 @@ const layer = Layer.effect(
       ).pipe(Effect.map((all) => all.flat()))
       const last = corrections.at(-1)
       const user = last?.message.info
-      if (!last || user?.role !== "user") return undefined
+      // The model learner runs where the user let it: with Vector Local on, by default.
+      const allowed =
+        settings.modelLearner === "always" || (settings.modelLearner === "local-only" && Egress.policy().enabled)
+      if (!last || user?.role !== "user" || !allowed) return undefined
+      // Only a correction the rules found nothing in needs the session: whether it read outside content, and the reply
+      // before the correction.
+      const msgs = yield* sessions.messages({ sessionID: session.id })
+      const tainted = SessionMemory.taint(msgs) !== undefined
+      const before = msgs.filter((message) => message.info.id < user.id)
       return Effect.gen(function* () {
         const learned = yield* modelLearn({
           session,
           user,
           typed: last.typed,
-          reply: SessionTaskSize.closingText(msgs.slice(0, last.index)).slice(-600),
+          reply: SessionTaskSize.closingText(before).slice(-600),
           tainted,
           settings,
         })
@@ -2818,8 +2828,6 @@ const layer = Layer.effect(
       tainted: boolean
       settings: Brain.LearnSettings
     }) {
-      if (input.settings.modelLearner === "off") return []
-      if (input.settings.modelLearner === "local-only" && !Egress.policy().enabled) return []
       const primary = yield* provider.getModel(input.user.model.providerID, input.user.model.modelID).pipe(Effect.option)
       if (Option.isNone(primary)) return []
       const model =
