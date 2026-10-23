@@ -10,6 +10,7 @@ import { isFreeModel } from "@vectordevai/schema/free-model"
 import { Research } from "@vectordevai/schema/research"
 import type { TaskSize } from "@vectordevai/schema/task-size"
 import { Effect, Option, Schema } from "effect"
+import { Auth } from "@/auth"
 import { Config } from "@/config/config"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import type { Provider } from "@/provider/provider"
@@ -18,7 +19,7 @@ import { MessageV2 } from "../session/message-v2"
 import { MessageID, SessionID } from "../session/schema"
 import type { TaskSizeContext } from "./escalate"
 import { ResearchRun } from "./research-run"
-import { searchProvider } from "./research-search"
+import { available, options, searchProvider } from "./research-search"
 import { SubagentLifecycle } from "./subagent-lifecycle"
 import { Tool } from "./tool"
 import DESCRIPTION from "./research-plan.txt"
@@ -88,6 +89,7 @@ export const ResearchPlanTool = Tool.define<
   | SpendGuard.Service
   | FreeModelGuests.Service
   | Database.Service
+  | Auth.Service
 >(
   "research_plan",
   Effect.gen(function* () {
@@ -99,6 +101,7 @@ export const ResearchPlanTool = Tool.define<
     const guard = yield* SpendGuard.Service
     const guests = yield* FreeModelGuests.Service
     const database = yield* Database.Service
+    const auth = yield* Auth.Service
     // Who can answer a plan card: the same clients the question tool is offered to.
     const interactive = ["app", "cli", "desktop"].includes(flags.client) || flags.enableQuestionTool
 
@@ -113,11 +116,13 @@ export const ResearchPlanTool = Tool.define<
           const place = yield* research.place()
           const cfg = yield* config.get()
           const size = ctx.extra?.taskSize as TaskSizeContext | undefined
+          // What `vector run --research` was told: its --scope holds whatever the model proposes.
+          const chosen = options(ctx.messages)
           // The user's own sites to prefer and avoid apply in code, whatever the model proposed.
           const plan: Research.Plan = {
             question: params.question.trim(),
             subquestions: params.subquestions.map((item) => item.trim()),
-            scope: params.scope,
+            scope: chosen.scope ?? params.scope,
             depth: params.depth,
             ...domains("prefer_domains", params.prefer_domains, cfg.research?.domains?.prefer),
             ...domains("avoid_domains", params.avoid_domains, cfg.research?.domains?.avoid),
@@ -153,7 +158,14 @@ export const ResearchPlanTool = Tool.define<
               ? "focused"
               : "deep"
           const proposed = { ...plan, depth: deeper(plan.depth, ceiling) }
-          const provider = searchProvider(cfg.research)
+          const provider = searchProvider(
+            cfg.research,
+            yield* available().pipe(
+              Effect.provideService(Auth.Service, auth),
+              Effect.provideService(RuntimeFlags.Service, flags),
+            ),
+            chosen.search,
+          )
           const estimate = yield* estimateLine(proposed, ctx, provider.provider)
           const start = Effect.fnUntraced(function* (input: Research.Plan) {
             // A run the model re-planned with the same question keeps its run and what it read.
@@ -281,7 +293,11 @@ export const ResearchPlanTool = Tool.define<
     }
 
     // The plan card's estimate line, in the copy deck's words; always called an estimate.
-    function estimateLine(plan: Research.Plan, ctx: Tool.Context, provider: string) {
+    function estimateLine(
+      plan: Research.Plan,
+      ctx: Tool.Context,
+      provider: ReturnType<typeof searchProvider>["provider"],
+    ) {
       return Effect.gen(function* () {
         const caps = yield* research.limits(plan.depth)
         const own = (yield* guard.snapshot(SessionID.make(ctx.sessionID)))?.budget
@@ -314,7 +330,7 @@ export const ResearchPlanTool = Tool.define<
           // Research's default caps apply only when the user has none of their own.
           ...(own?.usd !== undefined ? { capUsd: own.usd } : own?.steps === undefined ? { capUsd: caps.usd } : {}),
           capSteps: own?.steps ?? caps.steps,
-          ...(provider === "searxng" || provider === "none" ? { search: provider } : {}),
+          search: provider,
         })
       })
     }
