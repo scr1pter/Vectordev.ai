@@ -347,6 +347,11 @@ export const BrowserTool = Tool.define<typeof Parameters, Metadata, never>(
           if (params.action === "screenshot" && model?.capabilities.input.image !== true)
             return { title: "No screenshot", output: NO_IMAGES, metadata: { url: "", action: params.action } }
           if (params.action === "handoff") return yield* handoff(params, ctx, lead)
+          // The lead reads the page the user reached after a handoff, and no other; without one it does not touch the
+          // user's browser at all.
+          const handed = lead && READING.has(params.action) ? reached(ctx.messages) : undefined
+          if (lead && READING.has(params.action) && !handed)
+            return { title: "Not done", output: AFTER_HANDOFF, metadata: { url: "", action: params.action } }
           const current =
             params.action === "open_url" || params.action === "close"
               ? undefined
@@ -361,8 +366,7 @@ export const BrowserTool = Tool.define<typeof Parameters, Metadata, never>(
                     ctx.abort,
                   ),
                 )
-          // The lead reads the page the user reached after a handoff, and no other.
-          if (lead && READING.has(params.action) && !handedOff(ctx.messages, current?.finalUrl))
+          if (handed && (!current || withoutFragment(handed) !== withoutFragment(current.finalUrl)))
             return { title: "Not done", output: AFTER_HANDOFF, metadata: { url: "", action: params.action } }
           const targetUrl = params.action === "open_url" ? params.url : current?.finalUrl
           // Reading a page the user handed over asks nothing more: they chose it and pressed Continue.
@@ -596,8 +600,8 @@ export const BrowserTool = Tool.define<typeof Parameters, Metadata, never>(
 
 type Params = Schema.Schema.Type<typeof Parameters>
 
-// Whether the visible browser shows the page the user reached after this session's last handoff.
-function handedOff(messages: readonly SessionV1.WithParts[], current: string | undefined) {
+// The page the user reached at this session's last handoff, when they pressed Continue.
+function reached(messages: readonly SessionV1.WithParts[]) {
   const last = messages
     .flatMap((message) => message.parts)
     .findLast(
@@ -607,9 +611,9 @@ function handedOff(messages: readonly SessionV1.WithParts[], current: string | u
         part.state.status === "completed" &&
         part.state.metadata?.handoff !== undefined,
     )
-  if (!last || last.state.status !== "completed" || last.state.metadata?.handoff !== "continued") return false
-  const reached = last.state.metadata.url
-  return typeof reached === "string" && current !== undefined && withoutFragment(reached) === withoutFragment(current)
+  if (!last || last.state.status !== "completed" || last.state.metadata?.handoff !== "continued") return undefined
+  const url = last.state.metadata.url
+  return typeof url === "string" && url ? url : undefined
 }
 
 function withoutFragment(url: string) {
