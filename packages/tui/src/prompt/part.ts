@@ -57,3 +57,27 @@ export function expandPastedText(
   )
   return { text: out.text + displaySlice(text, out.at), pasted: out.pasted }
 }
+
+/**
+ * A slash command's name and arguments from the prompt's expanded text, as the command route takes them: the name is
+ * the first line's first word, and the arguments the rest of that line and every line after it. The spans the user
+ * pasted are moved to the arguments' own offsets, so Vector never learns how they work from what they pasted after a
+ * command either.
+ */
+export function slashCommand(text: string, pasted: readonly (readonly [number, number])[]) {
+  const firstLineEnd = text.indexOf("\n")
+  const firstLine = firstLineEnd === -1 ? text : text.slice(0, firstLineEnd)
+  const name = firstLine.split(" ")[0]
+  const restOfInput = firstLineEnd === -1 ? "" : text.slice(firstLineEnd + 1)
+  // The arguments are the text from just past the name's space, so an offset in them is one in the text less `start`.
+  const start = name.length + (firstLine.includes(" ") ? 1 : 0)
+  const args = firstLine.slice(start) + (restOfInput ? "\n" + restOfInput : "")
+  return {
+    name: name.slice(1),
+    arguments: args,
+    pasted: pasted.flatMap(([from, to]) => {
+      const span = [Math.max(from, start) - start, Math.min(to - start, args.length)] as [number, number]
+      return span[1] > span[0] ? [span] : []
+    }),
+  }
+}
