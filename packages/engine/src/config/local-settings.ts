@@ -91,7 +91,7 @@ export const Status = Schema.Struct({
   held: Schema.optional(Held),
   /** The keys of the local block a company lock keeps the user from changing. */
   locked: Strings,
-  log: Schema.Struct({ directory: Schema.String, retain_days: Schema.Number }),
+  log: Schema.Struct({ directory: Schema.String, retain_days: Schema.Finite }),
   /** An agent or Vector's own terminal started this Vector, so nothing here can loosen Vector Local. */
   agent: Schema.Boolean,
   sources: Schema.Array(Source),

@@ -3051,7 +3051,7 @@ export type LocalStatus = {
   locked: Array<string>
   log: {
     directory: string
-    retain_days: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    retain_days: number
   }
   agent: boolean
   sources: Array<LocalSource>
@@ -3085,7 +3085,7 @@ export type LocalUpdate = {
     }
   }
   pins?: {
-    [key: string]: LocalPinConfig
+    [key: string]: LocalPinConfig | null
   }
   retain_days?: number
   confirm?: boolean
@@ -3214,7 +3214,7 @@ export type LocalServer = {
 }
 
 export type LocalProbeResult = {
-  server: LocalServer
+  server: LocalServer | null
   message?: string
 }
 
@@ -3237,10 +3237,10 @@ export type LocalModelCheck = {
   model: string
   result: "works" | "no-tools" | "schema-rejected" | "context-too-small" | "failed" | "ask"
   message?: string
-  context?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-  ttft_ms?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-  requests: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-  checked_at: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  context?: number
+  ttft_ms?: number
+  requests: number
+  checked_at: number
   server_version?: string
 }
 
@@ -3257,8 +3257,8 @@ export type LocalSuggestion = {
   publisher: string
   licence: string
   quantization: string
-  memory_gb: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-  context: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  memory_gb: number
+  context: number
   tools: boolean
   serve: Array<string>
   ollama?: string
@@ -3269,8 +3269,8 @@ export type LocalRecommendation = {
   hardware: {
     summary: string
     kind: "unified" | "gpu" | "cpu"
-    total: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-    usable: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    total: number
+    usable: number
   }
   tier: string
   summary: string
@@ -3278,7 +3278,7 @@ export type LocalRecommendation = {
   label: string
   date: string
   roles: {
-    [key: string]: LocalSuggestion
+    [key: string]: LocalSuggestion | null
   }
   alternatives: Array<LocalSuggestion>
 }
@@ -12589,7 +12589,7 @@ export type LocalEgressReportResponses = {
   /**
    * How many events the log took
    */
-  200: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  200: number
 }
 
 export type LocalEgressReportResponse = LocalEgressReportResponses[keyof LocalEgressReportResponses]

@@ -117,10 +117,10 @@ export const LocalModelCheck = Schema.Struct({
   model: Schema.String,
   result: LocalProbe.CheckResult,
   message: Schema.optional(Schema.String),
-  context: Schema.optional(Schema.Number),
-  ttft_ms: Schema.optional(Schema.Number),
-  requests: Schema.Number,
-  checked_at: Schema.Number,
+  context: Schema.optional(Schema.Finite),
+  ttft_ms: Schema.optional(Schema.Finite),
+  requests: Schema.Finite,
+  checked_at: Schema.Finite,
   server_version: Schema.optional(Schema.String),
 }).annotate({ identifier: "LocalModelCheck" })
 
@@ -142,8 +142,8 @@ const Suggestion = Schema.Struct({
   publisher: Schema.String,
   licence: Schema.String,
   quantization: Schema.String,
-  memory_gb: Schema.Number,
-  context: Schema.Number,
+  memory_gb: Schema.Finite,
+  context: Schema.Finite,
   tools: Schema.Boolean,
   serve: Schema.Array(Schema.String),
   ollama: Schema.optional(Schema.String),
@@ -155,8 +155,8 @@ export const LocalRecommendation = Schema.Struct({
     /** "This computer has 32 GB of memory shared with its GPU; about 21 GB of it can hold a model." */
     summary: Schema.String,
     kind: Schema.Literals(["unified", "gpu", "cpu"]),
-    total: Schema.Number,
-    usable: Schema.Number,
+    total: Schema.Finite,
+    usable: Schema.Finite,
   }),
   tier: Schema.String,
   summary: Schema.String,
@@ -245,7 +245,7 @@ export const LocalApi = HttpApi.make("local")
         HttpApiEndpoint.post("egressReport", `${root}/egress/report`, {
           query: WorkspaceRoutingQuery,
           payload: LocalReportPayload,
-          success: described(Schema.Number, "How many events the log took"),
+          success: described(Schema.Finite, "How many events the log took"),
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "local.egress.report",
