@@ -8,6 +8,7 @@ import { ResearchStore } from "@vectordevai/core/research/store"
 import type { Research } from "@vectordevai/schema/research"
 import { Effect, Schema } from "effect"
 import { HttpClient } from "effect/unstable/http"
+import { EgressHttpClient } from "@vectordevai/core/local-mode/http-client"
 import type { Provider } from "@/provider/provider"
 import { ResearchRun } from "./research-run"
 import { Tool } from "./tool"
@@ -71,7 +72,8 @@ export const ResearchReadTool = Tool.define<
   Effect.gen(function* () {
     const research = yield* ResearchRun.Service
     const store = yield* ResearchStore.Service
-    const http = yield* HttpClient.HttpClient
+    // Each hop of a read is decided and logged as research-reader while Vector Local is on (Web access, the site lists).
+    const http = EgressHttpClient.make(yield* HttpClient.HttpClient)
 
     return {
       description: DESCRIPTION,
@@ -164,8 +166,8 @@ export const ResearchReadTool = Tool.define<
             },
             {
               http,
-              // Vector Local's Web access decides each hop once it is in force (phase L5); the reader itself refuses a
-              // private destination research found, and a metadata address whoever asks.
+              // Vector Local's Web access decides each hop as it is sent (research-reader); the reader itself refuses
+              // a private destination research found, and a metadata address whoever asks.
               authorize: () => Effect.void,
               authorizePrivate: (url) =>
                 ctx.ask({
@@ -179,7 +181,7 @@ export const ResearchReadTool = Tool.define<
               ...(research.network.resolver ? { resolver: research.network.resolver } : {}),
               ...(research.network.publicNames ? { publicNames: research.network.publicNames } : {}),
             },
-          )
+          ).pipe(EgressHttpClient.labelled("research-reader"))
           // "You trust this site" is Vector's own word beside the fence, so only sites the user chose earn it, never
           // ones a plan approved on its own named.
           const chosen = yield* research.domains(found)

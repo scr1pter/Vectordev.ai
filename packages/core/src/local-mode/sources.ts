@@ -594,8 +594,7 @@ export const SOURCES: readonly Source[] = [
     why: "Research searches through a SearXNG server on your list",
     local: "allowed",
     where: ["engine"],
-    callSites: [],
-    planned: ["packages/core/src/research/search.ts"],
+    callSites: ["packages/engine/src/tool/research-search.ts", "packages/core/src/research/search.ts"],
     note: "Forwards your queries to the search engines it is set up to use",
   },
   {
@@ -628,8 +627,11 @@ export const SOURCES: readonly Source[] = [
     why: "Reads pages for Deep research, after your approval",
     local: "allowed",
     where: ["engine"],
-    callSites: [],
-    planned: ["packages/core/src/research/reader.ts"],
+    callSites: [
+      "packages/engine/src/tool/research-read.ts",
+      "packages/engine/src/tool/research-run.ts",
+      "packages/core/src/research/reader.ts",
+    ],
     note: "Follows Web access, the run's approval and where each address came from",
   },
   {

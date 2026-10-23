@@ -6,6 +6,7 @@ import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { BrainSchema } from "@vectordevai/core/brain/schema"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
+import { EgressHttpClient } from "@vectordevai/core/local-mode/http-client"
 import { ResearchOutbound } from "@vectordevai/core/research/outbound"
 import { ResearchProvenance } from "@vectordevai/core/research/provenance"
 import { ResearchRate } from "@vectordevai/core/research/rate"
@@ -191,7 +192,11 @@ const layer = Layer.effect(
     const guests = yield* FreeModelGuests.Service
     const config = yield* Config.Service
     const guard = yield* SpendGuard.Service
-    const http = yield* HttpClient.HttpClient
+    // robots.txt is read for research, so its requests are research-reader's wherever the check runs.
+    const http = HttpClient.transform(
+      EgressHttpClient.make(yield* HttpClient.HttpClient),
+      EgressHttpClient.labelled("research-reader"),
+    )
     const network = yield* NetworkService
     const locations = yield* LocationServiceMap.Service
     const mcp = yield* MCP.Service

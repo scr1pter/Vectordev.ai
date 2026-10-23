@@ -101,6 +101,10 @@ const DECIDED_ELSEWHERE: Readonly<Record<string, string>> = {
     "Fetches a review's commits through Git.run (git/index.ts), which decides each fetch.",
   "packages/engine/src/worktree/index.ts":
     "Decides each git command that connects with Git.refusal (core git.ts) before git starts: a reset's fetch, a submodule update.",
+  "packages/core/src/research/reader.ts":
+    "Sends with the client its caller hands it, which tool/research-read.ts and tool/research-run.ts label research-reader.",
+  "packages/core/src/research/search.ts":
+    "Sends with the client its caller hands it, which tool/research-search.ts labels websearch-searxng.",
 }
 
 // The http and https addresses a file writes. One on this computer, a reserved example name, or one built from parts
@@ -208,6 +212,11 @@ const UNLABELLED_CALLS: ReadonlyArray<{ readonly file: string; readonly call: st
     why: "ChatGPT sign-in's HTTP requests inside provider.ts's fetch, which decides each model call before it runs.",
   },
   {
+    file: "packages/engine/src/plugin/openai/ws.ts",
+    call: "new WebSocket(options.url, connect)",
+    why: "ChatGPT sign-in's Responses socket, opened only once route() in the same file decides its model call (Egress.decide), or with the decision the pool made for that call.",
+  },
+  {
     file: "packages/engine/src/plugin/openai/codex.ts",
     call: "httpFetch: fetch",
     why: "The HTTP fallback of ChatGPT sign-in's WebSocket transport, inside provider.ts's fetch; ws.ts decides each socket.",
@@ -220,22 +229,22 @@ const UNLABELLED_CALLS: ReadonlyArray<{ readonly file: string; readonly call: st
   {
     file: "packages/core/src/research/reader.ts",
     call: "WebFetchRequest.execute(options.http",
-    why: "A planned research-reader call site: the client its caller hands it is labelled there (the research tools, not built yet).",
+    why: "Sends with the client its caller hands it, labelled research-reader there (tool/research-read.ts, tool/research-run.ts).",
   },
   {
     file: "packages/core/src/research/reader.ts",
     call: "HttpClientRequest.get(input.url)",
-    why: "A planned research-reader call site: the client its caller hands it is labelled there (the research tools, not built yet).",
+    why: "Sends with the client its caller hands it, labelled research-reader there (tool/research-read.ts, tool/research-run.ts).",
   },
   {
     file: "packages/core/src/research/search.ts",
     call: "WebFetchRequest.execute(",
-    why: "A planned websearch-searxng call site: the client its caller hands it is labelled there (the research tools, not built yet).",
+    why: "Sends with the client its caller hands it, labelled websearch-searxng there (tool/research-search.ts).",
   },
   {
     file: "packages/core/src/research/search.ts",
     call: "HttpClientRequest.get(address)",
-    why: "A planned websearch-searxng call site: the client its caller hands it is labelled there (the research tools, not built yet).",
+    why: "Sends with the client its caller hands it, labelled websearch-searxng there (tool/research-search.ts).",
   },
   {
     file: "packages/core/src/tool/websearch.ts",

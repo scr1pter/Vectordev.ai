@@ -1,8 +1,14 @@
 import { afterAll, expect } from "bun:test"
+import { readFileSync, rmSync, writeFileSync } from "node:fs"
+import path from "node:path"
 import { Effect } from "effect"
+import { Global } from "@vectordevai/core/global"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import { ResearchProvenance } from "@vectordevai/core/research/provenance"
 import { ResearchStore } from "@vectordevai/core/research/store"
 import type { PermissionV1 } from "@vectordevai/core/v1/permission"
+import { Config } from "@/config/config"
 import { Permission } from "../../src/permission"
 import { Session } from "@/session/session"
 import { MessageID } from "../../src/session/schema"
@@ -320,6 +326,77 @@ it.instance(
       const detail = yield* store.get(yield* instruction.place(), runID)
       expect(detail?.sources.map((source) => source.signals?.preference)).toEqual([undefined, "trusted"])
       expect(guard.outside()).toEqual([])
+    }),
+  90_000,
+)
+
+it.instance(
+  "with Vector Local on, research's searches and reads are decided as its own, and Web access None refuses a read as it is sent",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web)
+      yield* answer("once")
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "Research" })
+      const article = web.url("article", "/")
+      const site = new URL(article).origin
+      // Vector Local as the owner sets it in their own config, beside the research settings setup wrote there: the
+      // fake LLM server is the one model server on the list, and the search server is not on it.
+      const file = path.join(Global.Path.config, "vector.json")
+      const written = JSON.parse(readFileSync(file, "utf8"))
+      const local = (access?: "ask" | "none") => {
+        // With no access given the file is as setup wrote it again: JSON leaves an undefined block out.
+        const block = access && { enabled: true, endpoints: [new URL(test.llm.url).origin], web: access }
+        writeFileSync(file, JSON.stringify({ ...written, local: block || undefined }))
+        Config.refreshLocal()
+        Config.confirmLocal()
+      }
+      const decided = (since: number) =>
+        Egress.events({ since })
+          .filter((event) => event.source === "research-reader" || event.source === "websearch-searxng")
+          .map((event) => [event.source, event.origin, event.decision, event.rule])
+      yield* Effect.gen(function* () {
+        local("ask")
+        const asked = Date.now()
+        yield* test.llm.tool("research_plan", plan())
+        yield* test.llm.tool("research_search", { query: "heat pump field study" })
+        yield* test.llm.tool("research_read", { url: article })
+        yield* test.llm.text("Done.")
+        const searched = web.count("searxng")
+        yield* send({ sessionID: session.id, agent: "research", text: `Research heat pump savings: ${article}` })
+        const [search] = yield* calls(session.id, "research_search")
+        const [read] = yield* calls(session.id, "research_read")
+        // A search server off the list gets no query; Web access Ask reads the page the user typed.
+        expect(output(search)).toBe("Vector could not reach the search server.")
+        expect(web.count("searxng")).toBe(searched)
+        expect(output(read)).toContain("The study followed 412 homes through two winters.")
+        const first = decided(asked)
+        expect(first[0]).toEqual(["websearch-searxng", new URL(web.url("searxng", "/")).origin, "block", "not-listed"])
+        // Each hop of the page is research-reader's (an address the user typed skips robots.txt).
+        expect(first.length).toBeGreaterThan(1)
+        expect(first.slice(1)).toEqual(first.slice(1).map(() => ["research-reader", site, "allow", "web-ask"]))
+
+        local("none")
+        const offline = Date.now()
+        const before = web.count("article")
+        yield* test.llm.tool("research_plan", plan({ question: "Which heat pumps work below minus 20 degrees?" }))
+        yield* test.llm.tool("research_read", { url: article })
+        yield* test.llm.text("Done.")
+        yield* send({ sessionID: session.id, agent: "research", text: `Now research the coldest winters: ${article}` })
+        const reads = yield* calls(session.id, "research_read")
+        expect(output(reads[1])).toContain("was not read: ")
+        expect(web.count("article")).toBe(before)
+        expect(decided(offline)).toContainEqual(["research-reader", site, "block", "web-none"])
+        expect(guard.outside()).toEqual([])
+      }).pipe(
+        Effect.ensuring(
+          Effect.promise(async () => {
+            local()
+            rmSync(Config.localConfirmedFile(), { force: true })
+            await Egress.erase()
+          }),
+        ),
+      )
     }),
   90_000,
 )

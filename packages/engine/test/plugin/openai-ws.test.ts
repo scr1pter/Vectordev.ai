@@ -212,12 +212,13 @@ describe("plugin.openai.ws under Vector Local", () => {
         headers: {},
         timeout: 2_000,
       }).catch((error: unknown) => error)
+      // A server off the list that is not a cloud AI service is refused as one not on the list.
       expect(refused).toBeInstanceOf(EgressGuard.EgressBlocked)
-      expect((refused as EgressGuard.EgressBlocked).rule).toBe("not-allowable")
+      expect((refused as EgressGuard.EgressBlocked).rule).toBe("not-listed")
       const socket = await OpenAIWebSocket.connectResponsesWebSocket({ url: server.wsUrl, headers: {} })
       socket.terminate()
       expect(Egress.events().map((event) => [event.source, event.decision])).toEqual([
-        ["cloud-inference", "block"],
+        ["local-inference", "block"],
         ["local-inference", "allow"],
       ])
     } finally {

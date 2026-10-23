@@ -6,6 +6,7 @@ import { ResearchStore } from "@vectordevai/core/research/store"
 import type { ConfigResearchV1 } from "@vectordevai/core/v1/config/research"
 import { Effect, Schema } from "effect"
 import { HttpClient } from "effect/unstable/http"
+import { EgressHttpClient } from "@vectordevai/core/local-mode/http-client"
 import { Config } from "@/config/config"
 import { ResearchRun } from "./research-run"
 import { Tool } from "./tool"
@@ -66,7 +67,9 @@ export const ResearchSearchTool = Tool.define<
     const research = yield* ResearchRun.Service
     const store = yield* ResearchStore.Service
     const config = yield* Config.Service
-    const http = yield* HttpClient.HttpClient
+    // A search is decided and logged as websearch-searxng while Vector Local is on: allowed when its server is listed,
+    // and following Web access.
+    const http = EgressHttpClient.make(yield* HttpClient.HttpClient)
 
     return {
       description: DESCRIPTION,
@@ -119,7 +122,7 @@ export const ResearchSearchTool = Tool.define<
               http,
               url: provider.url,
               context,
-              // Vector Local's Web access decides the search server's address once it is in force (phase L5).
+              // Vector Local decides the search server's address as the request is sent (websearch-searxng).
               authorize: () => Effect.void,
               // A SearXNG server on the user's own network asks once for its origin.
               authorizePrivate: (url) =>
@@ -132,6 +135,7 @@ export const ResearchSearchTool = Tool.define<
               resolver: research.network.resolver,
             },
           ).pipe(
+            EgressHttpClient.labelled("websearch-searxng"),
             Effect.map((items) => ({ type: "results" as const, items })),
             // What the server or the network did, and the outbound check's own refusal, are answers; a declined
             // approval for a server on the user's network fails the call as any declined approval does.
