@@ -46,6 +46,8 @@ import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trus
 import type { LocalMode } from "@vectordevai/schema/local-mode"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import { Egress } from "@vectordevai/core/local-mode/egress"
+import { EgressGuard } from "@vectordevai/core/local-mode/guard"
+import { EgressHttpClient } from "@vectordevai/core/local-mode/http-client"
 import { EgressLogStore } from "@vectordevai/core/local-mode/log-store"
 import { LocalSources } from "@vectordevai/core/local-mode/sources"
 import { ModelCatalog } from "@vectordevai/core/model-catalog"
@@ -1102,7 +1104,8 @@ const layer = Layer.effect(
     const teams = yield* Teams.Service
     const env = yield* Env.Service
     const dependencies = yield* ConfigDependencies.Service
-    const http = yield* HttpClient.HttpClient
+    // An organization's config is the remote-config source's, so Vector Local decides each read of it.
+    const http = EgressHttpClient.make(yield* HttpClient.HttpClient)
     const flock = yield* EffectFlock.Service
     // Edits to the files Vector Local reads apply, or are held, while this layer is up.
     yield* Effect.acquireRelease(Effect.sync(watchLocal), (stop) => Effect.sync(stop))
@@ -1123,13 +1126,36 @@ const layer = Layer.effect(
       schema: S,
       loginOrigin: string,
     ) {
+      // Vector Local keeps an organization's config out until its host is listed or the source is allowed. It is
+      // decided here, before the retries below, so a refusal is logged once and not tried again.
+      const policy = Egress.policy()
+      const verdict = policy.enabled
+        ? LocalPolicy.decide(policy, { purpose: "config-remote", url, source: "remote-config" })
+        : undefined
+      if (verdict && verdict.decision !== "allow") {
+        Egress.record({ source: "remote-config", url }, verdict)
+        yield* Effect.logWarning(
+          `Vector Local blocked the organization config at ${url}. List its host or allow remote config to load it.`,
+        )
+        return
+      }
       const response = yield* withTransientReadRetry(http)
         .execute(
           HttpClientRequest.get(url).pipe(HttpClientRequest.acceptJson, HttpClientRequest.setHeaders(headers ?? {})),
         )
         .pipe(
-          Effect.catch((error) => Effect.die(new Error(`failed to fetch remote config from ${url}: ${String(error)}`))),
+          EgressHttpClient.labelled("remote-config"),
+          Effect.catch((error) =>
+            error.reason._tag === "TransportError" && error.reason.cause instanceof EgressGuard.EgressBlocked
+              ? Effect.succeed(undefined)
+              : Effect.die(new Error(`failed to fetch remote config from ${url}: ${String(error)}`)),
+          ),
         )
+      // A hop Vector Local refused as it was sent, such as a redirect to a host it does not allow.
+      if (!response) {
+        yield* Effect.logWarning(`Vector Local blocked a request for the organization config at ${url}.`)
+        return
+      }
       if (response.status === 404 && url.endsWith("/.well-known/vector")) {
         yield* Effect.logWarning(
           `Organization config at ${url} is not available for Vector (HTTP 404). Ask your administrator to serve /.well-known/vector, or run vector providers logout ${loginOrigin}. Skipping this organization config.`,
@@ -1550,6 +1576,8 @@ const layer = Layer.effect(
               ? yield* Effect.gen(function* () {
                   yield* Effect.logDebug("fetching remote config", { url: remote.url })
                   const data = yield* fetchRemoteJson(remote.url, remote.headers, Schema.Json, url)
+                  // Vector Local blocked it, as the warning said: the organization's config is skipped whole.
+                  if (data === undefined) return undefined
                   if (isRecord(data) && isRecord(data.config)) return data.config
                   if (isRecord(data)) return data
                   return yield* Effect.die(
@@ -1557,6 +1585,7 @@ const layer = Layer.effect(
                   )
                 })
               : {}
+            if (!fetchedConfig) continue
             const remoteConfig = mergeConfig(isRecord(wellknown.config) ? wellknown.config : {}, fetchedConfig)
             if (!remoteConfig.$schema) remoteConfig.$schema = "https://vectordev.ai/config.json"
             const source = wellknownURL

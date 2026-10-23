@@ -1,5 +1,6 @@
 import { getIDToken, setSecret } from "@actions/core"
 import { z } from "zod"
+import { githubFetch } from "./github.shared"
 
 export const GITHUB_APP_TOKEN_URL = "https://vectordev.ai/api/github/token"
 export const GITHUB_ACTIONS_BOT = "github-actions[bot]"
@@ -71,7 +72,8 @@ export async function resolveGithubAuth(
       // interpret them as masking instructions, so it must never receive one.
       if (process.env.GITHUB_ACTIONS === "true") setSecret(value)
     },
-    request: fetch,
+    // The App token exchange and its revocation are the github source's, so Vector Local decides them.
+    request: githubFetch,
   },
 ): Promise<GithubAuth> {
   const env = input.env ?? process.env

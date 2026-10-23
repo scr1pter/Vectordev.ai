@@ -5,9 +5,11 @@ import { LocalSources } from "@vectordevai/core/local-mode/sources"
 // Vector Local's inventory of connections (plan section 4.5), as a lint over the engine's, core's and the llm package's
 // source: every file that makes a connection of its own (a global fetch, a WebSocket, an http or https request, a raw
 // socket, or Effect's HTTP client) is a call site the source registry lists, or is listed below with why it needs no
-// source of its own. A new connection is added to the registry first. Dependency code (npm's installer, the embedding
-// model's downloader) is covered by the backstop guard, not by this lint. The end-to-end check that nothing else
-// connects is the strict-guard run in test/local-mode/local-run.test.ts.
+// source of its own; each connection and each HTTP client request is labelled or decided where it is made, or excused
+// one by one; and every file that writes an http or https address is a call site or says why it needs none. A new
+// connection is added to the registry first. Dependency code (npm's installer, the embedding model's downloader) is
+// covered by the backstop guard, not by this lint. The end-to-end check that nothing else connects is the strict-guard
+// run in test/local-mode/local-run.test.ts.
 
 const ROOT = path.resolve(import.meta.dir, "../../../..")
 
@@ -17,6 +19,9 @@ const CALLS: readonly RegExp[] = [
   /(?<![\w.$])(?<!function\s+)fetch\((?!\s*\w+\??\s*:)/g,
   /globalThis\.fetch\(/g,
   /=\s*fetch\s*[,)]/g,
+  // The global fetch chosen as a fallback and called (`(options.fetch ?? fetch)(url)`), or handed on as a property.
+  /\bfetch\)\(/g,
+  /\b\w+:\s*fetch\s*[,})]/g,
   /new WebSocket\(/g,
   /\bhttps?\.(?:request|get)\(/g,
   /\bnet\.(?:connect|createConnection)\(/g,
@@ -26,6 +31,13 @@ const CALLS: readonly RegExp[] = [
 ]
 // Effect's HTTP client, which a call site labels for the requests it makes with it (EgressHttpClient.labelled).
 const PRIMITIVES: readonly RegExp[] = [...CALLS, /HttpClient\.HttpClient\b/g]
+// Each request a file that holds the HTTP client makes with it: one built (HttpClientRequest.get and its kin) and one
+// sent (`.execute(`, the client's own or WebFetchRequest's).
+const HOLDS_CLIENT = /HttpClient\.HttpClient\b|WebFetchRequest\.execute\b/
+const REQUESTS: readonly RegExp[] = [
+  /\bHttpClientRequest\.(?:get|post|put|patch|del|delete|head|options|make)\(/g,
+  /\.execute\(/g,
+]
 const connects = (text: string) => PRIMITIVES.some((primitive) => new RegExp(primitive.source).test(text))
 
 // What labels or decides a connection where it is made.
@@ -33,6 +45,9 @@ const GATE =
   /Egress\.(?:fetch|decide|policy|record)\b|EgressHttpClient\.|EgressAttribution\.granted|LocalPolicy\.decide|webAccess\(|githubFetch\(|Git\.refusal/
 // How far before a call (in lines) the gate deciding it may be: a decision, then the request built and sent.
 const BEFORE = 25
+// How far after an HTTP client request its label may be: the request is built, piped through its options, then
+// labelled (`.pipe(…, EgressHttpClient.labelled(source))`).
+const AFTER = 12
 
 // Files that connect, or hold the HTTP client, but make no request a source would name.
 const WITHOUT_SOURCE: Readonly<Record<string, string>> = {
@@ -45,12 +60,16 @@ const WITHOUT_SOURCE: Readonly<Record<string, string>> = {
   "packages/core/src/util/webfetch-request.ts":
     "The pinned fetch webfetch, remote skills and instruction URLs send through; each caller labels its requests.",
   "packages/core/src/oauth/page.ts": "A sign-in page's script, which runs in the browser that opened the page.",
+  "packages/core/src/aisdk.ts":
+    "The V2 AI SDK service's model fetch, which no runner sends through yet; the backstop guard decides it as unlabelled, and a V2 turn's model is refused under Vector Local before a route is built.",
   // A provider's sign-in and its signed-in fetch take the global fetch as a default. Sign-in is not labelled yet: the
   // backstop guard decides it as unlabelled, so with Vector Local on it reaches only this computer and the list, and a
   // signed-in model's calls go through provider.ts's model call decision first.
   "packages/core/src/oauth/copilot.ts": "GitHub Copilot's sign-in token exchange, decided by the backstop guard.",
   "packages/core/src/oauth/device.ts": "A provider's device sign-in, decided by the backstop guard.",
   "packages/core/src/oauth/openrouter.ts": "OpenRouter's sign-in exchange, decided by the backstop guard.",
+  "packages/core/src/oauth/digitalocean.ts":
+    "DigitalOcean's sign-in and its model router list, decided by the backstop guard.",
   "packages/core/src/oauth/owned.ts":
     "A signed-in provider's fetch, which provider.ts's model call decision sends through.",
   "packages/engine/src/tool/vector-cloud.ts":
@@ -83,6 +102,73 @@ const DECIDED_ELSEWHERE: Readonly<Record<string, string>> = {
   "packages/engine/src/worktree/index.ts":
     "Decides each git command that connects with Git.refusal (core git.ts) before git starts: a reset's fetch, a submodule update.",
 }
+
+// The http and https addresses a file writes. One on this computer, a reserved example name, or one built from parts
+// (`http://${host}`, `http://[${address}]`) is not a destination of its own.
+const ADDRESS = /["'`]https?:\/\/([A-Za-z0-9][A-Za-z0-9.-]*)/g
+const NOT_A_DESTINATION =
+  /^(?:localhost|127(?:\.\d+){3}|0\.0\.0\.0|vector\.internal)$|\.localhost$|(?:^|\.)example(?:\.(?:com|org|net))?$|\.(?:test|invalid)$/
+
+const MODEL_API =
+  "A model API's address: model calls go through provider.ts's model call decision (V1) or the request executor's (EgressHttpClient.models), and go only to a listed server under Vector Local."
+const GATEWAY =
+  "A model gateway's address, and Vector's as the HTTP-Referer the gateway reads, sent inside model calls that provider.ts's decision or the request executor's decides."
+const SHOWN = "An address written into config or shown to people; nothing here connects to it."
+const SIGN_IN = "A provider's sign-in addresses, handed to the sign-in helpers the backstop guard decides."
+const GIT = "A GitHub address for git; each of Vector's git commands is decided before git starts (Git.refusal)."
+
+// Files that write an address but are not call sites, each with why that address needs no source of its own.
+const ADDRESSES: Readonly<Record<string, string>> = {
+  "packages/core/src/brain/embed-manifest.ts":
+    "The embedding model's download addresses, which brain/embed.ts fetches as embedding-model.",
+  "packages/core/src/config/migration.ts": SHOWN,
+  "packages/core/src/github-copilot/copilot-provider.ts": MODEL_API,
+  "packages/core/src/npm-config.ts": "npm's default registry, which npm.ts reaches as npm-plugins or lsp-install.",
+  "packages/core/src/oauth/poe.ts": SIGN_IN,
+  "packages/core/src/plugin/provider/cloudflare-workers-ai.ts": MODEL_API,
+  "packages/core/src/plugin/provider/digitalocean.ts": MODEL_API,
+  "packages/core/src/plugin/provider/gitlab.ts": MODEL_API,
+  "packages/core/src/plugin/provider/kilo.ts": GATEWAY,
+  "packages/core/src/plugin/provider/llmgateway.ts": GATEWAY,
+  "packages/core/src/plugin/provider/nvidia.ts": GATEWAY,
+  "packages/core/src/plugin/provider/openrouter.ts": GATEWAY,
+  "packages/core/src/plugin/provider/poe.ts": MODEL_API,
+  "packages/core/src/plugin/provider/vector.ts":
+    "Free models' address, which only the free model route sends to (vector-free-models); free models are off under Vector Local.",
+  "packages/core/src/plugin/provider/vercel.ts": GATEWAY,
+  "packages/core/src/plugin/provider/xai.ts": MODEL_API,
+  "packages/core/src/plugin/provider/zenmux.ts": GATEWAY,
+  "packages/core/src/provider-policy.ts": "The sign-in origins Vector accepts for each provider; it connects to none.",
+  "packages/core/src/public-session-share.ts": SHOWN,
+  "packages/core/src/repository.ts": GIT,
+  "packages/core/src/review/format.ts": SHOWN,
+  "packages/core/src/session/runner/model.ts": MODEL_API,
+  "packages/engine/src/cli/cmd/github.git.ts": GIT,
+  "packages/engine/src/cli/cmd/github.review.ts": GIT,
+  "packages/engine/src/cli/cmd/pr.ts": GIT,
+  "packages/engine/src/config/schema.ts": SHOWN,
+  "packages/engine/src/config/tui-migrate.ts": SHOWN,
+  "packages/engine/src/mcp/oauth-provider.ts":
+    "Vector's address in the client details it registers for an MCP server's sign-in; nothing here connects to it.",
+  "packages/engine/src/plugin/digitalocean.ts": MODEL_API,
+  "packages/engine/src/plugin/github-copilot/copilot.ts": MODEL_API,
+  "packages/engine/src/plugin/gitlab.ts": MODEL_API,
+  "packages/engine/src/plugin/poe.ts": MODEL_API,
+  "packages/engine/src/plugin/xai.ts": MODEL_API,
+  "packages/engine/src/server/routes/instance/httpapi/handlers/teams.ts": SHOWN,
+  "packages/engine/src/util/repository.ts": GIT,
+  "packages/llm/src/protocols/anthropic-messages.ts": MODEL_API,
+  "packages/llm/src/protocols/gemini.ts": MODEL_API,
+  "packages/llm/src/protocols/openai-chat.ts": MODEL_API,
+  "packages/llm/src/protocols/openai-responses.ts": MODEL_API,
+  "packages/llm/src/providers/amazon-bedrock.ts": MODEL_API,
+  "packages/llm/src/providers/cloudflare.ts": MODEL_API,
+  "packages/llm/src/providers/openai-compatible-profile.ts": MODEL_API,
+}
+
+// Each address `text` writes that is a destination of its own.
+const addresses = (text: string) =>
+  [...text.matchAll(ADDRESS)].map((match) => match[1].toLowerCase()).filter((host) => !NOT_A_DESTINATION.test(host))
 
 // Comments are taken out with their lines kept, so a call's line number is the file's.
 const strip = (text: string) =>
@@ -122,6 +208,61 @@ const UNLABELLED_CALLS: ReadonlyArray<{ readonly file: string; readonly call: st
     why: "ChatGPT sign-in's HTTP requests inside provider.ts's fetch, which decides each model call before it runs.",
   },
   {
+    file: "packages/engine/src/plugin/openai/codex.ts",
+    call: "httpFetch: fetch",
+    why: "The HTTP fallback of ChatGPT sign-in's WebSocket transport, inside provider.ts's fetch; ws.ts decides each socket.",
+  },
+  {
+    file: "packages/core/src/model-plans.ts",
+    call: "(input.request ?? fetch)(CHAT_URL",
+    why: "Vector Codium's own fetch, which provider.ts's model call decision sends through; Codium is off under Vector Local.",
+  },
+  {
+    file: "packages/core/src/research/reader.ts",
+    call: "WebFetchRequest.execute(options.http",
+    why: "A planned research-reader call site: the client its caller hands it is labelled there (the research tools, not built yet).",
+  },
+  {
+    file: "packages/core/src/research/reader.ts",
+    call: "HttpClientRequest.get(input.url)",
+    why: "A planned research-reader call site: the client its caller hands it is labelled there (the research tools, not built yet).",
+  },
+  {
+    file: "packages/core/src/research/search.ts",
+    call: "WebFetchRequest.execute(",
+    why: "A planned websearch-searxng call site: the client its caller hands it is labelled there (the research tools, not built yet).",
+  },
+  {
+    file: "packages/core/src/research/search.ts",
+    call: "HttpClientRequest.get(address)",
+    why: "A planned websearch-searxng call site: the client its caller hands it is labelled there (the research tools, not built yet).",
+  },
+  {
+    file: "packages/core/src/tool/websearch.ts",
+    call: "HttpClientRequest.post(url)",
+    why: "Built inside the search the tool's execute labels with the provider's source (websearch-exa or websearch-parallel).",
+  },
+  {
+    file: "packages/core/src/tool/websearch.ts",
+    call: "filterStatusOk(http).execute(request)",
+    why: "Sent inside the search the tool's execute labels with the provider's source (websearch-exa or websearch-parallel).",
+  },
+  {
+    file: "packages/engine/src/tool/mcp-websearch.ts",
+    call: "HttpClientRequest.post(url)",
+    why: "Sends with the client tool/websearch.ts labels with the provider's source.",
+  },
+  {
+    file: "packages/engine/src/tool/mcp-websearch.ts",
+    call: ".execute(request)",
+    why: "Sends with the client tool/websearch.ts labels with the provider's source.",
+  },
+  {
+    file: "packages/llm/src/route/executor.ts",
+    call: ".execute(request)",
+    why: "Sends through the HTTP client LayerNodePlatform.requestExecutor gives it, which decides each request as a model call (EgressHttpClient.models).",
+  },
+  {
     file: "packages/engine/src/plugin/snowflake-cortex.ts",
     call: "return fetch(requestInput, init)",
     why: "Cortex's request inside provider.ts's fetch, which decides each model call before it runs.",
@@ -158,19 +299,22 @@ const UNLABELLED_CALLS: ReadonlyArray<{ readonly file: string; readonly call: st
   },
 ]
 
-// Each raw connection in `text` with its line, for files the inventory lists.
+// Each raw connection in `text`, and each HTTP client request in a file that holds the client, with its line, for files
+// the inventory lists.
 function calls(file: string, text: string) {
   const lines = text.split("\n")
-  return CALLS.flatMap((primitive) =>
-    [...text.matchAll(primitive)].map((match) => {
-      const line = text.slice(0, match.index).split("\n").length
-      const before = lines
-        .slice(Math.max(0, line - 1 - BEFORE), line + 5)
-        .filter((item) => !/^\s*import\b/.test(item))
-        .join("\n")
-      return { file, line, text: lines[line - 1]!.trim(), gated: GATE.test(before) }
-    }),
-  )
+  const found = (primitives: readonly RegExp[], after: number) =>
+    primitives.flatMap((primitive) =>
+      [...text.matchAll(primitive)].map((match) => {
+        const line = text.slice(0, match.index).split("\n").length
+        const near = lines
+          .slice(Math.max(0, line - 1 - BEFORE), line + after)
+          .filter((item) => !/^\s*import\b/.test(item))
+          .join("\n")
+        return { file, line, text: lines[line - 1].trim(), gated: GATE.test(near) }
+      }),
+    )
+  return [...found(CALLS, 5), ...(HOLDS_CLIENT.test(text) ? found(REQUESTS, AFTER) : [])]
 }
 
 describe("Vector Local's connection inventory", () => {
@@ -208,6 +352,26 @@ describe("Vector Local's connection inventory", () => {
       (file) => !sites.some((site) => site.file === file) || gated(file),
     )
     expect(stale).toEqual([])
+  })
+
+  test("every file that writes an address is a call site in the source registry or says why it needs none", async () => {
+    const listed = new Set(LocalSources.SOURCES.flatMap((source) => [...source.callSites, ...(source.planned ?? [])]))
+    const writing = (await sources()).filter((item) => addresses(item.text).length > 0)
+    // The scan sees addresses where they are, so an empty result means something.
+    expect(writing.map((item) => item.file)).toEqual(
+      expect.arrayContaining(["packages/core/src/model-catalog.ts", "packages/llm/src/protocols/openai-chat.ts"]),
+    )
+    expect(
+      writing
+        .filter(
+          (item) =>
+            !listed.has(item.file) && !Object.hasOwn(WITHOUT_SOURCE, item.file) && !Object.hasOwn(ADDRESSES, item.file),
+        )
+        .map((item) => `${item.file} ${[...new Set(addresses(item.text))].join(", ")}`),
+    ).toEqual([])
+    // An excuse names a file that still writes an address and has not become a call site.
+    const all = new Map(writing.map((item) => [item.file, item.text]))
+    expect(Object.keys(ADDRESSES).filter((file) => !all.has(file) || listed.has(file))).toEqual([])
   })
 
   test("every connection a call site makes is labelled or decided where it is made, or excused one by one", async () => {

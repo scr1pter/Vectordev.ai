@@ -502,13 +502,15 @@ export const SOURCES: readonly Source[] = [
   {
     id: "github",
     purpose: "integration",
-    hosts: ["github.com", "api.github.com"],
-    sends: "Pull requests, review comments and your GitHub sign-in",
+    hosts: ["github.com", "api.github.com", ...VECTOR],
+    sends:
+      "Pull requests, review comments, your GitHub sign-in, and in GitHub Actions the workflow's identity token for the Vector GitHub App",
     why: "Pull requests and reviews on GitHub",
     local: "allow-with-reason",
     where: ["engine", "desktop"],
     callSites: [
       "packages/engine/src/cli/cmd/github.shared.ts",
+      "packages/engine/src/cli/cmd/github.auth.ts",
       "packages/engine/src/cli/cmd/github.handler.ts",
       "packages/engine/src/cli/cmd/github.attachment.ts",
       "packages/engine/src/cli/cmd/review.ts",
