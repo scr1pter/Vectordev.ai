@@ -306,7 +306,13 @@ export const ResearchPlanTool = Tool.define<
     ) {
       return Effect.gen(function* () {
         const caps = yield* research.limits(plan.depth)
-        const own = (yield* guard.snapshot(SessionID.make(ctx.sessionID)))?.budget
+        const budget = (yield* guard.snapshot(SessionID.make(ctx.sessionID)))?.budget
+        // A root research run without a cap of the user's runs under research's own defaults, which follow the plan's
+        // depth: a plan started deep runs under Deep's.
+        const defaults = [yield* research.limits("focused"), yield* research.limits("deep")]
+        const own = defaults.some((item) => item.usd === budget?.usd && item.steps === budget?.steps)
+          ? undefined
+          : budget
         const model = ctx.extra?.model as Provider.Model | undefined
         const price = model ? SpendGuard.priceOf(model.cost) : undefined
         const kind = !model

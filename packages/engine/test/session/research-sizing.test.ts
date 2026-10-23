@@ -255,6 +255,9 @@ app.instance(
       expect(names(bodies.at(-1)!)).toContain("task")
       const run = yield* (yield* SpendGuard.Service).snapshot(session.id)
       expect(run?.budget).toEqual({ usd: ResearchRun.LIMITS.deep.usd, steps: ResearchRun.LIMITS.deep.steps })
+      // The approved plan names the caps it runs under: Deep's, not the Focused defaults it started with.
+      const [planned] = yield* calls(session.id, "research_plan")
+      expect(output(planned)).toContain(`Step cap ${ResearchRun.LIMITS.deep.steps}`)
     }),
   60_000,
 )
