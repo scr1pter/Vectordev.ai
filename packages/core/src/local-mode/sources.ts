@@ -643,10 +643,14 @@ export const SOURCES: readonly Source[] = [
     sends: "The pages each research agent's own browser opens, and what it types into search fields",
     why: "Each Deep research agent reads pages in a browser of its own, with no cookies or sign-ins",
     local: "allowed",
-    where: ["desktop"],
-    callSites: ["packages/core/src/local-mode/egress-proxy.ts"],
-    planned: ["packages/desktop/src/main/research-browser.ts", "packages/desktop/src/main/research-proxy.ts"],
-    note: "Not live yet: research browsers will go through Vector's research proxy, which never reaches private or cloud metadata addresses and follows Web access",
+    where: ["desktop", "engine"],
+    callSites: [
+      "packages/core/src/local-mode/egress-proxy.ts",
+      "packages/desktop/src/main/research-proxy.ts",
+      "packages/desktop/src/main/research-browser.ts",
+      "packages/engine/src/tool/research-browser.ts",
+    ],
+    note: "Goes through Vector's research proxy, which never reaches this computer, your network or a cloud metadata address. It follows Web access as it was set when the app started",
   },
   {
     id: "external-agents",
