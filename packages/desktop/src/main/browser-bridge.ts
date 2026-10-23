@@ -2,9 +2,15 @@ import { randomUUID } from "node:crypto"
 import { createServer, type Server } from "node:http"
 
 import { runBrowserAgent } from "./browser-agent"
-import { parseBrowserAgentInput } from "./browser-bridge-input"
+import { parseBrowserAgentInput, parseResearchBrowserInput } from "./browser-bridge-input"
+import { runResearchBrowser } from "./research-browser"
 
+// The engine's way to the desktop's browsers. POST /command drives the visible agent browser (the browser tool); POST
+// /research drives the research browsers (research_browser), with its own validator and its own map of browsers, so a
+// command on one path has no way to name a browser of the other.
 const MAX_BODY_BYTES = 256 * 1024
+// A research command carries the run's addresses when the desktop's copy starts.
+const MAX_RESEARCH_BYTES = 1024 * 1024
 
 let bridgeServer: Server | undefined
 let bridgeUrl = ""
@@ -16,7 +22,8 @@ export async function startBrowserBridge() {
   bridgeToken = randomUUID()
   bridgeServer = createServer(async (request, response) => {
     response.setHeader("content-type", "application/json; charset=utf-8")
-    if (request.method !== "POST" || request.url !== "/command") {
+    const research = request.url === "/research"
+    if (request.method !== "POST" || (request.url !== "/command" && !research)) {
       response.statusCode = 404
       response.end(JSON.stringify({ error: "Not found" }))
       return
@@ -32,7 +39,7 @@ export async function startBrowserBridge() {
     for await (const chunk of request) {
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
       bytes += buffer.byteLength
-      if (bytes > MAX_BODY_BYTES) {
+      if (bytes > (research ? MAX_RESEARCH_BYTES : MAX_BODY_BYTES)) {
         response.statusCode = 413
         response.end(JSON.stringify({ error: "Request too large" }))
         request.destroy()
@@ -42,8 +49,10 @@ export async function startBrowserBridge() {
     }
 
     try {
-      const input = parseBrowserAgentInput(JSON.parse(Buffer.concat(chunks).toString("utf8")))
-      const result = await runBrowserAgent(undefined, input)
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8"))
+      const result = research
+        ? await runResearchBrowser(parseResearchBrowserInput(body))
+        : await runBrowserAgent(undefined, parseBrowserAgentInput(body))
       response.statusCode = result.ok ? 200 : 409
       response.end(JSON.stringify(result))
     } catch (error) {

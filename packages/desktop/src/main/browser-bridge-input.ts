@@ -1,4 +1,5 @@
 import type { BrowserAgentInput } from "../preload/types"
+import type { Command as ResearchCommand, Input as ResearchInput } from "./research-browser"
 
 const COMMANDS = new Set<NonNullable<BrowserAgentInput["command"]>>([
   "attach",
@@ -22,6 +23,9 @@ const COMMANDS = new Set<NonNullable<BrowserAgentInput["command"]>>([
   "scroll",
   "clearLogs",
   "setVisible",
+  "readPage",
+  "observePage",
+  "clickRef",
 ])
 
 export function parseBrowserAgentInput(value: unknown): BrowserAgentInput {
@@ -37,6 +41,7 @@ export function parseBrowserAgentInput(value: unknown): BrowserAgentInput {
     command: command as BrowserAgentInput["command"],
     url: optionalString(input.url, "url", 8192),
     selector: optionalString(input.selector, "selector", 4096),
+    ref: optionalRef(input.ref),
     text: optionalString(input.text, "text", 64 * 1024),
     key: optionalString(input.key, "key", 64),
     allowExternal: optionalBoolean(input.allowExternal, "allowExternal"),
@@ -44,6 +49,96 @@ export function parseBrowserAgentInput(value: unknown): BrowserAgentInput {
     milliseconds: optionalNumber(input.milliseconds, "milliseconds"),
     deltaY: optionalNumber(input.deltaY, "deltaY"),
   }
+}
+
+// Research browser commands (section 5.6a) come on their own path, POST /research, and are read here alone: their own
+// commands, their own fields and nothing else, so one cannot carry a visible-browser contextId or command. The run and
+// the agent's session come from the engine's tool context, never from the model, and both are plain IDs.
+const RESEARCH_COMMANDS = new Set<ResearchCommand>([
+  "research.open",
+  "research.read",
+  "research.links",
+  "research.find",
+  "research.observe",
+  "research.click",
+  "research.type",
+  "research.press",
+  "research.scroll",
+  "research.back",
+  "research.screenshot",
+  "research.close",
+])
+const RESEARCH_FIELDS = new Set([
+  "command",
+  "runID",
+  "sessionID",
+  "rootID",
+  "agent",
+  "max",
+  "images",
+  "generation",
+  "provenance",
+  "typed",
+  "url",
+  "ref",
+  "text",
+  "key",
+  "deltaY",
+])
+const RESEARCH_ID = /^[A-Za-z0-9_-]{1,64}$/
+// A run reads at most a few hundred pages and searches; this bounds one command's copy of its addresses.
+const MAX_ADDRESSES = 5_000
+/** The most browsers one run may have open: the lead and its researchers. */
+export const MAX_RESEARCH_BROWSERS = 9
+
+export function parseResearchBrowserInput(value: unknown): ResearchInput {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid research browser command.")
+  const input = value as Record<string, unknown>
+  const extra = Object.keys(input).find((key) => !RESEARCH_FIELDS.has(key))
+  if (extra) throw new Error(`Research browser commands take no ${extra.slice(0, 64)}.`)
+  if (typeof input.command !== "string" || !RESEARCH_COMMANDS.has(input.command as ResearchCommand))
+    throw new Error("Unknown research browser command.")
+  if (input.agent !== "research" && input.agent !== "researcher") throw new Error("Invalid research browser agent.")
+  if (typeof input.max !== "number" || !Number.isInteger(input.max) || input.max < 1 || input.max > MAX_RESEARCH_BROWSERS)
+    throw new Error("Invalid research browser count.")
+  return {
+    command: input.command as ResearchCommand,
+    runID: researchID(input.runID, "runID"),
+    sessionID: researchID(input.sessionID, "sessionID"),
+    ...(input.rootID === undefined ? {} : { rootID: researchID(input.rootID, "rootID") }),
+    agent: input.agent,
+    max: input.max,
+    ...(input.images === undefined ? {} : { images: optionalBoolean(input.images, "images")! }),
+    ...(input.generation === undefined ? {} : { generation: researchID(input.generation, "generation") }),
+    ...(input.provenance === undefined ? {} : { provenance: addresses(input.provenance, "provenance") }),
+    ...(input.typed === undefined ? {} : { typed: addresses(input.typed, "typed") }),
+    ...(input.url === undefined ? {} : { url: optionalString(input.url, "url", 8192)! }),
+    ...(input.ref === undefined ? {} : { ref: optionalRef(input.ref)! }),
+    ...(input.text === undefined ? {} : { text: optionalString(input.text, "text", 2_000)! }),
+    ...(input.key === undefined ? {} : { key: optionalString(input.key, "key", 32)! }),
+    ...(input.deltaY === undefined ? {} : { deltaY: optionalNumber(input.deltaY, "deltaY")! }),
+  }
+}
+
+function researchID(value: unknown, name: string) {
+  if (typeof value !== "string" || !RESEARCH_ID.test(value)) throw new Error(`Invalid research browser ${name}.`)
+  return value
+}
+
+function addresses(value: unknown, name: string) {
+  if (!Array.isArray(value) || value.length > MAX_ADDRESSES) throw new Error(`Invalid research browser ${name}.`)
+  return value.map((item) => {
+    if (typeof item !== "string" || item.length > 8192 || !/^https?:\/\//i.test(item))
+      throw new Error(`Invalid research browser ${name}.`)
+    return item
+  })
+}
+
+// The handles observe gives, ref_1 to ref_9999.
+function optionalRef(value: unknown) {
+  if (value === undefined) return
+  if (typeof value !== "string" || !/^ref_\d{1,4}$/.test(value)) throw new Error("Invalid browser ref.")
+  return value
 }
 
 function boundedString(value: unknown, name: string, max: number) {

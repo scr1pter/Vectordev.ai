@@ -200,6 +200,12 @@ class FakeContents extends Emitter {
     this.inputs.push(event)
     if (event.type === "mouseUp") this.onMouseUp?.()
   }
+  async executeJavaScript() {
+    return undefined
+  }
+  getZoomFactor() {
+    return 1
+  }
   async capturePage() {
     return { toDataURL: () => `data:image/png;base64,${Buffer.from(this.url).toString("base64")}` }
   }
@@ -223,6 +229,7 @@ class FakeView {
   setBounds(bounds: unknown) {
     this.bounds = bounds
   }
+  setBackgroundColor() {}
 }
 
 const windows: FakeWindow[] = []
@@ -590,5 +597,50 @@ describe("research browsers", () => {
     await close("ses_lead")
     expect(guard.outside()).toEqual([])
     expect(LocalPolicy.hostClass("article.web.test")).toBe("internet")
+  })
+})
+
+describe("the bridge", () => {
+  test("research and visible commands sent with each other's IDs fail, and neither reaches the other's browsers", async () => {
+    const agent = await import("./browser-agent")
+    expect((await agent.runBrowserAgent(undefined, { contextId: "ses_lead", command: "wait", milliseconds: 0 })).ok).toBe(true)
+    const user = latest()
+    expect(user.webContents.partition.name).toBe("persist:vector-browser")
+    // The same session's research browser is another page, in a research slot.
+    expect((await send({ command: "research.scroll", sessionID: "ses_lead" })).ok).toBe(true)
+    const mine = latest()
+    expect(mine).not.toBe(user)
+    expect(mine.webContents.partition.name).toMatch(/^vector-research-\d+$/)
+    // A visible command naming a research browser's ID gets a visible page of its own, never the research one.
+    await agent.runBrowserAgent(undefined, { contextId: "run_one:ses_lead", command: "wait", milliseconds: 0 })
+    expect(latest()).not.toBe(mine)
+    expect(latest().webContents.partition.name).toBe("persist:vector-browser")
+    expect(research.ResearchWatch.list().map((chip) => chip.id)).toEqual(["run_one:ses_lead"])
+
+    const { startBrowserBridge, stopBrowserBridge } = await import("./browser-bridge")
+    const bridge = await startBrowserBridge()
+    const post = (path: string, body: unknown, token = bridge.token) =>
+      fetch(`${bridge.url}${path}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }).then(async (response) => ({ status: response.status, body: (await response.json()) as Record<string, unknown> }))
+    try {
+      const command = { command: "research.scroll", runID: "run_one", sessionID: "ses_lead", agent: "research", max: 3 }
+      expect(await post("/research", command)).toMatchObject({ status: 200, body: { ok: true, label: "Research lead" } })
+      expect(await post("/research", { ...command, contextId: "ses_lead" })).toEqual({
+        status: 400,
+        body: { error: "Research browser commands take no contextId." },
+      })
+      expect(await post("/research", { contextId: "ses_lead", command: "openUrl", url: ARTICLE })).toMatchObject({ status: 400 })
+      expect(await post("/command", { ...command, contextId: "run_one:ses_lead" })).toEqual({
+        status: 400,
+        body: { error: "Unknown browser command." },
+      })
+      expect(await post("/research", command, "wrong")).toMatchObject({ status: 401 })
+    } finally {
+      await stopBrowserBridge()
+    }
+    await close("ses_lead")
   })
 })
