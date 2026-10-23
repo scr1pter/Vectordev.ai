@@ -1219,7 +1219,8 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
       .pipe(Effect.orDie)
   })
 
-  // Every facet is learned and the model learner runs only with Vector Local until the user says otherwise (section 7.4).
+  // Every facet is learned, and the model learner runs only with Vector Local on, until the user says otherwise
+  // (section 7.4).
   const learnSettings = Effect.fn("Brain.learnSettings")(function* () {
     const row = yield* db
       .select()
@@ -1229,10 +1230,9 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
       .pipe(Effect.orDie)
     return {
       learning: row?.learning ?? true,
-      facets: Object.fromEntries(BrainLearn.FACETS.map((facet) => [facet, row?.learn_facets?.[facet] !== false])) as Record<
-        BrainSchema.Facet,
-        boolean
-      >,
+      facets: Object.fromEntries(
+        BrainLearn.FACETS.map((facet) => [facet, row?.learn_facets?.[facet] !== false]),
+      ) as Record<BrainSchema.Facet, boolean>,
       modelLearner: row?.model_learner ?? "local-only",
     } satisfies LearnSettings
   })
@@ -1395,9 +1395,14 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     const term = proposal.kind === "term" ? BrainLearn.term(cleaned) : undefined
     if (proposal.kind === "term" && !term)
       return refuse("not-a-term", 'A term reads "When I say X, I mean Y". Save anything else as a preference.')
-    const facet = proposal.facet ?? (term ? "vocabulary" : proposal.kind === "preference" ? BrainLearn.facetOf(cleaned) : undefined)
+    const facet =
+      proposal.facet ??
+      (term ? "vocabulary" : proposal.kind === "preference" ? BrainLearn.facetOf(cleaned) : undefined)
     if (settings && facet && !settings.facets[facet])
-      return refuse("learning-off", `Learning about your ${facet} is turned off in Settings > Memory, so nothing was saved.`)
+      return refuse(
+        "learning-off",
+        `Learning about your ${facet} is turned off in Settings > Memory, so nothing was saved.`,
+      )
     const limit = agent ? LIMIT.agent : LIMIT.user
     if (cleaned.length > limit)
       return refuse("too-long", `Keep one memory to ${limit} characters: one fact, lesson or decision per entry.`)
@@ -1493,7 +1498,8 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     if (exact) {
       // A held write never adds to an entry outside the review queue, so outside content cannot vouch for memory; nor
       // does a model's suggestion from such a session, or an imported file, change what is known.
-      if ((hold && exact.status !== "quarantined") || pending === "review") return { type: "merged" as const, entry: toEntry(exact) }
+      if ((hold && exact.status !== "quarantined") || pending === "review")
+        return { type: "merged" as const, entry: toEntry(exact) }
       // What the user put away stays away until they bring it back; the agent may restore only what it or tidying
       // put away.
       if (agent && exact.status === "archived" && (yield* archivedBy(exact.id)) === "user")
@@ -1838,7 +1844,9 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
           stale: false,
           updated_at: now,
           ...(term ? { term_key: term.key } : {}),
-          ...(row.kind === "preference" && change.facet === undefined ? { facet: BrainLearn.facetOf(redacted.text) } : {}),
+          ...(row.kind === "preference" && change.facet === undefined
+            ? { facet: BrainLearn.facetOf(redacted.text) }
+            : {}),
         })
         .where(eq(BrainEntryTable.id, id))
         .run()
@@ -1846,7 +1854,12 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
       yield* event(row, "edited", actor, { previous: row.body })
     }
     if (change.facet !== undefined && (row.kind === "preference" || row.kind === "term")) {
-      yield* db.update(BrainEntryTable).set({ facet: change.facet, updated_at: now }).where(eq(BrainEntryTable.id, id)).run().pipe(Effect.orDie)
+      yield* db
+        .update(BrainEntryTable)
+        .set({ facet: change.facet, updated_at: now })
+        .where(eq(BrainEntryTable.id, id))
+        .run()
+        .pipe(Effect.orDie)
       yield* event(row, "filed", actor, { facet: change.facet })
     }
     if (change.pinned !== undefined) {
