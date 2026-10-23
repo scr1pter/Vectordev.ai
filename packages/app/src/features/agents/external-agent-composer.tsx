@@ -1,9 +1,13 @@
 import { createEffect, Show } from "solid-js"
 import { createStore } from "solid-js/store"
+import { ModelSelectorPopoverV2, type ModelSelectorModelState } from "@/components/dialog-select-model"
 import "./external-agent-chat.css"
 
 export function ExternalAgentComposer(props: {
   runtimeLabel: string
+  /** The runtime's own CLI models, in Vector's picker. */
+  model: ModelSelectorModelState
+  modelLabel: string
   value: string
   running: boolean
   sending: boolean
@@ -50,6 +54,26 @@ export function ExternalAgentComposer(props: {
             <span />
             {props.runtimeLabel}
           </span>
+          {/* Stays usable while a turn runs: that turn keeps its model, and the choice applies from the next one. */}
+          <ModelSelectorPopoverV2
+            model={props.model}
+            fixedCatalog
+            triggerAs="button"
+            triggerProps={{
+              type: "button",
+              class: "vector-agent-model-chip",
+              "data-action": "external-agent-model",
+              "aria-label": `${props.runtimeLabel} model: ${props.modelLabel}`,
+              title: props.running
+                ? `Choose the ${props.runtimeLabel} model for your next message`
+                : `Choose the ${props.runtimeLabel} model`,
+            }}
+          >
+            <span class="vector-agent-model-chip-name">{props.modelLabel}</span>
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="m4.5 6.5 3.5 3.5 3.5-3.5" />
+            </svg>
+          </ModelSelectorPopoverV2>
           <span class="vector-agent-composer-hint">
             {props.running ? "Working · draft your next message" : "Shift ↵ for a new line"}
           </span>

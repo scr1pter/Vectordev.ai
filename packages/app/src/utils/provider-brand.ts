@@ -298,7 +298,9 @@ function pickerSection<T extends PickerModel>(section: Omit<PickerSection<T>, "r
 }
 
 /** Group connected coding models by provider. Without a search, the recent choices come first, above every provider
-    and above Free models inside of Vector; a model listed there is not repeated below. */
+    and above Free models inside of Vector; a model listed there is not repeated below. `keepOrder` keeps the order the
+    models came in within each section, for a hand-ordered list such as an external agent's, which leads with its CLI's
+    default. */
 export function buildModelSections<T extends PickerModel>(input: {
   models: readonly T[]
   term?: string
@@ -306,6 +308,7 @@ export function buildModelSections<T extends PickerModel>(input: {
   recentKeys?: readonly string[]
   now: number
   popular?: readonly string[]
+  keepOrder?: boolean
 }): PickerSection<T>[] {
   const term = (input.term ?? "").trim().toLowerCase()
   // Both copies of a free model are listed, the shared one first; each runs where it says.
@@ -376,7 +379,8 @@ export function buildModelSections<T extends PickerModel>(input: {
   const rank = (model: T) => ranks.get(model) ?? 0
   // Vector Codium keeps its catalog's order, led by the model it recommends: its models list no release date, so
   // sorting by date and name would put Claude Haiku 5.5, the model that uses credits fastest, first.
-  const order = (a: T, b: T) => rank(a) - rank(b) || (a.provider.id === "vector-plan" ? 0 : byRelease(a, b))
+  const order = (a: T, b: T) =>
+    rank(a) - rank(b) || (input.keepOrder || a.provider.id === "vector-plan" ? 0 : byRelease(a, b))
 
   const popular = (input.popular ?? []).filter(providerAllowed)
   const popularity = (id: string) => {

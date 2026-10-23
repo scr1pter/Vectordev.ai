@@ -14,6 +14,7 @@ import {
 } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useLocal } from "@/context/local"
+import type { ModelKey } from "@/context/models"
 import { useServerSync } from "@/context/server-sync"
 import { useDialog } from "@vectordevai/ui/context/dialog"
 import { popularProviders } from "@/hooks/use-providers"
@@ -40,17 +41,24 @@ import {
   readOpenSections,
   toggleOpenSection,
   writeOpenSections,
+  type PickerModel,
   type PickerSection,
   type PickerSectionView,
 } from "@/utils/provider-brand"
 
 type ModelState = ReturnType<typeof useLocal>["model"]
-/** Minimal surface the selector popover needs — lets other screens (e.g.
-    Parallel Workspaces) host the exact same picker with their own selection.
-    Without `recent`, the top section is just the current model, under "Current model". */
-export type ModelSelectorModelState = Pick<ModelState, "list" | "visible" | "current" | "set"> &
-  Partial<Pick<ModelState, "recent">>
-type ModelItem = ReturnType<ModelState["list"]>[number]
+/** Minimal surface the selector popover needs — lets other screens (e.g. Parallel Workspaces, or an external agent's
+    own CLI models) host the exact same picker with their own selection. Rows only need the fields the picker reads,
+    so a list need not come from a connected provider. Without `recent`, the top section is just the current model,
+    under "Current model". */
+export type ModelSelectorModelState = {
+  list: () => readonly PickerModel[]
+  visible: (key: ModelKey) => boolean
+  current: () => PickerModel | undefined
+  set: (key: ModelKey | undefined, options?: { recent?: boolean }) => void
+  recent?: () => readonly (PickerModel | undefined)[]
+}
+type ModelItem = PickerModel
 type ModelSection = PickerSection<ModelItem>
 type ModelSectionView = PickerSectionView<ModelItem>
 
@@ -61,12 +69,14 @@ const connectKey = "action:connect-provider"
     they can't drift apart, and buildModelSections leaves out models that can't hold a
     coding conversation for both views and search alike. Which sections are open is kept
     for the next picker, in either view. The picker never renders or logs provider.key or
-    provider.options. */
+    provider.options. A `fixed` list (an external agent's CLI models) keeps its own order,
+    shows every section open, and has no Connect provider row. */
 function createModelSections(input: {
   model: ModelSelectorModelState
   provider: () => string | undefined
   search: () => string
   now: () => number
+  fixed?: boolean
 }) {
   const models = createMemo(() => {
     const provider = input.provider()
@@ -87,14 +97,19 @@ function createModelSections(input: {
       recentKeys: input.model.recent?.().flatMap((item) => (item ? [pickerModelKey(item)] : [])),
       now: input.now(),
       popular: popularProviders,
+      keepOrder: input.fixed,
     }),
   )
   const [open, setOpenSections] = createSignal(readOpenSections())
-  const views = createMemo(() => pickerSectionViews(sections(), open(), input.search()))
+  const views = createMemo(() =>
+    pickerSectionViews(sections(), open(), input.search()).map((view) =>
+      input.fixed ? { ...view, toggle: false, open: true } : view,
+    ),
+  )
   // Navigation order is render order: every visible header and row, then Connect provider.
   const navigation = createMemo(() => {
     const visible = pickerNavigation(views())
-    return { keys: [...visible.keys, connectKey], headers: visible.headers }
+    return { keys: input.fixed ? visible.keys : [...visible.keys, connectKey], headers: visible.headers }
   })
   const toggle = (id: string) => {
     const next = toggleOpenSection(open(), id)
@@ -262,6 +277,9 @@ export function ModelSelectorPopoverV2(props: {
   triggerAs?: ValidComponent
   triggerProps?: ModelSelectorTriggerProps
   onClose?: () => void
+  /** The list is the host's own, such as the models an external agent's CLI accepts, not Vector's providers: it
+      keeps its order, every section stays open, and there is nothing to connect or refresh. */
+  fixedCatalog?: boolean
 }) {
   const model = props.model ?? useLocal().model
   const serverSync = useServerSync()
@@ -279,6 +297,7 @@ export function ModelSelectorPopoverV2(props: {
     provider: () => props.provider,
     search: () => store.search,
     now: () => store.now,
+    fixed: props.fixedCatalog,
   })
   const sections = picker.sections
   const keys = () => picker.navigation().keys
@@ -309,7 +328,7 @@ export function ModelSelectorPopoverV2(props: {
     if (open) {
       // Account models can arrive after the list was first read, as when vectordev.ai answers a first Codium
       // catalog read slowly; opening the picker reads the list again so they show up.
-      void serverSync().refreshProviders()
+      if (!props.fixedCatalog) void serverSync().refreshProviders()
       restoreTrigger = true
       pointerMoved = createPointerGuard()
       picker.reload()
@@ -369,7 +388,7 @@ export function ModelSelectorPopoverV2(props: {
   const setSearch = (value: string) => {
     setStore("search", value)
     // The first rendered row becomes active on every keystroke; with no match, Connect provider.
-    setStore("active", keys()[0] ?? connectKey)
+    setStore("active", keys()[0] ?? (props.fixedCatalog ? "" : connectKey))
     queueMicrotask(() => activeItem()?.scrollIntoView({ block: "nearest" }))
   }
 
@@ -496,18 +515,20 @@ export function ModelSelectorPopoverV2(props: {
               </Show>
             </div>
           </ScrollView>
-          <div class="h-px bg-[color:var(--vx-line)]" />
-          <div class="flex flex-col p-0.5">
-            <MenuV2.Item
-              data-option-key={connectKey}
-              data-active={active() === connectKey ? "" : undefined}
-              onMouseMove={(event: MouseEvent) => hover(event, connectKey)}
-              onSelect={connectProvider}
-            >
-              <Icon name="plus" size="small" />
-              <span class="min-w-0 flex-1 truncate text-sm leading-5">{language.t("command.provider.connect")}</span>
-            </MenuV2.Item>
-          </div>
+          <Show when={!props.fixedCatalog}>
+            <div class="h-px bg-[color:var(--vx-line)]" />
+            <div class="flex flex-col p-0.5">
+              <MenuV2.Item
+                data-option-key={connectKey}
+                data-active={active() === connectKey ? "" : undefined}
+                onMouseMove={(event: MouseEvent) => hover(event, connectKey)}
+                onSelect={connectProvider}
+              >
+                <Icon name="plus" size="small" />
+                <span class="min-w-0 flex-1 truncate text-sm leading-5">{language.t("command.provider.connect")}</span>
+              </MenuV2.Item>
+            </div>
+          </Show>
         </MenuV2.Content>
       </MenuV2.Portal>
     </MenuV2>
