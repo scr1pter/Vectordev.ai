@@ -16,6 +16,7 @@ import { Instruction } from "../../src/session/instruction"
 import { SessionMemory } from "../../src/session/memory"
 import { SessionPrompt } from "../../src/session/prompt"
 import { SessionTaskSize } from "../../src/session/task-size"
+import { SessionCompaction } from "../../src/session/compaction"
 import { ResearchRun } from "../../src/tool/research-run"
 import { reply } from "../lib/llm-server"
 import { calls, output, plan, ref, repositoryConfig, runtime, send, setup } from "../lib/research"
@@ -26,8 +27,8 @@ import { NetworkGuard } from "../../../core/test/lib/network-guard"
 // no memory at all; a question is Work, where the lead may still hand independent sub-questions to up to 2
 // researchers; only the user's own "Start deep" (or a Thorough request) makes it Deep, never a child's plan. Research's
 // default caps are the run's budget only when the user set none, a page budget ends the run with a report, a
-// repository's config cannot pick where research searches, and the lead recalls how the owner works and no fact
-// about them.
+// repository's config cannot pick where research searches, the lead recalls how the owner works and no fact about
+// them, and a compaction keeps the run's digest.
 
 const guard = NetworkGuard.use()
 const web = FakeWeb.start({ sites: FakeWeb.sites() })
@@ -484,6 +485,38 @@ it.instance(
       expect(names(bodies.at(-1)!)).toContain("research_read")
     }),
   60_000,
+)
+
+it.instance(
+  "a compaction of a research session keeps the run, where its sub-questions stand and its notes",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web)
+      const sessions = yield* Session.Service
+      const prompt = yield* SessionPrompt.Service
+      const compaction = yield* SessionCompaction.Service
+      const session = yield* sessions.create({ title: "Research", permission: allow })
+      yield* test.llm.tool("research_plan", plan())
+      yield* test.llm.tool("research_read", { url: web.url("article", "/") })
+      yield* test.llm.tool("research_plan", { ...plan(), status: ["answered", "open"] })
+      yield* test.llm.text("Read one study so far.")
+      yield* send({ sessionID: session.id, agent: "research", text: `Research heat pumps: ${web.url("article", "/")}` })
+      const [planned] = yield* calls(session.id, "research_plan")
+      const runID = planned?.state.status === "completed" ? planned.state.metadata[ResearchRun.RUN] : undefined
+      yield* compaction.create({ sessionID: session.id, agent: "research", model: ref, auto: false })
+      yield* test.llm.text("## Goal\n- Research heat pumps")
+      const before = (yield* test.llm.hits).length
+      yield* prompt.loop({ sessionID: session.id })
+      const summary = (yield* test.llm.hits).slice(before).map((hit) => JSON.stringify(hit.body))[0] ?? ""
+      expect(summary).toContain("<research_run>")
+      expect(summary).toContain(`Deep research run ${runID}`)
+      expect(summary).toContain("1. [answered] What did field studies measure?")
+      expect(summary).toContain("2. [open] How large were the savings?")
+      // A source by its site alone: its title is the page's to write.
+      expect(summary).toContain("Sources: S1 web.test.")
+      expect(summary).not.toContain("Sources: S1 How heat pumps")
+    }),
+  90_000,
 )
 
 test("only a plan the user started deep on the root card raises a request", () => {

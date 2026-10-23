@@ -912,6 +912,52 @@ const layer = Layer.effect(
       return "repair" as const
     })
 
+    // What a compaction of a research session keeps of its run (section 5.9): the run, where each sub-question stands,
+    // how many notes it saved and the sources it read. The notes and pages stay in the run's store, found again by their
+    // IDs, so the summary needs only these. Read from the stored history, since an earlier compaction may have
+    // summarised the plan's call out of view.
+    const researchDigest = Effect.fn("SessionPrompt.researchDigest")(function* (sessionID: SessionID) {
+      const stored = yield* sessions
+        .messages({ sessionID })
+        .pipe(Effect.catch(() => Effect.succeed([] as SessionV1.WithParts[])))
+      const planned = stored
+        .flatMap((message) => message.parts)
+        .findLast(
+          (part): part is SessionV1.ToolPart =>
+            part.type === "tool" &&
+            part.tool === "research_plan" &&
+            part.state.status === "completed" &&
+            typeof part.state.metadata?.[ResearchRun.RUN] === "string",
+        )
+      if (planned?.state.status !== "completed") return []
+      const detail = yield* researchStore.get(
+        yield* instruction.place(),
+        String(planned.state.metadata[ResearchRun.RUN]),
+      )
+      if (!detail) return []
+      const plan = detail.run.plan
+      const sources = detail.sources
+        .filter((source) => !source.forgotten)
+        .slice(0, 80)
+        .map((source) => `${source.id} ${source.site}${source.status === "read" ? "" : ` (${source.status})`}`)
+      return [
+        [
+          "<research_run>",
+          `This session is doing Deep research run ${detail.run.id} (${detail.run.depth}, ${detail.run.status}). Keep the run's ID and where each sub-question stands in the summary. Its sources and notes stay in the run: research_read reads a source again by its ID (source: "S3"), and research_report cites notes as [N3].`,
+          ...(plan
+            ? [
+                "Sub-questions:",
+                ...plan.subquestions.map((item, index) => `${index + 1}. [${plan.status?.[index] ?? "open"}] ${item}`),
+              ]
+            : []),
+          `Notes saved: ${detail.notes.length}${detail.notes.length ? ` (${detail.notes.map((note) => note.id).join(", ")})` : ""}.`,
+          `Sources: ${sources.length ? sources.join(", ") : "none yet"}.`,
+          ...(detail.report ? ["A report is saved; calling research_report again saves the next version."] : []),
+          "</research_run>",
+        ].join("\n"),
+      ]
+    })
+
     // Deep research's judge (section 5.8), run by Vector itself once the research lead has written its report in this
     // run, never by a model: after a Deep run, and after a Focused one whose report cites at least 8 notes, unless the
     // user turned the judge off for the request ("skip the judge", or a prompt's or the config's judge "off"); with
@@ -2191,6 +2237,7 @@ const layer = Layer.effect(
             sessionID,
             auto: task.auto,
             overflow: task.overflow,
+            context: yield* researchDigest(sessionID),
           })
           if (result === "stop") break
           // The summary may replace the message that opened the request it covers. The marker records the request,
