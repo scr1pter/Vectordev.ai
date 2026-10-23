@@ -23,6 +23,8 @@ const seen: {
   body: string
   cookie: string | null
   proxyAuthorization: string | null
+  /** The x-test-mark header, so a test reads only the requests it made, whatever an earlier one left on its way. */
+  mark: string | null
 }[] = []
 const server = Bun.serve({
   hostname: "127.0.0.1",
@@ -36,6 +38,7 @@ const server = Bun.serve({
       body: await request.text(),
       cookie: request.headers.get("cookie"),
       proxyAuthorization: request.headers.get("proxy-authorization"),
+      mark: request.headers.get("x-test-mark"),
     })
     if (url.pathname === "/out") return Response.redirect(`http://${OUTSIDE}/collect`, 302)
     if (url.pathname === "/hop") return Response.redirect("/landed", 302)
@@ -240,12 +243,13 @@ describe("EgressGuard.installStrict", () => {
   })
 
   test("follows redirects the way fetch does: method, body and credentials", async () => {
-    seen.length = 0
-    await fetch(at("/see-other"), { method: "POST", body: "form" })
-    await fetch(at("/keep"), { method: "PUT", body: "kept" })
-    await fetch(at("/hop"), { headers: { authorization: "Bearer same-site" } })
-    await fetch(at("/elsewhere"), { headers: { authorization: "Bearer other-site" } })
-    expect(seen.map((item) => [item.path, item.method, item.body, item.authorization])).toEqual([
+    const mark = { "x-test-mark": "follows" }
+    await fetch(at("/see-other"), { method: "POST", body: "form", headers: mark })
+    await fetch(at("/keep"), { method: "PUT", body: "kept", headers: mark })
+    await fetch(at("/hop"), { headers: { ...mark, authorization: "Bearer same-site" } })
+    await fetch(at("/elsewhere"), { headers: { ...mark, authorization: "Bearer other-site" } })
+    const own = seen.filter((item) => item.mark === mark["x-test-mark"])
+    expect(own.map((item) => [item.path, item.method, item.body, item.authorization])).toEqual([
       ["/see-other", "POST", "form", null],
       ["/landed", "GET", "", null],
       ["/keep", "PUT", "kept", null],
@@ -265,10 +269,12 @@ describe("EgressGuard.installStrict", () => {
   })
 
   test("resends a Request object's body on a 307, as fetch does", async () => {
-    seen.length = 0
-    const response = await fetch(new Request(at("/keep"), { method: "POST", body: "payload" }))
+    const response = await fetch(
+      new Request(at("/keep"), { method: "POST", body: "payload", headers: { "x-test-mark": "resend" } }),
+    )
     expect({ status: response.status, redirected: response.redirected }).toEqual({ status: 200, redirected: true })
-    expect(seen.map((item) => [item.path, item.method, item.body])).toEqual([
+    const own = seen.filter((item) => item.mark === "resend")
+    expect(own.map((item) => [item.path, item.method, item.body])).toEqual([
       ["/keep", "POST", "payload"],
       ["/landed", "POST", "payload"],
     ])
