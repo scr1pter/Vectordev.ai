@@ -3164,6 +3164,7 @@ export type EgressEvent = {
   tool?: string
   carried: EgressCarried
   frame?: string
+  resource?: "page" | "subresource"
 }
 
 export type EgressSummary = {

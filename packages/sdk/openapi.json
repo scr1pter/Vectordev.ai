@@ -34723,6 +34723,10 @@
           },
           "frame": {
             "type": "string"
+          },
+          "resource": {
+            "type": "string",
+            "enum": ["page", "subresource"]
           }
         },
         "required": [

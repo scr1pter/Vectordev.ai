@@ -169,6 +169,40 @@ describe("Egress.decide", () => {
     expect(Egress.events({ blocked: true }).map((event) => event.source)).toEqual(["model-catalog"])
   })
 
+  test("counts a page a browser opened as a page and what the page loaded only as hosts it reached", () => {
+    Egress.configure(on())
+    EgressAttribution.run({ sessionID: "ses_browse", agent: "build" }, () => {
+      const page = (url: string) =>
+        Egress.record(
+          { source: "agent-browser", url, resource: "page" },
+          LocalPolicy.decide(Egress.policy(), { purpose: "browser", url, source: "agent-browser" }),
+        )
+      const loaded = (url: string) =>
+        Egress.record(
+          { source: "agent-browser", url, resource: "subresource" },
+          LocalPolicy.decide(Egress.policy(), { purpose: "browser", url, source: "agent-browser" }),
+        )
+      page("https://news.example.org/")
+      loaded("https://cdn.example.net/app.js")
+      loaded("https://fonts.example.com/font.woff2")
+      loaded("https://cdn.example.net/style.css")
+      page("https://docs.example.org/guide")
+    })
+    const summary = Egress.summary("ses_browse")
+    expect({ pages: summary.pages, hosts: summary.hosts, requests: summary.requests }).toEqual({
+      pages: 2,
+      hosts: 4,
+      requests: 5,
+    })
+    expect(Egress.events({ session: "ses_browse" }).map((event) => event.resource)).toEqual([
+      "page",
+      "subresource",
+      "subresource",
+      "subresource",
+      "page",
+    ])
+  })
+
   test("tells the user about unlabelled blocks and blocks they caused, once per source in ten minutes", () => {
     Egress.configure(on())
     const told: LocalMode.Event[] = []

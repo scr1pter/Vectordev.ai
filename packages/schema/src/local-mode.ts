@@ -182,6 +182,9 @@ export const Event = Schema.Struct({
   carried: Carried,
   // For a request no call site labelled: the first stack frame outside the network guard, so the code can be found.
   frame: optional(Schema.String),
+  // For a request a browser Vector drives made: the page it opened, or something a page loaded (an image, a script,
+  // a frame). The counters count a page as a page read and what pages loaded only as other hosts they reached.
+  resource: optional(Schema.Literals(["page", "subresource"])),
 }).annotate({ identifier: "EgressEvent" })
 export type Event = typeof Event.Type
 
@@ -192,7 +195,8 @@ export const Summary = Schema.Struct({
   helper_requests: NonNegativeInt,
   // Model calls by origin.
   model_calls: Schema.Record(Schema.String, NonNegativeInt),
-  // Web pages read, and the other hosts reached for web purposes.
+  // Web pages read (what a page loaded is not a page), and the hosts reached for web purposes, what pages loaded
+  // included.
   pages: NonNegativeInt,
   hosts: NonNegativeInt,
   searches: NonNegativeInt,
