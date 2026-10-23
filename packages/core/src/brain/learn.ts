@@ -205,7 +205,8 @@ export function accept(
   const quote = BrainScan.stripHidden(suggestion.quote).replace(/\s+/g, " ").trim()
   if (!text || quote.length < 3 || quote.length > LIMIT.text) return undefined
   if (!normal(input.typed).includes(normal(quote))) return undefined
-  if ([text, quote].some((value) => BrainScan.credential(value) || BrainScan.redact(value, {}).redacted)) return undefined
+  if ([text, quote].some((value) => BrainScan.credential(value) || BrainScan.redact(value, {}).redacted))
+    return undefined
   if ([text, quote].some((value) => BrainScan.instructionLike(value) || sensitive(value))) return undefined
   if (suggestion.kind === "term" && !term(text)) return undefined
   const facet = suggestion.kind === "term" ? "vocabulary" : facetOf(text)
@@ -325,9 +326,11 @@ function parseTerm(text: string, masked: string) {
 // ("don't change that file", "stop here") are not ways of working.
 const FIRST =
   /^i(?:'d|\s+would)\s+(?:much\s+)?(?:rather|prefer)\s+(.+)$|^i\s+(?:really\s+|usually\s+|generally\s+|always\s+|strongly\s+|much\s+)?(?:prefer|like|love|dislike|hate|don't\s+like|do\s+not\s+like|can't\s+stand)\s+(.+)$/i
-const IMPERATIVE = /^(?:you\s+should\s+|make\s+sure\s+(?:to\s+|you\s+)?|remember\s+to\s+)?(?:always|never|don't|dont|do\s+not)\s+(\S.+)$/i
+const IMPERATIVE =
+  /^(?:you\s+should\s+|make\s+sure\s+(?:to\s+|you\s+)?|remember\s+to\s+)?(?:always|never|don't|dont|do\s+not)\s+(\S.+)$/i
 const STOP = /^stop\s+[a-z]+ing\b\s*\S/i
-const FEEDBACK = /^(?:it|this|that|these|those|both|either|neither|yours|mine|the\s+(?:first|second|last|other|new)(?:\s+one)?)\b(?!\s+when\b)/i
+const FEEDBACK =
+  /^(?:it|this|that|these|those|both|either|neither|yours|mine|the\s+(?:first|second|last|other|new)(?:\s+one)?)\b(?!\s+when\b)/i
 const ONE_OFF =
   /\b(?:it|that|these|those|here|now|yet|today|tonight|tomorrow|again|anymore|any\s+more|this\s+(?:time|one|file|function|line|test|change|pr|branch|bug|method|class|component|part|section)|that\s+one)\b|^(?:don't|dont|do\s+not|never)\s+(?:worry|bother|know|mind|forget|think)\b/i
 
@@ -340,7 +343,10 @@ function preference(masked: string) {
 }
 
 function trimmed(clause: string) {
-  const text = clause.replace(/\s+/g, " ").trim().replace(/[.,;:!]+$/, "")
+  const text = clause
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[.,;:!]+$/, "")
   if (text.length <= LIMIT.text) return text
   const cut = text.slice(0, LIMIT.text)
   return cut.slice(0, cut.lastIndexOf(" ") > 0 ? cut.lastIndexOf(" ") : LIMIT.text).replace(/[.,;:!]+$/, "")

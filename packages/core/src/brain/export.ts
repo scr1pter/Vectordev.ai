@@ -103,8 +103,7 @@ export const collect = Effect.fn("BrainExport.collect")(function* (input: {
     ),
   )
   // Documents are the repository's, whoever added them.
-  const documents =
-    input.scope === "personal" ? [] : yield* input.knowledge.documents(input.place, { personal: true })
+  const documents = input.scope === "personal" ? [] : yield* input.knowledge.documents(input.place, { personal: true })
   const read = yield* Effect.forEach(documents, (document) =>
     Effect.gen(function* () {
       const records: BrainSchema.Record[] = []
@@ -193,7 +192,10 @@ export function markdown(file: File) {
     "",
     `${document.format}${document.pages ? `, ${document.pages} pages` : ""}, ${document.origin}, ${document.visibility}, ${document.status}${document.version > 1 ? `, version ${document.version}` : ""}`,
     "",
-    ...document.records.map((record) => `- **${record.id}** ${record.kind}${record.page ? ` (p.${record.page})` : ""}: ${oneLine(record.card)}`),
+    ...document.records.map(
+      (record) =>
+        `- **${record.id}** ${record.kind}${record.page ? ` (p.${record.page})` : ""}: ${oneLine(record.card)}`,
+    ),
     "",
   ])
   return `${["# Vector memory", "", ...sections, ...(documents.length ? ["## Documents", "", ...documents] : [])].join("\n")}\n`
@@ -255,7 +257,16 @@ export const importText = Effect.fn("BrainExport.importText")(function* (input: 
   } satisfies Imported
 })
 
-const KINDS: readonly BrainSchema.Kind[] = ["rule", "preference", "term", "decision", "lesson", "fact", "failure", "review"]
+const KINDS: readonly BrainSchema.Kind[] = [
+  "rule",
+  "preference",
+  "term",
+  "decision",
+  "lesson",
+  "fact",
+  "failure",
+  "review",
+]
 
 const HEADINGS: Record<BrainSchema.Kind, string> = {
   rule: "Rules",
@@ -301,13 +312,18 @@ function fromMarkdown(text: string): Incoming[] {
       const marks = (bullet[2] ?? "").split(",").map((mark) => mark.trim())
       if (marks.some((mark) => mark === "archived" || mark === "superseded" || mark === "quarantined")) return state
       const kind = state.kind as BrainSchema.LearnedKind
-      const facet = marks.find((mark): mark is BrainSchema.Facet => BrainLearn.FACETS.includes(mark as BrainSchema.Facet))
+      const facet = marks.find((mark): mark is BrainSchema.Facet =>
+        BrainLearn.FACETS.includes(mark as BrainSchema.Facet),
+      )
       const scope = marks.includes("repository")
         ? ("repository" as const)
         : marks.includes("personal") || kind === "preference" || kind === "term"
           ? ("personal" as const)
           : ("repository" as const)
-      return { kind: state.kind, items: [...state.items, { kind, text: bullet[1]!, scope, ...(facet ? { facet } : {}) }] }
+      return {
+        kind: state.kind,
+        items: [...state.items, { kind, text: bullet[1]!, scope, ...(facet ? { facet } : {}) }],
+      }
     },
     { items: [] },
   ).items

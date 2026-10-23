@@ -7,8 +7,12 @@ import { added, text, withKnowledge, type Setup } from "./fixture/knowledge"
 // Export and import of memory (section 6.5): the CLI and Settings share one export, a page to read or JSON, and an
 // import brings everything in waiting for the user's approval.
 
-const own = (setup: Setup, kind: "preference" | "decision" | "term" | "fact", body: string, scope: "personal" | "repository" = "personal") =>
-  setup.brain.propose(setup.place, { kind, text: body, scope, origin: "user", evidence: { type: "user" } })
+const own = (
+  setup: Setup,
+  kind: "preference" | "decision" | "term" | "fact",
+  body: string,
+  scope: "personal" | "repository" = "personal",
+) => setup.brain.propose(setup.place, { kind, text: body, scope, origin: "user", evidence: { type: "user" } })
 
 const fill = (setup: Setup) =>
   Effect.gen(function* () {
@@ -31,7 +35,13 @@ describe("BrainExport.render", () => {
     const page = await withKnowledge((setup) =>
       Effect.gen(function* () {
         yield* fill(setup)
-        return yield* BrainExport.render({ brain: setup.brain, knowledge: setup.knowledge, place: setup.place, scope: "all", format: "markdown" })
+        return yield* BrainExport.render({
+          brain: setup.brain,
+          knowledge: setup.knowledge,
+          place: setup.place,
+          scope: "all",
+          format: "markdown",
+        })
       }),
     )
     expect(page).toStartWith("# Vector memory\n")
@@ -49,7 +59,12 @@ describe("BrainExport.render", () => {
     const file = await withKnowledge((setup) =>
       Effect.gen(function* () {
         yield* fill(setup)
-        return yield* BrainExport.collect({ brain: setup.brain, knowledge: setup.knowledge, place: setup.place, scope: "personal" })
+        return yield* BrainExport.collect({
+          brain: setup.brain,
+          knowledge: setup.knowledge,
+          place: setup.place,
+          scope: "personal",
+        })
       }),
     )
     expect(file.entries.every((entry) => entry.scope === "personal")).toBe(true)
@@ -63,16 +78,32 @@ describe("BrainExport.importText", () => {
     const json = await withKnowledge((setup) =>
       Effect.gen(function* () {
         yield* fill(setup)
-        return yield* BrainExport.render({ brain: setup.brain, knowledge: setup.knowledge, place: setup.place, scope: "all", format: "json" })
+        return yield* BrainExport.render({
+          brain: setup.brain,
+          knowledge: setup.knowledge,
+          place: setup.place,
+          scope: "all",
+          format: "json",
+        })
       }),
     )
     const result = await withKnowledge((setup) =>
       Effect.gen(function* () {
         const imported = yield* BrainExport.importText({ brain: setup.brain, place: setup.place, text: json })
-        const recalled = yield* setup.brain.recall(setup.place, { query: "tables comparisons", budget: 300, personal: true })
-        const preference = imported.entries.find((entry) => entry.kind === "preference" && entry.text.includes("tables"))!
+        const recalled = yield* setup.brain.recall(setup.place, {
+          query: "tables comparisons",
+          budget: 300,
+          personal: true,
+        })
+        const preference = imported.entries.find(
+          (entry) => entry.kind === "preference" && entry.text.includes("tables"),
+        )!
         yield* setup.brain.update(setup.place, preference.id, { action: "approve" }, "user")
-        const approved = yield* setup.brain.recall(setup.place, { query: "tables comparisons", budget: 300, personal: true })
+        const approved = yield* setup.brain.recall(setup.place, {
+          query: "tables comparisons",
+          budget: 300,
+          personal: true,
+        })
         const again = yield* BrainExport.importText({ brain: setup.brain, place: setup.place, text: json })
         return { imported, recalled, approved, again }
       }),
