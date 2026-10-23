@@ -38,7 +38,9 @@ export class LocalConfirmError extends Schema.ErrorClass<LocalConfirmError>("Loc
     name: Schema.Literal("LocalConfirmError"),
     data: Schema.Struct({
       message: Schema.String,
-      /** What the change would loosen, for the owner's dialog: "turns Vector Local off", "allows github". */
+      /**
+       * What the change would loosen, for the owner's dialog: "turns Vector Local off", "allows github for any host".
+       */
       changes: Schema.Array(Schema.String),
       /**
        * For Add server: what changed about a server already on the list since it was pinned (its kind, version,

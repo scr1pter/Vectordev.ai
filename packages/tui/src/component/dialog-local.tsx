@@ -361,7 +361,7 @@ export function summaryLines(summary: {
     calls.length === 0
       ? "Model calls: none"
       : `Model calls: ${calls.map(([origin, count]) => `${count} to ${origin}`).join(", ")}`,
-    `Web: ${summary.pages} page${summary.pages === 1 ? "" : "s"}, ${summary.hosts} host${summary.hosts === 1 ? "" : "s"}, ${summary.searches} search${summary.searches === 1 ? "" : "es"}`,
+    `Web: ${summary.pages} page${summary.pages === 1 ? "" : "s"}, ${summary.hosts} other host${summary.hosts === 1 ? "" : "s"} they loaded, ${summary.searches} search${summary.searches === 1 ? "" : "es"}`,
     `Memory sent: ${summary.carried.personal} personal card${summary.carried.personal === 1 ? "" : "s"}, ${summary.carried.documents} document passage${summary.carried.documents === 1 ? "" : "s"}`,
     `Blocked: ${blocked}`,
     ...(summary.helper_requests > 0

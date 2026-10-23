@@ -405,6 +405,23 @@ describe("LocalPolicy.hostClass", () => {
     expect(LocalPolicy.listed(policy, "http://192.168.1.1/")).toBe(false)
     expect(policy.warnings.filter((warning) => warning.includes("company's policy only"))).toHaveLength(2)
   })
+
+  test("names an origin the company's endpoint patterns match, or whose host web pages may reach", () => {
+    const policy = LocalPolicy.resolve({
+      managed: {
+        lock: true,
+        user_may: ["endpoints"],
+        endpoint_domains: ["https://*.ml.corp.example.com", "*.corp.example"],
+        web_domains: { allow: ["docs.example.com"] },
+      },
+    })
+    expect(LocalPolicy.named(policy, "https://gpu1.ml.corp.example.com/v1")).toBe(true)
+    expect(LocalPolicy.named(policy, "https://llm.corp.example")).toBe(true)
+    expect(LocalPolicy.named(policy, "https://docs.example.com:8443/")).toBe(true)
+    expect(LocalPolicy.named(policy, "http://gpu1.ml.corp.example.com/v1")).toBe(false)
+    expect(LocalPolicy.named(policy, "https://exfil.example.com/")).toBe(false)
+    expect(LocalPolicy.named(policy, "not an address")).toBe(false)
+  })
 })
 
 describe("LocalPolicy.resolve", () => {

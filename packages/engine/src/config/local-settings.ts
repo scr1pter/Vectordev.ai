@@ -573,8 +573,9 @@ export const FORWARDS =
 
 /**
  * Reads the server a typed address points at, as Add server does: with Vector Local on, a server not on the list yet
- * is read through Egress.checking, so only that origin is let through while it is read (no prompts are sent), and an
- * internet server stays blocked with Web access None.
+ * is read through Egress.checking, so only that origin is let through while it is read (no prompts are sent). A
+ * server Vector Local would not let the user list is not read at all (probeProblem), and neither is one a Vector the
+ * agent started could not add.
  */
 export async function probe(input: { readonly url: string; readonly headers?: Readonly<Record<string, string>> }) {
   const place = LocalProbe.locate(input.url)
@@ -583,19 +584,36 @@ export async function probe(input: { readonly url: string; readonly headers?: Re
       server: null,
       message: `${input.url} is not a model server's address. Use its origin, such as http://127.0.0.1:11434.`,
     }
-  const policy = Egress.policy()
-  const offline =
-    policy.enabled && policy.web === "none" && LocalPolicy.hostClass(new URL(place.origin).hostname) === "internet"
-  if (offline)
-    return {
-      server: null,
-      message: "Web access is set to None, so Vector reads no server on the internet. Your network still works.",
-    }
+  const problem = probeProblem(Egress.policy(), place.origin)
+  if (problem) return { server: null, message: problem }
   const server = await Egress.checking(LocalProbe.SERVER_CHECK, place.origin, () =>
     LocalProbe.probe(input.url, { headers: input.headers }),
   ).catch(() => undefined)
   if (server) return { server }
   return { server: null, message: `No model server Vector knows answered at ${place.origin}.` }
+}
+
+/**
+ * Why Add server does not read the server at `origin`, before anything connects, or undefined. A server on the list,
+ * and one on this computer, are always read. Otherwise: a Vector the agent started cannot add a server, so it reads
+ * none; and with Vector Local on, a server on the internet is not read with Web access None, one outside your network
+ * and the sites the policy names is not read with Your network only, and under a company lock one the company does not
+ * let you list is not read. Egress.checking would let any of them through, since allowing the source would.
+ */
+function probeProblem(policy: LocalMode.Policy, origin: string) {
+  const place = LocalPolicy.hostClass(new URL(origin).hostname)
+  if (place === "this-computer" || LocalPolicy.listed(policy, origin)) return undefined
+  if (agentMarked()) return AGENT
+  if (!policy.enabled) return undefined
+  if (place === "internet" && policy.web === "none")
+    return "Web access is set to None, so Vector reads no server on the internet. Your network still works."
+  if (policy.lock && endpointProblem(policy, origin))
+    return policy.user_may.includes("endpoints")
+      ? `${LOCKED} It lets you add only servers on your network or the ones it names, so Vector does not read ${origin}.`
+      : `${LOCKED} It keeps the model server list, so Vector does not read ${origin}.`
+  if (place === "internet" && policy.web === "network" && !LocalPolicy.named(policy, origin))
+    return `Web access is set to Your network only, so Vector reads no server on the internet your company does not name. Set Web access to Ask to add ${origin}.`
+  return undefined
 }
 
 /**
@@ -651,10 +669,11 @@ export function identity(server: LocalProbe.Server) {
 
 /**
  * Add server: puts the server on the model server list with the identity it answered with (a change that loosens
- * Vector Local while it is on, so it needs `confirm` then, as a new identity for a server on the list does), and adds
- * it to the user's global config as a provider with the models it runs there, each with its context, reply limit,
- * tool calling and image input. Its cloud models are left out. Nothing is written when the listing is refused or waits
- * for confirmation. `identity` says what changed when the server was pinned before and answers differently now.
+ * Vector Local while it is on, so it needs `confirm` then; a new identity for a server on the list needs it on or off),
+ * and adds it to the user's global config as a provider with the models it runs there, each with its context, reply
+ * limit, tool calling and image input. Its cloud models are left out. Nothing is written when the listing is refused
+ * or waits for confirmation. `identity` says what changed when the server was pinned before and answers differently
+ * now.
  */
 export const addServer = Effect.fn("LocalSettings.addServer")(function* (input: {
   readonly server: LocalProbe.Server
@@ -735,10 +754,12 @@ const ROLES: Record<Role, { readonly agent: string; readonly label: string }> = 
 /**
  * Check models for one model: 2 or 3 requests to its server with the role's real tools, as the agent sends them
  * (LocalProbe.check), after reading the server and comparing it with its identity pin. A result is written to the
- * user's global config: the model's tool calling and limits, and `local.checked`; a model the catalog lists at a cloud
- * address keeps the catalog's limits. It reads only servers you or your company host: never a cloud AI service, and
- * never a server on the internet that is not on the list, since its requests carry the role's tools and the
- * provider's key. With Vector Local on it reaches only a server on the list, since its requests are model calls.
+ * user's global config: the model's tool calling and limits, what the server says about itself in the provider's
+ * options (`forwards` for a LiteLLM proxy, `concurrency` where none is set, `headerTimeout`), and `local.checked`; a
+ * model the catalog lists at a cloud address keeps the catalog's limits. It reads only servers you or your company
+ * host: never a cloud AI service, and never a server on the internet that is not on the list, since its requests carry
+ * the role's tools and the provider's key. With Vector Local on it reaches only a server on the list, since its
+ * requests are model calls.
  */
 export const checkModel = Effect.fn("LocalSettings.checkModel")(function* (input: {
   readonly model: string
@@ -816,19 +837,62 @@ export const checkModel = Effect.fn("LocalSettings.checkModel")(function* (input
     }),
   )
   if (checked.result === "ask") return { type: "checked" as const, checked }
+  const result = unsized(checked, model, role.label, server)
   const current = Config.localUserBlock().block
-  const patch = LocalProbe.patch({ providerID: ref.providerID, server, checks: [checked], current, list: false })
+  const concurrency = (yield* config.getGlobal()).provider?.[ref.providerID]?.options?.concurrency
+  const patch = LocalProbe.patch({
+    providerID: ref.providerID,
+    server,
+    checks: [result],
+    current,
+    concurrency,
+    list: false,
+  })
   // A model the catalog lists at a cloud address keeps the catalog's limits: the server checked here, such as a proxy
-  // the user hosts, passes its requests on to that service.
+  // the user hosts, passes its requests on to that service. What the server says about itself applies either way: a
+  // LiteLLM proxy passes every prompt on (`forwards`, so its steps are never counted as free local ones and a dollar
+  // cap still stops them), how many requests it takes where no count is set, and the longer wait for headers.
   const listedAt = Option.isSome(model) ? model.value.api.url : ""
   const catalogued = URL.canParse(listedAt) && LocalPolicy.hostClass(new URL(listedAt).hostname) === "internet"
-  const entry = catalogued ? undefined : patch.provider[ref.providerID]?.models[ref.modelID]
+  const written = patch.provider[ref.providerID]
+  const entry = catalogued ? undefined : written?.models[ref.modelID]
   yield* config.updateGlobal({
-    ...(entry ? { provider: { [ref.providerID]: { models: { [ref.modelID]: entry } } } } : {}),
+    ...(entry || written?.options
+      ? {
+          provider: {
+            [ref.providerID]: {
+              ...(written?.options ? { options: written.options } : {}),
+              ...(entry ? { models: { [ref.modelID]: entry } } : {}),
+            },
+          },
+        }
+      : {}),
     local: { checked: { ...current?.checked, ...patch.local.checked } },
   } as ConfigV1.Info)
-  return { type: "checked" as const, checked }
+  return { type: "checked" as const, checked: result }
 })
+
+// A model that works but whose context neither the server nor the user's config gives: Vector's agents refuse a model
+// with no known context on a server someone hosts (session/overflow.ts), so the check says so rather than a plain
+// "works", with how to set it.
+function unsized(
+  checked: LocalProbe.Checked,
+  model: Option.Option<Provider.Model>,
+  role: string,
+  server: LocalProbe.Server,
+): LocalProbe.Checked {
+  if (checked.result !== "works" || checked.context || checked.message) return checked
+  const configured = Option.isSome(model) ? model.value.limit.input || model.value.limit.context : 0
+  if (configured > 0) return checked
+  const fix =
+    server.kind === "ollama"
+      ? "Set num_ctx for it in Ollama, or limit.context for this model in your config."
+      : "Set limit.context for this model in your config."
+  return {
+    ...checked,
+    message: `It calls tools, but ${server.name} did not say how large ${checked.model}'s context is, so ${role} refuses it until a context is set. ${fix}`,
+  }
+}
 
 // Why Check models does not read the server at `address`: a cloud AI service the company did not list, whose limits
 // come from the model catalog; a server on the internet that is not on the list; or, with Vector Local on, any server

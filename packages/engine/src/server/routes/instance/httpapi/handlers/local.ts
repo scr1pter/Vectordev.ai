@@ -71,12 +71,18 @@ export const localHandlers = HttpApiBuilder.group(InstanceHttpApi, "local", (han
       })
     })
 
-    // Under a company lock the company sets how long the network log is kept, so only it erases the log.
+    // Under a company lock the company sets how long the network log is kept, so only it erases the log. A Vector the
+    // agent started never erases it: the log is the owner's record of what Vector sent, as a shorter one would be.
     const egressClear = Effect.fn("LocalHttpApi.egressClear")(function* () {
       if (Config.local().lock)
         return yield* failure(
           "locked",
           `${LocalSettings.LOCKED} Your company sets how long the network log is kept, so it is not erased here.`,
+        )
+      if (LocalSettings.agentMarked())
+        return yield* failure(
+          "agent",
+          "An agent or Vector's own terminal started this Vector, so it cannot erase the network log. Erase it yourself in the app or the terminal UI.",
         )
       yield* Effect.promise(() => Egress.erase())
       return true
@@ -242,6 +248,7 @@ const COLUMNS = [
   "origin",
   "method",
   "bytes_out",
+  "bytes_in",
   "decision",
   "rule",
   "reason",
@@ -270,6 +277,7 @@ function toCsv(events: readonly LocalMode.Event[]) {
       event.origin,
       event.method,
       event.bytes_out,
+      event.bytes_in,
       event.decision,
       event.rule,
       event.reason,

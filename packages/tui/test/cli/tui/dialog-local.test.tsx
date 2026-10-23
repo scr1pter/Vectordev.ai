@@ -193,7 +193,7 @@ describe("What Vector sent", () => {
       }),
     ).toEqual([
       "Model calls: 42 to http://127.0.0.1:11434",
-      "Web: 6 pages, 41 hosts, 8 searches",
+      "Web: 6 pages, 41 other hosts they loaded, 8 searches",
       "Memory sent: 9 personal cards, 4 document passages",
       "Blocked: 2",
       "Including 3 helper requests",

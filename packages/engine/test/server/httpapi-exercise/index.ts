@@ -618,6 +618,94 @@ const scenarios: Scenario[] = [
       body: { accountID: "httpapi-account", orgID: "httpapi-org" },
     }))
     .status(400, undefined, "none"),
+  // Vector Local: each route as the owner reads or changes it, with Vector Local off as the exercise starts. Nothing here
+  // leaves this computer: Find servers asks only this computer's ports, and the address read is one nothing answers.
+  http.protected.get("/local", "local.get").json(200, (body) => {
+    object(body)
+    object(body.policy)
+    check(body.policy.enabled === false, "Vector Local is off until the owner turns it on")
+    check(body.agent === false, "the exercise is not a Vector the agent started")
+    check(Array.isArray(body.sources) && body.sources.length > 0, "the status should list Vector's services")
+  }),
+  http.protected
+    .patch("/local", "local.update")
+    .mutating()
+    .at((ctx) => ({ path: "/local", headers: ctx.headers(), body: { enabled: false } }))
+    .json(200, (body) => {
+      object(body)
+      object(body.policy)
+      check(body.policy.enabled === false, "keeping Vector Local off tightens nothing and needs no confirmation")
+    }),
+  http.protected.get("/local/egress", "local.egress.list").json(200, array),
+  http.protected.get("/local/egress/summary", "local.egress.summary").json(200, (body) => {
+    object(body)
+    object(body.model_calls)
+    check(typeof body.pages === "number", "the summary should count web pages")
+  }),
+  http.protected
+    .get("/local/egress/export", "local.egress.export")
+    .at((ctx) => ({ path: "/local/egress/export?format=csv", headers: ctx.headers() }))
+    .status(200, (_ctx, result) =>
+      Effect.sync(() => {
+        check(result.contentType.includes("text/csv"), "a CSV export should say it is CSV")
+        check(result.text.startsWith("time,source,purpose"), "a CSV export should start with its columns")
+      }),
+    ),
+  http.protected
+    .delete("/local/egress", "local.egress.clear")
+    .json(200, (body) => check(body === true, "the owner may erase the network log")),
+  http.protected
+    .post("/local/egress/report", "local.egress.report")
+    .at((ctx) => ({ path: "/local/egress/report", headers: ctx.headers(), body: { events: [] } }))
+    .json(200, (body) => check(body === 0, "with Vector Local off the log takes no events")),
+  http.protected
+    .post("/local/detect", "local.detect")
+    .at((ctx) => ({ path: "/local/detect", headers: ctx.headers(), body: {} }))
+    .json(200, array),
+  http.protected
+    .post("/local/probe", "local.probe")
+    .at((ctx) => ({ path: "/local/probe", headers: ctx.headers(), body: { url: "http://127.0.0.1:9" } }))
+    .json(200, (body) => {
+      object(body)
+      check(body.server === null, "nothing answers on the discard port")
+      check(typeof body.message === "string", "the result should say why no server was read")
+    }),
+  http.protected
+    .post("/local/servers", "local.servers.add")
+    .mutating()
+    .at((ctx) => ({ path: "/local/servers", headers: ctx.headers(), body: { url: "http://127.0.0.1:9" } }))
+    .json(
+      400,
+      (body) => {
+        object(body)
+        check(body.name === "LocalError", "Add server should reach the Local handler, not fail decoding")
+      },
+      "status",
+    ),
+  http.protected
+    .post("/local/check", "local.check")
+    .at((ctx) => ({ path: "/local/check", headers: ctx.headers(), body: {} }))
+    .json(200, (body) => {
+      object(body)
+      check(body.result === "off", "with Vector Local off the check says so")
+      check(Array.isArray(body.rows), "the check should return its rows")
+    }),
+  http.protected
+    .post("/local/grant", "local.grant")
+    .at((ctx) => ({ path: "/local/grant", headers: ctx.headers(), body: { source: "github" } }))
+    .json(
+      400,
+      (body) => {
+        object(body)
+        check(body.name === "LocalError", "a grant for a service Vector Local never asks about should be refused")
+      },
+      "status",
+    ),
+  http.protected.get("/local/recommend", "local.recommend").json(200, (body) => {
+    object(body)
+    check(typeof body.label === "string", "model suggestions should carry their dated label")
+    object(body.roles)
+  }),
   http.protected.get("/memory", "memory.list").json(200, (body) => {
     object(body)
     check(Array.isArray(body.entries), "memory list should return entries")

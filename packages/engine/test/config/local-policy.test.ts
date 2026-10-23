@@ -572,7 +572,7 @@ describe("children inherit the Local floor", () => {
     writeFileSync(copy, JSON.stringify({ local: block }))
     const next = await start(env)
     expect(next.policy).toMatchObject({ enabled: true, web: "network", endpoints: [], allow: [] })
-    expect(next.pending).toEqual([`adds the model server ${GPU_BOX}`, "allows github"])
+    expect(next.pending).toEqual([`adds the model server ${GPU_BOX}`, "allows github for any host"])
   }, 30_000)
 })
 
@@ -807,7 +807,7 @@ describe("loosening edits wait for the owner", () => {
     expect(next.pending).toEqual([
       "sets Web access to Ask",
       `adds the model server ${GPU_BOX}`,
-      "allows github",
+      "allows github for any host",
       "lets web pages reach docs.example.com",
     ])
   }, 30_000)
@@ -816,7 +816,10 @@ describe("loosening edits wait for the owner", () => {
     writeGlobal({ enabled: true, endpoints: [SERVER] })
     Config.refreshLocal()
     writeGlobal({ enabled: true, endpoints: [SERVER, GPU_BOX], allow: [CATALOG] })
-    expect((await start(process.env)).pending).toEqual([`adds the model server ${GPU_BOX}`, "allows catalog"])
+    expect((await start(process.env)).pending).toEqual([
+      `adds the model server ${GPU_BOX}`,
+      "allows catalog for any host",
+    ])
     // What the held change tells the owner to do, with Vector Local on through the user's config or the environment.
     for (const copy of [undefined, "garbage", JSON.stringify({ local: { enabled: "yes" } })]) {
       rmSync(Config.localConfirmedFile(), { force: true })
@@ -841,7 +844,7 @@ describe("loosening edits wait for the owner", () => {
     const copy = readFileSync(Config.localConfirmedFile(), "utf8")
     const next = await start({ ...process.env, VECTOR_LOCAL: "1", VECTOR_AGENT_SESSION: "1" })
     expect(next.policy).toMatchObject({ enabled: true, endpoints: [], allow: [] })
-    expect(next.pending).toEqual([`adds the model server ${GPU_BOX}`, "allows catalog"])
+    expect(next.pending).toEqual([`adds the model server ${GPU_BOX}`, "allows catalog for any host"])
     // Nor written.
     expect(readFileSync(Config.localConfirmedFile(), "utf8")).toBe(copy)
   }, 30_000)
@@ -882,7 +885,7 @@ describe("loosening edits wait for the owner", () => {
     expect(Config.localPending()?.changes).toEqual([
       "sets Web access to Ask",
       `adds the model server ${SERVER}`,
-      "allows github",
+      "allows github for any host",
     ])
   })
 
@@ -904,7 +907,7 @@ describe("loosening edits wait for the owner", () => {
       })
       expect(Config.localPending()?.changes).toEqual([
         `adds the model server ${GPU_BOX}`,
-        "allows catalog",
+        "allows catalog for any host",
         "lets web pages reach *.example.com",
       ])
     })
@@ -1083,7 +1086,7 @@ describe("loosening edits wait for the owner", () => {
     })
     expect(Config.localPending()?.changes).toEqual([
       `adds the model server ${internet}`,
-      "allows github",
+      "allows github for any host",
       "lets web pages reach docs.example.com",
     ])
     Config.confirmLocal()
@@ -1125,7 +1128,7 @@ describe("loosening edits wait for the owner", () => {
     process.env.VECTOR_AGENT_SESSION = "1"
     expect(Config.localLoosening({ endpoints: [SERVER, GPU_BOX], allow: [GITHUB] })).toEqual([
       `adds the model server ${GPU_BOX}`,
-      "allows github",
+      "allows github for any host",
     ])
     // Turning it on, or a stricter Web access, still only tightens.
     expect(Config.localLoosening({ enabled: true, web: "none", endpoints: [SERVER] })).toEqual([])
@@ -1240,7 +1243,7 @@ describe("an edit that loosens one part and tightens another", () => {
     Config.refreshLocal()
     writeGlobal({ enabled: true, web_domains: { deny: ["docs.example.com"] }, allow: [GITHUB] })
     Config.refreshLocal()
-    expect(Config.localPending()?.changes).toEqual(["allows github", "stops blocking ads.example"])
+    expect(Config.localPending()?.changes).toEqual(["allows github for any host", "stops blocking ads.example"])
     expect(Config.local()).toMatchObject({ allow: [], web_domains: { deny: ["ads.example", "docs.example.com"] } })
     expect(Egress.decide(PAGE).decision).toBe("block")
   })

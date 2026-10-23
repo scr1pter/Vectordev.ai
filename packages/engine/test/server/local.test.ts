@@ -6,6 +6,7 @@ import { Flag } from "@vectordevai/core/flag/flag"
 import { Global } from "@vectordevai/core/global"
 import { ChildEnvironment } from "@vectordevai/core/child-environment"
 import { Egress } from "@vectordevai/core/local-mode/egress"
+import { ModelSlots } from "@vectordevai/core/local-mode/model-slots"
 import type { LocalProbe } from "@vectordevai/core/local-mode/probe"
 import { LocalSources } from "@vectordevai/core/local-mode/sources"
 import type { LocalMode } from "@vectordevai/schema/local-mode"
@@ -227,9 +228,15 @@ describe("the Local API", () => {
     expect(listed.policy.endpoints).toEqual([{ origin: "http://127.0.0.1:11434", from: "user" }])
     expect(written()?.endpoints).toEqual(["http://127.0.0.1:11434"])
 
+    const narrow = await patch({ allow: { add: [{ source: "github", hosts: ["api.github.com"], reason: "API" }] } })
+    expect(narrow.status).toBe(409)
+    expect((await json<Refusal>(narrow)).data.changes).toEqual(["allows github for api.github.com"])
+    const api = { allow: { add: [{ source: "github", hosts: ["api.github.com"], reason: "API" }] }, confirm: true }
+    expect((await patch(api)).status).toBe(200)
+    // Widening it to every host asks again, and the line names the hosts the owner is confirming.
     const allow = await patch({ allow: { add: [{ source: "github", reason: "Pull requests" }] } })
     expect(allow.status).toBe(409)
-    expect((await json<Refusal>(allow)).data.changes).toEqual(["allows github"])
+    expect((await json<Refusal>(allow)).data.changes).toEqual(["allows github for any host"])
     const allowed = await json<Status>(
       await patch({ allow: { add: [{ source: "github", reason: " Pull requests " }] }, confirm: true }),
     )
@@ -275,7 +282,7 @@ describe("the Local API", () => {
     expect(status.policy.enabled).toBe(true)
     expect(status.held?.changes).toEqual(["turns Vector Local off"])
 
-    const unseen = await json<Refusal>(await patch({ held: ["allows github"], confirm: true }))
+    const unseen = await json<Refusal>(await patch({ held: ["allows github for any host"], confirm: true }))
     expect(unseen.data).toMatchObject({ code: "changed", changes: ["turns Vector Local off"] })
     expect((await patch({ held: ["turns Vector Local off"] })).status).toBe(409)
     const mixed = await json<Refusal>(await patch({ held: ["turns Vector Local off"], confirm: true, web: "none" }))
@@ -293,11 +300,11 @@ describe("the Local API", () => {
   test("a change config holds is never part of another: a tightening applies at once, and a confirmed change only itself", async () => {
     await turnOn({ web: "ask" })
     edit({ allow: [{ source: "github", reason: "Added by hand", added_at: 1, added_by: "app" }] })
-    expect(Config.localPending()?.changes).toEqual(["allows github"])
+    expect(Config.localPending()?.changes).toEqual(["allows github for any host"])
     // Web access None only tightens, so it applies without a dialog, and the edit stays held, in the file as it was.
     const tighter = await patch({ web: "none" })
     expect(tighter.status).toBe(200)
-    expect((await json<Status>(tighter)).held?.changes).toEqual(["allows github"])
+    expect((await json<Status>(tighter)).held?.changes).toEqual(["allows github for any host"])
     expect(Config.local()).toMatchObject({ web: "none", allow: [] })
     expect(written()).toMatchObject({ web: "none", allow: [{ source: "github" }] })
     // A looser Web access asks about itself alone, and confirming it leaves the held edit held.
@@ -305,10 +312,10 @@ describe("the Local API", () => {
     expect(looser.data.changes).toEqual(["sets Web access to Your network only"])
     const confirmed = await json<Status>(await patch({ web: "network", confirm: true }))
     expect(confirmed.policy).toMatchObject({ web: "network", allow: [] })
-    expect(confirmed.held?.changes).toEqual(["allows github"])
+    expect(confirmed.held?.changes).toEqual(["allows github for any host"])
     expect(Config.local().allow).toEqual([])
     // Only the held path, with the lines the owner saw, applies the edit.
-    const applied = await json<Status>(await patch({ held: ["allows github"], confirm: true }))
+    const applied = await json<Status>(await patch({ held: ["allows github for any host"], confirm: true }))
     expect(applied.policy.allow.map((item) => item.source)).toEqual(["github"])
   })
 
@@ -329,7 +336,7 @@ describe("the Local API", () => {
     })
     expect(on.held?.changes).toEqual([
       "adds the model server https://models.example.com",
-      "allows github",
+      "allows github for any host",
       "lets web pages reach docs.example.com",
     ])
     const applied = await json<Status>(await patch({ held: [...(on.held?.changes ?? [])], confirm: true }))
@@ -363,7 +370,7 @@ describe("the Local API", () => {
       const allow = await json<Refusal>(
         await patch({ allow: { add: [{ source: "github", reason: "Pull requests" }] }, confirm: true }),
       )
-      expect(allow.data).toMatchObject({ code: "agent", changes: ["allows github"] })
+      expect(allow.data).toMatchObject({ code: "agent", changes: ["allows github for any host"] })
       const server = await json<Refusal>(await patch({ endpoints: { add: ["http://10.9.9.9:8000"] }, web: "ask" }))
       expect(server.data).toMatchObject({ code: "agent", changes: ["adds the model server http://10.9.9.9:8000"] })
       // Add server neither lists the server nor adds it as a provider.
@@ -413,6 +420,34 @@ describe("the Local API", () => {
       edit({ pins: { [fake.origin]: older } })
       expect(Config.localPending()?.changes).toEqual([`accepts a new identity for ${fake.origin}`])
       expect(Config.local().pins?.[fake.origin]).toEqual(pin)
+    } finally {
+      await fake.close()
+    }
+  })
+
+  test("with Vector Local off, a new identity for a server on the list asks too, and turning it on keeps the one the owner let apply", async () => {
+    const fake = await LocalServers.serve("ollama")
+    try {
+      const pin = (await json<Read>(await send("POST", "/local/probe", { url: fake.origin }))).server!.pin
+      const older = { ...pin, version: "0.11.0" }
+      expect((await patch({ endpoints: { add: [fake.origin] }, pins: { [fake.origin]: older } })).status).toBe(200)
+      expect(Config.local().enabled).toBe(false)
+      const again = await send("POST", "/local/servers", { url: fake.origin })
+      expect(again.status).toBe(409)
+      expect((await json<Refusal>(again)).data).toMatchObject({
+        changes: [`accepts a new identity for ${fake.origin}`],
+        identity: ["version"],
+      })
+      expect(written()?.pins).toEqual({ [fake.origin]: older })
+      const added = await json<Added>(await send("POST", "/local/servers", { url: fake.origin, confirm: true }))
+      expect(added.identity).toEqual(["version"])
+      expect(Config.local().pins?.[fake.origin]).toEqual(pin)
+      // An edit that re-pins it while Vector Local is off is held as well, and stays held once it is on.
+      edit({ pins: { [fake.origin]: older } })
+      expect(Config.localPending()?.changes).toEqual([`accepts a new identity for ${fake.origin}`])
+      expect((await patch({ enabled: true })).status).toBe(200)
+      expect(Config.local()).toMatchObject({ enabled: true, pins: { [fake.origin]: pin } })
+      expect(Config.localPending()?.changes).toEqual([`accepts a new identity for ${fake.origin}`])
     } finally {
       await fake.close()
     }
@@ -469,7 +504,7 @@ describe("the Local API", () => {
     expect(csv.headers.get("content-type")).toContain("text/csv")
     const rows = (await csv.text()).split("\n")
     expect(rows[0]).toBe(
-      "time,source,purpose,class,origin,method,bytes_out,decision,rule,reason,session_id,root_session_id,tool,personal,documents,repository",
+      "time,source,purpose,class,origin,method,bytes_out,bytes_in,decision,rule,reason,session_id,root_session_id,tool,personal,documents,repository",
     )
     expect(rows.slice(1).map((row) => row.split(",")[1])).toEqual(["model-catalog", "updates"])
 
@@ -491,6 +526,16 @@ describe("the Local API", () => {
       rmSync(managed, { recursive: true, force: true })
       Config.refreshLocal()
     }
+  })
+
+  test("a Vector the agent started cannot erase the network log", async () => {
+    await turnOn()
+    Egress.decide({ source: "model-catalog", url: "https://vectordev.ai/api/models" })
+    process.env[ChildEnvironment.AGENT_MARKER] = "ses_agent"
+    const erase = await send("DELETE", "/local/egress")
+    expect([erase.status, (await json<Refusal>(erase)).data.code]).toEqual([400, "agent"])
+    delete process.env[ChildEnvironment.AGENT_MARKER]
+    expect((await json<LocalMode.Event[]>(await send("GET", "/local/egress"))).length).toBe(1)
   })
 
   test("Find servers reads this computer; reading a typed address identifies the server and its models", async () => {
@@ -574,6 +619,45 @@ describe("the Local API", () => {
     const read = await json<Read>(await send("POST", "/local/probe", { url: "https://models.example.com/v1" }))
     expect(read.server).toBeNull()
     expect(read.message).toContain("Web access is set to None")
+  })
+
+  test("with Your network only, under a company lock, or in a Vector the agent started, a typed server Vector Local would not let you list is not read", async () => {
+    await turnOn({ web: "network" })
+    const network = await json<Read>(await send("POST", "/local/probe", { url: "https://exfil.example.com/v1" }))
+    expect(network.server).toBeNull()
+    expect(network.message).toContain("Web access is set to Your network only")
+    const added = await json<Refusal>(
+      await send("POST", "/local/servers", { url: "https://exfil.example.com", confirm: true }),
+    )
+    expect(added.data).toMatchObject({ code: "not-found", message: expect.stringContaining("Your network only") })
+
+    process.env[ChildEnvironment.AGENT_MARKER] = "ses_agent"
+    const agent = await json<Read>(await send("POST", "/local/probe", { url: "http://10.9.9.9:8000" }))
+    expect(agent.message).toContain("cannot loosen Vector Local")
+    delete process.env[ChildEnvironment.AGENT_MARKER]
+
+    const managed = process.env.VECTOR_TEST_MANAGED_CONFIG_DIR!
+    mkdirSync(managed, { recursive: true })
+    try {
+      // The company keeps the list, so Vector reads no server it does not list, on the internet or on your network.
+      writeFileSync(path.join(managed, "vector.json"), JSON.stringify({ local: { lock: true, user_may: [] } }))
+      expect(Config.refreshLocal()).toMatchObject({ lock: true, web: "ask" })
+      for (const url of ["https://exfil.example.com", "http://10.9.9.9:8000"]) {
+        const read = await json<Read>(await send("POST", "/local/probe", { url }))
+        expect([url, read.server, read.message]).toEqual([url, null, expect.stringContaining("Set by your company")])
+      }
+      // It lets the user list servers on their network and the ones it names, so others on the internet stay unread.
+      writeFileSync(
+        path.join(managed, "vector.json"),
+        JSON.stringify({ local: { lock: true, user_may: ["endpoints"], endpoint_domains: ["*.corp.example"] } }),
+      )
+      Config.refreshLocal()
+      const elsewhere = await json<Read>(await send("POST", "/local/probe", { url: "https://exfil.example.com" }))
+      expect(elsewhere.message).toContain("servers on your network or the ones it names")
+    } finally {
+      rmSync(managed, { recursive: true, force: true })
+      Config.refreshLocal()
+    }
   })
 
   test("Check reads every layer, and a listed server that stops answering fails its row", async () => {
@@ -686,6 +770,51 @@ describe("the Local API", () => {
 
       const unknown = await send("POST", "/local/check", { model: "nowhere/model" })
       expect([unknown.status, (await json<Refusal>(unknown)).data.code]).toEqual([400, "invalid"])
+    } finally {
+      await fake.close()
+    }
+  })
+
+  test("Check models records a LiteLLM proxy as passing every prompt on, so its steps are never free local ones", async () => {
+    const fake = await LocalServers.serve("openai", { routes: { "POST /v1/chat/completions": LocalServers.chat() } })
+    try {
+      const read = await json<Read>(await send("POST", "/local/probe", { url: fake.origin }))
+      expect(read.server).toMatchObject({ kind: "openai", forwards: "litellm", class: "this-computer" })
+      await providers({
+        "company-proxy": {
+          npm: "@ai-sdk/openai-compatible",
+          name: "Company proxy",
+          options: { baseURL: `${fake.origin}/v1` },
+          models: { "company-coder": { name: "company-coder" } },
+        },
+      })
+      await turnOn({ endpoints: { add: [fake.origin] }, pins: { [fake.origin]: read.server!.pin } })
+      // On this computer and on the list, so until the check says otherwise its steps count as local ones.
+      expect(ModelSlots.local(`${fake.origin}/v1`, { policy: Config.local() })).toBe(true)
+      const checked = (
+        await json<Report>(
+          await send("POST", "/local/check", { model: "company-proxy/company-coder", confirmed: true }),
+        )
+      ).model
+      // The proxy does not say how large the model's context is, which the agent needs to know before it uses it.
+      expect(checked).toMatchObject({
+        result: "works",
+        message: expect.stringContaining("so Vector's agent refuses it until a context is set"),
+      })
+      const options = GLOBAL_FILES.filter((file) => existsSync(file))
+        .map(
+          (file) =>
+            (parse(readFileSync(file, "utf8")) as { provider?: Record<string, { options: Record<string, unknown> }> })
+              .provider?.["company-proxy"]?.options,
+        )
+        .find(Boolean)
+      expect(options).toEqual({ baseURL: `${fake.origin}/v1`, forwards: true })
+      expect(
+        ModelSlots.local(`${fake.origin}/v1`, { policy: Config.local(), forwards: options?.forwards === true }),
+      ).toBe(false)
+      expect(written()?.checked).toMatchObject({
+        "company-proxy/company-coder": { result: "works", message: expect.stringContaining("limit.context") },
+      })
     } finally {
       await fake.close()
     }

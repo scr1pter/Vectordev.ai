@@ -543,9 +543,12 @@ function writableGlobal(info: Info) {
 // at once: the policy in effect is the stricter of what the owner last let apply and the change, setting by setting
 // (stricterLocal). The baseline is what is in effect while this process runs and, at start, the copy of the user's
 // block the last process saved in Vector's state folder, so an edit made while Vector was closed is held too. A missing
-// or unreadable copy counts as the user's block at start. Nothing is held while Vector Local is off, so turning it on
-// holds the services, the internet model servers and the sites the user's block lets through until the owner confirms
-// them, and a change to an identity pin of a server on the list waits like a new server.
+// or unreadable copy counts as the user's block at start. While Vector Local is off only a change to the identity pin
+// of a server on the list is held, so turning it on holds the services, the internet model servers and the sites the
+// user's block lets through until the owner confirms them; a change to an identity pin waits like a new server, on or
+// off. Model servers on this computer and the user's network apply when Vector Local turns on, as `vector run --local`
+// and the VECTOR_LOCAL floor need them to, and requests to one whose identity changed are held until the owner
+// confirms it (LocalProbe.verify).
 //
 // The copy is the user's to change, like the config itself, so it is a check and not a boundary: whatever can write
 // the state folder can rewrite or delete it, and what stops the agent there is the ask on its own writes to these
@@ -761,9 +764,11 @@ export function localLog() {
 /**
  * What writing `block` as the user's own local block would loosen, compared with the block in effect
  * (`localConfirmedBlock`), in the words a held change uses, so the Local API and `vector local` ask the owner before
- * they write it rather than leave the change held. Empty when it only tightens, or while Vector Local is off. Under
- * the agent marker it is judged as if Vector Local were on, whatever it is now: the owner turning it on later would
- * otherwise let through what the agent added while it was off. The same rules hold the change if it is written anyway.
+ * they write it rather than leave the change held. Empty when it only tightens; while Vector Local is off, it names
+ * only a new identity (or none) for a server on the list, such as Add server re-pinning one that answers differently.
+ * Under the agent marker it is judged as if Vector Local were on, whatever it is now: the owner turning it on later
+ * would otherwise let through what the agent added while it was off. The same rules hold the change if it is written
+ * anyway.
  */
 export function localLoosening(block: ConfigLocalV1.Info | undefined) {
   const sources = readLocalSources()
@@ -875,8 +880,10 @@ function evaluateLocal() {
   const kept = resolveLocal(sources, confirmed)
   // Turning Vector Local on lets at once only what stays on this computer and the user's network. The services the
   // user's block allows, the model servers it lists on the internet and the sites it lets web pages reach wait for the
-  // owner: anything could have added them while Vector Local was off, when nothing was held.
-  const baseline = !kept.enabled && proposed.enabled ? { ...confirmed, user: turnedOn(current.user) } : confirmed
+  // owner: anything could have added them while Vector Local was off, when only identity pins were held. A pin other
+  // than the one the owner let apply waits too.
+  const baseline =
+    !kept.enabled && proposed.enabled ? { ...confirmed, user: turnedOn(current.user, confirmed.user) } : confirmed
   const changes = sources.failed
     ? []
     : heldChanges(sources.managed, resolveLocal(sources, baseline), proposed, baseline.user, current.user)
@@ -933,8 +940,10 @@ function startConfirmed(sources: ReturnType<typeof readLocalSources>) {
 
 /**
  * What a change loosens: in the policy in effect, and in the user's own block as if it alone turned Vector Local on,
- * so a change the environment or the company's policy hides today is held too. Nothing is held while Local is off,
- * unless `always` asks what it would loosen if Vector Local were on.
+ * so a change the environment or the company's policy hides today is held too. While Local is off only a new identity
+ * (or none) for a server on the list is held, unless `always` asks what it would loosen if Vector Local were on: the
+ * pin is how Vector tells that server from another one in its place, and turning Vector Local on applies the pins the
+ * config has at once, so a pin changed while it was off would otherwise go unasked.
  */
 function heldChanges(
   managed: ConfigLocalV1.Info | undefined,
@@ -944,13 +953,13 @@ function heldChanges(
   after: ConfigLocalV1.Info | undefined,
   always = false,
 ) {
-  if (!kept.enabled && !always) return []
   // A cloud AI service the user listed never applies, so listing one loosens nothing.
   const own = (block: ConfigLocalV1.Info | undefined) =>
     LocalPolicy.resolve({
       global: { ...block, enabled: true },
       ...(block?.endpoints?.length ? { cloudHosts: localCloudHosts() } : {}),
     })
+  if (!kept.enabled && !always) return identities(own(before), own(after))
   const changes = [
     ...new Set([
       ...loosening(kept, proposed),
@@ -972,9 +981,13 @@ function shorterLog(before: number | undefined, after: number | undefined) {
 
 /**
  * The user's block as turning Vector Local on applies it at once: without the services it allows, the model servers it
- * lists on the internet and the sites it lets web pages reach, which wait for the owner (evaluateLocal).
+ * lists on the internet and the sites it lets web pages reach, which wait for the owner (evaluateLocal), and with the
+ * identity pins the owner let apply (`confirmed`'s), so a different one waits too.
  */
-function turnedOn(block: ConfigLocalV1.Info | undefined): ConfigLocalV1.Info | undefined {
+function turnedOn(
+  block: ConfigLocalV1.Info | undefined,
+  confirmed: ConfigLocalV1.Info | undefined,
+): ConfigLocalV1.Info | undefined {
   if (!block) return block
   return {
     ...block,
@@ -983,6 +996,7 @@ function turnedOn(block: ConfigLocalV1.Info | undefined): ConfigLocalV1.Info | u
     ),
     allow: [],
     web_domains: { ...block.web_domains, allow: [] },
+    ...(block.pins || confirmed?.pins ? { pins: { ...block.pins, ...confirmed?.pins } } : {}),
   }
 }
 
@@ -1284,27 +1298,20 @@ function tightenLocal(policy: LocalMode.Policy, override: LocalBlock): LocalMode
 export function loosening(before: LocalMode.Policy, after: LocalMode.Policy) {
   if (!before.enabled) return []
   if (!after.enabled) return [LOCAL_OFF]
-  const endpoint = (item: LocalMode.Endpoint) => `${item.from} ${LocalPolicy.origin(item.origin) ?? item.origin}`
-  const endpoints = new Set(before.endpoints.map(endpoint))
+  const endpoints = new Set(before.endpoints.map(endpointKey))
   const allows = new Set(before.allow.map(allowedKey))
-  // A pin is how Vector tells the server on the list from another one in its place, so replacing or removing the pin
-  // of a server that stays listed lets a different server receive the prompts.
-  const identity = (item: LocalMode.Endpoint) => {
-    const origin = LocalPolicy.origin(item.origin) ?? item.origin
-    const was = before.pins?.[origin]
-    const now = after.pins?.[origin]
-    if (!was || (now && pinKey(now) === pinKey(was))) return []
-    return [now ? `accepts a new identity for ${origin}` : `stops checking the identity of ${origin}`]
-  }
   return [
     ...(LocalPolicy.stricter(after.web, before.web) !== after.web
       ? [`sets Web access to ${LOCAL_WEB_LABELS[after.web]}`]
       : []),
     ...after.endpoints
-      .filter((item) => !endpoints.has(endpoint(item)))
+      .filter((item) => !endpoints.has(endpointKey(item)))
       .map((item) => `adds the model server ${item.origin}`),
-    ...after.endpoints.filter((item) => endpoints.has(endpoint(item))).flatMap(identity),
-    ...after.allow.filter((item) => !allows.has(allowedKey(item))).map((item) => `allows ${item.source}`),
+    ...identities(before, after),
+    // The hosts are part of the line, so widening an entry's hosts reads differently from the entry the owner saw.
+    ...after.allow
+      .filter((item) => !allows.has(allowedKey(item)))
+      .map((item) => `allows ${item.source} for ${item.hosts?.length ? item.hosts.join(", ") : "any host"}`),
     ...after.web_domains.allow
       .filter((pattern) => !before.web_domains.allow.includes(pattern))
       .map((pattern) => `lets web pages reach ${pattern}`),
@@ -1312,6 +1319,28 @@ export function loosening(before: LocalMode.Policy, after: LocalMode.Policy) {
       .filter((pattern) => !after.web_domains.deny.includes(pattern))
       .map((pattern) => `stops blocking ${pattern}`),
   ]
+}
+
+/**
+ * A new identity, or none, for each server on both lists. A pin is how Vector tells the server on the list from
+ * another one in its place, so replacing or removing the pin of a server that stays listed lets a different server
+ * receive the prompts.
+ */
+function identities(before: LocalMode.Policy, after: LocalMode.Policy) {
+  const endpoints = new Set(before.endpoints.map(endpointKey))
+  return after.endpoints
+    .filter((item) => endpoints.has(endpointKey(item)))
+    .flatMap((item) => {
+      const origin = LocalPolicy.origin(item.origin) ?? item.origin
+      const was = before.pins?.[origin]
+      const now = after.pins?.[origin]
+      if (!was || (now && pinKey(now) === pinKey(was))) return []
+      return [now ? `accepts a new identity for ${origin}` : `stops checking the identity of ${origin}`]
+    })
+}
+
+function endpointKey(item: LocalMode.Endpoint) {
+  return `${item.from} ${LocalPolicy.origin(item.origin) ?? item.origin}`
 }
 
 function saveLocalConfirmed(block: ConfigLocalV1.Info | undefined) {
