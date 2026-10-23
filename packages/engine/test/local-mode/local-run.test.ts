@@ -336,6 +336,64 @@ describe("the provider under Vector Local", () => {
     }),
   )
 
+  pinned.live(
+    "refuses a copy of an Ollama cloud model, which the server says runs on ollama.com, before any prompt",
+    () =>
+      Effect.gen(function* () {
+        // A copy made with `ollama cp` keeps the remote fields but loses the -cloud name.
+        const server = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            LocalServers.serve("ollama", {
+              routes: {
+                "GET /api/tags": () => Response.json({ models: [{ name: "mymodel:latest", size: 1 }] }),
+                "POST /api/show": () =>
+                  Response.json({ remote_host: "https://ollama.com:443", remote_model: "gpt-oss:120b" }),
+              },
+            }),
+          ),
+          (fake) => Effect.promise(() => fake.close()),
+        )
+        const added = yield* Effect.promise(() => LocalProbe.probe(server.origin))
+        expect(added?.models).toEqual([expect.objectContaining({ id: "mymodel:latest", cloud: true })])
+        yield* provideTmpdirInstance(
+          () =>
+            withLocal({ enabled: true, endpoints: [server.origin], pins: { [server.origin]: added!.pin } }, () =>
+              Effect.gen(function* () {
+                const provider = yield* Provider.Service
+                const language = yield* provider.getLanguage(
+                  yield* provider.getModel(ProviderV2.ID.make("ollama"), ModelV2.ID.make("mymodel:latest")),
+                )
+                const refused = yield* Effect.promise(() =>
+                  language.doStream({ prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }] }).then(
+                    () => undefined,
+                    (error: unknown) => error,
+                  ),
+                )
+                expect(refused).toBeDefined()
+                expect(server.hits().filter((hit) => hit.path.endsWith("/chat/completions"))).toEqual([])
+                expect(Egress.events().filter((event) => event.purpose === "inference")).toEqual([
+                  expect.objectContaining({ source: "ollama-cloud-models", decision: "block", rule: "not-allowable" }),
+                ])
+                expect(guard.outside()).toEqual([])
+              }),
+            ),
+          {
+            trusted: true,
+            config: {
+              provider: {
+                ollama: {
+                  name: "Ollama",
+                  npm: "@ai-sdk/openai-compatible",
+                  models: { "mymodel:latest": qwen("mymodel:latest") },
+                  options: { apiKey: "ollama", baseURL: `${server.origin}/v1` },
+                },
+              },
+            },
+          },
+        )
+      }),
+  )
+
   it.instance(
     "changes nothing with Vector Local off",
     () =>
