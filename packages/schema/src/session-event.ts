@@ -212,7 +212,8 @@ export const AncillaryUsage = Event.define({
     ...Base,
     // Stable across archive remapping; separate billed attempts never share this identity.
     usageID: Event.ID,
-    purpose: Schema.Literal("title"),
+    // title: the session's title. memory: the optional model learner reading what the user typed (section 6.3).
+    purpose: Schema.Literals(["title", "memory"]),
     model: Model.Ref,
     cost: Step.Ended.data.fields.cost.pipe(optional),
     unpriced: Step.Ended.data.fields.unpriced,

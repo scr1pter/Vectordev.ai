@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { FileSystem, Integration, Permission, Project, Reference, Session, Workspace } from "../src"
 import { EventManifest } from "../src/event-manifest"
 import { IdeEvent } from "../src/ide-event"
+import { MemoryEvent } from "../src/memory-event"
 import { Research } from "../src/research"
 import { SessionEvent } from "../src/session-event"
 import { SessionTodo } from "../src/session-todo"
@@ -11,7 +12,7 @@ import { WorkspaceEvent } from "../src/workspace-event"
 describe("public event manifest", () => {
   test("owns the complete public event surface", () => {
     expect(EventManifest.ServerDefinitions.length).toBe(64)
-    expect(EventManifest.Definitions.length).toBe(96)
+    expect(EventManifest.Definitions.length).toBe(97)
     expect(SessionV1.Event.Definitions).toEqual([
       SessionV1.Event.Created,
       SessionV1.Event.Updated,
@@ -24,7 +25,7 @@ describe("public event manifest", () => {
       SessionV1.Event.Diff,
       SessionV1.Event.Error,
     ])
-    expect(EventManifest.Latest.size).toBe(96)
+    expect(EventManifest.Latest.size).toBe(97)
     expect(EventManifest.Durable.size).toBe(40)
   })
 
@@ -38,6 +39,7 @@ describe("public event manifest", () => {
     expect(EventManifest.Latest.get("session.next.step.ended")).toBe(SessionEvent.Step.Ended)
     expect(EventManifest.Durable.get("session.next.step.resumed.1")).toBe(SessionEvent.Step.Resumed)
     expect(EventManifest.Latest.get("todo.updated")).toBe(SessionTodo.Event.Updated)
+    expect(EventManifest.Latest.get("memory.learned")).toBe(MemoryEvent.Learned)
     expect(EventManifest.Latest.get("research.updated")).toBe(Research.Event.Updated)
     expect(EventManifest.Latest.get("project.updated")).toBe(Project.Event.Updated)
     expect(Project.Event.Definitions).toEqual([Project.Event.Updated])
