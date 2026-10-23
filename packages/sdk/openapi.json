@@ -35045,6 +35045,9 @@
           "preference": {
             "type": "string",
             "enum": ["trusted", "avoided"]
+          },
+          "signed_in": {
+            "type": "boolean"
           }
         },
         "required": ["kind", "primary", "data", "references", "paywalled", "addressed_to_ai", "corroborated"],

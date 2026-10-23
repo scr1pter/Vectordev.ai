@@ -107,6 +107,8 @@ export const Signal = Schema.Struct({
   addressed_to_ai: Schema.Boolean,
   corroborated: NonNegativeInt,
   preference: optional(Schema.Literals(["trusted", "avoided"])),
+  // Read in the user's own signed-in browser after a handoff: private, like a private document's text.
+  signed_in: optional(Schema.Boolean),
 }).annotate({ identifier: "ResearchSignal" })
 export type Signal = typeof Signal.Type
 

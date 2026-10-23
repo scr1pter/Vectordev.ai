@@ -3646,6 +3646,7 @@ export type ResearchSignal = {
   addressed_to_ai: boolean
   corroborated: number
   preference?: "trusted" | "avoided"
+  signed_in?: boolean
 }
 
 export type MemoryResearchSource = {
