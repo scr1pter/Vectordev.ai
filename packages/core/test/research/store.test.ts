@@ -959,7 +959,7 @@ describe("research migration", () => {
     const before = (untouched.query("SELECT id FROM migration").all() as { id: string }[]).length
     untouched.close()
 
-    expect(migrations.at(-1)).toBe("20261201000000_research")
+    expect(migrations).toContain("20261201000000_research")
     expect(before).toBe(7)
     expect(document).toEqual([{ id: "d1", origin: "upload", source_url: null, fetched_at: null, run_id: null }])
     expect(kept).toEqual({ entries: [{ id: "m1a2b3" }], postings: [{ term: 1, item: 1, count: 2 }] })

@@ -7492,7 +7492,7 @@
                 "properties": {
                   "kind": {
                     "type": "string",
-                    "enum": ["preference", "decision", "lesson", "fact"]
+                    "enum": ["preference", "decision", "lesson", "fact", "term"]
                   },
                   "text": {
                     "type": "string"
@@ -7678,6 +7678,10 @@
                   "pinned": {
                     "type": "boolean"
                   },
+                  "facet": {
+                    "type": "string",
+                    "enum": ["format", "workflow", "vocabulary", "tooling", "sources", "style"]
+                  },
                   "action": {
                     "type": "string",
                     "enum": ["approve", "reject", "archive", "restore", "undo"]
@@ -7857,6 +7861,249 @@
         ]
       }
     },
+    "/memory/sessions/{sessionID}": {
+      "delete": {
+        "tags": ["memory"],
+        "operationId": "memory.eraseSession",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "The session, such as ses_4k2q7m3x"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "How many entries were erased",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "number",
+                  "description": "How many entries were erased"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Forget every entry Vector learned whose only evidence is this session, so it is not learned again. What you wrote and what other sessions also taught stay. The session keeps its messages until you delete them.",
+        "summary": "Erase what Vector learned in a session",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.eraseSession({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/export": {
+      "get": {
+        "tags": ["memory"],
+        "operationId": "memory.export",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["personal", "repository", "all"]
+            },
+            "required": false
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["markdown", "json"]
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "text/markdown": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Everything Vector keeps for this repository, for you, or both, as an attachment: a Markdown page per kind with each entry's evidence and what Vector read from documents, or with `format=json` the same as data. Never the documents' files.",
+        "summary": "Export memory",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.export({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/import": {
+      "post": {
+        "tags": ["memory"],
+        "operationId": "memory.import",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What the import brought in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryImportResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Read an export (Markdown or JSON) back in. Every preference, term, decision, lesson and fact it holds lands waiting for your approval, so a changed file cannot put memory in use; rules stay in their files. What you forgot is not imported again.",
+        "summary": "Import memory",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": ["text"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.import({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/memory/tidy": {
       "post": {
         "tags": ["memory"],
@@ -7975,7 +8222,7 @@
             }
           }
         },
-        "description": "Whether Vector may add to its memory as it works.",
+        "description": "Whether Vector may add to its memory as it works, which facets of how you work it may learn, and when the optional model learner runs.",
         "summary": "Get memory settings",
         "x-codeSamples": [
           {
@@ -8037,7 +8284,7 @@
             }
           }
         },
-        "description": "Turn Vector's learning on or off, reading the repository's own docs, and keeping originals of added documents. Memory already saved stays until you erase it; turning repository docs off forgets what Vector read of them, and turning originals off deletes the kept copies.",
+        "description": "Turn Vector's learning on or off, each facet of how you work it may learn, the optional model learner, reading the repository's own docs, and keeping originals of added documents. Memory already saved stays until you erase it; turning repository docs off forgets what Vector read of them, and turning originals off deletes the kept copies.",
         "summary": "Change memory settings",
         "requestBody": {
           "content": {
@@ -8053,6 +8300,33 @@
                   },
                   "keepOriginals": {
                     "type": "boolean"
+                  },
+                  "facets": {
+                    "type": "object",
+                    "properties": {
+                      "format": {
+                        "type": "boolean"
+                      },
+                      "workflow": {
+                        "type": "boolean"
+                      },
+                      "vocabulary": {
+                        "type": "boolean"
+                      },
+                      "tooling": {
+                        "type": "boolean"
+                      },
+                      "sources": {
+                        "type": "boolean"
+                      },
+                      "style": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "modelLearner": {
+                    "$ref": "#/components/schemas/MemoryModelLearner"
                   }
                 },
                 "additionalProperties": false
@@ -15475,6 +15749,22 @@
                   },
                   "arguments": {
                     "type": "string"
+                  },
+                  "pasted": {
+                    "type": "array",
+                    "items": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "integer"
+                        }
+                      ],
+                      "maxItems": 2,
+                      "minItems": 2
+                    }
                   },
                   "command": {
                     "type": "string"
@@ -25252,6 +25542,9 @@
             "$ref": "#/components/schemas/EventLocalBlocked"
           },
           {
+            "$ref": "#/components/schemas/EventMemoryLearned"
+          },
+          {
             "$ref": "#/components/schemas/EventVcsBranchUpdated"
           },
           {
@@ -27781,7 +28074,7 @@
                       },
                       "purpose": {
                         "type": "string",
-                        "enum": ["title"]
+                        "enum": ["title", "memory"]
                       },
                       "model": {
                         "$ref": "#/components/schemas/ModelRef"
@@ -30723,6 +31016,41 @@
                       }
                     },
                     "required": ["source", "origin"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["id", "type", "properties"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["memory.learned"]
+                  },
+                  "properties": {
+                    "type": "object",
+                    "properties": {
+                      "sessionID": {
+                        "type": "string",
+                        "pattern": "^ses"
+                      },
+                      "entryIDs": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "messageID": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["sessionID", "entryIDs"],
                     "additionalProperties": false
                   }
                 },
@@ -35347,11 +35675,11 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["rule", "preference", "decision", "lesson", "fact", "failure", "review"]
+            "enum": ["rule", "preference", "decision", "lesson", "fact", "failure", "review", "term"]
           },
           "origin": {
             "type": "string",
-            "enum": ["file", "user", "agent", "failure-memory"]
+            "enum": ["file", "user", "agent", "failure-memory", "import"]
           },
           "status": {
             "type": "string",
@@ -35425,6 +35753,23 @@
           },
           "private": {
             "type": "boolean"
+          },
+          "facet": {
+            "type": "string",
+            "enum": ["format", "workflow", "vocabulary", "tooling", "sources", "style"]
+          },
+          "term": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "meaning": {
+                "type": "string"
+              }
+            },
+            "required": ["key", "meaning"],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -35802,6 +36147,28 @@
         "required": ["name", "data"],
         "additionalProperties": false
       },
+      "MemoryImportResult": {
+        "type": "object",
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryEntry"
+            }
+          },
+          "known": {
+            "type": "number"
+          },
+          "refused": {
+            "type": "number"
+          },
+          "over": {
+            "type": "number"
+          }
+        },
+        "required": ["entries", "known", "refused", "over"],
+        "additionalProperties": false
+      },
       "MemoryTidy": {
         "type": "object",
         "properties": {
@@ -35824,6 +36191,35 @@
         "required": ["merged", "promoted", "archived", "dropped", "stale"],
         "additionalProperties": false
       },
+      "MemoryFacets": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "boolean"
+          },
+          "workflow": {
+            "type": "boolean"
+          },
+          "vocabulary": {
+            "type": "boolean"
+          },
+          "tooling": {
+            "type": "boolean"
+          },
+          "sources": {
+            "type": "boolean"
+          },
+          "style": {
+            "type": "boolean"
+          }
+        },
+        "required": ["format", "workflow", "vocabulary", "tooling", "sources", "style"],
+        "additionalProperties": false
+      },
+      "MemoryModelLearner": {
+        "type": "string",
+        "enum": ["local-only", "always", "off"]
+      },
       "MemorySettings": {
         "type": "object",
         "properties": {
@@ -35835,9 +36231,15 @@
           },
           "keepOriginals": {
             "type": "boolean"
+          },
+          "facets": {
+            "$ref": "#/components/schemas/MemoryFacets"
+          },
+          "modelLearner": {
+            "$ref": "#/components/schemas/MemoryModelLearner"
           }
         },
-        "required": ["learning", "repositoryDocs", "keepOriginals"],
+        "required": ["learning", "repositoryDocs", "keepOriginals", "facets", "modelLearner"],
         "additionalProperties": false
       },
       "MemoryModelOption": {
@@ -40836,6 +41238,9 @@
             "$ref": "#/components/schemas/LocalBlocked"
           },
           {
+            "$ref": "#/components/schemas/MemoryLearned"
+          },
+          {
             "$ref": "#/components/schemas/VcsBranchUpdated"
           },
           {
@@ -42571,7 +42976,7 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": ["session.next.ancillary.usage.1"]
+                "enum": ["session.next.ancillary.usage.2"]
               },
               "id": {
                 "type": "string",
@@ -42599,7 +43004,7 @@
                   },
                   "purpose": {
                     "type": "string",
-                    "enum": ["title"]
+                    "enum": ["title", "memory"]
                   },
                   "model": {
                     "$ref": "#/components/schemas/ModelRef"
@@ -45791,7 +46196,7 @@
               },
               "purpose": {
                 "type": "string",
-                "enum": ["title"]
+                "enum": ["title", "memory"]
               },
               "model": {
                 "$ref": "#/components/schemas/ModelRef"
@@ -51826,6 +52231,63 @@
         "required": ["id", "type", "data"],
         "additionalProperties": false
       },
+      "MemoryLearned": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["memory.learned"]
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateID": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": ["aggregateID", "seq", "version"],
+            "additionalProperties": false
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRef"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "entryIDs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "messageID": {
+                "type": "string"
+              }
+            },
+            "required": ["sessionID", "entryIDs"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "data"],
+        "additionalProperties": false
+      },
       "VcsBranchUpdated": {
         "type": "object",
         "properties": {
@@ -52674,7 +53136,7 @@
               },
               "purpose": {
                 "type": "string",
-                "enum": ["title"]
+                "enum": ["title", "memory"]
               },
               "model": {
                 "$ref": "#/components/schemas/ModelRef"
@@ -55471,6 +55933,41 @@
               }
             },
             "required": ["source", "origin"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "properties"],
+        "additionalProperties": false
+      },
+      "EventMemoryLearned": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["memory.learned"]
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "entryIDs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "messageID": {
+                "type": "string"
+              }
+            },
+            "required": ["sessionID", "entryIDs"],
             "additionalProperties": false
           }
         },

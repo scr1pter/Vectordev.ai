@@ -787,7 +787,34 @@ const scenarios: Scenario[] = [
     .mutating()
     .at((ctx) => ({ path: "/memory/erase", headers: ctx.headers(), body: { scope: "repository" } }))
     .json(200, (body) => check(typeof body === "number", "memory erase should return a count"), "status"),
-  http.protected.get("/memory/settings", "memory.settings.get").json(200, object),
+  http.protected
+    .delete("/memory/sessions/{sessionID}", "memory.eraseSession")
+    .mutating()
+    .at((ctx) => ({ path: route("/memory/sessions/{sessionID}", { sessionID: "ses_none" }), headers: ctx.headers() }))
+    .json(200, (body) => check(body === 0, "a session that taught nothing erases nothing"), "status"),
+  http.protected
+    .get("/memory/export", "memory.export")
+    .at((ctx) => ({ path: "/memory/export?scope=personal&format=json", headers: ctx.headers() }))
+    .json(200, (body) => {
+      object(body)
+      check(body.format === "vector-memory" && body.version === 1, "an export should say what it is")
+    }),
+  http.protected
+    .post("/memory/import", "memory.import")
+    .mutating()
+    .at((ctx) => ({ path: "/memory/import", headers: ctx.headers(), body: { text: "# Notes\n\nNothing to bring in." } }))
+    .json(
+      200,
+      (body) => {
+        object(body)
+        check(Array.isArray(body.entries) && body.entries.length === 0, "a page with no entries imports none")
+      },
+      "status",
+    ),
+  http.protected.get("/memory/settings", "memory.settings.get").json(200, (body) => {
+    object(body)
+    check(typeof body.facets === "object" && body.modelLearner === "local-only", "learning settings should say each facet and the model learner")
+  }),
   http.protected
     .patch("/memory/settings", "memory.settings.update")
     .mutating()
@@ -917,6 +944,13 @@ const scenarios: Scenario[] = [
       body: { action: "not-applicable" },
     }))
     .json(400, object, "status"),
+  http.protected
+    .post("/memory/posting-check", "memory.posting.check")
+    .at((ctx) => ({ path: "/memory/posting-check", headers: ctx.headers(), body: { parts: ["Fixed the retry loop."], typed: false } }))
+    .json(200, (body) => {
+      object(body)
+      check(body.status === "clean", "text that repeats nothing of the owner's memory posts as it is")
+    }),
   http.protected
     .get("/memory/knowledge", "memory.knowledge")
     .at((ctx) => ({ path: "/memory/knowledge?ids=rnone,dnone", headers: ctx.headers() }))
