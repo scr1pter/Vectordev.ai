@@ -154,7 +154,7 @@ describe("the provider under Vector Local", () => {
             id: "cloud",
             reason: "off-in-local",
             message:
-              "cloud: off in Vector Local, because its server is not on your list of model servers. Add the server to the list, or turn Vector Local off to use it.",
+              "cloud: off in Vector Local. Its server is not on your list of model servers. Add the server to the list, or turn Vector Local off to use it.",
           })
           expect(unavailable).toContainEqual({
             id: "mistral",
@@ -211,7 +211,7 @@ describe("the provider under Vector Local", () => {
             Effect.flip,
           )
           expect(refused.message).toBe(
-            "cloud/big cannot review: cloud: off in Vector Local, because its server is not on your list of model servers. Add the server to the list, or turn Vector Local off to use it.",
+            "cloud/big cannot review: cloud: off in Vector Local. Its server is not on your list of model servers. Add the server to the list, or turn Vector Local off to use it.",
           )
           expect((yield* ReviewModel.resolveReviewModel({ trigger: "local", flag: "box/qwen" })).costKind).toBe("local")
         }),
@@ -432,6 +432,7 @@ describe("a Vector Local run", () => {
         Ripgrep.node,
         FSUtil.node,
         Database.node,
+        LocalProbe.holdsNode,
         LayerNode.make({ service: TestLLMServer, layer: TestLLMServer.layer, deps: [] }),
       ]),
       [
@@ -626,12 +627,49 @@ describe("a Vector Local run", () => {
               .pipe(Effect.exit)
             const refused = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
             expect(refused instanceof Error ? refused.message : String(refused)).toBe(
-              "Model unavailable: lmstudio/tiny-context. lmstudio: off in Vector Local, because its server is not on your list of model servers. Add the server to the list, or turn Vector Local off to use it.",
+              "Model unavailable: lmstudio/tiny-context. lmstudio: off in Vector Local. Its server is not on your list of model servers. Add the server to the list, or turn Vector Local off to use it.",
             )
             expect(yield* harness.llm.calls).toBe(0)
             expect(guard.outside()).toEqual([])
           }),
         )
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "refuses a turn on a listed server that answers as a different one than its pin, before any prompt",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* setup()
+        const holds = yield* LocalProbe.HoldsService
+        // The server was added as a vLLM server; a generic OpenAI-compatible one answers on its port now.
+        const pin = { kind: "vllm", version: "0.11.0", models: "sha256:added", spki: null }
+        yield* withLocal({ enabled: true, endpoints: [harness.origin], pins: { [harness.origin]: pin } }, () =>
+          Effect.gen(function* () {
+            const chat = yield* harness.sessions.create({ title: "Pinned" })
+            yield* harness.llm.text("Fixed.")
+            const exit = yield* harness.prompt
+              .prompt({
+                sessionID: chat.id,
+                agent: "build",
+                model: small,
+                parts: [{ type: "text", text: "fix the typo in README" }],
+                size: "standard",
+              })
+              .pipe(Effect.exit)
+            const changed = LocalProbe.changedMessage(harness.origin)
+            const stored = yield* harness.sessions.messages({ sessionID: chat.id })
+            const failed = Exit.isFailure(exit) ? String(Cause.squash(exit.cause)) : JSON.stringify(stored)
+            expect(failed).toContain(changed)
+            expect(holds.held(harness.origin)).toBe(changed)
+            // No prompt reached the server: only its own answers about itself were read, as the server check.
+            expect(yield* harness.llm.calls).toBe(0)
+            expect(Egress.events().filter((event) => event.purpose === "inference")).toEqual([])
+            expect(Egress.events().some((event) => event.source === LocalProbe.SERVER_CHECK)).toBe(true)
+            expect(guard.outside()).toEqual([])
+          }),
+        ).pipe(Effect.ensuring(Effect.sync(() => holds.confirm(harness.origin))))
       }),
     { git: true },
   )
@@ -1560,15 +1598,17 @@ describe("Vector's own git and the V2 runner under Vector Local", () => {
       Egress.configure(LocalPolicy.resolve({ global: { enabled: true, endpoints: ["http://127.0.0.1:9"] } }))
       const refused = yield* refusal(cloud)
       expect(refused.message).toBe(
-        "anthropic/claude is off in Vector Local. This service sends your work outside the servers you host, so Vector Local keeps it off.",
+        "anthropic/claude: off in Vector Local. https://api.anthropic.com is a cloud AI service, not a server you host. Your company's policy can list it, or turn Vector Local off to use it.",
       )
       expect(yield* refusal(free)).toMatchObject({
         _tag: "SessionRunnerModel.OffInLocalError",
-        reason: "Vector's free models and Vector Codium run on vectordev.ai, outside the model servers you host.",
+        reason:
+          "Vector's free models and Vector Codium run on vectordev.ai, outside the model servers you host. Turn Vector Local off to use them.",
       })
       expect(yield* refusal(unlisted)).toMatchObject({
         _tag: "SessionRunnerModel.OffInLocalError",
-        reason: "Model calls go only to the model servers on your list.",
+        reason:
+          "Its server is not on your list of model servers. Add the server to the list, or turn Vector Local off to use it.",
       })
       // The automatic choice skips every model Vector Local keeps off.
       expect(yield* automatic).toMatchObject({ providerID: "box", id: "qwen" })

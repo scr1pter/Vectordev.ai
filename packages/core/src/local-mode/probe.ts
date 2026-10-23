@@ -1,9 +1,13 @@
 export * as LocalProbe from "./probe"
 
 import { Context, Layer, Option, Schema } from "effect"
+import type { LocalMode } from "@vectordevai/schema/local-mode"
 import { makeGlobalNode } from "../effect/app-node"
 import { Hash } from "../util/hash"
 import { ConfigLocalV1 } from "../v1/config/local"
+import { Egress } from "./egress"
+import { EgressAttribution } from "./attribution"
+import { EgressGuard } from "./guard"
 import { LocalErrors } from "./errors"
 import { LocalPolicy } from "./policy"
 import { LlamaCppServer } from "./servers/llamacpp"
@@ -171,9 +175,15 @@ export function output(context: number) {
   return Math.max(1, Math.min(8192, Math.floor(context / 4)))
 }
 
+/**
+ * The registry source a server's answers about itself are read as: with Vector Local on they reach this computer and
+ * the servers on the list, and a server elsewhere once the user lists it or allows the source.
+ */
+export const SERVER_CHECK = "local-server-check"
+
 function reader(root: string, options: Options & { readonly timeout: number }): Read {
   return async (path, body) => {
-    const response = await fetch(`${root}${path}`, {
+    const response = await Egress.fetch(SERVER_CHECK, `${root}${path}`, {
       method: body === undefined ? "GET" : "POST",
       headers: {
         accept: "application/json",
@@ -234,18 +244,24 @@ export function modelSet(models: readonly { readonly id: string }[]) {
  * system trusts; requests to the server still check its certificate as usual.
  */
 export async function spki(origin: string, timeout = IDENTIFY_TIMEOUT.remote): Promise<string | null> {
-  const { connect } = await import("node:tls")
+  const tls = await import("node:tls")
   const { createHash, X509Certificate } = await import("node:crypto")
   const { isIP } = await import("node:net")
   const url = new URL(origin)
   const host = url.hostname.replace(/^\[|\]$/g, "")
+  // The certificate is read over a socket of its own, decided and logged as the server check's other reads are.
+  const decided = Egress.policy().enabled ? Egress.decide({ source: SERVER_CHECK, url: origin }) : undefined
+  if (decided && decided.decision !== "allow") return null
+  const grants = EgressGuard.destinations(url)
   return new Promise((resolve) => {
-    const socket = connect({
-      host,
-      port: Number(url.port || 443),
-      servername: isIP(host) ? undefined : host,
-      rejectUnauthorized: false,
-    })
+    const socket = EgressAttribution.granted({ source: SERVER_CHECK, purpose: "integration", grants }, () =>
+      tls.connect({
+        host,
+        port: Number(url.port || 443),
+        servername: isIP(host) ? undefined : host,
+        rejectUnauthorized: false,
+      }),
+    )
     const finish = (value: string | null) => {
       clearTimeout(timer)
       socket.destroy()
@@ -333,14 +349,29 @@ export interface Holds {
   readonly confirm: (origin: string) => void
   /** Throws IdentityChanged while the server at `url` is held. Model requests call this before they are sent. */
   readonly gate: (url: string | URL) => void
+  /**
+   * Reads the listed server `url` goes to again and compares it with its pin in `policy` (`verify`): before its first
+   * model call in this process, and again once the policy or the pin changes. Model requests wait for this before they
+   * are sent. A server that answers as a different one is held; one that does not answer is left to its request. A
+   * server with no pin, or one not on the list, is not read. Requests to one server share one check.
+   */
+  readonly check: (url: string | URL, policy: LocalMode.Policy) => Promise<void>
+  /**
+   * Whether the server at `url`, when it was checked, said `model` runs somewhere else: an Ollama cloud model, which
+   * /api/show gives remote fields for whatever its name.
+   */
+  readonly forwards: (url: string | URL, model: string) => boolean
 }
 
 export class HoldsService extends Context.Service<HoldsService, Holds>()("@vector/LocalProbeHolds") {}
 
-export function makeHolds(): Holds {
+export function makeHolds(options: Options = {}): Holds {
   const held = new Map<string, string>()
+  // The checks made under each policy in effect, by server and pin, so a new policy or pin checks again.
+  const checks = new WeakMap<LocalMode.Policy, Map<string, Promise<void>>>()
+  const remote = new Map<string, ReadonlySet<string>>()
   const key = (url: string | URL) => LocalPolicy.origin(url) ?? String(url)
-  return {
+  const holds: Holds = {
     hold: (origin, message) => {
       held.set(key(origin), message)
     },
@@ -353,7 +384,29 @@ export function makeHolds(): Holds {
       const message = held.get(origin)
       if (message) throw new IdentityChanged(origin, message)
     },
+    check: (url, policy) => {
+      const origin = key(url)
+      const pin = policy.pins?.[origin]
+      const listed = LocalPolicy.decide(policy, { purpose: "inference", url: origin, source: "local-inference" })
+      if (!policy.enabled || !pin || listed.decision !== "allow") return Promise.resolve()
+      const done = checks.get(policy) ?? new Map<string, Promise<void>>()
+      checks.set(policy, done)
+      const id = `${origin} ${JSON.stringify(pin)}`
+      const running =
+        done.get(id) ??
+        verify({ origin, pin, holds, options }).then(
+          (verified) => {
+            if (verified.status === "unreachable") return
+            remote.set(origin, new Set(verified.server.models.filter((model) => model.cloud).map((model) => model.id)))
+          },
+          () => undefined,
+        )
+      done.set(id, running)
+      return running
+    },
+    forwards: (url, model) => remote.get(key(url))?.has(model) === true,
   }
+  return holds
 }
 
 export const holdsLayer = Layer.sync(HoldsService, () => HoldsService.of(makeHolds()))
@@ -546,7 +599,8 @@ function answer(tool: Tool, first: Completion): Messages {
 
 async function complete(input: CheckInput, messages: Messages): Promise<Completion> {
   const started = performance.now()
-  const response = await fetch(`${input.server.baseURL}/chat/completions`, {
+  // A check sends prompts, so it is a model call: with Vector Local on, only to a server on the list.
+  const response = await Egress.fetch("local-inference", `${input.server.baseURL}/chat/completions`, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "text/event-stream", ...headers(input) },
     body: JSON.stringify({

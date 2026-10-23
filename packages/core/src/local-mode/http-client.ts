@@ -46,21 +46,29 @@ export const make = (client: HttpClient.HttpClient) =>
 
 /**
  * Wraps the HTTP client model calls go through (the request executor of @vectordevai/llm, which the V2 runner and the
- * native runtime send with), so with Vector Local on each request is decided as a model call: labelled by the source
- * its route provides, or else by where it goes (LocalSources.inference), sent with no redirect followed, and refused
- * before anything is sent while the server it goes to is held because its identity changed. With Vector Local off a
- * request goes as it is.
+ * native runtime send with), so with Vector Local on each request is decided as a model call: labelled by the
+ * inference source its route provides, or else by where it goes (LocalSources.inference), sent with no redirect
+ * followed, and refused before anything is sent while the server it goes to is held because its identity changed. A
+ * listed server's identity is checked against its pin before its first model call (Holds.check). With Vector Local off
+ * a request goes as it is.
  */
 export const models = (client: HttpClient.HttpClient, holds: LocalProbe.Holds) =>
   HttpClient.transform(make(client), (effect, request) =>
     Effect.gen(function* () {
       if (!Egress.policy().enabled) return yield* effect
+      yield* Effect.promise(() => holds.check(request.url, Egress.policy()))
       const held = holds.held(request.url)
       if (held)
         return yield* new HttpClientError.HttpClientError({
           reason: new HttpClientError.TransportError({ request, description: held }),
         })
-      const source = (yield* Label) ?? LocalSources.inference(request.url)
+      // A label from an outer scope (a web tool's, say) says nothing about a model call made inside it, so only an
+      // inference source is kept.
+      const outer = yield* Label
+      const source =
+        outer !== undefined && LocalSources.get(outer)?.purpose === "inference"
+          ? outer
+          : LocalSources.inference(request.url)
       return yield* effect.pipe(Effect.provideService(Label, source))
     }),
   )

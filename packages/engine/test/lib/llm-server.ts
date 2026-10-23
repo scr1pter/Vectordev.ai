@@ -709,6 +709,16 @@ export class TestLLMServer extends Context.Service<TestLLMServer, TestLLMServer.
 
       yield* router.add("POST", "/v1/chat/completions", handle("chat"))
       yield* router.add("POST", "/v1/responses", handle("responses"))
+      // What a generic OpenAI-compatible server says about itself, which Vector Local's identity check reads.
+      yield* router.add(
+        "GET",
+        "/v1/models",
+        Effect.succeed(
+          HttpServerResponse.text(JSON.stringify({ object: "list", data: [{ id: "test-model" }] }), {
+            contentType: "application/json",
+          }),
+        ),
+      )
 
       yield* server.serve(router.asHttpEffect())
 

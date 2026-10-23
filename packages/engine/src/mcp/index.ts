@@ -1133,8 +1133,7 @@ const layer = Layer.effect(
       const url = remoteURL(mcpConfig.url)
       if (!url) throw new Error(`Invalid MCP URL for "${mcpName}"`)
       const decided = Egress.decide({ source: "mcp-remote", url })
-      if (decided.decision !== "allow")
-        throw new Error(`MCP server ${mcpName} is off in Vector Local: ${decided.reason}`)
+      if (decided.decision !== "allow") throw new Error(`MCP server ${mcpName}: off in Vector Local. ${decided.reason}`)
 
       // OAuth config is optional - if not provided, we'll use auto-discovery
       const oauthConfig = typeof mcpConfig.oauth === "object" ? mcpConfig.oauth : undefined

@@ -8,15 +8,27 @@ export const ProviderUnavailable = Schema.Struct({
 })
 export type ProviderUnavailable = typeof ProviderUnavailable.Type
 
+/**
+ * Why Vector Local keeps a model off, and what makes it usable, after "<provider>: off in Vector Local." The engine's
+ * provider list and the V2 runner both say these.
+ */
+export const OFF_IN_LOCAL = {
+  listed:
+    "Its server is not on your list of model servers. Add the server to the list, or turn Vector Local off to use it.",
+  vector:
+    "Vector's free models and Vector Codium run on vectordev.ai, outside the model servers you host. Turn Vector Local off to use them.",
+  ollama:
+    "It is an Ollama cloud model: the Ollama app passes its prompts on to ollama.com. Choose a model that runs on your server, or turn Vector Local off to use it.",
+  unknown:
+    "Vector cannot tell which server its requests go to. Set its baseURL to a model server on your list, or turn Vector Local off to use it.",
+  cloud: (origin: string) =>
+    `${origin} is a cloud AI service, not a server you host. Your company's policy can list it, or turn Vector Local off to use it.`,
+}
+
 export function providerUnavailable(id: string, reason: ProviderUnavailable["reason"]): ProviderUnavailable {
   // Vector Local keeps the credential: removing it would not make the provider usable, so the logout advice that ends
   // the other messages does not apply.
-  if (reason === "off-in-local")
-    return {
-      id,
-      reason,
-      message: `${id}: off in Vector Local, because its server is not on your list of model servers. Add the server to the list, or turn Vector Local off to use it.`,
-    }
+  if (reason === "off-in-local") return { id, reason, message: `${id}: off in Vector Local. ${OFF_IN_LOCAL.listed}` }
   const action = {
     "sign-in-paused": "sign-in is paused in Vector; connect a supported provider with an API key",
     "provider-not-configured": "provider is not configured; add its endpoint and models to vector.json",

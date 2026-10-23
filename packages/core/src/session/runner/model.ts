@@ -36,6 +36,8 @@ import { Egress } from "../../local-mode/egress"
 import { OllamaServer } from "../../local-mode/servers/ollama"
 import { LocalSources } from "../../local-mode/sources"
 import type { LocalMode } from "@vectordevai/schema/local-mode"
+import { OFF_IN_LOCAL } from "@vectordevai/schema/provider-unavailable"
+import { LocalProbe } from "../../local-mode/probe"
 
 export class ModelNotSelectedError extends Schema.TaggedErrorClass<ModelNotSelectedError>()(
   "SessionRunnerModel.ModelNotSelectedError",
@@ -105,7 +107,7 @@ export class OffInLocalError extends Schema.TaggedErrorClass<OffInLocalError>()(
   reason: Schema.String,
 }) {
   override get message() {
-    return `${this.providerID}/${this.modelID} is off in Vector Local. ${this.reason}`
+    return `${this.providerID}/${this.modelID}: off in Vector Local. ${this.reason}`
   }
 }
 
@@ -485,28 +487,43 @@ const PACKAGE_ORIGINS: Record<string, string> = {
 
 /**
  * Vector Local keeps every model call on the model servers on the list, as the V1 provider does: a turn on any other
- * model fails here, before a route is built or a stream starts. Nothing is logged, since no request is made.
+ * model fails here, before a route is built or a stream starts, with the notice the V1 provider gives. A listed
+ * server's identity is checked against its pin first (Holds.check), so a server that answers as a different one, or
+ * says the model runs elsewhere, is refused here too. Nothing is logged, since no model request is made.
  */
-export const allowedInLocal = (model: ModelV2.Info) => {
-  const policy = Egress.policy()
-  if (!policy.enabled) return Effect.void
-  const reason = localRefusal(model, policy)
-  if (reason === undefined) return Effect.void
-  return Effect.fail(new OffInLocalError({ providerID: model.providerID, modelID: model.id, reason }))
-}
+export const allowedInLocal = (model: ModelV2.Info, holds?: LocalProbe.Holds) =>
+  Effect.gen(function* () {
+    const policy = Egress.policy()
+    if (!policy.enabled) return
+    const url = address(model)
+    if (holds && url) yield* Effect.promise(() => holds.check(url, policy))
+    const reason = localRefusal(model, policy, holds)
+    if (reason === undefined) return
+    return yield* new OffInLocalError({ providerID: model.providerID, modelID: model.id, reason })
+  })
 
 // Why Vector Local refuses a model, or undefined when its requests go to a model server on the list. Vector's own
-// models (free models and Vector Codium) and an Ollama cloud model are never allowed, nor is one whose address is
-// unknown.
-function localRefusal(model: ModelV2.Info, policy: LocalMode.Policy) {
-  if (model.providerID === ModelPlans.PROVIDER_ID || requiresFreeRoute(model))
-    return "Vector's free models and Vector Codium run on vectordev.ai, outside the model servers you host."
-  const url = model.api.url ?? (model.api.type === "aisdk" ? PACKAGE_ORIGINS[model.api.package] : undefined)
-  if (!url) return "Vector cannot tell which server its requests go to."
-  if (ModelSlots.server(url, policy) && OllamaServer.cloud({ name: model.api.id }))
-    return "It is an Ollama cloud model: the Ollama app passes its prompts on to ollama.com."
+// models (free models and Vector Codium) and an Ollama cloud model (by its name, or by what its server said when it
+// was checked) are never allowed, nor is one whose address is unknown.
+function localRefusal(model: ModelV2.Info, policy: LocalMode.Policy, holds?: LocalProbe.Holds) {
+  if (model.providerID === ModelPlans.PROVIDER_ID || requiresFreeRoute(model)) return OFF_IN_LOCAL.vector
+  const url = address(model)
+  if (!url) return OFF_IN_LOCAL.unknown
+  if (
+    ModelSlots.server(url, policy) &&
+    (OllamaServer.cloud({ name: model.api.id }) || holds?.forwards(url, model.api.id))
+  )
+    return OFF_IN_LOCAL.ollama
+  const held = holds?.held(url)
+  if (held) return held
   const verdict = LocalPolicy.decide(policy, { purpose: "inference", url, source: LocalSources.inference(url) })
-  return verdict.decision === "allow" ? undefined : verdict.reason
+  if (verdict.decision === "allow") return undefined
+  return verdict.rule === "not-allowable" ? OFF_IN_LOCAL.cloud(LocalPolicy.origin(url) ?? url) : OFF_IN_LOCAL.listed
+}
+
+// Where a model's requests go: its catalog address, or the SDK package's own.
+function address(model: ModelV2.Info) {
+  return model.api.url ?? (model.api.type === "aisdk" ? PACKAGE_ORIGINS[model.api.package] : undefined)
 }
 
 // Whatever decides where a model's requests go.
@@ -526,10 +543,12 @@ export const locationLayer = Layer.effect(
     const guests = yield* FreeModelGuests.Service
     // Optional so a resolver built without the process's lines, as in tests, sends requests as they come.
     const slots = Option.getOrUndefined(yield* Effect.serviceOption(ModelSlots.Service))
+    // Optional for the same reason; the HTTP client model calls go through checks the pin again either way.
+    const holds = Option.getOrUndefined(yield* Effect.serviceOption(LocalProbe.HoldsService))
     return Service.of({
       resolve: Effect.fn("SessionRunnerModel.resolve")(function* (session) {
         const selected = yield* select(catalog, session)
-        yield* allowedInLocal(selected)
+        yield* allowedInLocal(selected, holds)
         if (selected.providerID === ModelPlans.PROVIDER_ID)
           return withPricing(modelPlanRoute(selected, modelPlans, freeCredentials), selected.cost)
         // Configuration can overwrite API metadata or add a free ID after catalog validation.
@@ -567,6 +586,7 @@ export const node = makeLocationNode({
     FreeModelGuests.node,
     ModelPlans.node,
     ModelSlots.node,
+    LocalProbe.holdsNode,
   ],
 })
 

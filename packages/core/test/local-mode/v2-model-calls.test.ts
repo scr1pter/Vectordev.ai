@@ -52,18 +52,43 @@ const recording = await Bun.file(
   path.resolve(import.meta.dir, "../fixtures/recordings/session-runner/openai-chat-streams-text.json"),
 ).json()
 const chats: string[] = []
+const stream = () =>
+  new Response(recording.interactions[0].response.body, {
+    headers: { "content-type": "text/event-stream; charset=utf-8", connection: "close" },
+  })
+// Where a redirect from the model server would send a prompt, if Vector followed it.
+const elsewhere = Bun.serve({
+  hostname: "127.0.0.1",
+  port: 0,
+  fetch: (request) => {
+    chats.push(`elsewhere ${new URL(request.url).pathname}`)
+    return stream()
+  },
+})
 const server = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
   fetch: async (request) => {
-    chats.push(new URL(request.url).pathname)
-    return new Response(recording.interactions[0].response.body, {
-      headers: { "content-type": "text/event-stream; charset=utf-8", connection: "close" },
-    })
+    const url = new URL(request.url)
+    // What a generic OpenAI-compatible server says about itself, which the identity check reads.
+    if (request.method === "GET")
+      return url.pathname === "/v1/models"
+        ? Response.json({ object: "list", data: [{ id: "gpt-4o-mini" }] })
+        : new Response("Not found", { status: 404 })
+    chats.push(url.pathname)
+    if (url.pathname.startsWith("/moved/"))
+      return new Response(null, {
+        status: 307,
+        headers: { location: `http://127.0.0.1:${elsewhere.port}/v1/chat/completions` },
+      })
+    return stream()
   },
 })
 const origin = `http://127.0.0.1:${server.port}`
-afterAll(() => server.stop(true))
+afterAll(() => {
+  server.stop(true)
+  elsewhere.stop(true)
+})
 
 const permission = Layer.succeed(
   PermissionV2.Service,
@@ -77,14 +102,13 @@ const permission = Layer.succeed(
     list: () => Effect.die("unused"),
   }),
 )
-const model = OpenAIChat.route
-  .with({
-    endpoint: { baseURL: `${origin}/v1` },
-    auth: Auth.bearer("fixture"),
-    generation: { maxTokens: 20, temperature: 0 },
-  })
-  .model({ id: "gpt-4o-mini" })
-const models = SessionRunnerModel.layerWith(() => Effect.succeed(model))
+const at = (baseURL: string) =>
+  OpenAIChat.route
+    .with({ endpoint: { baseURL }, auth: Auth.bearer("fixture"), generation: { maxTokens: 20, temperature: 0 } })
+    .model({ id: "gpt-4o-mini" })
+// The model a turn runs on: the server's own address, unless a test moves it.
+const current = { model: at(`${origin}/v1`) }
+const models = SessionRunnerModel.layerWith(() => Effect.succeed(current.model))
 const systemContext = AppNodeBuilder.build(SystemContextRegistry.node)
 const skillGuidance = Layer.mock(SkillGuidance.Service, { load: () => Effect.succeed(SystemContext.empty) })
 const referenceGuidance = Layer.mock(ReferenceGuidance.Service, { load: () => Effect.succeed(SystemContext.empty) })
@@ -190,6 +214,37 @@ describe("a V2 runner turn under Vector Local", () => {
       expect(calls).toHaveLength(chats.length)
       for (const call of calls)
         expect(call).toMatchObject({ source: "local-inference", origin, class: "listed", decision: "allow" })
+
+      // A server that answers a model call with a redirect gets the call, and the prompt goes nowhere else.
+      chats.length = 0
+      current.model = at(`${origin}/moved/v1`)
+      const moved = yield* turn("ses_v2_redirect").pipe(
+        Effect.ensuring(Effect.sync(() => (current.model = at(`${origin}/v1`)))),
+      )
+      expect(moved.some((message) => message.type === "assistant" && message.finish === "stop")).toBe(false)
+      expect(chats.length).toBeGreaterThan(0)
+      expect(chats.every((path) => path === "/moved/v1/chat/completions")).toBe(true)
+      expect(guard.outside()).toEqual([])
+    }),
+  )
+
+  it.effect("checks a listed server against its pin before the first model call, and holds one that changed", () =>
+    Effect.gen(function* () {
+      chats.length = 0
+      // The server was added as a vLLM server; a generic OpenAI-compatible one answers on its port now.
+      Egress.configure(
+        LocalPolicy.resolve({
+          global: { enabled: true, endpoints: [origin], pins: { [origin]: { kind: "vllm", version: "0.11.0" } } },
+        }),
+      )
+      const holds = yield* LocalProbe.HoldsService
+      const messages = yield* turn("ses_v2_pinned")
+      const held = holds.held(origin)
+      holds.confirm(origin)
+      expect(messages.some((message) => message.type === "assistant" && message.finish === "stop")).toBe(false)
+      expect(chats).toEqual([])
+      expect(held).toBe(LocalProbe.changedMessage(origin))
+      expect(Egress.events().filter((event) => event.purpose === "inference")).toEqual([])
       expect(guard.outside()).toEqual([])
     }),
   )

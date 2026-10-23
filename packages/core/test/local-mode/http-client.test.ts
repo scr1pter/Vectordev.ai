@@ -6,6 +6,7 @@ import { Egress } from "../../src/local-mode/egress"
 import { EgressGuard } from "../../src/local-mode/guard"
 import { EgressHttpClient } from "../../src/local-mode/http-client"
 import { LocalPolicy } from "../../src/local-mode/policy"
+import { LocalProbe } from "../../src/local-mode/probe"
 import { FakeWeb } from "../lib/fake-web"
 
 const web = FakeWeb.start({
@@ -125,6 +126,31 @@ describe("EgressHttpClient", () => {
     )
     expect(exit).toEqual(Exit.succeed("models"))
     expect(sent).toEqual([web.url("catalog", "/models")])
+  })
+
+  test("decides a model call as one, whatever label the scope it is made in has", async () => {
+    Egress.configure(policy)
+    const before = web.count("catalog", "/models")
+    const call = (url: string, scope?: string) =>
+      Effect.gen(function* () {
+        const client = EgressHttpClient.models(yield* HttpClient.HttpClient, LocalProbe.makeHolds())
+        const response = yield* client.execute(HttpClientRequest.get(url))
+        return yield* response.text
+      }).pipe(
+        scope ? EgressHttpClient.labelled(scope) : (effect) => effect,
+        Effect.provide(FetchHttpClient.layer),
+        Effect.runPromiseExit,
+      )
+    // Inside a web tool's scope a model call still goes only to a server on the list, decided as a model call.
+    expect(await call(`${MODEL}/v1`, "webfetch")).toEqual(Exit.succeed("completion"))
+    expect(failure(await call(web.url("catalog", "/models"), "webfetch"))).toBeInstanceOf(EgressGuard.EgressBlocked)
+    expect(failure(await call(web.url("catalog", "/models")))).toBeInstanceOf(EgressGuard.EgressBlocked)
+    expect(web.count("catalog", "/models")).toBe(before)
+    expect(Egress.events().map((event) => [event.source, event.purpose, event.decision])).toEqual([
+      ["local-inference", "inference", "allow"],
+      ["local-inference", "inference", "block"],
+      ["local-inference", "inference", "block"],
+    ])
   })
 
   test("passes everything and logs nothing with Vector Local off", async () => {

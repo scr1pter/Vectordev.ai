@@ -32,7 +32,12 @@ import {
   FREE_MODELS_SIGN_IN_TERMINAL,
   freeModelMayTrain,
 } from "@vectordevai/core/free-model-choice"
-import { ProviderUnavailable, providerRetired, providerUnavailable } from "@vectordevai/schema/provider-unavailable"
+import {
+  OFF_IN_LOCAL,
+  ProviderUnavailable,
+  providerRetired,
+  providerUnavailable,
+} from "@vectordevai/schema/provider-unavailable"
 import { renamedModel } from "@vectordevai/schema/provider-policy"
 import {
   providerAllowed,
@@ -198,10 +203,14 @@ function requestOrigins(
 }
 
 // The registry source a model call to `target` is decided as (LocalSources): an Ollama cloud model, which the server
-// passes on to ollama.com, a cloud AI service by its host (listed by a company or not), or a model server someone
-// hosts, listed or not.
-function inferenceSource(model: Model, target: string, policy: LocalMode.Policy) {
-  if (ModelSlots.server(target, policy) && OllamaServer.cloud({ name: model.api.id })) return "ollama-cloud-models"
+// passes on to ollama.com (known by its name, or by the remote fields the server gave when it was checked), a cloud AI
+// service by its host (listed by a company or not), or a model server someone hosts, listed or not.
+function inferenceSource(model: Model, target: string, policy: LocalMode.Policy, holds: LocalProbe.Holds) {
+  if (
+    ModelSlots.server(target, policy) &&
+    (OllamaServer.cloud({ name: model.api.id }) || holds.forwards(target, model.api.id))
+  )
+    return "ollama-cloud-models"
   return LocalSources.inference(target)
 }
 
@@ -215,6 +224,7 @@ function offInLocal(
   loader: CustomVarsLoader | undefined,
   envs: Record<string, string | undefined>,
   policy: LocalMode.Policy,
+  holds: LocalProbe.Holds,
 ): ProviderUnavailable | undefined {
   const notice = (why: string) => ({
     id: model.providerID,
@@ -222,31 +232,19 @@ function offInLocal(
     message: `${model.providerID}: off in Vector Local. ${why}`,
   })
   if (model.providerID === ProviderV2.ID.vector || model.providerID === ModelPlans.PROVIDER_ID || model.freeModel)
-    return notice(LOCAL_OFF.vector)
+    return notice(OFF_IN_LOCAL.vector)
   const origins = requestOrigins(model, options, loader, envs)
-  if (origins.length === 0) return notice(LOCAL_OFF.unknown)
+  if (origins.length === 0) return notice(OFF_IN_LOCAL.unknown)
   // The first address Vector Local would not let a model call reach decides the notice.
   const refused = origins.flatMap((origin) => {
-    const source = inferenceSource(model, origin, policy)
-    if (source === "ollama-cloud-models") return [notice(LOCAL_OFF.ollama)]
+    const source = inferenceSource(model, origin, policy, holds)
+    if (source === "ollama-cloud-models") return [notice(OFF_IN_LOCAL.ollama)]
     const verdict = LocalPolicy.decide(policy, { purpose: "inference", url: origin, source })
     if (verdict.decision === "allow") return []
-    if (verdict.rule === "not-allowable") return [notice(LOCAL_OFF.cloud(origin))]
+    if (verdict.rule === "not-allowable") return [notice(OFF_IN_LOCAL.cloud(origin))]
     return [providerUnavailable(model.providerID, "off-in-local")]
   })
   return refused[0]
-}
-
-/** Why Vector Local keeps a model off, after "<provider>: off in Vector Local." */
-const LOCAL_OFF = {
-  vector:
-    "Vector's free models and Vector Codium run on vectordev.ai, outside the model servers you host. Turn Vector Local off to use them.",
-  ollama:
-    "It is an Ollama cloud model: the Ollama app passes its prompts on to ollama.com. Choose a model that runs on your server, or turn Vector Local off to use it.",
-  unknown:
-    "Vector cannot tell which server its requests go to. Set its baseURL to a model server on your list, or turn Vector Local off to use it.",
-  cloud: (origin: string) =>
-    `${origin} is a cloud AI service, not a server you host. Your company's policy can list it, or turn Vector Local off to use it.`,
 }
 
 // The lane a model's requests take in a server's line. The session processor names the user's turn and its
@@ -2278,7 +2276,7 @@ const layer = Layer.effect(
           for (const [id, item] of Object.entries(providers)) {
             const providerID = ProviderV2.ID.make(id)
             for (const [modelID, model] of Object.entries(item.models)) {
-              const notice = offInLocal(model, item.options, varsLoaders[providerID], envs, policy)
+              const notice = offInLocal(model, item.options, varsLoaders[providerID], envs, policy, holds)
               if (!notice) continue
               withheld.set(`${providerID}/${modelID}`, notice)
               delete item.models[modelID]
@@ -2572,10 +2570,15 @@ const layer = Layer.effect(
               throw new Error("Plugin OAuth approval or credential changed. Reconnect to continue.")
             opts.redirect = "error"
           }
-          // With Vector Local on, no model call goes to a server whose identity changed since it was added
-          // (LocalProbe.verify) until the user confirms the server.
+          // With Vector Local on, a listed server's identity is checked against its pin before its first model call
+          // (and again once the policy changes), and no model call goes to a server whose identity changed since it
+          // was added until the user confirms the server. The check also learns which of its models the server passes
+          // on, which the decision below refuses.
           const target = input instanceof Request ? input.url : String(input)
-          if (Egress.policy().enabled) holds.gate(target)
+          if (Egress.policy().enabled) {
+            await holds.check(target, Egress.policy())
+            holds.gate(target)
+          }
           const chunkAbortCtl = typeof chunkTimeout === "number" && chunkTimeout > 0 ? new AbortController() : undefined
           const headerTimeoutMs = headerTimeout === false ? undefined : headerTimeout
           const headerTimeoutCtl = typeof headerTimeoutMs === "number" ? timeoutController(headerTimeoutMs) : undefined
@@ -2595,7 +2598,7 @@ const layer = Layer.effect(
           // follows no redirect. With Vector Local off it goes to fetchFn as it is.
           const res = ResponseTerminal.wrap(
             await Egress.fetch(
-              Egress.policy().enabled ? inferenceSource(model, target, Egress.policy()) : "local-inference",
+              Egress.policy().enabled ? inferenceSource(model, target, Egress.policy(), holds) : "local-inference",
               input,
               {
                 ...opts,
@@ -2660,7 +2663,7 @@ const layer = Layer.effect(
           unavailable: {
             id: providerID,
             reason: "off-in-local",
-            message: `${providerID}: off in Vector Local. ${LOCAL_OFF.vector}`,
+            message: `${providerID}: off in Vector Local. ${OFF_IN_LOCAL.vector}`,
           },
         })
       // A turn waits for vectordev.ai's answer when this account has no Codium catalog yet.

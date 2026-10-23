@@ -414,8 +414,20 @@ export function resolve(input: Sources): LocalMode.Policy {
     user_may: lock ? [...userMay] : [],
     locked_keys: managed.locked_keys ?? [],
     endpoint_domains: managed.endpoint_domains ?? [],
+    ...pinsOf(managed, user),
     warnings,
   }
+}
+
+// The servers' identity pins, by origin as requests name it. A company's pin for a server wins over the user's.
+function pinsOf(managed: ConfigLocalV1.Info, user: ConfigLocalV1.Info) {
+  const pins = Object.fromEntries(
+    [...Object.entries(user.pins ?? {}), ...Object.entries(managed.pins ?? {})].flatMap(([key, pin]) => {
+      const at = origin(key)
+      return at ? [[at, pin] as const] : []
+    }),
+  )
+  return Object.keys(pins).length > 0 ? { pins } : {}
 }
 
 function parse(input: string | URL) {

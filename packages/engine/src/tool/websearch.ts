@@ -131,7 +131,7 @@ export const WebSearchTool = Tool.define(
             : undefined
           if (verdict && verdict.decision !== "allow") {
             Egress.record({ source, url: endpoint, tool: "websearch", notify: true }, verdict)
-            return yield* Effect.die(new Error(`Web search is off in Vector Local. ${verdict.reason}`))
+            return yield* Effect.die(new Error(`Web search: off in Vector Local. ${verdict.reason}`))
           }
 
           yield* ctx.ask({

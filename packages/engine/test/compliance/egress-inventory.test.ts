@@ -52,8 +52,6 @@ const WITHOUT_SOURCE: Readonly<Record<string, string>> = {
 const DECIDED_ELSEWHERE: Readonly<Record<string, string>> = {
   "packages/llm/src/route/executor.ts":
     "Sends through the HTTP client LayerNodePlatform.requestExecutor gives it, which decides each request as a model call (EgressHttpClient.models).",
-  "packages/core/src/local-mode/servers/ollama.ts":
-    "Asks the user's own Ollama server, on this computer or on the list, for a larger-context copy when they click; the backstop lets an unlabelled request reach only those.",
   "packages/core/src/plugin/provider/google-vertex.ts":
     "A V2 route's model calls are refused before the route is built (SessionRunnerModel.allowedInLocal); a V1 call goes through provider.ts's fetch first.",
   "packages/core/src/npm.ts":
