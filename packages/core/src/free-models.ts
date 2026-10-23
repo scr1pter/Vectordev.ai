@@ -63,8 +63,8 @@ export function createClient(
     now?: () => number
     disabled?: () => boolean
     /**
-     * Whether Vector Local is on: free models run on vectordev.ai and openrouter.ai, outside the model servers the user
-     * hosts, so the catalog is OFF and nothing is fetched.
+     * Whether Vector Local is on: free models send prompts through vectordev.ai and openrouter.ai to the services that
+     * run them, outside the servers the user lists, so the catalog is OFF and nothing is fetched.
      */
     local?: () => boolean
     /** How long a non-forced catalog read waits for vectordev.ai before answering without it. */

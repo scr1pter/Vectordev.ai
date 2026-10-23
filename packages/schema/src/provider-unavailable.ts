@@ -16,7 +16,7 @@ export const OFF_IN_LOCAL = {
   listed:
     "Its server is not on your list of model servers. Add the server to the list, or turn Vector Local off to use it.",
   vector:
-    "Vector's free models and Vector Codium run on vectordev.ai, outside the model servers you host. Turn Vector Local off to use them.",
+    "Free models provided by Vector and Vector Codium send your prompts through vectordev.ai to the services that run them, outside the servers you listed. Turn Vector Local off to use them.",
   ollama:
     "It is an Ollama cloud model: the Ollama app passes its prompts on to ollama.com. Choose a model that runs on your server, or turn Vector Local off to use it.",
   unknown:

@@ -1961,7 +1961,7 @@ describe("Vector's own git and the V2 runner under Vector Local", () => {
       expect(yield* refusal(free)).toMatchObject({
         _tag: "SessionRunnerModel.OffInLocalError",
         reason:
-          "Vector's free models and Vector Codium run on vectordev.ai, outside the model servers you host. Turn Vector Local off to use them.",
+          "Free models provided by Vector and Vector Codium send your prompts through vectordev.ai to the services that run them, outside the servers you listed. Turn Vector Local off to use them.",
       })
       expect(yield* refusal(unlisted)).toMatchObject({
         _tag: "SessionRunnerModel.OffInLocalError",

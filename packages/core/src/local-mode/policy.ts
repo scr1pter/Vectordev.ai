@@ -91,7 +91,8 @@ const DOWNLOADS = new Set<LocalMode.Purpose>(["model-download", "tool-download",
 const CONNECTED = new Set<LocalMode.Purpose>(["integration", "mcp", "config-remote"])
 // Vector's own inference (free models and Vector Codium) is never allowable under Vector Local, and no list holds it.
 const VECTOR_HOSTS = ["vectordev.ai"]
-const VECTOR_REFUSED = "Vector's own models run on vectordev.ai, outside the servers you host."
+const VECTOR_REFUSED =
+  "Free models provided by Vector and Vector Codium send prompts through vectordev.ai to the services that run them, outside the servers you list."
 const WEB_ORDER: Record<LocalMode.Web, number> = { ask: 0, network: 1, none: 2 }
 const WEB_SETTINGS = ["ask", "network", "none"] as const satisfies readonly LocalMode.Web[]
 
