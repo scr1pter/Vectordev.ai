@@ -51,6 +51,12 @@ jobs:
       - name: Setup Bun
         uses: ./.github/actions/setup-bun
 
+      # The engine suite runs under the strict network guard, so Vector may not download ripgrep for the tests that
+      # search files: it has to be installed (engine/test/preload.ts).
+      - name: Install ripgrep
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ripgrep && rg --version
+
       - name: Configure git identity
         run: |
           git config --global user.email "bot@vectordev.ai"
@@ -161,6 +167,11 @@ jobs:
 
       - name: Setup Bun
         uses: ./.github/actions/setup-bun
+
+      # The engine suite runs under the strict network guard, so Vector may not download ripgrep for the tests that
+      # search files: it has to be installed (engine/test/preload.ts).
+      - name: Install ripgrep
+        run: choco install ripgrep -y --no-progress && rg --version
 
       - name: Configure git identity
         run: |
