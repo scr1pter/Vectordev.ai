@@ -45,6 +45,8 @@ export type Proxy = {
    * arrive: a chunked or compressed answer counts as much as one with a Content-Length.
    */
   readonly received: () => number
+  /** Ends every connection the proxy is carrying, tunnels and answers still arriving included, and keeps listening. */
+  readonly drop: () => void
   readonly stop: () => Promise<void>
 }
 
@@ -220,6 +222,7 @@ function create(decide: Decide, options: Options) {
         url: `http://127.0.0.1:${port}`,
         port,
         received: () => [...open].reduce((sum, socket) => sum + socket.bytesWritten, delivered.closed),
+        drop: () => open.forEach((socket) => socket.destroy()),
         stop: () =>
           new Promise<void>((done) => {
             server.close(() => done())

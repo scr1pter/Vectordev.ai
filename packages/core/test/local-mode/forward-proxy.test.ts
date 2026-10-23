@@ -15,6 +15,24 @@ const web = FakeWeb.start({
   sites: {
     article: {
       "/": { body: "article" },
+      // An answer that never ends, a chunk at a time, until its reader goes away.
+      "/endless": () => {
+        const state = { open: true }
+        return new Response(
+          new ReadableStream({
+            pull: (controller) =>
+              new Promise<void>((resolve) =>
+                setTimeout(() => {
+                  if (state.open) controller.enqueue(new Uint8Array(1024).fill(98))
+                  resolve()
+                }, 10),
+              ),
+            cancel: () => {
+              state.open = false
+            },
+          }),
+        )
+      },
       "/stream": () =>
         new Response(
           new ReadableStream({
@@ -96,6 +114,33 @@ describe("ForwardProxy", () => {
       const refused = await get(refusing.port, "http://journal.example/")
       expect(refusing.received()).toBe(Buffer.byteLength(refused))
       await refusing.stop()
+    } finally {
+      await proxy.stop()
+    }
+    expect(guard.outside()).toEqual([])
+  })
+
+  test("drop ends an answer still arriving and keeps listening", async () => {
+    const target = new URL(web.url("article", "/endless"))
+    const proxy = await ForwardProxy.start(() => ({
+      connect: (connected) => net.connect(Number(target.port), "127.0.0.1", connected),
+    }))
+    try {
+      const state = { bytes: 0, closed: false }
+      const client = net.connect(proxy.port, "127.0.0.1", () =>
+        client.write(`GET ${target} HTTP/1.1\r\nHost: ${target.host}\r\n\r\n`),
+      )
+      client.on("data", (chunk: Buffer) => (state.bytes += chunk.length))
+      client.on("error", () => undefined)
+      const closed = new Promise<void>((resolve) => client.on("close", () => resolve()))
+      while (state.bytes < 8 * 1024) await new Promise((resolve) => setTimeout(resolve, 10))
+      proxy.drop()
+      await closed
+      const counted = proxy.received()
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      // Nothing more arrives for it, and the next request is served as usual.
+      expect(proxy.received()).toBe(counted)
+      expect(await get(proxy.port, web.url("article", "/"))).toContain("article")
     } finally {
       await proxy.stop()
     }
