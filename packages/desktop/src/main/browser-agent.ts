@@ -517,7 +517,7 @@ export async function click(selector: string) {
 /**
  * Executor-level guard (defense in depth beyond the planner prompt): typing
  * into credential fields is always refused so the run hands control to the user
- * via wait_for_user instead of ever filling passwords, OTPs, or cards.
+ * with the browser tool's handoff instead of ever filling passwords, OTPs, or cards.
  *
  * This is serialized into the page with toString(), so the body has to stay
  * self-contained: anything it read from module scope would be a ReferenceError
@@ -588,7 +588,7 @@ const NON_TYPING_KEYS = new Set([
 ])
 
 function credentialRefusal(target: string) {
-  return `Refused to send keystrokes to ${target}: it is a credential field (password, one-time code, or card number). Vector never fills credentials — emit the wait_for_user action so the user can complete this step in the live browser.`
+  return `Refused to send keystrokes to ${target}: it is a credential field (password, one-time code, or card number). Vector never fills credentials — use handoff so the user can complete this step in the live browser.`
 }
 
 export async function type(selector: string, text: string, clear = true) {
