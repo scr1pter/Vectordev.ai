@@ -3107,6 +3107,7 @@ export type LocalConfirmError = {
   data: {
     message: string
     changes: Array<string>
+    identity?: Array<"kind" | "version" | "models" | "spki">
   }
 }
 
@@ -3223,6 +3224,7 @@ export type LocalAddedServer = {
   models: Array<string>
   server: LocalServer
   status: LocalStatus
+  identity?: Array<"kind" | "version" | "models" | "spki">
 }
 
 export type LocalCheckRow = {
@@ -12436,9 +12438,9 @@ export type LocalEgressClearData = {
 
 export type LocalEgressClearErrors = {
   /**
-   * Bad request
+   * LocalError | InvalidRequestError
    */
-  400: BadRequestError
+  400: LocalError | InvalidRequestError
   /**
    * ForbiddenError
    */
@@ -12711,7 +12713,7 @@ export type LocalServersAddResponse = LocalServersAddResponses[keyof LocalServer
 export type LocalCheckData = {
   body?: {
     model?: string
-    role?: "agent" | "subagent" | "research"
+    role?: "agent" | "subagent" | "review" | "judge" | "research"
     confirmed?: boolean
   }
   path?: never
@@ -12747,7 +12749,6 @@ export type LocalCheckResponse = LocalCheckResponses[keyof LocalCheckResponses]
 export type LocalGrantData = {
   body?: {
     source: string
-    once?: boolean
   }
   path?: never
   query?: {
