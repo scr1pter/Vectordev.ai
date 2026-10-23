@@ -17,6 +17,7 @@ import type {
   CloudProviderResource,
 } from "../main/cloud-connections"
 import type { Observed, PageRead } from "../main/browser-page"
+import type { Chip as ResearchBrowserChip } from "../main/research-browser"
 import type { CloudOverview } from "../main/cloud-overview"
 import type { SupabaseCommand, SupabaseProgressEvent } from "../main/cloud-supabase"
 import type { VercelCloudApi } from "../main/cloud-vercel-ipc"
@@ -864,6 +865,16 @@ export type ElectronAPI = {
       sourcePath: string
       taskID: string
     }) => Promise<import("@vectordevai/schema/task").StopResult>
+    onChange: (callback: () => void) => () => void
+  }
+  /**
+   * Watching research browsers from the Sources tab: one chip per browser, snapshots of its page (about two a second is
+   * what a watcher needs) and Stop. There is no way to send input to one.
+   */
+  researchWatch: {
+    list: () => Promise<ResearchBrowserChip[]>
+    snapshot: (id: string) => Promise<string | undefined>
+    stop: (id: string) => Promise<boolean>
     onChange: (callback: () => void) => () => void
   }
   swarmOrchestrator: {
