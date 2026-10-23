@@ -15,7 +15,7 @@ import { TuiConfigProvider } from "../../../src/config"
 import { ToastProvider } from "../../../src/ui/toast"
 import { DialogProvider } from "../../../src/ui/dialog"
 import { VectorKeymapProvider, registerVectorKeymap } from "../../../src/keymap"
-import { VectorLocalProvider, badge } from "../../../src/context/vector-local"
+import { VectorLocalProvider, badge, remoteHost } from "../../../src/context/vector-local"
 import { DialogLocal, summaryLines } from "../../../src/component/dialog-local"
 
 // /local in the terminal UI against a fake engine: the switch reads the server's policy, and turning Vector Local off,
@@ -149,6 +149,13 @@ describe("the Local badge", () => {
     expect(badge({ enabled: true, web: "ask", lock: false })).toBe("Local")
     expect(badge({ enabled: true, web: "network", lock: false })).toBe("Local · your network")
     expect(badge({ enabled: true, web: "none", lock: true })).toBe("Local · no web · set by your company")
+  })
+
+  test("names the server when the terminal UI is attached to another computer", () => {
+    expect(remoteHost("http://vector.internal")).toBeUndefined()
+    expect(remoteHost("http://127.0.0.1:4096")).toBeUndefined()
+    expect(remoteHost("http://build-box:4096")).toBe("build-box")
+    expect(badge({ enabled: true, web: "network", lock: false }, "build-box")).toBe("Local on build-box · your network")
   })
 })
 

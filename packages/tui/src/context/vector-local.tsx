@@ -41,7 +41,7 @@ export const { use: useVectorLocal, provider: VectorLocalProvider } = createSimp
       status: () => store.status,
       denied: () => store.denied,
       refresh,
-      badge: createMemo(() => badge(store.status?.policy)),
+      badge: createMemo(() => badge(store.status?.policy, remoteHost(sdk.url))),
       /** Sends a change. A change that loosens Vector Local comes back as `confirm`, with what it loosens. */
       update: async (change: LocalUpdate) => {
         const result = await sdk.client.local.update({ localUpdate: change })
@@ -58,11 +58,24 @@ export const { use: useVectorLocal, provider: VectorLocalProvider } = createSimp
   },
 })
 
-/** The badge beside the prompt: "Local", "Local · your network" or "Local · no web", and who set it. */
-export function badge(policy: Pick<LocalPolicy, "enabled" | "web" | "lock"> | undefined) {
+/**
+ * The badge beside the prompt: "Local", "Local · your network" or "Local · no web", who set it, and the server's name
+ * when the terminal UI is attached to another computer ("Local on build-box"), whose policy it is.
+ */
+export function badge(policy: Pick<LocalPolicy, "enabled" | "web" | "lock"> | undefined, host?: string) {
   if (!policy?.enabled) return undefined
-  const label = policy.web === "none" ? "Local · no web" : policy.web === "network" ? "Local · your network" : "Local"
-  return policy.lock ? `${label} · set by your company` : label
+  return [
+    host ? `Local on ${host}` : "Local",
+    ...(policy.web === "none" ? ["no web"] : policy.web === "network" ? ["your network"] : []),
+    ...(policy.lock ? ["set by your company"] : []),
+  ].join(" · ")
+}
+
+// The server's host name when it runs on another computer; the terminal UI's own engine answers on this one.
+export function remoteHost(url: string) {
+  if (!URL.canParse(url)) return undefined
+  const host = new URL(url).hostname
+  return ["localhost", "127.0.0.1", "[::1]", "vector.internal"].includes(host) ? undefined : host
 }
 
 /** What a refused request says, in the server's words when it gave them. */
