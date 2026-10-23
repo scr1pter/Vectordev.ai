@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { chmod, mkdtemp, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "path"
@@ -48,6 +48,11 @@ import { Provider } from "@/provider/provider"
 import { Auth } from "@/auth"
 import { ModelCatalog } from "@vectordevai/core/model-catalog"
 import { ReviewModel } from "../../src/review/model"
+import { Review } from "../../src/review/run"
+import { SpendGuard } from "@vectordevai/core/spend-guard"
+import { EventV2Bridge } from "@/event-v2-bridge"
+import { parseUnifiedDiff } from "@vectordevai/core/review/diff"
+import { DEFAULT_REVIEW_CONFIG } from "@vectordevai/core/review/types"
 import { SessionPrompt } from "../../src/session/prompt"
 import { SessionSummary } from "../../src/session/summary"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
@@ -70,8 +75,9 @@ import { NetworkGuard } from "../../../core/test/lib/network-guard"
 import { LocalServers } from "../../../core/test/fixture/local-servers/serve"
 
 // Vector Local in the engine, end to end, with nothing leaving this computer: the strict network guard throws on any
-// connection that is not to loopback, the model server is the fake one on 127.0.0.1, and the user's own config lists
-// it (the test's managed folder stays empty). Each test turns Vector Local on for itself and off again.
+// connection that is not to loopback, and the model server is the fake one on 127.0.0.1. The main run lists it in the
+// test's managed folder, as a company would; the other tests list it in the user's own config. Each test turns Vector
+// Local on for itself and off again.
 
 const guard = NetworkGuard.use()
 
@@ -80,15 +86,24 @@ afterEach(async () => {
   await Egress.erase()
 })
 
-// Turns Vector Local on with `block` in the user's own config, as the owner confirms it, and off again after `body`.
-function withLocal<A, E, R>(block: ConfigLocalV1.Info, body: () => Effect.Effect<A, E, R>) {
-  const file = path.join(Global.Path.config, "vector.json")
+// Turns Vector Local on with `block` in the user's own config, as the owner confirms it, or in the test's managed
+// folder, as a company sets it, and off again after `body`.
+function withLocal<A, E, R>(
+  block: ConfigLocalV1.Info,
+  body: () => Effect.Effect<A, E, R>,
+  where: "user" | "managed" = "user",
+) {
+  const file = path.join(
+    where === "managed" ? process.env["VECTOR_TEST_MANAGED_CONFIG_DIR"]! : Global.Path.config,
+    "vector.json",
+  )
   const apply = () => {
     Config.refreshLocal()
     Config.confirmLocal()
   }
   return Effect.acquireUseRelease(
     Effect.sync(() => {
+      mkdirSync(path.dirname(file), { recursive: true })
       writeFileSync(file, JSON.stringify({ local: block }))
       apply()
     }),
@@ -371,6 +386,13 @@ describe("the provider under Vector Local", () => {
   )
 })
 
+// The change a Vectorscope review in a Local run looks at.
+const ROUTER_DIFF = parseUnifiedDiff(
+  ["diff --git a/router.ts b/router.ts", "--- a/router.ts", "+++ b/router.ts", "@@ -0,0 +1 @@", "+export {}"].join(
+    "\n",
+  ),
+)
+
 describe("a Vector Local run", () => {
   const summary = Layer.succeed(
     SessionSummary.Service,
@@ -436,6 +458,9 @@ describe("a Vector Local run", () => {
         FSUtil.node,
         Database.node,
         LocalProbe.holdsNode,
+        SpendGuard.node,
+        EventV2Bridge.node,
+        Provider.node,
         LayerNode.make({ service: TestLLMServer, layer: TestLLMServer.layer, deps: [] }),
       ]),
       [
@@ -508,104 +533,118 @@ describe("a Vector Local run", () => {
     () =>
       Effect.gen(function* () {
         const harness = yield* setup()
-        yield* withLocal({ enabled: true, endpoints: [harness.origin] }, () =>
-          Effect.gen(function* () {
-            yield* Effect.promise(() => Egress.erase())
-            // A new session, so its first request gets a title.
-            const chat = yield* harness.sessions.create({})
-            // A Thorough request on a small context: a title, a write step that fills the context, the compaction it
-            // brings, the step after it and the judge.
-            yield* harness.llm.push(
-              reply()
-                .tool("write", { filePath: path.join(harness.directory, "router.ts"), content: "export {}\n" })
-                .usage({ input: 19_000, output: 100 }),
-            )
-            yield* harness.llm.text("Summary of the work so far.")
-            yield* harness.llm.text("Migrated the router.")
-            yield* harness.llm.text("VERDICT: PASS")
-            yield* harness.prompt.prompt({
-              sessionID: chat.id,
-              agent: "build",
-              model: small,
-              parts: [{ type: "text", text: "be thorough: migrate the app to the new router across 40 files" }],
-            })
-            const judge = (yield* harness.sessions.children(chat.id)).map((child) => child.id)
-            expect(judge).toHaveLength(1)
-            const history = yield* harness.sessions.messages({ sessionID: chat.id })
-            expect(history.some((message) => message.parts.some((part) => part.type === "compaction"))).toBe(true)
-
-            // A subagent the agent launches through the task tool counts in the root.
-            yield* harness.llm.pushMatch(
-              (hit) => says("CHECK_ROUTER")(hit) && !says("CHILD_CHECK")(hit),
-              reply().tool("task", {
-                description: "check the router",
-                prompt: "CHILD_CHECK: check the router.",
-                subagent_type: "general",
-                background: false,
-              }),
-            )
-            yield* harness.llm.pushMatch(
-              (hit) => says("CHILD_CHECK")(hit) && !says("CHECK_ROUTER")(hit),
-              reply().text("Checked the router."),
-            )
-            yield* harness.prompt.prompt({
-              sessionID: chat.id,
-              agent: "build",
-              model: small,
-              parts: [{ type: "text", text: "CHECK_ROUTER: have a subagent check the router" }],
-              // Only a Thorough request offers subagents.
-              size: "thorough",
-              judge: "off",
-            })
-            const child = (yield* harness.sessions.children(chat.id)).find((item) => !judge.includes(item.id))
-            expect(child).toBeDefined()
-            expect(
-              (yield* harness.sessions.messages({ sessionID: child!.id })).some((message) =>
-                message.parts.some((part) => part.type === "text" && part.text === "Checked the router."),
-              ),
-            ).toBe(true)
-
-            // A Vectorscope reviewer the session launched counts in it too.
-            const review = yield* harness.sessions.create({
-              title: "Vectorscope review",
-              parentID: chat.id,
-              internal: "vectorscope.review",
-              permission: allow,
-            })
-            yield* harness.llm.text("No findings.")
-            yield* harness.prompt.prompt({
-              sessionID: review.id,
-              agent: "review",
-              model: small,
-              parts: [{ type: "text", text: "review the router change" }],
-            })
-
-            const hits = yield* harness.llm.hits
-            const calls = Egress.events().filter((event) => event.purpose === "inference")
-            // Every request the server answered was decided as a model call to it, for the root session.
-            expect(calls).toHaveLength(hits.length)
-            expect(hits.some((hit) => JSON.stringify(hit.body).includes("Generate a title"))).toBe(true)
-            expect(hits.some((hit) => JSON.stringify(hit.body).includes("independent completion judge"))).toBe(true)
-            for (const call of calls) {
-              expect(call).toMatchObject({
-                source: "local-inference",
-                origin: harness.origin,
-                class: "listed",
-                decision: "allow",
-                root_session_id: chat.id,
+        yield* withLocal(
+          { enabled: true, endpoints: [harness.origin] },
+          () =>
+            Effect.gen(function* () {
+              yield* Effect.promise(() => Egress.erase())
+              // The company's policy lists the server.
+              expect(Egress.policy().endpoints).toEqual([{ origin: harness.origin, from: "managed" }])
+              // A new session, so its first request gets a title.
+              const chat = yield* harness.sessions.create({})
+              // A Thorough request on a small context: a title, a write step that fills the context, the compaction it
+              // brings, the step after it and the judge.
+              yield* harness.llm.push(
+                reply()
+                  .tool("write", { filePath: path.join(harness.directory, "router.ts"), content: "export {}\n" })
+                  .usage({ input: 19_000, output: 100 }),
+              )
+              yield* harness.llm.text("Summary of the work so far.")
+              yield* harness.llm.text("Migrated the router.")
+              yield* harness.llm.text("VERDICT: PASS")
+              yield* harness.prompt.prompt({
+                sessionID: chat.id,
+                agent: "build",
+                model: small,
+                parts: [{ type: "text", text: "be thorough: migrate the app to the new router across 40 files" }],
               })
-            }
-            expect(new Set(calls.map((call) => call.session_id))).toEqual(
-              new Set([chat.id, ...judge, child!.id, review.id]),
-            )
-            const counted = Egress.summary(chat.id)
-            expect(counted.model_calls).toEqual({ [harness.origin]: hits.length })
-            // The reviewer is a helper: its requests roll up into the session that launched it.
-            expect(counted.helper_requests).toBe(calls.filter((call) => call.session_id === review.id).length)
-            expect(counted.helper_requests).toBeGreaterThan(0)
-            expect(counted.blocked).toEqual({})
-            expect(guard.outside()).toEqual([])
-          }),
+              const judge = (yield* harness.sessions.children(chat.id)).map((child) => child.id)
+              expect(judge).toHaveLength(1)
+              const history = yield* harness.sessions.messages({ sessionID: chat.id })
+              expect(history.some((message) => message.parts.some((part) => part.type === "compaction"))).toBe(true)
+
+              // A subagent the agent launches through the task tool counts in the root.
+              yield* harness.llm.pushMatch(
+                (hit) => says("CHECK_ROUTER")(hit) && !says("CHILD_CHECK")(hit),
+                reply().tool("task", {
+                  description: "check the router",
+                  prompt: "CHILD_CHECK: check the router.",
+                  subagent_type: "general",
+                  background: false,
+                }),
+              )
+              yield* harness.llm.pushMatch(
+                (hit) => says("CHILD_CHECK")(hit) && !says("CHECK_ROUTER")(hit),
+                reply().text("Checked the router."),
+              )
+              yield* harness.prompt.prompt({
+                sessionID: chat.id,
+                agent: "build",
+                model: small,
+                parts: [{ type: "text", text: "CHECK_ROUTER: have a subagent check the router" }],
+                // Only a Thorough request offers subagents.
+                size: "thorough",
+                judge: "off",
+              })
+              const child = (yield* harness.sessions.children(chat.id)).find((item) => !judge.includes(item.id))
+              expect(child).toBeDefined()
+              expect(
+                (yield* harness.sessions.messages({ sessionID: child!.id })).some((message) =>
+                  message.parts.some((part) => part.type === "text" && part.text === "Checked the router."),
+                ),
+              ).toBe(true)
+
+              // A Vectorscope review the session launches, through Vectorscope's own run, counts in it too.
+              const reviewed = yield* Review.run({
+                parentID: chat.id,
+                directory: harness.directory,
+                trigger: "local",
+                trust: "trusted",
+                base: "1".repeat(40),
+                head: "2".repeat(40),
+                mode: "full",
+                files: ROUTER_DIFF,
+                anchors: ROUTER_DIFF,
+                skipped: [],
+                context: {},
+                prior: [],
+                rules: "",
+                config: { ...DEFAULT_REVIEW_CONFIG, verify: "off", security: "off" },
+                model: { ...small, context: 20_000, costKind: "local" },
+                knownPath: async () => true,
+              })
+              const reviewers = reviewed.sessions.map((id) => SessionID.make(id))
+              expect(reviewers.length).toBeGreaterThan(0)
+
+              const hits = yield* harness.llm.hits
+              const calls = Egress.events().filter((event) => event.purpose === "inference")
+              // Every request the server answered was decided as a model call to it, for the root session.
+              expect(calls).toHaveLength(hits.length)
+              expect(hits.some((hit) => JSON.stringify(hit.body).includes("Generate a title"))).toBe(true)
+              expect(hits.some((hit) => JSON.stringify(hit.body).includes("independent completion judge"))).toBe(true)
+              for (const call of calls) {
+                expect(call).toMatchObject({
+                  source: "local-inference",
+                  origin: harness.origin,
+                  class: "listed",
+                  decision: "allow",
+                  root_session_id: chat.id,
+                })
+              }
+              expect(new Set(calls.map((call) => call.session_id))).toEqual(
+                new Set([chat.id, ...judge, child!.id, ...reviewers]),
+              )
+              const counted = Egress.summary(chat.id)
+              expect(counted.model_calls).toEqual({ [harness.origin]: hits.length })
+              // The reviewers are helpers: their requests roll up into the session that launched them.
+              expect(counted.helper_requests).toBe(
+                calls.filter((call) => reviewers.some((id) => id === call.session_id)).length,
+              )
+              expect(counted.helper_requests).toBeGreaterThan(0)
+              expect(counted.blocked).toEqual({})
+              expect(guard.outside()).toEqual([])
+            }),
+          "managed",
         )
       }),
     { git: true },

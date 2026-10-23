@@ -177,7 +177,15 @@ describe("Vector installation", () => {
       expect(yield* Installation.use.latest("npm", { manual: true })).toBe("1.99.92")
       yield* Installation.use.upgrade("npm", "1.99.92")
       expect(local.commands).toContainEqual(["npm", "install", "-g", "@vectordevai/cli@1.99.92"])
-    }).pipe(Effect.ensuring(Effect.sync(() => Egress.configure(LocalPolicy.OFF)))),
+    }).pipe(
+      // The standing grant was for this test's confirmed check only.
+      Effect.ensuring(
+        Effect.sync(() => {
+          Egress.revoke("updates")
+          Egress.configure(LocalPolicy.OFF)
+        }),
+      ),
+    ),
   )
 
   testEffect(

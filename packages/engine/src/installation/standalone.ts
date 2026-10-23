@@ -67,7 +67,7 @@ export async function receipt(executable = process.execPath): Promise<Receipt | 
 
 export async function latest(
   value: Receipt,
-  request: (url: string, init: RequestInit) => Promise<Response> = (url, init) => fetch(url, init),
+  request: (url: string, init: RequestInit) => Promise<Response> = (url, init) => Egress.fetch("updates", url, init),
 ) {
   const response = await request(
     `https://vectordev.ai/api/cli-release?version=${value.channel}&target=${value.target}`,

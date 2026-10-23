@@ -212,6 +212,7 @@ export const SOURCES: readonly Source[] = [
       "packages/engine/src/plugin/openai/ws.ts",
       "packages/core/src/plugin/provider/google-vertex.ts",
       "packages/engine/src/plugin/snowflake-cortex.ts",
+      "packages/core/src/plugin/provider/snowflake-cortex.ts",
       "packages/engine/src/plugin/github-copilot/models.ts",
     ],
     note: "Allowed only when your company's policy lists the host, labelled Company endpoint (listed by your company)",
@@ -309,7 +310,11 @@ export const SOURCES: readonly Source[] = [
     why: "Signs you in to Vector and checks your licence",
     local: "blocked",
     where: ["engine", "desktop"],
-    callSites: ["packages/engine/src/cli/vector-account.ts", "packages/desktop/src/main/vector-account.ts"],
+    callSites: [
+      "packages/engine/src/cli/vector-account.ts",
+      "packages/engine/src/cli/cmd/github.app.ts",
+      "packages/desktop/src/main/vector-account.ts",
+    ],
   },
   {
     id: "teams",
@@ -505,6 +510,7 @@ export const SOURCES: readonly Source[] = [
     callSites: [
       "packages/engine/src/cli/cmd/github.shared.ts",
       "packages/engine/src/cli/cmd/github.handler.ts",
+      "packages/engine/src/cli/cmd/github.attachment.ts",
       "packages/engine/src/cli/cmd/review.ts",
       "packages/desktop/src/main/github-pr.ts",
       "packages/desktop/src/main/github-api.ts",
