@@ -58,7 +58,7 @@ describe("ResearchQuote.found", () => {
     })
   })
 
-  test("keeps superscripts, subscripts and fractions, so a different number is not word for word", () => {
+  test("keeps superscripts and fractions, so a different number is not word for word", () => {
     const trial = [
       {
         chunk: 1,
@@ -76,7 +76,6 @@ describe("ResearchQuote.found", () => {
       "Area grew to 3 km2 by 2020",
       `Efficacy was 1${char(0x2044)}2 of placebo`,
       "Efficacy was 1/2 of placebo",
-      "of placebo. CO2 fell.",
     ])
       expect({ quote, ok: quoted(quote).ok }).toEqual({ quote, ok: false })
     // The source's own form passes, and a superscript written after a caret reads as one.
@@ -87,7 +86,26 @@ describe("ResearchQuote.found", () => {
       quote: `dose was 5${char(0xd7)}10${char(0x207b, 0x2076)} mol per kg`,
     })
     expect(quoted(`Efficacy was ${char(0xbd)} of placebo`)).toMatchObject({ ok: true, chunk: 2 })
-    expect(quoted(`placebo. CO_2 fell.`)).toMatchObject({ ok: true, quote: `placebo. CO${char(0x2082)} fell.` })
+  })
+
+  test("folds subscripts, so a source's subscript 2 copied as a plain 2 is word for word", () => {
+    const climate = [
+      {
+        chunk: 1,
+        text: `Global CO${char(0x2082)} emissions fell by 10${char(0x2074)} tonnes in 2024, and H${char(0x2082)}O use by half.`,
+      },
+    ]
+    const quoted = (quote: string) => ResearchQuote.found({ source: "S4", parts: climate, quote })
+    // The note keeps the source's own words for the quote.
+    expect(quoted("CO2 emissions fell")).toEqual({ ok: true, chunk: 1, quote: `CO${char(0x2082)} emissions fell` })
+    expect(quoted(`Global CO${char(0x2082)} emissions`)).toMatchObject({ ok: true })
+    expect(quoted("CO2 emissions fell by 10^4 tonnes")).toMatchObject({
+      ok: true,
+      quote: `CO${char(0x2082)} emissions fell by 10${char(0x2074)} tonnes`,
+    })
+    expect(quoted("in 2024, and H2O use by half.")).toMatchObject({ ok: true })
+    // A superscript still is not its digits.
+    expect(quoted("CO2 emissions fell by 104 tonnes")).toMatchObject({ ok: false, reason: "missing" })
   })
 
   test("keeps case, so a quote with its capitals changed is not word for word", () => {

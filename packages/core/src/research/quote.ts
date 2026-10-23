@@ -7,27 +7,27 @@ import { WebFence } from "./fence"
 // 1. Is the quote in the source? It must be at least 12 characters and, once both are normalised (whitespace, curly
 //    quotes, dashes, ligatures, full-width and other compatibility forms, soft hyphens and other invisible
 //    characters), a substring of the source's saved, cleaned text. Case is kept: a quote with its capitals changed is
-//    not word for word. Superscripts, subscripts and fractions are kept too, since folding them makes another number
-//    (10\u2074 is not 104). This is what makes a citation real, so a quote that fails it is refused, and a note keeps
-//    the source's own words for its quote, not the agent's copy.
+//    not word for word. Superscripts and fractions are kept too, since folding them makes another number (10\u2074 is
+//    not 104). Subscripts are folded, since CO\u2082 and CO2 are the same words, the way PDF text and copies write
+//    them. This is what makes a citation real, so a quote that fails it is refused, and a note keeps the source's own
+//    words for its quote, not the agent's copy.
 // 2. Does the quote say the claim? `BrainLexical.states(claim, quote)`: every term of the claim, every value it gives
 //    and every "not" in it, in the quote. A note whose quote does not is saved as a paraphrase, which cannot make a
 //    section High confidence on its own.
 
 export const MIN_CHARS = 12
 
-// The characters Unicode decomposes as superscripts, subscripts and fractions (decomposition types super, sub and
-// fraction, Unicode 17), and the unit squares with a superscript in them (\u33A2 is km\u00B2). NFKC would fold 10\u2074
-// into 104 and 5\u00D710\u207B\u2076 into 5\u00D710-6, so a run of superscripts is written after a caret instead
-// (10^4, 10^-6, km^2), a run of subscripts after an underscore (CO_2), and a fraction or a unit square as itself.
+// The characters Unicode decomposes as superscripts and fractions (decomposition types super and fraction, Unicode
+// 17), and the unit squares with a superscript in them (\u33A2 is km\u00B2). NFKC would fold 10\u2074 into 104 and
+// 5\u00D710\u207B\u2076 into 5\u00D710-6, so a run of superscripts is written after a caret instead (10^4, 10^-6,
+// km^2), and a fraction or a unit square as itself. Subscripts (decomposition type sub) are left to NFKC, which writes
+// CO\u2082 as CO2: folding one does not make another number the way 10\u2074 and 104 do.
 const SUPERSCRIPT =
   "\u00AA\u00B2\u00B3\u00B9\u00BA\u02B0-\u02B8\u02E0-\u02E4\u10FC\u1D2C-\u1D2E\u1D30-\u1D3A\u1D3C-\u1D4D\u1D4F-\u1D61\u1D78\u1D9B-\u1DBF\u2070\u2071\u2074-\u207F\u2120\u2122\u2C7D\u2D6F\u3192-\u319F\uA69C\uA69D\uA770\uA7F1-\uA7F4\uA7F8\uA7F9\uAB5C-\uAB5F\uAB69\u{10781}-\u{10785}\u{10787}-\u{107B0}\u{107B2}-\u{107BA}\u{1E030}-\u{1E050}\u{1E06B}-\u{1E06D}\u{1F16A}-\u{1F16C}"
-const SUBSCRIPT = "\u1D62-\u1D6A\u2080-\u208E\u2090-\u209C\u2C7C\u{1E051}-\u{1E06A}"
 const KEPT = "\u00BC-\u00BE\u2150-\u215F\u2189\u3378\u3379\u339F-\u33A6\u33A8\u33AF"
 const RAISED = new RegExp(`^[${SUPERSCRIPT}]`, "u")
-const LOWERED = new RegExp(`^[${SUBSCRIPT}]`, "u")
 // Split on, so the runs and characters above are kept out of NFKC.
-const MARKED = new RegExp(`([${SUPERSCRIPT}]+|[${SUBSCRIPT}]+|[${KEPT}])`, "u")
+const MARKED = new RegExp(`([${SUPERSCRIPT}]+|[${KEPT}])`, "u")
 // What a quote's last character may carry after it: accents and other marks, and invisible characters.
 const TRAILING = /^[\p{M}\p{Default_Ignorable_Code_Point}]*/u
 
@@ -59,7 +59,6 @@ export function normalize(text: string) {
     .map((piece, index) => {
       if (index % 2 === 0) return piece.normalize("NFKC")
       if (RAISED.test(piece)) return `^${piece.normalize("NFKC")}`
-      if (LOWERED.test(piece)) return `_${piece.normalize("NFKC")}`
       return piece
     })
     .join("")
@@ -137,8 +136,11 @@ function shortest(max: number, test: (length: number) => boolean) {
   const state = { low: 0, high: max }
   while (state.low < state.high) {
     const middle = Math.floor((state.low + state.high) / 2)
-    if (test(middle)) state.high = middle
-    else state.low = middle + 1
+    if (test(middle)) {
+      state.high = middle
+      continue
+    }
+    state.low = middle + 1
   }
   return state.low
 }
