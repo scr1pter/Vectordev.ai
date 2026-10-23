@@ -1,5 +1,6 @@
 import { Database } from "@vectordevai/core/database/database"
 import { ResearchEstimate } from "@vectordevai/core/research/estimate"
+import { ResearchPlan } from "@vectordevai/core/research/plan"
 import { ResearchReader } from "@vectordevai/core/research/reader"
 import { ResearchSearch } from "@vectordevai/core/research/search"
 import { ResearchStore } from "@vectordevai/core/research/store"
@@ -9,7 +10,7 @@ import { ModelSlots } from "@vectordevai/core/local-mode/model-slots"
 import { isFreeModel } from "@vectordevai/schema/free-model"
 import { Research } from "@vectordevai/schema/research"
 import type { TaskSize } from "@vectordevai/schema/task-size"
-import { Effect, Option, Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { Auth } from "@/auth"
 import { Config } from "@/config/config"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -70,13 +71,6 @@ type Metadata = {
   source?: "user"
 }
 
-const START = "Start"
-const START_DEEP = "Start deep"
-const CANCEL = "Cancel"
-const PREFIX = "vector-plan:"
-const APPROVAL =
-  /^(?:please[\s,]+)?(?:ok(?:ay)?|yes|yeah|yep|yup|sure|start(?: it)?|go(?: ahead)?|go for it|do it|sounds good|looks good|lgtm|approved?)(?:[\s,]+(?:please|thanks|thank you))?[\s.!]*$/i
-const decodeAnswer = Schema.decodeUnknownOption(Schema.fromJsonString(Research.PlanAnswer))
 // A base prompt to estimate with before the session has measured one on this model.
 const BASE_PROMPT = 12_000
 
@@ -129,8 +123,8 @@ export const ResearchPlanTool = Tool.define<
             subquestions: params.subquestions.map((item) => item.trim()),
             scope: offline ? "brain" : (chosen.scope ?? params.scope),
             depth: params.depth,
-            ...domains("prefer_domains", params.prefer_domains, cfg.research?.domains?.prefer),
-            ...domains("avoid_domains", params.avoid_domains, cfg.research?.domains?.avoid),
+            ...ResearchPlan.domains("prefer_domains", params.prefer_domains, cfg.research?.domains?.prefer),
+            ...ResearchPlan.domains("avoid_domains", params.avoid_domains, cfg.research?.domains?.avoid),
             ...(params.format ? { format: params.format } : {}),
             ...(params.time_window ? { time_window: params.time_window } : {}),
             ...(params.status ? { status: params.status.slice(0, params.subquestions.length) } : {}),
@@ -139,7 +133,7 @@ export const ResearchPlanTool = Tool.define<
           // A call that only moves the sub-questions of the approved plan along.
           const found = yield* research.current(ctx)
           const approved = "refused" in found ? undefined : found
-          if (approved && same(approved.plan, plan)) {
+          if (approved && ResearchPlan.same(approved.plan, plan)) {
             const next = { ...approved.plan, ...(plan.status ? { status: plan.status } : {}) }
             yield* store.plan(place, approved.run.id, next)
             return {
@@ -175,7 +169,7 @@ export const ResearchPlanTool = Tool.define<
                 ? ceiling
                 : !lead.parentID && focused(ctx)
                   ? "focused"
-                  : deeper(plan.depth, ceiling),
+                  : ResearchPlan.deeper(plan.depth, ceiling),
           }
           const provider = searchProvider(
             cfg.research,
@@ -227,16 +221,16 @@ export const ResearchPlanTool = Tool.define<
                   question: card(proposed, estimate, provider, offline),
                   header: "Research plan",
                   options: [
-                    { label: START, description: `Research at this depth (${proposed.depth})` },
+                    { label: ResearchPlan.START, description: `Research at this depth (${proposed.depth})` },
                     ...(ceiling === "deep" && proposed.depth !== "deep"
                       ? [
                           {
-                            label: START_DEEP,
+                            label: ResearchPlan.START_DEEP,
                             description: "Up to 4 researchers and a judge that checks the citations",
                           },
                         ]
                       : []),
-                    { label: CANCEL, description: "Stop without searching or reading anything" },
+                    { label: ResearchPlan.CANCEL, description: "Stop without searching or reading anything" },
                   ],
                   custom: true,
                 },
@@ -252,7 +246,7 @@ export const ResearchPlanTool = Tool.define<
                 "The user dismissed the plan card, so nothing was searched or read. Ask what they would like changed, or wait for them.",
               metadata: { plan: proposed, approved: false, answer: "cancel" as const, estimate },
             }
-          const decided = decide(reply, proposed, ceiling, offline)
+          const decided = ResearchPlan.decide(reply, proposed, ceiling, offline)
           if (decided.type === "cancel") {
             return {
               title: "Research cancelled",
@@ -391,69 +385,13 @@ function measured(ctx: Tool.Context) {
   return tokens > 0 ? tokens : undefined
 }
 
-// The plan's sites with the user's own, each once.
-function domains(key: "prefer_domains" | "avoid_domains", proposed?: readonly string[], own?: readonly string[]) {
-  const all = [
-    ...new Set([...(proposed ?? []), ...(own ?? [])].map((item) => item.trim().toLowerCase()).filter(Boolean)),
-  ]
-  return all.length ? { [key]: all.slice(0, 50) } : {}
-}
-
-// The same question and sub-questions: what a call that only changes their status sends.
-function same(left: Research.Plan, right: Research.Plan) {
-  return (
-    left.question === right.question &&
-    left.subquestions.length === right.subquestions.length &&
-    left.subquestions.every((item, index) => item === right.subquestions[index])
-  )
-}
-
-function deeper(depth: Research.Depth, ceiling: Research.Depth): Research.Depth {
-  return depth === "deep" && ceiling === "deep" ? "deep" : "focused"
-}
-
-// What the user's answer on the plan card means. `vector-plan:{json}` is the card's own answer, with any fields the
-// user edited and those they asked Vector to remember; any other text is a steer. With Web access None an edited scope
-// stays the brain.
-function decide(reply: string, plan: Research.Plan, ceiling: Research.Depth, offline: boolean) {
-  if (reply === START) return { type: "start", answer: "start", plan, always: [] } as const
-  if (reply === START_DEEP)
-    return {
-      type: "start",
-      answer: "start-deep",
-      plan: { ...plan, depth: deeper("deep", ceiling) },
-      always: [],
-    } as const
-  if (reply === CANCEL) return { type: "cancel" } as const
-  // A bare approval typed on the card ("ok", "yes", "go ahead") starts the plan as it is (section 5.2); a reply that asks
-  // for anything more is a steer.
-  if (APPROVAL.test(reply)) return { type: "start", answer: "start", plan, always: [] } as const
-  if (!reply.startsWith(PREFIX)) return { type: "steer" } as const
-  const decoded = decodeAnswer(reply.slice(PREFIX.length))
-  if (Option.isNone(decoded)) return { type: "steer" } as const
-  const answer = decoded.value
-  if (answer.action === "cancel") return { type: "cancel" } as const
-  const edited: Research.Plan = {
-    ...plan,
-    ...answer.plan,
-    ...(offline ? { scope: "brain" as const } : {}),
-    depth: answer.action === "start-deep" ? deeper("deep", ceiling) : plan.depth,
-  }
-  return {
-    type: "start",
-    answer: answer.action,
-    plan: edited,
-    always: [...(answer.always ?? [])],
-  } as const
-}
-
 // What the plan card shows: the plan, its scope and depth, the estimate, and what search is set up, or that Vector
 // Local's Web access is None.
 function card(plan: Research.Plan, estimate: string, provider: ReturnType<typeof searchProvider>, offline: boolean) {
   return [
     `Research: ${plan.question}`,
     ...plan.subquestions.map((item, index) => `${index + 1}. ${item}`),
-    `Scope: ${scopeLabel(plan.scope)}`,
+    `Scope: ${ResearchPlan.scopeLabel(plan.scope)}`,
     `Depth: ${plan.depth === "deep" ? "Deep: up to 4 researchers and a judge" : "Focused: one agent, plus up to 2 researchers when the question has independent parts"}`,
     ...(plan.prefer_domains?.length ? [`Prefer: ${plan.prefer_domains.join(", ")}`] : []),
     ...(plan.avoid_domains?.length ? [`Avoid: ${plan.avoid_domains.join(", ")}`] : []),
@@ -463,12 +401,6 @@ function card(plan: Research.Plan, estimate: string, provider: ReturnType<typeof
     ...(offline ? [ResearchRun.OFFLINE] : []),
     ...(provider.provider === "none" && plan.scope !== "brain" ? [provider.reason ?? ResearchSearch.NONE] : []),
   ].join("\n")
-}
-
-function scopeLabel(scope: Research.Scope) {
-  if (scope === "web") return "the web"
-  if (scope === "brain") return "this repository's brain and files"
-  return "the web and this repository's brain"
 }
 
 function approvedText(input: {

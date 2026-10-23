@@ -289,15 +289,6 @@ export const ResearchSearchTool = Tool.define<
               metadata: { runID, query, provider: provider.provider },
             }
           const read = new Map(found.detail.sources.map((source) => [source.canonical_url, source.id]))
-          const listed = results.items.map((item, index) => {
-            const known = read.get(ResearchCanonical.canonical(item.url) ?? "")
-            return [
-              `${index + 1}. ${item.title}${known ? ` (already read as ${known})` : ""}`,
-              `   ${item.url}`,
-              ...(item.published ? [`   published ${item.published}`] : []),
-              ...(item.snippet ? [`   ${item.snippet}`] : []),
-            ].join("\n")
-          })
           const billed =
             provider.provider === "exa" || provider.provider === "parallel"
               ? [
@@ -312,10 +303,7 @@ export const ResearchSearchTool = Tool.define<
           return {
             title: `Searched: ${query}`,
             output: results.items.length
-              ? `${results.items.length} result${results.items.length === 1 ? "" : "s"}. Read the useful ones with research_read.${billed}\n${WebFence.fenceWebPage(
-                  { title: `Search results: ${query}`, tool: "research_search" },
-                  listed.join("\n"),
-                )}`
+              ? `${results.items.length} result${results.items.length === 1 ? "" : "s"}. Read the useful ones with research_read.${billed}\n${ResearchSearch.listing(query, results.items, read)}`
               : `No results. Try other words, or a broader query.${billed}`,
             metadata: {
               runID,

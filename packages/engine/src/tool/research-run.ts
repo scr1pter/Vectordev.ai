@@ -6,18 +6,16 @@ import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { BrainSchema } from "@vectordevai/core/brain/schema"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
-import { Egress } from "@vectordevai/core/local-mode/egress"
-import { EgressGuard } from "@vectordevai/core/local-mode/guard"
 import { EgressHttpClient } from "@vectordevai/core/local-mode/http-client"
-import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import { ResearchNetwork } from "@vectordevai/core/research/network"
 import { ResearchOutbound } from "@vectordevai/core/research/outbound"
+import { ResearchPlan } from "@vectordevai/core/research/plan"
 import { ResearchProvenance } from "@vectordevai/core/research/provenance"
 import { ResearchRate } from "@vectordevai/core/research/rate"
 import { ResearchReader } from "@vectordevai/core/research/reader"
 import { ResearchRobots } from "@vectordevai/core/research/robots"
 import { ResearchStore } from "@vectordevai/core/research/store"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
-import type { WebFetchRequest } from "@vectordevai/core/util/webfetch-request"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { Location } from "@vectordevai/core/location"
 import { LocationServiceMap, locationServiceMapLayer } from "@vectordevai/core/location-services"
@@ -26,7 +24,6 @@ import { AbsolutePath } from "@vectordevai/core/schema"
 import { Research } from "@vectordevai/schema/research"
 import type { RunBudget } from "@vectordevai/schema/run-budget"
 import { Context, Effect, Layer, Option, Schema, Scope, Semaphore } from "effect"
-import { lookup } from "node:dns/promises"
 import { HttpClient } from "effect/unstable/http"
 import { Config } from "@/config/config"
 import { InstanceState } from "@/effect/instance-state"
@@ -67,28 +64,17 @@ export const OPTIONS = "vector.research"
 export const GATE = "researchJudgeGate"
 
 /** Caps for one run: its spend and steps, the pages and searches the store counts, and its researchers. */
-export type Limits = {
-  readonly usd: number
-  readonly steps: number
-  readonly pages: number
-  readonly searches: number
-  readonly researchers: number
-}
+export type Limits = ResearchPlan.Limits
 
 /** Default caps for one run, used only when the user has no cap of their own (section 11.2). */
-export const LIMITS: Readonly<Record<Research.Depth, Limits>> = {
-  focused: { usd: 1, steps: 80, pages: 15, searches: 8, researchers: 2 },
-  deep: { usd: 3, steps: 240, pages: 40, searches: 24, researchers: 4 },
-}
+export const LIMITS = ResearchPlan.LIMITS
 
 /** What a researcher hands back to the lead, at most (section 5.3). */
 export const RETURN_CHARS = 1_500
 
-export const NO_PLAN =
-  "Plan the research with research_plan first: nothing is searched or read before the plan is approved."
-export const STOPPED = "This research was stopped. Plan a new run with research_plan only if the user asks for one."
-export const READ_APPROVAL =
-  "Read public pages for this research? Vector reads only pages from search results, links on pages it read, and addresses you typed. This approval lasts for this research only."
+export const NO_PLAN = ResearchPlan.NO_PLAN
+export const STOPPED = ResearchPlan.STOPPED
+export const READ_APPROVAL = ResearchPlan.READ_APPROVAL
 export const REQUEST_REFUSAL =
   "That research request would send text from what this session read. Rephrase the question with public terms, or ask the user to type the words they want researched."
 export const BRIEF_REFUSAL =
@@ -98,8 +84,7 @@ export const LEAD_ONLY =
 export const WARNED =
   "Run Guard warned that this run is close to its cap, so no new researcher starts. Write the report from what the run has, or resume a researcher with task_id."
 
-export const OFFLINE =
-  "Vector Local's Web access is None, so this research uses this repository's brain and files only: it searches and reads nothing on the web."
+export const OFFLINE = ResearchPlan.OFFLINE
 export const OFFLINE_RESEARCHERS =
   "Vector Local's Web access is None, so research has no web workers. Answer the sub-question from this repository's brain and files yourself."
 
@@ -107,14 +92,11 @@ export const OFFLINE_RESEARCHERS =
 export const NETWORK_TOOLS: readonly string[] = ["research_search", "research_read", "research_browser"]
 
 /**
- * Whether Vector Local is on with Web access None, as it also is while the policy is still being resolved. Research
- * then uses the brain and the repository's files only (section 5.9): its plan's scope is the brain whatever was
- * proposed, its network tools are not offered, and the lead launches no researchers, whose work is the web.
+ * Whether Vector Local is on with Web access None (section 5.9). Research then uses the brain and the repository's
+ * files only: its plan's scope is the brain whatever was proposed, its network tools are not offered, and the lead
+ * launches no researchers, whose work is the web.
  */
-export function offline() {
-  const policy = Egress.policy()
-  return policy.enabled && policy.web === "none"
-}
+export const offline = ResearchPlan.offline
 
 /** Whether a research tool is kept from research agents now: a network tool while Web access is None. */
 export function withheld(tool: string) {
@@ -126,35 +108,10 @@ const LIMITERS = 16
 // How deep a session tree is walked: to the session the user types in, and down through subagents.
 const DEPTH = 4
 
-/**
- * The network research reads through. Production resolves names with the system's resolver; tests give the fake web's
- * resolver and its domain as public names, as the reader's own tests do.
- */
-export type Network = {
-  readonly resolver?: WebFetchRequest.DestinationResolver
-  readonly publicNames?: readonly string[]
-}
-export class NetworkService extends Context.Service<NetworkService, Network>()("@vector/ResearchNetwork") {}
-export const networkNode = LayerNode.make({
-  service: NetworkService,
-  layer: Layer.sync(NetworkService, pinned),
-  deps: [],
-})
-
-// A test's child process in strict mode (a source checkout only, never under Vector Local, as
-// EgressGuard.strictFromEnvironment decides) reaches the names it pinned on this computer, as the strict guard does, and
-// reads them as public, as the in-process tests read the fake web. Everywhere else: nothing, the system's resolver.
-function pinned(): Network {
-  const names = EgressGuard.strictFromEnvironment()?.names ?? []
-  if (names.length === 0) return {}
-  return {
-    resolver: (hostname) =>
-      names.some((name) => LocalPolicy.domainMatches(hostname, name))
-        ? Promise.resolve([{ address: "127.0.0.1", family: 4 }])
-        : lookup(hostname, { all: true, verbatim: true }),
-    publicNames: names,
-  }
-}
+/** The network research reads through, shared with the V2 runner's research tools. */
+export type Network = ResearchNetwork.Network
+export const NetworkService = ResearchNetwork.Service
+export const networkNode = ResearchNetwork.node
 
 /** The run a research tool call works in. */
 export type Found = {
@@ -921,12 +878,7 @@ function refusal(message: string, checked: Extract<ResearchOutbound.Result, { ok
     : `${message} It shares "${checked.match}".`
 }
 
-const normal = (domain: string) =>
-  domain
-    .trim()
-    .toLowerCase()
-    .replace(/^\*?\.|\.$/g, "")
-    .replace(/^www\./, "")
+const normal = ResearchPlan.normal
 
 const text = (file: string) =>
   Effect.promise(() =>
