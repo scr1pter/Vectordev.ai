@@ -1,0 +1,235 @@
+import { afterAll, expect } from "bun:test"
+import { Effect } from "effect"
+import type { PermissionV1 } from "@vectordevai/core/v1/permission"
+import { ResearchOutbound } from "@vectordevai/core/research/outbound"
+import { ResearchProvenance } from "@vectordevai/core/research/provenance"
+import { ResearchStore } from "@vectordevai/core/research/store"
+import { Permission } from "../../src/permission"
+import { Question } from "../../src/question"
+import { Session } from "@/session/session"
+import { AFTER_HANDOFF, CONTINUE, HANDOFF_QUESTION, NO_IMAGES, RESEARCH_ONLY } from "../../src/tool/browser"
+import { ResearchRun } from "../../src/tool/research-run"
+import { FakeBridge } from "../lib/fake-bridge"
+import { calls, output, plan, runtime, send, setup } from "../lib/research"
+import { FakeWeb } from "../../../core/test/lib/fake-web"
+import { NetworkGuard } from "../../../core/test/lib/network-guard"
+
+// The user's visible agent browser's new actions (section 5.6): read, links, find, observe with ref_N handles, a click
+// by ref, and handoff, which shows the page in Preview and waits on a question until the user presses Continue. In
+// Deep research the lead may only hand a page over and then read the page the user reached; that page is a private
+// source of the run, read signed in. The desktop is a fake bridge on loopback.
+
+const guard = NetworkGuard.use()
+const web = FakeWeb.start({ sites: FakeWeb.sites() })
+const bridge = FakeBridge.start()
+const pointed = FakeBridge.use(bridge)
+const it = runtime(web, { client: "app" })
+afterAll(async () => {
+  pointed.off()
+  await bridge.close()
+  await web.close()
+})
+
+const LOGIN = "http://localhost:4000/login"
+const SIGNED_IN = `<!doctype html><html><head><title>Inside the heat pump supply chain</title></head><body><main><h1>Inside the heat pump supply chain</h1><p>Members only: the compressor makers plan to raise prices by nine percent next spring for every installer.</p><p>Three countries supply most of the market.</p></main></body></html>`
+
+// A visible browser that shows `current` and moves only when told to.
+const visible = (start = "") => {
+  const state = { current: start }
+  return {
+    state,
+    handler: (call: FakeBridge.Call) => {
+      const body = call.body
+      if (body.command === "openUrl") state.current = String(body.url)
+      if (body.command === "readPage")
+        return FakeBridge.visible({
+          url: state.current,
+          title: "Inside the heat pump supply chain",
+          page: { html: SIGNED_IN, title: "Inside the heat pump supply chain", url: state.current, links: [{ url: "https://journal.example/next", text: "Next", main: true }], forms: [], truncated: false },
+        })
+      if (body.command === "observePage")
+        return FakeBridge.visible({
+          url: state.current,
+          observed: { title: "Docs", url: state.current, text: "Welcome to the docs", elements: [{ ref: "ref_1", role: "link", name: "Guides", tag: "a", href: "http://localhost:4000/guides" }] },
+        })
+      return FakeBridge.visible({ url: state.current, title: "Page", target: { found: true, label: "Guides" } })
+    },
+  }
+}
+
+// Answers each handoff with `reply`, a research plan card with Start, and each permission once, keeping what was asked.
+const answer = (reply: string) =>
+  Effect.gen(function* () {
+    const question = yield* Question.Service
+    const permission = yield* Permission.Service
+    const asked = { questions: [] as Question.Request[], permissions: [] as PermissionV1.Request[] }
+    yield* Effect.gen(function* () {
+      while (true) {
+        for (const request of yield* question.list()) {
+          const plan = request.questions[0]?.header === "Research plan"
+          if (!plan) asked.questions.push(request)
+          yield* question.reply({ requestID: request.id, answers: [[plan ? "Start" : reply]] }).pipe(Effect.ignore)
+        }
+        for (const request of yield* permission.list()) {
+          asked.permissions.push(request)
+          yield* permission.reply({ requestID: request.id, reply: "once" }).pipe(Effect.ignore)
+        }
+        yield* Effect.sleep(10)
+      }
+    }).pipe(Effect.forkScoped)
+    return asked
+  })
+
+const commands = (from: number) =>
+  bridge
+    .calls()
+    .slice(from)
+    .filter((call) => call.path === "/command")
+    .map((call) => String(call.body.command))
+
+it.instance(
+  "handoff opens the page, asks the user, and resumes on Continue; read then reads the page they reached",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web)
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "Dashboard" })
+      bridge.answer(visible().handler)
+      const asked = yield* answer(CONTINUE)
+      const before = bridge.calls().length
+      yield* test.llm.tool("browser", { action: "handoff", url: LOGIN, reason: "Sign in to the staging dashboard." })
+      yield* test.llm.tool("browser", { action: "read" })
+      yield* test.llm.text("Done.")
+      yield* send({ sessionID: session.id, agent: "build", text: "Check the staging dashboard's numbers." })
+      const [handoff, read] = yield* calls(session.id, "browser")
+      expect(asked.questions).toHaveLength(1)
+      expect(asked.questions[0]!.questions[0]).toMatchObject({
+        header: "Browser handoff",
+        question: `Sign in to the staging dashboard.\n\n${HANDOFF_QUESTION}`,
+      })
+      expect(asked.questions[0]!.tool?.callID).toBeTruthy()
+      expect(output(handoff)).toContain("The user finished in the browser.")
+      expect(handoff?.state.status === "completed" ? handoff.state.metadata : {}).toMatchObject({
+        action: "handoff",
+        handoff: "continued",
+        url: LOGIN,
+      })
+      expect(output(read)).toContain("chunk 1 of 1")
+      expect(output(read)).toContain("the compressor makers plan to raise prices")
+      expect(output(read)).toContain("untrusted_web_page")
+      expect(commands(before)).toEqual(["openUrl", "inspectDom", "inspectDom", "readPage"])
+    }),
+  90_000,
+)
+
+it.instance(
+  "a cancelled handoff carries on without the page",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web)
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "Dashboard" })
+      bridge.answer(visible().handler)
+      yield* answer("Cancel")
+      yield* test.llm.tool("browser", { action: "handoff", url: LOGIN, reason: "Sign in." })
+      yield* test.llm.text("Done.")
+      yield* send({ sessionID: session.id, agent: "build", text: "Check the staging dashboard." })
+      const [handoff] = yield* calls(session.id, "browser")
+      expect(output(handoff)).toContain("did not continue")
+      expect(handoff?.state.status === "completed" ? handoff.state.metadata.handoff : undefined).toBe("cancelled")
+    }),
+  90_000,
+)
+
+it.instance(
+  "observe gives ref handles, a click by ref uses trusted input, and screenshots wait for a model that reads images",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web)
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "Docs" })
+      bridge.answer(visible("http://localhost:4000/").handler)
+      const before = bridge.calls().length
+      yield* test.llm.tool("browser", { action: "observe" })
+      yield* test.llm.tool("browser", { action: "click", ref: "ref_1" })
+      yield* test.llm.tool("browser", { action: "screenshot" })
+      yield* test.llm.text("Done.")
+      yield* send({ sessionID: session.id, agent: "build", text: "Look at the local docs." })
+      const [observe, click, shot] = yield* calls(session.id, "browser")
+      expect(output(observe)).toContain('ref_1 link "Guides" → http://localhost:4000/guides')
+      expect(click?.state.status).toBe("completed")
+      expect(output(shot)).toBe(NO_IMAGES)
+      expect(commands(before)).toEqual(["inspectDom", "observePage", "inspectDom", "clickRef"])
+      // The click asked the desktop for the name of what the ref would press, by the ref.
+      const named = bridge
+        .calls()
+        .slice(before)
+        .filter((call) => call.body.command === "inspectDom")
+        .at(-1)
+      expect(named?.body.ref).toBe("ref_1")
+    }),
+  90_000,
+)
+
+it.instance(
+  "in Deep research the lead hands a page over and reads only the page the user reached, as a private source",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web)
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({
+        title: "Research",
+        permission: [{ permission: "research_read", pattern: "*", action: "allow" }],
+      })
+      const paywall = web.url("paywall", "/")
+      const browser = visible("about:blank")
+      bridge.answer(browser.handler)
+      const asked = yield* answer(CONTINUE)
+      const before = bridge.calls().length
+      yield* test.llm.tool("research_plan", plan())
+      yield* test.llm.tool("browser", { action: "open_url", url: paywall })
+      yield* test.llm.tool("browser", { action: "read" })
+      yield* test.llm.tool("browser", { action: "handoff", url: "https://elsewhere.example/members" })
+      yield* test.llm.tool("browser", { action: "handoff", url: paywall, reason: "The article is for subscribers." })
+      yield* test.llm.tool("browser", { action: "read" })
+      // Words of the signed-in page are private: they do not go into a search.
+      yield* test.llm.tool("research_search", { query: "compressor makers plan to raise prices by nine percent" })
+      yield* test.llm.text("Done.")
+      yield* send({ sessionID: session.id, agent: "research", text: `Research heat pump supply prices: ${paywall}` })
+
+      const browsed = yield* calls(session.id, "browser")
+      expect(output(browsed[0])).toBe(RESEARCH_ONLY)
+      expect(output(browsed[1])).toBe(AFTER_HANDOFF)
+      expect(output(browsed[2])).toContain(ResearchProvenance.REFUSAL)
+      expect(output(browsed[3])).toContain("The user finished in the browser.")
+      // Opening the page in the user's browser asked first, by its origin.
+      expect(asked.permissions.map((request) => request.permission)).toContain("browser_external")
+      expect(output(browsed[4])).toContain("S1 · ")
+      expect(output(browsed[4])).toContain("read in your own signed-in browser")
+      expect(browsed[4]?.state.status === "completed" ? browsed[4].state.metadata : {}).toMatchObject({
+        private: true,
+        source: "S1",
+      })
+      const [search] = yield* calls(session.id, "research_search")
+      expect(output(search)).toContain(ResearchOutbound.REFUSAL.slice(0, 30))
+      // The source is the run's, private and read signed in.
+      const research = yield* ResearchRun.Service
+      const store = yield* ResearchStore.Service
+      const place = yield* research.place()
+      const runID = browsed[4]?.state.status === "completed" ? String(browsed[4].state.metadata.runID) : ""
+      const saved = yield* store.source(place, runID, "S1")
+      expect(saved?.private).toBe(true)
+      expect(saved?.source.signals?.signed_in).toBe(true)
+      // No open_url, click, type or press reached the user's browser.
+      expect(commands(before)).toEqual(["openUrl", "inspectDom", "inspectDom", "readPage"])
+      expect(guard.outside()).toEqual([])
+
+      // Once the user's browser shows another page, the lead reads nothing more there.
+      browser.state.current = "https://bank.example/accounts"
+      yield* test.llm.tool("browser", { action: "read" })
+      yield* test.llm.text("Done.")
+      yield* send({ sessionID: session.id, agent: "research", text: "Carry on." })
+      expect(output((yield* calls(session.id, "browser")).at(-1))).toBe(AFTER_HANDOFF)
+    }),
+  120_000,
+)
