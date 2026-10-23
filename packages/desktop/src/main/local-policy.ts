@@ -14,10 +14,13 @@ import { LocalStartup } from "@vectordevai/core/local-mode/startup"
 
 /** Resolves this process's Vector Local policy from the desktop's own folders; preferAppEnv must have run. */
 export function resolveDesktopLocal(userData: string) {
-  return Egress.configure(
-    LocalStartup.policy({
-      config: join(process.env.XDG_CONFIG_HOME ?? join(userData, "xdg-config"), "vector"),
-      state: join(process.env.XDG_STATE_HOME ?? join(userData, "xdg-state"), "vector"),
-    }),
-  )
+  return Egress.configure(LocalStartup.policy(desktopLocalFolders(userData)))
+}
+
+/** The folders the desktop's engine reads Vector Local from: its global config folder and its state folder. */
+export function desktopLocalFolders(userData: string) {
+  return {
+    config: join(process.env.XDG_CONFIG_HOME ?? join(userData, "xdg-config"), "vector"),
+    state: join(process.env.XDG_STATE_HOME ?? join(userData, "xdg-state"), "vector"),
+  }
 }
