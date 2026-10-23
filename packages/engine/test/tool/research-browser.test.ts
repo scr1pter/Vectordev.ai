@@ -521,7 +521,7 @@ it.instance(
 )
 
 it.instance(
-  "with Vector Local's Web access set to None, a research browser opens nothing, whatever the desktop's proxy holds",
+  "with Vector Local's Web access set to Your network, a research browser opens no site on the internet, whatever the desktop's proxy holds",
   () =>
     Effect.gen(function* () {
       const test = yield* setup(web)
@@ -541,8 +541,9 @@ it.instance(
           Config.refreshLocal()
           Config.confirmLocal()
         })
-      // The fake model server is on the list of model servers, as a company's own would be.
-      yield* local({ enabled: true, web: "none", endpoints: [new URL(test.llm.url).origin] })
+      // The fake model server is on the list of model servers, as a company's own would be. Web access None would not
+      // offer research_browser at all (research-offline.test.ts); Your network still offers it, and refuses this site.
+      yield* local({ enabled: true, web: "network", endpoints: [new URL(test.llm.url).origin] })
       yield* send({
         sessionID: session.id,
         agent: "research",

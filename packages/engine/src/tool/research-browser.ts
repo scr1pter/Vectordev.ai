@@ -315,6 +315,14 @@ export const ResearchBrowserTool = Tool.define<
               output: ResearchSource.SCOPE,
               metadata: { runID, action, refused: "scope" as const },
             }
+          // Not offered with Vector Local's Web access None; a run that began before it was set reaches no more pages,
+          // though its browser may still be closed.
+          if (action !== "close" && ResearchRun.offline())
+            return {
+              title: "Not done",
+              output: ResearchRun.OFFLINE,
+              metadata: { runID, action, refused: "offline" as const },
+            }
           if (!available())
             return { title: "Needs the desktop browser", output: NEEDS_DESKTOP, metadata: { runID, action } }
           const model = ctx.extra?.model as Provider.Model | undefined

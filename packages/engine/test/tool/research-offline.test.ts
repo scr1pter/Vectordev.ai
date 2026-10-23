@@ -7,6 +7,7 @@ import { Global } from "@vectordevai/core/global"
 import type { ConfigLocalV1 } from "@vectordevai/core/v1/config/local"
 import { Config } from "@/config/config"
 import { Session } from "@/session/session"
+import { ResearchBrowserTool } from "../../src/tool/research-browser"
 import { ResearchReadTool } from "../../src/tool/research-read"
 import { ResearchRun } from "../../src/tool/research-run"
 import { ResearchSearchTool } from "../../src/tool/research-search"
@@ -26,7 +27,7 @@ const web = FakeWeb.start({ sites: FakeWeb.sites() })
 const it = runtime(web)
 afterAll(() => web.close())
 
-const NETWORK = ["research_read", "research_search"]
+const NETWORK = ["research_read", "research_search", "research_browser"]
 const toolNames = (body: string) =>
   ((JSON.parse(body) as { tools?: { function?: { name?: string } }[] }).tools ?? []).flatMap((tool) =>
     tool.function?.name ? [tool.function.name] : [],
@@ -149,13 +150,16 @@ it.instance(
       // The fetch the tools would read the web with, which none of these calls reaches.
       const search = yield* (yield* ResearchSearchTool.pipe(Effect.provide(FetchHttpClient.layer))).init()
       const read = yield* (yield* ResearchReadTool.pipe(Effect.provide(FetchHttpClient.layer))).init()
-      const [searched, page] = yield* Effect.all([
+      const browser = yield* (yield* ResearchBrowserTool).init()
+      const [searched, page, opened] = yield* Effect.all([
         search.execute({ query: "heat pump field study savings" }, ctx),
         read.execute({ url: web.url("article", "/") }, ctx),
+        browser.execute({ action: "open", url: web.url("article", "/") }, ctx),
       ]).pipe(Effect.ensuring(off()))
 
       expect([searched.output, searched.metadata.refused]).toEqual([ResearchRun.OFFLINE, "offline"])
       expect([page.output, page.metadata.refused]).toEqual([ResearchRun.OFFLINE, "offline"])
+      expect([opened.output, opened.metadata.refused]).toEqual([ResearchRun.OFFLINE, "offline"])
       expect(web.hits().filter((hit) => hit.site === "searxng" || hit.site === "article")).toEqual([])
     }),
   120_000,
