@@ -96,6 +96,27 @@ export function policy(input: Input = {}): LocalMode.Policy {
   }
 }
 
+/** Whether a company policy file is in one of the managed folders, readable or not. */
+export function managed(input: Input = {}) {
+  return locations(input).managed.some((file) => existsSync(file))
+}
+
+/**
+ * The certificate files `local.ca.files` names, for the desktop's main process and its engine to add to the system and
+ * default certificates: the company policy's, then the user's own config's unless the company locks Vector Local. A
+ * relative path is read from the folder of the file that names it. The overrides and the environment name none, since
+ * a certificate trusts more rather than less.
+ */
+export function ca(input: Input = {}) {
+  const files = locations(input)
+  const named = (file: string, found: ConfigLocalV1.Info | "undecodable" | undefined) =>
+    decoded(found) ? (found.ca?.files ?? []).map((item) => path.resolve(path.dirname(file), item)) : []
+  const company = files.managed.map((file) => ({ file, found: managedBlock(file) }))
+  const lock = company.some((item) => decoded(item.found) && item.found.lock === true)
+  const user = lock ? [] : files.user.map((file) => ({ file, found: block(text(file)) }))
+  return [...new Set([...company, ...user].flatMap((item) => named(item.file, item.found)))]
+}
+
 // The files each source is read from: the managed folders, the user's own config, and the overrides that may only
 // tighten it, with the state folder that keeps the block the owner last let apply.
 function locations(input: Input) {

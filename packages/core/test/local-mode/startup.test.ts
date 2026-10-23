@@ -196,3 +196,51 @@ describe("LocalStartup.policy", () => {
     expect(LocalStartup.policy({ ...input, env: {}, platform: "darwin" })).toMatchObject({ enabled: false })
   })
 })
+
+describe("LocalStartup.managed", () => {
+  test("is whether a company policy file is in a managed folder", async () => {
+    await using dir = await tmpdir()
+    const input = folders(dir.path)
+    expect(LocalStartup.managed({ ...input, env: {} })).toBe(false)
+    write(path.join(input.config, "vector.json"), JSON.stringify({ local: { enabled: true } }))
+    expect(LocalStartup.managed({ ...input, env: {} })).toBe(false)
+    write(path.join(input.managed[0]!, "vector.json"), JSON.stringify({ share: "disabled" }))
+    expect(LocalStartup.managed({ ...input, env: {} })).toBe(true)
+  })
+})
+
+describe("LocalStartup.ca", () => {
+  test("names the company's certificate files, then the user's, read from the folder of the file that names them", async () => {
+    await using dir = await tmpdir()
+    const input = folders(dir.path)
+    expect(LocalStartup.ca({ ...input, env: {} })).toEqual([])
+    write(path.join(input.managed[0]!, "vector.json"), JSON.stringify({ local: { ca: { files: ["corp-root.pem"] } } }))
+    write(
+      path.join(input.config, "vector.jsonc"),
+      `{
+        // the lab's own root, written with a comment and an absolute path
+        "local": { "ca": { "files": [${JSON.stringify(path.join(dir.path, "lab.pem"))}, "../corp-root-copy.pem",] } },
+      }`,
+    )
+    expect(LocalStartup.ca({ ...input, env: {} })).toEqual([
+      path.join(input.managed[0]!, "corp-root.pem"),
+      path.join(dir.path, "lab.pem"),
+      path.join(dir.path, "corp-root-copy.pem"),
+    ])
+  })
+
+  test("reads only the company's files under a lock, and none from the environment or a block it cannot decode", async () => {
+    await using dir = await tmpdir()
+    const input = folders(dir.path)
+    const user = path.join(dir.path, "user.pem")
+    const corp = path.join(dir.path, "corp.pem")
+    write(path.join(input.config, "vector.json"), JSON.stringify({ local: { ca: { files: [user] } } }))
+    write(path.join(input.config, "config.json"), `{ "local": { "ca": 7 } }`)
+    const env = {
+      VECTOR_CONFIG_CONTENT: JSON.stringify({ local: { ca: { files: [path.join(dir.path, "env.pem")] } } }),
+    }
+    expect(LocalStartup.ca({ ...input, env })).toEqual([user])
+    write(path.join(input.managed[0]!, "vector.json"), JSON.stringify({ local: { lock: true, ca: { files: [corp] } } }))
+    expect(LocalStartup.ca({ ...input, env })).toEqual([corp])
+  })
+})
