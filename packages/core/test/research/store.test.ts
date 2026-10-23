@@ -302,6 +302,46 @@ describe("ResearchStore sources", () => {
     expect(result.detail?.run.pages).toBe(2)
   })
 
+  test("a public read after a signed-in one is a source of its own, never answered with the signed-in copy", async () => {
+    const result = await withStore((setup) =>
+      Effect.gen(function* () {
+        const run = yield* setup.store.start(setup.place, RUN)
+        const long = Array.from({ length: 12 }, (_, index) => `${STUDY[index % 3]} Paragraph ${index} of the article.`)
+        const signals: Research.Signal = {
+          kind: "other",
+          primary: false,
+          data: false,
+          references: false,
+          paywalled: false,
+          addressed_to_ai: false,
+          corroborated: 0,
+          signed_in: true,
+        }
+        // The lead handed the article off and read it signed in first.
+        const full = yield* setup.store.addSource(
+          setup.place,
+          run.id,
+          page("journal", long, { private: true, signals }),
+        )
+        // Then a researcher reads the same address, publicly, and the page shows the same text.
+        const open = yield* setup.store.addSource(setup.place, run.id, page("journal", long))
+        return {
+          full,
+          open,
+          signed: yield* setup.store.source(setup.place, run.id, "S1"),
+          saved: yield* setup.store.source(setup.place, run.id, "S2"),
+        }
+      }),
+    )
+    expect(result.full).toMatchObject({ type: "added", source: { id: "S1" } })
+    // Not "known" as S1, and no copy of it either: public text of its own, which a researcher may read and cite.
+    expect(result.open).toMatchObject({ type: "added", source: { id: "S2", status: "read" } })
+    expect(result.saved?.private).toBe(false)
+    expect(result.saved?.source.signals?.signed_in).toBeUndefined()
+    expect(result.signed?.private).toBe(true)
+    expect(result.signed?.source.signals?.signed_in).toBe(true)
+  })
+
   test("a copy is still found once later runs have pushed the run's pages out of memory", async () => {
     const result = await withStore((setup) =>
       Effect.gen(function* () {

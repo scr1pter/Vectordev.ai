@@ -665,11 +665,12 @@ function make(input: {
         const readable = (page.status === "read" || page.status === "paywalled") && text.trim().length > 0
         // An address the run read is free to read again. One it read with no text (skipped, failed, built by script) is
         // filled in, as the same S#, by a later read that has text, such as the desktop browser's. A page read signed in,
-        // in the user's own browser after a handoff, is a source of its own: the run's public copy of the address (a
-        // paywall's excerpt, or what the page showed before the sign-in) is not what the user unlocked.
+        // in the user's own browser after a handoff, is a source of its own both ways round: the run's public copy of the
+        // address (a paywall's excerpt, or what the page showed before the sign-in) is not what the user unlocked, and a
+        // later public read of the address, a researcher's say, is not the signed-in copy and is never answered with it.
         const signedIn = page.signals?.signed_in === true
         const same = sources.find(
-          (source) => source.canonical_url === page.canonical && (!signedIn || source.signals?.signed_in === true),
+          (source) => source.canonical_url === page.canonical && (source.signals?.signed_in === true) === signedIn,
         )
         const blank =
           same !== undefined && same.document_id === null && !forgottenOf(same) && same.status !== "duplicate"
@@ -749,10 +750,19 @@ function make(input: {
           yield* publish(place, runID, found.row.status, { sourceID: source.id })
           return { type: "added" as const, source }
         }
-        // The public copy of a page read signed in holds its excerpt, so it is no source the signed-in read copies.
+        // The public copy of a page read signed in holds its excerpt, so it is no source the signed-in read copies. And a
+        // public read copies no private source: it is public text of its own, which an agent that may not see the
+        // private one (a researcher) can still read and cite.
+        const hidden = new Set(
+          sources
+            .filter((source) => source.private || source.signals?.signed_in === true)
+            .map((source) => `S${source.ordinal}`),
+        )
         const copy = ResearchDedupe.duplicateOf(
           { ...fingerprint, canonical: page.canonical },
-          (yield* knownOf(store, runID, sources)).filter((known) => !signedIn || known.canonical !== page.canonical),
+          (yield* knownOf(store, runID, sources)).filter((known) =>
+            signedIn ? known.canonical !== page.canonical : page.private === true || !hidden.has(known.id),
+          ),
         )
         if (copy) {
           const of = `S${ordinalOf("S", copy) ?? ""}`
