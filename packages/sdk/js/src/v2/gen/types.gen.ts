@@ -737,6 +737,7 @@ export type Prompt = {
   text: string
   files?: Array<PromptFileAttachment>
   agents?: Array<PromptAgentAttachment>
+  agent?: string
 }
 
 export type Pty = {
@@ -4888,6 +4889,7 @@ export type PromptInput = {
   text: string
   files?: Array<PromptInputFileAttachment>
   agents?: Array<PromptAgentAttachment>
+  agent?: string
 }
 
 export type SpendSnapshot = {
@@ -5294,6 +5296,7 @@ export type SessionMessageUser = {
   text: string
   files?: Array<PromptFileAttachment>
   agents?: Array<PromptAgentAttachment>
+  agent?: string
   type: "user"
 }
 
