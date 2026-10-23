@@ -23,7 +23,7 @@ import type { WebFetchRequest } from "@vectordevai/core/util/webfetch-request"
 export const NEEDS_GUARD = "Research browsers need Vector's network guard, which could not start."
 /** The user name a research browser gives its proxy; only the password (the secret) is checked. */
 export const USER = "vector-research"
-const ROBOTS_TIMEOUT = 15_000
+const FETCH_TIMEOUT = 20_000
 const MAX_REDIRECTS = 3
 
 export type ProxyAuthInfo = { readonly isProxy: boolean; readonly host: string; readonly port: number }
@@ -43,7 +43,19 @@ export type ResearchProxy = {
   readonly login: (authInfo: ProxyAuthInfo, callback: (username?: string, password?: string) => void) => void
   /** Fetches a robots.txt through this proxy, as robots.ts's cache asks for one. */
   readonly robots: (url: string) => Promise<ResearchRobots.Fetched>
+  /**
+   * Fetches one address through this proxy, up to `maxBytes`, following no redirect: a PDF a research browser opened,
+   * which goes to the reader in memory since downloads are off.
+   */
+  readonly get: (url: string, maxBytes: number) => Promise<Fetched>
   readonly stop: () => Promise<void>
+}
+
+export type Fetched = {
+  readonly status: number
+  readonly contentType: string
+  readonly body: Buffer
+  readonly location?: string
 }
 
 /**
@@ -93,6 +105,7 @@ export async function startResearchProxy(input: {
       callback()
     },
     robots: (url) => robotsThrough(proxy.port, authorization, url),
+    get: (url, maxBytes) => getThrough(proxy.port, authorization, url, maxBytes),
     stop: proxy.stop,
   }
 }
@@ -100,32 +113,33 @@ export async function startResearchProxy(input: {
 // One GET through the proxy, following redirects on the same host only, as the engine's robots reader does; a redirect
 // elsewhere, a failure or a timeout is "unreachable", which robots.ts reads as no path allowed for now.
 async function robotsThrough(port: number, authorization: string, url: string, hops = 0): Promise<ResearchRobots.Fetched> {
-  const answer = await getThrough(port, authorization, url).catch(() => undefined)
+  const answer = await getThrough(port, authorization, url, ResearchRobots.MAX_BYTES).catch(() => undefined)
   if (!answer) return { status: "unreachable" }
-  if (answer.status < 300 || answer.status >= 400) return { status: answer.status, text: answer.text }
+  if (answer.status < 300 || answer.status >= 400) return { status: answer.status, text: answer.body.toString("utf8") }
   const next = answer.location && URL.canParse(answer.location, url) ? new URL(answer.location, url) : undefined
   if (!next || next.hostname !== new URL(url).hostname || hops >= MAX_REDIRECTS) return { status: "unreachable" }
   return robotsThrough(port, authorization, next.toString(), hops + 1)
 }
 
-function getThrough(port: number, authorization: string, url: string) {
+function getThrough(port: number, authorization: string, url: string, maxBytes: number) {
   const target = new URL(url)
-  return new Promise<{ status: number; text: string; location?: string }>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("robots.txt took too long")), ROBOTS_TIMEOUT)
+  return new Promise<Fetched>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${target.host} took too long to answer`)), FETCH_TIMEOUT)
     const settle = (response: http.IncomingMessage) => {
       const chunks: Buffer[] = []
       const state = { bytes: 0 }
       response.on("data", (chunk: Buffer) => {
         state.bytes += chunk.length
-        if (state.bytes > ResearchRobots.MAX_BYTES) return response.destroy(new Error("robots.txt is too large"))
+        if (state.bytes > maxBytes) return response.destroy(new Error(`The answer is over ${maxBytes} bytes`))
         chunks.push(chunk)
       })
-      response.on("error", reject)
+      response.on("error", fail)
       response.on("end", () => {
         clearTimeout(timer)
         resolve({
           status: response.statusCode ?? 0,
-          text: Buffer.concat(chunks).toString("utf8"),
+          contentType: String(response.headers["content-type"] ?? ""),
+          body: Buffer.concat(chunks),
           ...(typeof response.headers.location === "string" ? { location: response.headers.location } : {}),
         })
       })
@@ -134,7 +148,7 @@ function getThrough(port: number, authorization: string, url: string) {
       clearTimeout(timer)
       reject(error)
     }
-    const headers = { "user-agent": "Vector", accept: "text/plain" }
+    const headers = { "user-agent": "Vector", accept: "*/*" }
     if (target.protocol === "http:") {
       http
         .get(
