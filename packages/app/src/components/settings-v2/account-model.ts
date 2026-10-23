@@ -1,4 +1,5 @@
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
+import { accountChip, type VectorAccountStatus } from "@/vector-account"
 
 export type CodiumSummary =
   | { kind: "loading" }
@@ -71,4 +72,25 @@ export function accountIdentity(status: { name?: string; email?: string }) {
   const name = status.name?.trim()
   if (name) return { title: name, detail: status.email }
   return { title: status.email ?? "", detail: undefined }
+}
+
+/**
+ * Who the Settings header names: the person's photo, else their initials, beside their name, else the part of their
+ * email before the @. Signed out, or until the desktop answers, there is no one, and the header shows Vector's own logo
+ * and name. `failed` is a photo the header could not show; it falls back to the initials until a different one arrives.
+ */
+export function settingsIdentity(status: VectorAccountStatus, failed?: string) {
+  const name = status.name?.trim() || status.email?.split("@")[0]?.trim()
+  if (!status.authenticated || !name) return undefined
+  const words = name.split(/[\s._+-]+/).filter(Boolean)
+  const photo = accountChip(status).photo
+  return {
+    name,
+    initials:
+      (words.length > 1 ? [words[0], words[words.length - 1]] : words)
+        .map((word) => [...word][0])
+        .join("")
+        .toLocaleUpperCase() || [...name][0],
+    photo: photo === failed ? undefined : photo,
+  }
 }

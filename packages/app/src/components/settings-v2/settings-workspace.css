@@ -117,10 +117,31 @@
   box-shadow: none;
 }
 
+/* The signed-in person's photo, or their initials, in the logo's place: the Account page's avatar, at the logo's size. */
+.settings-v2--fullscreen .settings-v2-brand-avatar {
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--vx-gradient, linear-gradient(135deg, #7659d0 0%, #a287ef 100%));
+  color: #fff;
+  font-size: 12px;
+  font-weight: 560;
+  line-height: 1;
+  object-fit: cover;
+  box-shadow: 0 0 0 1px rgba(182, 159, 247, 0.28);
+}
+
+.settings-v2--fullscreen .settings-v2-brand-text {
+  min-width: 0;
+}
+
 .settings-v2--fullscreen .settings-v2-brand-name {
+  overflow: hidden;
   color: var(--settings-text);
   font-size: 14px;
   font-weight: 590;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .settings-v2--fullscreen .settings-v2-brand-subtitle {
