@@ -198,7 +198,7 @@ export const Info = Schema.Struct({
       }),
       judge: Schema.optional(TaskSize.JudgeMode).annotate({
         description:
-          "When Vector runs LLM-as-a-judge after a run that changed files: off, thorough (large tasks only) or changes (every task that changed files). Default: off. A prompt's own judge setting overrides it. Deep research's citation judge follows it too: off turns it off, changes checks every report, and otherwise it checks Deep reports and Focused ones that cite 8 or more notes.",
+          "When Vector runs LLM-as-a-judge after a run that changed files: off, thorough (large tasks only) or changes (every task that changed files). Default: off for those runs. A prompt's own judge setting overrides it. Deep research's citation judge reads it too, and runs when it is unset: unset or thorough checks Deep reports and Focused ones that cite 8 or more notes, changes checks every report, and off turns it off.",
       }),
     }),
   ).annotate({ description: "Task sizing: how much harness, reasoning and verification each request gets." }),
