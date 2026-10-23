@@ -20,7 +20,8 @@ export const RECALL = "vector.memory.recall"
 
 /**
  * Metadata key of a text part a slash command wrote: its template, an MCP server's prompt, a skill, or what its shell
- * snippets printed. The value says which arguments the user typed and whether the text came from outside.
+ * snippets printed. The value says which arguments the user typed, which spans of them they pasted, and whether the
+ * text came from outside.
  */
 export const COMMAND = "vector.command"
 
@@ -161,22 +162,29 @@ export const HOLD = "hold"
  * What the user typed in a message, without Vector's synthetic notes or attached file contents. A slash command's text
  * is someone else's words (a template, an MCP server's prompt, a skill, a snippet's output), so of it only the
  * arguments the user typed count, and text from outside (an imported transcript, an issue) or that the user pasted (an
- * email, a log, someone else's message), as a part of its own or a span of a typed one, does not count at all: Vector
- * learns what the user likes only from this.
+ * email, a log, someone else's message), as a part of its own or a span of a typed one or of a command's arguments,
+ * does not count at all: Vector learns what the user likes only from this.
  */
 export function typed(message: SessionV1.WithParts) {
   return message.parts
     .flatMap((part) => {
-      if (part.type !== "text" || part.synthetic || part.ignored || outside(part)) return []
-      return [command(part)?.arguments ?? unpasted(part.text, part.metadata?.[BrainSchema.PASTED])]
+      if (part.type !== "text" || part.synthetic || part.ignored) return []
+      // Where text from outside sat, two blank lines: what the user typed after it is a paragraph of its own, and not
+      // the one a line before it such as "Here is the email:" introduces.
+      if (outside(part)) return [PASTE_BREAK]
+      const found = command(part)
+      return [
+        found ? unpasted(found.arguments, found.pasted) : unpasted(part.text, part.metadata?.[BrainSchema.PASTED]),
+      ]
     })
     .join("\n")
     .trim()
 }
 
-// A typed part's text without the spans the user pasted into it, each left as a paragraph break so the words on either
-// side neither join nor run into a quote across it. Spans that do not fit the text leave nothing of it: a part that
-// says it holds pasted text, but not where, vouches for none of its words.
+// A typed part's text without the spans the user pasted into it, each left as two blank lines so the words on either
+// side neither join nor run into a quote across it, and a line before the paste that introduces it ("Bob wrote:")
+// introduces nothing the user typed. Spans that do not fit the text leave nothing of it: a part that says it holds
+// pasted text, but not where, vouches for none of its words.
 function unpasted(text: string, spans: unknown) {
   if (spans === undefined) return text
   if (!Array.isArray(spans) || !spans.every((span) => fits(span, text.length))) return ""
@@ -185,12 +193,14 @@ function unpasted(text: string, spans: unknown) {
     .reduce(
       (out, span) => ({
         at: Math.max(out.at, span[1]),
-        text: span[0] > out.at ? `${out.text}${text.slice(out.at, span[0])}\n\n` : out.text,
+        text: span[0] > out.at ? `${out.text}${text.slice(out.at, span[0])}${PASTE_BREAK}` : out.text,
       }),
       { at: 0, text: "" },
     )
   return cut.text + text.slice(cut.at)
 }
+
+const PASTE_BREAK = "\n\n\n"
 
 function fits(span: unknown, length: number) {
   return (
@@ -219,6 +229,8 @@ export function command(part: SessionV1.Part) {
   if (!value || typeof value !== "object") return undefined
   return {
     arguments: "arguments" in value && typeof value.arguments === "string" ? value.arguments : "",
+    /** The spans of the arguments the user pasted, as the composer sent them. */
+    pasted: "pasted" in value ? value.pasted : undefined,
     outside: "outside" in value && (value.outside === "web" || value.outside === "mcp") ? value.outside : undefined,
   }
 }

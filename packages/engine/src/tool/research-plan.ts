@@ -7,6 +7,7 @@ import { ResearchStore } from "@vectordevai/core/research/store"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { ModelSlots } from "@vectordevai/core/local-mode/model-slots"
+import { freeModelMayTrain } from "@vectordevai/core/free-model-choice"
 import { isFreeModel } from "@vectordevai/schema/free-model"
 import { MemoryEvent } from "@vectordevai/schema/memory-event"
 import { Research } from "@vectordevai/schema/research"
@@ -32,7 +33,8 @@ import DESCRIPTION from "./research-plan.txt"
 // approved, so nothing is searched or read before. A call that only moves sub-questions along never asks again. In a
 // child session (the build agent's research tool) and where no one can answer, the plan is approved on its own,
 // within its launcher's size: only the user's own answer on the root plan card raises a run to Thorough (RC7). What the
-// user ticks "Always" for on the card (the sites to prefer or avoid, the format) is kept as their preference.
+// user ticks "Always" for on the card (the sites to prefer or avoid, the format) is kept as their preference, and every
+// later plan carries it, marked as coming from their preferences.
 
 export const Parameters = Schema.Struct({
   question: Schema.String.check(Schema.isLengthBetween(1, 1_000)).annotate({
@@ -61,6 +63,12 @@ export const Parameters = Schema.Struct({
   }),
 })
 
+type Learned = {
+  readonly prefer_domains?: readonly string[]
+  readonly avoid_domains?: readonly string[]
+  readonly format?: Research.Format
+}
+
 type Metadata = {
   runID?: string
   plan?: Research.Plan
@@ -68,12 +76,15 @@ type Metadata = {
   answer?: "start" | "start-deep" | "cancel" | "steer" | "automatic" | "status"
   estimate?: string
   always?: readonly string[]
+  /** What of the plan came from the user's preferences, for the card to mark "from your preferences". */
+  learned?: Learned
   /** An approved deep plan raises the request to Thorough, as escalate's result does; only the user's answer does. */
   from?: TaskSize.Tier
   to?: TaskSize.Tier
   source?: "user"
 }
 
+const FROM_PREFERENCES = "from your preferences"
 const START = "Start"
 const START_DEEP = "Start deep"
 const CANCEL = "Cancel"
@@ -128,18 +139,27 @@ export const ResearchPlanTool = Tool.define<
           const size = ctx.extra?.taskSize as TaskSizeContext | undefined
           // What `vector run --research` was told: its --scope holds whatever the model proposes.
           const chosen = options(ctx.messages)
-          // The user's own sites to prefer and avoid apply in code, whatever the model proposed.
+          // The user's own sites to prefer and avoid apply in code, whatever the model proposed: those of their config
+          // and those they ticked "Always" for on an earlier card, with the format they ticked when the model chose none.
+          const kept = yield* preferred(place, lead.id, ctx.extra?.model as Provider.Model | undefined)
           const plan: Research.Plan = {
             question: params.question.trim(),
             subquestions: params.subquestions.map((item) => item.trim()),
             scope: chosen.scope ?? params.scope,
             depth: params.depth,
-            ...domains("prefer_domains", params.prefer_domains, cfg.research?.domains?.prefer),
-            ...domains("avoid_domains", params.avoid_domains, cfg.research?.domains?.avoid),
-            ...(params.format ? { format: params.format } : {}),
+            ...domains("prefer_domains", params.prefer_domains, [
+              ...(cfg.research?.domains?.prefer ?? []),
+              ...(kept.prefer_domains ?? []),
+            ]),
+            ...domains("avoid_domains", params.avoid_domains, [
+              ...(cfg.research?.domains?.avoid ?? []),
+              ...(kept.avoid_domains ?? []),
+            ]),
+            ...(params.format ? { format: params.format } : kept.format ? { format: kept.format } : {}),
             ...(params.time_window ? { time_window: params.time_window } : {}),
             ...(params.status ? { status: params.status.slice(0, params.subquestions.length) } : {}),
           }
+          const learned = marks(plan, kept)
 
           // A call that only moves the sub-questions of the approved plan along.
           const found = yield* research.current(ctx)
@@ -210,7 +230,14 @@ export const ResearchPlanTool = Tool.define<
             return {
               title: `Research plan: ${proposed.subquestions.length} sub-question${proposed.subquestions.length === 1 ? "" : "s"}`,
               output: approvedText({ plan: proposed, runID, estimate, automatic: true, provider: provider.provider }),
-              metadata: { runID, plan: proposed, approved: true, answer: "automatic" as const, estimate },
+              metadata: {
+                runID,
+                plan: proposed,
+                approved: true,
+                answer: "automatic" as const,
+                estimate,
+                ...(learned ? { learned } : {}),
+              },
             }
           }
 
@@ -219,7 +246,7 @@ export const ResearchPlanTool = Tool.define<
               sessionID: SessionID.make(ctx.sessionID),
               questions: [
                 {
-                  question: card(proposed, estimate, provider),
+                  question: card(proposed, estimate, provider, learned),
                   header: "Research plan",
                   options: [
                     { label: START, description: `Research at this depth (${proposed.depth})` },
@@ -245,21 +272,39 @@ export const ResearchPlanTool = Tool.define<
               title: "Plan not approved",
               output:
                 "The user dismissed the plan card, so nothing was searched or read. Ask what they would like changed, or wait for them.",
-              metadata: { plan: proposed, approved: false, answer: "cancel" as const, estimate },
+              metadata: {
+                plan: proposed,
+                approved: false,
+                answer: "cancel" as const,
+                estimate,
+                ...(learned ? { learned } : {}),
+              },
             }
           const decided = decide(reply, proposed, ceiling)
           if (decided.type === "cancel") {
             return {
               title: "Research cancelled",
               output: "The user cancelled this research. Nothing was searched or read. Say so in one line and stop.",
-              metadata: { plan: proposed, approved: false, answer: "cancel" as const, estimate },
+              metadata: {
+                plan: proposed,
+                approved: false,
+                answer: "cancel" as const,
+                estimate,
+                ...(learned ? { learned } : {}),
+              },
             }
           }
           if (decided.type === "steer")
             return {
               title: "Plan not approved",
               output: `The user replied to the plan instead of starting it: "${reply.slice(0, 2_000)}". Nothing was searched or read. Revise the plan with research_plan.`,
-              metadata: { plan: proposed, approved: false, answer: "steer" as const, estimate },
+              metadata: {
+                plan: proposed,
+                approved: false,
+                answer: "steer" as const,
+                estimate,
+                ...(learned ? { learned } : {}),
+              },
             }
           const runID = yield* start(decided.plan)
           yield* keep({
@@ -293,12 +338,44 @@ export const ResearchPlanTool = Tool.define<
               answer: decided.answer,
               estimate,
               ...(decided.always.length ? { always: decided.always } : {}),
+              // Of what the user approved, what their preferences gave it.
+              ...(marks(decided.plan, kept) ? { learned: marks(decided.plan, kept) } : {}),
               ...(raised && size?.tier !== "thorough"
                 ? { from: size?.tier ?? ("standard" as const), to: "thorough" as const, source: "user" as const }
                 : {}),
             },
           }
         }).pipe(Effect.orDie),
+    }
+
+    // What the user ticked "Always" for on an earlier plan card (section 5.4): the sites their preferences in use say to
+    // prefer and avoid, and the format, applied to the plan in code. They are the owner's personal memory, so none of it
+    // applies in a session an invited guest has acted in, or on a free model that may train on prompts.
+    function preferred(place: Brain.Place, sessionID: SessionID, model: Provider.Model | undefined) {
+      return Effect.gen(function* () {
+        if ((model && freeModelMayTrain(model)) || (yield* guests.marked(sessionID))) return NOTHING_KEPT
+        const kept = (yield* brain.list(place, { scope: "personal" })).filter(
+          (entry) => entry.kind === "preference" && entry.status === "active",
+        )
+        const sites = (field: "prefer_domains" | "avoid_domains") => [
+          ...new Set(
+            kept
+              .filter((entry) => entry.text.startsWith(ALWAYS[field]))
+              .flatMap((entry) => entry.text.slice(ALWAYS[field].length).split(","))
+              .map((site) => site.trim().toLowerCase())
+              .filter(Boolean),
+          ),
+        ]
+        const format = kept
+          .filter((entry) => entry.text.startsWith(ALWAYS.format))
+          .map((entry) => decodeFormat(entry.text.slice(ALWAYS.format.length).trim()))
+          .find(Option.isSome)
+        return {
+          prefer_domains: sites("prefer_domains"),
+          avoid_domains: sites("avoid_domains"),
+          ...(format ? { format: format.value } : {}),
+        } satisfies Learned
+      })
     }
 
     // The plan card's "Always" boxes (section 6.3): the user asked Vector to keep the sites or the format they chose for
@@ -450,6 +527,23 @@ function domains(key: "prefer_domains" | "avoid_domains", proposed?: readonly st
   return all.length ? { [key]: all.slice(0, 50) } : {}
 }
 
+// What of the plan its card marks "from your preferences": the sites and the format the user's preferences gave it,
+// of those it still carries. Nothing when they gave it none.
+function marks(plan: Research.Plan, kept: Learned): Learned | undefined {
+  const prefer = (kept.prefer_domains ?? []).filter((site) => plan.prefer_domains?.includes(site))
+  const avoid = (kept.avoid_domains ?? []).filter((site) => plan.avoid_domains?.includes(site))
+  const format = kept.format !== undefined && plan.format === kept.format ? kept.format : undefined
+  if (!prefer.length && !avoid.length && !format) return undefined
+  return {
+    ...(prefer.length ? { prefer_domains: prefer } : {}),
+    ...(avoid.length ? { avoid_domains: avoid } : {}),
+    ...(format ? { format } : {}),
+  }
+}
+
+const decodeFormat = Schema.decodeUnknownOption(Research.Format)
+const NOTHING_KEPT: Learned = {}
+
 // The same question and sub-questions: what a call that only changes their status sends.
 function same(left: Research.Plan, right: Research.Plan) {
   return (
@@ -521,16 +615,28 @@ function decide(reply: string, plan: Research.Plan, ceiling: Research.Depth) {
 }
 
 // What the plan card shows: the plan, its scope and depth, the estimate, and what search is set up.
-function card(plan: Research.Plan, estimate: string, provider: ReturnType<typeof searchProvider>) {
+// The sites and format the user's preferences gave the plan are marked as theirs.
+function card(
+  plan: Research.Plan,
+  estimate: string,
+  provider: ReturnType<typeof searchProvider>,
+  learned: Learned | undefined,
+) {
+  const mark = (site: string, kept?: readonly string[]) =>
+    kept?.includes(site) ? `${site} (${FROM_PREFERENCES})` : site
   return [
     `Research: ${plan.question}`,
     ...plan.subquestions.map((item, index) => `${index + 1}. ${item}`),
     `Scope: ${scopeLabel(plan.scope)}`,
     `Depth: ${plan.depth === "deep" ? "Deep: up to 4 researchers and a judge" : "Focused: one agent, plus up to 2 researchers when the question has independent parts"}`,
-    ...(plan.prefer_domains?.length ? [`Prefer: ${plan.prefer_domains.join(", ")}`] : []),
-    ...(plan.avoid_domains?.length ? [`Avoid: ${plan.avoid_domains.join(", ")}`] : []),
+    ...(plan.prefer_domains?.length
+      ? [`Prefer: ${plan.prefer_domains.map((site) => mark(site, learned?.prefer_domains)).join(", ")}`]
+      : []),
+    ...(plan.avoid_domains?.length
+      ? [`Avoid: ${plan.avoid_domains.map((site) => mark(site, learned?.avoid_domains)).join(", ")}`]
+      : []),
     ...(plan.time_window ? [`Time window: ${plan.time_window}`] : []),
-    ...(plan.format ? [`Format: ${plan.format}`] : []),
+    ...(plan.format ? [`Format: ${plan.format}${learned?.format ? ` (${FROM_PREFERENCES})` : ""}`] : []),
     estimate,
     ...(provider.provider === "none" && plan.scope !== "brain" ? [provider.reason ?? ResearchSearch.NONE] : []),
   ].join("\n")

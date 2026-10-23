@@ -27,7 +27,10 @@ const web = FakeWeb.start({ sites: FakeWeb.sites() })
 const it = runtime(web)
 afterAll(() => web.close())
 
-const HABIT = "Run the payments tests with bun test before every commit"
+// A researcher hears the owner's preferences about format, sources and style (section 6.4a), so how they work here is
+// about sources; a workflow line such as how they run tests is the lead's alone.
+const HABIT = "Cite primary sources over blog posts in every summary"
+const WORKFLOW = "Run the payments tests with bun test before every commit"
 const DECISION = "Review migrations before handlers in every pull request"
 const PARTICULAR = "Drop the Initech integration from billing.initech.com next quarter"
 const FACT = "My badge number at Hooli is 44172 and my manager is Dana Whitfield"
@@ -45,6 +48,7 @@ const remember = Effect.fn("test.remember")(function* () {
   const own = (kind: "preference" | "decision" | "fact", text: string, extra: Partial<Brain.Proposal> = {}) =>
     brain.propose(place, { kind, text, scope: "personal", origin: "user", evidence: { type: "user" }, ...extra })
   yield* own("preference", HABIT)
+  yield* own("preference", WORKFLOW)
   yield* own("decision", DECISION)
   yield* own("decision", PARTICULAR)
   yield* own("fact", FACT)
@@ -88,6 +92,7 @@ it.instance(
       expect(body).toContain("Prefer sources on: nature.com")
       // How the owner works, screened, and the rules file; nothing about the owner.
       expect(body).toContain(HABIT)
+      expect(body).not.toContain(WORKFLOW)
       expect(body).toContain("Never force-push to main")
       expect(body).not.toContain("badge number")
       expect(body).not.toContain("Whitfield")

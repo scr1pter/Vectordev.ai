@@ -5,6 +5,7 @@ import { Brain } from "@vectordevai/core/brain/brain"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { ResearchStore } from "@vectordevai/core/research/store"
 import type { SessionV1 } from "@vectordevai/core/v1/session"
+import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { MemoryEvent } from "@vectordevai/schema/memory-event"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Question } from "../../src/question"
@@ -196,16 +197,17 @@ it.instance(
 )
 
 it.instance(
-  "what the user ticks Always for on the plan card is kept as their preference in use, and a later choice adds to it",
+  "what the user ticks Always for on the plan card is kept as their preference in use, carried by the next plan, and a later choice adds to it",
   () =>
     Effect.gen(function* () {
       const test = yield* setup(web)
       const card = (edits: Record<string, unknown>, always: string[]) =>
         `vector-plan:${JSON.stringify({ action: "start", plan: edits, always })}`
-      yield* answer([
+      const asked = yield* answer([
         card({ prefer_domains: ["Nature.com"], format: "table" }, ["prefer_domains", "format"]),
         // Sites to avoid that were not ticked are not kept.
-        card({ prefer_domains: ["nih.gov"], avoid_domains: ["example.com"] }, ["prefer_domains"]),
+        card({ prefer_domains: ["nih.gov", "nature.com"], avoid_domains: ["example.com"] }, ["prefer_domains"]),
+        "Start",
       ])
       const events = yield* EventV2Bridge.Service
       const announced: unknown[] = []
@@ -223,6 +225,27 @@ it.instance(
       yield* test.llm.text("Done.")
       yield* send({ sessionID: second.id, agent: "research", text: "Research how loud heat pumps are." })
       yield* unsubscribe
+      // A session an invited guest acted in gets none of the owner's preferences.
+      const guests = yield* FreeModelGuests.Service
+      const shared = yield* sessions.create({ title: "Research" })
+      yield* guests.mark(shared.id)
+      yield* test.llm.tool("research_plan", plan())
+      yield* test.llm.text("Done.")
+      yield* send({ sessionID: shared.id, agent: "research", text: "Research how long heat pumps last." })
+
+      // The model proposed no sites and no format: the second plan carries what the first card's Always kept, marked.
+      expect(asked[0]).not.toContain("Prefer:")
+      expect(asked[1]).toContain("Prefer: nature.com (from your preferences)")
+      expect(asked[1]).toContain("Format: table (from your preferences)")
+      const [later] = yield* calls(second.id, "research_plan")
+      expect(metadataOf(later)).toMatchObject({
+        plan: { prefer_domains: ["nih.gov", "nature.com"], format: "table" },
+        learned: { prefer_domains: ["nature.com"], format: "table" },
+      })
+      expect(asked[2]).not.toContain("nature.com")
+      expect(asked[2]).not.toContain("from your preferences")
+      const [guest] = yield* calls(shared.id, "research_plan")
+      expect(metadataOf(guest).learned).toBeUndefined()
 
       const brain = yield* Brain.Service
       const instruction = yield* Instruction.Service

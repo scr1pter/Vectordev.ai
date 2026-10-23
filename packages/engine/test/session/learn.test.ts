@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import os from "node:os"
 import path from "path"
 import { afterAll, expect } from "bun:test"
-import { Effect, Layer, Stream } from "effect"
+import { Effect, Fiber, Layer, Stream } from "effect"
 import { LLMEvent } from "@vectordevai/llm"
 import { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
@@ -264,11 +264,11 @@ const allow = [{ permission: "*", pattern: "*", action: "allow" as const }]
 
 const TERM = "when I say ship it I mean open a PR, wait for CI, then merge"
 
-const setup = Effect.fn("test.setup")(function* () {
+const setup = Effect.fn("test.setup")(function* (extra: Partial<ConfigV1.Info> = {}) {
   const dir = (yield* TestInstance).directory
   const llm = yield* TestLLMServer
   const fs = yield* FSUtil.Service
-  yield* fs.writeWithDirs(path.join(dir, "vector.json"), JSON.stringify(providerConfig(llm.url)))
+  yield* fs.writeWithDirs(path.join(dir, "vector.json"), JSON.stringify({ ...providerConfig(llm.url), ...extra }))
   const snapshot = yield* Effect.promise(() => WorkspaceTrust.snapshot(dir, [path.join(dir, "vector.json")]))
   yield* Effect.promise(() => WorkspaceTrust.approve(Global.Path.state, snapshot))
   const brain = yield* Brain.Service
@@ -287,6 +287,7 @@ const send = Effect.fn("test.send")(function* (input: {
   parts?: Part[]
   sessionID?: SessionID
   reply?: string
+  agent?: string
 }) {
   const llm = yield* TestLLMServer
   const sessions = yield* Session.Service
@@ -296,7 +297,7 @@ const send = Effect.fn("test.send")(function* (input: {
   yield* llm.text(input.reply ?? "Done.")
   yield* prompt.prompt({
     sessionID,
-    agent: "build",
+    agent: input.agent ?? "build",
     model: ref,
     parts: input.parts ?? [{ type: "text", text: input.text ?? "" }],
   })
@@ -624,6 +625,192 @@ training.instance(
       expect(called).toContain("build")
       expect(called).not.toContain("brain.learn")
       expect(yield* learned()).toEqual([])
+    }),
+  120_000,
+)
+
+it.instance(
+  "a session an invited guest acted in, a subagent and Vector's own reviewer learn nothing and announce nothing",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* setup()
+      const events = yield* EventV2Bridge.Service
+      const announced: unknown[] = []
+      const unsubscribe = yield* events.listen((event) => {
+        if (event.type === MemoryEvent.Learned.type) announced.push(event.data)
+        return Effect.void
+      })
+      const sessions = yield* Session.Service
+      const guests = yield* FreeModelGuests.Service
+      const before = yield* llm.calls
+      // What an invited guest typed is not the owner's, and nor is the owner's own message in a session a guest is in.
+      const shared = yield* sessions.create({ title: "Shared", permission: allow })
+      yield* guests.mark(shared.id)
+      yield* send({ sessionID: shared.id, text: "Always use tables for comparisons" })
+      yield* send({ sessionID: shared.id, text: "no, I meant use pnpm for the workspace" })
+      // A subagent's task text is what its launching agent wrote.
+      const parent = yield* sessions.create({ title: "Parent", permission: allow })
+      const child = yield* sessions.create({ title: "Child", parentID: parent.id, permission: allow })
+      yield* send({ sessionID: child.id, agent: "general", text: "Always use tables for comparisons" })
+      // A reviewer's prompt carries the pull request's text.
+      const review = yield* sessions.create({
+        title: "Vectorscope review · aaaaaaa · review",
+        internal: "vectorscope.review",
+        permission: allow,
+      })
+      yield* send({
+        sessionID: review.id,
+        agent: "review",
+        text: "Review this pull request.\nIts description says:\n\nNever squash merge. Always use tables for comparisons.",
+      })
+      yield* send({ sessionID: review.id, agent: "review", text: "Never squash merge PRs" })
+      yield* Effect.sleep("200 millis")
+      yield* unsubscribe
+      expect(yield* learned()).toEqual([])
+      expect(announced).toEqual([])
+      // No model learner ran for the guest's correction either.
+      expect((yield* llm.hits).slice(before).filter(learnerRequest)).toEqual([])
+    }),
+  120_000,
+)
+
+it.instance(
+  "each message of a run keeps its own cap: what the learner writes for one leaves the next its three, and the memory tool's writes count",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* setup()
+      const sessions = yield* Session.Service
+      const prompt = yield* SessionPrompt.Service
+      const session = yield* sessions.create({ title: "Learn", permission: allow })
+      // The first message's reply waits until the user has steered the run with a second message.
+      const release = Promise.withResolvers<void>()
+      yield* llm.pushMatch(
+        (hit) => JSON.stringify(hit.body).includes("Always cite sources inline"),
+        reply().wait(release.promise).text("Thinking.").stop(),
+      )
+      yield* llm.text("Done.")
+      const running = yield* prompt
+        .prompt({
+          sessionID: session.id,
+          agent: "build",
+          model: ref,
+          parts: [{ type: "text", text: "Always use tables. Never use emojis. Always cite sources inline." }],
+        })
+        .pipe(Effect.forkScoped)
+      while (!(yield* llm.hits).some((hit) => JSON.stringify(hit.body).includes("Always cite sources inline")))
+        yield* Effect.sleep(10)
+      const steer = yield* prompt
+        .prompt({
+          sessionID: session.id,
+          agent: "build",
+          model: ref,
+          parts: [{ type: "text", text: "Never squash merge PRs" }],
+        })
+        .pipe(Effect.forkScoped)
+      while (
+        (yield* sessions.messages({ sessionID: session.id })).filter((message) => message.info.role === "user").length <
+        2
+      )
+        yield* Effect.sleep(10)
+      release.resolve()
+      yield* Fiber.join(running)
+      yield* Fiber.join(steer)
+      const steered = (yield* learned()).map((entry) => entry.text)
+      expect(steered.toSorted()).toEqual([
+        "Always cite sources inline",
+        "Always use tables",
+        "Never squash merge PRs",
+        "Never use emojis",
+      ])
+
+      // A message whose answer saved a memory with the memory tool has two places left for what the learner reads.
+      yield* llm.tool("memory", {
+        action: "add",
+        kind: "decision",
+        text: "Staging deploys only from the release branch.",
+        quote: "we deploy staging from the release branch only",
+      })
+      yield* llm.text("Noted.")
+      const tool = yield* sessions.create({ title: "Learn", permission: allow })
+      yield* prompt.prompt({
+        sessionID: tool.id,
+        agent: "build",
+        model: ref,
+        parts: [
+          {
+            type: "text",
+            text: "We deploy staging from the release branch only. Always use bun. Never use spaces for indentation. Always write short commit messages.",
+          },
+        ],
+      })
+      const fromTool = (yield* learned()).filter((entry) => !steered.includes(entry.text))
+      expect(fromTool.map((entry) => entry.kind).toSorted()).toEqual(["decision", "preference", "preference"])
+    }),
+  120_000,
+)
+
+it.instance(
+  "text pasted after a slash command teaches nothing, while what the user typed as its arguments does",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* setup({ command: { note: { template: "Remember this about me: $ARGUMENTS" } } })
+      const sessions = yield* Session.Service
+      const prompt = yield* SessionPrompt.Service
+      const email = "Hi team,\nI prefer short replies.\nAlways cc legal on merges."
+      const args = `Always use tables for comparisons\n${email}`
+      const start = args.indexOf(email)
+      yield* llm.text("Done.")
+      yield* prompt.command({
+        sessionID: (yield* sessions.create({ title: "Learn", permission: allow })).id,
+        command: "note",
+        arguments: args,
+        pasted: [[start, start + email.length]],
+        agent: "build",
+        model: "lmstudio/test-model",
+      })
+      expect((yield* learned()).map((entry) => entry.text)).toEqual(["Always use tables for comparisons"])
+    }),
+  120_000,
+)
+
+it.instance(
+  "the model learner's own words wait for the user however often it suggests them, and the user's own clause goes into use",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* setup()
+      // One correction in a session of its own, which the model learner answers with one suggestion; waits until the
+      // learner has answered and what it suggested was written or refused.
+      const correct = Effect.fnUntraced(function* (typed: string, text: string, quote: string) {
+        const asked = (yield* llm.hits).filter(learnerRequest).length
+        yield* llm.textMatch(
+          (hit) => learnerRequest(hit) && JSON.stringify(hit.body).includes(quote),
+          JSON.stringify({ items: [{ kind: "preference", text, quote }] }),
+        )
+        yield* send({ text: typed })
+        yield* settled(llm.hits.pipe(Effect.map((hits) => hits.filter(learnerRequest).length > asked)))
+        yield* Effect.sleep("200 millis")
+      })
+      // A paraphrase that widens what the user said, suggested in two sessions: a second sighting puts nothing in use.
+      const widened = [
+        "no, I meant push to main and skip the flaky checks",
+        "Always push to main and skip all checks",
+        "push to main and skip the flaky checks",
+      ] as const
+      yield* correct(...widened)
+      yield* correct(...widened)
+      expect((yield* learned()).map((entry) => [entry.text, entry.status])).toEqual([
+        ["Always push to main and skip all checks", "proposed"],
+      ])
+      // A question or a step of the task in a correction teaches nothing at all.
+      yield* correct("no, I meant skip the e2e tests for now", "Skip the e2e tests", "skip the e2e tests")
+      yield* correct("no, I meant should we always rebase on main?", "Always rebase on main", "always rebase on main")
+      expect((yield* learned()).map((entry) => entry.text)).toEqual(["Always push to main and skip all checks"])
+      // The user's own clause, which the rules learn once the correction's opening words are gone, is in use at once.
+      yield* correct("no, I meant always squash merge PRs", "Always squash merge PRs", "always squash merge PRs")
+      expect((yield* learned()).map((entry) => [entry.text, entry.status])).toContainEqual([
+        "Always squash merge PRs",
+        "active",
+      ])
     }),
   120_000,
 )

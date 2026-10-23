@@ -133,8 +133,9 @@ export function audienceOf(session: Pick<Session.Info, "internal" | "parentID">,
  * hears preferences about format, sources and style (no vocabulary: the lead resolves the owner's words when it writes
  * sub-questions, and a private code name would otherwise reach queries), and the research judge the sources facet
  * alone. A Vectorscope reviewer hears no terms, and of a pull request Vector cannot trust only preferences and review
- * notes. A research lead the build agent started hears the research facets: preferences and terms of them, and no
- * decision or lesson, which has no facet and is no part of how the owner researches.
+ * notes. A research lead the build agent started hears the research facets: preferences and terms of them, a term only
+ * when it passes the outward screen (its meaning names no one, no amount and no date, since the lead's queries reach
+ * the web), and no decision or lesson, which has no facet and is no part of how the owner researches.
  */
 export function habitsOf(
   session: Pick<Session.Info, "internal" | "parentID">,
@@ -2736,10 +2737,13 @@ const layer = Layer.effect(
     // Only typed words count (not what they pasted, a slash command's text or text from outside), and never in a session
     // an invited guest is in, a subagent or Vector's own helpers, whose messages Vector or another agent wrote. Each
     // message keeps the per-message cap and the facets the user turned off; what a short message says goes into use at
-    // once and the rest waits for a second sighting. A correction the rules found nothing in goes to the optional model
-    // learner, returned to run in the background (nothing when it has no work or may not run), and only then is the
-    // session read. Every write says it is the learner's, which alone may make an instruction personal without a
-    // first-person quote. Each message's writes are announced for the app's "Learned" chip.
+    // once and the rest waits for a second sighting. The cap is each message's own: what the agent's memory tool wrote
+    // while answering it counts, and what the learner writes for the run's other messages, all at its end, does not. A
+    // correction the rules found nothing in goes to the optional model learner, returned to run in the background
+    // (nothing when it has no work or may not run), and only then is the session read; what it suggests waits for the
+    // user unless it is the user's own clause, so only the user puts a model's words in use. Every write says it is the
+    // learner's, which alone may make an instruction personal without a first-person quote. Each message's writes are
+    // announced for the app's "Learned" chip.
     const learnRun = Effect.fn("SessionPrompt.learnRun")(function* (
       session: Session.Info,
       taught: ReadonlyMap<MessageID, { readonly message: SessionV1.WithParts; readonly tier: TaskSize.Tier }>,
@@ -2760,25 +2764,46 @@ const layer = Layer.effect(
       const settings = yield* brain.learnSettings()
       if (!settings.learning) return undefined
       const place = yield* instruction.place()
+      // What the memory tool wrote while each message was the one being answered, up to the run's next message, read
+      // before the learner writes anything.
+      const asked = [...taught.values()]
+        .map((item) => item.message.info)
+        .filter((info) => info.role === "user")
+        .toSorted((a, b) => (a.id < b.id ? -1 : 1))
+      const room = new Map(
+        yield* Effect.forEach(requests, (request) =>
+          Effect.gen(function* () {
+            const next = asked.find((info) => info.id > request.message.info.id)
+            const written =
+              (yield* brain.written(session.id, request.message.info.time.created)) -
+              (next ? yield* brain.written(session.id, next.time.created) : 0)
+            return [request.message.info.id, Math.max(0, Brain.LIMIT.perMessage - written)] as const
+          }),
+        ),
+      )
       const write = Effect.fnUntraced(function* (
         message: SessionV1.WithParts,
         items: readonly BrainLearn.Learned[],
         pending: "sighting" | "review",
       ) {
-        const results = yield* Effect.forEach(items, (item) =>
-          brain.propose(place, {
-            kind: item.kind,
-            text: item.text,
-            scope: "personal",
-            facet: item.facet,
-            origin: "agent",
-            evidence: { type: "message", quote: item.quote, verified: true },
-            learner: true,
-            sessionID: session.id,
-            since: message.info.time.created,
-            ...(item.status === "proposed" ? { pending } : {}),
-          }),
-        )
+        // What is past the message's cap is never proposed; a refused write leaves its place to the next item.
+        const results: Brain.WriteResult[] = []
+        for (const item of items) {
+          if (results.filter((result) => result.type !== "refused").length >= (room.get(message.info.id) ?? 0)) break
+          results.push(
+            yield* brain.propose(place, {
+              kind: item.kind,
+              text: item.text,
+              scope: "personal",
+              facet: item.facet,
+              origin: "agent",
+              evidence: { type: "message", quote: item.quote, verified: true },
+              learner: true,
+              sessionID: session.id,
+              ...(item.status === "proposed" ? { pending } : {}),
+            }),
+          )
+        }
         const entryIDs = results.flatMap((result) =>
           result.type === "added" || result.type === "superseded" || result.type === "promoted" ? [result.entry.id] : [],
         )
@@ -2812,15 +2837,18 @@ const layer = Layer.effect(
           tainted,
           settings,
         })
-        yield* write(last.message, learned, tainted ? "review" : "sighting")
+        // A model's own words wait for the user, never for the same words from another session: a model would
+        // write them again.
+        yield* write(last.message, learned, "review")
       })
     })
 
     // The optional model learner (section 6.3): one small-model request reads a correction ("no, I meant…") after the
     // agent's reply. It runs where the user let it (with Vector Local on, by default), never on a model that may train
     // on prompts, at helper priority once the run is over; the session's next prompt cancels it, and its tokens count in
-    // the session. What it suggests is kept only with a quote of the user's own typed words, and in a session that read
-    // outside content it only ever waits for the user.
+    // the session. What it suggests is kept only with a quote of the user's own typed words, never from a question, a
+    // step of the task or feedback on the answer, and goes into use only when it is the user's own clause, never in a
+    // session that read outside content; anything else waits for the user.
     const modelLearn = Effect.fn("SessionPrompt.modelLearn")(function* (input: {
       session: Session.Info
       user: SessionV1.User
@@ -3507,7 +3535,12 @@ const layer = Layer.effect(
               ...part,
               metadata: {
                 ...part.metadata,
-                [SessionMemory.COMMAND]: { source: cmd.source ?? "command", arguments: input.arguments, ...(outside ? { outside } : {}) },
+                [SessionMemory.COMMAND]: {
+                  source: cmd.source ?? "command",
+                  arguments: input.arguments,
+                  ...(input.pasted?.length ? { pasted: input.pasted } : {}),
+                  ...(outside ? { outside } : {}),
+                },
               },
             }
           : part,
@@ -3949,6 +3982,9 @@ export const CommandInput = Schema.Struct({
   agent: Schema.optional(Schema.String),
   model: Schema.optional(Schema.String),
   arguments: Schema.String,
+  // The spans of `arguments` the user pasted rather than typed, as [start, end] string offsets, which Vector never
+  // learns how they work from.
+  pasted: Schema.optional(Schema.Array(Schema.Tuple([Schema.Int, Schema.Int]))),
   command: Schema.String,
   variant: Schema.optional(Schema.String),
   executionMode: Schema.optional(Schema.Union([Schema.Literal("normal"), Schema.Literal("fast")])),
