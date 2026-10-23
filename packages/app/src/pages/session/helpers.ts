@@ -32,6 +32,8 @@ export const createSessionTabs = (input: TabsInput) => {
     () => input.tabs().active() === "codespace" || input.tabs().all().includes("codespace"),
   )
   const previewOpen = createMemo(() => input.tabs().active() === "preview" || input.tabs().all().includes("preview"))
+  // Deep research's Sources tab sits next to Preview.
+  const sourcesOpen = createMemo(() => input.tabs().active() === "sources" || input.tabs().all().includes("sources"))
   const openedTabs = createMemo(
     () => {
       const seen = new Set<string>()
@@ -39,7 +41,8 @@ export const createSessionTabs = (input: TabsInput) => {
         .tabs()
         .all()
         .flatMap((tab) => {
-          if (tab === "context" || tab === "review" || tab === "codespace" || tab === "preview") return []
+          if (tab === "context" || tab === "review" || tab === "codespace" || tab === "preview" || tab === "sources")
+            return []
           const value = input.pathFromTab(tab) ? input.normalizeTab(tab) : tab
           if (seen.has(value)) return []
           seen.add(value)
@@ -54,6 +57,7 @@ export const createSessionTabs = (input: TabsInput) => {
     if (active === "context") return active
     if (active === "codespace") return active
     if (active === "preview") return active
+    if (active === "sources") return active
     if (active === "review" && review()) return active
     if (active && input.pathFromTab(active)) return input.normalizeTab(active)
 
@@ -62,6 +66,7 @@ export const createSessionTabs = (input: TabsInput) => {
     if (contextOpen()) return "context"
     if (codespaceOpen()) return "codespace"
     if (previewOpen()) return "preview"
+    if (sourcesOpen()) return "sources"
     if (review() && hasReview()) return "review"
     return "empty"
   })
@@ -81,6 +86,7 @@ export const createSessionTabs = (input: TabsInput) => {
     contextOpen,
     codespaceOpen,
     previewOpen,
+    sourcesOpen,
     openedTabs,
     activeTab,
     activeFileTab,
