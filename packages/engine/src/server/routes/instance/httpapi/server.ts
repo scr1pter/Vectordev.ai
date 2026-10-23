@@ -65,6 +65,7 @@ import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainEmbed } from "@vectordevai/core/brain/embed"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { ResearchStore } from "@vectordevai/core/research/store"
+import { LocalProbe } from "@vectordevai/core/local-mode/probe"
 import { ModelCatalog } from "@vectordevai/core/model-catalog"
 import { Npm } from "@vectordevai/core/npm"
 import { PermissionSaved } from "@vectordevai/core/permission/saved"
@@ -102,6 +103,7 @@ import { VectorTeams } from "@/teams"
 import { fileHandlers } from "./handlers/file"
 import { globalHandlers } from "./handlers/global"
 import { instanceHandlers } from "./handlers/instance"
+import { localHandlers } from "./handlers/local"
 import { mcpHandlers } from "./handlers/mcp"
 import { memoryHandlers } from "./handlers/memory"
 import { permissionHandlers } from "./handlers/permission"
@@ -174,6 +176,7 @@ const instanceApiRoutes = HttpApiBuilder.layer(InstanceHttpApi).pipe(
     experimentalHandlers,
     fileHandlers,
     instanceHandlers,
+    localHandlers,
     mcpHandlers,
     memoryHandlers,
     projectHandlers,
@@ -247,6 +250,7 @@ const app = LayerNode.group([
   BrainKnowledge.node,
   BrainEmbed.node,
   ResearchStore.node,
+  LocalProbe.holdsNode,
   Provider.node,
   ProviderAuth.node,
   Agent.node,
