@@ -504,19 +504,27 @@ test.skipIf(!darwin)("the toolchain stays readable and executable inside the san
   expect(sandboxed({ command: 'T=$(mktemp) && echo x > "$T" && echo TMPOK', workspaceRoot: root }).output).toBe("TMPOK")
 })
 
-test.skipIf(!darwin)("the network switch is enforced against a real socket", async () => {
-  const root = workspace()
-  const server = net.createServer((socket) => socket.end("ok"))
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()))
-  const address = server.address()
-  const port = typeof address === "object" && address ? address.port : 0
+test.skipIf(!darwin)(
+  "the network switch is enforced against a real socket, and no network still reaches loopback",
+  async () => {
+    const root = workspace()
+    const server = net.createServer((socket) => socket.end("ok"))
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()))
+    const address = server.address()
+    const port = typeof address === "object" && address ? address.port : 0
 
-  const probe = `nc -z -w 2 127.0.0.1 ${port} > /dev/null 2>&1 && echo CONNECTED || echo BLOCKED`
-  expect(sandboxed({ command: probe, workspaceRoot: root, allowNetwork: true }).output).toBe("CONNECTED")
-  expect(sandboxed({ command: probe, workspaceRoot: root, allowNetwork: false }).output).toBe("BLOCKED")
+    const probe = `nc -z -w 2 127.0.0.1 ${port} > /dev/null 2>&1 && echo CONNECTED || echo BLOCKED`
+    expect(sandboxed({ command: probe, workspaceRoot: root, allowNetwork: true }).output).toBe("CONNECTED")
+    // Vector Local's Web access None keeps this computer's own servers reachable (a database, a dev server).
+    expect(sandboxed({ command: probe, workspaceRoot: root, allowNetwork: false }).output).toBe("CONNECTED")
+    // TEST-NET-1 is never routed, so nothing outside is reached either way: a connection the sandbox let through would
+    // wait out nc's 2 seconds, and one it refused fails at once.
+    const outside = `SECONDS=0; nc -z -w 2 192.0.2.1 443 > /dev/null 2>&1 && echo CONNECTED || echo "BLOCKED after $SECONDS s"`
+    expect(sandboxed({ command: outside, workspaceRoot: root, allowNetwork: false }).output).toBe("BLOCKED after 0 s")
 
-  await new Promise<void>((resolve) => server.close(() => resolve()))
-})
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  },
+)
 
 test.skipIf(!darwin)("a root worktree does not turn into write access to the whole disk", () => {
   const root = workspace()

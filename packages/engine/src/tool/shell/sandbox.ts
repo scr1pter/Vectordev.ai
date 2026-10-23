@@ -202,10 +202,84 @@ export function seatbeltProfile(input: {
       : []),
     // Registries and package downloads are the common case, so network stays on
     // unless the caller turns it off. Unix sockets survive either way because
-    // local toolchains (compiler daemons, DNS) talk over them.
-    ...(input.allowNetwork ? ["(allow network*)"] : ["(deny network*)", "(allow network* (local unix) (remote unix))"]),
+    // local toolchains (compiler daemons) talk over them.
+    ...(input.allowNetwork ? ["(allow network*)"] : OFFLINE_NETWORK),
     "",
   ].join("\n")
+}
+
+// The network rules with no network: this computer's own servers stay reachable (a database, a dev server) and a
+// command may serve on loopback itself, while nothing reaches another host. Outbound is allowed by the remote address
+// alone: `(local ip "localhost:*")` under network* also let connections to other hosts out (macOS 27), so binding and
+// accepting are the only rules the local address decides. Name lookups go through mDNSResponder, which would send the
+// name to the network's resolver, so its socket is refused; names in /etc/hosts, localhost among them, still resolve.
+const OFFLINE_NETWORK = [
+  "(deny network*)",
+  "(allow network* (local unix) (remote unix))",
+  '(deny network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))',
+  '(allow network-outbound (remote ip "localhost:*"))',
+  '(allow network-bind network-inbound (local ip "localhost:*"))',
+]
+
+// Where systemd-resolved listens on Linux. A sandbox without network hides it, so a name lookup cannot go through the
+// host's resolver, whose own connections are outside the sandbox.
+const RESOLVER = "/run/systemd/resolve"
+
+// The variables that point programs at a proxy. A command with no network gets none, so a proxy that runs on this
+// computer does not carry its requests out.
+const PROXY_VARIABLES = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "FTP_PROXY"]
+
+export const WINDOWS_UNFILTERED =
+  "Commands the agent runs are not network-filtered on Windows. Vector Local's Web access is None, but a command can still reach the network."
+const WRITES = "they can write only in this repository, the working folder, temporary folders and package caches"
+export const OFFLINE_NOTICE: Record<"seatbelt" | "bubblewrap", string> = {
+  seatbelt: `Vector Local's Web access is None, so the commands the agent runs go through Vector's sandbox: they can reach servers on this computer only, and ${WRITES}.`,
+  bubblewrap: `Vector Local's Web access is None, so the commands the agent runs go through Vector's sandbox: they reach no network, not even servers on this computer, and ${WRITES}.`,
+}
+
+/** How a command runs with Web access None: in the sandbox, as it is where no sandbox exists (Windows), or not at all. */
+export type Offline =
+  | { readonly type: "sandboxed"; readonly wrapped: Wrapped; readonly notice: string }
+  | { readonly type: "unfiltered"; readonly notice: string }
+  | { readonly type: "refused"; readonly message: string }
+
+/**
+ * A command under Vector Local's Web access None (section 4.3.5): on macOS and Linux it runs in the sandbox with no
+ * network but this computer's, whatever VECTOR_SHELL_SANDBOX says, and a command the sandbox cannot wrap (bwrap is
+ * missing, the profile could not be built) is refused rather than run unwrapped. Windows has no sandbox, so there a
+ * command runs as it is, and the notice says it is not network-filtered.
+ */
+export function offline(input: Omit<Parameters<typeof wrapCommand>[0], "allowNetwork">): Offline {
+  const platform = input.platform ?? process.platform
+  if (platform === "win32") return { type: "unfiltered", notice: WINDOWS_UNFILTERED }
+  const missing = offlineRefusal(platform)
+  if (missing) return { type: "refused", message: missing }
+  const env = Object.fromEntries(
+    Object.entries(input.env).filter(([key]) => !PROXY_VARIABLES.includes(key.toUpperCase())),
+  )
+  const wrapped = wrapCommand({ ...input, env, allowNetwork: false })
+  if (!wrapped.sandboxed || wrapped.mechanism === "none")
+    return { type: "refused", message: refusal(platform, wrapped.reason) }
+  return { type: "sandboxed", wrapped, notice: OFFLINE_NOTICE[wrapped.mechanism] }
+}
+
+/**
+ * Why a command cannot run with Web access None on this platform, before anything about it is asked: no sandbox is
+ * there to run it in. Undefined where one is, and on Windows, which has none to require.
+ */
+export function offlineRefusal(platform: NodeJS.Platform = process.platform) {
+  if (platform === "win32") return undefined
+  const availability = sandboxAvailability(platform)
+  return availability.supported ? undefined : refusal(platform, availability.reason)
+}
+
+function refusal(platform: NodeJS.Platform, reason = "the sandbox could not be applied") {
+  return [
+    `Vector did not run this command. With Web access None in Vector Local, commands run only inside Vector's sandbox, and ${reason.replace(/\.$/, "")}.`,
+    platform === "linux"
+      ? "Install bubblewrap (the bwrap command) to run commands, or change Web access in Vector Local."
+      : "Change Web access in Vector Local to run commands without the sandbox.",
+  ].join(" ")
 }
 
 export function wrapCommand(input: {
@@ -331,6 +405,7 @@ export function wrapCommand(input: {
         "/proc",
         "--tmpfs",
         "/tmp",
+        ...(allowNetwork || !fs.existsSync(RESOLVER) ? [] : ["--tmpfs", RESOLVER]),
         ...writable.filter(fs.existsSync).flatMap((file) => ["--bind", file, file]),
         ...git.readonly.filter(fs.existsSync).flatMap((file) => ["--ro-bind", file, file]),
         // bwrap has no read filter, so covering the path is how a secret gets
