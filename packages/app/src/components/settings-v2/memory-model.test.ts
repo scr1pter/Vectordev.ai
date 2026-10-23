@@ -148,8 +148,8 @@ describe("memory page model", () => {
     ).toBe("Saved without the secret it contained. Vector will use it when it is relevant.")
   })
 
-  test("splits the page into Memory and Documents", () => {
-    expect(MEMORY_TABS.map((item) => item.label)).toEqual(["Memory", "Documents", "Search model"])
+  test("splits the page into Memory, Documents and Research", () => {
+    expect(MEMORY_TABS.map((item) => item.label)).toEqual(["Memory", "Documents", "Research", "Search model"])
     for (const item of MEMORY_TABS) expect(item.label.toLowerCase()).not.toContain("project")
   })
 })

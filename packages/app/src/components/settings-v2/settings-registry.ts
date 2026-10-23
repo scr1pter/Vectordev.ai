@@ -68,6 +68,11 @@ export const settingsGroups: readonly SettingsGroup[] = [
           "RULES.md",
           "preferences",
           "lessons",
+          "research",
+          "deep research",
+          "reports",
+          "sources",
+          "citations",
         ],
       },
       {

@@ -6,6 +6,8 @@ import { getFilename } from "@vectordevai/core/util/path"
 import { useGlobal } from "@/context/global"
 import { useServer } from "@/context/server"
 import { LocalMemoryPanel } from "@/features/memory/local-memory-panel"
+import { Markdown } from "@vectordevai/session-ui/markdown"
+import { CITE_PREFIX, HELD, reportMarkdown, reportPath, size, statusLabel } from "@/features/research/research-model"
 import { SettingsMemoryDocuments } from "./memory-documents"
 import { SettingsMemorySearchModel } from "./memory-search-model"
 import {
@@ -32,6 +34,7 @@ import {
   type MemoryTab,
 } from "./memory-model"
 import "./settings-memory.css"
+import "@/features/research/research.css"
 
 type Scope = "repository" | "personal"
 
@@ -147,6 +150,10 @@ export function SettingsMemoryV2(props: { repositoryPath?: string; sessionDirect
 
       <Show when={tab() === "documents"}>
         <SettingsMemoryDocuments client={client} repository={!!directory()} onModel={() => setTab("model")} />
+      </Show>
+
+      <Show when={tab() === "research"}>
+        <ResearchRuns client={client} repository={!!directory()} />
       </Show>
 
       <Show when={tab() === "model"}>
@@ -625,13 +632,15 @@ function EraseCard(props: {
   repository: boolean
   act: (run: (current: VectorClient) => Promise<{ error?: unknown }>, done: string) => Promise<void>
 }) {
-  const [confirming, setConfirming] = createSignal<"repository" | "personal" | "all" | undefined>()
-  const what = (scope: "repository" | "personal" | "all") =>
-    scope === "all"
-      ? "everything Vector learned, in every repository and about you"
-      : scope === "personal"
-        ? "everything Vector learned about you"
-        : "everything Vector learned in this repository, its failure memory included"
+  const [confirming, setConfirming] = createSignal<"repository" | "personal" | "all" | "research" | undefined>()
+  const what = (scope: "repository" | "personal" | "all" | "research") =>
+    scope === "research"
+      ? "all research in this repository: every run's pages, notes and reports"
+      : scope === "all"
+        ? "everything Vector learned, in every repository and about you"
+        : scope === "personal"
+          ? "everything Vector learned about you"
+          : "everything Vector learned in this repository, its failure memory included"
   return (
     <div class="settings-v2-card settings-v2-card--wide">
       <div class="settings-v2-card-head">
@@ -664,6 +673,9 @@ function EraseCard(props: {
                 <ButtonV2 variant="outline" onClick={() => setConfirming("repository")}>
                   Erase what Vector learned here
                 </ButtonV2>
+                <ButtonV2 variant="outline" onClick={() => setConfirming("research")}>
+                  Erase all research in this repository
+                </ButtonV2>
               </Show>
               <ButtonV2 variant="outline" onClick={() => setConfirming("personal")}>
                 Erase what Vector learned about you
@@ -681,7 +693,14 @@ function EraseCard(props: {
                 <ButtonV2
                   variant="danger"
                   onClick={async () => {
-                    await props.act((current) => current.memory.erase({ scope: scope() }), "Erased.")
+                    const chosen = scope()
+                    await props.act(
+                      (current) =>
+                        chosen === "research"
+                          ? current.memory.research.forgetAll()
+                          : current.memory.erase({ scope: chosen }),
+                      "Erased.",
+                    )
                     setConfirming(undefined)
                   }}
                 >
@@ -695,6 +714,232 @@ function EraseCard(props: {
           )}
         </Show>
       </div>
+    </div>
+  )
+}
+
+// Settings > Memory > Research (section 6.5): the runs this repository's brain keeps, with Open, Keep, Export and
+// Forget, and Forget for a single source. A run nobody keeps is deleted after `retain` days.
+function ResearchRuns(props: { client: () => VectorClient | undefined; repository: boolean }) {
+  const [version, setVersion] = createSignal(0)
+  const [open, setOpen] = createSignal<string>()
+  const [confirming, setConfirming] = createSignal<string>()
+  const [notice, setNotice] = createSignal("")
+  const [list] = createResource(
+    () => {
+      const current = props.client()
+      if (!current || !props.repository) return false
+      return { client: current, version: version() }
+    },
+    (input) => input.client.memory.research.list().then((result) => result.data),
+  )
+  const act = async (run: (current: VectorClient) => Promise<{ error?: unknown }>, done: string) => {
+    const current = props.client()
+    if (!current) return
+    const result = await run(current).catch((cause: unknown) => ({ error: cause }))
+    setNotice(result.error ? errorMessage(result.error) : done)
+    if (!result.error) setVersion((value) => value + 1)
+  }
+  const download = async (runID: string, question: string, created: number, format: "markdown" | "json") => {
+    const current = props.client()
+    if (!current) return
+    const result = await current.memory.research.export({ runID, format }).catch(() => undefined)
+    const body = result?.data as unknown
+    if (body === undefined || body === null) {
+      setNotice("Vector could not export this research.")
+      return
+    }
+    const text = typeof body === "string" ? body : JSON.stringify(body, null, 2)
+    const name = reportPath(question, created)
+      .split("/")
+      .at(-1)!
+      .replace(/\.md$/, format === "json" ? ".json" : ".md")
+    const url = URL.createObjectURL(
+      new Blob([text], { type: format === "json" ? "application/json" : "text/markdown" }),
+    )
+    const link = document.createElement("a")
+    link.href = url
+    link.download = name
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  return (
+    <div class="settings-v2-card settings-v2-card--wide" data-component="settings-memory-research">
+      <div class="settings-v2-card-head">
+        <div class="settings-v2-card-copy">
+          <h3 class="settings-v2-card-title">Research</h3>
+          <p class="settings-v2-card-description">
+            Deep research runs this repository's brain keeps: each question, the pages read and the notes and report
+            written from them. {HELD} Runs you do not keep are deleted after {list.latest?.retain ?? 30} days.
+            <Show when={list.latest}>
+              {(current) => (
+                <>
+                  {" "}
+                  Research here takes {size(current().bytes)} of the {size(current().limit)} it may keep; past that, the
+                  oldest runs you did not keep go first.
+                </>
+              )}
+            </Show>
+          </p>
+        </div>
+      </div>
+      <Show when={notice()}>
+        <p class="settings-memory-notice" role="status">
+          {notice()}
+        </p>
+      </Show>
+      <div class="settings-memory-list">
+        <Show
+          when={props.repository && (list.latest?.runs.length ?? 0) > 0}
+          fallback={
+            <p class="settings-memory-empty">
+              {!props.repository
+                ? "Open a repository to see its research."
+                : list.loading
+                  ? "Reading research…"
+                  : "No research in this repository yet. Pick Deep research in the composer's Mode menu to start one."}
+            </p>
+          }
+        >
+          <For each={list.latest?.runs}>
+            {(item) => (
+              <article class="settings-memory-row" data-component="settings-memory-research-run">
+                <div class="settings-memory-row-head">
+                  <span class="settings-memory-tag">{item.run.depth === "deep" ? "Deep" : "Focused"}</span>
+                  <span class="settings-memory-tag">{item.run.kept ? "Kept" : "Not kept"}</span>
+                  <span class="settings-memory-id">{item.run.id}</span>
+                </div>
+                <p class="settings-memory-text">{item.run.question}</p>
+                <p class="settings-memory-meta">
+                  {new Date(item.run.created_at).toLocaleDateString()} · {item.sources} source
+                  {item.sources === 1 ? "" : "s"} · {item.notes} note{item.notes === 1 ? "" : "s"} · {size(item.bytes)}
+                </p>
+                <div class="settings-memory-actions">
+                  <Show
+                    when={confirming() === item.run.id}
+                    fallback={
+                      <>
+                        <ButtonV2
+                          size="small"
+                          variant="outline"
+                          onClick={() => setOpen((id) => (id === item.run.id ? undefined : item.run.id))}
+                        >
+                          {open() === item.run.id ? "Close" : "Open the report"}
+                        </ButtonV2>
+                        <Show when={!item.run.kept}>
+                          <ButtonV2
+                            size="small"
+                            variant="ghost"
+                            onClick={() =>
+                              act(
+                                (current) => current.memory.research.keep({ runID: item.run.id }),
+                                "Kept: the report is used like your other private documents.",
+                              )
+                            }
+                          >
+                            Keep
+                          </ButtonV2>
+                        </Show>
+                        <ButtonV2
+                          size="small"
+                          variant="ghost"
+                          onClick={() => download(item.run.id, item.run.question, item.run.created_at, "markdown")}
+                        >
+                          Export
+                        </ButtonV2>
+                        <ButtonV2
+                          size="small"
+                          variant="ghost"
+                          onClick={() => download(item.run.id, item.run.question, item.run.created_at, "json")}
+                        >
+                          Export JSON
+                        </ButtonV2>
+                        <ButtonV2 size="small" variant="ghost" onClick={() => setConfirming(item.run.id)}>
+                          Forget
+                        </ButtonV2>
+                      </>
+                    }
+                  >
+                    <span class="settings-memory-meta">Forget this run's report, pages and notes?</span>
+                    <ButtonV2
+                      size="small"
+                      variant="danger"
+                      onClick={async () => {
+                        setConfirming(undefined)
+                        await act(
+                          (current) => current.memory.research.forget({ runID: item.run.id }),
+                          "Forgot the research.",
+                        )
+                      }}
+                    >
+                      Forget
+                    </ButtonV2>
+                    <ButtonV2 size="small" variant="ghost" onClick={() => setConfirming(undefined)}>
+                      Cancel
+                    </ButtonV2>
+                  </Show>
+                </div>
+                <Show when={open() === item.run.id}>
+                  <ResearchRunDetail client={props.client} runID={item.run.id} version={version()} act={act} />
+                </Show>
+              </article>
+            )}
+          </For>
+        </Show>
+      </div>
+    </div>
+  )
+}
+
+function ResearchRunDetail(props: {
+  client: () => VectorClient | undefined
+  runID: string
+  version: number
+  act: (run: (current: VectorClient) => Promise<{ error?: unknown }>, done: string) => Promise<void>
+}) {
+  const [detail] = createResource(
+    () => {
+      const current = props.client()
+      if (!current) return false
+      return { client: current, runID: props.runID, version: props.version }
+    },
+    (input) => input.client.memory.research.get({ runID: input.runID }).then((result) => result.data),
+  )
+  return (
+    <div class="settings-memory-research-detail">
+      <Show when={detail.latest?.report} fallback={<p class="settings-memory-meta">No report saved for this run.</p>}>
+        {(report) => (
+          <div
+            onClick={(event) => {
+              // A citation opens its source in the session's Sources tab; here it only shows its quote on hover.
+              if (event.target instanceof Element && event.target.closest(`a[href^="${CITE_PREFIX}"]`))
+                event.preventDefault()
+            }}
+          >
+            <Markdown text={reportMarkdown(report())} cacheKey={`settings-research:${props.runID}`} />
+          </div>
+        )}
+      </Show>
+      <For each={detail.latest?.sources}>
+        {(source) => (
+          <p class="settings-memory-meta">
+            {source.id} · {source.title || source.url} · {source.site} · {statusLabel(source)}{" "}
+            <ButtonV2
+              size="small"
+              variant="ghost"
+              onClick={() =>
+                props.act(
+                  (current) => current.memory.research.forgetSource({ runID: props.runID, sourceID: source.id }),
+                  `Forgot ${source.id}. Notes that quoted it say so.`,
+                )
+              }
+            >
+              Forget source
+            </ButtonV2>
+          </p>
+        )}
+      </For>
     </div>
   )
 }

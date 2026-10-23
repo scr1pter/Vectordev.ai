@@ -39,9 +39,12 @@ describe("settings registry", () => {
       "providers",
     ])
     expect(filterSettingsGroups("update").flatMap((group) => group.items.map((item) => item.value))).toEqual(["about"])
-    expect(filterSettingsGroups("memory").flatMap((group) => group.items.map((item) => item.value))).toEqual([
-      "memory",
-    ])
+    expect(filterSettingsGroups("memory").flatMap((group) => group.items.map((item) => item.value))).toEqual(["memory"])
+  })
+
+  test("finds Deep research's runs, reports and sources under Memory", () => {
+    for (const query of ["research", "Deep research", "reports", "sources", "citations"])
+      expect(filterSettingsGroups(query).flatMap((group) => group.items.map((item) => item.value))).toEqual(["memory"])
   })
 
   test("finds the Memory page, which replaced the rules page and the Local memory card, by what people call them", () => {
