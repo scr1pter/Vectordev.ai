@@ -579,3 +579,38 @@ test("only packaged release builds report to vectordev.ai unless a development U
     usageCheckinEndpoint({ packaged: false, channel: "dev", override: "http://localhost:3000/api/usage/checkin" }),
   ).toBe("http://localhost:3000/api/usage/checkin")
 })
+
+test("reads and sends nothing while Vector Local or the first run's hold keeps the check-in back", async () => {
+  const app = fixture()
+  app.state.sessions.push({ id: "ses_a", updated: at(9) })
+  const allowed = { current: false }
+  const sent: string[] = []
+  const usage = createUsageCheckin({
+    ...app.options,
+    allowed: () => allowed.current,
+    send: (url, init) => {
+      sent.push(url)
+      return fetch(url, init)
+    },
+  })
+  expect(await usage.checkin()).toBe(false)
+  expect(app.lists).toHaveLength(0)
+  expect(app.checkins).toHaveLength(0)
+  // Allowed again (the person answered, or allowed the check-in), it checks in through Vector Local's send.
+  allowed.current = true
+  expect(await usage.checkin()).toBe(true)
+  expect(sent).toEqual([app.options.endpoint!])
+  expect(app.checkins).toHaveLength(1)
+  expect(app.lists).toHaveLength(1)
+})
+
+test("stops a check-in that Vector Local closed while the sessions were being counted", async () => {
+  const app = fixture()
+  app.state.sessions.push({ id: "ses_a", updated: at(9) })
+  const checks = { count: 0 }
+  // Allowed when asked first, refused when asked again just before sending.
+  const usage = createUsageCheckin({ ...app.options, allowed: () => checks.count++ === 0 })
+  expect(await usage.checkin()).toBe(false)
+  expect(app.lists).toHaveLength(1)
+  expect(app.checkins).toHaveLength(0)
+})
