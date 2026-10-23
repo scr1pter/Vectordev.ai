@@ -74,6 +74,7 @@ describe("server authentication", () => {
       ["POST", "/local/egress/report"],
       ["POST", "/local/detect"],
       ["POST", "/local/probe"],
+      ["POST", "/local/servers"],
       ["POST", "/local/check"],
       ["POST", "/local/grant"],
       ["GET", "/local/recommend"],

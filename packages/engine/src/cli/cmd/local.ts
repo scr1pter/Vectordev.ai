@@ -37,22 +37,46 @@ export const LocalCommand = cmd({
   async handler() {},
 })
 
-// Applies a change, asking first at this terminal when it would loosen Vector Local.
-const change = Effect.fn("Cli.local.change")(function* (update: Omit<LocalSettings.Update, "by" | "confirm">) {
+// Runs `attempt` without confirmation, and once more with it when the owner says yes at this terminal: the step a
+// change that would loosen Vector Local takes. Anything refused fails with its reason.
+const asked = Effect.fn("Cli.local.asked")(function* <A, R>(
+  attempt: (confirmed: boolean) => Effect.Effect<A | Exclude<LocalSettings.Outcome, { type: "applied" }>, never, R>,
+) {
   const { LocalSettings } = yield* Effect.promise(() => import("@/config/local-settings"))
-  const first = yield* LocalSettings.apply({ ...update, by: "cli" })
-  if (first.type === "applied") return first.status
-  if (first.type === "refused") return yield* fail(first.message)
-  if (!process.stdin.isTTY || !process.stdout.isTTY)
-    return yield* fail(`${NEEDS_TERMINAL} It ${first.changes.join(", ")}.`)
+  const first = yield* attempt(false)
+  const done = (result: typeof first) =>
+    isOutcome(result) && result.type === "refused"
+      ? fail(result.message)
+      : isOutcome(result) && result.type === "confirm"
+        ? fail(`${NEEDS_TERMINAL} It ${result.changes.join(", ")}.`)
+        : Effect.succeed(result as A)
+  if (!isOutcome(first) || first.type !== "confirm") return yield* done(first)
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return yield* done(first)
   const answer = yield* Effect.promise(() =>
     confirm({ message: `${LocalSettings.CONFIRM} It ${first.changes.join(", ")}.`, initialValue: false }),
   )
   if (answer !== true) return yield* fail("Nothing changed.")
-  const second = yield* LocalSettings.apply({ ...update, by: "cli", confirm: true })
-  if (second.type === "applied") return second.status
-  if (second.type === "refused") return yield* fail(second.message)
-  return yield* fail(`${NEEDS_TERMINAL} It ${second.changes.join(", ")}.`)
+  return yield* done(yield* attempt(true))
+})
+
+function isOutcome(value: unknown): value is Exclude<LocalSettings.Outcome, { type: "applied" }> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "type" in value &&
+    (value.type === "confirm" || value.type === "refused")
+  )
+}
+
+// Applies a change, asking first at this terminal when it would loosen Vector Local.
+const change = Effect.fn("Cli.local.change")(function* (update: Omit<LocalSettings.Update, "by" | "confirm">) {
+  const { LocalSettings } = yield* Effect.promise(() => import("@/config/local-settings"))
+  const applied = yield* asked((confirmed) =>
+    LocalSettings.apply({ ...update, by: "cli", confirm: confirmed }).pipe(
+      Effect.map((outcome) => (outcome.type === "applied" ? outcome.status : outcome)),
+    ),
+  )
+  return applied
 })
 
 export const LocalStatusCommand = effectCmd({
@@ -138,8 +162,6 @@ export const LocalSetupCommand = effectCmd({
     const { LocalSettings } = yield* Effect.promise(() => import("@/config/local-settings"))
     const { LocalDetect } = yield* Effect.promise(() => import("@vectordevai/core/local-mode/detect"))
     const { LocalProbe } = yield* Effect.promise(() => import("@vectordevai/core/local-mode/probe"))
-    const { Config } = yield* Effect.promise(() => import("@/config/config"))
-    const config = yield* Config.Service
     const servers = args.address
       ? yield* Effect.promise(() => LocalSettings.probe({ url: args.address! })).pipe(
           Effect.flatMap((read) =>
@@ -149,33 +171,17 @@ export const LocalSetupCommand = effectCmd({
       : yield* Effect.promise(() => LocalDetect.detect())
     if (servers.length === 0) return yield* noServer()
     const server = yield* choose(servers)
-    const existing = Object.keys((yield* config.get()).provider ?? {})
-    const providerID = args.provider ?? freeID(server.kind, existing)
-    if (!/^[a-z0-9][a-z0-9-_]*$/.test(providerID) || (args.provider && existing.includes(providerID)))
-      return yield* fail(`Choose an unused provider name of lowercase letters, numbers, hyphens or underscores.`)
-    // The server goes on the list first: with Vector Local on that asks, and nothing is written if the answer is no.
-    yield* change({ endpoints: { add: [server.origin] }, pins: { [server.origin]: server.pin } })
-    const patch = LocalProbe.patch({ providerID, server, list: false })
-    const models = server.models.filter((model) => !model.cloud)
-    yield* config.updateGlobal({
-      provider: {
-        [providerID]: {
-          npm: "@ai-sdk/openai-compatible",
-          name: `${server.name} (${new URL(server.origin).host})`,
-          options: { baseURL: server.baseURL, ...patch.provider[providerID]?.options },
-          models: Object.fromEntries(
-            models.map((model) => [model.id, { name: model.id, ...patch.provider[providerID]?.models[model.id] }]),
-          ),
-        },
-      },
-    })
+    // With Vector Local on, putting the server on the list asks first, and nothing is written if the answer is no.
+    const added = yield* asked((confirmed) =>
+      LocalSettings.addServer({ server, provider: args.provider, by: "cli", confirm: confirmed }),
+    )
     UI.println(
-      `Added ${serverLine(server)} as ${providerID}, with ${models.length} model${models.length === 1 ? "" : "s"}.`,
+      `Added ${serverLine(server)} as ${added.provider}, with ${added.models.length} model${added.models.length === 1 ? "" : "s"}.`,
     )
     if (server.class !== "this-computer" && !server.encrypted) UI.println(LocalSettings.NOT_ENCRYPTED)
     if (server.forwards) UI.println(LocalSettings.FORWARDS)
     if (server.class === "this-computer") UI.println(LocalProbe.SHARED_MACHINE)
-    UI.println(`Check a model with vector local check --model ${providerID}/<model>.`)
+    UI.println(`Check a model with vector local check --model ${added.provider}/<model>.`)
   }),
 })
 
@@ -370,12 +376,6 @@ export function sinceOf(input: string, now: number) {
   if (span) return now - Number(span[1]) * { m: 60_000, h: 3_600_000, d: 86_400_000 }[span[2]!.toLowerCase() as "m"]
   const date = Date.parse(input)
   return Number.isNaN(date) ? null : date
-}
-
-/** The provider name for a server: its kind, then kind-2, kind-3, … when that is taken. */
-export function freeID(base: string, existing: readonly string[]) {
-  if (!existing.includes(base)) return base
-  return Array.from({ length: 98 }, (_, index) => `${base}-${index + 2}`).find((id) => !existing.includes(id)) ?? base
 }
 
 // Which server to add: the only one found, or the one picked at this terminal.

@@ -2,6 +2,7 @@ export * as LocalSettings from "./local-settings"
 
 import { Effect, Option, Schema } from "effect"
 import { LocalMode } from "@vectordevai/schema/local-mode"
+import { providerAllowed } from "@vectordevai/schema/provider-policy"
 import { ChildEnvironment } from "@vectordevai/core/child-environment"
 import { Egress } from "@vectordevai/core/local-mode/egress"
 import { EgressGuard } from "@vectordevai/core/local-mode/guard"
@@ -139,7 +140,7 @@ export type Outcome =
 
 export const CONFIRM = "This change would loosen Vector Local. Apply it?"
 export const AGENT =
-  "An agent or Vector's own terminal started this Vector, so it cannot loosen Vector Local. Change it in Vector Local's settings or in your own terminal."
+  "An agent or Vector's own terminal started this Vector, so it cannot loosen Vector Local. Change it yourself in a terminal, or with /local in the terminal UI."
 export const LOCKED = "Set by your company. Ask your administrator to change it."
 const CHANGED = "The change waiting for you is not the one you confirmed. Look at it again before you apply it."
 const NOTHING_HELD = "No change to Vector Local is waiting for you."
@@ -607,6 +608,81 @@ export const modelsRow = Effect.fn("LocalSettings.modelsRow")(function* () {
     title: `Models Vector may call: ${usable.map((provider) => `${provider.id} (${Object.keys(provider.models).length})`).join(", ")}`,
     ...(offLine ? { detail: offLine } : {}),
   }
+})
+
+// The provider name each kind of server is added as, the names the app's server presets use.
+const PROVIDER_NAMES: Record<LocalProbe.Kind, string> = {
+  ollama: "ollama",
+  lmstudio: "lm-studio",
+  vllm: "vllm",
+  llamacpp: "llama-cpp",
+  sglang: "sglang",
+  openai: "local-server",
+}
+const PROVIDER_ID = /^[a-z0-9][a-z0-9-_]*$/
+
+/** A provider name based on `base` that nothing uses yet: ollama, then ollama-2, ollama-3, … */
+export function freeID(base: string, taken: readonly string[]) {
+  const used = (id: string) => taken.includes(id) || providerAllowed(id)
+  if (!used(base)) return base
+  return Array.from({ length: 98 }, (_, index) => `${base}-${index + 2}`).find((id) => !used(id)) ?? base
+}
+
+/**
+ * Add server: puts the server on the model server list with the identity it answered with (a change that loosens
+ * Vector Local while it is on, so it needs `confirm` then), and adds it to the user's global config as a provider with
+ * the models it runs there, each with its context, reply limit, tool calling and image input. Its cloud models are
+ * left out. Nothing is written when the listing is refused or waits for confirmation.
+ */
+export const addServer = Effect.fn("LocalSettings.addServer")(function* (input: {
+  readonly server: LocalProbe.Server
+  readonly provider?: string
+  readonly confirm?: boolean
+  readonly by: "app" | "cli"
+  readonly holds?: LocalProbe.Holds
+}) {
+  const config = yield* Config.Service
+  const providers = yield* Provider.Service
+  // The user's global config as last written, the repository's config and every provider Vector knows: a name any of
+  // them uses is taken, so a server never replaces a provider.
+  const taken = [
+    ...Object.keys((yield* config.getGlobal()).provider ?? {}),
+    ...Object.keys((yield* config.get()).provider ?? {}),
+    ...Object.keys(yield* providers.list()),
+  ]
+  const named = input.provider?.trim()
+  const providerID = named || freeID(PROVIDER_NAMES[input.server.kind], taken)
+  if (!PROVIDER_ID.test(providerID) || (named && (taken.includes(named) || providerAllowed(named))))
+    return refused(
+      "invalid",
+      `Choose an unused provider name of lowercase letters, numbers, hyphens or underscores, not ${providerID}.`,
+    )
+  const server = input.server
+  const listed = yield* apply(
+    {
+      endpoints: { add: [server.origin] },
+      pins: { [server.origin]: server.pin },
+      confirm: input.confirm,
+      by: input.by,
+    },
+    input.holds,
+  )
+  if (listed.type !== "applied") return listed
+  const patch = LocalProbe.patch({ providerID, server, list: false })
+  const models = server.models.filter((model) => !model.cloud)
+  yield* config.updateGlobal({
+    provider: {
+      [providerID]: {
+        npm: "@ai-sdk/openai-compatible",
+        name: `${server.name} (${new URL(server.origin).host})`,
+        options: { baseURL: server.baseURL, ...patch.provider[providerID]?.options },
+        models: Object.fromEntries(
+          models.map((model) => [model.id, { name: model.id, ...patch.provider[providerID]?.models[model.id] }]),
+        ),
+      },
+    },
+  } as ConfigV1.Info)
+  return { type: "added" as const, provider: providerID, models: models.map((model) => model.id), status: status() }
 })
 
 export const Role = Schema.Literals(["agent", "subagent", "research"])

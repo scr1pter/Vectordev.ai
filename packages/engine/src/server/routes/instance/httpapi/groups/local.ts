@@ -90,6 +90,21 @@ export const LocalProbeResult = Schema.Struct({
   message: Schema.optional(Schema.String),
 }).annotate({ identifier: "LocalProbeResult" })
 
+export const LocalAddServerPayload = Schema.Struct({
+  ...LocalProbePayload.fields,
+  /** The provider name to add it as. Default: its kind's, numbered when that is taken. */
+  provider: Schema.optional(Schema.String),
+  /** The owner confirmed putting it on the list, which loosens Vector Local while it is on. */
+  confirm: Schema.optional(Schema.Boolean),
+})
+
+export const LocalAddedServer = Schema.Struct({
+  provider: Schema.String,
+  models: Schema.Array(Schema.String),
+  server: LocalProbe.Server,
+  status: LocalSettings.Status,
+}).annotate({ identifier: "LocalAddedServer" })
+
 export const LocalCheckPayload = Schema.Struct({
   /** A model to run through the requests the role makes, as provider/model. Without it, every layer is checked. */
   model: Schema.optional(Schema.String),
@@ -261,6 +276,19 @@ export const LocalApi = HttpApi.make("local")
             summary: "Read a model server",
             description:
               "Read the server at an address you typed: what kind it is, its version, its models with their context, tools and image support, and the identity Vector pins when you add it. It asks for these only; it sends no prompt. With Vector Local on, only that server is let through while it is read, and Web access None keeps internet servers blocked.",
+          }),
+        ),
+        HttpApiEndpoint.post("addServer", `${root}/servers`, {
+          query: WorkspaceRoutingQuery,
+          payload: LocalAddServerPayload,
+          success: described(LocalAddedServer, "The server, on the list and added as a provider"),
+          error: errors,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "local.servers.add",
+            summary: "Add a model server",
+            description:
+              "Read the server at an address, put it on the model server list with the identity it answered with, and add it to your user config as a provider with the models it runs, each with its context, reply limit, tool calling and image input. Its cloud models are left out. With Vector Local on, listing a server loosens it, so the request needs `confirm: true`, and fails with LocalConfirmError otherwise. Headers are used to read the server and are not saved.",
           }),
         ),
         HttpApiEndpoint.post("check", `${root}/check`, {

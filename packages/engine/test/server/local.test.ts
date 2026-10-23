@@ -127,6 +127,7 @@ describe("the Local API", () => {
       ["POST", "/local/egress/report", { events: [] }],
       ["POST", "/local/detect", {}],
       ["POST", "/local/probe", { url: "http://127.0.0.1:9" }],
+      ["POST", "/local/servers", { url: "http://127.0.0.1:9" }],
       ["POST", "/local/check", {}],
       ["POST", "/local/grant", { source: "embedding-model" }],
       ["GET", "/local/recommend"],
@@ -332,6 +333,48 @@ describe("the Local API", () => {
       expect(nothing).toEqual({ server: null, message: "No model server Vector knows answered at http://127.0.0.1:9." })
     } finally {
       await fake.close()
+    }
+  })
+
+  test("Add server lists the server with its identity and adds its models; with Vector Local on it asks first", async () => {
+    const ollama = await LocalServers.serve("ollama")
+    const studio = await LocalServers.serve("lmstudio")
+    try {
+      const added = await json(await send("POST", "/local/servers", { url: `${ollama.origin}/v1` }))
+      expect(added).toMatchObject({ provider: "ollama", server: { kind: "ollama", origin: ollama.origin } })
+      // Its cloud model runs on ollama.com, and its embedding model writes no text, so neither is added.
+      expect(added.models).toEqual(["gemma3:12b", "llama3.3:70b", "qwen3-coder:30b"])
+      expect(added.status.policy.endpoints).toEqual([{ origin: ollama.origin, from: "user" }])
+      expect(written()?.pins).toEqual({ [ollama.origin]: added.server.pin })
+      const provider = GLOBAL_FILES.filter((file) => existsSync(file))
+        .map((file) => (parse(readFileSync(file, "utf8")) as { provider?: Record<string, any> }).provider?.ollama)
+        .find(Boolean)
+      expect(provider).toMatchObject({
+        npm: "@ai-sdk/openai-compatible",
+        name: `Ollama (${new URL(ollama.origin).host})`,
+        options: { baseURL: `${ollama.origin}/v1` },
+        models: { "llama3.3:70b": { name: "llama3.3:70b", tool_call: true } },
+      })
+
+      await turnOn()
+      const asked = await send("POST", "/local/servers", { url: studio.origin })
+      expect(asked.status).toBe(409)
+      expect((await json(asked)).data.changes).toEqual([`adds the model server ${studio.origin}`])
+      expect(Config.local().endpoints.map((item) => item.origin)).toEqual([ollama.origin])
+      const confirmed = await json(await send("POST", "/local/servers", { url: studio.origin, confirm: true }))
+      // lmstudio is the catalog's own provider, so a server added by hand gets the app's name for it.
+      expect(confirmed.provider).toBe("lm-studio")
+      expect(Config.local().endpoints.map((item) => item.origin)).toEqual([ollama.origin, studio.origin])
+
+      const taken = await json(
+        await send("POST", "/local/servers", { url: studio.origin, provider: "ollama", confirm: true }),
+      )
+      expect(taken.data).toMatchObject({ code: "invalid", message: expect.stringContaining("unused provider name") })
+      const nothing = await json(await send("POST", "/local/servers", { url: "http://127.0.0.1:9" }))
+      expect(nothing.data.code).toBe("not-found")
+    } finally {
+      await ollama.close()
+      await studio.close()
     }
   })
 

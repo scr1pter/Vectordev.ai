@@ -92,6 +92,28 @@ export const localHandlers = HttpApiBuilder.group(InstanceHttpApi, "local", (han
       return yield* Effect.promise(() => LocalSettings.probe(ctx.payload))
     })
 
+    const addServer = Effect.fn("LocalHttpApi.addServer")(function* (ctx: {
+      payload: { url: string; headers?: Readonly<Record<string, string>>; provider?: string; confirm?: boolean }
+    }) {
+      const read = yield* Effect.promise(() => LocalSettings.probe(ctx.payload))
+      if (!read.server) return yield* failure("not-found", read.message ?? `Nothing answered at ${ctx.payload.url}.`)
+      const outcome = yield* LocalSettings.addServer({
+        server: read.server,
+        provider: ctx.payload.provider,
+        confirm: ctx.payload.confirm,
+        by: "app",
+        holds,
+      })
+      if (outcome.type === "added")
+        return { provider: outcome.provider, models: outcome.models, server: read.server, status: outcome.status }
+      if (outcome.type === "confirm")
+        return yield* new LocalConfirmError({
+          name: "LocalConfirmError",
+          data: { message: LocalSettings.CONFIRM, changes: [...outcome.changes] },
+        })
+      return yield* failure(outcome.reason, outcome.message, outcome.changes)
+    })
+
     const check = Effect.fn("LocalHttpApi.check")(function* (ctx: {
       payload: void | { model?: string; role?: LocalSettings.Role; confirmed?: boolean }
     }) {
@@ -127,7 +149,7 @@ export const localHandlers = HttpApiBuilder.group(InstanceHttpApi, "local", (han
       if (!ASKS.has(source.purpose) && source.local !== "ask-once")
         return yield* failure(
           "invalid",
-          `Vector Local does not ask before ${source.id}, so there is nothing to answer once. Allow it in Vector Local's settings instead.`,
+          `Vector Local does not ask before ${source.id}, so there is nothing to answer once. Allow it for good instead (PATCH /local, or vector local allow).`,
         )
       if (LocalSettings.agentMarked()) return yield* failure("agent", LocalSettings.AGENT)
       Egress.grant(source.id, { once: ctx.payload.once ?? true })
@@ -164,6 +186,7 @@ export const localHandlers = HttpApiBuilder.group(InstanceHttpApi, "local", (han
       .handle("egressReport", egressReport)
       .handle("detect", detect)
       .handle("probe", probe)
+      .handle("addServer", addServer)
       .handle("check", check)
       .handle("grant", grant)
       .handle("recommend", recommend)

@@ -2,9 +2,10 @@ import { beforeEach, describe, expect, test } from "bun:test"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { Effect } from "effect"
+import { parse } from "jsonc-parser"
 import { ChildEnvironment } from "@vectordevai/core/child-environment"
 import { LocalProbe } from "@vectordevai/core/local-mode/probe"
-import { freeID, sinceOf } from "../../src/cli/cmd/local"
+import { sinceOf } from "../../src/cli/cmd/local"
 import { cliIt } from "../lib/cli-process"
 import { LocalServers } from "../../../core/test/fixture/local-servers/serve"
 
@@ -26,8 +27,13 @@ const writeConfig = (home: string, value: Record<string, unknown>) => {
   mkdirSync(path.dirname(configFile(home)), { recursive: true })
   writeFileSync(configFile(home), JSON.stringify(value, null, 2))
 }
-const readConfig = (home: string) =>
-  existsSync(configFile(home)) ? (JSON.parse(readFileSync(configFile(home), "utf8")) as Record<string, any>) : {}
+// The user's config as Vector writes it: into the first of these that exists, or a new vector.jsonc.
+const readConfig = (home: string) => {
+  const file = ["vector.jsonc", "vector.json", "config.json"]
+    .map((name) => path.join(home, ".config", "vector", name))
+    .find((item) => existsSync(item))
+  return file ? (parse(readFileSync(file, "utf8")) as Record<string, any>) : {}
+}
 
 // A fake Ollama on 127.0.0.1 for the test's scope, with its identity pin as Add server records it.
 const ollama = (routes?: Record<string, LocalServers.Route>) =>
@@ -156,6 +162,33 @@ describe("vector local", () => {
   )
 })
 
+describe("vector local setup", () => {
+  cliIt.live(
+    "adds a typed server as a provider and lists it; with Vector Local on it asks at a terminal first",
+    ({ vector, home }) =>
+      Effect.gen(function* () {
+        const server = yield* ollama()
+        const added = yield* vector.spawn(["local", "setup", `${server.fake.origin}/v1`])
+        vector.expectExit(added, 0)
+        expect(added.stderr).toContain(`Added Ollama 0.12.6 at ${server.fake.origin}`)
+        expect(added.stderr).toContain("as ollama, with 3 models.")
+        const config = readConfig(home)
+        expect(config.local).toEqual({ endpoints: [server.fake.origin], pins: { [server.fake.origin]: server.pin } })
+        expect(config.provider.ollama.options.baseURL).toBe(`${server.fake.origin}/v1`)
+
+        const other = yield* ollama()
+        vector.expectExit(yield* vector.spawn(["local", "on"]), 0)
+        const asked = yield* vector.spawn(["local", "setup", other.fake.origin])
+        vector.expectExit(asked, 1)
+        expect(asked.stderr).toContain(`It adds the model server ${other.fake.origin}.`)
+        // Nothing was written: neither the list nor a second provider.
+        expect(readConfig(home).local.endpoints).toEqual([server.fake.origin])
+        expect(Object.keys(readConfig(home).provider)).toEqual(["ollama"])
+      }),
+    60_000,
+  )
+})
+
 describe("vector run --local", () => {
   cliIt.live(
     "turns Vector Local on for this run only, so an unlisted model server gets no prompt",
@@ -199,10 +232,5 @@ describe("vector local helpers", () => {
     expect(sinceOf("7d", now)).toBe(now - 7 * 86_400_000)
     expect(sinceOf("2026-10-01", now)).toBe(Date.parse("2026-10-01"))
     expect(sinceOf("soon", now)).toBeNull()
-  })
-
-  test("a server's provider name is its kind, numbered when that is taken", () => {
-    expect(freeID("ollama", [])).toBe("ollama")
-    expect(freeID("ollama", ["ollama", "ollama-2"])).toBe("ollama-3")
   })
 })

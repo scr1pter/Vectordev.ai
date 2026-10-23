@@ -114,3 +114,12 @@ describe("LocalSettings.validate", () => {
     expect(LocalSettings.validate(policy, { allow: { add: [{ source: "github", reason: "PRs" }] } })).toBeUndefined()
   })
 })
+
+describe("LocalSettings.freeID", () => {
+  test("names a server's provider after its kind, numbered when that name is taken or is a catalog provider's", () => {
+    expect(LocalSettings.freeID("ollama", [])).toBe("ollama")
+    expect(LocalSettings.freeID("ollama", ["ollama", "ollama-2"])).toBe("ollama-3")
+    // lmstudio is the catalog's own LM Studio provider, so a server added by hand never merges into it.
+    expect(LocalSettings.freeID("lmstudio", [])).toBe("lmstudio-2")
+  })
+})
