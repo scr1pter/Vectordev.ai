@@ -745,7 +745,7 @@ describe("loosening edits wait for the owner", () => {
       expect(untrustedChildEnvironment({}).VECTOR_LOCAL).toBe("1")
       expect(Config.localPending()?.proposed.enabled).toBe(false)
       expect(toasts.map((event) => event.payload.properties.message)).toEqual([
-        `A change to your config would loosen Vector Local: it turns Vector Local off. Vector applies the parts that make it stricter and holds the rest. To apply it, quit Vector, delete ${Config.localConfirmedFile()} and start Vector again.`,
+        `A change to your config would loosen Vector Local: it turns Vector Local off. Vector applies the parts that make it stricter and holds the rest. To apply it, confirm it with /local in the terminal UI, or run vector local confirm in a terminal.`,
       ])
 
       const applied = nextChange("updated")
@@ -981,7 +981,7 @@ describe("loosening edits wait for the owner", () => {
       yield* Effect.addFinalizer(() => Effect.sync(() => GlobalBus.off("event", onEvent)))
       yield* Config.use.get()
       expect(toasts).toEqual([
-        `A change to your config would loosen Vector Local: it adds the model server ${GPU_BOX}. Vector applies the parts that make it stricter and holds the rest. To apply it, quit Vector, delete ${Config.localConfirmedFile()} and start Vector again.`,
+        `A change to your config would loosen Vector Local: it adds the model server ${GPU_BOX}. Vector applies the parts that make it stricter and holds the rest. To apply it, confirm it with /local in the terminal UI, or run vector local confirm in a terminal.`,
       ])
     }),
   )

@@ -707,6 +707,46 @@ export function confirmLocal() {
 }
 
 /**
+ * The user's own local block as their config files hold it now, merged in the order config merges them, read from
+ * disk rather than from the cached global config, so a change starts from what the files say. `unreadable` names the
+ * files Vector cannot read or whose local block it cannot decode, which a change must not write over.
+ */
+export function localUserBlock(): { readonly block?: ConfigLocalV1.Info; readonly unreadable: readonly string[] } {
+  const blocks = localFiles()
+    .user.map(localFile)
+    .filter((item) => item !== undefined)
+  const unreadable = blocks.filter((item) => item.unreadable).map((item) => item.source)
+  if (unreadable.length > 0) return { unreadable }
+  const block = mergeLocalBlocks(blocks)
+  return block ? { block, unreadable } : { unreadable }
+}
+
+/** Where the network log is written and for how many days, as Egress was last told. */
+export function localLog() {
+  const log = Option.getOrUndefined(
+    Schema.decodeUnknownOption(
+      Schema.fromJsonString(Schema.Struct({ directory: Schema.String, retainDays: Schema.optional(Schema.Number) })),
+    )(localState.log ?? ""),
+  )
+  return {
+    directory: log?.directory ?? path.join(Global.Path.data, "local"),
+    retain_days: log?.retainDays ?? EgressLogStore.RETAIN_DAYS,
+  }
+}
+
+/**
+ * What writing `block` as the user's own local block would loosen, in the words a held change uses, so the Local API
+ * and `vector local` ask the owner before they write it rather than leave the change held. Empty when it only
+ * tightens, or while Vector Local is off. The same rules hold the change if it is written anyway.
+ */
+export function localLoosening(block: ConfigLocalV1.Info | undefined) {
+  const sources = readLocalSources()
+  const confirmed = localState.confirmed ?? { user: undefined, overrides: sources.overrides }
+  const proposed = resolveLocal(sources, { user: block, overrides: sources.overrides })
+  return heldChanges(sources.managed, resolveLocal(sources, confirmed), proposed, confirmed.user, block)
+}
+
+/**
  * Adds the provider addresses of a model catalog the engine loaded to the cloud AI hosts a user may not list as a
  * model server of their own. That only takes servers off the list, so it applies at once. The provider service calls
  * this each time it reads the catalog. The catalog is read only while the user lists a server of their own, so a
@@ -733,11 +773,11 @@ function announceHeldLocal() {
 }
 
 function toastHeldLocal(pending: LocalPending) {
-  // Confirming in the app or with `vector local` comes with the Local API; until then the owner applies a held change
-  // by starting again without the copy the next start compares with.
+  // The owner applies a held change where Vector Local's settings are, which confirm it through the Local API
+  // (PATCH /local), or in a terminal with `vector local confirm`.
   const apply = agentMarked()
     ? "An agent or Vector's own terminal started this Vector, so it cannot apply a change like this."
-    : `To apply it, quit Vector, delete ${localConfirmedFile()} and start Vector again.`
+    : "To apply it, confirm it with /local in the terminal UI, or run vector local confirm in a terminal."
   GlobalBus.emit("event", {
     directory: "global",
     payload: {
