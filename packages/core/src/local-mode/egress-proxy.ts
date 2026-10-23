@@ -103,7 +103,9 @@ export function start(options: Options): Promise<ForwardProxy.Proxy> {
     if (inside && !test) return refusePrivate(inside)
     const refused = await options.admit?.(destination)
     if (refused) return { refuse: refused }
-    Egress.record(request, verdict)
+    // A connection the browser opens is not a page it read: the desktop's Chromium dispatcher (egress-filter.ts) logs
+    // the pages each research browser opens, so this line counts only as a host reached.
+    Egress.record({ ...request, resource: "subresource" }, verdict)
     const address = addresses[0]!
     return {
       connect: (connected) =>

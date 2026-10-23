@@ -21,6 +21,7 @@ import {
 } from "./browser-page"
 import { POST, addLinks, decideResearchNavigation, spelled, type Decision, type Kind } from "./research-navigation"
 import { NEEDS_GUARD, startResearchProxy, type ResearchProxy } from "./research-proxy"
+import { egressFilter } from "./egress-filter"
 
 // Every research agent's own browser (section 5.6a). The lead `research` agent and each `researcher` it starts drive
 // one research browser apiece, through the engine's research_browser tool and the bridge's POST /research. A run (keyed
@@ -73,9 +74,9 @@ import { NEEDS_GUARD, startResearchProxy, type ResearchProxy } from "./research-
 // - A browser closes when its agent's session finishes (the engine closes it), when its run is stopped, after 10 idle
 //   minutes, or when its page stops answering.
 //
-// Electron keeps one listener per webRequest event per session. `registerResearchListeners` and
-// `researchRequestHandlers` are exported so Vector Local's Chromium dispatcher (L7) composes these instead of
-// replacing them.
+// Electron keeps one listener per webRequest event per session, and Vector Local's Chromium dispatcher
+// (egress-filter.ts) holds each session's onBeforeRequest: the navigation rule registers there as a step, which runs
+// after Vector Local's own decision. The other webRequest events are this file's alone.
 
 export const PARTITION_PREFIX = "vector-research-"
 export const VIEW = { width: 1280, height: 900 } as const
@@ -890,9 +891,9 @@ function harden(partition: Session) {
   registerResearchListeners(partition)
 }
 
-/** Registers the research browsers' webRequest listeners on a slot session. L7's dispatcher composes these. */
+/** Registers the research browsers' webRequest listeners on a slot session, the navigation rule through the dispatcher. */
 export function registerResearchListeners(target: Pick<Session, "webRequest">) {
-  target.webRequest.onBeforeRequest(researchRequestHandlers.beforeRequest)
+  egressFilter.register(target, researchRequestHandlers.beforeRequest, { kind: "research-browser" })
   target.webRequest.onBeforeSendHeaders(researchRequestHandlers.beforeSendHeaders)
   target.webRequest.onHeadersReceived(researchRequestHandlers.headersReceived)
   target.webRequest.onCompleted(researchRequestHandlers.done)
