@@ -71,12 +71,11 @@ function isOutcome(value: unknown): value is Exclude<LocalSettings.Outcome, { ty
 // Applies a change, asking first at this terminal when it would loosen Vector Local.
 const change = Effect.fn("Cli.local.change")(function* (update: Omit<LocalSettings.Update, "by" | "confirm">) {
   const { LocalSettings } = yield* Effect.promise(() => import("@/config/local-settings"))
-  const applied = yield* asked((confirmed) =>
+  return yield* asked((confirmed) =>
     LocalSettings.apply({ ...update, by: "cli", confirm: confirmed }).pipe(
       Effect.map((outcome) => (outcome.type === "applied" ? outcome.status : outcome)),
     ),
   )
-  return applied
 })
 
 export const LocalStatusCommand = effectCmd({
