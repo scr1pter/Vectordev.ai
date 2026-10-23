@@ -197,6 +197,7 @@ const api: ElectronAPI = {
     refresh: (id) => ipcRenderer.invoke("parallel-workspaces-refresh", id),
     run: (id, concurrency) => ipcRenderer.invoke("parallel-workspaces-run", id, concurrency),
     followUp: (id, text) => ipcRenderer.invoke("parallel-workspaces-follow-up", id, text),
+    setRuntimeModel: (id, model) => ipcRenderer.invoke("parallel-workspaces-set-runtime-model", id, model),
     stop: (id) => ipcRenderer.invoke("parallel-workspaces-stop", id),
     merge: (id, force, commit) => ipcRenderer.invoke("parallel-workspaces-merge", id, force, commit),
     mainDiff: (sourcePath) => ipcRenderer.invoke("parallel-workspaces-main-diff", sourcePath),

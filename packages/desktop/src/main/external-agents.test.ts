@@ -12,6 +12,8 @@ import {
   agentTurnFinished,
   detectExternalAgents,
   executableNames,
+  externalModelValue,
+  modelRejected,
   resolveAgentPath,
   runCli,
   runExternalCodingAgent,
@@ -1210,4 +1212,189 @@ describe("external agent detection on this machine", () => {
       expect(agent.version).toBeUndefined()
     }
   }, 60_000)
+})
+
+describe("choosing the model an external CLI runs", () => {
+  // Each CLI's own flag, always before the prompt or session id that ends the
+  // argv: a flag after codex's prompt or cursor's prompt would be read as part
+  // of the task instead.
+  test("each runtime receives its own model flag on a fresh turn", () => {
+    const claude = runtimeArguments("claude-code", "/w", "do it", undefined, false, "opus")
+    expect(claude.slice(-2)).toEqual(["--model", "opus"])
+    expect(claude[claude.indexOf("-p") + 1]).toBe("do it")
+
+    expect(runtimeArguments("codex", "/w", "do it", undefined, false, "gpt-5.5")).toEqual([
+      "exec",
+      "--json",
+      "--sandbox",
+      "workspace-write",
+      "--skip-git-repo-check",
+      "--model",
+      "gpt-5.5",
+      "-C",
+      "/w",
+      "do it",
+    ])
+
+    expect(runtimeArguments("cursor", "/w", "do it", undefined, false, "composer-2.5")).toEqual([
+      "-p",
+      "--trust",
+      "--force",
+      "--output-format",
+      "stream-json",
+      "--model",
+      "composer-2.5",
+      "do it",
+    ])
+  })
+
+  test("a resumed turn carries the model too, without disturbing resume's argv rules", () => {
+    const claude = runtimeArguments("claude-code", "/w", "next", "sid-2", false, "claude-opus-5-5")
+    expect(claude[claude.indexOf("--resume") + 1]).toBe("sid-2")
+    expect(claude[claude.indexOf("--model") + 1]).toBe("claude-opus-5-5")
+
+    // `codex exec resume` takes the model as the same -c override the sandbox
+    // already uses there, and still never --sandbox or -C.
+    const codex = runtimeArguments("codex", "/w", "next", "sid-1", false, "gpt-5.5")
+    expect(codex).toEqual([
+      "exec",
+      "resume",
+      "--json",
+      "--skip-git-repo-check",
+      "-c",
+      'sandbox_mode="workspace-write"',
+      "-c",
+      'model="gpt-5.5"',
+      "sid-1",
+      "next",
+    ])
+
+    const cursor = runtimeArguments("cursor", "/w", "next", "sid-3", false, "auto")
+    expect(cursor[cursor.indexOf("--resume") + 1]).toBe("sid-3")
+    expect(cursor[cursor.indexOf("--model") + 1]).toBe("auto")
+    expect(cursor.at(-1)).toBe("next")
+  })
+
+  test("the model flag survives the Windows stdin prompt form", () => {
+    const claude = runtimeArguments("claude-code", "C:\\w", "line one\nline two", undefined, true, "sonnet")
+    expect(claude).not.toContain("line one\nline two")
+    expect(claude[claude.indexOf("--model") + 1]).toBe("sonnet")
+    const codex = runtimeArguments("codex", "C:\\w", "line one\nline two", undefined, true, "gpt-5.5")
+    expect(codex.at(-1)).toBe("-")
+    expect(codex[codex.indexOf("--model") + 1]).toBe("gpt-5.5")
+  })
+
+  test("only a plain model name reaches a CLI", () => {
+    expect(externalModelValue(undefined)).toBeUndefined()
+    expect(externalModelValue("  ")).toBeUndefined()
+    expect(externalModelValue(" opus ")).toBe("opus")
+    expect(externalModelValue("claude-opus-5-5")).toBe("claude-opus-5-5")
+    expect(externalModelValue("sonnet[1m]")).toBe("sonnet[1m]")
+    expect(externalModelValue("claude-opus-4-8[context=1m,effort=high,fast=false]")).toBe(
+      "claude-opus-4-8[context=1m,effort=high,fast=false]",
+    )
+    // A flag, a TOML quote, a shell or cmd.exe metacharacter, or a space.
+    for (const value of ["--dangerously-skip-permissions", 'gpt"5', "gpt-5 && calc", "gpt%PATH%", "a b", "x^y"]) {
+      expect(() => externalModelValue(value)).toThrow("is not a model name")
+    }
+    expect(() => externalModelValue(5)).toThrow("Choose a model")
+  })
+
+  test("a CLI that refuses the model is quoted, and the refusal is recognised for each runtime", () => {
+    // Cursor names the problem on stderr only; without the model the old
+    // generic sentence stays, which the crash test above locks.
+    const cursor = agentOutcome(
+      "cursor",
+      1,
+      ["[stderr] Cannot use this model: nope. Available models: auto, composer-2.5"],
+      "nope",
+    )
+    expect(cursor.error).toBe("Cursor Agent: Cannot use this model: nope. Available models: auto, composer-2.5")
+    expect(modelRejected("nope", cursor)).toBe(true)
+
+    const claude = agentOutcome(
+      "claude-code",
+      0,
+      [
+        '[stdout] {"type":"result","subtype":"success","is_error":true,"result":"There\'s an issue with the selected model (claude-nope). It may not exist or you may not have access to it. Run --model to pick a different model."}',
+      ],
+      "claude-nope",
+    )
+    expect(claude.error).toContain("issue with the selected model (claude-nope)")
+    expect(modelRejected("claude-nope", claude)).toBe(true)
+
+    const codex = agentOutcome(
+      "codex",
+      1,
+      [
+        '[stdout] {"type":"turn.failed","error":{"message":"The \'gpt-nope\' model is not supported when using Codex with a ChatGPT account."}}',
+      ],
+      "gpt-nope",
+    )
+    expect(codex.error).toContain("model is not supported")
+    expect(modelRejected("gpt-nope", codex)).toBe(true)
+
+    // The same words are not a refused model when Vector passed none, or when
+    // the run succeeded.
+    expect(modelRejected(undefined, codex)).toBe(false)
+    expect(modelRejected("gpt-5.5", { exitCode: 0 })).toBe(false)
+    expect(modelRejected("gpt-5.5", { exitCode: 1, error: "Codex exited with code 1." })).toBe(false)
+  })
+
+  async function argvCli(name: string, cli: string, body: string) {
+    const directory = join(root, "model", name)
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, cli), `#!/bin/sh\nprintf '%s\\n' "$@" > "${join(directory, "argv")}"\n${body}\n`)
+    await chmod(join(directory, cli), 0o755)
+    return { directory, env: { HOME: root, PATH: `${directory}:/usr/bin:/bin` } }
+  }
+
+  const finals = {
+    "claude-code": { type: "result", subtype: "success", is_error: false, result: "Done", session_id: "c1" },
+    codex: { type: "turn.completed" },
+    cursor: { type: "result", subtype: "success", is_error: false, result: "Done", session_id: "c1" },
+  } as const
+  const clis = { "claude-code": "claude", codex: "codex", cursor: "cursor-agent" } as const
+
+  for (const runtime of ["claude-code", "codex", "cursor"] as const) {
+    test(`a live ${runtime} process is spawned with the chosen model, and with no flag by default`, async () => {
+      const { directory, env } = await argvCli(`${runtime}-flag`, clis[runtime], printLines([finals[runtime]]))
+      const argv = async () => (await Bun.file(join(directory, "argv")).text()).trim().split("\n")
+
+      await runExternalCodingAgent({ runtime, cwd: root, prompt: "fixture only", env, model: "fixture-model" })
+      const chosen = await argv()
+      expect(chosen[chosen.indexOf("--model") + 1]).toBe("fixture-model")
+
+      await runExternalCodingAgent({ runtime, cwd: root, prompt: "fixture only", env })
+      expect(await argv()).not.toContain("--model")
+    }, 20_000)
+  }
+
+  test("a live CLI that refuses the model reports its own words and modelRejected", async () => {
+    const { env } = await argvCli(
+      "cursor-refused",
+      "cursor-agent",
+      "echo 'Cannot use this model: fixture-nope. Run cursor-agent models to see what you can use.' >&2\nexit 1",
+    )
+    const result = await runExternalCodingAgent({
+      runtime: "cursor",
+      cwd: root,
+      prompt: "fixture only",
+      env,
+      model: "fixture-nope",
+    })
+    expect(result.exitCode).toBe(1)
+    expect(result.error).toBe(
+      "Cursor Agent: Cannot use this model: fixture-nope. Run cursor-agent models to see what you can use.",
+    )
+    expect(result.modelRejected).toBe(true)
+  }, 20_000)
+
+  test("an unsafe model value never spawns the CLI", async () => {
+    const { directory, env } = await argvCli("claude-unsafe", "claude", printLines([finals["claude-code"]]))
+    await expect(
+      runExternalCodingAgent({ runtime: "claude-code", cwd: root, prompt: "x", env, model: "--permission-mode" }),
+    ).rejects.toThrow("is not a model name")
+    expect(await Bun.file(join(directory, "argv")).exists()).toBe(false)
+  })
 })
