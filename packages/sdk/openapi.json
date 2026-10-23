@@ -40671,7 +40671,7 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": ["session.next.ancillary.usage.1"]
+                "enum": ["session.next.ancillary.usage.2"]
               },
               "id": {
                 "type": "string",

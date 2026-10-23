@@ -5418,7 +5418,7 @@ export type SyncEventSessionNextAncillaryUsage = {
   type: "sync"
   id: string
   syncEvent: {
-    type: "session.next.ancillary.usage.1"
+    type: "session.next.ancillary.usage.2"
     id: string
     seq: number
     aggregateID: string
