@@ -45,7 +45,14 @@ import {
   submitPullRequestReview,
   viewPullRequest,
 } from "./github-pr"
-import { getPinchZoomEnabled, getWindowID, setPinchZoomEnabled, setTitlebar, updateTitlebar } from "./windows"
+import {
+  getMainWindowCount,
+  getPinchZoomEnabled,
+  getWindowID,
+  setPinchZoomEnabled,
+  setTitlebar,
+  updateTitlebar,
+} from "./windows"
 import { assertTrustedRenderer } from "./ipc-security"
 import {
   openPathApplicationCommand,
@@ -876,7 +883,8 @@ export function registerIpcHandlers(deps: Deps) {
     return "unknown"
   })
 
-  handle("get-window-count", () => BrowserWindow.getAllWindows().length)
+  // Main windows only: a hidden helper window, such as the research browsers' host, is not one the user has open.
+  handle("get-window-count", () => getMainWindowCount())
 
   handle("get-window-id", (event: IpcMainInvokeEvent) => {
     const win = BrowserWindow.fromWebContents(event.sender)
