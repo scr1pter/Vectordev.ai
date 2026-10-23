@@ -256,18 +256,25 @@ const WEB_RESULTS = new Set([
   "research_browser",
 ])
 
+// Each web reader's purpose under Vector Local, and the tool the network log names for it.
+const WEB_ACCESS = {
+  webfetch: { purpose: "web-page", tool: "webfetch" },
+  "agent-browser": { purpose: "browser", tool: "browser" },
+  "research-browser": { purpose: "research-browser", tool: "research_browser" },
+} as const
+
 /**
  * Refuses a web read that Web access does not allow while Vector Local is on (None reaches only this computer, Your
  * network only your network and the sites your company lists), before anything is asked or sent. The refusal is logged
  * and the person is told. The request itself is decided again, hop by hop, as it is sent.
  */
-export function webAccess(source: "webfetch" | "agent-browser", address: string) {
+export function webAccess(source: "webfetch" | "agent-browser" | "research-browser", address: string) {
   const policy = Egress.policy()
   if (!policy.enabled) return
-  const purpose = source === "webfetch" ? "web-page" : "browser"
-  const verdict = LocalPolicy.decide(policy, { purpose, url: address, source })
+  const purpose = WEB_ACCESS[source]
+  const verdict = LocalPolicy.decide(policy, { purpose: purpose.purpose, url: address, source })
   if (verdict.decision === "allow") return
-  Egress.record({ source, url: address, tool: source === "webfetch" ? "webfetch" : "browser", notify: true }, verdict)
+  Egress.record({ source, url: address, tool: purpose.tool, notify: true }, verdict)
   throw new EgressGuard.EgressBlocked(
     URL.canParse(address) ? new URL(address).hostname : address,
     "fetch",

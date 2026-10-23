@@ -308,6 +308,11 @@ const UNLABELLED_CALLS: ReadonlyArray<{ readonly file: string; readonly call: st
     call: "return fetch(`${url}/command`",
     why: "The desktop app's browser bridge on this computer; the page itself is decided before (webAccess).",
   },
+  {
+    file: "packages/engine/src/tool/research-browser.ts",
+    call: "fetch(`${process.env.VECTOR_BROWSER_BRIDGE_URL}/research`",
+    why: "The desktop app's browser bridge on this computer; each address an agent opens is decided before (webAccess), and the desktop's research proxy decides every page a research browser reaches.",
+  },
 ]
 
 // Each raw connection in `text`, and each HTTP client request in a file that holds the client, with its line, for files

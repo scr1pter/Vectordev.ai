@@ -16,6 +16,7 @@ import type {
   CloudProviderProjectLink,
   CloudProviderResource,
 } from "../main/cloud-connections"
+import type { Observed, PageRead } from "../main/browser-page"
 import type { CloudOverview } from "../main/cloud-overview"
 import type { SupabaseCommand, SupabaseProgressEvent } from "../main/cloud-supabase"
 import type { VercelCloudApi } from "../main/cloud-vercel-ipc"
@@ -422,6 +423,10 @@ export type BrowserAutomationRun = {
     rect: { x: number; y: number; width: number; height: number }
   }[]
   pageHtml?: string
+  /** For readPage: the page as the research reader reads it. */
+  page?: PageRead
+  /** For observePage: the page's text and its controls, each with a ref handle clickRef takes. */
+  observed?: Observed
   diagnostics?: {
     consoleCount: number
     runtimeErrorCount: number
@@ -461,9 +466,14 @@ export type BrowserAgentInput = {
     | "scroll"
     | "clearLogs"
     | "setVisible"
+    | "readPage"
+    | "observePage"
+    | "clickRef"
   url?: string
   allowExternal?: boolean
   selector?: string
+  /** A ref_N handle from observePage, for clickRef, or for inspectDom to name what a click there would press. */
+  ref?: string
   text?: string
   key?: string
   milliseconds?: number

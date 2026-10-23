@@ -517,6 +517,15 @@ export function address(url: string, context: Context): Result {
   return inspect(text.replace(/[-+_]+(?=\p{L})/gu, " "), context, false)
 }
 
+/**
+ * The context as browsers apply it in research (research_browser's addresses and typing, and the lead's handoff): a
+ * public source of the run clears no number, so a hostile page that lists every 5-digit number cannot make one of the
+ * user's sendable. Runs of 6 words a public source holds stay clear, as they do for searches.
+ */
+export function strict(context: Context): Context {
+  return { ...context, public: context.public.map((text) => text.replace(/\p{Nd}/gu, " ")) }
+}
+
 // The check, with the user's domains exempt where they stand as a host name or a site: value when `sites` holds: in a
 // search query, where they become site: filters, and not in an address. Runs of words and names are read in the
 // query as written, so a domain clears no name it holds.

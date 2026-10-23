@@ -38,6 +38,7 @@ export function isAllowedBrowserNavigation(rawUrl: string, allowedExternalOrigin
 export const DRIVING_COMMANDS = new Set([
   "openUrl",
   "click",
+  "clickRef",
   "type",
   "press",
   "reload",

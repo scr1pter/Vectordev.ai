@@ -38,7 +38,18 @@ export type Route =
   | { readonly connect: (connected: () => void) => net.Socket; readonly refuse?: undefined }
   | { readonly refuse: Refusal; readonly connect?: undefined }
 
-export type Proxy = { readonly url: string; readonly port: number; readonly stop: () => Promise<void> }
+export type Proxy = {
+  readonly url: string
+  readonly port: number
+  /**
+   * The bytes this proxy has passed to its clients so far, its own answers and every site's included, counted as they
+   * arrive: a chunked or compressed answer counts as much as one with a Content-Length.
+   */
+  readonly received: () => number
+  /** Ends every connection the proxy is carrying, tunnels and answers still arriving included, and keeps listening. */
+  readonly drop: () => void
+  readonly stop: () => Promise<void>
+}
 
 export type Options = {
   /**
@@ -89,6 +100,8 @@ export function startSync(decide: Decide, options: Options = {}): Proxy {
 function create(decide: Decide, options: Options) {
   // Every open connection, so stopping the proxy also ends the tunnels and requests it is carrying.
   const open = new Set<net.Socket>()
+  // What the connections that closed already received.
+  const delivered = { closed: 0 }
   const server = net.createServer((client) => {
     const current: { upstream?: net.Socket; idle?: ReturnType<typeof setTimeout> } = {}
     open.add(client)
@@ -96,6 +109,7 @@ function create(decide: Decide, options: Options) {
     client.on("close", () => {
       open.delete(client)
       clearTimeout(current.idle)
+      delivered.closed += client.bytesWritten
       current.upstream?.destroy()
     })
     // A response whose end the client can tell leaves its connection open for the client's next request, whatever the
@@ -202,13 +216,7 @@ function create(decide: Decide, options: Options) {
             if (current.upstream === upstream) client.destroy()
             return
           }
-          // A refusal the network guard made after a lookup reads as one, not as an unreachable host.
-          const blocked = error instanceof Error && error.name === "EgressBlocked"
-          refuse(client, {
-            status: blocked ? 403 : 502,
-            reason: blocked ? "Forbidden" : "Bad Gateway",
-            message: blocked ? error.message : `Could not reach ${destination.host}.`,
-          })
+          refuse(client, unreachable(error, destination.host))
         })
       }
       Promise.resolve()
@@ -217,6 +225,8 @@ function create(decide: Decide, options: Options) {
           (route) => (route.refuse ? refuse(client, route.refuse) : relay(route.connect)),
           () => refuse(client, { status: 502, reason: "Bad Gateway", message: `Could not reach ${destination.host}.` }),
         )
+        // A guard that refuses the connection as it is made throws there, before the socket exists to report it.
+        .catch((error: unknown) => refuse(client, unreachable(error, destination.host)))
     }
     // A client that never finishes its first request would hold its connection open; one with the secret has sent it
     // in that request.
@@ -236,6 +246,8 @@ function create(decide: Decide, options: Options) {
       return {
         url: `http://127.0.0.1:${port}`,
         port,
+        received: () => [...open].reduce((sum, socket) => sum + socket.bytesWritten, delivered.closed),
+        drop: () => open.forEach((socket) => socket.destroy()),
         stop: () =>
           new Promise<void>((done) => {
             server.close(() => done())
@@ -243,6 +255,17 @@ function create(decide: Decide, options: Options) {
           }),
       }
     },
+  }
+}
+
+// Why an upstream could not be reached. A refusal the network guard made after a lookup reads as one, not as an
+// unreachable host.
+function unreachable(error: unknown, host: string): Refusal {
+  const blocked = error instanceof Error && error.name === "EgressBlocked"
+  return {
+    status: blocked ? 403 : 502,
+    reason: blocked ? "Forbidden" : "Bad Gateway",
+    message: blocked ? error.message : `Could not reach ${host}.`,
   }
 }
 

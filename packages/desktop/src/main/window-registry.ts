@@ -32,6 +32,18 @@ export function createWindowRegistry<W>(persistence: {
       if (!lastFocusedID) return
       return windows.get(lastFocusedID)
     },
+    /**
+     * The main window to show: `focused` when it is one of them, else the last focused, else any open one. Never a
+     * window that is not a main window, such as the research browsers' hidden host.
+     */
+    pick(focused?: W | null) {
+      if (focused && [...windows.values()].includes(focused)) return focused
+      return (lastFocusedID ? windows.get(lastFocusedID) : undefined) ?? windows.values().next().value
+    },
+    /** How many main windows are open. */
+    count() {
+      return windows.size
+    },
     closed(id: string) {
       windows.delete(id)
       if (lastFocusedID === id) lastFocusedID = windows.keys().next().value

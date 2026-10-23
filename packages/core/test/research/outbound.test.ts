@@ -1535,3 +1535,28 @@ describe("ResearchOutbound.check with short names", () => {
     expect(guard.attempts()).toEqual([])
   })
 })
+
+describe("ResearchOutbound.strict", () => {
+  test("lets a public source clear no number, and still clear a run of words, as browsers apply the check", () => {
+    const page = { ...context, public: ["A grant of 2 815 640 dollars."] }
+    expect(check("2,815,640 budget", page).ok).toBe(true)
+    expect(check("2,815,640 budget", ResearchOutbound.strict(page)).ok).toBe(false)
+    expect(ResearchOutbound.address("https://grants.example/2815640", ResearchOutbound.strict(page)).ok).toBe(false)
+    // The user's own typing still clears a number.
+    expect(
+      check("2,815,640 budget", ResearchOutbound.strict({ ...page, typed: ["The budget is 2,815,640."] })).ok,
+    ).toBe(true)
+    const article = {
+      private: ["Members only: the compressor makers plan to raise prices by nine percent next spring."],
+      typed: [],
+      public: [],
+    }
+    const query = "compressor makers plan to raise prices by nine percent"
+    expect(check(query, article).ok).toBe(false)
+    const shown = {
+      ...article,
+      public: ["The compressor makers plan to raise prices by nine percent, the trade press says."],
+    }
+    expect(check(query, ResearchOutbound.strict(shown)).ok).toBe(true)
+  })
+})
