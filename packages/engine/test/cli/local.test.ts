@@ -162,6 +162,23 @@ describe("vector local", () => {
   )
 })
 
+describe("the account gate", () => {
+  cliIt.live(
+    "leaves every vector local command open, and keeps vector run --local behind it, on Vector Local from the start",
+    ({ vector }) =>
+      Effect.gen(function* () {
+        const status = yield* vector.spawn(["local", "status"], { env: { VECTOR_CLI: "1" } })
+        vector.expectExit(status, 0)
+        expect(status.stderr).toContain("Vector Local is off")
+        // --local applies before the account check, so the check knows vectordev.ai is blocked and sends nothing.
+        const run = yield* vector.spawn(["run", "--local", "say hi"], { env: { VECTOR_CLI: "1" } })
+        vector.expectExit(run, 1)
+        expect(run.stderr).toContain("A free Vector account is required. Vector Local blocks requests to vectordev.ai")
+      }),
+    60_000,
+  )
+})
+
 describe("vector local setup", () => {
   cliIt.live(
     "adds a typed server as a provider and lists it; with Vector Local on it asks at a terminal first",
