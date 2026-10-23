@@ -33,8 +33,15 @@ afterAll(async () => {
 const LOGIN = "http://localhost:4000/login"
 const SIGNED_IN = `<!doctype html><html><head><title>Inside the heat pump supply chain</title></head><body><main><h1>Inside the heat pump supply chain</h1><p>Members only: the compressor makers plan to raise prices by nine percent next spring for every installer.</p><p>Three countries supply most of the market.</p></main></body></html>`
 
+// The same article for a subscriber who signed in: the publisher keeps isAccessibleForFree: false and its locked class.
+const MEMBERS = `<!doctype html><html><head><title>Inside the heat pump supply chain</title><script type="application/ld+json">{"@context":"https://schema.org","@type":"NewsArticle","headline":"Inside the heat pump supply chain","isAccessibleForFree":false}</script></head><body><main><h1>Inside the heat pump supply chain</h1><p>Compressor makers in three countries supply most of the market, according to industry filings.</p>${Array.from(
+  { length: 30 },
+  (_, index) =>
+    `<p class="locked">Section ${index} for subscribers: the makers plan to raise compressor prices for installers.</p>`,
+).join("")}<p class="locked">Members only: prices rise by nine percent next spring.</p></main></body></html>`
+
 // A visible browser that shows `current` and moves only when told to.
-const visible = (start = "") => {
+const visible = (start = "", html = SIGNED_IN) => {
   const state = { current: start }
   return {
     state,
@@ -45,13 +52,29 @@ const visible = (start = "") => {
         return FakeBridge.visible({
           url: state.current,
           title: "Inside the heat pump supply chain",
-          page: { html: SIGNED_IN, title: "Inside the heat pump supply chain", url: state.current, links: [{ url: "https://journal.example/next", text: "Next", main: true }], forms: [], truncated: false },
+          page: {
+            html,
+            title: "Inside the heat pump supply chain",
+            url: state.current,
+            links: [{ url: "https://journal.example/next", text: "Next", main: true }],
+            forms: [],
+            truncated: false,
+          },
         })
       if (body.command === "observePage")
         return FakeBridge.visible({
           url: state.current,
-          domSummary: { textSample: "", interactives: [], inputs: [{ tag: "input", selector: "#search", type: "search" }] },
-          observed: { title: "Docs", url: state.current, text: "Welcome to the docs", elements: [{ ref: "ref_1", role: "link", name: "Guides", tag: "a", href: "http://localhost:4000/guides" }] },
+          domSummary: {
+            textSample: "",
+            interactives: [],
+            inputs: [{ tag: "input", selector: "#search", type: "search" }],
+          },
+          observed: {
+            title: "Docs",
+            url: state.current,
+            text: "Welcome to the docs",
+            elements: [{ ref: "ref_1", role: "link", name: "Guides", tag: "a", href: "http://localhost:4000/guides" }],
+          },
         })
       return FakeBridge.visible({ url: state.current, title: "Page", target: { found: true, label: "Guides" } })
     },
@@ -233,6 +256,57 @@ it.instance(
       yield* test.llm.text("Done.")
       yield* send({ sessionID: session.id, agent: "research", text: "Carry on." })
       expect(output((yield* calls(session.id, "browser")).at(-1))).toBe(AFTER_HANDOFF)
+    }),
+  120_000,
+)
+
+it.instance(
+  "a page read after a handoff is the user's signed-in text in full, beside the public excerpt research_read kept",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web)
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({
+        title: "Research",
+        permission: [{ permission: "research_read", pattern: "*", action: "allow" }],
+      })
+      const paywall = web.url("paywall", "/")
+      bridge.answer(visible("about:blank", MEMBERS).handler)
+      yield* answer(CONTINUE)
+      yield* test.llm.tool("research_plan", plan())
+      // The public read first: the paywall keeps its excerpt only.
+      yield* test.llm.tool("research_read", { url: paywall })
+      yield* test.llm.tool("browser", { action: "handoff", url: paywall, reason: "The article is for subscribers." })
+      yield* test.llm.tool("browser", { action: "read" })
+      yield* test.llm.text("Done.")
+      yield* send({ sessionID: session.id, agent: "research", text: `Research heat pump supply prices: ${paywall}` })
+
+      const [read] = yield* calls(session.id, "research_read")
+      expect(output(read)).toContain("S1 · ")
+      expect(read?.state.status === "completed" ? read.state.metadata.status : undefined).toBe("paywalled")
+      const browsed = yield* calls(session.id, "browser")
+      // A source of its own, read in full although the page still says it is not free.
+      expect(output(browsed[1])).toContain("S2 · ")
+      expect(output(browsed[1])).not.toContain("Paywalled")
+      expect(browsed[1]?.state.status === "completed" ? browsed[1].state.metadata : {}).toMatchObject({
+        private: true,
+        source: "S2",
+      })
+      const research = yield* ResearchRun.Service
+      const store = yield* ResearchStore.Service
+      const runID = browsed[1]?.state.status === "completed" ? String(browsed[1].state.metadata.runID) : ""
+      const saved = yield* store.source(yield* research.place(), runID, "S2")
+      expect(saved?.private).toBe(true)
+      expect(saved?.source.status).toBe("read")
+      expect(saved?.source.signals?.signed_in).toBe(true)
+      expect(saved?.chunks.map((chunk) => chunk.text).join("\n")).toContain(
+        "Members only: prices rise by nine percent next spring.",
+      )
+      // The public excerpt stays as it was.
+      const excerpt = yield* store.source(yield* research.place(), runID, "S1")
+      expect(excerpt?.source.status).toBe("paywalled")
+      expect(excerpt?.private).toBe(false)
+      expect(guard.outside()).toEqual([])
     }),
   120_000,
 )

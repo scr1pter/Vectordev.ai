@@ -255,6 +255,53 @@ describe("ResearchStore sources", () => {
     expect(result.detail?.run.pages).toBe(1)
   })
 
+  test("a page read signed in after a handoff is a private source of its own, beside the run's public excerpt", async () => {
+    const result = await withStore((setup) =>
+      Effect.gen(function* () {
+        const run = yield* setup.store.start(setup.place, RUN)
+        const long = Array.from({ length: 12 }, (_, index) => `${STUDY[index % 3]} Paragraph ${index} of the article.`)
+        // research_read's public read: the paywall's excerpt.
+        const excerpt = yield* setup.store.addSource(
+          setup.place,
+          run.id,
+          page("journal", long.slice(0, 2), { status: "paywalled", reason: "Paywalled" }),
+        )
+        // The user's own browser, signed in, after a handoff: the whole article.
+        const signals: Research.Signal = {
+          kind: "other",
+          primary: false,
+          data: false,
+          references: false,
+          paywalled: false,
+          addressed_to_ai: false,
+          corroborated: 0,
+          signed_in: true,
+        }
+        const signedIn = { private: true, signals } satisfies Partial<ResearchStore.SourceInput>
+        const full = yield* setup.store.addSource(setup.place, run.id, page("journal", long, signedIn))
+        const again = yield* setup.store.addSource(setup.place, run.id, page("journal", long, signedIn))
+        const publicAgain = yield* setup.store.addSource(setup.place, run.id, page("journal", long.slice(0, 2)))
+        return {
+          excerpt,
+          full,
+          again,
+          publicAgain,
+          saved: yield* setup.store.source(setup.place, run.id, "S2"),
+          detail: yield* setup.store.get(setup.place, run.id),
+        }
+      }),
+    )
+    expect(result.excerpt).toMatchObject({ type: "added", source: { id: "S1", status: "paywalled" } })
+    expect(result.full).toMatchObject({ type: "added", source: { id: "S2", status: "read" } })
+    expect(result.saved?.private).toBe(true)
+    expect(result.saved?.source.signals?.signed_in).toBe(true)
+    expect(result.saved?.chunks.map((chunk) => chunk.text)).toHaveLength(12)
+    // Reading either again is free and gives the same source.
+    expect(result.again).toMatchObject({ type: "known", source: { id: "S2" } })
+    expect(result.publicAgain).toMatchObject({ type: "known", source: { id: "S1" } })
+    expect(result.detail?.run.pages).toBe(2)
+  })
+
   test("a copy is still found once later runs have pushed the run's pages out of memory", async () => {
     const result = await withStore((setup) =>
       Effect.gen(function* () {

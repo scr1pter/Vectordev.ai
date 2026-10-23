@@ -43,8 +43,33 @@ describe("ResearchReader.parse", () => {
     })
     expect(walled.status).toBe("paywalled")
     // The browser's own status for the page counts, as a site's answer does.
-    const gone = await parse({ url: "https://news.example/gone", contentType: "text/html", status: 410, body: html("<p>Gone</p>") })
+    const gone = await parse({
+      url: "https://news.example/gone",
+      contentType: "text/html",
+      status: 410,
+      body: html("<p>Gone</p>"),
+    })
     expect(gone.status).toBe("failed")
+  })
+
+  test("a page the user's own browser showed after a handoff is read in full, whatever its paywall markers say", async () => {
+    // Publishers keep isAccessibleForFree: false and their meter classes for subscribers who signed in too.
+    const paragraphs = Array.from(
+      { length: 40 },
+      (_, index) => `<p>Paragraph ${index} for subscribers: the compressor makers plan new prices for installers.</p>`,
+    ).join("")
+    const body = html(
+      `<!doctype html><html><head><title>Members article</title><script type="application/ld+json">{"@context":"https://schema.org","@type":"NewsArticle","headline":"Members article","isAccessibleForFree":false}</script></head><body><main class="article-locked"><h1>Members article</h1>${paragraphs}<p>The last paragraph is here.</p></main></body></html>`,
+    )
+    const url = "https://journal.example/members"
+    const walled = await parse({ url, contentType: "text/html; charset=utf-8", body })
+    expect(walled.status).toBe("paywalled")
+    expect(walled.text).not.toContain("The last paragraph is here.")
+    const signed = await parse({ url, contentType: "text/html; charset=utf-8", body, signedIn: true })
+    expect(signed.status).toBe("read")
+    expect(signed.paywall).toBeUndefined()
+    expect(signed.text).toContain("Paragraph 39 for subscribers")
+    expect(signed.text).toContain("The last paragraph is here.")
   })
 
   test("reads a PDF a browser fetched into memory, page by page", async () => {
