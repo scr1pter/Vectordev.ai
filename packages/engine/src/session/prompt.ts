@@ -2132,6 +2132,9 @@ const layer = Layer.effect(
                       },
                       tools: offered,
                       nested: session.parentID !== undefined,
+                      // A research worker and the judge are not told the working tree: its path names folders, and
+                      // what they send leaves the machine.
+                      workspace: !OUTWARD_AGENTS.has(agent.name),
                       // The day the history starts on; a later day is noted on the user message that starts it.
                       date: msgs.find((message) => message.info.role === "user")?.info.time.created,
                     }),

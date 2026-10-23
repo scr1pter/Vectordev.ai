@@ -41,11 +41,8 @@ const web = FakeWeb.start({
     },
   },
 })
-const { it, cleanup } = runtime(web)
-afterAll(async () => {
-  await web.close()
-  cleanup()
-})
+const it = runtime(web)
+afterAll(() => web.close())
 
 // Answers each permission the run asks, and keeps what was asked.
 const answer = (reply: PermissionV1.ReplyBody["reply"]) =>
@@ -68,14 +65,14 @@ it.instance(
   "an address no search result, page link or typed message gave is refused, and nothing is fetched",
   () =>
     Effect.gen(function* () {
-      const { llm } = yield* setup(web)
+      const test = yield* setup(web)
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research" })
-      yield* llm.tool("research_plan", plan())
-      yield* llm.tool("research_read", { url: web.url("article", "/") })
+      yield* test.llm.tool("research_plan", plan())
+      yield* test.llm.tool("research_read", { url: web.url("article", "/") })
       // An address a page might have asked for, with the agent's own text in its query.
-      yield* llm.tool("research_read", { url: `${web.url("article", "/")}?ref=badge-4417` })
-      yield* llm.text("Done.")
+      yield* test.llm.tool("research_read", { url: `${web.url("article", "/")}?ref=badge-4417` })
+      yield* test.llm.text("Done.")
       yield* send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." })
       const reads = yield* calls(session.id, "research_read")
       expect(reads).toHaveLength(2)
@@ -90,17 +87,17 @@ it.instance(
   "the run's first page asks once, the approval is not saved, and a saved source reads again offline",
   () =>
     Effect.gen(function* () {
-      const { llm } = yield* setup(web)
+      const test = yield* setup(web)
       const sessions = yield* Session.Service
       const asked = yield* answer("always")
       const session = yield* sessions.create({ title: "Research" })
       const article = web.url("article", "/")
       const pdf = web.url("docs", "/report.pdf")
-      yield* llm.tool("research_plan", plan())
-      yield* llm.tool("research_read", { url: article })
-      yield* llm.tool("research_read", { url: pdf })
-      yield* llm.tool("research_read", { source: "S1", find: "412 homes" })
-      yield* llm.text("Done.")
+      yield* test.llm.tool("research_plan", plan())
+      yield* test.llm.tool("research_read", { url: article })
+      yield* test.llm.tool("research_read", { url: pdf })
+      yield* test.llm.tool("research_read", { source: "S1", find: "412 homes" })
+      yield* test.llm.text("Done.")
       const before = web.count("article")
       yield* send({
         sessionID: session.id,
@@ -127,9 +124,9 @@ it.instance(
       expect(asked.filter((request) => request.permission === "private_network")).toEqual([])
 
       // A new run asks again: the answer was for that run only.
-      yield* llm.tool("research_plan", plan({ question: "Which heat pumps work below minus 20 degrees?" }))
-      yield* llm.tool("research_read", { url: web.url("docs", "/report.pdf") })
-      yield* llm.text("Done.")
+      yield* test.llm.tool("research_plan", plan({ question: "Which heat pumps work below minus 20 degrees?" }))
+      yield* test.llm.tool("research_read", { url: web.url("docs", "/report.pdf") })
+      yield* test.llm.text("Done.")
       yield* send({
         sessionID: session.id,
         agent: "research",
@@ -155,18 +152,18 @@ it.instance(
   "a link a read offered may be read next; one that looks built to carry data is not offered",
   () =>
     Effect.gen(function* () {
-      const { llm } = yield* setup(web)
+      const test = yield* setup(web)
       const sessions = yield* Session.Service
       yield* answer("once")
       const session = yield* sessions.create({ title: "Research" })
       const hostile = web.url("hostile", "/")
       const article = web.url("article", "/")
       const data = web.url("article", "/data/heat-pump-study.csv")
-      yield* llm.tool("research_plan", plan())
-      yield* llm.tool("research_read", { url: hostile, links: true })
-      yield* llm.tool("research_read", { url: article, links: true })
-      yield* llm.tool("research_read", { url: data })
-      yield* llm.text("Done.")
+      yield* test.llm.tool("research_plan", plan())
+      yield* test.llm.tool("research_read", { url: hostile, links: true })
+      yield* test.llm.tool("research_read", { url: article, links: true })
+      yield* test.llm.tool("research_read", { url: data })
+      yield* test.llm.text("Done.")
       yield* send({
         sessionID: session.id,
         agent: "research",
@@ -193,16 +190,16 @@ it.instance(
   "past the run's page budget a read is refused before the site is asked, so the run ends with a report",
   () =>
     Effect.gen(function* () {
-      const { llm } = yield* setup(web, { research: { limits: { focused: { pages: 1 } } } })
+      const test = yield* setup(web, { research: { limits: { focused: { pages: 1 } } } })
       const sessions = yield* Session.Service
       yield* answer("once")
       const session = yield* sessions.create({ title: "Research" })
       const article = web.url("article", "/")
       const pdf = web.url("docs", "/report.pdf")
-      yield* llm.tool("research_plan", plan())
-      yield* llm.tool("research_read", { url: article })
-      yield* llm.tool("research_read", { url: pdf })
-      yield* llm.text("Done.")
+      yield* test.llm.tool("research_plan", plan())
+      yield* test.llm.tool("research_read", { url: article })
+      yield* test.llm.tool("research_read", { url: pdf })
+      yield* test.llm.text("Done.")
       const before = web.count("docs", "/report.pdf")
       yield* send({ sessionID: session.id, agent: "research", text: `Research heat pump savings: ${article} ${pdf}` })
       const [first, second] = yield* calls(session.id, "research_read")
@@ -217,13 +214,13 @@ it.instance(
   "after a compaction drops the plan from what the model sees, the run and what it may read are still found",
   () =>
     Effect.gen(function* () {
-      const { llm } = yield* setup(web)
+      const test = yield* setup(web)
       yield* answer("once")
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research" })
-      yield* llm.tool("research_plan", plan())
-      yield* llm.tool("research_search", { query: "heat pump field study" })
-      yield* llm.text("Done.")
+      yield* test.llm.tool("research_plan", plan())
+      yield* test.llm.tool("research_search", { query: "heat pump field study" })
+      yield* test.llm.text("Done.")
       yield* send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." })
       const research = yield* ResearchRun.Service
       // What a step after a compaction gets: none of the messages before the summary.
@@ -249,7 +246,7 @@ it.instance(
   "a search result at a metadata, private or loopback address is refused without asking and never fetched",
   () =>
     Effect.gen(function* () {
-      const { llm } = yield* setup(web, {
+      const test = yield* setup(web, {
         research: { search: { provider: "searxng", url: web.url("lansearch", "/") } },
       })
       const asked = yield* answer("once")
@@ -261,10 +258,10 @@ it.instance(
         web.direct("article", "/"),
         "http://metadata.google.internal/computeMetadata/v1/",
       ]
-      yield* llm.tool("research_plan", plan())
-      yield* llm.tool("research_search", { query: "heat pump field study" })
-      for (const url of found) yield* llm.tool("research_read", { url })
-      yield* llm.text("Done.")
+      yield* test.llm.tool("research_plan", plan())
+      yield* test.llm.tool("research_search", { query: "heat pump field study" })
+      for (const url of found) yield* test.llm.tool("research_read", { url })
+      yield* test.llm.text("Done.")
       const before = web.count("article")
       yield* send({ sessionID: session.id, agent: "research", text: "Research heat pumps." })
       const reads = yield* calls(session.id, "research_read")
@@ -286,6 +283,42 @@ it.instance(
         ),
       ).toEqual([])
       expect(web.count("article") - before).toBe(0)
+      expect(guard.outside()).toEqual([])
+    }),
+  90_000,
+)
+
+it.instance(
+  "only a site the user chose reads as trusted, never one a plan approved on its own named",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web, { research: { domains: { prefer: [`docs.${FakeWeb.DOMAIN}`] } } })
+      yield* answer("once")
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "Research" })
+      const article = web.url("article", "/")
+      const pdf = web.url("docs", "/report.pdf")
+      // The lead names the article's site itself, and no one approves its plan.
+      yield* test.llm.tool("research_plan", { ...plan(), prefer_domains: [`article.${FakeWeb.DOMAIN}`] })
+      yield* test.llm.tool("research_read", { url: article })
+      yield* test.llm.tool("research_read", { url: pdf })
+      yield* test.llm.text("Done.")
+      yield* send({
+        sessionID: session.id,
+        agent: "research",
+        text: `Research heat pump savings: ${article} and ${pdf}.`,
+      })
+      const [planned] = yield* calls(session.id, "research_plan")
+      expect(planned?.state.status === "completed" ? planned.state.metadata.answer : undefined).toBe("automatic")
+      const [fromArticle, fromDocs] = yield* calls(session.id, "research_read")
+      expect(output(fromArticle)).toContain("412 homes")
+      expect(output(fromArticle)).not.toContain("You trust this site")
+      expect(output(fromDocs)).toContain("You trust this site")
+      const store = yield* ResearchStore.Service
+      const instruction = yield* Instruction.Service
+      const runID = planned?.state.status === "completed" ? planned.state.metadata.runID : ""
+      const detail = yield* store.get(yield* instruction.place(), runID)
+      expect(detail?.sources.map((source) => source.signals?.preference)).toEqual([undefined, "trusted"])
       expect(guard.outside()).toEqual([])
     }),
   90_000,

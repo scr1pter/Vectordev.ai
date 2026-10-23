@@ -15,6 +15,7 @@ export function make(overrides: Partial<Config.Interface> = {}) {
     trustedPath: () => Effect.succeed(undefined),
     waitForDependencies: () => Effect.void,
     permissionCeiling: () => Effect.succeed(undefined),
+    researchDomains: () => Effect.succeed({ prefer: [], avoid: [] }),
     localPolicy: () => Effect.succeed(Config.local()),
     trust: () => Effect.succeed({ workspace: "", fingerprint: "", trusted: false, ignored: false, settings: false }),
     approve: () => Effect.void,

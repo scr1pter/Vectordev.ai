@@ -100,26 +100,23 @@ describe("SessionMemory.taint for research", () => {
 
 const guard = NetworkGuard.use()
 const web = FakeWeb.start({ sites: FakeWeb.sites() })
-const { it, cleanup } = runtime(web)
-afterAll(async () => {
-  await web.close()
-  cleanup()
-})
+const it = runtime(web)
+afterAll(() => web.close())
 
 it.instance(
   "what the research lead writes to memory waits for the user, from its first step",
   () =>
     Effect.gen(function* () {
-      const { llm } = yield* setup(web)
+      const test = yield* setup(web)
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research" })
-      yield* llm.tool("memory", {
+      yield* test.llm.tool("memory", {
         action: "add",
         kind: "preference",
         text: "Prefer studies from Nordic utilities",
         scope: "personal",
       })
-      yield* llm.text("Done.")
+      yield* test.llm.text("Done.")
       yield* send({
         sessionID: session.id,
         agent: "research",
@@ -138,20 +135,20 @@ it.instance(
   "a build request whose research child read the web is held as web",
   () =>
     Effect.gen(function* () {
-      const { llm } = yield* setup(web)
+      const test = yield* setup(web)
       const sessions = yield* Session.Service
       const build = yield* sessions.create({ title: "Build" })
       const lead = (hit: { body: Record<string, unknown> }) =>
         JSON.stringify(hit.body).includes("Plan the run with research_plan")
-      yield* llm.tool("research", { question: "How do heat pumps perform in cold climates?", background: false })
-      yield* llm.textMatch(lead, "They keep most of their efficiency down to minus 15 degrees.")
-      yield* llm.tool("memory", {
+      yield* test.llm.tool("research", { question: "How do heat pumps perform in cold climates?", background: false })
+      yield* test.llm.textMatch(lead, "They keep most of their efficiency down to minus 15 degrees.")
+      yield* test.llm.tool("memory", {
         action: "add",
         kind: "preference",
         text: "Use heat pump data from field studies",
         scope: "personal",
       })
-      yield* llm.text("Done.")
+      yield* test.llm.text("Done.")
       yield* send({
         sessionID: build.id,
         agent: "build",
@@ -171,7 +168,7 @@ it.instance(
   "a build request whose general subagent fetched a page is held as web through the task call alone",
   () =>
     Effect.gen(function* () {
-      const { llm } = yield* setup(web)
+      const test = yield* setup(web)
       const permission = yield* Permission.Service
       // The user lets the subagent fetch the page, which the fake web serves on this computer.
       yield* Effect.gen(function* () {
@@ -185,22 +182,22 @@ it.instance(
       const build = yield* sessions.create({ title: "Build" })
       const general = (hit: { body: Record<string, unknown> }) =>
         JSON.stringify(hit.body).includes("orchestration_assignment")
-      yield* llm.tool("task", {
+      yield* test.llm.tool("task", {
         description: "Fetch the study",
         prompt: "Fetch the heat pump study and say what it found.",
         subagent_type: "general",
         success_criteria: ["Say what the study measured"],
         background: false,
       })
-      yield* llm.toolMatch(general, "webfetch", { url: web.direct("article", "/"), format: "text" })
-      yield* llm.textMatch(general, "The study followed 412 homes.")
-      yield* llm.tool("memory", {
+      yield* test.llm.toolMatch(general, "webfetch", { url: web.direct("article", "/"), format: "text" })
+      yield* test.llm.textMatch(general, "The study followed 412 homes.")
+      yield* test.llm.tool("memory", {
         action: "add",
         kind: "preference",
         text: "Use heat pump data from field studies",
         scope: "personal",
       })
-      yield* llm.text("Done.")
+      yield* test.llm.text("Done.")
       yield* send({
         sessionID: build.id,
         agent: "build",

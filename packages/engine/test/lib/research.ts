@@ -1,3 +1,4 @@
+import { afterAll } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import path from "path"
@@ -173,7 +174,8 @@ const root = LayerNode.group([
 /**
  * The test runtime for a file. `client` decides whether a root plan card asks (the app does) or the plan is approved
  * on its own (a client that cannot answer). Background subagents are off, so a task's report comes back in its call.
- * The user's personal memory files live in a folder of the file's own. MCP has no server unless `mcp` gives one.
+ * The user's personal memory files live in a folder of the file's own, removed when the file's tests end. MCP has no
+ * server unless `mcp` gives one.
  */
 export function runtime(
   web: FakeWeb.Web,
@@ -202,13 +204,11 @@ export function runtime(
       ],
     ]),
   )
-  return {
-    it,
-    cleanup: () => {
-      rmSync(config, { recursive: true, force: true })
-      rmSync(userConfig, { force: true })
-    },
-  }
+  afterAll(() => {
+    rmSync(config, { recursive: true, force: true })
+    rmSync(userConfig, { force: true })
+  })
+  return it
 }
 
 /** The repository's config: the fake LLM server as the model. */

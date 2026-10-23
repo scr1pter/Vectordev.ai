@@ -13,11 +13,8 @@ import { NetworkGuard } from "../../../core/test/lib/network-guard"
 
 const guard = NetworkGuard.use()
 const web = FakeWeb.start({ sites: FakeWeb.sites() })
-const { it, cleanup } = runtime(web)
-afterAll(async () => {
-  await web.close()
-  cleanup()
-})
+const it = runtime(web)
+afterAll(() => web.close())
 
 const allow = [{ permission: "research_read", pattern: "*", action: "allow" as const }]
 
@@ -25,48 +22,48 @@ it.instance(
   "a quote not in the source is refused, a paraphrase is marked, and the report cites saved notes only",
   () =>
     Effect.gen(function* () {
-      const { llm } = yield* setup(web)
+      const test = yield* setup(web)
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research", permission: allow })
       const article = web.url("article", "/")
       const question = "How much do heat pumps cut heating bills in cold climates?"
-      yield* llm.tool("research_plan", plan({ question }))
-      yield* llm.tool("research_read", { url: article })
+      yield* test.llm.tool("research_plan", plan({ question }))
+      yield* test.llm.tool("research_read", { url: article })
       // Words the page does not have.
-      yield* llm.tool("research_note", {
+      yield* test.llm.tool("research_note", {
         subquestion: "What did field studies measure?",
         claim: "The study followed 500 homes.",
         source: "S1",
         quote: "The study followed 500 homes through three winters.",
       })
       // The page's words, for a claim with a value they do not state.
-      yield* llm.tool("research_note", {
+      yield* test.llm.tool("research_note", {
         subquestion: "How large were the savings?",
         claim: "Heating bills fell by 61 percent in every home.",
         source: "S1",
         quote: "The study followed 412 homes through two winters.",
       })
       // The page's words, for the claim they state.
-      yield* llm.tool("research_note", {
+      yield* test.llm.tool("research_note", {
         subquestion: "What did field studies measure?",
         claim: "The study followed 412 homes through two winters.",
         source: "S1",
         quote: "The study followed 412 homes through two winters.",
       })
-      yield* llm.tool("research_report", {
+      yield* test.llm.tool("research_report", {
         title: "Heat pumps in cold climates",
         answer:
           "A field study followed 412 homes through two winters [N2]. Another claim cites a note that was never saved [N9].",
         sections: [{ heading: "What was measured", body: "The study followed 412 homes [N2]." }],
         open_questions: [],
       })
-      yield* llm.tool("research_report", {
+      yield* test.llm.tool("research_report", {
         title: "Heat pumps in cold climates",
         answer: "A field study followed 412 homes through two winters [N2].",
         sections: [{ heading: "What was measured", body: "The study followed 412 homes [N2]. Savings varied [N1]." }],
         open_questions: ["How do savings change below minus 20 degrees?"],
       })
-      yield* llm.text("Done.")
+      yield* test.llm.text("Done.")
       yield* send({
         sessionID: session.id,
         agent: "research",

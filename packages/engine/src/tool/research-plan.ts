@@ -139,8 +139,19 @@ export const ResearchPlanTool = Tool.define<
             }
           }
 
-          // A child stays at its launcher's size, and a request the user capped at Work stays Focused.
-          const ceiling: Research.Depth = lead.parentID ? yield* launcherDepth(lead) : size?.capped ? "focused" : "deep"
+          // A headless run (`vector run` denies the question tool) has no one to answer a card either.
+          const unanswerable =
+            !interactive ||
+            (ctx.deniedResources
+              ? (yield* ctx.deniedResources({ permission: "question", patterns: ["*"] })).length > 0
+              : false)
+          // A child stays at its launcher's size, and a request the user capped at Work stays Focused. A plan no one
+          // can answer goes deep only on a Thorough request: the model's own depth never raises a Work one (RC7).
+          const ceiling: Research.Depth = lead.parentID
+            ? yield* launcherDepth(lead)
+            : size?.capped || (unanswerable && !thorough(size, ctx))
+              ? "focused"
+              : "deep"
           const proposed = { ...plan, depth: deeper(plan.depth, ceiling) }
           const provider = searchProvider(cfg.research)
           const estimate = yield* estimateLine(proposed, ctx, provider.provider)
@@ -164,12 +175,6 @@ export const ResearchPlanTool = Tool.define<
             return run.id
           })
 
-          // A headless run (`vector run` denies the question tool) has no one to answer a card either.
-          const unanswerable =
-            !interactive ||
-            (ctx.deniedResources
-              ? (yield* ctx.deniedResources({ permission: "question", patterns: ["*"] })).length > 0
-              : false)
           if (lead.parentID || unanswerable) {
             const runID = yield* start(proposed)
             return {
@@ -315,6 +320,14 @@ export const ResearchPlanTool = Tool.define<
     }
   }),
 )
+
+// Whether the request is Thorough: by Vector's sizing of it, or without one by the sender's own pick (the Depth chip's
+// Deep, or the CLI's deep depth), which the request message keeps.
+function thorough(size: TaskSizeContext | undefined, ctx: Tool.Context) {
+  if (size) return size.tier === "thorough"
+  const request = ctx.messages.findLast((message) => message.info.role === "user")?.info
+  return request?.role === "user" && request.size === "thorough"
+}
 
 // The base prompt this session measured on its model: its last finished step's prompt, cached part included.
 function measured(ctx: Tool.Context) {

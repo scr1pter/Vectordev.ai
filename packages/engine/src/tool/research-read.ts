@@ -180,14 +180,17 @@ export const ResearchReadTool = Tool.define<
               ...(research.network.publicNames ? { publicNames: research.network.publicNames } : {}),
             },
           )
+          // "You trust this site" is Vector's own word beside the fence, so only sites the user chose earn it, never
+          // ones a plan approved on its own named.
+          const chosen = yield* research.domains(found)
           const signals = ResearchSignals.signals({
             url: page.final,
             meta: page.meta,
             flagged: page.flagged.length,
             paywalled: page.status === "paywalled",
             corroborated: 0,
-            ...(found.plan.prefer_domains ? { prefer: found.plan.prefer_domains } : {}),
-            ...(found.plan.avoid_domains ? { avoid: found.plan.avoid_domains } : {}),
+            prefer: chosen.prefer,
+            avoid: chosen.avoid,
             now: Date.now(),
           })
           const added = yield* store.addSource(found.place, runID, {

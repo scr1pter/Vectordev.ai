@@ -1413,6 +1413,9 @@ for (const trusted of [true, false])
             domains: { prefer: ["nature.com"], avoid: ["pinterest.com", "spam.example"] },
             tool: "thorough",
           })
+          // The repository's avoid list narrows what research reads; only the user's own sites clear a host name
+          // from the outbound check.
+          expect(yield* Config.use.researchDomains()).toEqual({ prefer: ["nature.com"], avoid: ["pinterest.com"] })
         }),
     ),
   )

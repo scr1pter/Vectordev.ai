@@ -19,11 +19,8 @@ import { NetworkGuard } from "../../../core/test/lib/network-guard"
 
 const guard = NetworkGuard.use()
 const web = FakeWeb.start({ sites: FakeWeb.sites() })
-const { it, cleanup } = runtime(web, { client: "app" })
-afterAll(async () => {
-  await web.close()
-  cleanup()
-})
+const it = runtime(web, { client: "app" })
+afterAll(() => web.close())
 
 // Answers each plan card with the next of `replies`, and keeps the questions asked.
 const answer = (replies: string[]) =>
@@ -42,20 +39,20 @@ const answer = (replies: string[]) =>
     return asked
   })
 
-const metadataOf = (part: SessionV1.ToolPart | undefined) =>
-  part?.state.status === "completed" ? part.state.metadata : ({} as Record<string, any>)
+const metadataOf = (part: SessionV1.ToolPart | undefined): SessionV1.ToolStateCompleted["metadata"] =>
+  part?.state.status === "completed" ? part.state.metadata : {}
 
 it.instance(
   "Start deep raises the run to Thorough from the user's own answer, and a status-only call never asks again",
   () =>
     Effect.gen(function* () {
-      const { llm } = yield* setup(web)
+      const test = yield* setup(web)
       const asked = yield* answer(["Start deep"])
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research" })
-      yield* llm.tool("research_plan", plan())
-      yield* llm.tool("research_plan", { ...plan(), status: ["answered", "open"] })
-      yield* llm.text("Done.")
+      yield* test.llm.tool("research_plan", plan())
+      yield* test.llm.tool("research_plan", { ...plan(), status: ["answered", "open"] })
+      yield* test.llm.text("Done.")
       yield* send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." })
 
       expect(asked).toHaveLength(1)
@@ -85,7 +82,7 @@ it.instance(
   "a typed reply is a steer that starts nothing, the card's JSON answer carries edits, and Cancel stops",
   () =>
     Effect.gen(function* () {
-      const { llm } = yield* setup(web)
+      const test = yield* setup(web)
       const edited = `vector-plan:${JSON.stringify({
         action: "start",
         plan: { subquestions: ["Which homes did the study follow?"], avoid_domains: ["example.com"] },
@@ -98,11 +95,11 @@ it.instance(
       const instruction = yield* Instruction.Service
       const place = yield* instruction.place()
       const before = (yield* store.list(place)).length
-      yield* llm.tool("research_plan", plan())
-      yield* llm.tool("research_read", { url: web.url("article", "/") })
-      yield* llm.tool("research_plan", plan({ question: "What did Nordic heat pump field studies find?" }))
-      yield* llm.tool("research_plan", plan({ question: "Should I stop researching heat pumps?" }))
-      yield* llm.text("Done.")
+      yield* test.llm.tool("research_plan", plan())
+      yield* test.llm.tool("research_read", { url: web.url("article", "/") })
+      yield* test.llm.tool("research_plan", plan({ question: "What did Nordic heat pump field studies find?" }))
+      yield* test.llm.tool("research_plan", plan({ question: "Should I stop researching heat pumps?" }))
+      yield* test.llm.text("Done.")
       yield* send({ sessionID: session.id, agent: "research", text: `Research heat pumps, ${web.url("article", "/")}` })
 
       const [steer, approved, cancelled] = yield* calls(session.id, "research_plan")
@@ -128,38 +125,53 @@ it.instance(
   90_000,
 )
 
-it.instance(
-  "a headless run, which denies questions, has its plan approved within its size and never asks",
-  () =>
-    Effect.gen(function* () {
-      const { llm } = yield* setup(web)
-      const asked = yield* answer([])
-      const sessions = yield* Session.Service
-      // What `vector run` gives a session that no one can answer.
-      const session = yield* sessions.create({
-        title: "Research",
-        permission: [{ permission: "question", pattern: "*", action: "deny" }],
-      })
-      yield* llm.tool("research_plan", plan({ depth: "deep" }))
-      yield* llm.text("Done.")
-      yield* send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." })
-      expect(asked).toEqual([])
-      const [planned] = yield* calls(session.id, "research_plan")
-      expect(metadataOf(planned)).toMatchObject({ approved: true, answer: "automatic" })
-      // Only the user's own answer raises a run to Thorough.
-      expect(metadataOf(planned).to).toBeUndefined()
-    }),
-  60_000,
-)
+for (const size of [undefined, "thorough" as const])
+  it.instance(
+    `a headless run, which denies questions, has its plan approved within its ${size ?? "Work"} size and never asks`,
+    () =>
+      Effect.gen(function* () {
+        const test = yield* setup(web)
+        const asked = yield* answer([])
+        const sessions = yield* Session.Service
+        // What `vector run` gives a session that no one can answer.
+        const session = yield* sessions.create({
+          title: "Research",
+          permission: [{ permission: "question", pattern: "*", action: "deny" }],
+        })
+        yield* test.llm.tool("research_plan", plan({ depth: "deep" }))
+        yield* test.llm.text("Done.")
+        yield* send({
+          sessionID: session.id,
+          agent: "research",
+          text: "Research how much heat pumps save.",
+          ...(size ? { size } : {}),
+        })
+        expect(asked).toEqual([])
+        const [planned] = yield* calls(session.id, "research_plan")
+        // The model asked for deep; only a Thorough request lets a plan no one approved go deep, with its caps.
+        expect(metadataOf(planned)).toMatchObject({
+          approved: true,
+          answer: "automatic",
+          plan: { depth: size === "thorough" ? "deep" : "focused" },
+        })
+        // Only the user's own answer raises a run to Thorough.
+        expect(metadataOf(planned).to).toBeUndefined()
+        const store = yield* ResearchStore.Service
+        const instruction = yield* Instruction.Service
+        const detail = yield* store.get(yield* instruction.place(), metadataOf(planned).runID)
+        expect(detail?.run.depth).toBe(size === "thorough" ? "deep" : "focused")
+      }),
+    60_000,
+  )
 
 it.instance(
   "a site the user approved on the plan card may be searched though the run read it in a file",
   () =>
     Effect.gen(function* () {
-      const { dir, llm } = yield* setup(web)
+      const test = yield* setup(web)
       const fs = yield* FSUtil.Service
       yield* fs.writeWithDirs(
-        path.join(dir, "notes", "hosts.md"),
+        path.join(test.dir, "notes", "hosts.md"),
         "# Hosts\n\nOur status page is status.acmecorp.com.\n",
       )
       yield* answer(["Start"])
@@ -168,10 +180,10 @@ it.instance(
         title: "Research",
         permission: [{ permission: "private_network", pattern: "*", action: "allow" }],
       })
-      yield* llm.tool("research_plan", { ...plan(), prefer_domains: ["acmecorp.com"] })
-      yield* llm.tool("read", { filePath: path.join(dir, "notes", "hosts.md") })
-      yield* llm.tool("research_search", { query: "outage history", site: "status.acmecorp.com" })
-      yield* llm.text("Done.")
+      yield* test.llm.tool("research_plan", { ...plan(), prefer_domains: ["acmecorp.com"] })
+      yield* test.llm.tool("read", { filePath: path.join(test.dir, "notes", "hosts.md") })
+      yield* test.llm.tool("research_search", { query: "outage history", site: "status.acmecorp.com" })
+      yield* test.llm.text("Done.")
       yield* send({ sessionID: session.id, agent: "research", text: "Research how often status pages report outages." })
       const [search] = yield* calls(session.id, "research_search")
       expect(output(search)).toContain("untrusted_web_page")

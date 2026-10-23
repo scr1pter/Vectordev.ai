@@ -1298,11 +1298,23 @@ export const TaskTool = Tool.define(
           runTask().pipe(
             Effect.onInterrupt(() => ops.cancel(nextSession.id)),
             Effect.flatMap(settleRun),
-            // A researcher hands back 1,500 characters at most, and the notes it saved in the run.
+            // A researcher hands back 1,500 characters at most, and the notes it saved in the run, whether it finished
+            // or failed partway: a failed run's text reaches the lead too.
             Effect.flatMap((text) =>
               next.name === ResearchRun.RESEARCHER && Option.isSome(research)
                 ? research.value.returned(nextSession.id, text)
                 : Effect.succeed(text),
+            ),
+            Effect.catchTag("BackgroundJob.RunFailed", (failed) =>
+              next.name === ResearchRun.RESEARCHER && Option.isSome(research)
+                ? research.value
+                    .returned(nextSession.id, failed.output)
+                    .pipe(
+                      Effect.flatMap((output) =>
+                        Effect.fail(new BackgroundJob.RunFailed({ message: failed.message, output })),
+                      ),
+                    )
+                : Effect.fail(failed),
             ),
           )
         // A message for a background task that is mid-run joins the child's running loop, as a prompt sent to a busy

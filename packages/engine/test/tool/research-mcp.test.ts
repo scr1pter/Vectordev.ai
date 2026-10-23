@@ -55,11 +55,8 @@ const server = Layer.succeed(
 
 const guard = NetworkGuard.use()
 const web = FakeWeb.start({ sites: FakeWeb.sites() })
-const { it, cleanup } = runtime(web, { mcp: server })
-afterAll(async () => {
-  await web.close()
-  cleanup()
-})
+const it = runtime(web, { mcp: server })
+afterAll(() => web.close())
 
 const names = (body: string) =>
   ((JSON.parse(body) as { tools?: { function?: { name?: string } }[] }).tools ?? []).map((tool) => tool.function?.name)
@@ -68,7 +65,7 @@ it.instance(
   "no research agent is offered an MCP tool or resource, even where the session's rules allow them",
   () =>
     Effect.gen(function* () {
-      const { llm } = yield* setup(web)
+      const test = yield* setup(web)
       const sessions = yield* Session.Service
       // A client's tools list sets session rules, which come after the agent's.
       const open = [
@@ -79,15 +76,15 @@ it.instance(
       const lead = yield* sessions.create({ title: "Research", permission: open })
       const researcher = (hit: { body: Record<string, unknown> }) =>
         JSON.stringify(hit.body).includes("research_assignment")
-      yield* llm.tool("research_plan", plan({ depth: "deep" }))
-      yield* llm.tool("task", {
+      yield* test.llm.tool("research_plan", plan({ depth: "deep" }))
+      yield* test.llm.tool("task", {
         description: "CI practice",
         prompt: "How do other teams run payments tests in continuous integration?",
         subagent_type: "researcher",
         background: false,
       })
-      yield* llm.textMatch(researcher, "Found it.")
-      yield* llm.text("Done.")
+      yield* test.llm.textMatch(researcher, "Found it.")
+      yield* test.llm.text("Done.")
       const bodies = yield* send({ sessionID: lead.id, agent: "research", text: "Research payments testing." })
       const [researched] = bodies.filter((body) => body.includes("research_assignment"))
       expect(researched).toBeDefined()
@@ -95,7 +92,7 @@ it.instance(
 
       // Build is offered them, so the server is connected.
       const build = yield* sessions.create({ title: "Build" })
-      yield* llm.text("Done.")
+      yield* test.llm.text("Done.")
       const [offered] = yield* send({ sessionID: build.id, agent: "build", text: "What is in our notes?" })
       expect(names(offered!)).toEqual(expect.arrayContaining(MCP_TOOLS))
       expect(guard.outside()).toEqual([])
@@ -107,13 +104,13 @@ it.instance(
   "what an MCP tool returned to build stays out of its research requests",
   () =>
     Effect.gen(function* () {
-      const { llm } = yield* setup(web)
+      const test = yield* setup(web)
       const sessions = yield* Session.Service
       const build = yield* sessions.create({ title: "Build" })
-      yield* llm.tool("notes_search", { query: "renewals" })
-      yield* llm.tool("research", { question: `How do others handle this? ${PRIVATE}`, background: false })
-      yield* llm.tool("research", { question: "Who renews with zephyrRenewals?", background: false })
-      yield* llm.text("Done.")
+      yield* test.llm.tool("notes_search", { query: "renewals" })
+      yield* test.llm.tool("research", { question: `How do others handle this? ${PRIVATE}`, background: false })
+      yield* test.llm.tool("research", { question: "Who renews with zephyrRenewals?", background: false })
+      yield* test.llm.text("Done.")
       yield* send({ sessionID: build.id, agent: "build", text: "Look into our renewals.", size: "standard" })
       const [searched] = yield* calls(build.id, "notes_search")
       expect(output(searched)).toContain("Globex")

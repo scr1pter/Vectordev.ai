@@ -406,7 +406,14 @@ type State = {
   trusted: boolean
   trustedSnapshot: WorkspaceTrust.TrustedSnapshot | undefined
   ceiling: PermissionCeiling | undefined
+  research: ResearchDomains
 }
+
+/**
+ * The sites research prefers and avoids by the user's own config and the company's, without any a repository added. A
+ * repository's avoid list narrows what research reads, but only these clear a host name from its outbound check.
+ */
+export type ResearchDomains = { readonly prefer: readonly string[]; readonly avoid: readonly string[] }
 
 export type TrustStatus = WorkspaceTrust.Status & {
   /**
@@ -440,6 +447,7 @@ export interface Interface {
   readonly trust: () => Effect.Effect<TrustStatus>
   readonly approve: () => Effect.Effect<void>
   readonly permissionCeiling: () => Effect.Effect<PermissionCeiling | undefined>
+  readonly researchDomains: () => Effect.Effect<ResearchDomains>
   /**
    * The Vector Local policy in effect (Config.local()) as this instance reports it: with a note when the repository's
    * own config has a local block, which never applies.
@@ -1509,6 +1517,9 @@ const layer = Layer.effect(
 
         // The user's own sources merged alone, and whether a trusted project granted any permission over them.
         let userPermissions: Pick<Info, "permission" | "tools" | "agent"> = {}
+        // The user's own and the company's research block merged alone: a repository's avoid list joins the merged
+        // config, never this one.
+        let userResearch: Pick<Info, "research"> = {}
         let projectGrants = false
         // Repository files whose budget.run was dropped, for the notice once loading ends.
         const ignoredRunBudgets: string[] = []
@@ -1538,6 +1549,7 @@ const layer = Layer.effect(
               ...(safe.tools && { tools: safe.tools }),
               ...(safe.agent && { agent: safe.agent }),
             })
+          if (!projectSource && safe.research) userResearch = mergeConfig(userResearch, { research: safe.research })
           result = mergeConfigConcatArrays(result, safe)
           if (projectSource && input.local !== undefined) repositoryLocal = true
           const ignored =
@@ -1730,6 +1742,7 @@ const layer = Layer.effect(
             ...(next.tools && { tools: next.tools }),
             ...(next.agent && { agent: next.agent }),
           })
+          if (next.research) userResearch = mergeConfig(userResearch, { research: next.research })
           result = mergeConfigConcatArrays(result, omit(next, ["local"]))
         }
 
@@ -1832,6 +1845,10 @@ const layer = Layer.effect(
                   ),
                 }
               : undefined,
+          research: {
+            prefer: userResearch.research?.domains?.prefer ?? [],
+            avoid: userResearch.research?.domains?.avoid ?? [],
+          },
         }
       },
       Effect.provideService(FSUtil.Service, fs),
@@ -1860,6 +1877,10 @@ const layer = Layer.effect(
 
     const permissionCeiling = Effect.fn("Config.permissionCeiling")(function* () {
       return yield* InstanceState.use(state, (s) => s.ceiling)
+    })
+
+    const researchDomains = Effect.fn("Config.researchDomains")(function* () {
+      return yield* InstanceState.use(state, (s) => s.research)
     })
 
     const localPolicy = Effect.fn("Config.localPolicy")(function* () {
@@ -2059,6 +2080,7 @@ const layer = Layer.effect(
       trustedPath,
       approve,
       permissionCeiling,
+      researchDomains,
       localPolicy,
     })
   }),

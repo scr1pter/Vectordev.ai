@@ -17,7 +17,7 @@ import type { WebFetchRequest } from "@vectordevai/core/util/webfetch-request"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { Research } from "@vectordevai/schema/research"
 import type { RunBudget } from "@vectordevai/schema/run-budget"
-import { Context, Effect, Layer, Scope, Semaphore } from "effect"
+import { Context, Effect, Layer, Option, Schema, Scope, Semaphore } from "effect"
 import { HttpClient } from "effect/unstable/http"
 import { Config } from "@/config/config"
 import { Session } from "@/session/session"
@@ -34,11 +34,11 @@ import type { Tool } from "./tool"
 // - the run is the newest plan the lead's session approved (research_plan's completed call carries its id);
 // - provenance is the run's search results, the links research_read offered, and addresses the user typed;
 // - the outbound check's private context is everything any agent of the run took in that is not known to be public:
-//   the owner's personal lines recalled or pinned for it (a researcher's how-you-work lines included), MEMORY.md,
-//   private document cards, every tool's output but the web's (files read, commands run, a subagent's report, an MCP
-//   server's answer), files attached to a message, pages read in the user's signed-in browser, and sources read from
-//   the user's own network. Only the root user's typed words are exempt: a sub-question or a task brief is written by
-//   an agent.
+//   the memory lines recalled, found or pinned for it whatever their scope (a researcher's how-you-work lines
+//   included), MEMORY.md, the document titles and cards it was shown, every tool's output but the web's (files read,
+//   commands run, a subagent's report, an MCP server's answer), files attached to a message, pages read in the user's
+//   signed-in browser, and pages read or fetched from the user's own network. Only the root user's typed words are
+//   exempt: a sub-question, a task brief or a message to a task is written by an agent.
 
 export const LEAD = "research"
 export const RESEARCHER = "researcher"
@@ -74,9 +74,13 @@ export const REQUEST_REFUSAL =
   "That research request would send text from what this session read. Rephrase the question with public terms, or ask the user to type the words they want researched."
 export const BRIEF_REFUSAL =
   "That brief would send text from your private context to a web worker. Write the sub-question in public terms."
+export const LEAD_ONLY =
+  "A researcher takes its sub-question and any message from the research lead that launched it alone."
 
 // How long a run keeps its own rate limiter after its last read, and how many runs keep one.
 const LIMITERS = 16
+// How deep a session tree is walked: to the session the user types in, and down through subagents.
+const DEPTH = 4
 
 /**
  * The network research reads through. Production resolves names with the system's resolver; tests give the fake web's
@@ -112,14 +116,22 @@ export type Brief =
   | { readonly type: "ok"; readonly prompt: string; readonly budget?: RunBudget.Info }
   | { readonly type: "refused"; readonly message: string }
 
+/** The sites the user chose for research: what may become a site: filter, and what reads as "You trust this site". */
+export type Domains = { readonly prefer: readonly string[]; readonly avoid: readonly string[] }
+
 export interface Interface {
   readonly place: () => Effect.Effect<Brain.Place>
   /** The run's lead: the session itself, or for a researcher or the judge the lead that launched it. */
   readonly lead: (sessionID: SessionID) => Effect.Effect<Session.Info>
   /** The run this call works in, or why there is none to work in. */
   readonly current: (ctx: Tool.Context) => Effect.Effect<Current>
-  /** The outbound check's context: the run's, or without a run the calling session's alone. */
+  /** The outbound check's context: the run's, or without a run the whole session tree's the caller is in. */
   readonly context: (ctx: Tool.Context, found?: Found) => Effect.Effect<ResearchOutbound.Context>
+  /**
+   * The sites the user chose: their own config's and their company's, and the plan's when they approved it on its
+   * card. A repository's avoid list and a plan an agent approved on its own choose nothing.
+   */
+  readonly domains: (found?: Found) => Effect.Effect<Domains>
   /** The addresses the run may read. */
   readonly provenance: (ctx: Tool.Context, found: Found) => Effect.Effect<ResearchProvenance.Addresses>
   /** Asks once per run before its first page is read. The approval is never saved. */
@@ -147,6 +159,15 @@ export interface Interface {
   }) => Effect.Effect<Brief, never, Scope.Scope>
   /** What a researcher returns to the lead: at most 1,500 characters, and the notes it saved. */
   readonly returned: (sessionID: SessionID, text: string) => Effect.Effect<string>
+  /**
+   * A message an agent sends to a running task (task_manage), before it is delivered. A researcher hears from the
+   * lead that launched it alone, and a message to a research lead or a researcher passes the check its brief passed.
+   */
+  readonly message: (input: {
+    readonly ctx: Tool.Context
+    readonly taskID: string
+    readonly text: string
+  }) => Effect.Effect<{ readonly type: "ok" } | { readonly type: "refused"; readonly message: string }>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@vector/ResearchRun") {}
@@ -195,12 +216,13 @@ const layer = Layer.effect(
     })
 
     // The session the user types in: the run's lead in Deep research, or the build session that handed it a question.
-    const top = Effect.fn("ResearchRun.top")(function* (sessionID: SessionID) {
-      let session = yield* sessions.get(sessionID).pipe(Effect.orDie)
-      for (let depth = 0; session.parentID && depth < 4; depth++)
-        session = yield* sessions.get(session.parentID).pipe(Effect.orDie)
-      return session
-    })
+    const top = (sessionID: SessionID, depth = 0): Effect.Effect<Session.Info> =>
+      sessions.get(sessionID).pipe(
+        Effect.orDie,
+        Effect.flatMap((session) =>
+          session.parentID && depth < DEPTH ? top(session.parentID, depth + 1) : Effect.succeed(session),
+        ),
+      )
 
     // A session's whole history. The calling session's messages are this step's, with the memory it was shown filled
     // in; the stored ones before a compaction still count, since what was read then may be in its summary.
@@ -216,6 +238,18 @@ const layer = Layer.effect(
         ...ctx.messages.filter((message) => !known.has(message.info.id)),
       ]
     })
+
+    // A session's history and every subagent's below it: a subagent's report, and what it says through task_manage,
+    // may relay anything it took in.
+    const lineage = (ctx: Tool.Context, sessionID: SessionID, depth = 0): Effect.Effect<SessionV1.WithParts[][]> =>
+      Effect.gen(function* () {
+        const own = yield* history(ctx, sessionID)
+        if (depth >= DEPTH) return [own]
+        const below = yield* Effect.forEach(yield* sessions.children(sessionID), (child) =>
+          lineage(ctx, child.id, depth + 1),
+        )
+        return [own, ...below.flat()]
+      })
 
     // Every session of the run: the lead and the research agents it launched.
     const members = Effect.fn("ResearchRun.members")(function* (ctx: Tool.Context, leader: Session.Info) {
@@ -275,31 +309,37 @@ const layer = Layer.effect(
 
     const context = Effect.fn("ResearchRun.context")(function* (ctx: Tool.Context, found?: Found) {
       const where = found?.place ?? (yield* place())
-      // Without a run (the build agent's research request) the calling session's whole history counts: what it took
-      // in before a compaction may be in the summary it works from.
-      const messages = found ? (yield* members(ctx, found.lead)).flat() : yield* history(ctx, ctx.sessionID)
-      const parts = messages.flatMap((message) => message.parts)
-      const taken = messages.map(intake)
       const root = yield* top(ctx.sessionID)
+      // Without a run (the build agent's research request, or a message to a research agent) everything in the
+      // session tree the caller is in counts: what build took in, and what each subagent took in, since its report or
+      // a message may relay it. Stored history counts too: what was read before a compaction may be in the summary.
+      const messages = (found ? yield* members(ctx, found.lead) : yield* lineage(ctx, root.id)).flat()
+      const parts = messages.flatMap((message) => message.parts)
+      const saved = new Set(parts.flatMap(savedPrivately))
+      const taken = messages.map((message) => intake(message, saved))
       const guest = (yield* guests.marked(root.id)) || (yield* guests.marked(ctx.sessionID))
-      const cfg = yield* config.get()
 
-      // The owner's personal lines this run was given: recalled into a message, found by the memory tool, or pinned in
-      // a digest. How-you-work preferences are the work; decisions, lessons, facts and private entries are private.
-      const recalled = new Set(
-        parts.flatMap((part) => [...(SessionMemory.recall(part)?.personal ?? []), ...SessionMemory.personal(part)]),
+      // The memory entries the run was shown, whatever their scope: recalled into a message, found by the memory tool
+      // (whose transcript keeps a personal or private entry's id alone), or pinned in a digest, which carries every
+      // pinned entry the role may hear. How the owner works and what the repository learned are the work; the owner's
+      // decisions, lessons and facts, the repository's facts, and whatever was learned beside a private document are
+      // private. A session an invited guest is in was shown none of the owner's own.
+      const shown = new Set(
+        parts.flatMap((part) => [...(SessionMemory.recall(part)?.ids ?? []), ...SessionMemory.personal(part)]),
       )
-      const entries = guest
-        ? []
-        : (yield* brain.list(where, { scope: "personal" })).filter(
-            (entry) => recalled.has(entry.id) || (entry.pinned && entry.status === "active"),
-          )
-      const habit = (entry: (typeof entries)[number]) =>
-        !entry.private && (entry.kind === "preference" || entry.kind === "review")
+      const entries = (yield* brain.list(where, {})).filter(
+        (entry) =>
+          (shown.has(entry.id) || entry.pinned) && (!guest || (entry.scope === "repository" && !entry.private)),
+      )
+      const work = (entry: (typeof entries)[number]) =>
+        !entry.private &&
+        (entry.scope === "repository" ? entry.kind !== "fact" : entry.kind === "preference" || entry.kind === "review")
       const files = brain.files()
       const memory = guest ? "" : yield* text(files.memory)
       // The owner's rules and the repository's own rules files, which every digest carries.
       const rules = yield* Effect.forEach([files.rules, ...where.sources.map((source) => source.path)], text)
+      // The digest names the repository's documents by title, a private document's to the owner.
+      const titles = yield* knowledge.titles(where, { personal: !guest })
 
       // Document cards and passages the run was shown, rendered again from their ids as each request renders them: a
       // private document's are private, the repository's the work.
@@ -320,11 +360,11 @@ const layer = Layer.effect(
           .get(where, { ...item, personal: !guest, sessionID: ctx.sessionID })
           .pipe(Effect.map((got) => ({ id: item.id, text: got?.text }))),
       )
-      const shown = [
+      const shownCards = [
         ...[...lines].map(([id, line]) => ({ id, text: line })),
         ...passages.flatMap((item) => (item.text ? [{ id: item.id, text: item.text }] : [])),
       ]
-      const visible = yield* Effect.forEach(shown, (item) =>
+      const visible = yield* Effect.forEach(shownCards, (item) =>
         knowledge.sources(where, [item.id]).pipe(
           Effect.map((found) => ({
             ...item,
@@ -337,32 +377,52 @@ const layer = Layer.effect(
 
       const sources = found ? yield* sourceText(found) : { open: [] as string[], closed: [] as string[] }
       const results = parts.flatMap((part) => resultsOf(part, found?.run.id))
+      const chosen = yield* domains(found)
       return {
         private: [
           memory,
-          ...entries.filter((entry) => !habit(entry)).map((entry) => entry.text),
+          ...entries.filter((entry) => !work(entry)).map((entry) => entry.text),
+          ...titles.flatMap((item) => (item.visibility === "private" ? [item.title] : [])),
           ...card(true),
           ...taken.flatMap((item) => item.private),
           ...sources.closed,
         ].filter(Boolean),
         work: [
           ...rules,
-          // Every agent's system prompt names the working tree, and its path names the user and the repository.
+          // The lead's and build's system prompts name the working tree, and its path names the user and the
+          // repository. A researcher's and the judge's do not.
           where.root,
-          ...entries.filter(habit).map((entry) => entry.text),
+          ...entries.filter(work).map((entry) => entry.text),
+          ...titles.flatMap((item) => (item.visibility === "private" ? [] : [item.title])),
           ...card(false),
           ...taken.flatMap((item) => item.work),
         ].filter(Boolean),
         typed: yield* typedOf(ctx),
         public: [...results.flatMap((result) => [result.title, result.snippet]), ...sources.open],
-        // The user's own sites become site: filters. A plan's count only when the user approved it on its card: an
-        // agent that approved its own plan could otherwise clear any public host name it chose.
-        domains: [
-          ...(found?.approvedByUser ? [...(found.plan.prefer_domains ?? []), ...(found.plan.avoid_domains ?? [])] : []),
-          ...(cfg.research?.domains?.prefer ?? []),
-          ...(cfg.research?.domains?.avoid ?? []),
-        ],
+        // The user's own sites become site: filters.
+        domains: [...chosen.prefer, ...chosen.avoid],
       } satisfies ResearchOutbound.Context
+    })
+
+    const domains = Effect.fn("ResearchRun.domains")(function* (found?: Found) {
+      const own = yield* config.researchDomains()
+      const avoided = new Set(own.avoid.map(normal))
+      // A plan's sites count only when the user approved it on its card: an agent that approved its own plan could
+      // otherwise choose any site. Every plan carries the merged config's avoid list, a repository's included, so a
+      // site only a repository avoids is left out of it here.
+      const repository = new Set(
+        ((yield* config.get()).research?.domains?.avoid ?? []).map(normal).filter((domain) => !avoided.has(domain)),
+      )
+      const plan = found?.approvedByUser ? found.plan : undefined
+      return {
+        prefer: [...new Set([...own.prefer, ...(plan?.prefer_domains ?? [])].map(normal))].filter(Boolean),
+        avoid: [
+          ...new Set([
+            ...avoided,
+            ...(plan?.avoid_domains ?? []).map(normal).filter((domain) => !repository.has(domain)),
+          ]),
+        ].filter(Boolean),
+      } satisfies Domains
     })
 
     // The text of the run's pages: what was read on the user's own network is private, the rest public.
@@ -551,11 +611,41 @@ const layer = Layer.effect(
       return notes.length ? `${clipped}\n\nNotes saved: ${[...new Set(notes)].join(", ")}` : clipped
     })
 
+    const message = Effect.fn("ResearchRun.message")(function* (input: {
+      readonly ctx: Tool.Context
+      readonly taskID: string
+      readonly text: string
+    }) {
+      const id = Schema.decodeUnknownOption(SessionID)(input.taskID)
+      if (Option.isNone(id)) return { type: "ok" as const }
+      const task = yield* sessions.get(id.value).pipe(Effect.option)
+      if (Option.isNone(task)) return { type: "ok" as const }
+      const agent = SubagentLifecycle.read(task.value)?.agent ?? task.value.agent
+      if (agent === LEAD) {
+        // The lead works from its request and what it is told, so a message must not carry private text either.
+        const checked = ResearchOutbound.check(input.text, yield* context(input.ctx))
+        return checked.ok
+          ? { type: "ok" as const }
+          : { type: "refused" as const, message: refusal(REQUEST_REFUSAL, checked) }
+      }
+      if (agent !== RESEARCHER && agent !== JUDGE) return { type: "ok" as const }
+      if (input.ctx.agent !== LEAD || task.value.parentID !== input.ctx.sessionID)
+        return { type: "refused" as const, message: LEAD_ONLY }
+      const found = yield* current(input.ctx)
+      if ("refused" in found) return { type: "refused" as const, message: found.refused }
+      const checked = ResearchOutbound.check(input.text, yield* context(input.ctx, found))
+      return checked.ok
+        ? { type: "ok" as const }
+        : { type: "refused" as const, message: refusal(BRIEF_REFUSAL, checked) }
+    })
+
     return Service.of({
       place,
       lead,
       current,
       context,
+      domains,
+      message,
       provenance,
       approve,
       limiter,
@@ -629,8 +719,8 @@ const WEB_TOOLS = new Set([
   "research_note",
   "research_report",
 ])
-// Tools whose output the repository or Vector wrote: the work. A subagent's report is the work too, whatever the
-// subagent read, since it may quote any of it.
+// Tools whose output the repository or Vector wrote: the work. A subagent's report is the work too: what the subagent
+// took in counts by its own kind, since the context reads every session below the caller.
 const WORK_TOOLS = new Set([
   "bash",
   "read",
@@ -661,7 +751,7 @@ const WORK_TOOLS = new Set([
  * In a user message a file attached and Vector's other notes are the work, and text from outside (an issue, an
  * imported transcript) is private, but for a local file an editor embedded. The user's typed words are exempt anyway.
  */
-function intake(message: SessionV1.WithParts) {
+function intake(message: SessionV1.WithParts, saved: ReadonlySet<string>) {
   const found = message.parts.flatMap((part): { readonly kind: "private" | "work"; readonly text: string }[] => {
     if (part.type === "text" && message.info.role === "user") {
       if (SessionMemory.outside(part))
@@ -670,8 +760,17 @@ function intake(message: SessionV1.WithParts) {
     }
     if (part.type !== "tool" || part.state.status !== "completed") return []
     const text = part.state.output
-    if (part.tool === "research_read") return part.state.metadata?.private === true ? [{ kind: "private", text }] : []
+    // A page read or fetched from the user's own computer or network is theirs.
+    if ((part.tool === "research_read" || part.tool === "webfetch") && part.state.metadata?.private === true)
+      return [{ kind: "private", text }]
     if (WEB_TOOLS.has(part.tool)) return []
+    // Such a page saved whole when it was too long to show, read back.
+    const input = part.state.input
+    if (
+      (part.tool === "read" || part.tool === "grep") &&
+      [...saved].some((file) => input.filePath === file || input.path === file || text.includes(file))
+    )
+      return [{ kind: "private", text }]
     if (part.tool === "task" && runOwn(part.state.metadata)) return []
     return [{ kind: WORK_TOOLS.has(part.tool) ? "work" : "private", text }]
   })
@@ -679,6 +778,13 @@ function intake(message: SessionV1.WithParts) {
     private: found.flatMap((item) => (item.kind === "private" ? [item.text] : [])),
     work: found.flatMap((item) => (item.kind === "work" ? [item.text] : [])),
   }
+}
+
+// Where webfetch saved a page from the user's own network that was too long to show.
+function savedPrivately(part: SessionV1.Part) {
+  if (part.type !== "tool" || part.tool !== "webfetch" || part.state.status !== "completed") return []
+  const file = part.state.metadata?.outputPath
+  return part.state.metadata?.private === true && typeof file === "string" ? [file] : []
 }
 
 // Whether a task call launched only the run's own research agents: a researcher or the judge.
@@ -700,6 +806,13 @@ function refusal(message: string, checked: Extract<ResearchOutbound.Result, { ok
     ? `${message} It holds a password, key or token.`
     : `${message} It shares "${checked.match}".`
 }
+
+const normal = (domain: string) =>
+  domain
+    .trim()
+    .toLowerCase()
+    .replace(/^\*?\.|\.$/g, "")
+    .replace(/^www\./, "")
 
 const text = (file: string) =>
   Effect.promise(() =>
