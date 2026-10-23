@@ -21,6 +21,8 @@ import { EventV2 } from "@vectordevai/core/event"
 import { EventTable } from "@vectordevai/core/event/sql"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { Global } from "@vectordevai/core/global"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import { Location } from "@vectordevai/core/location"
 import { PermissionV2 } from "@vectordevai/core/permission"
 import { AgentPlugin } from "@vectordevai/core/plugin/agent"
@@ -688,6 +690,39 @@ describe("Deep research on the V2 runner", () => {
       expect(detail?.queries).toEqual(["ledger service migration without downtime"])
       expect(guard.outside()).toEqual([])
     }),
+  )
+
+  it.live(
+    "with Vector Local's Web access None, research is offered no tool that reaches the web and plans the brain",
+    () =>
+      Effect.gen(function* () {
+        yield* setup({ research: { search: { provider: "searxng", url: web.url("searxng", "/") } } })
+        yield* answering()
+        Egress.configure(LocalPolicy.resolve({ global: { enabled: true, web: "none" } }))
+        const session = yield* SessionV2.Service
+        turns.push(
+          {
+            events: call("research_plan", {
+              question: ResearchScript.QUESTION,
+              subquestions: ResearchScript.SUBQUESTIONS,
+              scope: "web",
+              depth: "focused",
+            }),
+          },
+          { events: say("I will use the repository's files.") },
+        )
+        yield* session.prompt({ sessionID, prompt: research("Research heat pump savings."), resume: false })
+        yield* session.resume(sessionID)
+
+        for (const request of requests) {
+          expect(tools(request)).not.toContain("research_search")
+          expect(tools(request)).not.toContain("research_read")
+          expect(tools(request)).toContain("research_plan")
+        }
+        const [planned] = yield* recorded("research_plan")
+        expect(planned?.structured).toMatchObject({ approved: true, plan: { scope: "brain" } })
+        expect(planned?.text).toContain(ResearchPlan.OFFLINE)
+      }).pipe(Effect.ensuring(Effect.sync(() => Egress.configure(LocalPolicy.OFF)))),
   )
 
   it.live("a repository's config cannot choose where research searches", () =>

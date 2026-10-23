@@ -1,6 +1,7 @@
 export * as ResearchPlan from "./plan"
 
 import { Option, Schema } from "effect"
+import type { Permission } from "@vectordevai/schema/permission"
 import { Research } from "@vectordevai/schema/research"
 import type { RunBudget } from "@vectordevai/schema/run-budget"
 import type { Config } from "../config"
@@ -76,6 +77,14 @@ export const OFFLINE =
 export function offline() {
   const policy = Egress.policy()
   return policy.enabled && policy.web === "none"
+}
+
+/** The research tools that reach the web, which research is not offered while Vector Local's Web access is None. */
+export const NETWORK_TOOLS = ["research_search", "research_read", "research_browser"] as const
+
+/** The rules that keep research's network tools from every agent while Web access is None, and none otherwise. */
+export function withheld(): Permission.Ruleset {
+  return offline() ? NETWORK_TOOLS.map((action) => ({ action, resource: "*", effect: "deny" as const })) : []
 }
 
 /** The plan card's buttons. */

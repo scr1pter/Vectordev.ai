@@ -250,6 +250,7 @@ const layer = Layer.effect(
             agent.info?.permissions ?? [],
             internalSessionPermissions(session.internal),
             AgentV2.reserved(agent.id),
+            ResearchPlan.withheld(),
           )
       // Each turn sizes the request it answers from the projected history, as the V1 runner does: a greeting is offered
       // no tools and any other request every tool. V2 has no subagents or judge, so no size brings them in. Vector's

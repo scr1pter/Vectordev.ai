@@ -89,7 +89,7 @@ export const OFFLINE_RESEARCHERS =
   "Vector Local's Web access is None, so research has no web workers. Answer the sub-question from this repository's brain and files yourself."
 
 /** The research tools that reach the web, which research is not offered while Vector Local's Web access is None. */
-export const NETWORK_TOOLS: readonly string[] = ["research_search", "research_read", "research_browser"]
+export const NETWORK_TOOLS: readonly string[] = ResearchPlan.NETWORK_TOOLS
 
 /**
  * Whether Vector Local is on with Web access None (section 5.9). Research then uses the brain and the repository's
