@@ -727,6 +727,56 @@ describe("SpendGuard service", () => {
     }),
   )
 
+  it.effect("moves a run from one fallback to another only while no owner armed a budget over it", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      const focused = { usd: 1, steps: 80 }
+      const deep = { usd: 3, steps: 240 }
+
+      const plain = SessionID.make("ses_fallback_plain")
+      yield* guard.begin(plain, focused)
+      yield* guard.replaceFallback(plain, deep)
+      expect((yield* guard.snapshot(plain))?.budget).toEqual(deep)
+      yield* guard.end(plain)
+
+      // A budget the owner armed before the run began, or while it runs, stays, even one equal to the fallback.
+      const before = SessionID.make("ses_fallback_before")
+      yield* guard.arm(before, focused)
+      yield* guard.begin(before, focused)
+      yield* guard.replaceFallback(before, deep)
+      expect((yield* guard.snapshot(before))?.budget).toEqual(focused)
+      yield* guard.end(before)
+      const during = SessionID.make("ses_fallback_during")
+      yield* guard.begin(during, focused)
+      yield* guard.arm(during, { usd: 0.5 })
+      yield* guard.replaceFallback(during, deep)
+      expect((yield* guard.snapshot(during))?.budget).toEqual({ usd: 0.5 })
+      yield* guard.end(during)
+
+      // A guest's limits, held before the run or given during it, hold the new fallback too.
+      const held = SessionID.make("ses_fallback_held")
+      yield* guard.tighten(held, { usd: 2 })
+      yield* guard.begin(held, focused)
+      expect((yield* guard.snapshot(held))?.budget).toEqual(focused)
+      yield* guard.replaceFallback(held, deep)
+      expect((yield* guard.snapshot(held))?.budget).toEqual({ usd: 2, steps: 240 })
+      yield* guard.end(held)
+      const given = SessionID.make("ses_fallback_given")
+      yield* guard.begin(given, focused)
+      yield* guard.tighten(given, { steps: 100 })
+      yield* guard.replaceFallback(given, deep)
+      expect((yield* guard.snapshot(given))?.budget).toEqual({ usd: 3, steps: 100 })
+      yield* guard.end(given)
+
+      // No run going: nothing to move, and nothing is held for the next one.
+      const idle = SessionID.make("ses_fallback_idle")
+      yield* guard.replaceFallback(idle, deep)
+      yield* guard.begin(idle, focused)
+      expect((yield* guard.snapshot(idle))?.budget).toEqual(focused)
+      yield* guard.end(idle)
+    }),
+  )
+
   it.effect("drops a budget armed for a run that never began", () =>
     Effect.gen(function* () {
       const guard = yield* SpendGuard.Service

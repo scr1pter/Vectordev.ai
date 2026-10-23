@@ -5,6 +5,8 @@ import path from "path"
 import { Effect, Layer } from "effect"
 import type { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
+import { httpClient } from "@vectordevai/core/effect/app-node-platform"
+import type { HttpClient } from "effect/unstable/http"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { Global } from "@vectordevai/core/global"
@@ -181,7 +183,12 @@ const root = LayerNode.group([
  */
 export function runtime(
   web: FakeWeb.Web,
-  options: { readonly client?: string; readonly mcp?: Layer.Layer<MCP.Service> } = {},
+  options: {
+    readonly client?: string
+    readonly mcp?: Layer.Layer<MCP.Service>
+    /** The HTTP client every request goes through, such as one that sends a search service's to the fake web. */
+    readonly http?: Layer.Layer<HttpClient.HttpClient>
+  } = {},
 ) {
   const config = mkdtempSync(path.join(os.tmpdir(), "vector-research-"))
   writeFileSync(path.join(config, "RULES.md"), "- Never force-push to main\n")
@@ -204,6 +211,7 @@ export function runtime(
         ResearchRun.networkNode,
         Layer.succeed(ResearchRun.NetworkService, { resolver: web.resolver, publicNames: [FakeWeb.DOMAIN] }),
       ],
+      ...(options.http ? [[httpClient, options.http] as const] : []),
     ]),
   )
   afterAll(() => {

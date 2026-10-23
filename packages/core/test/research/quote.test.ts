@@ -139,6 +139,34 @@ describe("ResearchQuote.found", () => {
   })
 })
 
+describe("ResearchQuote.passage", () => {
+  test("finds the words around a quote that crosses a line break or a chunk, in the source's own words", () => {
+    // The saved quote is the source's words with single spaces; the source itself has a line break inside it.
+    const saved = found("The study followed 412 homes through two winters.")
+    expect(saved).toMatchObject({ ok: true, quote: "The study followed 412 homes through two winters." })
+    const quote = saved.ok ? saved.quote : ""
+    expect(
+      parts
+        .map((part) => part.text)
+        .join(" ")
+        .indexOf(quote),
+    ).toBe(-1)
+    expect(ResearchQuote.passage({ parts, quote, around: 10 })).toBe(
+      "ld study. The study followed 412 homes through two winters. Results.",
+    )
+    // Across chunks, the passage runs on into the next chunk's words.
+    expect(ResearchQuote.passage({ parts, quote: "through two winters. Results. Delivered", around: 7 })).toBe(
+      "homes through two winters. Results. Delivered heatin",
+    )
+    // Folded characters are mapped back to the source's own: its ligature stays, and its invisible soft hyphen is
+    // cleaned out as the saved quote's is.
+    expect(ResearchQuote.passage({ parts, quote: "every fifteen minutes, officially", around: 5 })).toBe(
+      `read every fifteen minutes, of${char(0xfb01)}cially.`,
+    )
+    expect(ResearchQuote.passage({ parts, quote: "Something nobody ever wrote here", around: 400 })).toBeUndefined()
+  })
+})
+
 describe("ResearchQuote.supports", () => {
   test("grades support: the quote has to state the claim, its values and its negations", () => {
     const quote =

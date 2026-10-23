@@ -40,7 +40,10 @@ export const Info = Schema.Struct({
       provider: Schema.optional(Provider),
       url: Schema.optional(Schema.String).annotate({ description: "A SearXNG instance with its JSON format enabled" }),
     }),
-  ).annotate({ description: "Where research searches go. Read from your user config only. Default: none set up." }),
+  ).annotate({
+    description:
+      "Where research searches go: searxng (the url below), exa or parallel (on your own key, billed by them), none, or auto, the first of those set up. browser is not available yet. Read from your user config only. Default: none set up.",
+  }),
   depth: Schema.optional(Depth).annotate({
     description:
       "Focused: one agent, plus up to 2 researchers when the question has independent parts. Deep: up to 4 researchers and a citation judge (default: auto)",

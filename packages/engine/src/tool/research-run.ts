@@ -6,7 +6,9 @@ import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { BrainSchema } from "@vectordevai/core/brain/schema"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
+import { EgressGuard } from "@vectordevai/core/local-mode/guard"
 import { EgressHttpClient } from "@vectordevai/core/local-mode/http-client"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import { ResearchOutbound } from "@vectordevai/core/research/outbound"
 import { ResearchProvenance } from "@vectordevai/core/research/provenance"
 import { ResearchRate } from "@vectordevai/core/research/rate"
@@ -23,6 +25,7 @@ import { AbsolutePath } from "@vectordevai/core/schema"
 import { Research } from "@vectordevai/schema/research"
 import type { RunBudget } from "@vectordevai/schema/run-budget"
 import { Context, Effect, Layer, Option, Schema, Scope, Semaphore } from "effect"
+import { lookup } from "node:dns/promises"
 import { HttpClient } from "effect/unstable/http"
 import { Config } from "@/config/config"
 import { InstanceState } from "@/effect/instance-state"
@@ -56,6 +59,12 @@ export const JUDGE = "research-judge"
 /** research_plan's metadata key for the run it approved. */
 export const RUN = "runID"
 
+/** Where `vector run --research` puts its own choices for the run (search and scope): a text part's metadata. */
+export const OPTIONS = "vector.research"
+
+/** The task call's context key the judge gate sets: the research judge starts only from Vector's own gate. */
+export const GATE = "researchJudgeGate"
+
 /** Caps for one run: its spend and steps, the pages and searches the store counts, and its researchers. */
 export type Limits = {
   readonly usd: number
@@ -85,6 +94,8 @@ export const BRIEF_REFUSAL =
   "That brief would send text from your private context to a web worker. Write the sub-question in public terms."
 export const LEAD_ONLY =
   "A researcher takes its sub-question and any message from the research lead that launched it alone."
+export const WARNED =
+  "Run Guard warned that this run is close to its cap, so no new researcher starts. Write the report from what the run has, or resume a researcher with task_id."
 
 // How long a run keeps its own rate limiter after its last read, and how many runs keep one.
 const LIMITERS = 16
@@ -102,9 +113,24 @@ export type Network = {
 export class NetworkService extends Context.Service<NetworkService, Network>()("@vector/ResearchNetwork") {}
 export const networkNode = LayerNode.make({
   service: NetworkService,
-  layer: Layer.succeed(NetworkService, {}),
+  layer: Layer.sync(NetworkService, pinned),
   deps: [],
 })
+
+// A test's child process in strict mode (a source checkout only, never under Vector Local, as
+// EgressGuard.strictFromEnvironment decides) reaches the names it pinned on this computer, as the strict guard does, and
+// reads them as public, as the in-process tests read the fake web. Everywhere else: nothing, the system's resolver.
+function pinned(): Network {
+  const names = EgressGuard.strictFromEnvironment()?.names ?? []
+  if (names.length === 0) return {}
+  return {
+    resolver: (hostname) =>
+      names.some((name) => LocalPolicy.domainMatches(hostname, name))
+        ? Promise.resolve([{ address: "127.0.0.1", family: 4 }])
+        : lookup(hostname, { all: true, verbatim: true }),
+    publicNames: names,
+  }
+}
 
 /** The run a research tool call works in. */
 export type Found = {
@@ -573,6 +599,9 @@ const layer = Layer.effect(
       const found = yield* current(input.ctx)
       if ("refused" in found) return { type: "refused", message: found.refused } satisfies Brief
       if (!input.resume) {
+        // One Run Guard run covers the lineage (section 11.2), so a research lead the build agent started counts the
+        // build run's spend, and its own task budget too: once either warns, no new researcher starts.
+        if (yield* warned(input.ctx.sessionID)) return { type: "refused", message: WARNED } satisfies Brief
         const cap = (yield* limits(found.plan.depth)).researchers
         // The task call and entry that start this researcher, as its child's record will name them.
         const key = `${input.ctx.sessionID}:${input.ctx.callID ?? input.ctx.messageID}:${input.index ?? 0}`
@@ -633,6 +662,16 @@ const layer = Layer.effect(
           "</research_assignment>",
         ].join("\n"),
       } satisfies Brief
+    })
+
+    // Whether Run Guard warned the run this session spends in: its lineage's run, or a task budget it runs under.
+    const warned = Effect.fn("ResearchRun.warned")(function* (sessionID: SessionID) {
+      if ((yield* guard.snapshot(sessionID))?.warned) return true
+      return (yield* guard.scopes(sessionID)).some(
+        (scope) =>
+          scope.budget.usd !== undefined &&
+          scope.spentUsd >= scope.budget.usd * (scope.budget.warnAt ?? SpendGuard.WARN_AT),
+      )
     })
 
     const returned = Effect.fn("ResearchRun.returned")(function* (sessionID: SessionID, text: string) {
