@@ -300,8 +300,13 @@ export const make = Effect.gen(function* () {
       // Pipe immediately into bounded streams; retain backpressure until consumed.
       const captured = captureOutput(proc)
       let end = false
+      let spawned = false
       let exit: readonly [code: number | null, signal: NodeJS.Signals | null] | undefined
       proc.on("error", (err) => {
+        // Once the child runs, an error is not a failure to start. On Windows cross-spawn emits ENOENT in place of
+        // exit for exit status 1 from any command run under a shell, and a failed kill emits one too. Destroying the
+        // output here would leave its readers waiting for an end that never comes; close still settles the exit.
+        if (spawned) return
         captured.dispose()
         resume(Effect.fail(toPlatformError("spawn", err, command)))
       })
@@ -314,6 +319,7 @@ export const make = Effect.gen(function* () {
         Deferred.doneUnsafe(signal, Exit.succeed(exit ?? args))
       })
       proc.on("spawn", () => {
+        spawned = true
         resume(Effect.succeed([proc, signal, captured]))
       })
       return Effect.sync(() => {
