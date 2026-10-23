@@ -1,3 +1,5 @@
+export * as McpWebSearch from "./mcp-websearch"
+
 import { Duration, Effect, Schema } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 

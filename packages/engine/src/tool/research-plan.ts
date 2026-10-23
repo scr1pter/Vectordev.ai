@@ -10,6 +10,7 @@ import { isFreeModel } from "@vectordevai/schema/free-model"
 import { Research } from "@vectordevai/schema/research"
 import type { TaskSize } from "@vectordevai/schema/task-size"
 import { Effect, Option, Schema } from "effect"
+import { Auth } from "@/auth"
 import { Config } from "@/config/config"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import type { Provider } from "@/provider/provider"
@@ -18,7 +19,7 @@ import { MessageV2 } from "../session/message-v2"
 import { MessageID, SessionID } from "../session/schema"
 import type { TaskSizeContext } from "./escalate"
 import { ResearchRun } from "./research-run"
-import { searchProvider } from "./research-search"
+import { available, options, searchProvider } from "./research-search"
 import { SubagentLifecycle } from "./subagent-lifecycle"
 import { Tool } from "./tool"
 import DESCRIPTION from "./research-plan.txt"
@@ -73,6 +74,8 @@ const START = "Start"
 const START_DEEP = "Start deep"
 const CANCEL = "Cancel"
 const PREFIX = "vector-plan:"
+const APPROVAL =
+  /^(?:please[\s,]+)?(?:ok(?:ay)?|yes|yeah|yep|yup|sure|start(?: it)?|go(?: ahead)?|go for it|do it|sounds good|looks good|lgtm|approved?)(?:[\s,]+(?:please|thanks|thank you))?[\s.!]*$/i
 const decodeAnswer = Schema.decodeUnknownOption(Schema.fromJsonString(Research.PlanAnswer))
 // A base prompt to estimate with before the session has measured one on this model.
 const BASE_PROMPT = 12_000
@@ -88,6 +91,7 @@ export const ResearchPlanTool = Tool.define<
   | SpendGuard.Service
   | FreeModelGuests.Service
   | Database.Service
+  | Auth.Service
 >(
   "research_plan",
   Effect.gen(function* () {
@@ -99,6 +103,7 @@ export const ResearchPlanTool = Tool.define<
     const guard = yield* SpendGuard.Service
     const guests = yield* FreeModelGuests.Service
     const database = yield* Database.Service
+    const auth = yield* Auth.Service
     // Who can answer a plan card: the same clients the question tool is offered to.
     const interactive = ["app", "cli", "desktop"].includes(flags.client) || flags.enableQuestionTool
 
@@ -113,11 +118,13 @@ export const ResearchPlanTool = Tool.define<
           const place = yield* research.place()
           const cfg = yield* config.get()
           const size = ctx.extra?.taskSize as TaskSizeContext | undefined
+          // What `vector run --research` was told: its --scope holds whatever the model proposes.
+          const chosen = options(ctx.messages)
           // The user's own sites to prefer and avoid apply in code, whatever the model proposed.
           const plan: Research.Plan = {
             question: params.question.trim(),
             subquestions: params.subquestions.map((item) => item.trim()),
-            scope: params.scope,
+            scope: chosen.scope ?? params.scope,
             depth: params.depth,
             ...domains("prefer_domains", params.prefer_domains, cfg.research?.domains?.prefer),
             ...domains("avoid_domains", params.avoid_domains, cfg.research?.domains?.avoid),
@@ -152,8 +159,23 @@ export const ResearchPlanTool = Tool.define<
             : size?.capped || (unanswerable && !thorough(size, ctx))
               ? "focused"
               : "deep"
-          const proposed = { ...plan, depth: deeper(plan.depth, ceiling) }
-          const provider = searchProvider(cfg.research)
+          // A Thorough request (the Depth chip's Deep, `--depth deep`, "be thorough") researches deep (section 5.2), and
+          // one the user sized Focused themselves (the Depth chip's Focused) is proposed Focused, whatever the model
+          // planned: "Start deep" is then the only way up.
+          const proposed: Research.Plan = {
+            ...plan,
+            depth:
+              !lead.parentID && thorough(size, ctx)
+                ? ceiling
+                : !lead.parentID && focused(ctx)
+                  ? "focused"
+                  : deeper(plan.depth, ceiling),
+          }
+          const provider = searchProvider(
+            cfg.research,
+            yield* available().pipe(Effect.provideService(Auth.Service, auth)),
+            chosen.search,
+          )
           const estimate = yield* estimateLine(proposed, ctx, provider.provider)
           const start = Effect.fnUntraced(function* (input: Research.Plan) {
             // A run the model re-planned with the same question keeps its run and what it read.
@@ -281,10 +303,20 @@ export const ResearchPlanTool = Tool.define<
     }
 
     // The plan card's estimate line, in the copy deck's words; always called an estimate.
-    function estimateLine(plan: Research.Plan, ctx: Tool.Context, provider: string) {
+    function estimateLine(
+      plan: Research.Plan,
+      ctx: Tool.Context,
+      provider: ReturnType<typeof searchProvider>["provider"],
+    ) {
       return Effect.gen(function* () {
         const caps = yield* research.limits(plan.depth)
-        const own = (yield* guard.snapshot(SessionID.make(ctx.sessionID)))?.budget
+        const budget = (yield* guard.snapshot(SessionID.make(ctx.sessionID)))?.budget
+        // A root research run without a cap of the user's runs under research's own defaults, which follow the plan's
+        // depth: a plan started deep runs under Deep's.
+        const defaults = [yield* research.limits("focused"), yield* research.limits("deep")]
+        const own = defaults.some((item) => item.usd === budget?.usd && item.steps === budget?.steps)
+          ? undefined
+          : budget
         const model = ctx.extra?.model as Provider.Model | undefined
         const price = model ? SpendGuard.priceOf(model.cost) : undefined
         const kind = !model
@@ -314,7 +346,7 @@ export const ResearchPlanTool = Tool.define<
           // Research's default caps apply only when the user has none of their own.
           ...(own?.usd !== undefined ? { capUsd: own.usd } : own?.steps === undefined ? { capUsd: caps.usd } : {}),
           capSteps: own?.steps ?? caps.steps,
-          ...(provider === "searxng" || provider === "none" ? { search: provider } : {}),
+          search: provider,
         })
       })
     }
@@ -327,6 +359,12 @@ function thorough(size: TaskSizeContext | undefined, ctx: Tool.Context) {
   if (size) return size.tier === "thorough"
   const request = ctx.messages.findLast((message) => message.info.role === "user")?.info
   return request?.role === "user" && request.size === "thorough"
+}
+
+// The user chose Focused for this request themselves: the composer sends Focused as the size standard.
+function focused(ctx: Tool.Context) {
+  const request = ctx.messages.findLast((message) => message.info.role === "user")?.info
+  return request?.role === "user" && request.size === "standard"
 }
 
 // The base prompt this session measured on its model: its last finished step's prompt, cached part included.
@@ -372,6 +410,9 @@ function decide(reply: string, plan: Research.Plan, ceiling: Research.Depth) {
       always: [],
     } as const
   if (reply === CANCEL) return { type: "cancel" } as const
+  // A bare approval typed on the card ("ok", "yes", "go ahead") starts the plan as it is (section 5.2); a reply that asks
+  // for anything more is a steer.
+  if (APPROVAL.test(reply)) return { type: "start", answer: "start", plan, always: [] } as const
   if (!reply.startsWith(PREFIX)) return { type: "steer" } as const
   const decoded = decodeAnswer(reply.slice(PREFIX.length))
   if (Option.isNone(decoded)) return { type: "steer" } as const

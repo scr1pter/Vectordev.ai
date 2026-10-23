@@ -936,6 +936,92 @@ test("a guest's prompt budget can only tighten the owner's run limits", async ()
   }
 }, 60_000)
 
+test("a guest's prompt cannot choose where the owner's research searches", async () => {
+  await using tmp = await tmpdir({ trusted: true, config: testProviderConfig("http://127.0.0.1:9/v1") })
+  const previousWorkspaceID = Flag.VECTOR_WORKSPACE_ID
+  const keys = [
+    "VECTOR_SERVER_USERNAME",
+    "VECTOR_SERVER_PASSWORD",
+    "VECTOR_SERVER_GUEST_USERNAME",
+    "VECTOR_SERVER_GUEST_PASSWORD",
+    "VECTOR_SERVER_GUEST_WORKSPACES",
+    "VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES",
+    "VECTOR_DISABLE_DEFAULT_PLUGINS",
+  ] as const
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
+  Object.assign(process.env, {
+    VECTOR_SERVER_USERNAME: "vector",
+    VECTOR_SERVER_PASSWORD: "owner-secret",
+    VECTOR_SERVER_GUEST_USERNAME: "guest",
+    VECTOR_SERVER_GUEST_PASSWORD: "guest-secret",
+    VECTOR_SERVER_GUEST_WORKSPACES: "wrk_allowed",
+    VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES: JSON.stringify({ wrk_allowed: tmp.path }),
+    VECTOR_DISABLE_DEFAULT_PLUGINS: "1",
+  })
+  const listener = await Server.listen({ hostname: "127.0.0.1", port: 0 })
+  const owner = { authorization: basic("vector", "owner-secret"), "content-type": "application/json" }
+  const guest = { authorization: basic("guest", "guest-secret"), "content-type": "application/json" }
+  const call = (url: URL, init: RequestInit = {}) => fetch(url, { ...init, keepalive: false })
+  const at = (route: string) => new URL(`${route}?directory=${encodeURIComponent(tmp.path)}`, listener.url)
+  // What `vector run --research --search exa` sends: its choices in a text part's metadata.
+  const prompt = (sessionID: string, headers: Record<string, string>) =>
+    call(at(`/session/${sessionID}/prompt_async`), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        noReply: true,
+        model: { providerID: "lmstudio", modelID: "test-model" },
+        parts: [
+          { type: "text", text: "Research heat pumps" },
+          {
+            type: "text",
+            text: "Research settings",
+            synthetic: true,
+            metadata: { "vector.research": { search: "exa" } },
+          },
+        ],
+      }),
+    })
+  // The prompt's saved parts, read by the owner once it is saved.
+  const saved = async (sessionID: string) => {
+    const deadline = Date.now() + 15_000
+    while (Date.now() < deadline) {
+      const messages = (await (await call(at(`/session/${sessionID}/message`), { headers: owner })).json()) as {
+        parts: { text?: string; metadata?: Record<string, unknown> }[]
+      }[]
+      const parts = messages.flatMap((message) => message.parts)
+      const settings = parts.find((part) => part.text === "Research settings")
+      if (settings) return settings
+      await Bun.sleep(50)
+    }
+    return undefined
+  }
+  const session = async () =>
+    (
+      (await (await call(at("/session"), { method: "POST", headers: owner, body: JSON.stringify({}) })).json()) as {
+        id: string
+      }
+    ).id
+  try {
+    Flag.VECTOR_WORKSPACE_ID = "wrk_allowed"
+    const guested = await session()
+    expect((await prompt(guested, guest)).status).toBe(204)
+    expect((await saved(guested))?.metadata?.["vector.research"]).toBeUndefined()
+    // The owner's own choice stands.
+    const owned = await session()
+    expect((await prompt(owned, owner)).status).toBe(204)
+    expect((await saved(owned))?.metadata?.["vector.research"]).toEqual({ search: "exa" })
+  } finally {
+    Flag.VECTOR_WORKSPACE_ID = previousWorkspaceID
+    await listener.stop(true)
+    for (const key of keys) {
+      const value = previous[key]
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}, 30_000)
+
 test("guests cannot reach owner-only routes by spelling the path another way", async () => {
   await using tmp = await tmpdir({ trusted: true, config: { formatter: false, lsp: false } })
   const previousWorkspaceID = Flag.VECTOR_WORKSPACE_ID

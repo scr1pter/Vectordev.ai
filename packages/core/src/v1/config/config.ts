@@ -198,7 +198,7 @@ export const Info = Schema.Struct({
       }),
       judge: Schema.optional(TaskSize.JudgeMode).annotate({
         description:
-          "When Vector runs LLM-as-a-judge after a run that changed files: off, thorough (large tasks only) or changes (every task that changed files). Default: off. A prompt's own judge setting overrides it.",
+          "When Vector runs LLM-as-a-judge after a run that changed files: off, thorough (large tasks only) or changes (every task that changed files). Default: off for those runs. A prompt's own judge setting overrides it. Deep research's citation judge reads it too, and runs when it is unset: unset or thorough checks Deep reports and Focused ones that cite 8 or more notes, changes checks every report, and off turns it off.",
       }),
     }),
   ).annotate({ description: "Task sizing: how much harness, reasoning and verification each request gets." }),
@@ -208,7 +208,7 @@ export const Info = Schema.Struct({
   }),
   research: Schema.optional(ConfigResearchV1.Info).annotate({
     description:
-      "Deep research (in development): where research searches go (a SearXNG server for now), when the build agent may research as a tool, what one run may spend and read, the sites it prefers or avoids, and robots.txt. depth, browser_search and retain_days do not apply yet. Read from your user config; a repository's config may only add sites to avoid and turn the research tool down.",
+      "Deep research (in development): where research searches go (a SearXNG server, or Exa or Parallel on your own key), when the build agent may research as a tool, what one run may spend and read, the sites it prefers or avoids, and robots.txt. depth, browser_search and retain_days do not apply yet. Read from your user config; a repository's config may only add sites to avoid and turn the research tool down.",
   }),
   experimental: Schema.optional(
     Schema.Struct({

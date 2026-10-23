@@ -398,11 +398,11 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     // The owner's files are theirs to attach from anywhere. A guest's go through the workspace boundary and read
     // permission, which only the owner can approve, and a guest's budget can only tighten the owner's run limits. A
     // guest never accepted the free-model training notice, so the owner's acceptance does not carry a guest's prompt to
-    // a model that may train.
+    // a model that may train. Where research searches is the owner's choice too.
     const promptOptions = Effect.gen(function* () {
       return (yield* RequestPrincipal).kind === "owner"
         ? { userFile: () => true }
-        : { tightenBudget: true, refuseTrainingFreeModels: true }
+        : { tightenBudget: true, refuseTrainingFreeModels: true, dropResearchOptions: true }
     })
 
     const prompt = Effect.fn("SessionHttpApi.prompt")(function* (ctx: {

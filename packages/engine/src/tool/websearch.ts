@@ -1,7 +1,7 @@
 import { Effect, Schema } from "effect"
 import { HttpClient } from "effect/unstable/http"
 import * as Tool from "./tool"
-import * as McpWebSearch from "./mcp-websearch"
+import { McpWebSearch } from "./mcp-websearch"
 import DESCRIPTION from "./websearch.txt"
 import { InstallationVersion } from "@vectordevai/core/installation/version"
 import { WebFence } from "@vectordevai/core/research/fence"
