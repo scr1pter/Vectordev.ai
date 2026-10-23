@@ -402,6 +402,7 @@ export const SOURCES: readonly Source[] = [
     where: ["engine", "desktop"],
     callSites: [
       "packages/desktop/src/main/updater.ts",
+      "packages/desktop/src/main/egress-filter.ts",
       "packages/engine/src/cli/upgrade.ts",
       "packages/engine/src/cli/cmd/upgrade.ts",
       "packages/engine/src/installation/standalone.ts",
@@ -624,7 +625,11 @@ export const SOURCES: readonly Source[] = [
     why: "The browser the agent drives, after your approval",
     local: "allowed",
     where: ["desktop", "engine"],
-    callSites: ["packages/desktop/src/main/browser-agent.ts", "packages/engine/src/tool/browser.ts"],
+    callSites: [
+      "packages/desktop/src/main/browser-agent.ts",
+      "packages/desktop/src/main/egress-filter.ts",
+      "packages/engine/src/tool/browser.ts",
+    ],
     note: "Follows Web access",
   },
   {
@@ -654,6 +659,7 @@ export const SOURCES: readonly Source[] = [
       "packages/core/src/local-mode/egress-proxy.ts",
       "packages/desktop/src/main/research-proxy.ts",
       "packages/desktop/src/main/research-browser.ts",
+      "packages/desktop/src/main/egress-filter.ts",
       "packages/engine/src/tool/research-browser.ts",
     ],
     note: "Goes through Vector's research proxy, which never reaches this computer, your network or a cloud metadata address. Each address an agent opens follows Web access as it is now; the pages' own requests follow it as it was set when the app started",
@@ -677,7 +683,7 @@ export const SOURCES: readonly Source[] = [
     why: "A connection no part of Vector labelled, which Vector's network guard sees",
     local: "blocked",
     where: ["engine", "desktop"],
-    callSites: ["packages/core/src/local-mode/guard.ts"],
+    callSites: ["packages/core/src/local-mode/guard.ts", "packages/desktop/src/main/egress-filter.ts"],
     note: "Reaches only this computer and the model servers on your list; anything else the guard sees is blocked and logged with the code that made it. That covers Vector's worker threads: the threads of a process share one policy and one log, so the blocks of the terminal UI's main thread and of its workers are in the engine's log. The brain's reader is sealed instead: it refuses every connection off this computer and logs none, since it makes none of its own. Worker threads are covered under Bun when started through the global Worker or the worker_threads module, and under Node when their first import is the guard, as the brain's reader's is. The guard does not see Bun.fetch, a fetch, WebSocket or Bun.connect kept from before it started, Bun.SQL or Bun.RedisClient, or under Bun the ws package, whose one use in Vector (the OpenAI WebSocket transport) decides each model call itself, pooled sockets included, and the undici package, whose fetch is Bun.fetch there, so the GitHub requests of vector github are not seen. A request for a model server on your list on this computer or your network goes direct: one the proxy settings would still send to a proxy is refused, with a note to add its host to NO_PROXY. A listed server with an internet name may go through your company's proxy. The terminal UI's syntax highlighting downloads grammars from github.com in a worker thread, so with Vector Local on, including when it is turned on while the terminal UI runs, those downloads are blocked and logged",
   },
   {
