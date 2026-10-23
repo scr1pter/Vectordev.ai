@@ -114,9 +114,9 @@ const layer = Layer.effectDiscard(
     // conversation Vector cannot read counts as one that read the web.
     const afterWeb = Effect.fnUntraced(function* (address: string, sessionID: SessionSchema.ID) {
       if (!Egress.policy().enabled || !URL.canParse(address)) return false
-      const messages = yield* store.all(sessionID).pipe(Effect.option)
-      if (messages._tag === "None") return true
-      return newAddress(address, messages.value, (yield* store.get(sessionID))?.parentID !== undefined)
+      const messages = yield* store.all(sessionID).pipe(Effect.orElseSucceed(() => undefined))
+      if (!messages) return true
+      return newAddress(address, messages, (yield* store.get(sessionID))?.parentID !== undefined)
     })
 
     yield* tools
