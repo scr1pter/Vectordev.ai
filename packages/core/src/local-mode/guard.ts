@@ -64,14 +64,15 @@ import { LocalPolicy } from "./policy"
 // With Vector Local off, each wrap costs one call and logs nothing; a Worker still preloads the wraps, to follow.
 //
 // Strict mode, for tests (VECTOR_TEST_EGRESS=strict), refuses any connection off this computer and throws. Under Bun it
-// also runs a proxy of its own on 127.0.0.1 and points the proxy environment at it, so Bun.fetch, a fetch captured
-// before the guard was installed, node:http and a Worker's fetch are refused too, and it preloads its wraps in Workers
-// started through the global `Worker` or the `node:worker_threads` module object. Node needs no such proxy: its fetch,
-// node:http and WebSocket all connect through net, which the socket wrap decides. Node has no preload either, so a
-// Node worker is guarded when its entry imports `backstop-worker.ts` first, as the brain's reader does. The variables
-// that ask for strict mode (ENVIRONMENT) are read only from a source checkout, never in a release build or the desktop
-// app, and never where the environment turns Vector Local on (`strictFromEnvironment`): the agent can set them for a
-// nested `vector`, and they would loosen it.
+// also runs a proxy of its own on 127.0.0.1 and points the proxy environment at it for every name but loopback's
+// (`127.0.0.1`, `localhost`, `[::1]` go direct), so Bun.fetch, a fetch captured before the guard was installed,
+// node:http and a Worker's fetch are refused too, and it preloads its wraps in Workers started through the global
+// `Worker` or the `node:worker_threads` module object. Node needs no such proxy: its fetch, node:http and WebSocket
+// all connect through net, which the socket wrap decides. Node has no preload either, so a Node worker is guarded
+// when its entry imports `backstop-worker.ts` first, as the brain's reader does. The variables that ask for strict
+// mode (ENVIRONMENT) are read only from a source checkout, never in a release build or the desktop app, and never
+// where the environment turns Vector Local on (`strictFromEnvironment`): the agent can set them for a nested `vector`,
+// and they would loosen it.
 //
 // Neither mode covers:
 // - UDP and DNS lookups themselves, and the connections of child processes (the programs the agent runs make their
@@ -630,7 +631,9 @@ export function installStrict(options: StrictOptions = {}): Handle {
     ...(ownProxy && {
       [ENVIRONMENT.proxy]: ownProxy,
       ...Object.fromEntries(PROXY_VARIABLES.map((key) => [key, ownProxy])),
-      ...Object.fromEntries(NO_PROXY_VARIABLES.map((key) => [key, ""])),
+      // This computer's own names go direct, so a request to a server here fails or answers as it would without the
+      // guard: through a proxy a refused connection reads as the proxy's 502, and a connection is not the caller's own.
+      ...Object.fromEntries(NO_PROXY_VARIABLES.map((key) => [key, LOOPBACK.join(",")])),
     }),
   }
   // A Worker writes its own copy too, for the programs it starts; under Bun its own fetch already reads the proxy
