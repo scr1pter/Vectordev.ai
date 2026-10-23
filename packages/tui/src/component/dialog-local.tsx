@@ -11,8 +11,8 @@ import { useDialog, type DialogContext } from "../ui/dialog"
 import { useToast } from "../ui/toast"
 
 // /local: Vector Local in the terminal UI, for the server's owner. The switch, Web access, model servers on this
-// computer, a held change, the check and what Vector sent. What would loosen Vector Local is confirmed in a dialog that
-// lists what it loosens, and only then sent with `confirm`.
+// computer, the services allowed, a held change, the check and what Vector sent. What would loosen Vector Local is
+// confirmed in a dialog that lists what it loosens, and only then sent with `confirm`.
 
 export const WEB_OPTIONS: readonly {
   readonly value: LocalWeb
@@ -92,6 +92,12 @@ export function DialogLocal() {
             : `On your list: ${policy.endpoints.map((item) => item.origin).join(", ")}`,
         category: "Model servers",
       },
+      {
+        value: "allowed",
+        title: "Allowed services",
+        description: allowedLine(policy.allow),
+        category: "Vector Local",
+      },
       ...(status.held
         ? [
             {
@@ -130,6 +136,7 @@ export function DialogLocal() {
         }
         if (option.value === "web") return dialog.replace(() => <DialogLocalWeb />)
         if (option.value === "servers") return dialog.replace(() => <DialogLocalServers />)
+        if (option.value === "allowed") return dialog.replace(() => <DialogLocalAllowed />)
         if (option.value === "check") return dialog.replace(() => <DialogLocalCheck />)
         if (option.value === "sent") return dialog.replace(() => <DialogLocalSent />)
         if (option.value === "held" && status.held) {
@@ -158,6 +165,34 @@ export function DialogLocalWeb() {
   )
 }
 
+/** The services allowed with Vector Local on, in one line: each with the reason given for it. */
+export function allowedLine(allow: readonly { readonly source: string; readonly reason: string }[]) {
+  if (allow.length === 0) return "None: Vector's own services stay blocked"
+  return allow.map((item) => `${item.source} (${item.reason})`).join(", ")
+}
+
+/** The services allowed with Vector Local on, each with its reason; picking one takes the allowance back. */
+export function DialogLocalAllowed() {
+  const local = useVectorLocal()
+  const dialog = useDialog()
+  const toast = useToast()
+  return (
+    <DialogSelect
+      title="Allowed services (Vector Local)"
+      options={(local.status()?.policy.allow ?? []).map((item) => ({
+        value: item.source,
+        title: `Stop allowing ${item.source}`,
+        description: `${item.reason}${item.hosts?.length ? ` · ${item.hosts.join(", ")}` : ""} · added by ${item.added_by === "cli" ? "a terminal" : "the app"}`,
+      }))}
+      emptyView={<text>No services are allowed, so Vector's own services stay blocked with Vector Local on.</text>}
+      onSelect={async (option) => {
+        await changeLocal(dialog, local, toast, { allow: { remove: [option.value] } })
+        dialog.replace(() => <DialogLocal />)
+      }}
+    />
+  )
+}
+
 /** Find servers on this computer and add one: it goes on the list with its identity, and its models become a provider. */
 export function DialogLocalServers() {
   const sdk = useSDK()
@@ -178,8 +213,11 @@ export function DialogLocalServers() {
       await local.refresh()
       await sync.bootstrap()
       toast.show({
-        variant: "success",
-        message: `Added ${server.name} at ${server.origin} as ${added.provider}, with ${added.models.length} model${added.models.length === 1 ? "" : "s"}.`,
+        variant: added.identity?.length ? "warning" : "success",
+        message: [
+          ...(added.identity?.length ? [identityLine(server.origin, added.identity)] : []),
+          `Added ${server.name} at ${server.origin} as ${added.provider}, with ${added.models.length} model${added.models.length === 1 ? "" : "s"}.`,
+        ].join(" "),
       })
       dialog.clear()
       return
@@ -188,8 +226,11 @@ export function DialogLocalServers() {
     if (!confirmed && error && "name" in error && error.name === "LocalConfirmError") {
       const yes = await DialogConfirm.show(
         dialog,
-        "Loosen Vector Local?",
-        `${LOOSEN} It ${error.data.changes.join(", ")}.`,
+        error.data.identity?.length ? "Accept a different server?" : "Loosen Vector Local?",
+        [
+          ...(error.data.identity?.length ? [identityLine(server.origin, error.data.identity)] : []),
+          `${LOOSEN} It ${error.data.changes.join(", ")}.`,
+        ].join(" "),
         "Keep",
       )
       if (yes === true) return add(server, true)
@@ -219,6 +260,11 @@ export function DialogLocalServers() {
       }}
     />
   )
+}
+
+/** The warning for a server on the list that answers as a different one, with what changed since it was added. */
+export function identityLine(origin: string, changed: readonly string[]) {
+  return `${new URL(origin).host} now answers as a different server (${changed.join(", ")} changed since it was added). Check it before sending prompts.`
 }
 
 export function DialogLocalCheck() {

@@ -16,7 +16,7 @@ import { ToastProvider } from "../../../src/ui/toast"
 import { DialogProvider } from "../../../src/ui/dialog"
 import { VectorKeymapProvider, registerVectorKeymap } from "../../../src/keymap"
 import { VectorLocalProvider, badge, remoteHost } from "../../../src/context/vector-local"
-import { DialogLocal, summaryLines } from "../../../src/component/dialog-local"
+import { DialogLocal, allowedLine, identityLine, summaryLines } from "../../../src/component/dialog-local"
 
 // /local in the terminal UI against a fake engine: the switch reads the server's policy, and turning Vector Local off,
 // which loosens it, is sent with `confirm` only after the owner confirms the dialog that lists what it loosens.
@@ -116,6 +116,8 @@ describe("/local", () => {
       }
       try {
         await frame("Turn Vector Local off")
+        // The services allowed with Vector Local on are listed beside the switch.
+        expect(app.captureCharFrame()).toContain("Allowed services")
         app.mockInput.pressEnter()
         await frame("Loosen Vector Local?")
         expect(app.captureCharFrame()).toContain("turns Vector Local off.")
@@ -156,6 +158,24 @@ describe("the Local badge", () => {
     expect(remoteHost("http://127.0.0.1:4096")).toBeUndefined()
     expect(remoteHost("http://build-box:4096")).toBe("build-box")
     expect(badge({ enabled: true, web: "network", lock: false }, "build-box")).toBe("Local on build-box · your network")
+  })
+})
+
+describe("allowed services and a server's identity", () => {
+  test("lists each allowed service with its reason, or says none is", () => {
+    expect(allowedLine([])).toBe("None: Vector's own services stay blocked")
+    expect(
+      allowedLine([
+        { source: "github", reason: "Pull requests" },
+        { source: "catalog", reason: "Models" },
+      ]),
+    ).toBe("github (Pull requests), catalog (Models)")
+  })
+
+  test("names what changed about a server on the list that answers as a different one", () => {
+    expect(identityLine("http://127.0.0.1:11434", ["version", "models"])).toBe(
+      "127.0.0.1:11434 now answers as a different server (version, models changed since it was added). Check it before sending prompts.",
+    )
   })
 })
 
