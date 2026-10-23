@@ -1,11 +1,14 @@
+import { desktopLocal } from "@/utils/desktop-local"
+
 const TARGET_SAMPLE_RATE = 16_000
 
 type TranscriptionResponse =
   | { id: number; type: "result"; text: string }
+  | { id: number; type: "installed"; installed: boolean }
   | { id: number; type: "error"; error: string }
 
 type PendingTranscription = {
-  resolve: (text: string) => void
+  resolve: (value: string | boolean) => void
   reject: (error: Error) => void
 }
 
@@ -55,7 +58,7 @@ function transcriptionWorker() {
       request.reject(new Error(event.data.error))
       return
     }
-    request.resolve(event.data.text)
+    request.resolve(event.data.type === "installed" ? event.data.installed : event.data.text)
   })
   worker.addEventListener("error", (event) => {
     // Fires when the worker script itself fails to load or crashes — before any
@@ -70,15 +73,44 @@ function transcriptionWorker() {
   return worker
 }
 
-export function transcribeLocalAudio(input: Float32Array, sampleRate: number) {
+export async function transcribeLocalAudio(input: Float32Array, sampleRate: number) {
   const audio = resampleAudio(input, sampleRate)
-  if (!audio.length) return Promise.reject(new Error("No audio was recorded"))
+  if (!audio.length) throw new Error("No audio was recorded")
 
+  const remote = await downloadAllowed()
   const id = ++requestID
   return new Promise<string>((resolve, reject) => {
-    pending.set(id, { resolve, reject })
-    transcriptionWorker().postMessage({ id, audio }, [audio.buffer])
+    pending.set(id, { resolve: (value) => resolve(String(value)), reject })
+    transcriptionWorker().postMessage({ id, audio, remote }, [audio.buffer])
   })
+}
+
+/**
+ * Installs the dictation model from a folder the person picked (its files, by their paths in the folder), so dictation
+ * needs no download: Vector Local's "Install from folder". Rejects with what the folder lacks.
+ */
+export function installLocalTranscription(files: { path: string; file: Blob }[]) {
+  return ask({ install: files })
+}
+
+/** Whether the dictation model is on this computer, installed from a folder or downloaded before. */
+export function localTranscriptionInstalled() {
+  return ask({ installed: true })
+}
+
+function ask(message: { install: { path: string; file: Blob }[] } | { installed: true }) {
+  const id = ++requestID
+  return new Promise<boolean>((resolve, reject) => {
+    pending.set(id, { resolve: (value) => resolve(value === true), reject })
+    transcriptionWorker().postMessage({ id, ...message })
+  })
+}
+
+// In the desktop app with Vector Local on, the model is downloaded from Hugging Face only once the user allows it; until
+// then dictation uses the model only when it is on this computer.
+async function downloadAllowed() {
+  const local = await desktopLocal()
+  return !local || local.sources["dictation-model"] === "allow"
 }
 
 let warmupPromise: Promise<void> | undefined
@@ -89,16 +121,21 @@ let warmupPromise: Promise<void> | undefined
 // the next warmup or transcription retries the load.
 export function warmupLocalTranscription() {
   if (warmupPromise) return warmupPromise
-  warmupPromise = new Promise<string>((resolve, reject) => {
-    const id = ++requestID
-    pending.set(id, { resolve, reject })
-    transcriptionWorker().postMessage({ id, warmup: true })
-  }).then(
-    () => undefined,
-    () => {
-      warmupPromise = undefined
-    },
-  )
+  warmupPromise = downloadAllowed()
+    .then(
+      (remote) =>
+        new Promise<string | boolean>((resolve, reject) => {
+          const id = ++requestID
+          pending.set(id, { resolve, reject })
+          transcriptionWorker().postMessage({ id, warmup: true, remote })
+        }),
+    )
+    .then(
+      () => undefined,
+      () => {
+        warmupPromise = undefined
+      },
+    )
   return warmupPromise
 }
 
