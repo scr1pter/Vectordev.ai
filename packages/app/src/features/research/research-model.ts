@@ -15,6 +15,10 @@ export const PLACEHOLDER = "What should Vector research?"
 export const GUEST = "Sources are visible to the repository owner."
 export const HELD = "This report and its sources stay private and out of later sessions until you keep them."
 export const WRAP_UP = "Write the report now from what you have"
+export const NO_SEARCH =
+  "No search service set up. Research will use this repository's brain, its files and links you paste."
+export const PAYWALL =
+  "Paywalled: Vector kept the public excerpt only. Use Open in browser to read the rest with your own sign-in."
 export const VIEW_ONLY =
   "View only: Vector shows snapshots of this research browser. Nothing you do here reaches the page, so nothing signs it in."
 /** The agent every Deep research message carries. */
@@ -290,7 +294,7 @@ export function searchLine(card: Card | undefined) {
   if (card.search.provider === "exa") return "Search: Exa, on your key. Searches go to Exa, billed by Exa."
   if (card.search.provider === "parallel")
     return "Search: Parallel, on your key. Searches go to Parallel, billed by Parallel."
-  return "No search service set up"
+  return NO_SEARCH
 }
 
 // ---------------------------------------------------------------------------------------------------------------

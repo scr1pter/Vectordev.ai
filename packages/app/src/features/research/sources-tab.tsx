@@ -159,7 +159,7 @@ export function ResearchSourcesTab(props: {
         <div data-slot="research-row">
           <span data-slot="research-title">Sources</span>
           <span data-component="research-preview-label">{PREVIEW}</span>
-          <Show when={run()?.status === "running"}>
+          <Show when={run()?.status === "running" && run()?.session_id === props.sessionID}>
             <button type="button" data-slot="research-button" style={{ "margin-left": "auto" }} onClick={wrapUp}>
               Wrap up
             </button>

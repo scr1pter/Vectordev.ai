@@ -2,7 +2,7 @@ import { For, Show, createEffect, createMemo, createResource } from "solid-js"
 import type { MemoryResearchSource, ResearchNote } from "@vectordevai/sdk/v2/client"
 import { ResearchSignals } from "@vectordevai/core/research/signals"
 import { useSDK } from "@/context/sdk"
-import { highlights, segments, statusLabel } from "./research-model"
+import { PAYWALL, highlights, segments, statusLabel } from "./research-model"
 import "./research.css"
 
 /**
@@ -73,6 +73,9 @@ export function ResearchSourceViewer(props: {
               </For>
             </div>
           )}
+        </Show>
+        <Show when={props.source.status === "paywalled"}>
+          <div data-slot="research-notice">{PAYWALL}</div>
         </Show>
         <Show when={text.latest?.private}>
           <div data-slot="research-notice">

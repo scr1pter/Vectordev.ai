@@ -24,6 +24,7 @@ import {
   reportMarkdown,
   reportPath,
   runChips,
+  searchLine,
   segments,
   sessionRuns,
   site,
@@ -192,6 +193,20 @@ describe("the plan card", () => {
         encodePlanAnswer({ action: "start", plan: { subquestions: Array.from({ length: 9 }, (_, i) => `Q${i}`) } }),
       ),
     ).toBeUndefined()
+  })
+
+  test("says what research searches with, and what it uses without a search service", () => {
+    const card = { deep: false, preferences: { prefer: [], avoid: [] }, offline: false }
+    expect(searchLine({ ...card, search: { provider: "searxng", host: "gpu-box:8080" } })).toBe(
+      "Search: SearXNG (gpu-box:8080)",
+    )
+    expect(searchLine({ ...card, search: { provider: "exa" } })).toBe(
+      "Search: Exa, on your key. Searches go to Exa, billed by Exa.",
+    )
+    expect(searchLine({ ...card, search: { provider: "none" } })).toBe(
+      "No search service set up. Research will use this repository's brain, its files and links you paste.",
+    )
+    expect(searchLine(undefined)).toBeUndefined()
   })
 
   test("says why a plan cannot start", () => {
