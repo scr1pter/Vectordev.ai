@@ -110,7 +110,7 @@ const HOW_YOU_WORK = new Set<string>([...Brain.HABIT_KINDS, "rule"])
 // A preference in the sources facet (section 6.3), until B1 files each entry under its facet: one that names kinds of
 // sources (papers, studies, primary or official sources, journals, preprints, standards) or a site.
 const SOURCES =
-  /\b(?:sources?|papers?|stud(?:y|ies)|journals?|peer[- ]reviewed|primary|preprints?|arxiv|pubmed|doi|standards? bod(?:y|ies)|official (?:data|statistics|figures)|government (?:data|sites?)|(?:[a-z0-9-]+\.)+(?:com|org|gov|edu|net|int|io|eu|uk))\b/i
+  /\b(?:sources?|papers?|stud(?:y|ies)|journals?|peer[- ]reviewed|primary (?:research|data|literature)|preprints?|arxiv|pubmed|doi|standards? bod(?:y|ies)|official (?:data|statistics|figures)|government (?:data|sites?)|(?:[a-z0-9-]+\.)+(?:com|org|gov|edu|net|int|io|eu|uk))\b/i
 
 /**
  * Who a session's memory is for (section 6.4a). A role whose output leaves the machine or reaches the web gets the
@@ -3673,14 +3673,19 @@ function researchJudgeBrief(
 
 // The judge's verdict for each of `notes`: a line it could not read, or none, leaves a note not judged.
 function researchVerdicts(output: string, notes: readonly string[]) {
-  const said = new Map<string, Research.Verdict>()
-  for (const line of output.split("\n")) {
-    const match = VERDICT_LINE.exec(line)
-    const id = match ? `N${Number(match[1])}` : undefined
-    if (!match || !id || !notes.includes(id) || said.has(id)) continue
-    const word = match[2]!.toLowerCase()
-    said.set(id, word.startsWith("partial") ? "partial" : (word as Research.Verdict))
-  }
+  const said = new Map(
+    output
+      .split("\n")
+      .flatMap((line) => {
+        const match = VERDICT_LINE.exec(line)
+        const id = match ? `N${Number(match[1])}` : undefined
+        if (!match || !id || !notes.includes(id)) return []
+        const word = match[2]!.toLowerCase()
+        return [[id, word.startsWith("partial") ? "partial" : (word as Research.Verdict)] as const]
+      })
+      // A note's first line stands: a Map keeps the last value it is given for a key.
+      .toReversed(),
+  )
   return notes.map((note) => ({ note, verdict: said.get(note) ?? ("not-judged" as const) }))
 }
 

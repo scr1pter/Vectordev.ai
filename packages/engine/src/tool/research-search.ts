@@ -438,46 +438,37 @@ export function parsePaid(body: string, limit = ResearchSearch.DEFAULT_RESULTS):
 
 // "Title: …" / "URL: …" blocks, as Exa's search tool writes them; without any, every address the text names.
 function blocks(body: string) {
-  const items: { url: string; title?: string; snippet?: string; published?: string }[] = []
-  const current: { title?: string; url?: string; published?: string; text: string[] } = { text: [] }
-  const flush = () => {
-    if (current.url)
-      items.push({
-        url: current.url,
-        title: current.title,
-        snippet: current.text.join(" "),
-        published: current.published,
-      })
-    current.title = undefined
-    current.url = undefined
-    current.published = undefined
-    current.text = []
-  }
-  for (const line of body.split("\n")) {
-    const field = /^\s*(Title|URL|Published Date|Published|Author|Text|Highlights|Summary):\s*(.*)$/i.exec(line)
+  const records = body.split("\n").reduce<Block[]>((list, line) => {
+    const field = FIELD.exec(line)
     const name = field?.[1]?.toLowerCase()
-    if (name === "title") {
-      flush()
-      current.title = field![2]!.trim()
-      continue
-    }
-    if (name === "url") {
-      if (current.url) flush()
-      current.url = field![2]!.trim()
-      continue
-    }
-    if (name === "published date" || name === "published") {
-      current.published = field![2]!.trim()
-      continue
-    }
-    if (name === "author") continue
-    if (current.url && current.text.join(" ").length < SNIPPET_CHARS)
-      current.text.push((field ? field[2]! : line).trim())
-  }
-  flush()
+    const value = (field ? field[2]! : line).trim()
+    const current = list.at(-1)
+    const rest = list.slice(0, -1)
+    if (name === "title") return [...list, { title: value, text: [] }]
+    if (name === "url")
+      return current && !current.url ? [...rest, { ...current, url: value }] : [...list, { url: value, text: [] }]
+    if (!current) return list
+    if (name === "published date" || name === "published") return [...rest, { ...current, published: value }]
+    if (name === "author" || !current.url || !value || current.text.join(" ").length >= SNIPPET_CHARS) return list
+    return [...rest, { ...current, text: [...current.text, value] }]
+  }, [])
+  const items = records.flatMap((record) =>
+    record.url
+      ? [{ url: record.url, title: record.title, snippet: record.text.join(" "), published: record.published }]
+      : [],
+  )
   if (items.length) return items
   return [...body.matchAll(/https?:\/\/[^\s<>"')\]]+/g)].map((match) => ({ url: match[0] }))
 }
+
+// One result of a search service's text answer, as its lines are read.
+type Block = {
+  readonly url?: string
+  readonly title?: string
+  readonly published?: string
+  readonly text: readonly string[]
+}
+const FIELD = /^\s*(Title|URL|Published Date|Published|Author|Text|Highlights|Summary):\s*(.*)$/i
 
 function clip(value: string, max: number) {
   const cleaned = WebFence.clean(value).replace(/\s+/g, " ").trim()
