@@ -467,6 +467,18 @@ export const RunCommand = effectCmd({
         })
       }
 
+      // --local keeps this process on Vector Local, and an attached server runs the session in a process of its own,
+      // so the run goes ahead only where that server has Vector Local on already.
+      if (args.local && args.attach) {
+        const remote = await attachSDK(directory)
+          .local.get()
+          .catch(() => undefined)
+        if (!remote?.data?.policy.enabled)
+          die(
+            `--local keeps the runs this computer starts on Vector Local, and the server at ${args.attach} ${remote?.data ? "has it off" : "did not say whether it has it on"}. Turn it on there with vector local on, or run without --attach.`,
+          )
+      }
+
       const files: FilePart[] = []
       if (args.file) {
         const list = Array.isArray(args.file) ? args.file : [args.file]

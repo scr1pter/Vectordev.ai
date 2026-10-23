@@ -222,6 +222,19 @@ describe("vector run --local", () => {
       }),
     60_000,
   )
+
+  cliIt.live(
+    "with --attach, runs only on a server that has Vector Local on already",
+    ({ vector, llm }) =>
+      Effect.gen(function* () {
+        const server = yield* vector.serve()
+        const result = yield* vector.run("say hi", { extraArgs: ["--local", "--attach", server.url] })
+        vector.expectExit(result, 1)
+        expect(result.stderr).toContain(`the server at ${server.url} has it off`)
+        expect(yield* llm.calls).toBe(0)
+      }),
+    60_000,
+  )
 })
 
 describe("vector local helpers", () => {
