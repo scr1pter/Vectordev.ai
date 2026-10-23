@@ -1,21 +1,41 @@
 import { afterAll, describe, expect, mock, test } from "bun:test"
 import type { LookupAddress } from "node:dns"
+import http from "node:http"
 import net from "node:net"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import { ResearchProvenance } from "@vectordevai/core/research/provenance"
 import { FakeWeb } from "../../../core/test/lib/fake-web"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
-import { clickPoint, observePage, readPage, typeTarget, type PageRead } from "./browser-page"
-import { PAGE_STARTED, POST, SCHEME } from "./research-navigation"
+import { clickPoint, fieldValue, observePage, readPage, typeTarget, typingMoved, type PageRead } from "./browser-page"
+import { NOT_LINK, PAGE_STARTED, POST, SCHEME } from "./research-navigation"
 import { USER, useResearchNetwork } from "./research-proxy"
 
 // Research browsers against a stand-in for Electron's windows, views, pages and sessions (section 5.6a). What only
-// Chromium can show (cookies kept apart between partitions, `<-loopback>`, service workers failing, dialogs, freezing)
-// is checked by scripts/research-browser-smoke.ts in the real Electron. Each desktop test file runs in its own process,
+// Chromium can show (cookies kept apart between partitions, `<-loopback>`, service workers failing, dialogs, holding
+// scripts) is checked by scripts/research-browser-smoke.ts in the real Electron. Each desktop test file runs in its own process,
 // so this file's Electron mock stays its own. The proxies are real and reach the fake web on loopback only.
 
 const guard = NetworkGuard.use()
-const web = FakeWeb.start({ sites: FakeWeb.sites() })
+// Over the 20 MB a page load may receive, sent in chunks with no Content-Length.
+const BIG = 21 * 1024 * 1024
+const web = FakeWeb.start({
+  sites: {
+    ...FakeWeb.sites(),
+    big: {
+      "/stream.js": () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              const chunk = new Uint8Array(1024 * 1024).fill(120)
+              Array.from({ length: BIG / chunk.length }, () => controller.enqueue(chunk))
+              controller.close()
+            },
+          }),
+          { headers: { "content-type": "text/javascript" } },
+        ),
+    },
+  },
+})
 useResearchNetwork({
   resolver: (hostname: string): Promise<readonly LookupAddress[]> => web.resolver(hostname),
   privateHosts: [FakeWeb.DOMAIN],
@@ -108,6 +128,7 @@ const ids = { contents: 0, request: 0 }
 class FakeContents extends Emitter {
   readonly id = ++ids.contents
   readonly inputs: { type: string; x?: number; keyCode?: string }[] = []
+  focused = 0
   readonly devtools: { method: string; params?: unknown }[] = []
   url = ""
   title = ""
@@ -148,10 +169,11 @@ class FakeContents extends Emitter {
   }
   /** A navigation through the slot session's onBeforeRequest, as Chromium's network stack makes it. */
   async navigate(url: string, options: { readonly method?: string; readonly browser?: boolean } = {}) {
+    const id = ++ids.request
     const cancelled = await new Promise<boolean>((resolve) =>
       this.partition.web.beforeRequest!(
         {
-          id: ++ids.request,
+          id,
           url,
           method: options.method ?? "GET",
           webContentsId: this.id,
@@ -177,12 +199,15 @@ class FakeContents extends Emitter {
     this.url = url
     this.navigationHistory.entries.push(url)
     this.emit("did-navigate", {}, url, 200, "OK")
+    this.partition.web.completed?.({ id, webContentsId: this.id })
   }
   isLoading() {
     return false
   }
   stop() {}
-  focus() {}
+  focus() {
+    this.focused++
+  }
   getURL() {
     return this.url
   }
@@ -239,11 +264,15 @@ class FakeWindow {
     addChildView: (view: FakeView) => void this.children.add(view),
     removeChildView: (view: FakeView) => void this.children.delete(view),
   }
+  destroyed = false
   constructor(readonly options: Record<string, unknown>) {
     windows.push(this)
   }
   isDestroyed() {
-    return false
+    return this.destroyed
+  }
+  destroy() {
+    this.destroyed = true
   }
 }
 
@@ -278,7 +307,9 @@ const read = (links: readonly string[] = []): PageRead => ({
 scripts.set(readPage, () => read([PAPER]))
 scripts.set(observePage, () => ({ title: "", url: "", text: "", elements: [], links: [], forms: [] }))
 
-const base = (input: Partial<research.Input> & Pick<research.Input, "command" | "sessionID">): research.Input => ({
+const base = (
+  input: Partial<research.ResearchInput> & Pick<research.ResearchInput, "command" | "sessionID">,
+): research.ResearchInput => ({
   runID: "run_one",
   agent: input.sessionID === "ses_lead" ? "research" : "researcher",
   rootID: "ses_lead",
@@ -286,7 +317,7 @@ const base = (input: Partial<research.Input> & Pick<research.Input, "command" | 
   provenance: [ARTICLE],
   ...input,
 })
-const send = (input: Partial<research.Input> & Pick<research.Input, "command" | "sessionID">) =>
+const send = (input: Partial<research.ResearchInput> & Pick<research.ResearchInput, "command" | "sessionID">) =>
   research.runResearchBrowser(base(input))
 // The view a command just opened: views are made in order, one per browser.
 const latest = () => views.at(-1)!
@@ -354,14 +385,35 @@ describe("research browsers", () => {
     expect(view.options.webPreferences).not.toHaveProperty("preload")
     expect(view.webContents.muted).toBe(true)
     expect(view.webContents.webrtc).toBe("disable_non_proxied_udp")
+    // One hidden host for every research browser, which never takes focus and is in no taskbar.
     expect(windows).toHaveLength(1)
-    expect(windows[0]!.options).toMatchObject({ show: false, width: 1280, height: 900 })
+    expect(windows[0]!.options).toMatchObject({
+      show: false,
+      focusable: false,
+      skipTaskbar: true,
+      width: 1280,
+      height: 900,
+    })
     expect(windows[0]!.children.has(view)).toBe(true)
     // Two calls from one agent at once still open one browser.
-    await Promise.all([send({ command: "research.scroll", sessionID: "ses_r1" }), send({ command: "research.scroll", sessionID: "ses_r1" })])
+    await Promise.all([
+      send({ command: "research.scroll", sessionID: "ses_r1" }),
+      send({ command: "research.scroll", sessionID: "ses_r1" }),
+    ])
     expect(research.ResearchWatch.list().filter((chip) => chip.sessionID === "ses_r1")).toHaveLength(1)
     await close("ses_lead")
+    // The host stays while a research browser is open, and goes with the last one, so no window of Vector's is left
+    // for a Dock click, a second launch or the tray to show, and none keeps Vector open once its windows close.
+    expect(windows[0]!.destroyed).toBe(false)
     await close("ses_r1")
+    expect(windows[0]!.destroyed).toBe(true)
+    expect(windows[0]!.children.size).toBe(0)
+    // The next research browser gets a host of its own.
+    await send({ command: "research.scroll", sessionID: "ses_lead" })
+    expect(windows).toHaveLength(2)
+    expect(windows[1]!.children.has(latest())).toBe(true)
+    await close("ses_lead")
+    expect(windows[1]!.destroyed).toBe(true)
   })
 
   test("a run has at most its count of browsers open, and an agent past it waits for one to close", async () => {
@@ -382,7 +434,11 @@ describe("research browsers", () => {
     const third = await waiting
     expect(third.ok).toBe(true)
     expect(third.label).toBe("Researcher 2")
-    expect(research.ResearchWatch.list().map((chip) => chip.sessionID).toSorted()).toEqual(["ses_lead", "ses_r2"])
+    expect(
+      research.ResearchWatch.list()
+        .map((chip) => chip.sessionID)
+        .toSorted(),
+    ).toEqual(["ses_lead", "ses_r2"])
     await close("ses_lead")
     await close("ses_r2")
   })
@@ -393,7 +449,14 @@ describe("research browsers", () => {
     const partition = view.webContents.partition
     // Every permission is denied, fullscreen included.
     const answers: boolean[] = []
-    for (const permission of ["fullscreen", "media", "notifications", "geolocation", "clipboard-read", "display-capture"])
+    for (const permission of [
+      "fullscreen",
+      "media",
+      "notifications",
+      "geolocation",
+      "clipboard-read",
+      "display-capture",
+    ])
       partition.request!(view.webContents, permission, (granted: boolean) => answers.push(granted))
     expect(answers).toEqual([false, false, false, false, false, false])
     expect(partition.check!(view.webContents, "fullscreen", ARTICLE, {})).toBe(false)
@@ -407,22 +470,50 @@ describe("research browsers", () => {
     const port = Number(config.proxyRules.split(":").at(-1))
     // The proxy is live, needs its secret, and `login` answers it alone.
     const given: unknown[][] = []
-    view.webContents.emit("login", { preventDefault: () => given.push(["prevented"]) }, {}, { isProxy: true, host: "127.0.0.1", port }, (...answer: unknown[]) => given.push(answer))
-    view.webContents.emit("login", { preventDefault: () => given.push(["prevented"]) }, {}, { isProxy: false, host: "journal.example", port: 443 }, (...answer: unknown[]) => given.push(answer))
+    view.webContents.emit(
+      "login",
+      { preventDefault: () => given.push(["prevented"]) },
+      {},
+      { isProxy: true, host: "127.0.0.1", port },
+      (...answer: unknown[]) => given.push(answer),
+    )
+    view.webContents.emit(
+      "login",
+      { preventDefault: () => given.push(["prevented"]) },
+      {},
+      { isProxy: false, host: "journal.example", port: 443 },
+      (...answer: unknown[]) => given.push(answer),
+    )
     expect(given[0]).toEqual(["prevented"])
     expect(given[1]![0]).toBe(USER)
     expect(given.slice(2)).toEqual([["prevented"], []])
     // A client certificate request is answered with none.
     const certificates: unknown[][] = []
-    view.webContents.emit("select-client-certificate", { preventDefault: () => certificates.push(["prevented"]) }, ARTICLE, [{ subjectName: "user" }], (...answer: unknown[]) => certificates.push(answer))
+    view.webContents.emit(
+      "select-client-certificate",
+      { preventDefault: () => certificates.push(["prevented"]) },
+      ARTICLE,
+      [{ subjectName: "user" }],
+      (...answer: unknown[]) => certificates.push(answer),
+    )
     expect(certificates).toEqual([["prevented"], []])
-    // The page's scripts are frozen between commands and file choosers never open.
-    const methods = view.webContents.devtools.map((item) => `${item.method}${item.method === "Page.setWebLifecycleState" ? `:${(item.params as { state: string }).state}` : ""}`)
+    // The page's scripts are held in the debugger between commands, and file choosers never open.
+    const methods = view.webContents.devtools.map(
+      (item) =>
+        `${item.method}${item.method === "Debugger.setSkipAllPauses" ? `:${(item.params as { skip: boolean }).skip}` : ""}`,
+    )
     expect(methods).toContain("Page.setInterceptFileChooserDialog")
     expect(methods).toContain("Page.addScriptToEvaluateOnNewDocument")
-    expect(methods.filter((method) => method.startsWith("Page.setWebLifecycleState"))).toEqual([
-      "Page.setWebLifecycleState:active",
-      "Page.setWebLifecycleState:frozen",
+    // Typing reaches a field with the page told it has focus, so Vector never focuses the browser.
+    expect(methods).toContain("Emulation.setFocusEmulationEnabled")
+    expect(methods.filter((method) => method.startsWith("Debugger."))).toEqual([
+      "Debugger.enable",
+      "Debugger.setSkipAllPauses:true",
+      // The command runs, then the page's scripts are held until the next one.
+      "Debugger.setSkipAllPauses:true",
+      "Debugger.resume",
+      "Debugger.setSkipAllPauses:false",
+      "Debugger.pause",
     ])
     await close("ses_lead")
     // Closed: its pages, then its slot cleared, and its proxy stopped.
@@ -435,7 +526,10 @@ describe("research browsers", () => {
       "closeAllConnections",
     ])
     const refused = await new Promise<boolean>((resolve) =>
-      net.connect(port, "127.0.0.1").on("error", () => resolve(true)).on("connect", () => resolve(false)),
+      net
+        .connect(port, "127.0.0.1")
+        .on("error", () => resolve(true))
+        .on("connect", () => resolve(false)),
     )
     expect(refused).toBe(true)
   })
@@ -454,11 +548,9 @@ describe("research browsers", () => {
     scripts.set(clickPoint, () => ({ ok: true, x: 40, y: 60, hit: true, href: PAPER }))
     view.webContents.onMouseUp = () => void view.webContents.navigate(PAPER).catch(() => undefined)
     const clicked = await send({ command: "research.click", sessionID: "ses_lead", ref: "ref_1" })
-    expect(view.webContents.inputs.filter((input) => input.type.startsWith("mouse")).map((input) => input.type)).toEqual([
-      "mouseMove",
-      "mouseDown",
-      "mouseUp",
-    ])
+    expect(
+      view.webContents.inputs.filter((input) => input.type.startsWith("mouse")).map((input) => input.type),
+    ).toEqual(["mouseMove", "mouseDown", "mouseUp"])
     expect(clicked.joined).toEqual([PAPER])
     // The page later walking the browser to another site on its own is refused, and the browser stays.
     view.webContents.onMouseUp = undefined
@@ -471,13 +563,27 @@ describe("research browsers", () => {
     await view.webContents.navigate("https://other.example/comment", { method: "POST" }).catch(() => undefined)
     const frame = await new Promise<boolean>((resolve) =>
       research.researchRequestHandlers.beforeRequest(
-        { id: 9_001, url: "https://ads.example/form", method: "POST", webContentsId: view.webContents.id, resourceType: "subFrame", referrer: "", timestamp: 0, uploadData: [] } as never,
+        {
+          id: 9_001,
+          url: "https://ads.example/form",
+          method: "POST",
+          webContentsId: view.webContents.id,
+          resourceType: "subFrame",
+          referrer: "",
+          timestamp: 0,
+          uploadData: [],
+        } as never,
         (response) => resolve(response.cancel === true),
       ),
     )
     expect(frame).toBe(true)
     const navigate = { prevented: false }
-    view.webContents.emit("will-frame-navigate", { url: "data:text/html,hi", isMainFrame: true, isSameDocument: false, preventDefault: () => (navigate.prevented = true) })
+    view.webContents.emit("will-frame-navigate", {
+      url: "data:text/html,hi",
+      isMainFrame: true,
+      isSameDocument: false,
+      preventDefault: () => (navigate.prevented = true),
+    })
     expect(navigate.prevented).toBe(true)
     const refused = await send({ command: "research.scroll", sessionID: "ses_lead" })
     expect(refused.refused).toEqual([
@@ -491,10 +597,23 @@ describe("research browsers", () => {
   test("bounds what a page loads: no fonts, images only for image models, 150 requests, nothing private", async () => {
     await send({ command: "research.open", sessionID: "ses_lead", url: ARTICLE })
     const view = latest()
-    const request = (url: string, resourceType: string, from: { readonly webContentsId?: number } = { webContentsId: view.webContents.id }) =>
+    const request = (
+      url: string,
+      resourceType: string,
+      from: { readonly webContentsId?: number } = { webContentsId: view.webContents.id },
+    ) =>
       new Promise<boolean>((resolve) =>
         research.researchRequestHandlers.beforeRequest(
-          { id: ++ids.request, url, method: "GET", ...from, resourceType, referrer: "", timestamp: 0, uploadData: [] } as never,
+          {
+            id: ++ids.request,
+            url,
+            method: "GET",
+            ...from,
+            resourceType,
+            referrer: "",
+            timestamp: 0,
+            uploadData: [],
+          } as never,
           (response) => resolve(response.cancel !== true),
         ),
       )
@@ -507,13 +626,24 @@ describe("research browsers", () => {
     expect(await request("http://127.0.0.1:4096/session", "xhr")).toBe(false)
     expect(await request("ws://localhost:3000/socket", "webSocket")).toBe(false)
     const allowed = await Promise.all(
-      Array.from({ length: research.MAX_SUBRESOURCES + 1 }, (_, index) => request(`https://cdn.example/${index}.js`, "script")),
+      Array.from({ length: research.MAX_SUBRESOURCES + 1 }, (_, index) =>
+        request(`https://cdn.example/${index}.js`, "script"),
+      ),
     )
     expect(allowed.filter(Boolean)).toHaveLength(research.MAX_SUBRESOURCES)
     // A service worker's script is refused in the network stack.
     const headers = await new Promise<boolean>((resolve) =>
       research.researchRequestHandlers.beforeSendHeaders(
-        { id: 1, url: "https://journal.example/sw.js", method: "GET", webContentsId: view.webContents.id, resourceType: "script", referrer: "", timestamp: 0, requestHeaders: { "Service-Worker": "script" } } as never,
+        {
+          id: 1,
+          url: "https://journal.example/sw.js",
+          method: "GET",
+          webContentsId: view.webContents.id,
+          resourceType: "script",
+          referrer: "",
+          timestamp: 0,
+          requestHeaders: { "Service-Worker": "script" },
+        } as never,
         (response) => resolve(response.cancel === true),
       ),
     )
@@ -521,12 +651,84 @@ describe("research browsers", () => {
     // The next page load starts its own count; an image model's browser loads images.
     await send({ command: "research.open", sessionID: "ses_lead", url: ARTICLE, images: true })
     expect(await request("https://cdn.example/photo.jpg", "image")).toBe(true)
-    // 20 MB of sub-resources, by their Content-Length, is the most one page load gets.
-    research.researchRequestHandlers.headersReceived(
-      { id: 2, url: "https://cdn.example/big.js", method: "GET", webContentsId: view.webContents.id, resourceType: "script", responseHeaders: { "Content-Length": [String(research.MAX_SUBRESOURCE_BYTES + 1)] } } as never,
-      () => undefined,
+    // 20 MB is the most one page load receives, counted by the browser's proxy as the bytes arrive: an answer sent in
+    // chunks, with no Content-Length, counts in full.
+    const config = view.webContents.partition.proxies.at(-1) as { proxyRules: string }
+    const port = Number(config.proxyRules.split(":").at(-1))
+    const secret = await new Promise<string>((resolve) =>
+      view.webContents.emit(
+        "login",
+        { preventDefault: () => undefined },
+        {},
+        { isProxy: true, host: "127.0.0.1", port },
+        (_user: string, password: string) => resolve(password),
+      ),
     )
-    expect(await request("https://cdn.example/after.js", "script")).toBe(false)
+    const target = web.url("big", "/stream.js")
+    const received = await new Promise<{ readonly bytes: number; readonly length?: string }>((resolve, reject) =>
+      http
+        .get(
+          {
+            host: "127.0.0.1",
+            port,
+            path: target,
+            headers: {
+              host: new URL(target).host,
+              "proxy-authorization": `Basic ${Buffer.from(`${USER}:${secret}`).toString("base64")}`,
+            },
+          },
+          (response) => {
+            const state = { bytes: 0 }
+            response.on("data", (chunk: Buffer) => (state.bytes += chunk.length))
+            response.on("end", () =>
+              resolve({
+                bytes: state.bytes,
+                ...(response.headers["content-length"] ? { length: response.headers["content-length"] } : {}),
+              }),
+            )
+          },
+        )
+        .on("error", reject),
+    )
+    expect(received).toEqual({ bytes: BIG })
+    const refusedAfter = await request("https://cdn.example/after.js", "script")
+    expect(refusedAfter).toBe(false)
+    expect((await send({ command: "research.scroll", sessionID: "ses_lead" })).refused).toEqual([
+      { url: "https://cdn.example/after.js", reason: research.SUBRESOURCES },
+    ])
+    // A new page load starts its count again.
+    await send({ command: "research.open", sessionID: "ses_lead", url: ARTICLE })
+    expect(await request("https://cdn.example/after.js", "script")).toBe(true)
+    await close("ses_lead")
+  })
+
+  test("every document and frame a research browser loads is sandboxed with no dialogs; other answers are left as sent", async () => {
+    await send({ command: "research.scroll", sessionID: "ses_lead" })
+    const view = latest()
+    const answer = (resourceType: string, responseHeaders: Record<string, string[]>) =>
+      new Promise<{ responseHeaders?: Record<string, string[]> }>((resolve) =>
+        research.researchRequestHandlers.headersReceived(
+          {
+            id: ++ids.request,
+            url: ARTICLE,
+            method: "GET",
+            webContentsId: view.webContents.id,
+            resourceType,
+            responseHeaders,
+          } as never,
+          resolve,
+        ),
+      )
+    expect((await answer("mainFrame", { "content-type": ["text/html"] })).responseHeaders).toEqual({
+      "content-type": ["text/html"],
+      "Content-Security-Policy": [research.SANDBOX],
+    })
+    // The page's own policy stays, and the sandbox joins it.
+    expect((await answer("subFrame", { "content-security-policy": ["default-src 'self'"] })).responseHeaders).toEqual({
+      "content-security-policy": ["default-src 'self'", research.SANDBOX],
+    })
+    expect(research.SANDBOX).not.toContain("allow-modals")
+    expect(await answer("script", { "content-type": ["text/javascript"] })).toEqual({})
     await close("ses_lead")
   })
 
@@ -554,18 +756,42 @@ describe("research browsers", () => {
   test("types only what the agent may, and presses only the keys research needs", async () => {
     await send({ command: "research.open", sessionID: "ses_lead", url: ARTICLE })
     const view = latest()
-    scripts.set(typeTarget, () => ({ ok: false, reason: "Research browsers never type into a sign-in, contact or payment field." }))
-    expect(await send({ command: "research.type", sessionID: "ses_lead", ref: "ref_2", text: "heat pumps" })).toMatchObject({
+    scripts.set(typeTarget, () => ({
+      ok: false,
+      reason: "Research browsers never type into a sign-in, contact or payment field.",
+    }))
+    expect(
+      await send({ command: "research.type", sessionID: "ses_lead", ref: "ref_2", text: "heat pumps" }),
+    ).toMatchObject({
       ok: false,
       error: "Research browsers never type into a sign-in, contact or payment field.",
     })
-    expect(await send({ command: "research.type", sessionID: "ses_lead", ref: "ref_2", text: "heat\npumps" })).toMatchObject({ ok: false })
+    expect(
+      await send({ command: "research.type", sessionID: "ses_lead", ref: "ref_2", text: "heat\npumps" }),
+    ).toMatchObject({ ok: false })
     expect(await send({ command: "research.press", sessionID: "ses_lead", key: "a" })).toMatchObject({ ok: false })
     expect(await send({ command: "research.press", sessionID: "ses_lead", key: "Escape" })).toMatchObject({ ok: true })
-    expect(view.webContents.inputs.filter((input) => input.type.startsWith("key")).map((input) => input.keyCode)).toEqual(["Escape", "Escape"])
+    expect(
+      view.webContents.inputs.filter((input) => input.type.startsWith("key")).map((input) => input.keyCode),
+    ).toEqual(["Escape", "Escape"])
+    // A search field takes the text as trusted key input, without Vector focusing the browser, which would take the
+    // keyboard from the user's window.
+    scripts.set(typeTarget, () => ({ ok: true }))
+    scripts.set(typingMoved, () => false)
+    scripts.set(fieldValue, () => "hp")
+    expect(await send({ command: "research.type", sessionID: "ses_lead", ref: "ref_3", text: "hp" })).toMatchObject({
+      ok: true,
+    })
+    expect(view.webContents.inputs.filter((input) => input.type === "char").map((input) => input.keyCode)).toEqual([
+      "h",
+      "p",
+    ])
+    expect(view.webContents.focused).toBe(0)
     // Screenshots only for a model that reads images.
     expect(await send({ command: "research.screenshot", sessionID: "ses_lead" })).toMatchObject({ ok: false })
-    expect((await send({ command: "research.screenshot", sessionID: "ses_lead", images: true })).screenshot).toStartWith("data:image/png")
+    expect(
+      (await send({ command: "research.screenshot", sessionID: "ses_lead", images: true })).screenshot,
+    ).toStartWith("data:image/png")
     await close("ses_lead")
   })
 
@@ -574,7 +800,14 @@ describe("research browsers", () => {
     expect(Object.keys(research.ResearchWatch).toSorted()).toEqual(["list", "snapshot", "stop", "subscribe"])
     const chips = research.ResearchWatch.list()
     expect(chips).toEqual([
-      { id: "run_one:ses_r1", runID: "run_one", sessionID: "ses_r1", label: "Researcher 1", host: "article.web.test", state: "idle" },
+      {
+        id: "run_one:ses_r1",
+        runID: "run_one",
+        sessionID: "ses_r1",
+        label: "Researcher 1",
+        host: "article.web.test",
+        state: "idle",
+      },
     ])
     expect(await research.ResearchWatch.snapshot("run_one:ses_r1")).toStartWith("data:image/png;base64,")
     const events: string[] = []
@@ -584,6 +817,69 @@ describe("research browsers", () => {
     expect(events.length).toBeGreaterThan(0)
     expect(research.ResearchWatch.list()).toEqual([])
     expect(await research.ResearchWatch.snapshot("run_one:ses_r1")).toBeUndefined()
+    // A stopped researcher gets no other browser in this research; another agent of the run still does.
+    const made = views.length
+    expect(await send({ command: "research.open", sessionID: "ses_r1", url: ARTICLE })).toMatchObject({
+      ok: false,
+      error: research.STOPPED,
+    })
+    expect(views.length).toBe(made)
+    expect((await send({ command: "research.scroll", sessionID: "ses_r2" })).ok).toBe(true)
+    await close("ses_r2")
+    expect((await close("ses_r1")).ok).toBe(true)
+  })
+
+  test("closing a browser of a run the desktop no longer holds starts no copy of that run", async () => {
+    const closed = await close("ses_gone", "run_gone")
+    expect(closed).toMatchObject({ ok: true, generation: "" })
+    // Nothing was kept for it: a command naming any copy is told to send the run's addresses whole.
+    expect(
+      await send({ command: "research.scroll", sessionID: "ses_gone", runID: "run_gone", generation: "copy" }),
+    ).toMatchObject({
+      ok: false,
+      resync: true,
+    })
+  })
+
+  test("a click's href is good for the navigation that click starts, never for a later command's", async () => {
+    const elsewhere = web.url("nav", "/")
+    await send({ command: "research.open", sessionID: "ses_lead", url: ARTICLE })
+    const view = latest()
+    await send({ command: "research.read", sessionID: "ses_lead" })
+    scripts.set(clickPoint, () => ({ ok: true, x: 40, y: 60, hit: true, href: PAPER }))
+    view.webContents.onMouseUp = () => void view.webContents.navigate(PAPER).catch(() => undefined)
+    expect((await send({ command: "research.click", sessionID: "ses_lead", ref: "ref_1" })).joined).toEqual([PAPER])
+    view.webContents.onMouseUp = undefined
+    expect(view.webContents.url).toBe(PAPER)
+    // After an open, and after a press, within the 2 seconds an agent action allows, the page sending itself to another
+    // site is refused: the earlier click's href does not carry over.
+    await send({ command: "research.open", sessionID: "ses_lead", url: ARTICLE })
+    await view.webContents.navigate(elsewhere).catch(() => undefined)
+    expect((await send({ command: "research.scroll", sessionID: "ses_lead" })).refused).toEqual([
+      { url: elsewhere, reason: NOT_LINK },
+    ])
+    expect(view.webContents.url).toBe(ARTICLE)
+    await send({ command: "research.press", sessionID: "ses_lead", key: "Enter" })
+    await view.webContents.navigate(elsewhere).catch(() => undefined)
+    expect((await send({ command: "research.scroll", sessionID: "ses_lead" })).refused).toEqual([
+      { url: elsewhere, reason: NOT_LINK },
+    ])
+    expect(view.webContents.url).toBe(ARTICLE)
+    // A page that swaps the clicked link's address at click time has that one navigation decided as a hop; a second
+    // navigation the page starts after it is the page's own.
+    const further = web.url("copy", "/further")
+    view.webContents.onMouseUp = () =>
+      void view.webContents
+        .navigate(elsewhere)
+        .then(() => view.webContents.navigate(further))
+        .catch(() => undefined)
+    const swapped = await send({ command: "research.click", sessionID: "ses_lead", ref: "ref_1" })
+    view.webContents.onMouseUp = undefined
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(view.webContents.url).toBe(elsewhere)
+    const after = await send({ command: "research.scroll", sessionID: "ses_lead" })
+    expect([...swapped.refused, ...after.refused]).toEqual([{ url: further, reason: NOT_LINK }])
+    await close("ses_lead")
   })
 
   test("a command naming another copy of the run's provenance is told to send it whole", async () => {
@@ -593,7 +889,9 @@ describe("research browsers", () => {
       ok: false,
       resync: true,
     })
-    expect(await send({ command: "research.scroll", sessionID: "ses_lead", generation: started.generation })).toMatchObject({ ok: true })
+    expect(
+      await send({ command: "research.scroll", sessionID: "ses_lead", generation: started.generation }),
+    ).toMatchObject({ ok: true })
     await close("ses_lead")
     expect(guard.outside()).toEqual([])
     expect(LocalPolicy.hostClass("article.web.test")).toBe("internet")
@@ -603,7 +901,9 @@ describe("research browsers", () => {
 describe("the bridge", () => {
   test("research and visible commands sent with each other's IDs fail, and neither reaches the other's browsers", async () => {
     const agent = await import("./browser-agent")
-    expect((await agent.runBrowserAgent(undefined, { contextId: "ses_lead", command: "wait", milliseconds: 0 })).ok).toBe(true)
+    expect(
+      (await agent.runBrowserAgent(undefined, { contextId: "ses_lead", command: "wait", milliseconds: 0 })).ok,
+    ).toBe(true)
     const user = latest()
     expect(user.webContents.partition.name).toBe("persist:vector-browser")
     // The same session's research browser is another page, in a research slot.
@@ -624,15 +924,23 @@ describe("the bridge", () => {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify(body),
-      }).then(async (response) => ({ status: response.status, body: (await response.json()) as Record<string, unknown> }))
+      }).then(async (response) => ({
+        status: response.status,
+        body: (await response.json()) as Record<string, unknown>,
+      }))
     try {
       const command = { command: "research.scroll", runID: "run_one", sessionID: "ses_lead", agent: "research", max: 3 }
-      expect(await post("/research", command)).toMatchObject({ status: 200, body: { ok: true, label: "Research lead" } })
+      expect(await post("/research", command)).toMatchObject({
+        status: 200,
+        body: { ok: true, label: "Research lead" },
+      })
       expect(await post("/research", { ...command, contextId: "ses_lead" })).toEqual({
         status: 400,
         body: { error: "Research browser commands take no contextId." },
       })
-      expect(await post("/research", { contextId: "ses_lead", command: "openUrl", url: ARTICLE })).toMatchObject({ status: 400 })
+      expect(await post("/research", { contextId: "ses_lead", command: "openUrl", url: ARTICLE })).toMatchObject({
+        status: 400,
+      })
       expect(await post("/command", { ...command, contextId: "run_one:ses_lead" })).toEqual({
         status: 400,
         body: { error: "Unknown browser command." },

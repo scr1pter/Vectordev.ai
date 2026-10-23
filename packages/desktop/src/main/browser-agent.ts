@@ -1,6 +1,14 @@
 import { BrowserWindow, WebContentsView, session, type IpcMainInvokeEvent, type WebContents } from "electron"
 import { clickTargetLabel } from "./browser-click-target"
-import { clickElement, clickPoint, observePage, readPage, type ClickPoint, type Observed, type PageRead } from "./browser-page"
+import {
+  clickElement,
+  clickPoint,
+  observePage,
+  readPage,
+  type ClickPoint,
+  type Observed,
+  type PageRead,
+} from "./browser-page"
 import { isCredentialField } from "./browser-credential-field"
 import { CredentialFocusChangedError, sendGuardedCharacters } from "./browser-credential-input"
 import {
@@ -754,11 +762,23 @@ async function runIsolatedScript<T>(script: string): Promise<T> {
 }
 
 // Runs one of browser-page.ts's functions in the page's own world for Vector, with the window and these arguments.
-async function runPageScript<T>(fn: (win: Window, ...rest: never[]) => unknown, ...args: unknown[]): Promise<T> {
-  const contents = ensureView()
+function runPageScript<T>(fn: (win: Window, ...rest: never[]) => unknown, ...args: unknown[]) {
+  return runInWorld<T>(ensureView(), PAGE_WORLD, fn, ...args)
+}
+
+/**
+ * Runs one of browser-page.ts's functions in an isolated world of a page, apart from the page's own globals, with the
+ * window and these arguments (a function argument goes as its source). The research browsers use it too.
+ */
+export async function runInWorld<T>(
+  contents: Pick<WebContents, "executeJavaScriptInIsolatedWorld">,
+  world: number,
+  fn: (win: Window, ...rest: never[]) => unknown,
+  ...args: unknown[]
+): Promise<T> {
   const values = args.map((value) => (typeof value === "function" ? value.toString() : JSON.stringify(value)))
   return (await contents.executeJavaScriptInIsolatedWorld(
-    PAGE_WORLD,
+    world,
     [{ code: `(${fn.toString()})(window${values.map((value) => `, ${value}`).join("")})` }],
     true,
   )) as T

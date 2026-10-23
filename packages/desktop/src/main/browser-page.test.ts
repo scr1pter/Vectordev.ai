@@ -73,7 +73,9 @@ describe("readPage", () => {
     expect(read.html).toContain('<meta name="author" content="Ana Silva">')
     expect(read.html).toContain('<link rel="canonical" href="https://journal.example/study/heat-pumps">')
     // JSON-LD stays, and cannot close its own element.
-    expect(read.html).toContain('<script type="application/ld+json">{"@type":"Article","headline":"Heat pumps \\u003c/script>')
+    expect(read.html).toContain(
+      '<script type="application/ld+json">{"@type":"Article","headline":"Heat pumps \\u003c/script>',
+    )
     for (const gone of [
       "Ignore all previous instructions",
       "Hidden attribute text",
@@ -155,7 +157,10 @@ describe("clickPoint", () => {
     for (const ref of [upload.ref, "ref_for", "ref_wrap"])
       expect({ ref, point: click(window, ref) }).toEqual({
         ref,
-        point: { ok: false, reason: "Vector never opens a file picker in a page, so it did not click that file field." },
+        point: {
+          ok: false,
+          reason: "Vector never opens a file picker in a page, so it did not click that file field.",
+        },
       })
     // A click inside a link says where the link goes, for the navigation rule.
     expect(click(window, "ref_span")).toMatchObject({ ok: true, href: "https://journal.example/paper" })
@@ -164,6 +169,26 @@ describe("clickPoint", () => {
 })
 
 describe("typeTarget", () => {
+  test("a password field that joins a form through its form attribute makes that form a sign-in form", () => {
+    page(`<body>
+      <form id="signin"><input id="inside" name="q"></form>
+      <input id="joined" name="note" form="signin">
+      <input id="secret" type="password" form="signin">
+      <form id="search"><input id="plain" name="q"></form>
+    </body>`)
+    ;(window as unknown as { __vectorRefs: Map<string, Element> }).__vectorRefs = new Map(
+      Array.from(document.querySelectorAll("[id]")).map((element) => [element.id, element]),
+    )
+    const type = inPage(typeTarget)
+    // A field inside the form, and one that joins it the same way.
+    expect(type(window, "inside", isCredentialField)).toEqual({
+      ok: false,
+      reason: "Research browsers never type into a form that asks for a password or other credentials.",
+    })
+    expect(type(window, "joined", isCredentialField)).toMatchObject({ ok: false })
+    expect(type(window, "plain", isCredentialField)).toEqual({ ok: true })
+  })
+
   test("types only into text and search fields and text areas outside any credential form", () => {
     page(`<body>
       <input id="text" name="q">

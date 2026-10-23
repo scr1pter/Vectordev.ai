@@ -48,6 +48,8 @@ export type ResearchProxy = {
    * which goes to the reader in memory since downloads are off.
    */
   readonly get: (url: string, maxBytes: number) => Promise<Fetched>
+  /** The bytes this proxy has passed to its browser so far, counted as they arrive. */
+  readonly received: () => number
   readonly stop: () => Promise<void>
 }
 
@@ -106,13 +108,19 @@ export async function startResearchProxy(input: {
     },
     robots: (url) => robotsThrough(proxy.port, authorization, url),
     get: (url, maxBytes) => getThrough(proxy.port, authorization, url, maxBytes),
+    received: proxy.received,
     stop: proxy.stop,
   }
 }
 
 // One GET through the proxy, following redirects on the same host only, as the engine's robots reader does; a redirect
 // elsewhere, a failure or a timeout is "unreachable", which robots.ts reads as no path allowed for now.
-async function robotsThrough(port: number, authorization: string, url: string, hops = 0): Promise<ResearchRobots.Fetched> {
+async function robotsThrough(
+  port: number,
+  authorization: string,
+  url: string,
+  hops = 0,
+): Promise<ResearchRobots.Fetched> {
   const answer = await getThrough(port, authorization, url, ResearchRobots.MAX_BYTES).catch(() => undefined)
   if (!answer) return { status: "unreachable" }
   if (answer.status < 300 || answer.status >= 400) return { status: answer.status, text: answer.body.toString("utf8") }

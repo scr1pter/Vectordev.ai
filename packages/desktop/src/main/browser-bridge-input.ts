@@ -1,5 +1,5 @@
 import type { BrowserAgentInput } from "../preload/types"
-import type { Command as ResearchCommand, Input as ResearchInput } from "./research-browser"
+import type { ResearchCommand, ResearchInput } from "./research-browser"
 
 const COMMANDS = new Set<NonNullable<BrowserAgentInput["command"]>>([
   "attach",
@@ -99,7 +99,12 @@ export function parseResearchBrowserInput(value: unknown): ResearchInput {
   if (typeof input.command !== "string" || !RESEARCH_COMMANDS.has(input.command as ResearchCommand))
     throw new Error("Unknown research browser command.")
   if (input.agent !== "research" && input.agent !== "researcher") throw new Error("Invalid research browser agent.")
-  if (typeof input.max !== "number" || !Number.isInteger(input.max) || input.max < 1 || input.max > MAX_RESEARCH_BROWSERS)
+  if (
+    typeof input.max !== "number" ||
+    !Number.isInteger(input.max) ||
+    input.max < 1 ||
+    input.max > MAX_RESEARCH_BROWSERS
+  )
     throw new Error("Invalid research browser count.")
   return {
     command: input.command as ResearchCommand,

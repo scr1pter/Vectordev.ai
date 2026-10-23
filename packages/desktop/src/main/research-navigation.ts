@@ -32,8 +32,7 @@ export const CREDENTIALS = "Research browsers never send a user name or password
 export const PRIVATE = EgressProxy.PRIVATE_REASON
 export const NOT_LINK =
   "That address was not a link on the page the research browser read, so the browser stayed on the page."
-export const PAGE_STARTED =
-  "The page tried to open another site on its own, so the research browser stayed on it."
+export const PAGE_STARTED = "The page tried to open another site on its own, so the research browser stayed on it."
 export const DATA_LIKE = "That link looks built to carry data, so the research browser did not follow it."
 export const BACK =
   "Going back is decided like any navigation, and that page did not come from a search result, a page link or your message."
@@ -61,7 +60,10 @@ export type Input = {
   readonly links: ReadonlySet<string>
   /** GET form targets read there, as origin and path. */
   readonly forms: ReadonlySet<string>
-  /** The href of the element the agent just clicked. */
+  /**
+   * The href of the element the agent is clicking, given only for the first main-frame navigation that click starts:
+   * the caller drops it once that navigation is decided, so a later command's navigation never sees it.
+   */
   readonly clicked?: string
   /** The page's address as the rule last decided it. */
   readonly current?: string
@@ -112,7 +114,9 @@ export function decideResearchNavigation(input: Input): Decision {
   const exact = spelled(input.url)
   if (input.links.has(exact)) return { allow: true, via: "link", join: exact, robots: true }
   if (input.clicked !== undefined && spelled(input.clicked) === exact)
-    return ResearchProvenance.dataLike(exact) ? refuse(DATA_LIKE) : { allow: true, via: "link", join: exact, robots: true }
+    return ResearchProvenance.dataLike(exact)
+      ? refuse(DATA_LIKE)
+      : { allow: true, via: "link", join: exact, robots: true }
   // A GET form builds its address from its fields: the page's own and what the agent typed, which passed the outbound
   // check before it was typed. So its query is not judged as a link's would be.
   if (input.forms.has(`${address.origin}${address.pathname}`))

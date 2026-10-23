@@ -181,7 +181,11 @@ describe("research browser navigation rule", () => {
   })
 
   test("an address that names this computer or the user's network is refused in any frame", () => {
-    const local = addLinks(ResearchProvenance.empty(), ["http://10.0.0.5/wiki", "http://localhost:4096/session"], "typed")
+    const local = addLinks(
+      ResearchProvenance.empty(),
+      ["http://10.0.0.5/wiki", "http://localhost:4096/session"],
+      "typed",
+    )
     for (const url of [
       "http://127.0.0.1:4096/session",
       "http://localhost:4096/",

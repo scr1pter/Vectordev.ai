@@ -5,7 +5,7 @@ import { ResearchProvenance } from "@vectordevai/core/research/provenance"
 import { ResearchRate } from "@vectordevai/core/research/rate"
 import { ResearchReader } from "@vectordevai/core/research/reader"
 import { ResearchRobots } from "@vectordevai/core/research/robots"
-import { queueTurn } from "./browser-agent"
+import { queueTurn, runInWorld } from "./browser-agent"
 import { isCredentialField } from "./browser-credential-field"
 import { CredentialFocusChangedError, sendGuardedCharacters } from "./browser-credential-input"
 import {
@@ -30,14 +30,19 @@ import { NEEDS_GUARD, startResearchProxy, type ResearchProxy } from "./research-
 //
 // Isolation:
 // - Each browser is a WebContentsView of 1280x900 inside one hidden host window (as cloud-browser-check.ts does), with
-//   background throttling off so pages finish loading. Its session is a slot from a pool of in-memory partitions,
+//   background throttling off so pages finish loading. The host is never focusable and never in the taskbar, and it is
+//   destroyed when the last research browser closes, so it neither keeps Vector open once its windows close nor is a
+//   window anything can show. Its session is a slot from a pool of in-memory partitions,
 //   `vector-research-<n>`: Electron has no call that frees a session, so a partition per run would keep each one until
 //   Vector quits. A slot serves one agent at a time and shares no cookies, storage, cache or sign-in with the user's
 //   browser or another slot. When its browser closes, its pages close and then every storage type (service workers
 //   included), the cache, the auth cache, the host resolver cache and the open connections are cleared; a slot whose
 //   clearing fails is retired. The pool grows to the most browsers open at once and does not shrink; it is not a cap.
 // - Sandbox, context isolation and web security on, Node off, no preload, dialogs off, no spellcheck, audio muted,
-//   WebRTC only through the proxy (and stubbed), no webview tags, no plugins (so a PDF is a download).
+//   WebRTC only through the proxy (and stubbed), no webview tags, no plugins (so a PDF is a download). Every document
+//   a research browser loads, each frame's included, gets a CSP `sandbox` without `allow-modals`, which a fresh frame
+//   inherits and cannot undo: no print dialog, alert, confirm or prompt. Vector never focuses one; typing goes to the
+//   field with the page told it has focus (DevTools focus emulation), so the user's window keeps the keyboard.
 // - Every permission is denied, fullscreen included, and there is no display-media handler, so screen capture is
 //   refused. Downloads are cancelled; a PDF is fetched again through the proxy into memory for the reader instead.
 // - No credentials of any kind: a client-certificate request gets none, `login` is answered only for the browser's own
@@ -45,11 +50,15 @@ import { NEEDS_GUARD, startResearchProxy, type ResearchProxy } from "./research-
 // - Service worker scripts are cancelled in the network stack (their request carries a `Service-Worker` header), since
 //   a script stub can be undone from a fresh frame; clearing a slot removes any registration.
 // - A popup or target=_blank link loads in the same page when the navigation rule allows it.
-// - Between commands the page is frozen through the DevTools protocol and thawed for the next one, so a hostile page
-//   cannot keep its scripts, timers or requests running; file choosers are intercepted there, so none opens. A page
-//   that does not answer within the command deadline is closed.
+// - Between commands the page's scripts are held in the DevTools debugger and run again for the next command, so a
+//   hostile page cannot keep its scripts, timers or network callbacks running; file choosers are intercepted there, so
+//   none opens. After a load or an action the page runs until it has made no request for half a second (at most 3
+//   seconds), so a page built by script after its load event is built when it is held. A page that does not answer
+//   within the command deadline is closed.
 // - Fonts never load; images and media load only when the agent's model reads images. A page load may make at most
-//   150 other requests and 20 MB, after which they are cancelled.
+//   150 other requests and receive 20 MB, counted by the browser's own proxy as the bytes arrive (chunked and
+//   compressed answers included), after which further requests are cancelled. An answer already arriving when the bound
+//   is passed is not cut.
 // - Every request goes through the browser's own proxy (research-proxy.ts). The navigation rule (research-navigation.ts)
 //   runs in onBeforeRequest on every main-frame and subframe request and redirect hop, with the run's provenance, the
 //   run's per-host rate limits for documents and robots.txt for what Vector discovered.
@@ -67,6 +76,11 @@ export const LOAD_TIMEOUT_MS = 20_000
 export const COMMAND_DEADLINE_MS = 45_000
 /** How long an agent past its run's count waits for a research browser to close. */
 export const WAIT_MS = 60_000
+/** How long a page must make no request after a load or an action before it counts as settled, and the most to wait. */
+export const QUIET_MS = 500
+export const SETTLE_MS = 3_000
+/** How long typing waits for the page to show the keys it was sent. */
+export const TYPED_MS = 2_000
 export const MAX_SUBRESOURCES = 150
 export const MAX_SUBRESOURCE_BYTES = 20 * 1024 * 1024
 /** Roughly what observe shows of the page's text. */
@@ -77,12 +91,16 @@ const WORLD = 1_301
 
 export const DOWNLOADS_OFF = "Downloads are off in research browsers."
 export const PDF_OPENED = "That address is a PDF; Vector read it into memory instead of downloading it."
-export const SUBRESOURCES = "The page made more requests than a research browser allows, so the rest were cancelled."
+export const SUBRESOURCES =
+  "The page made more requests, or loaded more, than a research browser allows, so the rest were cancelled."
 export const SERVICE_WORKER = "Research browsers do not run service workers."
+export const STOPPED = "The user stopped this research browser, so this agent browses no more in this research."
+/** The CSP every research browser document gets: scripts, its own origin and GET forms, and no dialogs of any kind. */
+export const SANDBOX = "sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
 export const ROBOTS = ResearchReader.ROBOTS
 export const KEYS = ["Enter", "Tab", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"] as const
 
-export type Command =
+export type ResearchCommand =
   | "research.open"
   | "research.read"
   | "research.links"
@@ -96,8 +114,8 @@ export type Command =
   | "research.screenshot"
   | "research.close"
 
-export type Input = {
-  readonly command: Command
+export type ResearchInput = {
+  readonly command: ResearchCommand
   readonly runID: string
   readonly sessionID: string
   /** The run's lead, who the requests are attributed to as root. */
@@ -229,7 +247,7 @@ type Browser = {
   readonly key: string
   readonly run: Run
   readonly sessionID: string
-  readonly agent: Input["agent"]
+  readonly agent: ResearchInput["agent"]
   readonly label: string
   readonly slot: Slot<Session>
   readonly proxy: ResearchProxy
@@ -246,6 +264,10 @@ type Browser = {
   /** Links and GET form targets Vector read on the page at the agent's last read, links or observe. */
   links: Set<string>
   forms: Set<string>
+  /**
+   * The href of the element the agent is clicking, for the one main-frame navigation the click starts; cleared when
+   * that navigation is decided, when the click command ends, at every other command and on every navigation.
+   */
   clicked?: string
   actedAt?: number
   /** The page's address as the rule decided it. */
@@ -255,7 +277,10 @@ type Browser = {
   expected?: { readonly url: string; readonly decision: Decision & { readonly allow: true } }
   /** Main-frame requests in flight, by request ID, so a redirect hop is known as one. */
   readonly requests: Map<number, { readonly typedHost?: string }>
-  page: { requests: number; bytes: number }
+  /** Every request of the page in flight, for waiting until it is quiet. */
+  inflight: Set<number>
+  /** This page load's other requests, what the proxy had received when it began, and whether it passed a bound. */
+  page: { requests: number; start: number; over: boolean }
   joined: string[]
   refused: { url: string; reason: string }[]
   download?: { readonly url: string; readonly mime: string }
@@ -266,6 +291,9 @@ const browsers = new Map<string, Browser>()
 const byContents = new Map<number, Browser>()
 const opening = new Map<string, Promise<Browser | { readonly error: string }>>()
 const watchers = new Set<() => void>()
+// Browsers the user stopped, by run and session, so their agent does not open another (the most recent ones).
+const stopped = new Set<string>()
+const STOPPED_KEPT = 500
 const hardened = new WeakSet<object>()
 const pool = slotPool((name) => session.fromPartition(name))
 const host: { window?: BrowserWindow } = {}
@@ -274,15 +302,19 @@ const host: { window?: BrowserWindow } = {}
 // Commands
 
 /** Runs one research browser command for one agent of one run. */
-export async function runResearchBrowser(input: Input): Promise<Report> {
-  const run = sync(input)
-  if (!run) return { ...empty(""), ok: false, resync: true, error: "Send the run's addresses again." }
+export async function runResearchBrowser(input: ResearchInput): Promise<Report> {
   const key = `${input.runID}:${input.sessionID}`
+  // Before the run's copy of the provenance is touched: closing a browser the desktop no longer holds (the engine's
+  // close after the idle close, a timeout or Stop) starts no run.
   if (input.command === "research.close") {
+    const generation = runs.get(input.runID)?.generation ?? ""
     const existing = browsers.get(key)
     if (existing) await closeBrowser(existing)
-    return { ...empty(run.generation), ok: true }
+    return { ...empty(generation), ok: true }
   }
+  if (stopped.has(key)) return { ...empty(runs.get(input.runID)?.generation ?? ""), ok: false, error: STOPPED }
+  const run = sync(input)
+  if (!run) return { ...empty(""), ok: false, resync: true, error: "Send the run's addresses again." }
   const found = browsers.get(key) ?? (await obtain(key, input, run))
   if ("error" in found) return { ...empty(run.generation), ok: false, error: found.error }
   const browser = found
@@ -312,7 +344,7 @@ export async function runResearchBrowser(input: Input): Promise<Report> {
 
 // The desktop's copy of the run's provenance: kept while any of the run's browsers is open, with the links its
 // browsers followed added. The engine sends what it added since the copy it last saw, or the whole set to start one.
-function sync(input: Input) {
+function sync(input: ResearchInput) {
   const known = runs.get(input.runID)
   if (input.generation !== undefined && known?.generation !== input.generation) return undefined
   const run = known ?? createRun(input.runID)
@@ -344,7 +376,7 @@ function createRun(id: string): Run {
 }
 
 // The agent's browser, opened once even when two of its calls arrive together, after waiting for room in the run.
-function obtain(key: string, input: Input, run: Run) {
+function obtain(key: string, input: ResearchInput, run: Run) {
   const pending = opening.get(key)
   if (pending) return pending
   const started = (async () => {
@@ -379,7 +411,7 @@ function obtain(key: string, input: Input, run: Run) {
   return started
 }
 
-async function open(key: string, input: Input, run: Run): Promise<Browser | { readonly error: string }> {
+async function open(key: string, input: ResearchInput, run: Run): Promise<Browser | { readonly error: string }> {
   const slot = pool.acquire()
   const partition = slot.session
   if (!hardened.has(partition)) {
@@ -445,7 +477,8 @@ async function open(key: string, input: Input, run: Run): Promise<Browser | { re
     links: new Set(),
     forms: new Set(),
     requests: new Map(),
-    page: { requests: 0, bytes: 0 },
+    inflight: new Set(),
+    page: { requests: 0, start: proxy.received(), over: false },
     joined: [],
     refused: [],
   }
@@ -453,23 +486,31 @@ async function open(key: string, input: Input, run: Run): Promise<Browser | { re
   byContents.set(contents.id, browser)
   run.browsers.set(input.sessionID, browser)
   wire(browser)
+  // The first empty page, which the rule allows once: DevTools answers nothing about a page before there is one.
+  await contents.loadURL("about:blank").catch(() => undefined)
+  if (contents.isDestroyed()) {
+    await closeBrowser(browser)
+    return { error: "The research browser closed as it opened." }
+  }
   await devtools(browser)
   changed()
   return browser
 }
 
-async function perform(browser: Browser, input: Input): Promise<Report> {
-  await lifecycle(browser, "active")
+async function perform(browser: Browser, input: ResearchInput): Promise<Report> {
+  // A click's href is good for the navigation that click starts, never for a later command's.
+  browser.clicked = undefined
+  await lifecycle(browser, "running")
   const result = await act(browser, input).catch(
     (error: unknown): Partial<Report> => ({ ok: false, error: error instanceof Error ? error.message : String(error) }),
   )
-  if (!browser.closed) await lifecycle(browser, "frozen")
+  if (!browser.closed) await lifecycle(browser, "paused")
   browser.state = "idle"
   changed()
   return { ...report(browser), ok: true, ...result }
 }
 
-async function act(browser: Browser, input: Input): Promise<Partial<Report>> {
+async function act(browser: Browser, input: ResearchInput): Promise<Partial<Report>> {
   const contents = browser.contents
   switch (input.command) {
     case "research.open": {
@@ -481,6 +522,7 @@ async function act(browser: Browser, input: Input): Promise<Partial<Report>> {
       browser.actedAt = Date.now()
       browser.expected = { url: spelled(input.url), decision }
       await load(browser, () => contents.loadURL(input.url!))
+      await quiet(browser)
       return finishLoad(browser)
     }
     case "research.read":
@@ -491,9 +533,7 @@ async function act(browser: Browser, input: Input): Promise<Partial<Report>> {
       const read = await world<PageRead>(browser, readPage, { maxBytes: ResearchReader.MAX_BYTES })
       remember(browser, read.links, read.forms)
       // links and find need the page's links or its text, not the whole page again.
-      return input.command === "research.links"
-        ? { read: { ...read, html: "" } }
-        : { read }
+      return input.command === "research.links" ? { read: { ...read, html: "" } } : { read }
     }
     case "research.observe": {
       browser.state = "browsing"
@@ -518,6 +558,7 @@ async function act(browser: Browser, input: Input): Promise<Partial<Report>> {
       }
       if (!point.hit) await world(browser, clickElement, input.ref)
       await settle(browser)
+      browser.clicked = undefined
       return finishLoad(browser)
     }
     case "research.type": {
@@ -525,10 +566,14 @@ async function act(browser: Browser, input: Input): Promise<Partial<Report>> {
       const text = input.text ?? ""
       if (/[\r\n\t]/.test(text)) return fail("Type text without line breaks or tabs; press Enter to submit.")
       browser.state = "browsing"
-      const target = await world<Awaited<ReturnType<typeof typeTarget>>>(browser, typeTarget, input.ref, isCredentialField)
+      const target = await world<Awaited<ReturnType<typeof typeTarget>>>(
+        browser,
+        typeTarget,
+        input.ref,
+        isCredentialField,
+      )
       if (!target.ok) return fail(target.reason)
       browser.actedAt = Date.now()
-      contents.focus()
       const typed = await sendGuardedCharacters(
         text,
         () => world<boolean>(browser, typingMoved, input.ref!, isCredentialField),
@@ -542,7 +587,7 @@ async function act(browser: Browser, input: Input): Promise<Partial<Report>> {
       )
       if (!typed) return fail("Focus left the field while Vector typed, so it stopped.")
       browser.actedAt = Date.now()
-      const value = await world<string | undefined>(browser, fieldValue, input.ref)
+      const value = await typedValue(browser, input.ref, text)
       return value === undefined || value.endsWith(text) ? {} : { value }
     }
     case "research.press": {
@@ -550,7 +595,6 @@ async function act(browser: Browser, input: Input): Promise<Partial<Report>> {
       if (!key) return fail(`Research browsers press only ${KEYS.join(", ")}.`)
       browser.state = "browsing"
       browser.actedAt = Date.now()
-      contents.focus()
       contents.sendInputEvent({ type: "keyDown", keyCode: key })
       if (key === "Enter") contents.sendInputEvent({ type: "char", keyCode: key })
       contents.sendInputEvent({ type: "keyUp", keyCode: key })
@@ -567,7 +611,8 @@ async function act(browser: Browser, input: Input): Promise<Partial<Report>> {
       const history = contents.navigationHistory
       const index = history.getActiveIndex()
       const entry = index > 0 ? history.getEntryAtIndex(index - 1) : undefined
-      if (!entry) return fail("There is no earlier page in this research browser.")
+      // The browser's first empty page is not a page to go back to.
+      if (!entry || entry.url === "about:blank") return fail("There is no earlier page in this research browser.")
       const decision = decide(browser, entry.url, "back")
       if (!decision.allow) return refuse(browser, entry.url, decision.reason)
       browser.actedAt = Date.now()
@@ -586,6 +631,17 @@ async function act(browser: Browser, input: Input): Promise<Partial<Report>> {
   }
 }
 
+// The field's value once the page has taken the keys: Chromium hands the page key events after sendInputEvent returns,
+// and a page held before then would show them only at the next command. After TYPED_MS, what the field shows.
+async function typedValue(browser: Browser, ref: string, text: string) {
+  const deadline = Date.now() + TYPED_MS
+  while (true) {
+    const value = await world<string | undefined>(browser, fieldValue, ref)
+    if (value === undefined || value.endsWith(text) || Date.now() >= deadline) return value
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+}
+
 // After a load: a PDF the browser would have downloaded is fetched into memory through the proxy instead.
 async function finishLoad(browser: Browser): Promise<Partial<Report>> {
   const download = browser.download
@@ -596,7 +652,12 @@ async function finishLoad(browser: Browser): Promise<Partial<Report>> {
   return { pdf: { url: download.url, base64: got.body.toString("base64"), contentType: got.contentType } }
 }
 
-function decide(browser: Browser, url: string, kind: Kind, extra: { readonly frame?: "main" | "sub"; readonly method?: string; readonly typedHost?: string } = {}) {
+function decide(
+  browser: Browser,
+  url: string,
+  kind: Kind,
+  extra: { readonly frame?: "main" | "sub"; readonly method?: string; readonly typedHost?: string } = {},
+) {
   return decideResearchNavigation({
     url,
     method: extra.method ?? "GET",
@@ -658,14 +719,27 @@ async function load(browser: Browser, start: () => Promise<void>) {
 // Waits for what an action started: a navigation it caused, or the page's own reaction.
 async function settle(browser: Browser) {
   await new Promise((resolve) => setTimeout(resolve, 300))
-  if (browser.closed || !browser.contents.isLoading()) return
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, LOAD_TIMEOUT_MS)
-    browser.contents.once("did-stop-loading", () => {
-      clearTimeout(timer)
-      resolve()
+  if (!browser.closed && browser.contents.isLoading())
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, LOAD_TIMEOUT_MS)
+      browser.contents.once("did-stop-loading", () => {
+        clearTimeout(timer)
+        resolve()
+      })
     })
-  })
+  await quiet(browser)
+}
+
+// Until the page has had no request in flight for QUIET_MS, at most SETTLE_MS: the page is held when the command ends,
+// so a page that builds itself by script after its load event gets the time to, and so do its own redirects.
+async function quiet(browser: Browser) {
+  const deadline = Date.now() + SETTLE_MS
+  const state = { since: Date.now() }
+  while (!browser.closed && Date.now() < deadline) {
+    if (browser.inflight.size > 0) state.since = Date.now()
+    if (Date.now() - state.since >= QUIET_MS) return
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
 }
 
 function report(browser: Browser) {
@@ -693,12 +767,7 @@ function empty(generation: string): Report {
 
 // Runs one of browser-page.ts's functions in the page's isolated world, with the window and these arguments.
 function world<T>(browser: Browser, fn: (win: Window, ...rest: never[]) => unknown, ...args: unknown[]) {
-  const values = args.map((value) => (typeof value === "function" ? value.toString() : JSON.stringify(value)))
-  return browser.contents.executeJavaScriptInIsolatedWorld(
-    WORLD,
-    [{ code: `(${fn.toString()})(window${values.map((value) => `, ${value}`).join("")})` }],
-    true,
-  ) as Promise<T>
+  return runInWorld<T>(browser.contents, WORLD, fn, ...args)
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -743,6 +812,9 @@ function wire(browser: Browser) {
     return { action: "deny" }
   })
   contents.on("did-navigate", (_event, url, code) => {
+    browser.clicked = undefined
+    // The browser's first empty page is no page the rule decided.
+    if (url === "about:blank" && browser.decided === undefined) return
     browser.decided = url
     browser.status = code
     // The links of the page before are not on this one.
@@ -800,16 +872,26 @@ export const researchRequestHandlers = {
       )
     if (!URL.canParse(details.url)) return callback({ cancel: true })
     const target = new URL(details.url)
-    if ((target.protocol === "http:" || target.protocol === "https:" || target.protocol === "ws:" || target.protocol === "wss:") && LocalPolicy.hostClass(target.hostname) !== "internet")
+    if (
+      (target.protocol === "http:" ||
+        target.protocol === "https:" ||
+        target.protocol === "ws:" ||
+        target.protocol === "wss:") &&
+      LocalPolicy.hostClass(target.hostname) !== "internet"
+    )
       return callback({ cancel: true })
     if (details.resourceType === "font") return callback({ cancel: true })
     if ((details.resourceType === "image" || details.resourceType === "media") && !browser.images)
       return callback({ cancel: true })
     browser.page.requests++
-    if (browser.page.requests > MAX_SUBRESOURCES || browser.page.bytes > MAX_SUBRESOURCE_BYTES) {
-      if (browser.page.requests === MAX_SUBRESOURCES + 1) note(browser, details.url, SUBRESOURCES)
+    const over =
+      browser.page.requests > MAX_SUBRESOURCES || browser.proxy.received() - browser.page.start > MAX_SUBRESOURCE_BYTES
+    if (over) {
+      if (!browser.page.over) note(browser, details.url, SUBRESOURCES)
+      browser.page.over = true
       return callback({ cancel: true })
     }
+    browser.inflight.add(details.id)
     callback({})
   },
   beforeSendHeaders: (
@@ -824,20 +906,25 @@ export const researchRequestHandlers = {
     }
     callback({ requestHeaders: details.requestHeaders })
   },
+  /** Every document a research browser loads is sandboxed with no dialogs; a frame it holds inherits that. */
   headersReceived: (
     details: Electron.OnHeadersReceivedListenerDetails,
     callback: (response: Electron.HeadersReceivedResponse) => void,
   ) => {
-    const browser = details.webContentsId === undefined ? undefined : byContents.get(details.webContentsId)
-    if (browser && details.resourceType !== "mainFrame" && details.resourceType !== "subFrame") {
-      const length = Object.entries(details.responseHeaders ?? {}).find(([name]) => name.toLowerCase() === "content-length")
-      browser.page.bytes += Number(length?.[1]?.[0] ?? 0) || 0
-    }
-    callback({})
+    if (details.resourceType !== "mainFrame" && details.resourceType !== "subFrame") return callback({})
+    const headers = details.responseHeaders ?? {}
+    const name = Object.keys(headers).find((key) => key.toLowerCase() === "content-security-policy")
+    callback({
+      responseHeaders: {
+        ...headers,
+        [name ?? "Content-Security-Policy"]: [...(name ? (headers[name] ?? []) : []), SANDBOX],
+      },
+    })
   },
   done: (details: { readonly id: number; readonly webContentsId?: number }) => {
     const browser = details.webContentsId === undefined ? undefined : byContents.get(details.webContentsId)
     browser?.requests.delete(details.id)
+    browser?.inflight.delete(details.id)
   },
 }
 
@@ -856,18 +943,27 @@ async function frame(browser: Browser, details: BeforeRequest) {
         ...(prior?.typedHost ? { typedHost: prior.typedHost } : {}),
       })
   if (expected) browser.expected = undefined
+  // A click's href is spent on the first main-frame navigation after it, allowed or not.
+  if (main && !prior) browser.clicked = undefined
   // Even a load Vector started is refused when its method is not a read: a form can be resubmitted through history.
   const method = details.method.toUpperCase()
   if (decision.allow && method !== "GET" && method !== "HEAD") return refused(browser, details.url, POST)
   if (!decision.allow) return refused(browser, details.url, decision.reason)
+  // about:blank and about:srcdoc, which reach no site.
+  if (!/^https?:/i.test(details.url)) return true
   if (decision.robots && !(await Effect.runPromise(browser.run.robots.check(details.url))))
     return refused(browser, details.url, ROBOTS)
   await Effect.runPromise(browser.run.limiter.run(new URL(details.url).hostname, Effect.void, () => undefined))
-  if (!main) return true
+  if (!main) {
+    browser.inflight.add(details.id)
+    return true
+  }
+  // A new page: what the last one still had in flight is the network's to cancel, not this page's to wait for.
+  browser.inflight = new Set([details.id])
   const address = new URL(details.url)
   const typed = prior?.typedHost ?? (!decision.robots && decision.via === "provenance" ? address.hostname : undefined)
   browser.requests.set(details.id, typed ? { typedHost: typed } : {})
-  browser.page = { requests: 0, bytes: 0 }
+  browser.page = { requests: 0, start: browser.proxy.received(), over: false }
   if (decision.join) {
     browser.run.provenance = addLinks(browser.run.provenance, [decision.join], "link")
     browser.joined = [...new Set([...browser.joined, decision.join])]
@@ -895,9 +991,16 @@ async function devtools(browser: Browser) {
   await send("Page.enable")
   // No native file dialog, whatever the page's scripts do.
   await send("Page.setInterceptFileChooserDialog", { enabled: true })
-  // Before the page's own scripts in every frame: no print dialog and no peer connections. A best effort only; the
-  // proxy's WebRTC policy and the network stack's service worker refusal are what hold.
+  // The page behaves as focused, so typing reaches its field without Vector focusing the browser, which would take the
+  // keyboard from the user's own window.
+  await send("Emulation.setFocusEmulationEnabled", { enabled: true })
+  // Before the page's own scripts in every frame, a frame its script just made included (the Electron smoke checks it):
+  // no print dialog and no peer connections. What holds whatever a page does is the documents' sandbox for print() and
+  // dialogs, the proxy-only WebRTC policy, and the network stack's refusal of service workers.
   await send("Page.addScriptToEvaluateOnNewDocument", { source: STUBS, runImmediately: true })
+  // For holding the page's scripts between commands (lifecycle).
+  await send("Debugger.enable")
+  await send("Debugger.setSkipAllPauses", { skip: true })
   tools.on("message", (_event, method) => {
     if (method === "Page.javascriptDialogOpening") void send("Page.handleJavaScriptDialog", { accept: false })
   })
@@ -914,19 +1017,32 @@ const STUBS = `(() => {
   try { Object.defineProperty(Navigator.prototype, "serviceWorker", { get: () => undefined, configurable: false }) } catch {}
 })()`
 
-// Freezes the page between commands, so its scripts, timers and requests stop, and thaws it for the next one.
-function lifecycle(browser: Browser, state: "frozen" | "active") {
-  if (!browser.debugger || browser.closed || browser.contents.isDestroyed()) return Promise.resolve(false)
-  return browser.contents.debugger.sendCommand("Page.setWebLifecycleState", { state }).then(
-    () => true,
-    () => false,
-  )
+// Holds the page's scripts between commands and lets them run for the next one. It pauses them in the debugger: the
+// page's timers, handlers and network callbacks wait, none is dropped, and they run once the next command starts.
+// Chromium's own freezing (Page.setWebLifecycleState) does not stop a page that is shown, and research pages are, by
+// focus emulation (the Electron smoke checks both). While the page runs, pauses are skipped, so neither the page's own
+// `debugger` statement nor a pause asked for while no script ran can hold Vector's page scripts.
+async function lifecycle(browser: Browser, state: "paused" | "running") {
+  if (!browser.debugger || browser.closed || browser.contents.isDestroyed()) return
+  const send = (method: string, params?: Record<string, unknown>) =>
+    browser.contents.debugger.sendCommand(method, params).catch(() => undefined)
+  if (state === "paused") {
+    await send("Debugger.setSkipAllPauses", { skip: false })
+    await send("Debugger.pause")
+    return
+  }
+  await send("Debugger.setSkipAllPauses", { skip: true })
+  // Answers an error when nothing was paused yet, which is fine.
+  await send("Debugger.resume")
 }
 
 function hostWindow() {
   if (host.window && !host.window.isDestroyed()) return host.window
   host.window = new BrowserWindow({
     show: false,
+    // Nothing the user does reaches it: it never takes focus and is in no taskbar or window switcher.
+    focusable: false,
+    skipTaskbar: true,
     width: VIEW.width,
     height: VIEW.height,
     webPreferences: {
@@ -953,7 +1069,11 @@ async function closeBrowser(browser: Browser) {
   browser.run.browsers.delete(browser.sessionID)
   const contents = browser.contents
   if (host.window && !host.window.isDestroyed()) host.window.contentView.removeChildView(browser.view)
-  // Its pages close before its slot is cleared.
+  // Its pages close before its slot is cleared, with its scripts let run, so an unload handler does not hold the close.
+  if (browser.debugger && !contents.isDestroyed()) {
+    await contents.debugger.sendCommand("Debugger.setSkipAllPauses", { skip: true }).catch(() => undefined)
+    await contents.debugger.sendCommand("Debugger.resume").catch(() => undefined)
+  }
   await new Promise<void>((resolve) => {
     if (contents.isDestroyed()) return resolve()
     const timer = setTimeout(resolve, 2_000)
@@ -969,7 +1089,17 @@ async function closeBrowser(browser: Browser) {
   const run = browser.run
   if (run.browsers.size === 0 && run.opening === 0 && run.waiters.size === 0) runs.delete(run.id)
   ;[...run.waiters].forEach((wake) => wake())
+  releaseHost()
   changed()
+}
+
+// The host window lives only while a research browser does, so it never keeps Vector open after its own windows
+// close, and no lookup of Vector's windows ever finds it with nothing in it.
+function releaseHost() {
+  if (browsers.size > 0 || !host.window) return
+  const window = host.window
+  host.window = undefined
+  if (!window.isDestroyed()) window.destroy()
 }
 
 function changed() {
@@ -996,9 +1126,12 @@ export const ResearchWatch = {
     if (!browser || browser.closed || browser.contents.isDestroyed()) return undefined
     return (await browser.contents.capturePage()).toDataURL()
   },
+  /** Closes the browser, and its agent opens no other in this research. */
   stop: async (id: string) => {
     const browser = browsers.get(id)
     if (!browser) return false
+    stopped.add(id)
+    if (stopped.size > STOPPED_KEPT) stopped.delete(stopped.values().next().value!)
     await closeBrowser(browser)
     return true
   },

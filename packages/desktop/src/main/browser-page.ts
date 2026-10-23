@@ -126,13 +126,21 @@ export function readPage(win: Window, options: { readonly maxBytes: number }): P
     const view = element.ownerDocument.defaultView ?? win
     const style = view.getComputedStyle(element)
     if (element.hasAttribute("hidden") || style.display === "none") return "none"
-    if ((style.opacity !== "" && Number(style.opacity) === 0) || style.fontSize === "0px" || /^(?:transparent|rgba\(.*,\s*0\))$/.test(style.color))
+    if (
+      (style.opacity !== "" && Number(style.opacity) === 0) ||
+      style.fontSize === "0px" ||
+      /^(?:transparent|rgba\(.*,\s*0\))$/.test(style.color)
+    )
       return "none"
     if (laidOut) {
       const rect = element.getBoundingClientRect()
       const placed = style.position === "absolute" || style.position === "fixed"
       if (placed && (rect.right + view.scrollX <= 0 || rect.bottom + view.scrollY <= 0)) return "none"
-      if (rect.width <= 1 && rect.height <= 1 && (style.overflow === "hidden" || (style.clip ?? "").startsWith("rect(0")))
+      if (
+        rect.width <= 1 &&
+        rect.height <= 1 &&
+        (style.overflow === "hidden" || (style.clip ?? "").startsWith("rect(0"))
+      )
         return "none"
     }
     if (style.visibility === "hidden" || style.visibility === "collapse") return "text"
@@ -190,11 +198,7 @@ export function readPage(win: Window, options: { readonly maxBytes: number }): P
     push(`<${name}${attributes}>`)
     if (VOID.has(tag)) return
     const slot = tag === "slot" ? (element as HTMLSlotElement).assignedNodes({ flatten: true }) : []
-    const children = element.shadowRoot
-      ? element.shadowRoot.childNodes
-      : slot.length > 0
-        ? slot
-        : element.childNodes
+    const children = element.shadowRoot ? element.shadowRoot.childNodes : slot.length > 0 ? slot : element.childNodes
     children.forEach((child) => walk(child, depth + 1, how === "shown", inside))
     push(`</${name}>`)
   }
@@ -204,7 +208,9 @@ export function readPage(win: Window, options: { readonly maxBytes: number }): P
     ...Array.from(top.querySelectorAll("meta[content]")).flatMap((meta) => {
       const key = ["name", "property", "itemprop"].find((attribute) => meta.hasAttribute(attribute))
       return key
-        ? [`<meta ${key}="${quote(meta.getAttribute(key) ?? "")}" content="${quote(meta.getAttribute("content") ?? "")}">`]
+        ? [
+            `<meta ${key}="${quote(meta.getAttribute(key) ?? "")}" content="${quote(meta.getAttribute("content") ?? "")}">`,
+          ]
         : []
     }),
     ...Array.from(top.querySelectorAll("link[rel~='canonical'][href]")).flatMap((link) => {
@@ -470,7 +476,14 @@ export function typeTarget(win: Window, ref: string, isCredentialField: (field: 
   if (credential(element))
     return { ok: false, reason: "Research browsers never type into a sign-in, contact or payment field." }
   const form = (element as HTMLInputElement).form ?? element.closest("form")
-  const fields = form ? Array.from(form.querySelectorAll("input, textarea")) : []
+  // A form's elements include the fields outside it that join it through their `form` attribute; the ones inside it
+  // are read too, in case a page broke the collection.
+  const fields = form
+    ? [
+        ...Array.from(form.elements).filter((field) => field.localName === "input" || field.localName === "textarea"),
+        ...Array.from(form.querySelectorAll("input, textarea")),
+      ]
+    : []
   if (fields.some((field) => (field.getAttribute("type") ?? "").toLowerCase() === "password" || credential(field)))
     return {
       ok: false,
@@ -502,7 +515,9 @@ export function typingMoved(win: Window, ref: string, isCredentialField: (field:
     autocomplete: active.getAttribute("autocomplete"),
     name: active.getAttribute("name"),
     id: active.getAttribute("id"),
-    textSecurity: (active.ownerDocument.defaultView ?? win).getComputedStyle(active).getPropertyValue("-webkit-text-security"),
+    textSecurity: (active.ownerDocument.defaultView ?? win)
+      .getComputedStyle(active)
+      .getPropertyValue("-webkit-text-security"),
   })
 }
 
