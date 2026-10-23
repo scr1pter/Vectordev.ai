@@ -288,7 +288,7 @@ export const BrowserTool = Tool.define<typeof Parameters, Metadata, never>(
           // With Vector Local on, Web access applies to the browser's pages too, before anything is asked, and after the
           // web an address the agent chose that is new asks each time.
           webAccess("agent-browser", targetUrl!)
-          const after = params.action === "open_url" && newAddress(targetUrl!, ctx)
+          const after = params.action === "open_url" && (yield* newAddress(targetUrl!, ctx))
           yield* ctx.ask({
             permission: params.action === "open_url" ? "browser_external" : "browser_interact",
             patterns: [after ? `${PermissionPolicy.AFTER_WEB}${targetUrl}` : origin],

@@ -15,6 +15,7 @@ import { EgressHttpClient } from "@vectordevai/core/local-mode/http-client"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import { SessionMemory } from "../session/memory"
 import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
+import type { SessionV1 } from "@vectordevai/core/v1/session"
 
 const MAX_RESPONSE_SIZE = 5 * 1024 * 1024 // 5MB
 const DEFAULT_TIMEOUT = 30 * 1000 // 30 seconds
@@ -78,7 +79,7 @@ export const WebFetchTool = Tool.define(
           const request = HttpClientRequest.get(params.url).pipe(HttpClientRequest.setHeaders(headers))
           webAccess("webfetch", params.url)
           // The address the model chose is checked once; a redirect's next address is the server's, not the model's.
-          const strict = { first: newAddress(params.url, ctx) }
+          const strict = { first: yield* newAddress(params.url, ctx) }
 
           const { response, body } = yield* Effect.gen(function* () {
             const response = yield* WebFetchRequest.execute(http, request, {
@@ -175,24 +176,37 @@ export const AFTER_WEB_REASON =
 
 /**
  * Whether the agent's own choice of `address` asks again under Vector Local's rule for after the web (section 4.4):
- * once the conversation read the web, an address on a host it has not reached asks, as does one that did not appear
- * in an earlier result or link. An address the person typed never asks again for this. The ask's pattern starts with
- * PermissionPolicy.AFTER_WEB, so no saved approval, rule or auto-accept answers it. With Vector Local off it never
- * applies.
+ * once the conversation took in anything from outside, an address on a host it has not reached asks, as does one that
+ * did not appear in an earlier web result or link. An address the person typed never asks again for this. The ask's
+ * pattern starts with PermissionPolicy.AFTER_WEB, so no saved approval, rule or auto-accept answers it. With Vector
+ * Local off it never applies.
+ *
+ * It reads the whole conversation (Tool.Context.history), so a compaction that folded a page away does not end it.
+ * Outside content is whatever holds memory for review (SessionMemory.taint): a page, a search, an MCP tool, a remote
+ * skill or a subagent's report, foreground or background, since a subagent may have read the page and relays what
+ * it said. Only what the web itself returned counts as giving an address, never a subagent's report or an MCP tool's.
  *
  * A subagent works from a brief its launching agent wrote, which carries whatever that agent read: it counts as having
  * read the web from its first step, and nothing in its brief counts as typed by the person.
  */
-export function newAddress(address: string, ctx: Pick<Tool.Context, "messages" | "parentID">) {
+export const newAddress = Effect.fn("WebFetchTool.newAddress")(function* (
+  address: string,
+  ctx: Pick<Tool.Context, "messages" | "parentID" | "history">,
+) {
   if (!Egress.policy().enabled || !URL.canParse(address)) return false
-  const launched = ctx.parentID !== undefined
-  if (!launched && SessionMemory.taint(ctx.messages) !== "web") return false
+  return unvouched(address, ctx.history ? yield* ctx.history() : ctx.messages, ctx.parentID !== undefined)
+})
+
+// Whether nothing vouches for `address` in a conversation that took in outside content: the person did not type it,
+// or the web did not both give it and serve a page from its host.
+function unvouched(address: string, messages: readonly SessionV1.WithParts[], launched: boolean) {
+  if (!launched && SessionMemory.taint(messages) === undefined) return false
   const url = new URL(address)
   const forms = [address.trim(), url.href, `${url.host}${url.pathname}${url.search}`]
   const said = (text: string) => forms.some((form) => text.includes(form))
-  if (!launched && ctx.messages.some((message) => message.info.role === "user" && said(SessionMemory.typed(message))))
+  if (!launched && messages.some((message) => message.info.role === "user" && said(SessionMemory.typed(message))))
     return false
-  const tools = ctx.messages.flatMap((message) => message.parts.flatMap((part) => (part.type === "tool" ? [part] : [])))
+  const tools = messages.flatMap((message) => message.parts.flatMap((part) => (part.type === "tool" ? [part] : [])))
   const reached = tools.some(
     (part) =>
       (part.tool === "webfetch" || part.tool === "browser") &&

@@ -556,7 +556,13 @@ export function taint(messages: readonly SessionV1.WithParts[]): BrainSchema.Hol
     )
   )
     return "web"
-  if (tools.some((tool) => tool === "task" || tool === "task_manage" || tool === "send_teammate_message"))
+  // A background subagent's report arrives as a synthetic note in a user message, after its task call.
+  if (
+    tools.some((tool) => tool === "task" || tool === "task_manage" || tool === "send_teammate_message") ||
+    messages.some((message) =>
+      message.parts.some((part) => part.type === "text" && part.metadata?.["taskNotification"] !== undefined),
+    )
+  )
     return "subagent"
   if (commands.includes("mcp") || tools.some((tool) => !LOCAL_TOOLS.has(tool))) return "mcp"
   return undefined
