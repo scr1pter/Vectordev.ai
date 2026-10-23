@@ -2,10 +2,12 @@ import { afterAll, expect } from "bun:test"
 import path from "node:path"
 import { Effect } from "effect"
 import { FSUtil } from "@vectordevai/core/fs-util"
+import type { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { ResearchProvenance } from "@vectordevai/core/research/provenance"
 import { ResearchReader } from "@vectordevai/core/research/reader"
 import { ResearchStore } from "@vectordevai/core/research/store"
 import { Session } from "@/session/session"
+import { Permission } from "../../src/permission"
 import { ResearchBrowser } from "../../src/tool/research-browser"
 import { RENDER } from "../../src/tool/research-read"
 import { ResearchRun } from "../../src/tool/research-run"
@@ -26,6 +28,13 @@ const web = FakeWeb.start({
   sites: {
     ...FakeWeb.sites(),
     // A public page that lists numbers, as a hostile page listing every 5-digit number would.
+    // A page on the user's own network, read from the address the user typed: its text is private.
+    planner: {
+      "/": {
+        headers: { "content-type": "text/html; charset=utf-8" },
+        body: `<html><head><title>Sizing notes</title></head><body><main><h1>Sizing notes</h1><p>Our internal tool, the Zephyr planner, sizes every heat pump from the floor area and the coldest design day.</p><p>It is only for the installers on our team.</p></main></body></html>`,
+      },
+    },
     numbers: {
       "/": {
         headers: { "content-type": "text/html; charset=utf-8" },
@@ -76,6 +85,22 @@ const desktop = (pages: Record<string, unknown> = {}) => {
 }
 
 const researchCalls = () => bridge.calls().filter((call) => call.path === "/research")
+const researcher = (hit: { body: Record<string, unknown> }) => JSON.stringify(hit.body).includes("research_assignment")
+// Answers every permission once, as the user would.
+const approve = Effect.gen(function* () {
+  const permission = yield* Permission.Service
+  const asked: PermissionV1.Request[] = []
+  yield* Effect.gen(function* () {
+    while (true) {
+      for (const request of yield* permission.list()) {
+        asked.push(request)
+        yield* permission.reply({ requestID: request.id, reply: "once" }).pipe(Effect.ignore)
+      }
+      yield* Effect.sleep(10)
+    }
+  }).pipe(Effect.forkScoped)
+  return asked
+})
 // The commands sent from `from` on, once the closing that follows the session's end has been sent.
 const settled = (from: number) =>
   Effect.gen(function* () {
@@ -245,6 +270,56 @@ it.instance(
         .slice(before)
         .filter((call) => call.body.command === "research.type")
       expect(typed.map((call) => call.body.text)).toEqual(["Hooli heat pumps"])
+    }),
+  90_000,
+)
+
+it.instance(
+  "a researcher's typing is checked against the whole run, and its sub-question exempts nothing",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web)
+      const sessions = yield* Session.Service
+      const lead = yield* sessions.create({ title: "Research", permission: allow })
+      bridge.answer(desktop())
+      yield* approve
+      // On this computer, so on the user's own network: what it says is private context of the run.
+      const notes = web.direct("planner", "/")
+      yield* test.llm.tool("research_plan", plan({ depth: "deep" }))
+      // Nothing private names Zephyr yet, so the lead's sub-question passes its check.
+      yield* test.llm.tool("task", {
+        description: "Sizing",
+        prompt: "How does the Zephyr planner size heat pumps?",
+        subagent_type: "researcher",
+        background: false,
+      })
+      yield* test.llm.toolMatch(researcher, "research_read", { url: notes })
+      yield* test.llm.toolMatch(researcher, "research_browser", { action: "open", url: ARTICLE })
+      // Zephyr is in the researcher's own sub-question, which the lead wrote and the user did not type.
+      yield* test.llm.toolMatch(researcher, "research_browser", { action: "type", ref: "ref_1", text: "Zephyr planner sizing" })
+      // The user typed Hooli.
+      yield* test.llm.toolMatch(researcher, "research_browser", { action: "type", ref: "ref_1", text: "Hooli heat pump sizing" })
+      yield* test.llm.textMatch(researcher, "Found it.")
+      yield* test.llm.text("Done.")
+      yield* send({
+        sessionID: lead.id,
+        agent: "research",
+        text: `Research how heat pumps are sized for Hooli, from ${notes} and ${ARTICLE}.`,
+      })
+      const [child] = yield* sessions.children(lead.id)
+      const [read] = yield* calls(child!.id, "research_read")
+      expect(read?.state.status === "completed" ? read.state.metadata.private : undefined).toBe(true)
+      const typed = yield* calls(child!.id, "research_browser")
+      expect(output(typed[1])).toBe(ResearchBrowser.TYPED)
+      expect(output(typed[2])).toContain("Typed into ref_1.")
+      // The researcher's browser is its own, attributed to the lead's run, and counted in the run's browsers (a plan
+      // no one could answer stays Focused here).
+      const opened = researchCalls().find((call) => call.body.sessionID === child!.id && call.body.command === "research.open")
+      expect(opened?.body).toMatchObject({
+        agent: "researcher",
+        rootID: lead.id,
+        max: 1 + ResearchRun.LIMITS.focused.researchers,
+      })
     }),
   90_000,
 )
