@@ -191,3 +191,49 @@ it.instance(
     }),
   90_000,
 )
+
+it.instance(
+  "while the plan card is open, its running part carries the plan as Vector would run it, both estimates, the search set up and the user's own sites",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web, { research: { domains: { prefer: [" Nature.com "], avoid: ["example.com"] } } })
+      const question = yield* Question.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "Research" })
+      // What the app's plan card reads: the research_plan part while its question waits for the user.
+      const seen: Record<string, unknown>[] = []
+      yield* Effect.gen(function* () {
+        while (true) {
+          for (const request of yield* question.list()) {
+            const part = (yield* calls(session.id, "research_plan")).find(
+              (item) => item.callID === request.tool?.callID,
+            )
+            if (part?.state.status === "running") seen.push(part.state.metadata ?? {})
+            yield* question.reply({ requestID: request.id, answers: [["Start"]] }).pipe(Effect.ignore)
+          }
+          yield* Effect.sleep(10)
+        }
+      }).pipe(Effect.forkScoped)
+      yield* test.llm.tool("research_plan", plan())
+      yield* test.llm.text("Done.")
+      yield* send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." })
+
+      expect(seen).toHaveLength(1)
+      expect(seen[0]).toMatchObject({
+        plan: { depth: "focused", prefer_domains: ["nature.com"], avoid_domains: ["example.com"] },
+        estimate: expect.stringContaining("About 15 pages and 8 searches"),
+        card: {
+          deep: true,
+          deepEstimate: expect.stringContaining("About 40 pages and 24 searches"),
+          search: { provider: "searxng", host: new URL(web.url("searxng", "/")).host },
+          preferences: { prefer: ["nature.com"], avoid: ["example.com"] },
+          offline: false,
+        },
+      })
+      // Once answered, the part keeps what the run started with, not the card.
+      const [planned] = yield* calls(session.id, "research_plan")
+      expect(metadataOf(planned)).toMatchObject({ approved: true, answer: "start" })
+      expect(metadataOf(planned).card).toBeUndefined()
+    }),
+  90_000,
+)
