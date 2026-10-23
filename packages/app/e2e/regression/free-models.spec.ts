@@ -191,11 +191,9 @@ test("lists both copies of a free model once each, under Recently used first, an
 }, testInfo) => {
   await setup(page, { enabled: true })
   await page.locator('[data-action="prompt-model"]').filter({ visible: true }).first().click()
-  // The current model's section comes first, above the free models and every provider.
-  const sections = await page
-    .locator("[data-model-section]")
-    .evaluateAll((items) => items.map((item) => item.getAttribute("data-model-section")))
-  expect(sections[0]).toBe("recent")
+  // The current model's section comes first, above the free models and every provider. The assertion waits: on a
+  // loaded runner the picker can draw before the current model's row is known.
+  await expect(page.locator("[data-model-section]").first()).toHaveAttribute("data-model-section", "recent")
   await openFreeModels(page)
   // A connected OpenRouter account no longer hides the shared copy, which stays on Vector's shared allowance.
   const shared = page.locator('[data-option-key="vector:maker/coder:free"]')
