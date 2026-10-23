@@ -1,3 +1,4 @@
+import { Brain } from "@vectordevai/core/brain/brain"
 import { Database } from "@vectordevai/core/database/database"
 import { ResearchEstimate } from "@vectordevai/core/research/estimate"
 import { ResearchReader } from "@vectordevai/core/research/reader"
@@ -7,10 +8,12 @@ import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { ModelSlots } from "@vectordevai/core/local-mode/model-slots"
 import { isFreeModel } from "@vectordevai/schema/free-model"
+import { MemoryEvent } from "@vectordevai/schema/memory-event"
 import { Research } from "@vectordevai/schema/research"
 import type { TaskSize } from "@vectordevai/schema/task-size"
-import { Effect, Option, Schema } from "effect"
+import { Cause, Effect, Option, Schema } from "effect"
 import { Auth } from "@/auth"
+import { EventV2Bridge } from "@/event-v2-bridge"
 import { Config } from "@/config/config"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import type { Provider } from "@/provider/provider"
@@ -28,7 +31,8 @@ import DESCRIPTION from "./research-plan.txt"
 // plan card (Start, Start deep or Cancel; a typed reply is a steer). The run starts in the store only once the plan is
 // approved, so nothing is searched or read before. A call that only moves sub-questions along never asks again. In a
 // child session (the build agent's research tool) and where no one can answer, the plan is approved on its own,
-// within its launcher's size: only the user's own answer on the root plan card raises a run to Thorough (RC7).
+// within its launcher's size: only the user's own answer on the root plan card raises a run to Thorough (RC7). What the
+// user ticks "Always" for on the card (the sites to prefer or avoid, the format) is kept as their preference.
 
 export const Parameters = Schema.Struct({
   question: Schema.String.check(Schema.isLengthBetween(1, 1_000)).annotate({
@@ -92,6 +96,8 @@ export const ResearchPlanTool = Tool.define<
   | FreeModelGuests.Service
   | Database.Service
   | Auth.Service
+  | Brain.Service
+  | EventV2Bridge.Service
 >(
   "research_plan",
   Effect.gen(function* () {
@@ -104,6 +110,8 @@ export const ResearchPlanTool = Tool.define<
     const guests = yield* FreeModelGuests.Service
     const database = yield* Database.Service
     const auth = yield* Auth.Service
+    const brain = yield* Brain.Service
+    const events = yield* EventV2Bridge.Service
     // Who can answer a plan card: the same clients the question tool is offered to.
     const interactive = ["app", "cli", "desktop"].includes(flags.client) || flags.enableQuestionTool
 
@@ -254,6 +262,17 @@ export const ResearchPlanTool = Tool.define<
               metadata: { plan: proposed, approved: false, answer: "steer" as const, estimate },
             }
           const runID = yield* start(decided.plan)
+          yield* keep({
+            always: decided.always,
+            plan: decided.plan,
+            place,
+            sessionID: lead.id,
+            messageID: ctx.messageID,
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("keeping the plan card's choices failed", { error: Cause.squash(cause) }),
+            ),
+          )
           const raised = decided.plan.depth === "deep"
           return {
             title: `Research plan: ${decided.plan.subquestions.length} sub-question${decided.plan.subquestions.length === 1 ? "" : "s"}`,
@@ -280,6 +299,52 @@ export const ResearchPlanTool = Tool.define<
             },
           }
         }).pipe(Effect.orDie),
+    }
+
+    // The plan card's "Always" boxes (section 6.3): the user asked Vector to keep the sites or the format they chose for
+    // every research run, so each becomes their preference in use, with its own words as the evidence of what they
+    // ticked. A later choice adds sites to the ones kept, newest first, or replaces the format. Nothing is kept from a
+    // session an invited guest has acted in, and what Settings > Memory turned off the brain refuses.
+    function keep(input: {
+      readonly always: readonly (keyof typeof ALWAYS)[]
+      readonly plan: Research.Plan
+      readonly place: Brain.Place
+      readonly sessionID: SessionID
+      readonly messageID: string
+    }) {
+      return Effect.gen(function* () {
+        if (input.always.length === 0 || (yield* guests.marked(input.sessionID))) return
+        const kept = (yield* brain.list(input.place, { scope: "personal" })).filter(
+          (entry) => entry.kind === "preference" && entry.origin === "agent" && entry.status === "active",
+        )
+        const results = yield* Effect.forEach(input.always, (field) => {
+          const previous = kept.find((entry) => entry.text.startsWith(ALWAYS[field]))
+          const text = alwaysText(field, input.plan, previous?.text)
+          if (!text || text === previous?.text) return Effect.succeed(undefined)
+          return brain.propose(input.place, {
+            kind: "preference",
+            text,
+            scope: "personal",
+            facet: field === "format" ? "format" : "sources",
+            origin: "agent",
+            evidence: { type: "message", quote: text, verified: true },
+            learner: true,
+            sessionID: input.sessionID,
+            ...(previous ? { supersedes: previous.id } : {}),
+          })
+        })
+        const entryIDs = results.flatMap((result) =>
+          result?.type === "added" || result?.type === "superseded" || result?.type === "promoted"
+            ? [result.entry.id]
+            : [],
+        )
+        if (entryIDs.length)
+          yield* events.publish(MemoryEvent.Learned, {
+            sessionID: input.sessionID,
+            entryIDs,
+            messageID: input.messageID,
+          })
+      })
     }
 
     // The deepest a child's run may go: deep only when the request that launched it is Thorough.
@@ -396,6 +461,30 @@ function same(left: Research.Plan, right: Research.Plan) {
 
 function deeper(depth: Research.Depth, ceiling: Research.Depth): Research.Depth {
   return depth === "deep" && ceiling === "deep" ? "deep" : "focused"
+}
+
+// What each of the plan card's "Always" boxes keeps: the preference's words before the sites or the format.
+const ALWAYS = {
+  prefer_domains: "Always prefer these sites as research sources: ",
+  avoid_domains: "Never use these sites as research sources: ",
+  format: "Always write research reports as a ",
+} as const
+
+// The preference an "Always" box writes: the plan's sites before the ones kept already, as many as one memory holds, or
+// the plan's format. Nothing when the plan has none.
+function alwaysText(field: keyof typeof ALWAYS, plan: Research.Plan, previous?: string) {
+  if (field === "format") return plan.format ? `${ALWAYS.format}${plan.format}` : undefined
+  const sites = [
+    ...new Set([
+      ...(plan[field] ?? []).map((site) => site.trim().toLowerCase()),
+      ...(previous?.slice(ALWAYS[field].length).split(", ") ?? []),
+    ]),
+  ].filter(Boolean)
+  const fitting = sites.reduce<string[]>(
+    (all, site) => (`${ALWAYS[field]}${[...all, site].join(", ")}`.length <= Brain.LIMIT.agent ? [...all, site] : all),
+    [],
+  )
+  return fitting.length ? `${ALWAYS[field]}${fitting.join(", ")}` : undefined
 }
 
 // What the user's answer on the plan card means. `vector-plan:{json}` is the card's own answer, with any fields the
