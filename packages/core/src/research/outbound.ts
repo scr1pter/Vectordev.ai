@@ -8,8 +8,19 @@ import { ResearchCanonical } from "./canonical"
 import { WebFence } from "./fence"
 import { ResearchWords } from "./words"
 
-// The check on every search query and address research sends out. The research lead holds private context, and a
-// hostile page can try to steer it into putting some of that in a query. The context comes in two kinds:
+// The check on every search query and address research sends out. It catches accidental copying of private text into
+// a query or an address: a name, a rare token or a number from the private context, in the forms people usually write
+// them. It is meant to refuse almost no ordinary research query, so dates, versions and IP addresses are not private
+// numbers.
+//
+// It does not try to catch private text that an agent encodes on purpose, as a prompt-injected agent might: digits
+// spread out one per word, a number written in words, digits read across the words of a query, or any other covert
+// spelling. Reading every such spelling refused ordinary dated queries and news addresses, and no list of spellings is
+// both complete and usable. Deliberate leaks are limited by how a research run is built instead: an address must come
+// from a search result, a page link or the user's own text (the provenance lock), researchers in Deep carry no private
+// context, and memory writes are held after web content.
+//
+// The private context comes in two kinds:
 // - private facts: personal fact lines, MEMORY.md, private document passages, pages read signed in, and decision and
 //   lesson lines, which often carry private details ("we drop Acme in Q3", section 6.4a);
 // - the work: repository files read, how-you-work preferences and RULES.md. They name tools and libraries all the
@@ -18,9 +29,9 @@ import { ResearchWords } from "./words"
 // - a secret;
 // - a run of 6 or more words from either kind, unless the user typed it or a public source in this run holds it;
 // - a run of 3 words from a line of private-fact prose (not code) with a name or a number in it, on the same terms,
-//   since "Acme's Q3 churn" is private in fewer than 6 words;
-// - a private number of 5 or more digits, read by its digits alone (below), unless the user typed it or a public
-//   source in this run holds it;
+//   since "Acme's Q3 churn" is private in fewer than 6 words. The line's dates, versions and IPv4 addresses are left
+//   out of its words for this, on both sides, so "notes 21/10/2025" does not make "release notes 21/10/2025" private;
+// - a private number (below), unless the user typed it or a public source in this run holds it;
 // - a rare token from either kind: an identifier, a path, an email address, a host name (intranet names such as
 //   jira.acme.internal included) or an IP address; or a name from private-fact prose. An identifier, a host name or
 //   an email address of 3 or more parts still counts when the query splits it into words ("reconcile ledger
@@ -45,51 +56,49 @@ import { ResearchWords } from "./words"
 //   "\u2C98" are all "Acme";
 // - for names and rare tokens, with ASCII's own look-alikes read alike (I, l and 1; 0 and O; rn and m; vv and w), so
 //   "GIobex", "Gl0bex" and "Acrne" are Globex and Acme;
-// - for names, also with 3, 4, 5 and 7 read as e, a, s and t in a word of 4 or more characters that mixes letters and
-//   digits ("4cme", "Acm3", "K3strel", "Gl0b3x"), and "@" and "|" beside a letter read as a and l ("@cme", "G|obex").
-//   A word of digits alone ("1014") or a short one ("5am") keeps its digits;
-// - for names, with trade marks read past ("Acme\u2122"). A name is still that name spelled in single letters ("A c m
-//   e"), in two or three pieces one of which is not a common word ("Ac-me", "Hoo li"), run into digits or a company's
-//   ending ("acme2024", "acmeinc"), cut from the words around it by their capitals ("AcmeQ3Churn", "dropHooli"), with
-//   a quarter's or a half's letter run into it before the digit ("acmeq3"), and from 6 letters run into the letters of
-//   its word or made of whole words side by side ("acmerobotics", "glo-bex", "G l o b e x"). Pieces that are all
-//   common words ("is a" for a private Isa) are not a name, and neither are the ends of two words ("exhaust in" for a
-//   private Austin, "smart insurance" for Martin). Still missed: a name of 4 or 5 letters run into another word in
-//   lower case ("acmechurn").
+// - for names, with trade marks read past ("Acme\u2122"), as a plural or with a company's ending ("Acmes",
+//   "acmeinc"), and cut from the words around it by their capitals or digits, as identifiers and file names write it
+//   ("AcmeQ3Churn", "dropHooli", "acme2024", "acmeq3").
+// A few respellings of a name are read as well: digits for letters in a word that mixes the two ("4cme", "K3strel"),
+// "@" and "|" for a and l ("@cme", "G|obex"), single letters ("A c m e"), two or three pieces one of which is not a
+// common word ("Ac-me", "Hoo li"), and from 6 letters, the name run into the letters of its word or made of whole
+// words side by side ("acmerobotics", "glo-bex"). Pieces that are all common words ("is a" for a private Isa) are not a
+// name, and neither are the ends of two words ("exhaust in" for a private Austin). Like the covert spellings above, no
+// list of respellings is complete: these are not a defence against a deliberate one.
 //
-// Numbers are compared by their digits, so no separator can hide one. A digit of any script is its ASCII digit
-// (Arabic-Indic \u0662 and Devanagari \u0968 are 2), and so is a digit in a circle that Unicode does not decompose
-// (the dingbats \u2779 and \u278a, and \u24ff).
-// - The private side: each private number of 5 or more digits, and each stretch of whole groups in it of 5 or more
-//   (a phone number without its country code). A date written in numbers (6/1/2025, 1.6.2025, 21-05-94, 2025-10-20,
-//   10/2025) is not one: its digits say when, not who, and read as a number's groups they made "Q1 2025" and a news
-//   address's /2025/10/21/ private. The numbers beside a date stay numbers. Digit groups with one to three characters
-//   that are not letters or digits between them make one number ("2,400,000", "+1 415-555-0132", "0044 0532 0130", a
-//   card in fours), except where the text shows two numbers side by side:
-//   - a group glued to a letter joins the next only as a group of three, so "Q3 2026" is two numbers;
-//   - two years, or a year and the next one's last two digits, are a span of years ("2024-2025", "FY2024-25");
-//   - a list's, a table's or a sentence's separator stands between them (";", "|", a tab, ", ", a colon, ". "), or a
-//     line break, unless a thousands separator ends the line and a group of three starts the next ("2,400,\n000");
-//   - a comma groups thousands only by three ("2,400,000") or the Indian way ("1,23,45,679"), so "2024,2025" and
-//     "1,2019" are lists.
-//   A run of more than 8 groups is a list, each group a number on its own. A version or an IPv4 address (1.100.2,
-//   192.168.1.20) is not a number; an IP address is a rare token of its own, as written.
-// - The query side: its groups of digits, read across everything between them, words included. A query holds a
-//   private number when one of its groups holds it ("x4417203y"), or its groups, whole and in order, make it ("4417
-//   and then 203", "4 4 1 7 2 0 3", "a4b4c1d7e2f0g3"). So "iso 9001 2015" does not hold a private 12015: numbers side
-//   by side make another only from whole groups. The query is read again with the letters that stand for digits
-//   beside a digit read as digits: O and o as 0, and I, l, i and | as 1 ("44172O3", "582l3", "2,4OO,OOO").
-// - A query is refused when it holds a private number, or when its digits, all in order, hold 7 digits in a row of a
-//   longer one. The user's typing clears a number it holds the way a query would. A public source clears a number it
-//   holds as one of its own numbers, unless it holds more than 100 numbers of 5 or more digits: a page of every
-//   5-digit number would otherwise clear them all.
-// The cost: a data file with many numbers of 5 or more digits keeps those out of queries, the numbers of a fair query
-// included, until the user types them: an export whose 60,000 rows are numbered refuses "ISO 14001" and "SaaS churn
-// Q3 2026", whose digits make 14001 and 32026. And a private date is not kept out of queries. Not read: a number
-// spelled in words, split across two queries, or of 5 to 7 digits with digits added to its pieces ("94417 2039").
+// Numbers are read as written, the same way on both sides:
+// - A number is a run of groups of digits with one usual separator between each two: a space (NFKD makes a no-break
+//   or a thin space one), a comma, a dot, an apostrophe, a hyphen, an underscore or a slash, Arabic's thousands and
+//   decimal marks, or the parentheses around a phone number's area code. So "2,400,000", "2 400 000", "2'400'000",
+//   "+1 (415) 555-0132", "4417-8802-5671-9113" and "4417_8802_5671_9113" are one number each, while a word, a tab, a
+//   line break or two separators side by side ("2, 400") stand between two numbers. A digit of any script is its
+//   ASCII digit (Arabic-Indic \u0662 and Devanagari \u0968 are 2).
+// - Two groups with a usual separator between them are still two numbers side by side when:
+//   - one is glued to a letter and the later one is not a group of three: "Q3 2026" and "24H2 2025" are two numbers,
+//     "USD2,400,000" one;
+//   - one is a year and the other a year or a group of one or two digits: "2024-2025", "FY2024-25", "2025 11%" and
+//     "top 10 2025" are two;
+//   - a comma stands between them and they do not group thousands, by three ("2,400,000") or the Indian way
+//     ("1,23,45,679"): "2024,2025" and "1,2019" are lists.
+//   A run of more than 8 groups is a list, each group a number on its own.
+// - A private number has 5 or more digits and more than one significant figure (10000 and 300000 are not one), and
+//   each stretch of whole groups in a number is one too (415-555-0132 and 555-0132 in +1 415-555-0132).
+// - Dates, versions and IPv4 addresses are not numbers: their digits say when or which, not who, and reading them as
+//   numbers refused news addresses (/2025/10/21/) and dated queries. A date is a year, a month and a day, a day and a
+//   month with a year, or a month and a year, with one of "-", "/" and "." throughout (2025-10-20, 6/1/2025, 1.6.2025,
+//   21-05-94, 10/2025), or eight digits run together that read as one (20251020). A version or an IPv4 address is
+//   three or more groups joined by dots (1.100.2, 22.11.0, 192.168.1.20), but not a number grouped by thousands
+//   (2.345.678) or a phone number written with dots (06.12.34.56.78). An IP address is still a rare token, as written.
+// - A query holds a private number when one of its numbers is one, or when a number of 7 or more digits in it shares
+//   7 digits in a row with a longer private number ("8802 5671" of a card written 4417880256719113). The user's
+//   typing clears a number it holds. A public source clears a number it holds as one of its own, unless it holds more
+//   than 100 numbers of 5 or more digits: a page of every 5-digit number would otherwise clear them all.
+// The cost: a data file with many numbers of 5 or more digits keeps those out of queries until the user types them or
+// a public source holds them, the numbers of a fair query included ("ISO 14001" when 14001 is one of its values). And a
+// private date is not kept out of queries.
 //
-// It catches literal overlap only: a model can still paraphrase. The queries go to the search service the user set up
-// and are shown in the Sources tab, so a paraphrase is at least visible.
+// It checks literal overlap only: a model can still paraphrase. The queries go to the search service the user set up
+// and are shown in the Sources tab, so what went out can be seen.
 
 export const REFUSAL = "That search would send text from your private files. Rephrase it with public terms."
 
@@ -330,7 +339,8 @@ const PUBLIC_SITES = new Set([
   "europa.eu",
 ])
 
-// Words a line of prose capitalises at the start of a sentence, and months and days, which are not names.
+// Words a line of prose capitalises at the start of a sentence, and months and days and their short forms, which are
+// not names, so a private line's "paid on 22 Oct 2025" does not keep "Oct" out of queries.
 const COMMON_WORDS = new Set(
   `a about above across after afterwards again against all almost already also although always am among an and
   another any anyone anything are around as ask asked asks at avoid avoids be because been before being below best
@@ -344,7 +354,8 @@ const COMMON_WORDS = new Set(
   usually very via want wants was we weekly were what when where whether which while who whom whose why will with
   within without would yes yesterday yet you your yours
   january february march april may june july august september october november december
-  monday tuesday wednesday thursday friday saturday sunday`
+  monday tuesday wednesday thursday friday saturday sunday
+  jan feb mar apr jun jul aug sep sept oct nov dec mon tue tues wed thu thur thurs fri sat sun`
     .split(/\s+/)
     .filter(Boolean),
 )
@@ -425,57 +436,37 @@ const MARKS = /[\u2122\u2120\u00AE\u00A9]/g
 // A decimal digit of any script. NFKD has made full-width, superscript and mathematical digits ASCII ones already.
 const DIGIT = /\p{Nd}/gu
 const ONE_DIGIT = /^\p{Nd}$/u
-// Digits in a circle that NFKD leaves as they are, by their value: the dingbats' 1 to 10 in three styles, the negative
-// circled 11 to 20, the double circled 1 to 10, and the zeros.
-const CIRCLED: ReadonlyMap<string, string> = new Map([
-  ...[0x2776, 0x2780, 0x278a, 0x24f5].flatMap((first) =>
-    Array.from({ length: 10 }, (_, index) => [String.fromCodePoint(first + index), String(index + 1)] as const),
-  ),
-  ...Array.from({ length: 10 }, (_, index) => [String.fromCodePoint(0x24eb + index), String(index + 11)] as const),
-  ...[0x24ea, 0x24ff, 0x1f10b, 0x1f10c].map((code) => [String.fromCodePoint(code), "0"] as const),
-])
-const CIRCLED_DIGIT = /[\u24EA-\u24FF\u2776-\u2793\u{1F10B}\u{1F10C}]/gu
-// A date written in numbers: two or three groups of digits with one separator throughout, which `undated` reads.
+// A date written in numbers: two or three groups of digits with one separator throughout, which `undated` reads, and
+// one written as eight digits run together.
 const DATE_LIKE = /(?<!\d)(\d{1,4})([-/.])(\d{1,4})(?:\2(\d{1,4}))?(?!\d)/g
+const COMPACT_DATE = /^(?:19|20)\d\d(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])$/
 const FULL_YEAR = /^(?:19|20)\d\d$/
-// The letters that stand for digits beside one in a query ("44172O3", "582l3"), and three O's for a group of zeros
-// after a digit and a thousands separator ("2,4OO,OOO").
-const DIGIT_LIKE = /[OoIil|]*\d[\dOoIil|]*/g
-const ZEROS_LIKE = /(?<=\d)(?:[,.'\s][Oo]{3})+(?![\p{L}\p{N}])/gu
+// Three or more groups of digits joined by dots, which `plain` reads as a version or an IPv4 address or not.
+const DOTTED = /(?<![\d.])\d+(?:\.\d+){2,}/g
 // For names: a word cut where its case changes or its letters meet digits ("AcmeQ3Churn" is Acme, Q, 3, Churn), and
 // "@" and "|" beside a letter, which stand for a and l ("@cme", "G|obex"), and the digits that stand for letters in a
 // word that mixes the two ("4cme", "K3strel").
 const PIECE = /(?<=\p{Ll})(?=\p{Lu})|(?<=\p{Lu})(?=\p{Lu}\p{Ll})|(?<=\p{L})(?=\p{N})|(?<=\p{N})(?=\p{L})/u
 const LETTER_MARK = /(?<=\p{L})[@|]|[@|](?=\p{L})/gu
 const LETTER_DIGIT: Readonly<Record<string, string>> = { "3": "e", "4": "a", "5": "s", "7": "t" }
-// A group of digits, and what may stand between two groups of one private number: one to three characters that are
-// not letters, digits or marks (",", ".", " ", "-", ") ", "\u066C" in Arabic).
+// A group of digits, and what stands between two groups of one number as it is usually written: one space (NFKD has
+// made a no-break or a thin space one), comma, dot, apostrophe, hyphen, underscore or slash, Arabic's decimal or
+// thousands mark, or the parentheses around a phone number's area code ("(415) 555", "+1 (415)").
 const GROUP = /\d+/g
-const BETWEEN = /^[^\p{L}\p{N}\p{M}]{1,3}$/u
-const LETTER_BEFORE = /\p{L}$/u
-const LETTER_AFTER = /^\p{L}/u
-// What stands between the numbers of a list, a table or a sentence, never inside one number: a semicolon, a bar, a
-// tab, a colon (a time, 14:03:22), an Arabic or ideographic comma, a comma with a space beside it, and a sentence's
-// stop ("1. 2024 was"). A line break is one too, unless a number's groups go on after it: a thousands separator, the
-// break, and a group of three ("2,400,\r\n000").
-const LIST = /[;|\t:\u060C\u061B\u3001]|[,\u066C]\s|\s[,\u066C]|[.!?]\s/
-const LINE = /[\n\r\v\f\u0085\u2028\u2029]/
-const CONTINUED = /^[,.'\u2019\u066C][ \t]*(?:\r\n|\n|\r)[ \t]*$/
+const SEPARATOR = /^(?:[ ,.'_/\u2019\u066B\u066C\u2010\u2012-]|\)? ?\(?)$/u
+const LETTER = /^\p{L}$/u
 // The marks that group thousands ("2,400,000", "\u0662\u066C\u0664\u0660\u0660"), which also separate the values of a
 // list ("2024,2025"), so a group joins across one only as thousands are grouped; and what follows a group of two in
 // a number grouped the Indian way.
 const THOUSANDS = /^[,\u066C]$/
 const INDIAN = /^(?:[,\u066C]\d{2})*[,\u066C]\d{3}(?!\d)/
-// A year, which a span of years puts beside another ("2024-2025") or the next year's last two digits ("2024-25").
-const YEAR = /^(?:19|20)\d\d$/
-const DASH = /^\s*[-/\u2010-\u2015]\s*$/
 // The most groups one private number has. A run of more is a list, each group of it a number on its own.
 const MAX_GROUPS = 8
 // The shortest private number, and the run of a longer one's digits that is enough on its own ("8802 5671" of a card
 // written 4417880256719113).
 const NUMBER_DIGITS = 5
 const PART_DIGITS = 7
-// The longest number looked up whole in a query's digits. A longer one is found by its runs of PART_DIGITS digits.
+// The longest private number kept whole. A longer one is found by its runs of PART_DIGITS digits.
 const WHOLE_DIGITS = 32
 // A public text with more numbers of 5 or more digits than this clears none of them.
 const PUBLIC_NUMBERS = 100
@@ -539,7 +530,7 @@ function inspect(query: string, context: Context, sites: boolean): Result {
     .map((gram) => ` ${gram.join(" ")} `)
     .find((gram) => known.words.includes(gram) && !known.allowedWords.includes(gram))
   if (run) return refused("words", run.trim())
-  const named = grams(words, NAMED_RUN_WORDS)
+  const named = grams(wordsOf(plain(fold(query))), NAMED_RUN_WORDS)
     .map((gram) => gram.join(" "))
     .find((gram) => known.named.has(gram) && !known.allowedWords.includes(` ${gram} `))
   if (named) return refused("words", named)
@@ -631,25 +622,17 @@ function spelling(word: string) {
   return seen.replace(/[3457]/g, (digit) => LETTER_DIGIT[digit]!)
 }
 
-// A private number the query's digits hold, or 7 digits in a row of a longer one (see the comment at the top), read
-// as written and with the letters that stand for digits beside one read as those digits. A number the user typed is
-// looked up in their typing only when a query holds it.
+// The first private number a folded text holds, its numbers read as written (see the comment at the top): one of them
+// that is a private number, or the run of PART_DIGITS digits one of them shares with a longer private number. A
+// number the user typed is clear.
 function numberIn(text: string, known: Known) {
-  const read = text
-    .replace(DIGIT_LIKE, (run) => run.replace(/[Oo]/g, "0").replace(/[Iil|]/g, "1"))
-    .replace(ZEROS_LIKE, (run) => run.replace(/[Oo]/g, "0"))
-  return [...new Set([text, read])]
-    .map(
-      (variant) =>
-        held(variant).find((digits) => known.numbers.has(digits) && !known.typedNumber(digits)) ??
-        pieces((variant.match(GROUP) ?? []).join("")).find(
-          (piece) => known.parts.has(piece) && !known.typedPiece(piece),
-        ),
-    )
+  return [...new Set(numbersOf(text).flatMap(figures))]
+    .filter((digits) => !known.typedNumbers.has(digits))
+    .map((digits) => (known.numbers.has(digits) ? digits : pieces(digits).find((piece) => known.parts.has(piece))))
     .find(Boolean)
 }
 
-// Pieces of text joined, with where each one ends, so a word or a number is found in them the way `within` reads it.
+// Words joined, with where each one ends, so a name is found in them the way `within` reads it.
 function joinedOf(pieces: readonly string[]) {
   const ends = pieces.reduce<number[]>(
     (all, piece) => {
@@ -665,8 +648,8 @@ function joinedOf(pieces: readonly string[]) {
   return { text: pieces.join(""), bounds }
 }
 
-// Whether `key` is inside one of the joined pieces, or is several of them, whole and side by side: digit groups "4417
-// 203" hold 4417203 and words "glo bex" Globex, while "9001 2015" does not hold 12015 nor "exhaust in" Austin.
+// Whether `key` is inside one of the joined words, or is several of them, whole and side by side: "glo bex" holds
+// Globex, while "exhaust in" does not hold Austin.
 function within(joined: ReturnType<typeof joinedOf>, key: string) {
   const state = { at: joined.text.indexOf(key) }
   while (state.at >= 0) {
@@ -755,13 +738,15 @@ function namesOf(blocks: ReturnType<typeof prose>) {
   return [...new Set(found)]
 }
 
-// A path names a file or a place on disk: it starts at a root or home, has three or more parts, or ends in a file
-// name. "and/or" and "TCP/IP" are words.
+// A path names a file or a place on disk: it has a letter, and it starts at a root or home, has three or more parts,
+// or ends in a file name. "and/or" and "TCP/IP" are words, and a date or a number written with slashes (2025/11/03,
+// 4417/8802) is left to the number check.
 function path(token: string) {
   const parts = token
     .replace(/^~?\.{0,2}\//, "")
     .split("/")
     .filter(Boolean)
+  if (!/[A-Za-z]/.test(token)) return false
   return /^[~/.]/.test(token) || parts.length >= 3 || /\.[A-Za-z0-9]{1,6}$/.test(parts.at(-1) ?? "")
 }
 
@@ -808,14 +793,7 @@ function refused(reason: Reason, match: string): Result {
 }
 
 function fold(text: string) {
-  return WebFence.latin(
-    text
-      .replace(MARKS, "")
-      .replace(CIRCLED_DIGIT, (mark) => CIRCLED.get(mark)!)
-      .normalize("NFKD")
-      .replace(UNSEEN, "")
-      .replace(DIGIT, ascii),
-  )
+  return WebFence.latin(text.replace(MARKS, "").normalize("NFKD").replace(UNSEEN, "").replace(DIGIT, ascii))
 }
 
 // A decimal digit of any script as its ASCII digit. Unicode gives each script's digits 0 to 9 in order, in blocks of
@@ -835,37 +813,6 @@ function alike(text: string) {
   return text.toLowerCase().replace(/rn/g, "m").replace(/vv/g, "w").replace(/[i1]/g, "l").replace(/0/g, "o")
 }
 
-// The numbers a folded text's digits hold, read the way the comment at the top says: each stretch of NUMBER_DIGITS to
-// WHOLE_DIGITS digits inside one of its groups of digits, and each run of two or more of its groups, whole, as long as
-// that, whatever stands between them.
-function held(text: string) {
-  const groups = text.match(GROUP) ?? []
-  const digits = groups.join("")
-  const ends = groups.reduce<number[]>(
-    (all, group) => {
-      all.push(all.at(-1)! + group.length)
-      return all
-    },
-    [0],
-  )
-  return [
-    ...groups.flatMap((group) =>
-      Array.from(group, (_, start) =>
-        Array.from(
-          { length: Math.max(0, Math.min(group.length - start, WHOLE_DIGITS) - NUMBER_DIGITS + 1) },
-          (_, index) => group.slice(start, start + NUMBER_DIGITS + index),
-        ),
-      ).flat(),
-    ),
-    ...ends.slice(0, -1).flatMap((from, index) =>
-      ends
-        .slice(index + 2, index + 2 + WHOLE_DIGITS)
-        .filter((to) => to - from >= NUMBER_DIGITS && to - from <= WHOLE_DIGITS)
-        .map((to) => digits.slice(from, to)),
-    ),
-  ]
-}
-
 // Every run of PART_DIGITS digits in a string of digits.
 function pieces(digits: string) {
   return Array.from({ length: Math.max(0, digits.length - PART_DIGITS + 1) }, (_, index) =>
@@ -873,69 +820,69 @@ function pieces(digits: string) {
   )
 }
 
-type Run = { readonly groups: readonly string[]; readonly separators: readonly string[] }
+// The numbers of a folded text as it writes them, each as its groups of digits, without its dates, versions and IPv4
+// addresses. A run of more than MAX_GROUPS groups is a list, each of its groups a number on its own.
+function numbersOf(text: string) {
+  return runs(plain(text)).flatMap((groups) => (groups.length > MAX_GROUPS ? groups.map((group) => [group]) : [groups]))
+}
 
-// The digit groups of a folded text, in runs, each run one number as far as its text shows.
-function runs(text: string): Run[] {
-  return [...text.matchAll(GROUP)].reduce<{ groups: string[]; separators: string[]; start: number; end: number }[]>(
-    (all, match) => {
+// The groups of digits of a folded text in runs, each run one number as far as its text shows.
+function runs(text: string) {
+  return [...text.matchAll(GROUP)]
+    .reduce<{ groups: string[]; start: number; end: number }[]>((all, match) => {
       const last = all.at(-1)
-      const start = match.index
-      const end = start + match[0].length
-      const separator = last ? text.slice(last.end, start) : ""
-      if (last && joins(text, last, separator, match[0], end)) {
+      const end = match.index + match[0].length
+      if (last && joins(text, last, match[0], match.index)) {
         last.groups.push(match[0])
-        last.separators.push(separator)
         last.end = end
         return all
       }
-      all.push({ groups: [match[0]], separators: [], start, end })
+      all.push({ groups: [match[0]], start: match.index, end })
       return all
-    },
-    [],
-  )
+    }, [])
+    .map((run) => run.groups)
 }
 
-// Whether a group of digits, ending at `end`, carries on the number of the run before it across `separator`: across
-// what BETWEEN allows, unless
-// - one of the two is glued to a letter ("Q3", "3rd") and the later one is not a group of three: USD2,400,000 is one
+// Whether a group of digits at `start` carries on the number of the run before it: across one usual separator, unless
+// - one of the two is glued to a letter ("Q3", "24H2") and the later one is not a group of three: USD2,400,000 is one
 //   number, "Q3 2026" two;
-// - the two are years, or a year and the next one's last two digits ("2024-2025", "2019 2024", "FY2024-25");
-// - a list's separator or a line break stands between them, unless a thousands separator ends the line and a group of
-//   three starts the next ("2,400,\r\n000");
+// - one is a year and the other a year or a group of one or two digits ("2024-2025", "FY2024-25", "2025 11%");
 // - a thousands separator stands between them and they do not group thousands, by three ("2,400,000") or the Indian
 //   way, by two and a last three ("1,23,45,679"): "2024,2025" and "1,2019" are lists.
-function joins(text: string, last: { groups: string[]; start: number }, separator: string, group: string, end: number) {
-  if (!BETWEEN.test(separator)) return false
+function joins(text: string, last: { groups: string[]; start: number; end: number }, group: string, start: number) {
+  const separator = text.slice(last.end, start)
+  if (!SEPARATOR.test(separator)) return false
   const before = last.groups.at(-1)!
-  const glued =
-    (last.groups.length === 1 && LETTER_BEFORE.test(text.slice(Math.max(0, last.start - 2), last.start))) ||
-    LETTER_AFTER.test(text.slice(end, end + 2))
+  const end = start + group.length
+  const glued = (last.groups.length === 1 && LETTER.test(text[last.start - 1] ?? "")) || LETTER.test(text[end] ?? "")
   if (glued && group.length !== 3) return false
-  if (YEAR.test(before) && (YEAR.test(group) || (DASH.test(separator) && group === next(before)))) return false
-  if (LINE.test(separator)) return CONTINUED.test(separator) && before.length <= 3 && group.length === 3
-  if (LIST.test(separator)) return false
+  const pair = [before, group]
+  if (pair.some((item) => FULL_YEAR.test(item)) && pair.every((item) => FULL_YEAR.test(item) || item.length <= 2))
+    return false
   if (!THOUSANDS.test(separator)) return true
   if (before.length <= 3 && group.length === 3) return true
   return before.length <= 2 && group.length === 2 && INDIAN.test(text.slice(end, end + 24))
 }
 
-// The private numbers of a folded text, each as its run of digit groups, without dates, versions and IPv4 addresses. A
-// run of more than MAX_GROUPS groups is a list, each of its groups a number on its own.
-function numbersOf(text: string) {
-  return runs(undated(text))
-    .flatMap(apart)
-    .filter((run) => !dotted(run))
-    .flatMap((run) =>
-      run.groups.length > MAX_GROUPS ? run.groups.map((group) => ({ groups: [group], separators: [] })) : [run],
-    )
+// A folded text with each date written in numbers, each version and each IPv4 address blanked by a list's separator,
+// so their digits make no number and the numbers beside them stay apart. A version or an IPv4 address is three or
+// more groups joined by dots: an IPv4 address, or groups of at most three digits with no leading zero, unless every
+// group after the first has three (2.345.678 is a number, and 06.12.34.56.78 a phone number).
+function plain(text: string) {
+  return undated(text).replace(DOTTED, (match) => {
+    const groups = match.split(".")
+    const version =
+      groups.every((group) => group.length <= 3 && !/^0\d/.test(group)) &&
+      !groups.slice(1).every((group) => group.length === 3)
+    return version || isIP(match) === 4 ? " ; " : match
+  })
 }
 
-// The text with each date written in numbers blanked by a list's separator, so its digits make no number and the
-// numbers beside it stay apart. A date is a year, a month and a day ("2025-10-20", "2025/10/20", "2025.10.20"); a
-// day and a month, either way round, and a year of four digits or two ("6/1/2025", "1.6.2025", "21-05-94"); or a
-// month and a year ("10/2025", "2025-10", "10.2025"). It has one of "-", "/" and "." between its groups, the same
-// throughout, and the groups beside it do not go on with that separator: "06-12-34-56-78" is a phone number.
+// The text with each date written in numbers blanked by a list's separator. A date is a year, a month and a day
+// ("2025-10-20", "2025/10/20", "2025.10.20"); a day and a month, either way round, and a year of four digits or two
+// ("6/1/2025", "1.6.2025", "21-05-94"); or a month and a year ("10/2025", "2025-10", "10.2025"). It has one of "-",
+// "/" and "." between its groups, the same throughout, and the groups beside it do not go on with that separator:
+// "06-12-34-56-78" is a phone number.
 function undated(text: string) {
   return text.replace(
     DATE_LIKE,
@@ -962,64 +909,18 @@ function dated(first: string, separator: string, second: string, third: string |
   return (FULL_YEAR.test(third) || third.length === 2) && day(first) && day(second) && (month(first) || month(second))
 }
 
-// The last two digits of the year after this one, as a span of years writes them ("2024-25", "1999-00").
-function next(year: string) {
-  return String((Number(year) + 1) % 100).padStart(2, "0")
-}
-
-// A version or an IPv4 address in a run stands on its own, so "1.2.3, 1.3.0" is two versions and not one number.
-// The run is cut where a separator is not a dot, and the pieces that are not versions or addresses join again.
-function apart(run: Run): Run[] {
-  if (run.separators.filter((separator) => separator === ".").length < 2) return [run]
-  const cuts = [
-    0,
-    ...run.separators.flatMap((separator, index) => (separator === "." ? [] : [index + 1])),
-    run.groups.length,
-  ]
-  const parts = cuts
-    .slice(0, -1)
-    .map((from, index) => ({ from, to: cuts[index + 1]!, dotted: dotted(part(run, from, cuts[index + 1]!)) }))
-  if (!parts.some((piece) => piece.dotted)) return [run]
-  return parts
-    .reduce<typeof parts>((all, piece) => {
-      const last = all.at(-1)
-      if (last && !last.dotted && !piece.dotted) {
-        last.to = piece.to
-        return all
-      }
-      all.push({ ...piece })
-      return all
-    }, [])
-    .map((piece) => part(run, piece.from, piece.to))
-}
-
-function part(run: Run, from: number, to: number): Run {
-  return { groups: run.groups.slice(from, to), separators: run.separators.slice(from, to - 1) }
-}
-
-// A version or an IPv4 address, which the rare tokens read as written: an IPv4 address, or three or more groups of at
-// most three digits joined by dots alone, unless every group after the first has three (2.345.678 is a number).
-function dotted(run: Run) {
-  if (run.separators.length < 2 || !run.separators.every((separator) => separator === ".")) return false
-  if (run.groups.length === 4 && isIP(run.groups.join(".")) === 4) return true
-  return run.groups.every((group) => group.length <= 3) && !run.groups.slice(1).every((group) => group.length === 3)
-}
-
-// The private numbers a run holds: each stretch of whole groups in it, so +1 415-555-0132 holds 415-555-0132 and
-// 555-0132 as well as the whole, and 45,210.50 holds 45,210. A run has at most MAX_GROUPS groups.
-function figures(run: Run) {
-  if (run.groups.length === 1) return figure(run.groups[0]!) ? [run.groups[0]!] : []
-  return run.groups
-    .flatMap((_, start) =>
-      run.groups.slice(start).map((_, index) => run.groups.slice(start, start + index + 1).join("")),
-    )
+// The private numbers a number holds: each stretch of whole groups in it, so +1 415-555-0132 holds 415-555-0132 and
+// 555-0132 as well as the whole, and 45,210.50 holds 45,210. A number has at most MAX_GROUPS groups.
+function figures(groups: readonly string[]) {
+  return groups
+    .flatMap((_, start) => groups.slice(start).map((_, index) => groups.slice(start, start + index + 1).join("")))
     .filter(figure)
 }
 
-// A number of 5 or more digits, and more than one significant figure: 10000 and 300000 say nothing about anyone's
-// files, 2,400,000 does.
+// A number of 5 or more digits with more than one significant figure, and not a date run together (20251020): 10000
+// and 300000 say nothing about anyone's files, 2,400,000 does.
 function figure(digits: string) {
-  return digits.length >= NUMBER_DIGITS && !/^\d0+$/.test(digits)
+  return digits.length >= NUMBER_DIGITS && !/^\d0+$/.test(digits) && !COMPACT_DATE.test(digits)
 }
 
 // The numbers a public text holds as its own, or none when it holds more than PUBLIC_NUMBERS of them.
@@ -1134,10 +1035,8 @@ function build(context: Context) {
   const typedRaw = alike(context.typed.map(fold).join("\n"))
   const typedWords = new Set(context.typed.flatMap(wordsOf).map(alike))
   const typedSplit = context.typed.map((text) => alike(wordsOf(text).join(""))).join(" ")
-  // The numbers a public source holds as its own, and the digits the user typed, by text. A number the user typed is
-  // looked for in them only when a query holds it, so a long run of typed digits costs one copy of them here.
+  // The numbers a public source holds as its own, and the private numbers, each as its groups of digits.
   const shown = new Set(context.public.flatMap(publicNumbers))
-  const typedDigits = context.typed.map((text) => joinedOf(fold(text).match(GROUP) ?? []))
   const counted = folded.flatMap(numbersOf)
   const numbers = new Set(
     [...new Set(counted.flatMap(figures))].filter((number) => number.length <= WHOLE_DIGITS && !shown.has(number)),
@@ -1152,7 +1051,7 @@ function build(context: Context) {
     allowedWords: joined([...context.typed, ...context.public]),
     named: new Set(
       blocks.flatMap((block) =>
-        grams(wordsOf(block.text), NAMED_RUN_WORDS)
+        grams(wordsOf(plain(block.text)), NAMED_RUN_WORDS)
           .filter(
             (gram) =>
               gram.some((word) => named.has(word) || /\d/.test(word)) && gram.some((word) => LETTER_WORD.test(word)),
@@ -1165,19 +1064,17 @@ function build(context: Context) {
     tokens: tokens
       .map((token) => ({ token: token.toLowerCase(), key: alike(token) }))
       .filter((item) => item.token.length >= 5 && !typedRaw.includes(item.key)),
-    // The private numbers no public source cleared, and every run of PART_DIGITS digits of the longer ones.
+    // The private numbers no public source cleared, every run of PART_DIGITS digits of the longer ones, and the
+    // numbers the user typed, read the way a query's are.
     numbers,
     parts: new Set(
       counted
-        .map((run) => run.groups.join(""))
-        .filter((digits) => digits.length > PART_DIGITS && !shown.has(digits))
+        .map((groups) => groups.join(""))
+        .filter((digits) => digits.length > PART_DIGITS && figure(digits) && !shown.has(digits))
         .flatMap(pieces)
         .filter((piece) => !shown.has(piece)),
     ),
-    // Whether the user typed a private number, read as a query's digits are (inside a group, or whole groups side by
-    // side), and whether their digits, all in order, hold a run of PART_DIGITS of a longer one.
-    typedNumber: remembered((number) => typedDigits.some((typed) => within(typed, number))),
-    typedPiece: remembered((piece) => typedDigits.some((typed) => typed.text.includes(piece))),
+    typedNumbers: new Set(context.typed.flatMap((text) => numbersOf(fold(text)).flatMap(figures))),
     split: new Map(
       tokens
         .filter(open)
@@ -1187,18 +1084,6 @@ function build(context: Context) {
     ),
     names: found.map((name) => ({ name, key: alike(name) })).filter((item) => !typedWords.has(item.key)),
     exempt: exempting(context.domains ?? []),
-  }
-}
-
-// A test of the user's typing whose answers are kept, so each value costs one look at it however often queries ask.
-function remembered(test: (value: string) => boolean) {
-  const answers = new Map<string, boolean>()
-  return (value: string) => {
-    const kept = answers.get(value)
-    if (kept !== undefined) return kept
-    const answer = test(value)
-    answers.set(value, answer)
-    return answer
   }
 }
 

@@ -122,12 +122,14 @@ const leaks: readonly (readonly [string, ResearchOutbound.Reason])[] = [
   ["4 417 203", "token"],
   ["4417 8802 5671 9113", "token"],
   ["4417-8802-5671-9113 renewal", "token"],
-  // The same numbers with other separators, a currency code run into them, or the digits of other scripts:
+  // The same numbers with the other usual separators, a currency code run into them, or the digits of other scripts:
   // Arabic-Indic, Devanagari and Extended Arabic-Indic.
   ["2-400-000", "token"],
-  ["2\t400\t000", "token"],
-  ["2  400  000", "token"],
-  ["2, 400, 000", "token"],
+  ["2_400_000", "token"],
+  ["2/400/000", "token"],
+  [`2${char(0x2019)}400${char(0x2019)}000 contract`, "token"],
+  [`2${char(0x202f)}400${char(0x202f)}000 USD`, "token"],
+  [`2${char(0x2009)}400${char(0x2009)}000 USD`, "token"],
   ["USD2,400,000", "token"],
   [`${char(0x662, 0x664, 0x660, 0x660, 0x660, 0x660, 0x660)} USD`, "token"],
   [`${char(0x968, 0x96a, 0x966, 0x966, 0x966, 0x966, 0x966)} USD`, "token"],
@@ -136,12 +138,14 @@ const leaks: readonly (readonly [string, ResearchOutbound.Reason])[] = [
   ["4417.8802.5671.9113", "token"],
   ["4417_8802_5671_9113", "token"],
   ["4417/8802/5671/9113", "token"],
-  ["4417  8802  5671  9113", "token"],
   // Phone, social security and account numbers, whole, in parts, with and without a country code.
   ["415-555-0132 reverse lookup", "token"],
   ["who owns 415 555 0132", "token"],
   ["+1 415-555-0132", "token"],
   ["(415) 555-0132", "token"],
+  ["+1(415)555-0132", "token"],
+  [`415${char(0x2010)}555${char(0x2010)}0132`, "token"],
+  [`415${char(0x2012)}555${char(0x2012)}0132`, "token"],
   ["4155550132", "token"],
   ["123-45-6789 credit check", "token"],
   ["123 45 6789", "token"],
@@ -331,84 +335,64 @@ describe("ResearchOutbound.check", () => {
       })
   })
 
-  test("reads a query's digits whatever stands between them, words included", () => {
+  test("reads a number across one usual separator between its groups, as people write one", () => {
     const umbrella = {
       private: [
         "Umbrella pays about 2,400,000 USD a year.",
         "Order 4417203 was refunded.",
         "Her employee number is 58213.",
+        "Card 44178802 on file.",
+        "Ticket 12015 is open.",
       ],
       typed: [],
       public: [],
     }
     const queries = [
-      // Separators of any length or kind, line breaks, and modifier letters used as apostrophes.
-      "2    400    000 USD",
-      "2 -- 400 -- 000",
-      "2 . . 400 . . 000",
-      "2\n400\n000",
-      `2${char(0x2bc)}400${char(0x2bc)}000`,
-      `2${char(0x2c8)}400${char(0x2c8)}000`,
-      // Digits one by one, regrouped, with letters between them, or across words.
-      "4 4 1 7 2 0 3",
-      "44172 03",
-      "4417x203",
-      "a4b4c1d7e2f0g3",
-      "4417 and 203",
-      "4417 and then 203",
-      "4417 then also 203",
-      "4417 x y 203",
-      "2.4.0.0.0.0.0",
+      "2 400 000 USD",
+      "2.400.000 USD",
+      "2'400'000 USD",
+      `2${char(0xa0)}400${char(0xa0)}000 USD`,
       "$2,400,000.00",
-      // Inside a longer group of digits.
-      "ref 944172039",
-      // Digits in a circle that Unicode does not decompose: the dingbats in their three styles and the double
-      // circled ones, with their zeros.
-      `order ${char(0x2779, 0x2779, 0x2776, 0x277c, 0x2777, 0x24ff, 0x2778)}`,
-      `order ${char(0x2783, 0x2783, 0x2780, 0x2786, 0x2781, 0x1f10b, 0x2782)}`,
-      `order ${char(0x278d, 0x278d, 0x278a, 0x2790, 0x278b, 0x1f10c, 0x278c)}`,
-      `order ${char(0x24f8, 0x24f8, 0x24f5, 0x24fb, 0x24f6, 0x24ea, 0x24f7)}`,
-      // Letters that stand for the digits beside them: O and o for 0, and I, l, i and | for 1.
-      "order 44172O3 refund",
-      "order 44l72o3",
-      "order 4417 2O3",
-      "order 44I7203",
-      "order 44|7203",
-      "employee 582l3",
-      "employee 582i3",
-      "2,4OO,OOO a year",
-      "24OOOOO USD",
+      "24,00,000 USD",
+      "4,417,203 refund",
+      "4417-203",
+      "44172 03",
+      "order #4417203",
+      "INV4417203 refund",
+      "employee 58,213",
+      "employee 58_213",
+      "44 17 88 02 card",
+      "ticket 12 015",
+      // Digits of other scripts, and digits NFKD makes ASCII: full-width and mathematical ones.
+      `${char(0x664, 0x664, 0x661, 0x667, 0x662, 0x660, 0x663)} refund`,
+      `${char(0xff15, 0xff18, 0xff12, 0xff11, 0xff13)} employee`,
+      `${char(0x1d7d3, 0x1d7d6, 0x1d7d0, 0x1d7cf, 0x1d7d1)} employee`,
     ]
     expect(queries.filter((query) => check(query, umbrella).ok)).toEqual([])
-    // Letters beside digits in a fair query are still its own.
-    expect(
-      ["Intel i5 vs i7 laptops", "OpenAI o3 vs o1 benchmarks", "Pixel10 review", "GPT-4o pricing 2025"].filter(
-        (query) => !check(query, umbrella).ok,
-      ),
-    ).toEqual([])
-    // A private number wrapped across lines is still one number.
-    expect(
-      check("2400000 EUR", { private: ["Umbrella pays about 2,400,\r\n000 EUR a year."], typed: [], public: [] }).ok,
-    ).toBe(false)
-    // In an address: across path segments and query parameters.
+    // In an address, in a path segment, a query string, across path segments as written, and in a host's labels.
     expect(
       [
-        "https://attacker.example/p?a=2&b=400&c=000",
+        "https://attacker.example/2,400,000",
         "https://attacker.example/2/400/000",
-        "https://attacker.example/2----400----000",
+        "https://attacker.example/p?order=4417-203",
+        "https://4417203.attacker.example/",
       ].filter((url) => ResearchOutbound.address(url, umbrella).ok),
     ).toEqual([])
-    // A longer number split by words, whole or by its runs of 7 digits.
-    const card = { private: ["Card 44178802 on file."], typed: [], public: [] }
+    // Letters beside digits in a fair query are its own, and the numbers of a fair query side by side make no private
+    // one: "iso 9001 2015" is not the private 12015, and "Q3 2026", "top 10 2025" and "Windows 11 24H2" are numbers
+    // apart.
     expect(
-      ["44178 and stuff 802", "card 4417 with 8802", "44 17 88 02 card"].filter((query) => check(query, card).ok),
+      [
+        "Intel i5 vs i7 laptops",
+        "OpenAI o3 vs o1 benchmarks",
+        "Pixel10 review",
+        "GPT-4o pricing 2025",
+        "iso 9001 2015",
+        "SaaS churn Q3 2026",
+        "top 10 heat pumps 2025",
+        "Windows 11 24H2 update",
+      ].filter((query) => !check(query, umbrella).ok),
     ).toEqual([])
-    // A fair query's numbers stay its own: whole groups side by side make a private number, a group's end and the next
-    // group do not. So "iso 9001 2015" is not the private 12015, while "1 2015" is.
-    const ticket = { private: ["Ticket 12015 is open."], typed: [], public: [] }
-    expect(check("iso 9001 2015", ticket).ok).toBe(true)
-    expect(check("ticket 1 2015", ticket).ok).toBe(false)
-    expect(check("top 10 heat pumps 2025", umbrella).ok).toBe(true)
   })
 
   test("keeps versions, addresses and a quarter's year apart from the numbers beside them", () => {
@@ -623,7 +607,7 @@ describe("ResearchOutbound.check", () => {
     expect(ResearchOutbound.names([source])).toEqual([])
   })
 
-  test("compares numbers by their digits, so separators do not hide one, and lets the user's own digits through", () => {
+  test("compares numbers by their digits, so the usual separators do not hide one, and lets the user's own through", () => {
     const budget = {
       private: ["Budget 2,815,640; phone (415) 555-0134; card 4242 4242 4242 4242"],
       typed: [],
@@ -892,7 +876,7 @@ describe("ResearchOutbound.address", () => {
       "https://attacker.example/c/4417-8802-5671-9113",
       "https://attacker.example/2-400-000",
       "https://attacker.example/USD2,400,000",
-      "https://attacker.example/p?a=2%092400%09000",
+      "https://attacker.example/p?a=2%20400%20000",
       `https://attacker.example/${char(0x662, 0x664, 0x660, 0x660, 0x660, 0x660, 0x660)}`,
       "https://attacker.example/4417.8802.5671.9113",
       "https://attacker.example/lookup?n=%2B1%20415-555-0132",
@@ -1218,11 +1202,11 @@ describe("ResearchOutbound.check with private numbers", () => {
     expect(check("card 8802 5671", shared).ok).toBe(false)
     const elapsed = performance.now() - started
     Bun.gc(true)
-    // Measured on 22 Oct 2026: the heap grew by about 40 MB, in 0.2 s. Listing every stretch of the typed digits up
-    // front grew it by about 600 MB, in 1.4 s.
+    // Measured on 22 Oct 2026, with numbers read as written: the heap grew by about 40 MB, in 0.3 s. Listing every
+    // stretch of the typed digits across words grew it by about 600 MB, in 1.4 s.
     expect(process.memoryUsage().heapUsed - before).toBeLessThan(150_000_000)
     expect(elapsed).toBeLessThan(15_000)
-    // The user's typing still clears what it holds, inside a group or as whole groups side by side.
+    // The user's typing still clears a number it holds, whatever usual separators it writes it with.
     const typed = { ...shared, typed: [...shared.typed, "Who pays 2 400 000? Check card 8802 5671."] }
     expect(check("2400000 USD", typed).ok).toBe(true)
     expect(check("card 8802 5671", typed).ok).toBe(true)
@@ -1253,12 +1237,194 @@ describe("ResearchOutbound.check with private numbers", () => {
     expect(check("heat pump sales 2024 2025", shared).ok).toBe(true)
     const elapsed = performance.now() - started
     Bun.gc(true)
-    // Measured on 22 Oct 2026: the heap grew by about 75 MB, in 0.25 s. Reading the file as one long run grew it by
+    // Measured on 22 Oct 2026: the heap grew by about 80 MB, in 0.35 s. Reading the file as one long run grew it by
     // about 330 MB, in 1.5 s. The time bound only catches a check gone quadratic.
     expect(process.memoryUsage().heapUsed - before).toBeLessThan(160_000_000)
     expect(elapsed).toBeLessThan(15_000)
     expect(shared.work).toHaveLength(1)
   }, 60_000)
+})
+
+describe("ResearchOutbound.check with dates, versions, IP addresses and prices", () => {
+  // The private contexts the last review read dated queries and addresses against: memory lines with a year beside a
+  // number, a board memo, meeting notes, an invoice and a ticket numbered by date, and repository files whose
+  // identifiers start with a timestamp (a go.mod pseudo-version, a Rails migration, a log name, a changelog).
+  const contexts: Record<string, ResearchOutbound.Context> = {
+    memory: {
+      private: [
+        "In 2025 11% of our users churned.",
+        "Revenue (2025) 10,500 dollars.",
+        "Headcount 2025 10 new hires.",
+        "Our 2025 12 month plan is ready.",
+        "Ticket JIRA-2025-10 is open.",
+        "Release 2025.10.1 shipped.",
+        "Backup taken 20251020.",
+        "Q3 FY2025 10-K filing is due.",
+        "Top 10 2025 goals.",
+      ],
+      typed: ["How did heat pump sales do in late 2025?"],
+      public: [],
+    },
+    notes: {
+      private: [
+        "Board memo dated 2025-10-20. Revenue for 10/2025 was 2,815,640 dollars; the 2024-2025 plan closes on 31.12.2025.",
+        "Meeting notes 21/10/2025: Krishna will compare heat pumps; follow up 2025/11/03 and on 3.11.25.",
+        "Invoice INV-2025-10-0042 was paid on 22 Oct 2025.",
+        "Escalated as case 2025/10/118 to the vendor.",
+        "Phone 06-12-34-56-78, office 0044 0532 0130.",
+      ],
+      work: ["## Changelog\n\n### 1.4.0 - 2025-10-20\n- fixed 2025-10-19 regression in v1.3.9 (2025.10.18)"],
+      typed: ["compare heat pumps in cold climates"],
+      public: [],
+    },
+    timestamps: {
+      private: [],
+      work: [
+        "module example.com/app\n\nrequire golang.org/x/sys v0.0.0-20251020143022-abcdef123456 // indirect\n",
+        "db/migrate/20251021093000_create_users.rb\nclass CreateUsers < ActiveRecord::Migration[7.1]",
+        "tail -f logs/app-20251019.log",
+      ],
+      typed: [],
+      public: [],
+    },
+  }
+
+  // Queries a research agent writes for public questions: dated ones, versions, IP addresses, prices, and standards
+  // and identifiers with numbers in them.
+  const ordinary = [
+    "heat pump news 2025-10-20",
+    "heat pump news 2025-10-25",
+    "heat pumps 2025-10-20 announcement",
+    "cold climate heat pump 2025/11/03",
+    "heat pump 21/10/2025 study",
+    "EU heat pump statistics 31.12.2025 deadline",
+    "heat pump subsidy changes 1/1/2026",
+    "heat pump report 10/2025",
+    "heat pump rebates 2025-10",
+    "heat pump news Oct 2025",
+    "heat pump sales October 2025",
+    "heat pump market Q4 2025",
+    "heat pump installations 2024-2025",
+    "UK boiler upgrade scheme 2025/26",
+    "heat pump sales 2025 11 percent growth",
+    "SaaS churn benchmarks H1 2026",
+    "heat pump study published 20251020",
+    "top 10 heat pumps 2025",
+    "Windows 10 end of support 14 October 2025",
+    "heat pump 2025 2026 forecast",
+    "events on 14/11/2025 in Berlin",
+    "Node 22.11.0 release notes",
+    "React 19.1.0 changelog",
+    "TypeScript 5.9.2 breaking changes",
+    "Python 3.12.7 asyncio TaskGroup",
+    "Bun 1.3.14 test runner",
+    "Kubernetes 1.31.4 upgrade notes",
+    "OpenSSL 3.0.15 vulnerability",
+    "Ubuntu 24.04.1 LTS kernel",
+    "Chrome 130.0.6723.91 release",
+    "macOS 15.1 battery drain",
+    "semver 2.0.0 specification",
+    "1.4.0 release notes",
+    "8.8.8.8 DNS latency",
+    "1.1.1.1 resolver privacy policy",
+    "192.168.1.1 router admin page",
+    "169.254.169.254 metadata endpoint",
+    "10.0.0.0/8 private address range",
+    "2001:db8::/32 documentation prefix",
+    "127.0.0.1 vs 0.0.0.0 binding",
+    "heat pump price $12,500 installed",
+    "air source heat pump cost 7,500 GBP after grant",
+    "heat pump price 9.999 EUR",
+    "MacBook Air price 1,299 USD",
+    "electric car price 2025 $42,490",
+    "median house price 285 000 euros",
+    "electricity price 0.28 EUR per kWh",
+    "OpenAI API pricing $2.50 per million tokens",
+    "Stripe fees 2.9% plus 30 cents",
+    "ISO 9001 2015 certification requirements",
+    "ISO 14001 2015",
+    "RFC 9110 HTTP semantics",
+    "IEC 60335-2-40 refrigerant charge limits",
+    "CVE-2024-3094 xz backdoor",
+    "arxiv 2310.06825",
+    "doi 10.1038/s41586-021-03819-2",
+    "speed of light 299,792,458 m/s",
+    "zip codes 90001 to 90089",
+    "postcode 10115 berlin",
+    "Intel Core i9-14900K benchmarks",
+    "Windows 11 24H2 update KB5044284",
+    "USB 3.2 Gen 2x2 speed",
+    "heat pump COP at -15C",
+  ]
+
+  // News and blog addresses carry the date they were written, and documentation addresses a version.
+  const addresses = [
+    "https://news.example.com/2025/10/21/heat-pumps",
+    "https://news.example.com/2025/11/02/heat-pumps",
+    "https://news.example.com/2025/12/02/heat-pumps",
+    "https://www.theverge.com/2025/11/03/heat-pumps-are-winning",
+    "https://www.nytimes.com/2025/10/27/business/heat-pumps.html",
+    "https://techcrunch.com/2025/10/14/ai-funding-round/",
+    "https://example.com/2025-10-24-heat-pump-report",
+    "https://example.com/blog/2025/10/",
+    "https://example.com/reports/2025/11/03/",
+    "https://example.com/a?date=2025-10-20",
+    "https://www.bbc.co.uk/news/articles/2025/10/heat",
+    "https://docs.python.org/3.12/library/asyncio-task.html",
+    "https://github.com/oven-sh/bun/releases/tag/bun-v1.3.14",
+    "https://www.nature.com/articles/s41586-021-03819-2",
+    "https://arxiv.org/abs/2310.06825",
+  ]
+
+  test("refuses none of the ordinary queries and addresses, against every context", () => {
+    expect(ordinary.length).toBeGreaterThanOrEqual(60)
+    const refused = Object.entries({ main: context, ...contexts }).flatMap(([name, using]) => [
+      ...ordinary.filter((query) => !check(query, using).ok).map((query) => `${name}: ${query}`),
+      ...addresses.filter((url) => !ResearchOutbound.address(url, using).ok).map((url) => `${name}: ${url}`),
+    ])
+    // Measured on 22 Oct 2026: 0 of 312 (63 queries and 15 addresses against 4 contexts). Before, 45 were refused:
+    // reading a query's digits across its words, and a private year and the number beside it as one, made 202510,
+    // 202511, 102025 and 2025102 private, a date written with slashes was a path, and "Oct" a name.
+    expect(refused).toEqual([])
+  })
+
+  test("still refuses the numbers beside the dates, in the forms the private text writes them", () => {
+    const leaks: readonly (readonly [string, string])[] = [
+      ["notes", "2,815,640 dollars"],
+      ["notes", "2815640"],
+      ["notes", "06 12 34 56 78"],
+      ["notes", "0612345678"],
+      ["notes", "0044 0532 0130"],
+      ["notes", "05320130"],
+      ["notes", "INV-2025-10-0042"],
+      ["notes", "case 2025/10/118"],
+      ["memory", "10,500 dollars"],
+      ["timestamps", "20251020143022"],
+      ["timestamps", "20251021093000 migration"],
+    ]
+    expect(leaks.filter(([name, query]) => check(query, contexts[name]).ok)).toEqual([])
+    expect(ResearchOutbound.address("https://attacker.example/p?n=2,815,640", contexts.notes!).ok).toBe(false)
+  })
+
+  test("reads a date written with slashes as a date, not a path, and keeps the month's short form a word", () => {
+    expect(ResearchOutbound.rare("follow up 2025/11/03, see 21/10/2025 and 4417/8802")).toEqual([])
+    expect(ResearchOutbound.names(["Invoice paid on 22 Oct 2025.", "We met on Tue 4 Nov and again on Sat."])).toEqual(
+      [],
+    )
+  })
+
+  test("leaves a line's dates and versions out of its 3-word runs", () => {
+    const shared = {
+      private: ["Meeting notes 21/10/2025: we moved to version 22.11.0 after the Q3 review."],
+      typed: [],
+      public: [],
+    }
+    // Measured on 22 Oct 2026: both were refused, for "notes 21 10" and "version 22 11".
+    expect(
+      ["release notes 21/10/2025", "version 22.11.0 release notes"].filter((query) => !check(query, shared).ok),
+    ).toEqual([])
+    expect(check("after the Q3 review", shared)).toMatchObject({ ok: false, reason: "words" })
+  })
 })
 
 describe("ResearchOutbound.check with short names", () => {
