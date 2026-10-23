@@ -16,10 +16,12 @@ export const { use: useVectorLocal, provider: VectorLocalProvider } = createSimp
     const sdk = useSDK()
     const event = useEvent()
     const toast = useToast()
-    const [store, setStore] = createStore<{ status?: LocalStatus }>({})
+    const [store, setStore] = createStore<{ status?: LocalStatus; denied: boolean }>({ denied: false })
 
     const refresh = async () => {
       const result = await sdk.client.local.get().catch(() => undefined)
+      // An invited guest is refused every Local route.
+      setStore("denied", result?.response?.status === 403)
       if (result?.data) setStore("status", reconcile(result.data))
       return result?.data
     }
@@ -37,6 +39,7 @@ export const { use: useVectorLocal, provider: VectorLocalProvider } = createSimp
 
     return {
       status: () => store.status,
+      denied: () => store.denied,
       refresh,
       badge: createMemo(() => badge(store.status?.policy)),
       /** Sends a change. A change that loosens Vector Local comes back as `confirm`, with what it loosens. */

@@ -30,7 +30,7 @@ export const WEB_OPTIONS: readonly {
 
 const LOOSEN = "This change would loosen Vector Local. Apply it?"
 
-/** Sends a change, asking first when it would loosen Vector Local. Resolves whether it applied. */
+/** Sends a change, asking first when it would loosen Vector Local. Resolves whether it applied; a refusal is a toast. */
 export async function changeLocal(
   dialog: DialogContext,
   local: ReturnType<typeof useVectorLocal>,
@@ -116,13 +116,16 @@ export function DialogLocal() {
     <DialogSelect
       title="Vector Local"
       options={options()}
-      emptyView={<text>Only the server's owner can see Vector Local.</text>}
+      emptyView={
+        <text>{local.denied() ? "Only the server's owner can see Vector Local." : "Reading Vector Local…"}</text>
+      }
       onSelect={async (option) => {
         const status = local.status()
         if (!status) return
+        // After a change, or a confirmation the owner declined, the list shows Vector Local as it is now.
         if (option.value === "switch") {
-          const applied = await changeLocal(dialog, local, toast, { enabled: !status.policy.enabled })
-          if (applied) dialog.replace(() => <DialogLocal />)
+          await changeLocal(dialog, local, toast, { enabled: !status.policy.enabled })
+          dialog.replace(() => <DialogLocal />)
           return
         }
         if (option.value === "web") return dialog.replace(() => <DialogLocalWeb />)
@@ -130,8 +133,8 @@ export function DialogLocal() {
         if (option.value === "check") return dialog.replace(() => <DialogLocalCheck />)
         if (option.value === "sent") return dialog.replace(() => <DialogLocalSent />)
         if (option.value === "held" && status.held) {
-          const applied = await changeLocal(dialog, local, toast, { held: [...status.held.changes] })
-          if (applied) dialog.replace(() => <DialogLocal />)
+          await changeLocal(dialog, local, toast, { held: [...status.held.changes] })
+          dialog.replace(() => <DialogLocal />)
         }
       }}
     />
@@ -148,8 +151,8 @@ export function DialogLocalWeb() {
       current={local.status()?.policy.web}
       options={WEB_OPTIONS.map((item) => ({ value: item.value, title: item.title, description: item.description }))}
       onSelect={async (option) => {
-        const applied = await changeLocal(dialog, local, toast, { web: option.value })
-        if (applied) dialog.replace(() => <DialogLocal />)
+        await changeLocal(dialog, local, toast, { web: option.value })
+        dialog.replace(() => <DialogLocal />)
       }}
     />
   )

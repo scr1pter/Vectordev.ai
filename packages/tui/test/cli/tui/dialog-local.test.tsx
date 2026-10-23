@@ -42,92 +42,104 @@ const status = (enabled: boolean) => ({
 })
 
 describe("/local", () => {
-  test("turning Vector Local off asks first, and sends confirm only after the owner says yes", async () => {
-    await using tmp = await tmpdir()
-    await mkdir(path.join(tmp.path, "state"), { recursive: true })
-    await Bun.write(path.join(tmp.path, "state/kv.json"), "{}")
-    const state = { enabled: true }
-    const patches: unknown[] = []
-    const server = Bun.serve({
-      hostname: "127.0.0.1",
-      port: 0,
-      async fetch(request): Promise<Response> {
-        const url = new URL(request.url)
-        if (url.pathname !== "/local") return Response.json({})
-        if (request.method === "GET") return Response.json(status(state.enabled))
-        const body = (await request.json()) as { enabled?: boolean; confirm?: boolean }
-        patches.push(body)
-        if (body.enabled === false && body.confirm !== true)
-          return Response.json(
-            {
-              name: "LocalConfirmError",
-              data: {
-                message: "This change would loosen Vector Local. Apply it?",
-                changes: ["turns Vector Local off"],
+  test.each([["confirms"], ["keeps it on"]] as const)(
+    "turning Vector Local off asks first; the owner %s",
+    async (answer) => {
+      await using tmp = await tmpdir()
+      await mkdir(path.join(tmp.path, "state"), { recursive: true })
+      await Bun.write(path.join(tmp.path, "state/kv.json"), "{}")
+      const state = { enabled: true }
+      const patches: unknown[] = []
+      const server = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        async fetch(request): Promise<Response> {
+          const url = new URL(request.url)
+          if (url.pathname !== "/local") return Response.json({})
+          if (request.method === "GET") return Response.json(status(state.enabled))
+          const body = (await request.json()) as { enabled?: boolean; confirm?: boolean }
+          patches.push(body)
+          if (body.enabled === false && body.confirm !== true)
+            return Response.json(
+              {
+                name: "LocalConfirmError",
+                data: {
+                  message: "This change would loosen Vector Local. Apply it?",
+                  changes: ["turns Vector Local off"],
+                },
               },
-            },
-            { status: 409 },
-          )
-        state.enabled = body.enabled ?? state.enabled
-        return Response.json(status(state.enabled))
-      },
-    })
-    function Harness() {
-      const renderer = useRenderer()
-      const keymap = createDefaultOpenTuiKeymap(renderer)
-      const config = createTuiResolvedConfig({})
-      onCleanup(registerVectorKeymap(keymap, renderer, config))
-      return (
-        <TestTuiContexts
-          directory={tmp.path}
-          paths={{ home: tmp.path, state: path.join(tmp.path, "state"), worktree: tmp.path }}
-        >
-          <VectorKeymapProvider keymap={keymap}>
-            <TuiConfigProvider config={config}>
-              <KVProvider>
-                <ThemeProvider mode="dark">
-                  <ToastProvider>
-                    <SDKProvider url={server.url.origin} events={{ subscribe: async () => () => undefined }}>
-                      <VectorLocalProvider>
-                        <DialogProvider>
-                          <DialogLocal />
-                        </DialogProvider>
-                      </VectorLocalProvider>
-                    </SDKProvider>
-                  </ToastProvider>
-                </ThemeProvider>
-              </KVProvider>
-            </TuiConfigProvider>
-          </VectorKeymapProvider>
-        </TestTuiContexts>
-      )
-    }
-    const app = await testRender(() => <Harness />, { kittyKeyboard: true, width: 120, height: 40 })
-    const frame = async (text: string) => {
-      const start = Date.now()
-      while (Date.now() - start < 4000) {
-        await app.renderOnce()
-        if (app.captureCharFrame().includes(text)) return
-        await Bun.sleep(10)
+              { status: 409 },
+            )
+          state.enabled = body.enabled ?? state.enabled
+          return Response.json(status(state.enabled))
+        },
+      })
+      function Harness() {
+        const renderer = useRenderer()
+        const keymap = createDefaultOpenTuiKeymap(renderer)
+        const config = createTuiResolvedConfig({})
+        onCleanup(registerVectorKeymap(keymap, renderer, config))
+        return (
+          <TestTuiContexts
+            directory={tmp.path}
+            paths={{ home: tmp.path, state: path.join(tmp.path, "state"), worktree: tmp.path }}
+          >
+            <VectorKeymapProvider keymap={keymap}>
+              <TuiConfigProvider config={config}>
+                <KVProvider>
+                  <ThemeProvider mode="dark">
+                    <ToastProvider>
+                      <SDKProvider url={server.url.origin} events={{ subscribe: async () => () => undefined }}>
+                        <VectorLocalProvider>
+                          <DialogProvider>
+                            <DialogLocal />
+                          </DialogProvider>
+                        </VectorLocalProvider>
+                      </SDKProvider>
+                    </ToastProvider>
+                  </ThemeProvider>
+                </KVProvider>
+              </TuiConfigProvider>
+            </VectorKeymapProvider>
+          </TestTuiContexts>
+        )
       }
-      throw new Error(`Frame missing ${text}: ${app.captureCharFrame()}`)
-    }
-    try {
-      await frame("Turn Vector Local off")
-      app.mockInput.pressEnter()
-      await frame("Loosen Vector Local?")
-      expect(app.captureCharFrame()).toContain("turns Vector Local off.")
-      expect(patches).toEqual([{ enabled: false }])
-      expect(state.enabled).toBe(true)
-      app.mockInput.pressEnter()
-      await frame("Turn Vector Local on")
-      expect(patches).toEqual([{ enabled: false }, { enabled: false, confirm: true }])
-      expect(state.enabled).toBe(false)
-    } finally {
-      app.renderer.destroy()
-      server.stop(true)
-    }
-  })
+      const app = await testRender(() => <Harness />, { kittyKeyboard: true, width: 120, height: 40 })
+      const frame = async (text: string) => {
+        const start = Date.now()
+        while (Date.now() - start < 4000) {
+          await app.renderOnce()
+          if (app.captureCharFrame().includes(text)) return
+          await Bun.sleep(10)
+        }
+        throw new Error(`Frame missing ${text}: ${app.captureCharFrame()}`)
+      }
+      try {
+        await frame("Turn Vector Local off")
+        app.mockInput.pressEnter()
+        await frame("Loosen Vector Local?")
+        expect(app.captureCharFrame()).toContain("turns Vector Local off.")
+        expect(patches).toEqual([{ enabled: false }])
+        expect(state.enabled).toBe(true)
+        if (answer === "keeps it on") {
+          app.mockInput.pressArrow("left")
+          app.mockInput.pressEnter()
+          await frame("Turn Vector Local off")
+          // Nothing was sent with confirm, so Vector Local stays on.
+          expect(patches).toEqual([{ enabled: false }])
+          expect(state.enabled).toBe(true)
+          return
+        }
+        app.mockInput.pressEnter()
+        await frame("Turn Vector Local on")
+        expect(patches).toEqual([{ enabled: false }, { enabled: false, confirm: true }])
+        expect(state.enabled).toBe(false)
+      } finally {
+        app.renderer.destroy()
+        server.stop(true)
+      }
+    },
+  )
 })
 
 describe("the Local badge", () => {
