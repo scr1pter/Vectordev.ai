@@ -729,12 +729,15 @@ export function firstHop(input: Parameters<Fetch>[0], init: FetchInit | undefine
 
 /**
  * The first hop of a fetch call that follows redirects. A Request's own body is a stream the first send reads, so a
- * copy of it is kept, which a 307 or 308 resends as fetch would.
+ * copy of it is kept, which a 307 or 308 resends as fetch would. The copy is taken before anything reads the
+ * Request's `body`: Bun (1.3) sends an empty body for a Request cloned after that, when it carries a property of its
+ * own such as the `timeout` the SDK sets on each request it makes.
  */
 export async function followedHop(input: Parameters<Fetch>[0], init: FetchInit | undefined): Promise<Hop> {
+  if (!(input instanceof Request) || init?.body != null) return firstHop(input, init)
+  const copy = await input.clone().blob()
   const hop = firstHop(input, init)
-  if (!(input instanceof Request) || init?.body != null || input.body === null) return hop
-  return { ...hop, body: await input.clone().blob() }
+  return hop.body === null ? hop : { ...hop, body: copy }
 }
 
 type Wrap = {
@@ -831,7 +834,8 @@ function wrap(input: Wrap): Handle {
         input.judge({ kind: "fetch", host: `${url.protocol}//${url.host}`, url: `${url.protocol}//${url.host}` })
           .blocked ?? new EgressBlocked(url.protocol, "fetch"),
       )
-    const checked = decide(url, init, firstHop(target, init).method)
+    // Only the method: reading a Request's body before followedHop copies it would lose it.
+    const checked = decide(url, init, init?.method ?? (target instanceof Request ? target.method : "GET"))
     if (checked.blocked) return Promise.reject(checked.blocked)
     const mode = init?.redirect ?? (target instanceof Request ? target.redirect : "follow")
     return resolved(checked.attempt, checked.judged.within).then(async (outside) => {
