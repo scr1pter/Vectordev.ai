@@ -170,6 +170,17 @@ export function listed(policy: LocalMode.Policy, input: string | URL) {
 }
 
 /**
+ * Whether the policy names the url's origin outside the model server list: it matches a managed `endpoint_domains`
+ * pattern, or its host is a site on `web_domains.allow` (the company's, and the user's where the user may add one).
+ */
+export function named(policy: LocalMode.Policy, input: string | URL) {
+  const url = parse(input)
+  const normal = url ? origin(url) : undefined
+  if (!url || !normal) return false
+  return policy.endpoint_domains.some((pattern) => endpointPattern(normal, pattern)) || webAllowed(policy, url.hostname)
+}
+
+/**
  * Whether a listed origin may be reached wherever its name resolves: a company's own endpoint always, since its
  * `gpu.internal` may sit on its own public range, and the user's while no lock limits the user to their network.
  * Under a lock, a name the user listed that says it is on their network must resolve there.

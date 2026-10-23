@@ -501,6 +501,22 @@ describe("EgressGuard.install with Vector Local on", () => {
     listener.close()
   })
 
+  test("sends a Request's body as it is, also one the SDK made, which carries a timeout of its own", async () => {
+    current.policy = listed
+    const request = new Request(at("/sdk"), { method: "POST", body: '{"a":1}', headers: { "x-test-mark": "sdk" } })
+    // The SDK's client turns Bun's fetch timeout off this way on every request it sends.
+    Object.assign(request, { timeout: false })
+    expect(await (await fetch(request)).text()).toBe("here")
+    const kept = new Request(at("/keep"), { method: "POST", body: "again", headers: { "x-test-mark": "sdk" } })
+    Object.assign(kept, { timeout: false })
+    expect((await fetch(kept)).redirected).toBe(true)
+    expect(seen.filter((item) => item.mark === "sdk").map((item) => [item.path, item.body])).toEqual([
+      ["/sdk", '{"a":1}'],
+      ["/keep", "again"],
+      ["/landed", "again"],
+    ])
+  })
+
   test("refuses a name that says it is here or on your network but resolves outside, before connecting", async () => {
     current.policy = listed
     recorded.length = 0

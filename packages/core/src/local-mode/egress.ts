@@ -121,6 +121,8 @@ type State = {
   noticed: Map<string, number>
   /** One-time grants left by source; Infinity for a grant that lasts while this process runs. */
   grants: Map<string, number>
+  /** Origins a source may read while the owner checks a server there (`checking`), counted by "source origin". */
+  checks: Map<string, number>
   totals: Map<string, Totals>
 }
 
@@ -138,6 +140,7 @@ const state: State = (holder[KEY] ??= {
   noticeListeners: new Set(),
   noticed: new Map(),
   grants: new Map(),
+  checks: new Map(),
   totals: new Map(),
 })
 
@@ -253,11 +256,14 @@ export function decide(request: Request): Decided {
     source: request.source,
     manual: request.manual,
   })
-  // A one-time grant answers one ask: a download, or a manual update check the user confirmed.
+  // A one-time grant answers one ask: a download, or a manual update check the user confirmed. A server the owner is
+  // checking (`checking`) is read where allowing the source would let it be.
   const final =
     verdict.decision === "ask" && take(request.source)
       ? { ...verdict, decision: "allow" as const, reason: "You allowed this once." }
-      : verdict
+      : verdict.decision !== "allow" && verdict.allowable && state.checks.has(checkKey(request.source, request.url))
+        ? { ...verdict, decision: "allow" as const, rule: "allowed-source" as const, reason: CHECKING }
+        : verdict
   return { ...final, purpose, event: record(request, final) }
 }
 
@@ -290,6 +296,25 @@ export function grant(source: string, options: { readonly once: boolean } = { on
 /** Takes back what `grant` let through for `source`, so its next ask asks again. */
 export function revoke(source: string) {
   state.grants.delete(source)
+}
+
+/**
+ * Lets `source`'s requests to `origin` through while `run` runs, where allowing the source would let them through:
+ * Add server reading a server the owner typed in before it is on the list. A request Vector Local refuses whatever
+ * the user allows (an internet server with Web access None, a source that is not allowable) stays refused, every
+ * request is still decided and logged, and no other origin is let through.
+ */
+export function checking<T>(source: string, origin: string | URL, run: () => Promise<T>): Promise<T> {
+  const key = checkKey(source, origin)
+  state.checks.set(key, (state.checks.get(key) ?? 0) + 1)
+  const done = () => {
+    const left = (state.checks.get(key) ?? 1) - 1
+    if (left > 0) return void state.checks.set(key, left)
+    state.checks.delete(key)
+  }
+  return Promise.resolve()
+    .then(run)
+    .finally(done)
 }
 
 /**
@@ -613,6 +638,12 @@ function openLog(log: LogOptions): EgressLogStore.Store | string {
     const code = error instanceof Error && "code" in error && typeof error.code === "string" ? ` (${error.code})` : ""
     return `Vector could not write its network log in ${log.directory}${code}, so it keeps this session's log in memory only. It tries again the next time it reads its settings.`
   }
+}
+
+const CHECKING = "You asked Vector to read this server."
+
+function checkKey(source: string | undefined, input: string | URL) {
+  return `${source ?? ""} ${originOf(input)}`
 }
 
 function take(source: string) {

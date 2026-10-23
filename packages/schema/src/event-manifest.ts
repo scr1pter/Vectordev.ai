@@ -8,6 +8,7 @@ import { FileSystemWatcher } from "./filesystem-watcher"
 import { InstallationEvent } from "./installation-event"
 import { Integration } from "./integration"
 import { LegacyEvent } from "./legacy-event"
+import { LocalEvent } from "./local-event"
 import { LspEvent } from "./lsp-event"
 import { McpEvent } from "./mcp-event"
 import { ModelCatalog } from "./model-catalog"
@@ -77,6 +78,7 @@ export const Definitions = Event.inventory(
   ...QuestionV1.Event.Definitions,
   ...SessionCompactionEvent.Definitions,
   ...Research.Event.Definitions,
+  ...LocalEvent.Definitions,
   ...VcsEvent.Definitions,
   ...WorkspaceEvent.Definitions,
   ...WorktreeEvent.Definitions,

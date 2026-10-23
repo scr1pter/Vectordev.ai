@@ -18,7 +18,7 @@ import type { Argv } from "yargs"
 import path from "path"
 import { pathToFileURL } from "url"
 import { open } from "node:fs/promises"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { PublicSession } from "@vectordevai/schema/public-session"
 import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 import { BrainSchema } from "@vectordevai/core/brain/schema"
@@ -370,6 +370,11 @@ export const RunCommand = effectCmd({
         hidden: true,
         default: false,
       })
+      .option("local", {
+        type: "boolean",
+        describe:
+          "keep this run on Vector Local: model calls go only to the model servers on your list, and Vector's own requests to vectordev.ai are blocked. It only tightens, and changes no setting",
+      })
       .option("demo", {
         type: "boolean",
         default: false,
@@ -501,6 +506,31 @@ export const RunCommand = effectCmd({
           directory: dir,
           headers: attachHeaders,
         })
+      }
+
+      // --local keeps this process on Vector Local, and an attached server runs the session in a process of its own,
+      // so the run goes ahead only where that server has Vector Local on already. This process reaches that server
+      // because runLocal listed it, unless Vector Local here refused to (a company lock, or the agent marker).
+      if (args.local && args.attach) {
+        const remote = await attachSDK(directory)
+          .local.get()
+          .catch((error: unknown) => ({ data: undefined, error }))
+        // The client hands back a request the network guard refused as its error, rather than throwing it.
+        const failure: unknown = remote.error
+        if (failure instanceof Error && failure.name === "EgressBlocked") {
+          const { Config } = await import("@/config/config")
+          die(
+            [
+              `--local keeps this computer's requests on Vector Local, which kept this run from reaching ${args.attach}.`,
+              failure.message,
+              ...Config.local().warnings,
+            ].join(" "),
+          )
+        }
+        if (!remote.data?.policy.enabled)
+          die(
+            `--local keeps the runs this computer starts on Vector Local, and the server at ${args.attach} ${remote.data ? "has it off" : "did not say whether it has it on"}. Turn it on there with vector local on, or run without --attach.`,
+          )
       }
 
       const files: FilePart[] = []
@@ -859,6 +889,14 @@ export const RunCommand = effectCmd({
       async function execute(sdk: VectorClient) {
         const available = await sdk.config.providers({}, { throwOnError: true })
         if (!available.data.providers.some((provider) => Object.keys(provider.models).length > 0)) {
+          // With Vector Local on, models whose servers are not on the list are off; say which, not how to sign in.
+          const off = (available.data.unavailable ?? []).filter((item) => item.reason === "off-in-local")
+          if (off.length > 0) {
+            UI.error(
+              `Vector Local is on, and it keeps every model you have off. ${off.map((item) => item.message).join(" ")} Add a model server with vector local setup.`,
+            )
+            process.exit(1)
+          }
           // Only a local engine can say whether signing in would list free models; an attached server runs elsewhere.
           const signIn =
             !args.attach &&
@@ -1546,6 +1584,40 @@ type MiniCommandInput = {
   demo?: boolean
 }
 
+/**
+ * `vector run --local`: Vector Local for this run only, as the VECTOR_LOCAL floor in the environment, which can only
+ * tighten the policy the user's config and their company's set. It takes effect before anything connects (the CLI
+ * calls this before its account check), and the programs the run starts inherit it.
+ *
+ * With `--attach`, the Vector server the user typed is on the model server list for this run too, through
+ * VECTOR_LOCAL_POLICY, the user-level policy the environment may add to. This process then reaches that server, on
+ * the user's network as well as on this computer, and nothing else beyond this computer and the list. Vector Local
+ * decides it as it does a server the user lists: a company lock may refuse it, and a Vector the agent started adds
+ * none.
+ *
+ * It writes no file, so the next run is as the user's config says: neither the user's config nor Vector's copy of the
+ * block the owner let apply (Config.localConfirmedFile), which any start of Vector keeps up to date as it reads the
+ * config, and which the floor does not change.
+ */
+export async function runLocal(attach?: string) {
+  process.env.VECTOR_LOCAL = "1"
+  const { LocalPolicy } = await import("@vectordevai/core/local-mode/policy")
+  const target = attach === undefined ? undefined : LocalPolicy.origin(attach)
+  if (target) process.env.VECTOR_LOCAL_POLICY = withEndpoint(process.env.VECTOR_LOCAL_POLICY, target)
+  const { Config } = await import("@/config/config")
+  return Config.refreshLocal()
+}
+
+// VECTOR_LOCAL_POLICY with `origin` among its endpoints. A value that is not a JSON object is left as it is, which the
+// policy ignores with a warning, so the server is not listed either.
+function withEndpoint(text: string | undefined, origin: string) {
+  if (!text?.trim()) return JSON.stringify({ endpoints: [origin] })
+  const value = Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(text))
+  if (!isRecord(value)) return text
+  const endpoints = Array.isArray(value.endpoints) ? value.endpoints : []
+  return JSON.stringify({ ...value, endpoints: [...endpoints, origin] })
+}
+
 export async function runMini(input: MiniCommandInput) {
   if (!RunCommand.handler) throw new Error("Mini command handler is unavailable")
   await RunCommand.handler({
@@ -1578,6 +1650,7 @@ export async function runMini(input: MiniCommandInput) {
     yolo: false,
     "dangerously-skip-permissions": false,
     dangerouslySkipPermissions: false,
+    local: undefined,
     "max-cost": undefined,
     maxCost: undefined,
     "max-steps": undefined,

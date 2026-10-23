@@ -543,7 +543,12 @@ function writableGlobal(info: Info) {
 // at once: the policy in effect is the stricter of what the owner last let apply and the change, setting by setting
 // (stricterLocal). The baseline is what is in effect while this process runs and, at start, the copy of the user's
 // block the last process saved in Vector's state folder, so an edit made while Vector was closed is held too. A missing
-// or unreadable copy counts as the user's block at start.
+// or unreadable copy counts as the user's block at start. While Vector Local is off only a change to the identity pin
+// of a server on the list is held, so turning it on holds the services, the internet model servers and the sites the
+// user's block lets through until the owner confirms them; a change to an identity pin waits like a new server, on or
+// off. Model servers on this computer and the user's network apply when Vector Local turns on, as `vector run --local`
+// and the VECTOR_LOCAL floor need them to, and requests to one whose identity changed are held until the owner
+// confirms it (LocalProbe.verify).
 //
 // The copy is the user's to change, like the config itself, so it is a check and not a boundary: whatever can write
 // the state folder can rewrite or delete it, and what stops the agent there is the ask on its own writes to these
@@ -601,7 +606,10 @@ const localState: {
   policy: LocalMode.Policy
   /** The inputs in effect: what the owner last let apply, with what has tightened it since. Set at the first resolution. */
   confirmed: LocalInputs | undefined
-  /** The user's block as the state folder holds it, as JSON, so it is written only when it changes. */
+  /**
+   * The copy of the user's block in the state folder, as this process last read or wrote it: written only when the
+   * block changes, and never over a copy another Vector wrote since.
+   */
   saved: string | undefined
   pending: LocalPending | undefined
   /** The held change a repository's config load last announced, so each one is announced there once. */
@@ -707,6 +715,83 @@ export function confirmLocal() {
 }
 
 /**
+ * The user's own local block in effect: what the owner last let apply, with what has tightened it since. A change the
+ * Local API or `vector local` makes is judged against it, so an edit config is holding never counts as that change's.
+ */
+export function localConfirmedBlock() {
+  return localState.confirmed?.user
+}
+
+/**
+ * Records `block`, the user's block as the owner just confirmed a change to it, as the one to compare with. The caller
+ * writes the change next, and that write's resolution holds whatever else the files hold beyond `block`, as before.
+ * Only the owner's answer to a dialog that listed what the change loosens may lead here; under the agent marker it
+ * records nothing.
+ */
+export function confirmingLocal(block: ConfigLocalV1.Info | undefined) {
+  if (agentMarked() || !localState.confirmed) return
+  localState.confirmed = { user: block, overrides: localState.confirmed.overrides }
+}
+
+/**
+ * The user's own local block as their config files hold it now, merged in the order config merges them, read from
+ * disk rather than from the cached global config, so a change starts from what the files say. `unreadable` names the
+ * files Vector cannot read or whose local block it cannot decode, which a change must not write over.
+ */
+export function localUserBlock(): { readonly block?: ConfigLocalV1.Info; readonly unreadable: readonly string[] } {
+  const blocks = localFiles()
+    .user.map(localFile)
+    .filter((item) => item !== undefined)
+  const unreadable = blocks.filter((item) => item.unreadable).map((item) => item.source)
+  if (unreadable.length > 0) return { unreadable }
+  const block = mergeLocalBlocks(blocks)
+  return block ? { block, unreadable } : { unreadable }
+}
+
+/** Where the network log is written and for how many days, as Egress was last told. */
+export function localLog() {
+  const log = Option.getOrUndefined(
+    Schema.decodeUnknownOption(
+      Schema.fromJsonString(Schema.Struct({ directory: Schema.String, retainDays: Schema.optional(Schema.Number) })),
+    )(localState.log ?? ""),
+  )
+  return {
+    directory: log?.directory ?? path.join(Global.Path.data, "local"),
+    retain_days: log?.retainDays ?? EgressLogStore.RETAIN_DAYS,
+  }
+}
+
+/**
+ * What writing `block` as the user's own local block would loosen, compared with the block in effect
+ * (`localConfirmedBlock`), in the words a held change uses, so the Local API and `vector local` ask the owner before
+ * they write it rather than leave the change held. Empty when it only tightens; while Vector Local is off, it names
+ * only a new identity (or none) for a server on the list, such as Add server re-pinning one that answers differently.
+ * Under the agent marker it is judged as if Vector Local were on, whatever it is now: the owner turning it on later
+ * would otherwise let through what the agent added while it was off. The same rules hold the change if it is written
+ * anyway.
+ */
+export function localLoosening(block: ConfigLocalV1.Info | undefined) {
+  const sources = readLocalSources()
+  const confirmed = localState.confirmed ?? { user: undefined, overrides: sources.overrides }
+  const proposed = resolveLocal(sources, { user: block, overrides: sources.overrides })
+  return heldChanges(sources.managed, resolveLocal(sources, confirmed), proposed, confirmed.user, block, agentMarked())
+}
+
+/**
+ * How the owner applies a held change from where this Vector runs. The desktop app has no confirmation of its own yet,
+ * and keeps its own copy of the block the owner let apply, which `vector local confirm` never writes. A terminal's
+ * `vector local confirm` runs in a process of its own, so a Vector that is running applies what it confirmed only
+ * when it next starts; the terminal UI confirms in this Vector itself.
+ */
+export function localHeldAdvice() {
+  if (agentMarked())
+    return "An agent or Vector's own terminal started this Vector, so it cannot apply a change like this."
+  if (Flag.VECTOR_CLIENT === "desktop")
+    return `To apply it, quit Vector, delete ${localConfirmedFile()} and start Vector again.`
+  return "To apply it now, confirm it with /local in the terminal UI. vector local confirm in a terminal applies it when this Vector next starts."
+}
+
+/**
  * Adds the provider addresses of a model catalog the engine loaded to the cloud AI hosts a user may not list as a
  * model server of their own. That only takes servers off the list, so it applies at once. The provider service calls
  * this each time it reads the catalog. The catalog is read only while the user lists a server of their own, so a
@@ -733,18 +818,13 @@ function announceHeldLocal() {
 }
 
 function toastHeldLocal(pending: LocalPending) {
-  // Confirming in the app or with `vector local` comes with the Local API; until then the owner applies a held change
-  // by starting again without the copy the next start compares with.
-  const apply = agentMarked()
-    ? "An agent or Vector's own terminal started this Vector, so it cannot apply a change like this."
-    : `To apply it, quit Vector, delete ${localConfirmedFile()} and start Vector again.`
   GlobalBus.emit("event", {
     directory: "global",
     payload: {
       type: TuiEvent.ToastShow.type,
       properties: {
         title: "Vector Local change held",
-        message: `A change to your config would loosen Vector Local: it ${pending.changes.join(", ")}. Vector applies the parts that make it stricter and holds the rest. ${apply}`,
+        message: `A change to your config would loosen Vector Local: it ${pending.changes.join(", ")}. Vector applies the parts that make it stricter and holds the rest. ${localHeldAdvice()}`,
         variant: "warning",
         duration: 15_000,
       },
@@ -798,17 +878,25 @@ function evaluateLocal() {
   }
   const proposed = resolveLocal(sources, current)
   const kept = resolveLocal(sources, confirmed)
-  const changes = sources.failed ? [] : heldChanges(sources.managed, kept, proposed, confirmed.user, current.user)
+  // Turning Vector Local on lets at once only what stays on this computer and the user's network. The services the
+  // user's block allows, the model servers it lists on the internet and the sites it lets web pages reach wait for the
+  // owner: anything could have added them while Vector Local was off, when only identity pins were held. A pin other
+  // than the one the owner let apply waits too.
+  const baseline =
+    !kept.enabled && proposed.enabled ? { ...confirmed, user: turnedOn(current.user, confirmed.user) } : confirmed
+  const changes = sources.failed
+    ? []
+    : heldChanges(sources.managed, resolveLocal(sources, baseline), proposed, baseline.user, current.user)
   const held = changes.length > 0
   // A held change still applies what it tightens, such as a model server it removes or a stricter Web access: on if
   // either turns Local on, the stricter Web access, only what both list, every site either denies and the longer log.
   // That is what the next start compares with.
   const effect = held
     ? {
-        user: stricterLocal(confirmed.user, current.user),
+        user: stricterLocal(baseline.user, current.user),
         overrides: [
           ...new Map(
-            [...confirmed.overrides, ...current.overrides].map((item) => [JSON.stringify(item), item]),
+            [...baseline.overrides, ...current.overrides].map((item) => [JSON.stringify(item), item]),
           ).values(),
         ],
       }
@@ -845,14 +933,17 @@ function startConfirmed(sources: ReturnType<typeof readLocalSources>) {
   const saved = text
     ? Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(LocalConfirmed))(text))
     : undefined
-  localState.saved = saved && JSON.stringify(saved.local)
+  localState.saved = text ?? undefined
   if (saved) return { user: saved.local ?? undefined, overrides: sources.overrides }
   return { user: sources.readable ? sources.user : undefined, overrides: sources.overrides }
 }
 
 /**
  * What a change loosens: in the policy in effect, and in the user's own block as if it alone turned Vector Local on,
- * so a change the environment or the company's policy hides today is held too. Nothing is held while Local is off.
+ * so a change the environment or the company's policy hides today is held too. While Local is off only a new identity
+ * (or none) for a server on the list is held, unless `always` asks what it would loosen if Vector Local were on: the
+ * pin is how Vector tells that server from another one in its place, and turning Vector Local on applies the pins the
+ * config has at once, so a pin changed while it was off would otherwise go unasked.
  */
 function heldChanges(
   managed: ConfigLocalV1.Info | undefined,
@@ -860,9 +951,15 @@ function heldChanges(
   proposed: LocalMode.Policy,
   before: ConfigLocalV1.Info | undefined,
   after: ConfigLocalV1.Info | undefined,
+  always = false,
 ) {
-  if (!kept.enabled) return []
-  const own = (block: ConfigLocalV1.Info | undefined) => LocalPolicy.resolve({ global: { ...block, enabled: true } })
+  // A cloud AI service the user listed never applies, so listing one loosens nothing.
+  const own = (block: ConfigLocalV1.Info | undefined) =>
+    LocalPolicy.resolve({
+      global: { ...block, enabled: true },
+      ...(block?.endpoints?.length ? { cloudHosts: localCloudHosts() } : {}),
+    })
+  if (!kept.enabled && !always) return identities(own(before), own(after))
   const changes = [
     ...new Set([
       ...loosening(kept, proposed),
@@ -883,10 +980,31 @@ function shorterLog(before: number | undefined, after: number | undefined) {
 }
 
 /**
+ * The user's block as turning Vector Local on applies it at once: without the services it allows, the model servers it
+ * lists on the internet and the sites it lets web pages reach, which wait for the owner (evaluateLocal), and with the
+ * identity pins the owner let apply (`confirmed`'s), so a different one waits too.
+ */
+function turnedOn(
+  block: ConfigLocalV1.Info | undefined,
+  confirmed: ConfigLocalV1.Info | undefined,
+): ConfigLocalV1.Info | undefined {
+  if (!block) return block
+  return {
+    ...block,
+    endpoints: (block.endpoints ?? []).filter(
+      (item) => URL.canParse(item) && LocalPolicy.hostClass(new URL(item).hostname) !== "internet",
+    ),
+    allow: [],
+    web_domains: { ...block.web_domains, allow: [] },
+    ...(block.pins || confirmed?.pins ? { pins: { ...block.pins, ...confirmed?.pins } } : {}),
+  }
+}
+
+/**
  * The stricter of the block the owner last let apply and the user's new one, setting by setting: Vector Local on if
  * either turns it on, the stricter Web access, only the model servers, services and sites both list, every site either
- * denies, and the longer log. The parts Vector Local does not weigh (pins, checked results, certificates) come from
- * the new block, as they would from an edit that changed only them.
+ * denies, the identity pins the owner let apply, and the longer log. The other parts Vector Local does not weigh
+ * (checked results, certificates) come from the new block, as they would from an edit that changed only them.
  */
 function stricterLocal(before: ConfigLocalV1.Info | undefined, after: ConfigLocalV1.Info | undefined) {
   const endpoints = new Set((before?.endpoints ?? []).map((item) => LocalPolicy.origin(item) ?? item))
@@ -904,6 +1022,8 @@ function stricterLocal(before: ConfigLocalV1.Info | undefined, after: ConfigLoca
       allow: (after?.web_domains?.allow ?? []).filter((pattern) => sites.has(pattern)),
       deny: [...new Set([...(before?.web_domains?.deny ?? []), ...(after?.web_domains?.deny ?? [])])],
     },
+    // A server keeps the identity it was let apply with: a new pin, or none, waits for the owner like a new server.
+    ...(before?.pins || after?.pins ? { pins: { ...after?.pins, ...before?.pins } } : {}),
     ...(log
       ? {
           log: {
@@ -933,6 +1053,11 @@ function withWarnings(policy: LocalMode.Policy, warnings: readonly string[]): Lo
 // An allow entry as loosening compares it: the source and the hosts it covers.
 function allowedKey(item: LocalMode.Allowed) {
   return JSON.stringify([item.source, [...(item.hosts ?? [])].sort()])
+}
+
+// An identity pin as loosening compares it, whatever order its fields were written in.
+function pinKey(pin: LocalMode.Pin) {
+  return JSON.stringify([pin.kind, pin.version ?? null, pin.models ?? null, pin.spki ?? null])
 }
 
 function readLocalSources() {
@@ -1085,7 +1210,7 @@ function resolveLocal(sources: ReturnType<typeof readLocalSources>, inputs: Loca
       managed: sources.managed,
       global: inputs.user,
       env: process.env,
-      ...(listing ? { cloudHosts: cloudHosts() } : {}),
+      ...(listing ? { cloudHosts: localCloudHosts() } : {}),
     }),
   )
   // Only the desktop sets VECTOR_LOCAL_POLICY, for an engine it starts in WSL, and the desktop never runs under the
@@ -1109,8 +1234,11 @@ function resolveLocal(sources: ReturnType<typeof readLocalSources>, inputs: Loca
   }
 }
 
-// The registry's cloud AI hosts, the bundled catalog's and those of every catalog this process read.
-function cloudHosts() {
+/**
+ * The cloud AI hosts a user may not list as a model server: the registry's, the bundled catalog's and those of every
+ * catalog this process read.
+ */
+export function localCloudHosts() {
   localState.bundledCloud ??= LocalSources.cloudHosts(ModelCatalog.bundled() ?? {})
   const loaded = localState.catalog
   if (loaded && !localState.scanned.has(loaded)) {
@@ -1164,22 +1292,26 @@ function tightenLocal(policy: LocalMode.Policy, override: LocalBlock): LocalMode
 
 /**
  * What `after` would loosen compared with `before`, in words for the owner: turning Vector Local off, a looser Web
- * access, a new model server, a newly allowed service or site, or a site no longer denied. Empty when it only tightens.
+ * access, a new model server, a new identity (or none) for a server on the list, a newly allowed service or site, or a
+ * site no longer denied. Empty when it only tightens.
  */
 export function loosening(before: LocalMode.Policy, after: LocalMode.Policy) {
   if (!before.enabled) return []
   if (!after.enabled) return [LOCAL_OFF]
-  const endpoint = (item: LocalMode.Endpoint) => `${item.from} ${LocalPolicy.origin(item.origin) ?? item.origin}`
-  const endpoints = new Set(before.endpoints.map(endpoint))
+  const endpoints = new Set(before.endpoints.map(endpointKey))
   const allows = new Set(before.allow.map(allowedKey))
   return [
     ...(LocalPolicy.stricter(after.web, before.web) !== after.web
       ? [`sets Web access to ${LOCAL_WEB_LABELS[after.web]}`]
       : []),
     ...after.endpoints
-      .filter((item) => !endpoints.has(endpoint(item)))
+      .filter((item) => !endpoints.has(endpointKey(item)))
       .map((item) => `adds the model server ${item.origin}`),
-    ...after.allow.filter((item) => !allows.has(allowedKey(item))).map((item) => `allows ${item.source}`),
+    ...identities(before, after),
+    // The hosts are part of the line, so widening an entry's hosts reads differently from the entry the owner saw.
+    ...after.allow
+      .filter((item) => !allows.has(allowedKey(item)))
+      .map((item) => `allows ${item.source} for ${item.hosts?.length ? item.hosts.join(", ") : "any host"}`),
     ...after.web_domains.allow
       .filter((pattern) => !before.web_domains.allow.includes(pattern))
       .map((pattern) => `lets web pages reach ${pattern}`),
@@ -1189,16 +1321,47 @@ export function loosening(before: LocalMode.Policy, after: LocalMode.Policy) {
   ]
 }
 
+/**
+ * A new identity, or none, for each server on both lists. A pin is how Vector tells the server on the list from
+ * another one in its place, so replacing or removing the pin of a server that stays listed lets a different server
+ * receive the prompts.
+ */
+function identities(before: LocalMode.Policy, after: LocalMode.Policy) {
+  const endpoints = new Set(before.endpoints.map(endpointKey))
+  return after.endpoints
+    .filter((item) => endpoints.has(endpointKey(item)))
+    .flatMap((item) => {
+      const origin = LocalPolicy.origin(item.origin) ?? item.origin
+      const was = before.pins?.[origin]
+      const now = after.pins?.[origin]
+      if (!was || (now && pinKey(now) === pinKey(was))) return []
+      return [now ? `accepts a new identity for ${origin}` : `stops checking the identity of ${origin}`]
+    })
+}
+
+function endpointKey(item: LocalMode.Endpoint) {
+  return `${item.from} ${LocalPolicy.origin(item.origin) ?? item.origin}`
+}
+
 function saveLocalConfirmed(block: ConfigLocalV1.Info | undefined) {
-  const text = JSON.stringify(block ?? null)
+  const text = JSON.stringify({ local: block ?? null }, null, 2)
   // A process under the agent marker never writes the copy a later start trusts: it never read it, and the user's
   // config it read may be the agent's.
   if (agentMarked() || text === localState.saved) return
   const file = localConfirmedFile()
+  // Another Vector of the user's wrote the copy since this one last read or wrote it, such as `vector local confirm` in
+  // a terminal: what it recorded stands, and is what the next start compares with. A copy that already says what
+  // this one would write (a thread of this process that resolved Vector Local too) is this one's as well.
+  const current = readLocalText(file)
+  if (current === text) {
+    localState.saved = text
+    return
+  }
+  if (current && current !== localState.saved) return
   const temporary = `${file}.${process.pid}.${Date.now()}.tmp`
   // Best effort: a copy that cannot be written only means the next start compares with an older block, or with none.
   try {
-    writeFileSync(temporary, JSON.stringify({ local: block ?? null }, null, 2), { mode: 0o600 })
+    writeFileSync(temporary, text, { mode: 0o600 })
     renameSync(temporary, file)
     localState.saved = text
   } catch {

@@ -572,7 +572,7 @@ describe("children inherit the Local floor", () => {
     writeFileSync(copy, JSON.stringify({ local: block }))
     const next = await start(env)
     expect(next.policy).toMatchObject({ enabled: true, web: "network", endpoints: [], allow: [] })
-    expect(next.pending).toEqual([`adds the model server ${GPU_BOX}`, "allows github"])
+    expect(next.pending).toEqual([`adds the model server ${GPU_BOX}`, "allows github for any host"])
   }, 30_000)
 })
 
@@ -745,7 +745,7 @@ describe("loosening edits wait for the owner", () => {
       expect(untrustedChildEnvironment({}).VECTOR_LOCAL).toBe("1")
       expect(Config.localPending()?.proposed.enabled).toBe(false)
       expect(toasts.map((event) => event.payload.properties.message)).toEqual([
-        `A change to your config would loosen Vector Local: it turns Vector Local off. Vector applies the parts that make it stricter and holds the rest. To apply it, quit Vector, delete ${Config.localConfirmedFile()} and start Vector again.`,
+        `A change to your config would loosen Vector Local: it turns Vector Local off. Vector applies the parts that make it stricter and holds the rest. To apply it now, confirm it with /local in the terminal UI. vector local confirm in a terminal applies it when this Vector next starts.`,
       ])
 
       const applied = nextChange("updated")
@@ -807,7 +807,7 @@ describe("loosening edits wait for the owner", () => {
     expect(next.pending).toEqual([
       "sets Web access to Ask",
       `adds the model server ${GPU_BOX}`,
-      "allows github",
+      "allows github for any host",
       "lets web pages reach docs.example.com",
     ])
   }, 30_000)
@@ -816,7 +816,10 @@ describe("loosening edits wait for the owner", () => {
     writeGlobal({ enabled: true, endpoints: [SERVER] })
     Config.refreshLocal()
     writeGlobal({ enabled: true, endpoints: [SERVER, GPU_BOX], allow: [CATALOG] })
-    expect((await start(process.env)).pending).toEqual([`adds the model server ${GPU_BOX}`, "allows catalog"])
+    expect((await start(process.env)).pending).toEqual([
+      `adds the model server ${GPU_BOX}`,
+      "allows catalog for any host",
+    ])
     // What the held change tells the owner to do, with Vector Local on through the user's config or the environment.
     for (const copy of [undefined, "garbage", JSON.stringify({ local: { enabled: "yes" } })]) {
       rmSync(Config.localConfirmedFile(), { force: true })
@@ -841,7 +844,7 @@ describe("loosening edits wait for the owner", () => {
     const copy = readFileSync(Config.localConfirmedFile(), "utf8")
     const next = await start({ ...process.env, VECTOR_LOCAL: "1", VECTOR_AGENT_SESSION: "1" })
     expect(next.policy).toMatchObject({ enabled: true, endpoints: [], allow: [] })
-    expect(next.pending).toEqual([`adds the model server ${GPU_BOX}`, "allows catalog"])
+    expect(next.pending).toEqual([`adds the model server ${GPU_BOX}`, "allows catalog for any host"])
     // Nor written.
     expect(readFileSync(Config.localConfirmedFile(), "utf8")).toBe(copy)
   }, 30_000)
@@ -882,7 +885,7 @@ describe("loosening edits wait for the owner", () => {
     expect(Config.localPending()?.changes).toEqual([
       "sets Web access to Ask",
       `adds the model server ${SERVER}`,
-      "allows github",
+      "allows github for any host",
     ])
   })
 
@@ -904,7 +907,7 @@ describe("loosening edits wait for the owner", () => {
       })
       expect(Config.localPending()?.changes).toEqual([
         `adds the model server ${GPU_BOX}`,
-        "allows catalog",
+        "allows catalog for any host",
         "lets web pages reach *.example.com",
       ])
     })
@@ -981,7 +984,7 @@ describe("loosening edits wait for the owner", () => {
       yield* Effect.addFinalizer(() => Effect.sync(() => GlobalBus.off("event", onEvent)))
       yield* Config.use.get()
       expect(toasts).toEqual([
-        `A change to your config would loosen Vector Local: it adds the model server ${GPU_BOX}. Vector applies the parts that make it stricter and holds the rest. To apply it, quit Vector, delete ${Config.localConfirmedFile()} and start Vector again.`,
+        `A change to your config would loosen Vector Local: it adds the model server ${GPU_BOX}. Vector applies the parts that make it stricter and holds the rest. To apply it now, confirm it with /local in the terminal UI. vector local confirm in a terminal applies it when this Vector next starts.`,
       ])
     }),
   )
@@ -1015,6 +1018,120 @@ describe("loosening edits wait for the owner", () => {
     rmSync(managedDirectory, { recursive: true })
     expect(Config.refreshLocal().enabled).toBe(false)
     expect(Config.localPending()).toBe(undefined)
+  })
+
+  test("the held change says how to apply it from where this Vector runs", () => {
+    expect(Config.localHeldAdvice()).toBe(
+      "To apply it now, confirm it with /local in the terminal UI. vector local confirm in a terminal applies it when this Vector next starts.",
+    )
+    // The desktop app keeps a copy of its own, which vector local confirm never writes.
+    process.env.VECTOR_CLIENT = "desktop"
+    expect(Config.localHeldAdvice()).toBe(
+      `To apply it, quit Vector, delete ${Config.localConfirmedFile()} and start Vector again.`,
+    )
+    process.env.VECTOR_AGENT_SESSION = "1"
+    expect(Config.localHeldAdvice()).toBe(
+      "An agent or Vector's own terminal started this Vector, so it cannot apply a change like this.",
+    )
+  })
+
+  test("a confirmation another Vector records stands: this one never writes over it, and the next start applies it", async () => {
+    writeGlobal({ enabled: true, web: "network", endpoints: [SERVER] })
+    Config.refreshLocal()
+    writeGlobal({ enabled: true, web: "network", endpoints: [SERVER, GPU_BOX] })
+    Config.refreshLocal()
+    expect(Config.localPending()?.changes).toEqual([`adds the model server ${GPU_BOX}`])
+    // vector local confirm in a terminal: a process of its own confirms the held change and records it.
+    const listed = await run(
+      `
+      const { Config } = await import(${CONFIG})
+      Config.confirmLocal()
+      process.stdout.write(JSON.stringify(Config.local().endpoints.length) + "\\n")
+      process.exit(0)
+      `,
+      process.env,
+    )
+    expect(listed).toBe(2)
+    const copy = readFileSync(Config.localConfirmedFile(), "utf8")
+    // This Vector still holds it, and what it tightens since does not write over that copy.
+    writeGlobal({ enabled: true, web: "none", endpoints: [SERVER, GPU_BOX] })
+    expect(Config.refreshLocal()).toMatchObject({ web: "none", endpoints: [{ origin: SERVER, from: "user" }] })
+    expect(Config.localPending()?.changes).toEqual([`adds the model server ${GPU_BOX}`])
+    expect(readFileSync(Config.localConfirmedFile(), "utf8")).toBe(copy)
+    const next = await start(process.env)
+    expect(next.pending).toBe(null)
+    expect(next.policy).toMatchObject({
+      web: "none",
+      endpoints: [
+        { origin: SERVER, from: "user" },
+        { origin: GPU_BOX, from: "user" },
+      ],
+    })
+  }, 30_000)
+
+  test("turning Vector Local on holds what the user's block lets reach the internet until the owner confirms it", () => {
+    const internet = "https://models.example.com"
+    const block = { endpoints: [SERVER, internet], allow: [GITHUB], web_domains: { allow: ["docs.example.com"] } }
+    // Nothing is held while Vector Local is off, so anything could have written these.
+    writeGlobal(block)
+    expect(Config.refreshLocal().enabled).toBe(false)
+    expect(Config.localPending()).toBe(undefined)
+    writeGlobal({ ...block, enabled: true, web: "network" })
+    expect(Config.refreshLocal()).toMatchObject({
+      enabled: true,
+      web: "network",
+      endpoints: [{ origin: SERVER, from: "user" }],
+      allow: [],
+      web_domains: { allow: [] },
+    })
+    expect(Config.localPending()?.changes).toEqual([
+      `adds the model server ${internet}`,
+      "allows github for any host",
+      "lets web pages reach docs.example.com",
+    ])
+    Config.confirmLocal()
+    expect(Config.local()).toMatchObject({
+      endpoints: [
+        { origin: SERVER, from: "user" },
+        { origin: internet, from: "user" },
+      ],
+      allow: [GITHUB],
+      web_domains: { allow: ["docs.example.com"] },
+    })
+    expect(Config.localPending()).toBe(undefined)
+  })
+
+  test("a new identity pin for a server on the list, or none, is held, and the server keeps the one it had", () => {
+    const pin = { kind: "ollama", version: "0.12.6", models: "sha256:aaa" }
+    writeGlobal({ enabled: true, endpoints: [SERVER], pins: { [SERVER]: pin } })
+    expect(Config.refreshLocal().pins).toEqual({ [SERVER]: pin })
+    writeGlobal({ enabled: true, endpoints: [SERVER], pins: { [SERVER]: { ...pin, version: "9.9.9" } } })
+    expect(Config.refreshLocal().pins).toEqual({ [SERVER]: pin })
+    expect(Config.localPending()?.changes).toEqual([`accepts a new identity for ${SERVER}`])
+    writeGlobal({ enabled: true, endpoints: [SERVER] })
+    expect(Config.refreshLocal().pins).toEqual({ [SERVER]: pin })
+    expect(Config.localPending()?.changes).toEqual([`stops checking the identity of ${SERVER}`])
+    // The same pin written in another order is no new identity, and pinning a server for the first time tightens.
+    writeGlobal({
+      enabled: true,
+      endpoints: [SERVER, GPU_BOX],
+      pins: { [SERVER]: { models: pin.models, version: pin.version, kind: pin.kind } },
+    })
+    Config.refreshLocal()
+    expect(Config.localPending()?.changes).toEqual([`adds the model server ${GPU_BOX}`])
+  })
+
+  test("under the agent marker, what would loosen Vector Local once it is on counts while it is off", () => {
+    writeGlobal({ endpoints: [SERVER] })
+    expect(Config.refreshLocal().enabled).toBe(false)
+    expect(Config.localLoosening({ endpoints: [SERVER, GPU_BOX], allow: [GITHUB] })).toEqual([])
+    process.env.VECTOR_AGENT_SESSION = "1"
+    expect(Config.localLoosening({ endpoints: [SERVER, GPU_BOX], allow: [GITHUB] })).toEqual([
+      `adds the model server ${GPU_BOX}`,
+      "allows github for any host",
+    ])
+    // Turning it on, or a stricter Web access, still only tightens.
+    expect(Config.localLoosening({ enabled: true, web: "none", endpoints: [SERVER] })).toEqual([])
   })
 
   test.skipIf(process.platform === "win32")("the confirmed block is readable by the user only", () => {
@@ -1126,7 +1243,7 @@ describe("an edit that loosens one part and tightens another", () => {
     Config.refreshLocal()
     writeGlobal({ enabled: true, web_domains: { deny: ["docs.example.com"] }, allow: [GITHUB] })
     Config.refreshLocal()
-    expect(Config.localPending()?.changes).toEqual(["allows github", "stops blocking ads.example"])
+    expect(Config.localPending()?.changes).toEqual(["allows github for any host", "stops blocking ads.example"])
     expect(Config.local()).toMatchObject({ allow: [], web_domains: { deny: ["ads.example", "docs.example.com"] } })
     expect(Egress.decide(PAGE).decision).toBe("block")
   })
@@ -1259,9 +1376,13 @@ describe("cloud AI services the model catalog lists", () => {
   const LLAMA = "https://api.llama.com"
 
   test("cannot be one of the user's model servers, and a catalog Vector loads applies that at once", () => {
+    writeGlobal({ enabled: true, endpoints: [GPU_BOX] })
+    Config.refreshLocal()
+    // Not in the registry's list, and this build carries no catalog of its own, so it is a server like any other.
     writeGlobal({ enabled: true, endpoints: [GPU_BOX, LLAMA] })
-    // Not in the registry's list, and this build carries no catalog of its own.
-    expect(Config.refreshLocal().endpoints.map((item) => item.origin)).toEqual([GPU_BOX, LLAMA])
+    Config.refreshLocal()
+    Config.confirmLocal()
+    expect(Config.local().endpoints.map((item) => item.origin)).toEqual([GPU_BOX, LLAMA])
     expect(inference(LLAMA)).toBe("allow")
 
     Config.localCatalog({ llama: { api: `${LLAMA}/compat/v1/` } })
