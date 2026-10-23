@@ -5407,6 +5407,1136 @@
         ]
       }
     },
+    "/local": {
+      "get": {
+        "tags": ["local"],
+        "operationId": "local.get",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Vector Local's policy in effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "The Vector Local policy in effect for this Vector: on or off, Web access, the model server list, the services you allowed and what the policy files said. Also a change to your config that would loosen it and waits for you, the keys a company lock keeps, where the network log is kept, and every kind of request Vector makes.",
+        "summary": "Get Vector Local",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.get({\n  ...\n})"
+          }
+        ]
+      },
+      "patch": {
+        "tags": ["local"],
+        "operationId": "local.update",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Vector Local after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "LocalError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LocalError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "LocalConfirmError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalConfirmError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Change Vector Local in your user config. A change that makes it stricter applies at once. One that would loosen it (turn it off, a looser Web access, a new model server, a newly allowed service or site) fails with LocalConfirmError and the list of what it loosens, unless the request says `confirm: true`, which an owner's app sends only after asking. With `held`, it applies the change your config holds instead. A Vector an agent started cannot loosen it, and under a company lock only the keys your company left to you change.",
+        "summary": "Change Vector Local",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocalUpdate"
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.update({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/local/egress": {
+      "get": {
+        "tags": ["local"],
+        "operationId": "local.egress.list",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "required": false
+          },
+          {
+            "name": "session",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "blocked",
+            "in": "query",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "enum": ["true", "false"]
+                }
+              ]
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The network log in memory, oldest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EgressEvent"
+                  },
+                  "description": "The network log in memory, oldest first"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "The last 2,000 requests Vector decided while Vector Local was on: when, which kind of request, where it went (origin and class), the session, the size it sent, and whether it was allowed or blocked, with the rule. Never a path, a query, a header or a body.",
+        "summary": "List what Vector sent",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.egress.list({\n  ...\n})"
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["local"],
+        "operationId": "local.egress.clear",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The network log was erased",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "description": "The network log was erased"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Erase the network log: the events in memory, the counters and the files on this computer.",
+        "summary": "Erase what Vector sent",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.egress.clear({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/local/egress/summary": {
+      "get": {
+        "tags": ["local"],
+        "operationId": "local.egress.summary",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "session",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Counters for one session, or for this Vector",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EgressSummary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Model calls by origin, pages read and the other hosts they loaded, searches, the memory requests carried, and blocked requests by source. A session's counters include its subagents and helpers.",
+        "summary": "Summarize what Vector sent",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.egress.summary({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/local/egress/export": {
+      "get": {
+        "tags": ["local"],
+        "operationId": "local.egress.export",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "required": false
+          },
+          {
+            "name": "session",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "blocked",
+            "in": "query",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "enum": ["true", "false"]
+                }
+              ]
+            },
+            "required": false
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["jsonl", "csv"]
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/x-ndjson": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Every event the network log keeps on this computer (30 days unless set otherwise), as JSON lines or CSV.",
+        "summary": "Export what Vector sent",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.egress.export({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/local/egress/report": {
+      "post": {
+        "tags": ["local"],
+        "operationId": "local.egress.report",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "How many events the log took",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string",
+                      "enum": ["NaN"]
+                    },
+                    {
+                      "type": "string",
+                      "enum": ["Infinity"]
+                    },
+                    {
+                      "type": "string",
+                      "enum": ["-Infinity"]
+                    },
+                    {
+                      "type": "string",
+                      "enum": ["Infinity", "-Infinity", "NaN"]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Requests the desktop app's own windows made or blocked, which its main process decides, added to this Vector's network log while Vector Local is on.",
+        "summary": "Add events to the network log",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "events": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/EgressEvent"
+                    },
+                    "maxItems": 500
+                  }
+                },
+                "required": ["events"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.egress.report({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/local/detect": {
+      "post": {
+        "tags": ["local"],
+        "operationId": "local.detect",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Model servers answering on this computer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LocalServer"
+                  },
+                  "description": "Model servers answering on this computer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Find the model servers running on this computer: Ollama, LM Studio, vLLM, llama.cpp and SGLang on their usual ports at 127.0.0.1 and ::1. It never scans your network; add a server elsewhere by its address.",
+        "summary": "Find model servers",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ports": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    },
+                    "maxItems": 16
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.detect({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/local/probe": {
+      "post": {
+        "tags": ["local"],
+        "operationId": "local.probe",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The server at the address, or why none was read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalProbeResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Read the server at an address you typed: what kind it is, its version, its models with their context, tools and image support, and the identity Vector pins when you add it. It asks for these only; it sends no prompt. With Vector Local on, only that server is let through while it is read, and Web access None keeps internet servers blocked.",
+        "summary": "Read a model server",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string"
+                  },
+                  "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": ["url"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.probe({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/local/servers": {
+      "post": {
+        "tags": ["local"],
+        "operationId": "local.servers.add",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The server, on the list and added as a provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalAddedServer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "LocalError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LocalError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "LocalConfirmError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalConfirmError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Read the server at an address, put it on the model server list with the identity it answered with, and add it to your user config as a provider with the models it runs, each with its context, reply limit, tool calling and image input. Its cloud models are left out. With Vector Local on, listing a server loosens it, so the request needs `confirm: true`, and fails with LocalConfirmError otherwise. Headers are used to read the server and are not saved.",
+        "summary": "Add a model server",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string"
+                  },
+                  "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "confirm": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["url"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.servers.add({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/local/check": {
+      "post": {
+        "tags": ["local"],
+        "operationId": "local.check",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One row per layer, and the model check when a model was named",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalCheckResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "LocalError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LocalError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Read every layer of Vector Local, one row each: the switch, the policy, a held change, the network guard, unlabelled requests, Vector's own services, Web access, each model server on the list (it answers, as the server it was when added) and the network log. With `model`, it also runs that model through 2 or 3 requests with the role's real tools and records the result in your user config. It never loads a model too big for free memory without `confirmed`.",
+        "summary": "Check Vector Local",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": ["agent", "subagent", "research"]
+                  },
+                  "confirmed": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.check({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/local/grant": {
+      "post": {
+        "tags": ["local"],
+        "operationId": "local.grant",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The grant was given",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "description": "The grant was given"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "LocalError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LocalError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Let the next request of a kind Vector Local asks about through, such as a model download or a manual update check, or every one while this Vector runs. It is never saved. Allow a service for good with PATCH /local instead.",
+        "summary": "Allow a request once",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "source": {
+                    "type": "string"
+                  },
+                  "once": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["source"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.grant({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/local/recommend": {
+      "get": {
+        "tags": ["local"],
+        "operationId": "local.recommend",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Model suggestions for this computer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalRecommendation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "This computer's memory and GPUs, and the model families that fit them for each role, as dated examples from the publishers' own repositories or the Ollama library. Check each model's licence.",
+        "summary": "Suggest models",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.recommend({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/mcp": {
       "get": {
         "tags": ["mcp"],
@@ -24131,6 +25261,12 @@
             "$ref": "#/components/schemas/EventResearchUpdated"
           },
           {
+            "$ref": "#/components/schemas/EventLocalUpdated"
+          },
+          {
+            "$ref": "#/components/schemas/EventLocalBlocked"
+          },
+          {
             "$ref": "#/components/schemas/EventVcsBranchUpdated"
           },
           {
@@ -26285,6 +27421,10 @@
         "items": {
           "type": "string"
         }
+      },
+      "LocalWeb": {
+        "type": "string",
+        "enum": ["ask", "network", "none"]
       },
       "GlobalEvent": {
         "type": "object",
@@ -29548,6 +30688,68 @@
                   },
                   "type": {
                     "type": "string",
+                    "enum": ["local.updated"]
+                  },
+                  "properties": {
+                    "type": "object",
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "web": {
+                        "$ref": "#/components/schemas/LocalWeb"
+                      },
+                      "lock": {
+                        "type": "boolean"
+                      },
+                      "held": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": ["enabled", "web", "lock", "held"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["id", "type", "properties"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["local.blocked"]
+                  },
+                  "properties": {
+                    "type": "object",
+                    "properties": {
+                      "source": {
+                        "type": "string"
+                      },
+                      "origin": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["source", "origin"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["id", "type", "properties"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "type": {
+                    "type": "string",
                     "enum": ["vcs.branch.updated"]
                   },
                   "properties": {
@@ -30455,10 +31657,6 @@
           }
         },
         "additionalProperties": false
-      },
-      "LocalWeb": {
-        "type": "string",
-        "enum": ["ask", "network", "none"]
       },
       "LocalAllowed": {
         "type": "object",
@@ -32952,6 +34150,1239 @@
           }
         },
         "required": ["name", "extensions", "enabled"],
+        "additionalProperties": false
+      },
+      "LocalOrigin": {
+        "type": "string",
+        "enum": ["managed", "user", "environment"]
+      },
+      "LocalEndpoint": {
+        "type": "object",
+        "properties": {
+          "origin": {
+            "type": "string"
+          },
+          "from": {
+            "$ref": "#/components/schemas/LocalOrigin"
+          }
+        },
+        "required": ["origin", "from"],
+        "additionalProperties": false
+      },
+      "LocalPin": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "models": {
+            "type": "string"
+          },
+          "spki": {
+            "type": "string"
+          }
+        },
+        "required": ["kind"],
+        "additionalProperties": false
+      },
+      "LocalPolicy": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "web": {
+            "$ref": "#/components/schemas/LocalWeb"
+          },
+          "lock": {
+            "type": "boolean"
+          },
+          "pending": {
+            "type": "boolean"
+          },
+          "endpoints": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LocalEndpoint"
+            }
+          },
+          "web_domains": {
+            "type": "object",
+            "properties": {
+              "allow": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "deny": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["allow", "deny"],
+            "additionalProperties": false
+          },
+          "allow": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LocalAllowed"
+            }
+          },
+          "updates": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": ["url"],
+            "additionalProperties": false
+          },
+          "user_may": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "locked_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "endpoint_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pins": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/LocalPin"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "enabled",
+          "web",
+          "lock",
+          "endpoints",
+          "web_domains",
+          "allow",
+          "user_may",
+          "locked_keys",
+          "endpoint_domains",
+          "warnings"
+        ],
+        "additionalProperties": false
+      },
+      "LocalHeld": {
+        "type": "object",
+        "properties": {
+          "proposed": {
+            "$ref": "#/components/schemas/LocalPolicy"
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["proposed", "changes"],
+        "additionalProperties": false
+      },
+      "EgressPurpose": {
+        "type": "string",
+        "enum": [
+          "inference",
+          "catalog",
+          "policy",
+          "account",
+          "usage",
+          "crash",
+          "telemetry",
+          "support",
+          "release-notes",
+          "asset",
+          "updates",
+          "help",
+          "share",
+          "model-download",
+          "tool-download",
+          "plugin",
+          "git-remote",
+          "lsp-install",
+          "web-page",
+          "web-search",
+          "browser",
+          "research-reader",
+          "research-browser",
+          "integration",
+          "mcp",
+          "config-remote",
+          "unknown"
+        ]
+      },
+      "EgressSourceLocal": {
+        "type": "string",
+        "enum": ["blocked", "ask-once", "allowed", "allow-with-reason", "not-allowable", "not-covered"]
+      },
+      "EgressWhere": {
+        "type": "string",
+        "enum": ["engine", "desktop", "renderer"]
+      },
+      "LocalSource": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/EgressPurpose"
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sends": {
+            "type": "string"
+          },
+          "why": {
+            "type": "string"
+          },
+          "local": {
+            "$ref": "#/components/schemas/EgressSourceLocal"
+          },
+          "where": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EgressWhere"
+            }
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": ["id", "purpose", "hosts", "sends", "why", "local", "where"],
+        "additionalProperties": false
+      },
+      "LocalStatus": {
+        "type": "object",
+        "properties": {
+          "policy": {
+            "$ref": "#/components/schemas/LocalPolicy"
+          },
+          "held": {
+            "$ref": "#/components/schemas/LocalHeld"
+          },
+          "locked": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "log": {
+            "type": "object",
+            "properties": {
+              "directory": {
+                "type": "string"
+              },
+              "retain_days": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string",
+                    "enum": ["NaN"]
+                  },
+                  {
+                    "type": "string",
+                    "enum": ["Infinity"]
+                  },
+                  {
+                    "type": "string",
+                    "enum": ["-Infinity"]
+                  },
+                  {
+                    "type": "string",
+                    "enum": ["Infinity", "-Infinity", "NaN"]
+                  }
+                ]
+              }
+            },
+            "required": ["directory", "retain_days"],
+            "additionalProperties": false
+          },
+          "agent": {
+            "type": "boolean"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LocalSource"
+            }
+          }
+        },
+        "required": ["policy", "locked", "log", "agent", "sources"],
+        "additionalProperties": false
+      },
+      "LocalAllowRequest": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": ["source", "reason"],
+        "additionalProperties": false
+      },
+      "LocalUpdate": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "web": {
+            "$ref": "#/components/schemas/LocalWeb"
+          },
+          "endpoints": {
+            "type": "object",
+            "properties": {
+              "add": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "remove": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "allow": {
+            "type": "object",
+            "properties": {
+              "add": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/LocalAllowRequest"
+                }
+              },
+              "remove": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "web_domains": {
+            "type": "object",
+            "properties": {
+              "allow": {
+                "type": "object",
+                "properties": {
+                  "add": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "remove": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "additionalProperties": false
+              },
+              "deny": {
+                "type": "object",
+                "properties": {
+                  "add": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "remove": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          },
+          "pins": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/LocalPinConfig"
+            }
+          },
+          "retain_days": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "confirm": {
+            "type": "boolean"
+          },
+          "held": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "by": {
+            "type": "string",
+            "enum": ["app", "cli"]
+          }
+        },
+        "additionalProperties": false
+      },
+      "LocalError": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": ["LocalError"]
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": ["agent", "locked", "invalid", "changed", "not-found"]
+              },
+              "message": {
+                "type": "string"
+              },
+              "changes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["name", "data"],
+        "additionalProperties": false
+      },
+      "LocalConfirmError": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": ["LocalConfirmError"]
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "changes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["message", "changes"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["name", "data"],
+        "additionalProperties": false
+      },
+      "EgressClass": {
+        "type": "string",
+        "enum": ["this-computer", "your-network", "listed", "internet"]
+      },
+      "EgressDecision": {
+        "type": "string",
+        "enum": ["allow", "ask", "block"]
+      },
+      "EgressRule": {
+        "type": "string",
+        "enum": [
+          "local-off",
+          "pending",
+          "listed",
+          "not-listed",
+          "not-allowable",
+          "loopback",
+          "web-none",
+          "web-network",
+          "web-ask",
+          "web-deny",
+          "web-allow",
+          "vector-service",
+          "allowed-source",
+          "automatic-update",
+          "manual-check",
+          "mirror",
+          "download-grant",
+          "private-remote",
+          "unlabelled",
+          "resolved-outside",
+          "private-destination",
+          "web-port",
+          "proxy-environment"
+        ]
+      },
+      "EgressCarried": {
+        "type": "object",
+        "properties": {
+          "personal": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "documents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "repository": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": ["personal", "documents", "repository"],
+        "additionalProperties": false
+      },
+      "EgressEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "time": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "source": {
+            "type": "string"
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/EgressPurpose"
+          },
+          "class": {
+            "$ref": "#/components/schemas/EgressClass"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "bytes_out": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "bytes_in": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "decision": {
+            "$ref": "#/components/schemas/EgressDecision"
+          },
+          "rule": {
+            "$ref": "#/components/schemas/EgressRule"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "root_session_id": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "carried": {
+            "$ref": "#/components/schemas/EgressCarried"
+          },
+          "frame": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "time",
+          "source",
+          "purpose",
+          "class",
+          "origin",
+          "method",
+          "decision",
+          "rule",
+          "reason",
+          "carried"
+        ],
+        "additionalProperties": false
+      },
+      "EgressSummary": {
+        "type": "object",
+        "properties": {
+          "requests": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "helper_requests": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "model_calls": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "pages": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "hosts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "searches": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "carried": {
+            "$ref": "#/components/schemas/EgressCarried"
+          },
+          "blocked": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "required": ["requests", "helper_requests", "model_calls", "pages", "hosts", "searches", "carried", "blocked"],
+        "additionalProperties": false
+      },
+      "LocalServerKind": {
+        "type": "string",
+        "enum": ["ollama", "lmstudio", "vllm", "llamacpp", "sglang", "openai"]
+      },
+      "LocalServerForwards": {
+        "type": "string",
+        "enum": ["ollama-cloud", "litellm"]
+      },
+      "LocalServerModel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "context": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": ["NaN"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["-Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity", "-Infinity", "NaN"]
+              }
+            ]
+          },
+          "trained": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": ["NaN"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["-Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity", "-Infinity", "NaN"]
+              }
+            ]
+          },
+          "output": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": ["NaN"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["-Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity", "-Infinity", "NaN"]
+              }
+            ]
+          },
+          "tools": {
+            "type": "boolean"
+          },
+          "vision": {
+            "type": "boolean"
+          },
+          "loaded": {
+            "type": "boolean"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": ["NaN"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["-Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity", "-Infinity", "NaN"]
+              }
+            ]
+          },
+          "parameters": {
+            "type": "string"
+          },
+          "quantization": {
+            "type": "string"
+          },
+          "family": {
+            "type": "string"
+          },
+          "cloud": {
+            "type": "boolean"
+          }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      },
+      "LocalServer": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/LocalServerKind"
+          },
+          "name": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "baseURL": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "class": {
+            "type": "string",
+            "enum": ["this-computer", "your-network", "internet"]
+          },
+          "encrypted": {
+            "type": "boolean"
+          },
+          "concurrency": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": ["NaN"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["-Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity", "-Infinity", "NaN"]
+              }
+            ]
+          },
+          "forwards": {
+            "$ref": "#/components/schemas/LocalServerForwards"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LocalServerModel"
+            }
+          },
+          "pin": {
+            "$ref": "#/components/schemas/LocalPinConfig"
+          }
+        },
+        "required": ["kind", "name", "origin", "baseURL", "class", "encrypted", "models", "pin"],
+        "additionalProperties": false
+      },
+      "LocalProbeResult": {
+        "type": "object",
+        "properties": {
+          "server": {
+            "$ref": "#/components/schemas/LocalServer"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["server"],
+        "additionalProperties": false
+      },
+      "LocalAddedServer": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "server": {
+            "$ref": "#/components/schemas/LocalServer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/LocalStatus"
+          }
+        },
+        "required": ["provider", "models", "server", "status"],
+        "additionalProperties": false
+      },
+      "LocalCheckRow": {
+        "type": "object",
+        "properties": {
+          "layer": {
+            "type": "string",
+            "enum": ["switch", "policy", "held", "guard", "unlabelled", "services", "web", "server", "models", "log"]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pass", "warn", "fail"]
+          },
+          "title": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          }
+        },
+        "required": ["layer", "status", "title"],
+        "additionalProperties": false
+      },
+      "LocalModelCheck": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "result": {
+            "type": "string",
+            "enum": ["works", "no-tools", "schema-rejected", "context-too-small", "failed", "ask"]
+          },
+          "message": {
+            "type": "string"
+          },
+          "context": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": ["NaN"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["-Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity", "-Infinity", "NaN"]
+              }
+            ]
+          },
+          "ttft_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": ["NaN"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["-Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity", "-Infinity", "NaN"]
+              }
+            ]
+          },
+          "requests": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": ["NaN"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["-Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity", "-Infinity", "NaN"]
+              }
+            ]
+          },
+          "checked_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": ["NaN"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["-Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity", "-Infinity", "NaN"]
+              }
+            ]
+          },
+          "server_version": {
+            "type": "string"
+          }
+        },
+        "required": ["model", "result", "requests", "checked_at"],
+        "additionalProperties": false
+      },
+      "LocalCheckResult": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "result": {
+            "type": "string",
+            "enum": ["pass", "fail", "off"]
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LocalCheckRow"
+            }
+          },
+          "model": {
+            "$ref": "#/components/schemas/LocalModelCheck"
+          }
+        },
+        "required": ["enabled", "result", "rows"],
+        "additionalProperties": false
+      },
+      "LocalSuggestion": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "publisher": {
+            "type": "string"
+          },
+          "licence": {
+            "type": "string"
+          },
+          "quantization": {
+            "type": "string"
+          },
+          "memory_gb": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": ["NaN"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["-Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity", "-Infinity", "NaN"]
+              }
+            ]
+          },
+          "context": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": ["NaN"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["-Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity", "-Infinity", "NaN"]
+              }
+            ]
+          },
+          "tools": {
+            "type": "boolean"
+          },
+          "serve": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ollama": {
+            "type": "string"
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "publisher",
+          "licence",
+          "quantization",
+          "memory_gb",
+          "context",
+          "tools",
+          "serve",
+          "links"
+        ],
+        "additionalProperties": false
+      },
+      "LocalRecommendation": {
+        "type": "object",
+        "properties": {
+          "hardware": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": ["unified", "gpu", "cpu"]
+              },
+              "total": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string",
+                    "enum": ["NaN"]
+                  },
+                  {
+                    "type": "string",
+                    "enum": ["Infinity"]
+                  },
+                  {
+                    "type": "string",
+                    "enum": ["-Infinity"]
+                  },
+                  {
+                    "type": "string",
+                    "enum": ["Infinity", "-Infinity", "NaN"]
+                  }
+                ]
+              },
+              "usable": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string",
+                    "enum": ["NaN"]
+                  },
+                  {
+                    "type": "string",
+                    "enum": ["Infinity"]
+                  },
+                  {
+                    "type": "string",
+                    "enum": ["-Infinity"]
+                  },
+                  {
+                    "type": "string",
+                    "enum": ["Infinity", "-Infinity", "NaN"]
+                  }
+                ]
+              }
+            },
+            "required": ["summary", "kind", "total", "usable"],
+            "additionalProperties": false
+          },
+          "tier": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "roles": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/LocalSuggestion"
+            }
+          },
+          "alternatives": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LocalSuggestion"
+            }
+          }
+        },
+        "required": ["hardware", "tier", "summary", "label", "date", "roles", "alternatives"],
         "additionalProperties": false
       },
       "MCPStatusConnected": {
@@ -38548,6 +40979,12 @@
           },
           {
             "$ref": "#/components/schemas/ResearchUpdated"
+          },
+          {
+            "$ref": "#/components/schemas/LocalUpdated"
+          },
+          {
+            "$ref": "#/components/schemas/LocalBlocked"
           },
           {
             "$ref": "#/components/schemas/VcsBranchUpdated"
@@ -49431,6 +51868,112 @@
         "required": ["id", "type", "data"],
         "additionalProperties": false
       },
+      "LocalUpdated": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["local.updated"]
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateID": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": ["aggregateID", "seq", "version"],
+            "additionalProperties": false
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRef"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "web": {
+                "$ref": "#/components/schemas/LocalWeb"
+              },
+              "lock": {
+                "type": "boolean"
+              },
+              "held": {
+                "type": "boolean"
+              }
+            },
+            "required": ["enabled", "web", "lock", "held"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "data"],
+        "additionalProperties": false
+      },
+      "LocalBlocked": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["local.blocked"]
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateID": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": ["aggregateID", "seq", "version"],
+            "additionalProperties": false
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRef"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "origin": {
+                "type": "string"
+              }
+            },
+            "required": ["source", "origin"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "data"],
+        "additionalProperties": false
+      },
       "VcsBranchUpdated": {
         "type": "object",
         "properties": {
@@ -53020,6 +55563,68 @@
         "required": ["id", "type", "properties"],
         "additionalProperties": false
       },
+      "EventLocalUpdated": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["local.updated"]
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "web": {
+                "$ref": "#/components/schemas/LocalWeb"
+              },
+              "lock": {
+                "type": "boolean"
+              },
+              "held": {
+                "type": "boolean"
+              }
+            },
+            "required": ["enabled", "web", "lock", "held"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "properties"],
+        "additionalProperties": false
+      },
+      "EventLocalBlocked": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["local.blocked"]
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "origin": {
+                "type": "string"
+              }
+            },
+            "required": ["source", "origin"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "properties"],
+        "additionalProperties": false
+      },
       "EventVcsBranchUpdated": {
         "type": "object",
         "properties": {
@@ -53362,6 +55967,10 @@
     {
       "name": "instance",
       "description": "Experimental HttpApi instance read routes."
+    },
+    {
+      "name": "local",
+      "description": "Vector Local: run Vector's AI features on model servers you or your company host, with a log of the requests Vector makes."
     },
     {
       "name": "mcp",

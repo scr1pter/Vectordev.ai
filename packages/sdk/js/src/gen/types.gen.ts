@@ -93,6 +93,8 @@ export type Event =
   | EventQuestionRejected
   | EventSessionCompacted
   | EventResearchUpdated
+  | EventLocalUpdated
+  | EventLocalBlocked
   | EventVcsBranchUpdated
   | EventWorkspaceReady
   | EventWorkspaceFailed
@@ -821,6 +823,8 @@ export type QuestionTool = {
 }
 
 export type QuestionAnswer = Array<string>
+
+export type LocalWeb = "ask" | "network" | "none"
 
 export type GlobalEvent = {
   directory: string
@@ -1764,6 +1768,24 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "local.updated"
+        properties: {
+          enabled: boolean
+          web: LocalWeb
+          lock: boolean
+          held: boolean
+        }
+      }
+    | {
+        id: string
+        type: "local.blocked"
+        properties: {
+          source: string
+          origin: string
+        }
+      }
+    | {
+        id: string
         type: "vcs.branch.updated"
         properties: {
           branch?: string
@@ -2112,8 +2134,6 @@ export type RunBudget = {
   warnAt?: number
   unpricedSteps?: number
 }
-
-export type LocalWeb = "ask" | "network" | "none"
 
 export type LocalAllowed = {
   source: string
@@ -2931,6 +2951,336 @@ export type FormatterStatus = {
   name: string
   extensions: Array<string>
   enabled: boolean
+}
+
+export type LocalOrigin = "managed" | "user" | "environment"
+
+export type LocalEndpoint = {
+  origin: string
+  from: LocalOrigin
+}
+
+export type LocalPin = {
+  kind: string
+  version?: string
+  models?: string
+  spki?: string
+}
+
+export type LocalPolicy = {
+  enabled: boolean
+  web: LocalWeb
+  lock: boolean
+  pending?: boolean
+  endpoints: Array<LocalEndpoint>
+  web_domains: {
+    allow: Array<string>
+    deny: Array<string>
+  }
+  allow: Array<LocalAllowed>
+  updates?: {
+    url: string
+  }
+  user_may: Array<string>
+  locked_keys: Array<string>
+  endpoint_domains: Array<string>
+  pins?: {
+    [key: string]: LocalPin
+  }
+  warnings: Array<string>
+}
+
+export type LocalHeld = {
+  proposed: LocalPolicy
+  changes: Array<string>
+}
+
+export type EgressPurpose =
+  | "inference"
+  | "catalog"
+  | "policy"
+  | "account"
+  | "usage"
+  | "crash"
+  | "telemetry"
+  | "support"
+  | "release-notes"
+  | "asset"
+  | "updates"
+  | "help"
+  | "share"
+  | "model-download"
+  | "tool-download"
+  | "plugin"
+  | "git-remote"
+  | "lsp-install"
+  | "web-page"
+  | "web-search"
+  | "browser"
+  | "research-reader"
+  | "research-browser"
+  | "integration"
+  | "mcp"
+  | "config-remote"
+  | "unknown"
+
+export type EgressSourceLocal =
+  | "blocked"
+  | "ask-once"
+  | "allowed"
+  | "allow-with-reason"
+  | "not-allowable"
+  | "not-covered"
+
+export type EgressWhere = "engine" | "desktop" | "renderer"
+
+export type LocalSource = {
+  id: string
+  purpose: EgressPurpose
+  hosts: Array<string>
+  sends: string
+  why: string
+  local: EgressSourceLocal
+  where: Array<EgressWhere>
+  note?: string
+}
+
+export type LocalStatus = {
+  policy: LocalPolicy
+  held?: LocalHeld
+  locked: Array<string>
+  log: {
+    directory: string
+    retain_days: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  }
+  agent: boolean
+  sources: Array<LocalSource>
+}
+
+export type LocalAllowRequest = {
+  source: string
+  hosts?: Array<string>
+  reason: string
+}
+
+export type LocalUpdate = {
+  enabled?: boolean
+  web?: LocalWeb
+  endpoints?: {
+    add?: Array<string>
+    remove?: Array<string>
+  }
+  allow?: {
+    add?: Array<LocalAllowRequest>
+    remove?: Array<string>
+  }
+  web_domains?: {
+    allow?: {
+      add?: Array<string>
+      remove?: Array<string>
+    }
+    deny?: {
+      add?: Array<string>
+      remove?: Array<string>
+    }
+  }
+  pins?: {
+    [key: string]: LocalPinConfig
+  }
+  retain_days?: number
+  confirm?: boolean
+  held?: Array<string>
+  by?: "app" | "cli"
+}
+
+export type LocalError = {
+  name: "LocalError"
+  data: {
+    code: "agent" | "locked" | "invalid" | "changed" | "not-found"
+    message: string
+    changes?: Array<string>
+  }
+}
+
+export type LocalConfirmError = {
+  name: "LocalConfirmError"
+  data: {
+    message: string
+    changes: Array<string>
+  }
+}
+
+export type EgressClass = "this-computer" | "your-network" | "listed" | "internet"
+
+export type EgressDecision = "allow" | "ask" | "block"
+
+export type EgressRule =
+  | "local-off"
+  | "pending"
+  | "listed"
+  | "not-listed"
+  | "not-allowable"
+  | "loopback"
+  | "web-none"
+  | "web-network"
+  | "web-ask"
+  | "web-deny"
+  | "web-allow"
+  | "vector-service"
+  | "allowed-source"
+  | "automatic-update"
+  | "manual-check"
+  | "mirror"
+  | "download-grant"
+  | "private-remote"
+  | "unlabelled"
+  | "resolved-outside"
+  | "private-destination"
+  | "web-port"
+  | "proxy-environment"
+
+export type EgressCarried = {
+  personal: number
+  documents: number
+  repository: number
+}
+
+export type EgressEvent = {
+  id: string
+  time: number
+  source: string
+  purpose: EgressPurpose
+  class: EgressClass
+  origin: string
+  method: string
+  bytes_out?: number
+  bytes_in?: number
+  decision: EgressDecision
+  rule: EgressRule
+  reason: string
+  session_id?: string
+  root_session_id?: string
+  tool?: string
+  carried: EgressCarried
+  frame?: string
+}
+
+export type EgressSummary = {
+  requests: number
+  helper_requests: number
+  model_calls: {
+    [key: string]: number
+  }
+  pages: number
+  hosts: number
+  searches: number
+  carried: EgressCarried
+  blocked: {
+    [key: string]: number
+  }
+}
+
+export type LocalServerKind = "ollama" | "lmstudio" | "vllm" | "llamacpp" | "sglang" | "openai"
+
+export type LocalServerForwards = "ollama-cloud" | "litellm"
+
+export type LocalServerModel = {
+  id: string
+  context?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  trained?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  output?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  tools?: boolean
+  vision?: boolean
+  loaded?: boolean
+  size?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  parameters?: string
+  quantization?: string
+  family?: string
+  cloud?: boolean
+}
+
+export type LocalServer = {
+  kind: LocalServerKind
+  name: string
+  origin: string
+  baseURL: string
+  version?: string
+  class: "this-computer" | "your-network" | "internet"
+  encrypted: boolean
+  concurrency?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  forwards?: LocalServerForwards
+  models: Array<LocalServerModel>
+  pin: LocalPinConfig
+}
+
+export type LocalProbeResult = {
+  server: LocalServer
+  message?: string
+}
+
+export type LocalAddedServer = {
+  provider: string
+  models: Array<string>
+  server: LocalServer
+  status: LocalStatus
+}
+
+export type LocalCheckRow = {
+  layer: "switch" | "policy" | "held" | "guard" | "unlabelled" | "services" | "web" | "server" | "models" | "log"
+  status: "pass" | "warn" | "fail"
+  title: string
+  detail?: string
+  origin?: string
+}
+
+export type LocalModelCheck = {
+  model: string
+  result: "works" | "no-tools" | "schema-rejected" | "context-too-small" | "failed" | "ask"
+  message?: string
+  context?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  ttft_ms?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  requests: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  checked_at: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  server_version?: string
+}
+
+export type LocalCheckResult = {
+  enabled: boolean
+  result: "pass" | "fail" | "off"
+  rows: Array<LocalCheckRow>
+  model?: LocalModelCheck
+}
+
+export type LocalSuggestion = {
+  key: string
+  name: string
+  publisher: string
+  licence: string
+  quantization: string
+  memory_gb: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  context: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  tools: boolean
+  serve: Array<string>
+  ollama?: string
+  links: Array<string>
+}
+
+export type LocalRecommendation = {
+  hardware: {
+    summary: string
+    kind: "unified" | "gpu" | "cpu"
+    total: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    usable: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  }
+  tier: string
+  summary: string
+  note?: string
+  label: string
+  date: string
+  roles: {
+    [key: string]: LocalSuggestion
+  }
+  alternatives: Array<LocalSuggestion>
 }
 
 export type McpStatusConnected = {
@@ -4772,6 +5122,8 @@ export type V2Event =
   | QuestionRejected2
   | SessionCompacted
   | ResearchUpdated
+  | LocalUpdated
+  | LocalBlocked
   | VcsBranchUpdated
   | WorkspaceReady
   | WorkspaceFailed
@@ -8367,6 +8719,44 @@ export type ResearchUpdated = {
   }
 }
 
+export type LocalUpdated = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "local.updated"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    enabled: boolean
+    web: LocalWeb
+    lock: boolean
+    held: boolean
+  }
+}
+
+export type LocalBlocked = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "local.blocked"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    source: string
+    origin: string
+  }
+}
+
 export type VcsBranchUpdated = {
   id: string
   metadata?: {
@@ -9517,6 +9907,26 @@ export type EventResearchUpdated = {
     sourceID?: string
     noteID?: string
     status: "planned" | "running" | "done" | "stopped" | "failed" | "forgotten"
+  }
+}
+
+export type EventLocalUpdated = {
+  id: string
+  type: "local.updated"
+  properties: {
+    enabled: boolean
+    web: LocalWeb
+    lock: boolean
+    held: boolean
+  }
+}
+
+export type EventLocalBlocked = {
+  id: string
+  type: "local.blocked"
+  properties: {
+    source: string
+    origin: string
   }
 }
 
@@ -11945,6 +12355,461 @@ export type FormatterStatusResponses = {
 }
 
 export type FormatterStatusResponse = FormatterStatusResponses[keyof FormatterStatusResponses]
+
+export type LocalGetData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/local"
+}
+
+export type LocalGetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type LocalGetError = LocalGetErrors[keyof LocalGetErrors]
+
+export type LocalGetResponses = {
+  /**
+   * Vector Local's policy in effect
+   */
+  200: LocalStatus
+}
+
+export type LocalGetResponse = LocalGetResponses[keyof LocalGetResponses]
+
+export type LocalUpdateData = {
+  body?: LocalUpdate
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/local"
+}
+
+export type LocalUpdateErrors = {
+  /**
+   * LocalError | InvalidRequestError
+   */
+  400: LocalError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * LocalConfirmError
+   */
+  409: LocalConfirmError
+}
+
+export type LocalUpdateError = LocalUpdateErrors[keyof LocalUpdateErrors]
+
+export type LocalUpdateResponses = {
+  /**
+   * Vector Local after the change
+   */
+  200: LocalStatus
+}
+
+export type LocalUpdateResponse = LocalUpdateResponses[keyof LocalUpdateResponses]
+
+export type LocalEgressClearData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/local/egress"
+}
+
+export type LocalEgressClearErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type LocalEgressClearError = LocalEgressClearErrors[keyof LocalEgressClearErrors]
+
+export type LocalEgressClearResponses = {
+  /**
+   * The network log was erased
+   */
+  200: boolean
+}
+
+export type LocalEgressClearResponse = LocalEgressClearResponses[keyof LocalEgressClearResponses]
+
+export type LocalEgressListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    since?: number
+    session?: string
+    blocked?: boolean | "true" | "false"
+  }
+  url: "/local/egress"
+}
+
+export type LocalEgressListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type LocalEgressListError = LocalEgressListErrors[keyof LocalEgressListErrors]
+
+export type LocalEgressListResponses = {
+  /**
+   * The network log in memory, oldest first
+   */
+  200: Array<EgressEvent>
+}
+
+export type LocalEgressListResponse = LocalEgressListResponses[keyof LocalEgressListResponses]
+
+export type LocalEgressSummaryData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    session?: string
+  }
+  url: "/local/egress/summary"
+}
+
+export type LocalEgressSummaryErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type LocalEgressSummaryError = LocalEgressSummaryErrors[keyof LocalEgressSummaryErrors]
+
+export type LocalEgressSummaryResponses = {
+  /**
+   * Counters for one session, or for this Vector
+   */
+  200: EgressSummary
+}
+
+export type LocalEgressSummaryResponse = LocalEgressSummaryResponses[keyof LocalEgressSummaryResponses]
+
+export type LocalEgressExportData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    since?: number
+    session?: string
+    blocked?: boolean | "true" | "false"
+    format?: "jsonl" | "csv"
+  }
+  url: "/local/egress/export"
+}
+
+export type LocalEgressExportErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type LocalEgressExportError = LocalEgressExportErrors[keyof LocalEgressExportErrors]
+
+export type LocalEgressExportResponses = {
+  /**
+   * Success
+   */
+  200: string
+}
+
+export type LocalEgressExportResponse = LocalEgressExportResponses[keyof LocalEgressExportResponses]
+
+export type LocalEgressReportData = {
+  body?: {
+    events: Array<EgressEvent>
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/local/egress/report"
+}
+
+export type LocalEgressReportErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type LocalEgressReportError = LocalEgressReportErrors[keyof LocalEgressReportErrors]
+
+export type LocalEgressReportResponses = {
+  /**
+   * How many events the log took
+   */
+  200: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+}
+
+export type LocalEgressReportResponse = LocalEgressReportResponses[keyof LocalEgressReportResponses]
+
+export type LocalDetectData = {
+  body?: {
+    ports?: Array<number>
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/local/detect"
+}
+
+export type LocalDetectErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type LocalDetectError = LocalDetectErrors[keyof LocalDetectErrors]
+
+export type LocalDetectResponses = {
+  /**
+   * Model servers answering on this computer
+   */
+  200: Array<LocalServer>
+}
+
+export type LocalDetectResponse = LocalDetectResponses[keyof LocalDetectResponses]
+
+export type LocalProbeData = {
+  body?: {
+    url: string
+    headers?: {
+      [key: string]: string
+    }
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/local/probe"
+}
+
+export type LocalProbeErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type LocalProbeError = LocalProbeErrors[keyof LocalProbeErrors]
+
+export type LocalProbeResponses = {
+  /**
+   * The server at the address, or why none was read
+   */
+  200: LocalProbeResult
+}
+
+export type LocalProbeResponse = LocalProbeResponses[keyof LocalProbeResponses]
+
+export type LocalServersAddData = {
+  body?: {
+    url: string
+    headers?: {
+      [key: string]: string
+    }
+    provider?: string
+    confirm?: boolean
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/local/servers"
+}
+
+export type LocalServersAddErrors = {
+  /**
+   * LocalError | InvalidRequestError
+   */
+  400: LocalError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * LocalConfirmError
+   */
+  409: LocalConfirmError
+}
+
+export type LocalServersAddError = LocalServersAddErrors[keyof LocalServersAddErrors]
+
+export type LocalServersAddResponses = {
+  /**
+   * The server, on the list and added as a provider
+   */
+  200: LocalAddedServer
+}
+
+export type LocalServersAddResponse = LocalServersAddResponses[keyof LocalServersAddResponses]
+
+export type LocalCheckData = {
+  body?: {
+    model?: string
+    role?: "agent" | "subagent" | "research"
+    confirmed?: boolean
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/local/check"
+}
+
+export type LocalCheckErrors = {
+  /**
+   * LocalError | InvalidRequestError
+   */
+  400: LocalError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type LocalCheckError = LocalCheckErrors[keyof LocalCheckErrors]
+
+export type LocalCheckResponses = {
+  /**
+   * One row per layer, and the model check when a model was named
+   */
+  200: LocalCheckResult
+}
+
+export type LocalCheckResponse = LocalCheckResponses[keyof LocalCheckResponses]
+
+export type LocalGrantData = {
+  body?: {
+    source: string
+    once?: boolean
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/local/grant"
+}
+
+export type LocalGrantErrors = {
+  /**
+   * LocalError | InvalidRequestError
+   */
+  400: LocalError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type LocalGrantError = LocalGrantErrors[keyof LocalGrantErrors]
+
+export type LocalGrantResponses = {
+  /**
+   * The grant was given
+   */
+  200: boolean
+}
+
+export type LocalGrantResponse = LocalGrantResponses[keyof LocalGrantResponses]
+
+export type LocalRecommendData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/local/recommend"
+}
+
+export type LocalRecommendErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type LocalRecommendError = LocalRecommendErrors[keyof LocalRecommendErrors]
+
+export type LocalRecommendResponses = {
+  /**
+   * Model suggestions for this computer
+   */
+  200: LocalRecommendation
+}
+
+export type LocalRecommendResponse = LocalRecommendResponses[keyof LocalRecommendResponses]
 
 export type McpStatusData = {
   body?: never

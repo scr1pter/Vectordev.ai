@@ -162,6 +162,45 @@ import type {
   InstanceDisposeData,
   InstanceDisposeErrors,
   InstanceDisposeResponses,
+  LocalCheckData,
+  LocalCheckErrors,
+  LocalCheckResponses,
+  LocalDetectData,
+  LocalDetectErrors,
+  LocalDetectResponses,
+  LocalEgressClearData,
+  LocalEgressClearErrors,
+  LocalEgressClearResponses,
+  LocalEgressExportData,
+  LocalEgressExportErrors,
+  LocalEgressExportResponses,
+  LocalEgressListData,
+  LocalEgressListErrors,
+  LocalEgressListResponses,
+  LocalEgressReportData,
+  LocalEgressReportErrors,
+  LocalEgressReportResponses,
+  LocalEgressSummaryData,
+  LocalEgressSummaryErrors,
+  LocalEgressSummaryResponses,
+  LocalGetData,
+  LocalGetErrors,
+  LocalGetResponses,
+  LocalGrantData,
+  LocalGrantErrors,
+  LocalGrantResponses,
+  LocalProbeData,
+  LocalProbeErrors,
+  LocalProbeResponses,
+  LocalRecommendData,
+  LocalRecommendErrors,
+  LocalRecommendResponses,
+  LocalServersAddData,
+  LocalServersAddErrors,
+  LocalServersAddResponses,
+  LocalUpdateData,
+  LocalUpdateErrors,
+  LocalUpdateResponses,
   LspCodeActionData,
   LspCodeActionErrors,
   LspCodeActionResponses,
@@ -2067,6 +2106,206 @@ export class Formatter extends HeyApiClient {
       url: "/formatter",
       ...options,
     })
+  }
+}
+
+export class Egress extends HeyApiClient {
+  /**
+   * Erase what Vector sent
+   *
+   * Erase the network log: the events in memory, the counters and the files on this computer.
+   */
+  public clear<ThrowOnError extends boolean = false>(options?: Options<LocalEgressClearData, ThrowOnError>) {
+    return (options?.client ?? this.client).delete<LocalEgressClearResponses, LocalEgressClearErrors, ThrowOnError>({
+      url: "/local/egress",
+      ...options,
+    })
+  }
+
+  /**
+   * List what Vector sent
+   *
+   * The last 2,000 requests Vector decided while Vector Local was on: when, which kind of request, where it went (origin and class), the session, the size it sent, and whether it was allowed or blocked, with the rule. Never a path, a query, a header or a body.
+   */
+  public list<ThrowOnError extends boolean = false>(options?: Options<LocalEgressListData, ThrowOnError>) {
+    return (options?.client ?? this.client).get<LocalEgressListResponses, LocalEgressListErrors, ThrowOnError>({
+      url: "/local/egress",
+      ...options,
+    })
+  }
+
+  /**
+   * Summarize what Vector sent
+   *
+   * Model calls by origin, pages read and the other hosts they loaded, searches, the memory requests carried, and blocked requests by source. A session's counters include its subagents and helpers.
+   */
+  public summary<ThrowOnError extends boolean = false>(options?: Options<LocalEgressSummaryData, ThrowOnError>) {
+    return (options?.client ?? this.client).get<LocalEgressSummaryResponses, LocalEgressSummaryErrors, ThrowOnError>({
+      url: "/local/egress/summary",
+      ...options,
+    })
+  }
+
+  /**
+   * Export what Vector sent
+   *
+   * Every event the network log keeps on this computer (30 days unless set otherwise), as JSON lines or CSV.
+   */
+  public export<ThrowOnError extends boolean = false>(options?: Options<LocalEgressExportData, ThrowOnError>) {
+    return (options?.client ?? this.client).get<LocalEgressExportResponses, LocalEgressExportErrors, ThrowOnError>({
+      url: "/local/egress/export",
+      ...options,
+    })
+  }
+
+  /**
+   * Add events to the network log
+   *
+   * Requests the desktop app's own windows made or blocked, which its main process decides, added to this Vector's network log while Vector Local is on.
+   */
+  public report<ThrowOnError extends boolean = false>(options?: Options<LocalEgressReportData, ThrowOnError>) {
+    return (options?.client ?? this.client).post<LocalEgressReportResponses, LocalEgressReportErrors, ThrowOnError>({
+      url: "/local/egress/report",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  }
+}
+
+export class Servers extends HeyApiClient {
+  /**
+   * Add a model server
+   *
+   * Read the server at an address, put it on the model server list with the identity it answered with, and add it to your user config as a provider with the models it runs, each with its context, reply limit, tool calling and image input. Its cloud models are left out. With Vector Local on, listing a server loosens it, so the request needs `confirm: true`, and fails with LocalConfirmError otherwise. Headers are used to read the server and are not saved.
+   */
+  public add<ThrowOnError extends boolean = false>(options?: Options<LocalServersAddData, ThrowOnError>) {
+    return (options?.client ?? this.client).post<LocalServersAddResponses, LocalServersAddErrors, ThrowOnError>({
+      url: "/local/servers",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  }
+}
+
+export class Local extends HeyApiClient {
+  /**
+   * Get Vector Local
+   *
+   * The Vector Local policy in effect for this Vector: on or off, Web access, the model server list, the services you allowed and what the policy files said. Also a change to your config that would loosen it and waits for you, the keys a company lock keeps, where the network log is kept, and every kind of request Vector makes.
+   */
+  public get<ThrowOnError extends boolean = false>(options?: Options<LocalGetData, ThrowOnError>) {
+    return (options?.client ?? this.client).get<LocalGetResponses, LocalGetErrors, ThrowOnError>({
+      url: "/local",
+      ...options,
+    })
+  }
+
+  /**
+   * Change Vector Local
+   *
+   * Change Vector Local in your user config. A change that makes it stricter applies at once. One that would loosen it (turn it off, a looser Web access, a new model server, a newly allowed service or site) fails with LocalConfirmError and the list of what it loosens, unless the request says `confirm: true`, which an owner's app sends only after asking. With `held`, it applies the change your config holds instead. A Vector an agent started cannot loosen it, and under a company lock only the keys your company left to you change.
+   */
+  public update<ThrowOnError extends boolean = false>(options?: Options<LocalUpdateData, ThrowOnError>) {
+    return (options?.client ?? this.client).patch<LocalUpdateResponses, LocalUpdateErrors, ThrowOnError>({
+      url: "/local",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  }
+
+  /**
+   * Find model servers
+   *
+   * Find the model servers running on this computer: Ollama, LM Studio, vLLM, llama.cpp and SGLang on their usual ports at 127.0.0.1 and ::1. It never scans your network; add a server elsewhere by its address.
+   */
+  public detect<ThrowOnError extends boolean = false>(options?: Options<LocalDetectData, ThrowOnError>) {
+    return (options?.client ?? this.client).post<LocalDetectResponses, LocalDetectErrors, ThrowOnError>({
+      url: "/local/detect",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  }
+
+  /**
+   * Read a model server
+   *
+   * Read the server at an address you typed: what kind it is, its version, its models with their context, tools and image support, and the identity Vector pins when you add it. It asks for these only; it sends no prompt. With Vector Local on, only that server is let through while it is read, and Web access None keeps internet servers blocked.
+   */
+  public probe<ThrowOnError extends boolean = false>(options?: Options<LocalProbeData, ThrowOnError>) {
+    return (options?.client ?? this.client).post<LocalProbeResponses, LocalProbeErrors, ThrowOnError>({
+      url: "/local/probe",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  }
+
+  /**
+   * Check Vector Local
+   *
+   * Read every layer of Vector Local, one row each: the switch, the policy, a held change, the network guard, unlabelled requests, Vector's own services, Web access, each model server on the list (it answers, as the server it was when added) and the network log. With `model`, it also runs that model through 2 or 3 requests with the role's real tools and records the result in your user config. It never loads a model too big for free memory without `confirmed`.
+   */
+  public check<ThrowOnError extends boolean = false>(options?: Options<LocalCheckData, ThrowOnError>) {
+    return (options?.client ?? this.client).post<LocalCheckResponses, LocalCheckErrors, ThrowOnError>({
+      url: "/local/check",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  }
+
+  /**
+   * Allow a request once
+   *
+   * Let the next request of a kind Vector Local asks about through, such as a model download or a manual update check, or every one while this Vector runs. It is never saved. Allow a service for good with PATCH /local instead.
+   */
+  public grant<ThrowOnError extends boolean = false>(options?: Options<LocalGrantData, ThrowOnError>) {
+    return (options?.client ?? this.client).post<LocalGrantResponses, LocalGrantErrors, ThrowOnError>({
+      url: "/local/grant",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  }
+
+  /**
+   * Suggest models
+   *
+   * This computer's memory and GPUs, and the model families that fit them for each role, as dated examples from the publishers' own repositories or the Ollama library. Check each model's licence.
+   */
+  public recommend<ThrowOnError extends boolean = false>(options?: Options<LocalRecommendData, ThrowOnError>) {
+    return (options?.client ?? this.client).get<LocalRecommendResponses, LocalRecommendErrors, ThrowOnError>({
+      url: "/local/recommend",
+      ...options,
+    })
+  }
+
+  private _egress?: Egress
+  get egress(): Egress {
+    return (this._egress ??= new Egress({ client: this.client }))
+  }
+
+  private _servers?: Servers
+  get servers(): Servers {
+    return (this._servers ??= new Servers({ client: this.client }))
   }
 }
 
@@ -5054,6 +5293,11 @@ export class VectorClient extends HeyApiClient {
   private _formatter?: Formatter
   get formatter(): Formatter {
     return (this._formatter ??= new Formatter({ client: this.client }))
+  }
+
+  private _local?: Local
+  get local(): Local {
+    return (this._local ??= new Local({ client: this.client }))
   }
 
   private _mcp?: Mcp
