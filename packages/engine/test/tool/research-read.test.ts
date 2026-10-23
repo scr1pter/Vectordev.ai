@@ -331,7 +331,7 @@ it.instance(
 )
 
 it.instance(
-  "with Vector Local on, research's searches and reads are decided as its own, and Web access None refuses a read as it is sent",
+  "with Vector Local on, research's searches and reads are decided as its own, and Web access None offers no read",
   () =>
     Effect.gen(function* () {
       const test = yield* setup(web)
@@ -376,17 +376,27 @@ it.instance(
         expect(first.length).toBeGreaterThan(1)
         expect(first.slice(1)).toEqual(first.slice(1).map(() => ["research-reader", site, "allow", "web-ask"]))
 
+        // With Web access None research is the brain's and the repository's files': research_read is not offered, so
+        // the page the user typed is not read (research-offline.test.ts covers the rest).
         local("none")
         const offline = Date.now()
         const before = web.count("article")
         yield* test.llm.tool("research_plan", plan({ question: "Which heat pumps work below minus 20 degrees?" }))
-        yield* test.llm.tool("research_read", { url: article })
         yield* test.llm.text("Done.")
-        yield* send({ sessionID: session.id, agent: "research", text: `Now research the coldest winters: ${article}` })
-        const reads = yield* calls(session.id, "research_read")
-        expect(output(reads[1])).toContain("was not read: ")
+        const bodies = yield* send({
+          sessionID: session.id,
+          agent: "research",
+          text: `Now research the coldest winters: ${article}`,
+        })
+        const offered = bodies.flatMap((body) =>
+          ((JSON.parse(body) as { tools?: { function?: { name?: string } }[] }).tools ?? []).map(
+            (tool) => tool.function?.name,
+          ),
+        )
+        expect(offered).toContain("research_plan")
+        expect(offered).not.toContain("research_read")
         expect(web.count("article")).toBe(before)
-        expect(decided(offline)).toContainEqual(["research-reader", site, "block", "web-none"])
+        expect(decided(offline)).toEqual([])
         expect(guard.outside()).toEqual([])
       }).pipe(
         Effect.ensuring(

@@ -387,6 +387,8 @@ const layer = Layer.effect(
       const own = Agent.researchTools(input.agent.name)
       const filtered = (yield* all()).filter((tool) => {
         if (own && tool.id !== InvalidTool.id && !own.includes(tool.id)) return false
+        // With Vector Local's Web access None, research is offered no tool that reaches the web (section 5.9).
+        if (ResearchRun.withheld(tool.id)) return false
         if (RESEARCH_TOOL_IDS.has(tool.id)) return RESEARCH_TOOLS[input.agent.name]?.includes(tool.id) ?? false
         // The build agent researches as a tool on its own requests unless the user turned that off; the session
         // runtime's size decides the rest when the tool runs.

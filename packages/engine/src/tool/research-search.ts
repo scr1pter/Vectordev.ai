@@ -37,7 +37,7 @@ type Metadata = {
   query?: string
   provider?: string
   results?: ResearchRun.Result[]
-  refused?: "outbound" | "budget" | "scope" | "none"
+  refused?: "outbound" | "budget" | "scope" | "none" | "offline"
 }
 
 export const NOT_YET =
@@ -79,6 +79,13 @@ export const ResearchSearchTool = Tool.define<
           const found = yield* research.current(ctx)
           if ("refused" in found) return { title: "Not searched", output: found.refused, metadata: {} }
           const runID = found.run.id
+          // Not offered with Vector Local's Web access None; a run that began before it was set searches no more.
+          if (ResearchRun.offline())
+            return {
+              title: "Not searched",
+              output: ResearchRun.OFFLINE,
+              metadata: { runID, refused: "offline" as const },
+            }
           if (found.plan.scope === "brain")
             return {
               title: "Not searched",

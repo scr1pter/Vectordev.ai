@@ -113,11 +113,13 @@ export const ResearchPlanTool = Tool.define<
           const place = yield* research.place()
           const cfg = yield* config.get()
           const size = ctx.extra?.taskSize as TaskSizeContext | undefined
+          // With Vector Local's Web access None the scope is the brain and the repository's files, whatever was proposed.
+          const offline = ResearchRun.offline()
           // The user's own sites to prefer and avoid apply in code, whatever the model proposed.
           const plan: Research.Plan = {
             question: params.question.trim(),
             subquestions: params.subquestions.map((item) => item.trim()),
-            scope: params.scope,
+            scope: offline ? "brain" : params.scope,
             depth: params.depth,
             ...domains("prefer_domains", params.prefer_domains, cfg.research?.domains?.prefer),
             ...domains("avoid_domains", params.avoid_domains, cfg.research?.domains?.avoid),
@@ -147,11 +149,14 @@ export const ResearchPlanTool = Tool.define<
               : false)
           // A child stays at its launcher's size, and a request the user capped at Work stays Focused. A plan no one
           // can answer goes deep only on a Thorough request: the model's own depth never raises a Work one (RC7).
-          const ceiling: Research.Depth = lead.parentID
-            ? yield* launcherDepth(lead)
-            : size?.capped || (unanswerable && !thorough(size, ctx))
-              ? "focused"
-              : "deep"
+          // A run with Web access None stays Focused too: Deep's researchers work on the web, which it does not reach.
+          const ceiling: Research.Depth = offline
+            ? "focused"
+            : lead.parentID
+              ? yield* launcherDepth(lead)
+              : size?.capped || (unanswerable && !thorough(size, ctx))
+                ? "focused"
+                : "deep"
           const proposed = { ...plan, depth: deeper(plan.depth, ceiling) }
           const provider = searchProvider(cfg.research)
           const estimate = yield* estimateLine(proposed, ctx, provider.provider)
@@ -179,7 +184,14 @@ export const ResearchPlanTool = Tool.define<
             const runID = yield* start(proposed)
             return {
               title: `Research plan: ${proposed.subquestions.length} sub-question${proposed.subquestions.length === 1 ? "" : "s"}`,
-              output: approvedText({ plan: proposed, runID, estimate, automatic: true, provider: provider.provider }),
+              output: approvedText({
+                plan: proposed,
+                runID,
+                estimate,
+                automatic: true,
+                provider: provider.provider,
+                offline,
+              }),
               metadata: { runID, plan: proposed, approved: true, answer: "automatic" as const, estimate },
             }
           }
@@ -189,7 +201,7 @@ export const ResearchPlanTool = Tool.define<
               sessionID: SessionID.make(ctx.sessionID),
               questions: [
                 {
-                  question: card(proposed, estimate, provider),
+                  question: card(proposed, estimate, provider, offline),
                   header: "Research plan",
                   options: [
                     { label: START, description: `Research at this depth (${proposed.depth})` },
@@ -217,7 +229,7 @@ export const ResearchPlanTool = Tool.define<
                 "The user dismissed the plan card, so nothing was searched or read. Ask what they would like changed, or wait for them.",
               metadata: { plan: proposed, approved: false, answer: "cancel" as const, estimate },
             }
-          const decided = decide(reply, proposed, ceiling)
+          const decided = decide(reply, proposed, ceiling, offline)
           if (decided.type === "cancel") {
             return {
               title: "Research cancelled",
@@ -244,6 +256,7 @@ export const ResearchPlanTool = Tool.define<
                   : yield* estimateLine(decided.plan, ctx, provider.provider),
               automatic: false,
               provider: provider.provider,
+              offline,
             }),
             metadata: {
               runID,
@@ -361,8 +374,9 @@ function deeper(depth: Research.Depth, ceiling: Research.Depth): Research.Depth 
 }
 
 // What the user's answer on the plan card means. `vector-plan:{json}` is the card's own answer, with any fields the
-// user edited and those they asked Vector to remember; any other text is a steer.
-function decide(reply: string, plan: Research.Plan, ceiling: Research.Depth) {
+// user edited and those they asked Vector to remember; any other text is a steer. With Web access None an edited scope
+// stays the brain.
+function decide(reply: string, plan: Research.Plan, ceiling: Research.Depth, offline: boolean) {
   if (reply === START) return { type: "start", answer: "start", plan, always: [] } as const
   if (reply === START_DEEP)
     return {
@@ -380,6 +394,7 @@ function decide(reply: string, plan: Research.Plan, ceiling: Research.Depth) {
   const edited: Research.Plan = {
     ...plan,
     ...answer.plan,
+    ...(offline ? { scope: "brain" as const } : {}),
     depth: answer.action === "start-deep" ? deeper("deep", ceiling) : plan.depth,
   }
   return {
@@ -390,8 +405,9 @@ function decide(reply: string, plan: Research.Plan, ceiling: Research.Depth) {
   } as const
 }
 
-// What the plan card shows: the plan, its scope and depth, the estimate, and what search is set up.
-function card(plan: Research.Plan, estimate: string, provider: ReturnType<typeof searchProvider>) {
+// What the plan card shows: the plan, its scope and depth, the estimate, and what search is set up, or that Vector
+// Local's Web access is None.
+function card(plan: Research.Plan, estimate: string, provider: ReturnType<typeof searchProvider>, offline: boolean) {
   return [
     `Research: ${plan.question}`,
     ...plan.subquestions.map((item, index) => `${index + 1}. ${item}`),
@@ -402,6 +418,7 @@ function card(plan: Research.Plan, estimate: string, provider: ReturnType<typeof
     ...(plan.time_window ? [`Time window: ${plan.time_window}`] : []),
     ...(plan.format ? [`Format: ${plan.format}`] : []),
     estimate,
+    ...(offline ? [ResearchRun.OFFLINE] : []),
     ...(provider.provider === "none" && plan.scope !== "brain" ? [provider.reason ?? ResearchSearch.NONE] : []),
   ].join("\n")
 }
@@ -418,18 +435,23 @@ function approvedText(input: {
   readonly estimate: string
   readonly automatic: boolean
   readonly provider: string
+  readonly offline: boolean
 }) {
   return [
     input.automatic
       ? `The plan is approved within the request that launched this research (${input.plan.depth}).`
       : `The user approved the plan (${input.plan.depth}).`,
     `Run ${input.runID}. ${input.estimate}`,
-    input.provider === "none"
-      ? "No search service is set up: use this repository's brain and files, and the addresses in the user's message."
-      : "Search with research_search, read with research_read, and save each finding with research_note.",
-    input.plan.depth === "deep"
-      ? "Give independent sub-questions to researchers with the task tool, each brief written in public terms."
-      : "Do the research yourself; hand a sub-question to a researcher only when it is independent of the rest.",
+    ...(input.offline
+      ? [ResearchRun.OFFLINE, "Use the memory tool and the repository's files (read, grep, glob, list) yourself."]
+      : [
+          input.provider === "none"
+            ? "No search service is set up: use this repository's brain and files, and the addresses in the user's message."
+            : "Search with research_search, read with research_read, and save each finding with research_note.",
+          input.plan.depth === "deep"
+            ? "Give independent sub-questions to researchers with the task tool, each brief written in public terms."
+            : "Do the research yourself; hand a sub-question to a researcher only when it is independent of the rest.",
+        ]),
     "Then write the report with research_report.",
   ].join("\n")
 }
