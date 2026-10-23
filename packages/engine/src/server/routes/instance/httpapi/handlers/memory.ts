@@ -4,6 +4,7 @@ import { HttpServerRequest, HttpServerResponse, type Multipart } from "effect/un
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainEmbed } from "@vectordevai/core/brain/embed"
+import { BrainExport } from "@vectordevai/core/brain/export"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import type { BrainSchema } from "@vectordevai/core/brain/schema"
 import { Flag } from "@vectordevai/core/flag/flag"
@@ -15,7 +16,7 @@ import { SessionPosting } from "@/session/posting"
 import { SessionID } from "@/session/schema"
 import { Session } from "@/session/session"
 import { InstanceHttpApi } from "../api"
-import { MemoryApiError, MemoryTooLargeError, POSTING_CHARS, TEXT_BYTES, UPLOAD_BYTES } from "../groups/memory"
+import { IMPORT_CHARS, MemoryApiError, MemoryTooLargeError, POSTING_CHARS, TEXT_BYTES, UPLOAD_BYTES } from "../groups/memory"
 
 const refused = (message: string, reason?: string, document?: BrainSchema.Document) =>
   new MemoryApiError({
@@ -80,7 +81,7 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
     })
 
     const create = Effect.fn("MemoryHttpApi.create")(function* (ctx: {
-      payload: { kind: "preference" | "decision" | "lesson" | "fact"; text: string; scope: "repository" | "personal" }
+      payload: { kind: BrainSchema.LearnedKind; text: string; scope: "repository" | "personal" }
     }) {
       const result = yield* brain.propose(yield* instruction.place(), {
         kind: ctx.payload.kind,
@@ -120,6 +121,33 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
       return yield* brain.erase(place, ctx.payload.scope)
     })
 
+    const eraseSession = Effect.fn("MemoryHttpApi.eraseSession")(function* (ctx: { params: { sessionID: string } }) {
+      return yield* brain.eraseSession(yield* instruction.place(), ctx.params.sessionID)
+    })
+
+    // An attachment, never something a browser renders.
+    const exportMemory = Effect.fn("MemoryHttpApi.export")(function* (ctx: {
+      query: { scope?: BrainExport.Scope; format?: BrainExport.Format }
+    }) {
+      const place = yield* instruction.place()
+      const format = ctx.query.format ?? "markdown"
+      const body = yield* BrainExport.render({ brain, knowledge, place, scope: ctx.query.scope ?? "all", format })
+      return HttpServerResponse.text(body, {
+        contentType: `${format === "json" ? "application/json" : "text/markdown"}; charset=utf-8`,
+        headers: {
+          "content-disposition": `attachment; filename="vector-memory.${format === "json" ? "json" : "md"}"`,
+          "x-content-type-options": "nosniff",
+          "content-security-policy": "sandbox",
+          "cache-control": "no-store",
+        },
+      })
+    })
+
+    const importMemory = Effect.fn("MemoryHttpApi.import")(function* (ctx: { payload: { text: string } }) {
+      if (ctx.payload.text.length > IMPORT_CHARS) return yield* refused("Vector imports at most 2 MB at a time.", "limit")
+      return yield* BrainExport.importText({ brain, place: yield* instruction.place(), text: ctx.payload.text })
+    })
+
     const tidy = Effect.fn("MemoryHttpApi.tidy")(function* () {
       const report = yield* brain.consolidate(yield* instruction.place(), { force: true })
       return {
@@ -132,7 +160,8 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
     })
 
     const settingsOf = Effect.fnUntraced(function* (place: Brain.Place) {
-      return { learning: yield* brain.learning(), ...(yield* knowledge.settings(place)) }
+      const learn = yield* brain.learnSettings()
+      return { ...learn, ...(yield* knowledge.settings(place)) }
     })
 
     const settings = Effect.fn("MemoryHttpApi.settings")(function* () {
@@ -140,10 +169,21 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
     })
 
     const configure = Effect.fn("MemoryHttpApi.configure")(function* (ctx: {
-      payload: { learning?: boolean; repositoryDocs?: boolean; keepOriginals?: boolean }
+      payload: {
+        learning?: boolean
+        repositoryDocs?: boolean
+        keepOriginals?: boolean
+        facets?: Partial<Record<BrainSchema.Facet, boolean>>
+        modelLearner?: Brain.ModelLearner
+      }
     }) {
       const place = yield* instruction.place()
-      if (ctx.payload.learning !== undefined) yield* brain.setLearning(ctx.payload.learning)
+      if (ctx.payload.learning !== undefined || ctx.payload.facets || ctx.payload.modelLearner)
+        yield* brain.setLearnSettings({
+          ...(ctx.payload.learning === undefined ? {} : { learning: ctx.payload.learning }),
+          ...(ctx.payload.facets ? { facets: ctx.payload.facets } : {}),
+          ...(ctx.payload.modelLearner ? { modelLearner: ctx.payload.modelLearner } : {}),
+        })
       if (ctx.payload.repositoryDocs !== undefined || ctx.payload.keepOriginals !== undefined)
         yield* knowledge.configure(place, {
           ...(ctx.payload.repositoryDocs === undefined ? {} : { repositoryDocs: ctx.payload.repositoryDocs }),
@@ -653,5 +693,8 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
       .handle("researchSource", researchSource)
       .handle("forgetResearchSource", forgetResearchSource)
       .handle("postingCheck", postingCheck)
+      .handle("eraseSession", eraseSession)
+      .handle("export", exportMemory)
+      .handle("import", importMemory)
   }),
 )

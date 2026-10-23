@@ -57,11 +57,28 @@ export const MemoryCreatePayload = Schema.Struct({
 export const MemoryUpdatePayload = Schema.Struct({
   text: Schema.optional(Schema.String),
   pinned: Schema.optional(Schema.Boolean),
+  /** Files a preference or a term under another facet. */
+  facet: Schema.optional(BrainSchema.Facet),
   action: Schema.optional(Schema.Literals(["approve", "reject", "archive", "restore", "undo"])),
 })
 
 export const MemoryErasePayload = Schema.Struct({
   scope: Schema.Literals(["repository", "personal", "all"]),
+})
+
+/** The facets of how the user works that Vector may learn: each one on unless turned off ("Don't learn this kind"). */
+export const MemoryFacets = Schema.Struct({
+  format: Schema.Boolean,
+  workflow: Schema.Boolean,
+  vocabulary: Schema.Boolean,
+  tooling: Schema.Boolean,
+  sources: Schema.Boolean,
+  style: Schema.Boolean,
+}).annotate({ identifier: "MemoryFacets" })
+
+/** When the optional model learner runs: with Vector Local on (the default), with any model, or never. */
+export const MemoryModelLearner = Schema.Literals(["local-only", "always", "off"]).annotate({
+  identifier: "MemoryModelLearner",
 })
 
 export const MemorySettings = Schema.Struct({
@@ -70,13 +87,54 @@ export const MemorySettings = Schema.Struct({
   repositoryDocs: Schema.Boolean,
   /** Whether a copy of each added file is kept. The copy is not redacted. */
   keepOriginals: Schema.Boolean,
+  facets: MemoryFacets,
+  modelLearner: MemoryModelLearner,
 }).annotate({ identifier: "MemorySettings" })
 
 export const MemorySettingsPayload = Schema.Struct({
   learning: Schema.optional(Schema.Boolean),
   repositoryDocs: Schema.optional(Schema.Boolean),
   keepOriginals: Schema.optional(Schema.Boolean),
+  /** The facets to change; the others keep their setting. */
+  facets: Schema.optional(
+    Schema.Struct({
+      format: Schema.optional(Schema.Boolean),
+      workflow: Schema.optional(Schema.Boolean),
+      vocabulary: Schema.optional(Schema.Boolean),
+      tooling: Schema.optional(Schema.Boolean),
+      sources: Schema.optional(Schema.Boolean),
+      style: Schema.optional(Schema.Boolean),
+    }),
+  ),
+  modelLearner: Schema.optional(MemoryModelLearner),
 })
+
+export const MemoryExportQuery = Schema.Struct({
+  ...WorkspaceRoutingQueryFields,
+  /** personal: what Vector keeps for you. repository: this repository's memory and documents. all (the default): both. */
+  scope: Schema.optional(Schema.Literals(["personal", "repository", "all"])),
+  /** markdown (the default): a page per kind to read. json: the same, as data an import reads back. */
+  format: Schema.optional(Schema.Literals(["markdown", "json"])),
+})
+
+/** The most an import may be: 2 MB of text. */
+export const IMPORT_CHARS = 2 * 1024 * 1024
+
+export const MemoryImportPayload = Schema.Struct({
+  /** A Markdown or JSON export, or a Markdown list under "## Preferences", "## Terms" and the like. */
+  text: Schema.String,
+})
+
+export const MemoryImportResult = Schema.Struct({
+  /** What the import brought in, every entry waiting for your approval. */
+  entries: Schema.Array(BrainSchema.Entry),
+  /** Entries already in memory, the same words. */
+  known: Schema.Finite,
+  /** Entries refused: forgotten, secret, too long, or past what may wait for review. */
+  refused: Schema.Finite,
+  /** Entries past the 500 one import brings in. */
+  over: Schema.Finite,
+}).annotate({ identifier: "MemoryImportResult" })
 
 export const MemoryTidy = Schema.Struct({
   merged: Schema.Finite,
@@ -607,6 +665,42 @@ export const MemoryApi = HttpApi.make("memory")
               "Erase what Vector learned for this repository, for the user, or everywhere. Files people wrote are left alone.",
           }),
         ),
+        HttpApiEndpoint.delete("eraseSession", `${root}/sessions/:sessionID`, {
+          params: { sessionID: Schema.String.annotate({ description: "The session, such as ses_4k2q7m3x" }) },
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Finite, "How many entries were erased"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.session.erase",
+            summary: "Erase what Vector learned in a session",
+            description:
+              "Forget every entry Vector learned whose only evidence is this session, so it is not learned again. What you wrote and what other sessions also taught stay. The session keeps its messages until you delete them.",
+          }),
+        ),
+        HttpApiEndpoint.get("export", `${root}/export`, {
+          query: MemoryExportQuery,
+          success: Schema.String.pipe(HttpApiSchema.asText({ contentType: "text/markdown" })),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.export",
+            summary: "Export memory",
+            description:
+              "Everything Vector keeps for this repository, for you, or both, as an attachment: a Markdown page per kind with each entry's evidence and what Vector read from documents, or with `format=json` the same as data. Never the documents' files.",
+          }),
+        ),
+        HttpApiEndpoint.post("import", `${root}/import`, {
+          query: WorkspaceRoutingQuery,
+          payload: MemoryImportPayload,
+          success: described(MemoryImportResult, "What the import brought in"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.import",
+            summary: "Import memory",
+            description:
+              "Read an export (Markdown or JSON) back in. Every preference, term, decision, lesson and fact it holds lands waiting for your approval, so a changed file cannot put memory in use; rules stay in their files. What you forgot is not imported again.",
+          }),
+        ),
         HttpApiEndpoint.post("tidy", `${root}/tidy`, {
           query: WorkspaceRoutingQuery,
           success: described(MemoryTidy, "What tidying changed"),
@@ -624,7 +718,8 @@ export const MemoryApi = HttpApi.make("memory")
           OpenApi.annotations({
             identifier: "memory.settings.get",
             summary: "Get memory settings",
-            description: "Whether Vector may add to its memory as it works.",
+            description:
+              "Whether Vector may add to its memory as it works, which facets of how you work it may learn, and when the optional model learner runs.",
           }),
         ),
         HttpApiEndpoint.patch("configure", `${root}/settings`, {
@@ -636,7 +731,7 @@ export const MemoryApi = HttpApi.make("memory")
             identifier: "memory.settings.update",
             summary: "Change memory settings",
             description:
-              "Turn Vector's learning on or off, reading the repository's own docs, and keeping originals of added documents. Memory already saved stays until you erase it; turning repository docs off forgets what Vector read of them, and turning originals off deletes the kept copies.",
+              "Turn Vector's learning on or off, each facet of how you work it may learn, the optional model learner, reading the repository's own docs, and keeping originals of added documents. Memory already saved stays until you erase it; turning repository docs off forgets what Vector read of them, and turning originals off deletes the kept copies.",
           }),
         ),
         HttpApiEndpoint.get("model", `${root}/model`, {
