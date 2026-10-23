@@ -1,6 +1,6 @@
 import { describe, expect } from "bun:test"
 import fs from "node:fs/promises"
-import { spawn } from "node:child_process"
+import childProcess, { spawn } from "node:child_process"
 import os from "node:os"
 import path from "node:path"
 import { Effect, Exit, Stream } from "effect"
@@ -519,6 +519,50 @@ await new Promise((resolve, reject) => process.stdout.write(${method === "exitCo
         )
         expect(Exit.isFailure(exit) ? true : exit.value !== ChildProcessSpawner.ExitCode(0)).toBe(true)
       }),
+    )
+
+    // On Windows cross-spawn reports exit status 1 from a command it did not resolve itself, which is every command
+    // run under a shell (cmd's `dir *.log` finding nothing, a failing test run), as ENOENT: the child emits error in
+    // place of exit. Every child spawned here does the same, so the spawner meets it on any platform. The child exits
+    // while a process it started still holds its output open, so the error always arrives before the output ends.
+    fx.live(
+      "keeps the output and exit status of a child whose exit is reported as an error",
+      Effect.gen(function* () {
+        const proto = childProcess.ChildProcess.prototype
+        yield* Effect.acquireRelease(
+          Effect.sync(() => {
+            const own = Object.getOwnPropertyDescriptor(proto, "emit")
+            const emit = proto.emit
+            Object.defineProperty(proto, "emit", {
+              configurable: true,
+              writable: true,
+              value(this: childProcess.ChildProcess, name: string | symbol, ...args: unknown[]) {
+                if (name !== "exit" || args[0] !== 1) return Reflect.apply(emit, this, [name, ...args])
+                return Reflect.apply(emit, this, [
+                  "error",
+                  Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" }),
+                ])
+              },
+            })
+            return own
+          }),
+          (own) =>
+            Effect.sync(() => {
+              if (own) Object.defineProperty(proto, "emit", own)
+              else Reflect.deleteProperty(proto, "emit")
+            }),
+        )
+        const code = `require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => console.log(\\'late\\'), 500)'], { stdio: ['ignore', 'inherit', 'inherit'] }).unref(); console.log('early'); process.exit(1)`
+        const handle = yield* ChildProcess.make(`"${process.execPath}" -e "${code}"`, [], { shell: true })
+        const [output, exit] = yield* Effect.all([decodeByteStream(handle.all), handle.exitCode], {
+          concurrency: 2,
+        }).pipe(Effect.timeout("5 seconds"))
+        expect({ output: output.split(/\r?\n/), exit }).toEqual({
+          output: ["early", "late"],
+          exit: ChildProcessSpawner.ExitCode(1),
+        })
+      }),
+      10_000,
     )
   })
 
