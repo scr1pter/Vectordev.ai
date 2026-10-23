@@ -117,7 +117,7 @@ const setup = Effect.gen(function* () {
       code: "VECTOR_FREE_MODELS_LIMIT",
       reason: "user_daily",
       resetAt: 123456,
-      message: "Shared allowance used",
+      message: "You've run out of free tokens for today",
     },
   })
 })

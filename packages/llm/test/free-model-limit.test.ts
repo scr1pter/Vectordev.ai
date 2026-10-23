@@ -12,7 +12,7 @@ const limit: FreeModelLimit = {
   code: "VECTOR_FREE_MODELS_LIMIT",
   reason: "shared_daily",
   resetAt: 1900000000000,
-  message: "The shared free allowance is exhausted.",
+  message: "Free tokens have run out for today.",
 }
 const request = LLM.request({
   model: OpenAIChat.route.with({ endpoint: { baseURL: "https://fixture.invalid" } }).model({ id: "test:free" }),

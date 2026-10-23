@@ -37,3 +37,10 @@ test("free-model copy about the included models never names OpenRouter", () => {
   const copy = Object.entries(en).filter(([key]) => key.startsWith("freeModels.") && !own.includes(key))
   expect(copy.filter(([, text]) => /openrouter/i.test(text))).toEqual([])
 })
+
+// Owner, 23 October 2026: users shouldn't feel free models are an allowance from Vector that they share with others.
+test("free-model copy never calls them an allowance, shared or pooled", () => {
+  const copy = Object.entries(en).filter(([key]) => key.startsWith("freeModels."))
+  expect(copy.filter(([, text]) => /allowance|\bshared\b|\bpool(?:ed)?\b/i.test(text))).toEqual([])
+  expect(en["freeModels.limit.reset"]).toBe("More free tokens are available at {{time}}.")
+})

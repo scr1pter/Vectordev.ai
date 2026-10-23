@@ -15,7 +15,7 @@ const limit = {
   code: "VECTOR_FREE_MODELS_LIMIT",
   reason: "user_daily",
   resetAt: 123456,
-  message: "Shared allowance used",
+  message: "You've run out of free tokens for today",
 } as const
 
 test("AI SDK SSE quota retains typed details across split frames and suppresses raw JSON", async () => {

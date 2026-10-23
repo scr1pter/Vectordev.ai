@@ -202,10 +202,14 @@ export function freeModelsLimitNotice(error: unknown): FreeModelsLimitNotice | u
   return { reason, resetAt: data.resetAt }
 }
 
+/**
+ * Free models are never called an allowance, shared or pooled (owner, 23 October 2026). The overall daily limit
+ * (`shared_daily`) says only that free tokens ran out, never that the user used them up.
+ */
 export function freeModelsLimitTitle(limit: FreeModelsLimitNotice) {
-  if (limit.reason === "user_daily") return `You've reached today's limit for ${FREE_MODELS_TITLE}`
+  if (limit.reason === "user_daily") return "You've run out of free tokens for today"
   if (limit.reason === "user_minute") return "Give the free models provided by Vector a moment"
-  if (limit.reason === "shared_daily") return "Free models provided by Vector have reached today's limit"
+  if (limit.reason === "shared_daily") return "Free tokens have run out for today"
   return "Free models provided by Vector are temporarily unavailable"
 }
 
@@ -218,5 +222,10 @@ export function freeModelsLimitMessage(
   limit: FreeModelsLimitNotice,
   options: { locale?: string; terminal?: boolean } = {},
 ) {
-  return `${freeModelsLimitTitle(limit)}. They are expected to be available again at ${freeModelsResetLabel(limit, options.locale)}. ${options.terminal ? FREE_MODELS_OWN_KEYS_TERMINAL : FREE_MODELS_OWN_KEYS}`
+  return `${freeModelsLimitTitle(limit)}. ${freeModelsResetSentence(limit, options.locale)} ${options.terminal ? FREE_MODELS_OWN_KEYS_TERMINAL : FREE_MODELS_OWN_KEYS}`
+}
+
+/** When more free tokens are expected. The desktop card's `freeModels.limit.reset` says the same. */
+export function freeModelsResetSentence(limit: FreeModelsLimitNotice, locale?: string) {
+  return `More free tokens are available at ${freeModelsResetLabel(limit, locale)}.`
 }

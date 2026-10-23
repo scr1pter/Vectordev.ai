@@ -12,7 +12,7 @@ const limit: FreeModelLimit = {
   code: "VECTOR_FREE_MODELS_LIMIT",
   reason: "user_daily",
   resetAt: 1900000000000,
-  message: "The free allowance resets later.",
+  message: "More free tokens are available later.",
 }
 
 test("free-model limit reset times are finite in HTTP and stored error shapes", () => {

@@ -130,3 +130,31 @@ test("the free-model flow never tells anyone to connect an OpenRouter account of
   for (const text of [FREE_MODELS_SIGN_IN, FREE_MODELS_SHARED_COPY, FREE_MODELS_OWN_KEYS, FREE_MODELS_UNAVAILABLE])
     expect(promotion.some((pattern) => pattern.test(text))).toBe(false)
 })
+
+// Owner, 23 October 2026: "Users shouldn't feel they are getting an allowance from Vector and it's shared." The legal
+// pages keep their wording until the owner approves a change, so they are left out here.
+test("site copy and release notes never call the free models an allowance, shared or pooled", async () => {
+  const sources = [
+    ...(
+      await Array.fromAsync(
+        new Bun.Glob("packages/web/src/{pages,components,data}/**/*.{astro,ts,tsx}").scan({ cwd: root }),
+      )
+    ).filter((file) => !file.startsWith("packages/web/src/pages/legal/") && !/\.test\.tsx?$/.test(file)),
+    "packages/web/public/changelog.json",
+    "README.md",
+  ]
+  const found = await Promise.all(
+    sources.map(async (file) =>
+      (await Bun.file(root + file).text())
+        .replace(/\s+/g, " ")
+        .split(/(?<=[.;"])\s/)
+        .filter(
+          (sentence) =>
+            /\bfree (?:models?|tokens|allowance)\b|\bprovided by Vector\b|\bincluded with Vector\b/i.test(sentence) &&
+            /allowance|\bshared\b|\bshares\b|\bpool(?:ed)?\b/i.test(sentence),
+        )
+        .map((sentence) => `${file}: ${sentence.trim().slice(0, 160)}`),
+    ),
+  )
+  expect(found.flat()).toEqual([])
+})

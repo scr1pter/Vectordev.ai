@@ -143,6 +143,8 @@ test("fresh profile is told how to sign in to Vector, then starts on the shared 
   await expect(card.getByRole("button", { name: "Sign in to Vector" })).toHaveCount(0)
   // Included models never name OpenRouter in the app (owner, 22 October 2026); the legal pages say who processes them.
   await expect(card).toContainText("Free models are provided by Vector at no cost to you")
+  // Owner, 23 October 2026: never an allowance, and never shared with other people.
+  await expect(card).not.toContainText(/allowance|\bshared\b|\bpool(?:ed)?\b/i)
   await expect(card).not.toContainText(/openrouter/i)
   // It never asks anyone to bring an OpenRouter account of their own.
   await expect(card).not.toContainText(/connect (?:your own )?(?:free )?openrouter/i)

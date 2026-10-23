@@ -32,7 +32,13 @@ test.each([new ProviderError.HeaderTimeoutError(100), new ProviderError.Response
 test("nested SDK wrappers retain quota details without retrying", () => {
   const result = MessageV2.fromError(
     wrapped(
-      wrapped(new FreeModelsLimitError({ reason: "shared_daily", resetAt: 456, message: "Shared allowance used" })),
+      wrapped(
+        new FreeModelsLimitError({
+          reason: "shared_daily",
+          resetAt: 456,
+          message: "Free tokens have run out for today",
+        }),
+      ),
     ),
     { providerID },
   )
@@ -42,7 +48,7 @@ test("nested SDK wrappers retain quota details without retrying", () => {
       code: "VECTOR_FREE_MODELS_LIMIT",
       reason: "shared_daily",
       resetAt: 456,
-      message: "Shared allowance used",
+      message: "Free tokens have run out for today",
     },
   })
   expect(SessionRetry.retryable(result, providerID)).toBeUndefined()

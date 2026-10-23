@@ -3,7 +3,7 @@ import {
   FREE_MODELS_OWN_KEYS_TERMINAL,
   freeModelsLimitNotice,
   freeModelsLimitTitle,
-  freeModelsResetLabel,
+  freeModelsResetSentence,
   type FreeModelsLimitNotice,
 } from "@vectordevai/core/free-model-choice"
 import { useSDK } from "../context/sdk"
@@ -62,9 +62,7 @@ export function DialogFreeModelsLimit(props: { sessionID: string; limit: FreeMod
       locked={busy()}
       footer={
         <box paddingLeft={2} paddingRight={2} paddingBottom={1} gap={1}>
-          <text fg={theme.textMuted}>
-            Free models provided by Vector are expected to be available again at {freeModelsResetLabel(props.limit)}.
-          </text>
+          <text fg={theme.textMuted}>{freeModelsResetSentence(props.limit)}</text>
           <text fg={theme.textMuted}>{FREE_MODELS_OWN_KEYS_TERMINAL}</text>
         </box>
       }
@@ -87,7 +85,7 @@ export function DialogFreeModelsLimit(props: { sessionID: string; limit: FreeMod
             ]
           : []),
         {
-          title: "Wait until free models provided by Vector are available again",
+          title: "Wait until more free tokens are available",
           value: "wait",
           onSelect: () => dialog.clear(),
         },
