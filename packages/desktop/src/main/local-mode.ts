@@ -34,6 +34,8 @@ const RECHECK = 30_000
 const FIRST_RUN_CHECK = 15_000
 const CERTIFICATES_CHECK = 60_000
 const ANSWERED = "firstRunAnswered"
+/** Desktop main's own store for Vector Local: whether the first run's question was answered. */
+export const LOCAL_STORE = "local"
 // What the app's windows fetch from the internet, by registry source, as the dispatcher decides it.
 const RENDERER = {
   "release-notes": "https://vectordev.ai/changelog.json",
@@ -72,10 +74,19 @@ export function startDesktopLocal(input: {
   const policy = resolveDesktopLocal(input.userData)
   // Chromium may still look up a name a page names, before the request the dispatcher would refuse.
   if (policy.enabled) input.commandLine.appendSwitch("dns-prefetch-disable")
-  const trusted = trustCompanyCertificates(input.userData)
-  trusted.problems.forEach((problem) => input.log("company certificate skipped", { problem }))
-  if (trusted.added.length > 0) input.log("company certificates trusted", { count: trusted.added.length })
   policy.warnings.forEach((warning) => input.log("vector local", { warning }))
+  // Node's own certificate lists are read through OpenSSL and the system's store, either of which can fail on a
+  // broken installation; Vector then keeps the certificates Node starts with.
+  const trusted = (() => {
+    try {
+      return trustCompanyCertificates(input.userData)
+    } catch (error) {
+      input.log("failed to load system certificates", { error: String(error) })
+      return undefined
+    }
+  })()
+  trusted?.problems.forEach((problem) => input.log("company certificate skipped", { problem }))
+  if (trusted?.added.length) input.log("company certificates trusted", { count: trusted.added.length })
   return policy
 }
 
@@ -127,7 +138,7 @@ export function watchCompanyCertificates(input: {
 export function installChromiumLocal(deps: {
   readonly app: Pick<App, "on">
   readonly defaultSession: Target
-  readonly fromPartition: (partition: string, options?: { cache?: boolean }) => Target & Partial<PreloadTarget>
+  readonly fromPartition: (partition: string, options?: { cache: boolean }) => Target & Partial<PreloadTarget>
   readonly webContents: () => readonly Pick<WebContents, "setWebRTCIPHandlingPolicy">[]
   /** Where the agent's browser's preload is written. */
   readonly directory: string
@@ -260,6 +271,8 @@ export function connectDesktopLocal(input: {
   const timer = setInterval(() => void compare(), input.interval ?? RECHECK)
   timer.unref?.()
   const forward = forwardEgress({
+    // What this process logged before its engine answered, then each line as it is logged.
+    initial: Egress.events(),
     subscribe: Egress.subscribe,
     send: (events) =>
       fetch(new URL("/local/egress/report", input.engine.url).href, {
@@ -308,13 +321,14 @@ function authorization(engine: Engine) {
  * engine did not take is sent again later; the oldest are dropped past `limit`, as the engine's own memory does.
  */
 export function forwardEgress(deps: {
+  readonly initial?: readonly LocalMode.Event[]
   readonly subscribe: (listener: (event: LocalMode.Event) => void) => () => void
   readonly send: (events: readonly LocalMode.Event[]) => Promise<boolean>
   readonly delay?: number
   readonly retry?: number
   readonly limit?: number
 }) {
-  const queue: LocalMode.Event[] = []
+  const queue: LocalMode.Event[] = (deps.initial ?? []).slice(-(deps.limit ?? REPORT_LIMIT))
   const status: { timer?: ReturnType<typeof setTimeout>; sending: boolean; stopped: boolean } = {
     sending: false,
     stopped: false,
@@ -339,6 +353,7 @@ export function forwardEgress(deps: {
     if (queue.length > (deps.limit ?? REPORT_LIMIT)) queue.splice(0, queue.length - (deps.limit ?? REPORT_LIMIT))
     schedule(deps.delay ?? 1_000)
   })
+  if (queue.length > 0) schedule(0)
   return {
     flush,
     stop() {
@@ -516,7 +531,7 @@ export type UpdateGate = ReturnType<typeof createUpdateGate>
 
 /** Lets the updater's session reach `origins` while `run` runs. */
 export function duringUpdateCheck<T>(
-  fromPartition: (partition: string, options?: { cache?: boolean }) => Target,
+  fromPartition: (partition: string, options?: { cache: boolean }) => Target,
   origins: readonly string[],
   run: () => Promise<T>,
 ) {

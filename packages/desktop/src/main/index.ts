@@ -6,9 +6,8 @@ import * as http from "node:http"
 import { createServer } from "node:net"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
-import { getCACertificates, setDefaultCACertificates } from "node:tls"
 import type { Event } from "electron"
-import { app, BrowserWindow, dialog, powerSaveBlocker } from "electron"
+import { app, BrowserWindow, dialog, powerSaveBlocker, session, webContents } from "electron"
 
 import { Deferred, Effect, Fiber } from "effect"
 import contextMenu from "electron-context-menu"
@@ -43,7 +42,18 @@ import { registerWslIpcHandlers } from "./wsl/ipc"
 import { spawnWslSidecar } from "./wsl/sidecar"
 import { migrate } from "./migrate"
 import { leakedXdgHomes } from "./xdg-env"
-import { resolveDesktopLocal } from "./local-policy"
+import {
+  answeredByEngine,
+  connectDesktopLocal,
+  installChromiumLocal,
+  LOCAL_STORE,
+  startDesktopLocal,
+  startFirstRun,
+  usageCheckinAllowed,
+  watchCompanyCertificates,
+  watchFirstRun,
+} from "./local-mode"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 import { cleanupStoreFiles, removeLegacyAccessFiles } from "./store-cleanup"
 import { startBrowserBridge, stopBrowserBridge } from "./browser-bridge"
 import { startCloudBridge, stopCloudBridge } from "./cloud-bridge"
@@ -226,12 +236,6 @@ const main = Effect.gen(function* () {
     })
   }
 
-  try {
-    setDefaultCACertificates([...new Set([...getCACertificates("default"), ...getCACertificates("system")])])
-  } catch (error) {
-    logger.warn("failed to load system certificates", error)
-  }
-
   logger.log("app starting", {
     version: app.getVersion(),
     packaged: app.isPackaged,
@@ -258,7 +262,18 @@ const main = Effect.gen(function* () {
   }
 
   preferAppEnv(app.getPath("userData"))
-  resolveDesktopLocal(app.getPath("userData"))
+  // Vector Local's policy, the company's certificate authorities and Chromium's switches, all before app.whenReady.
+  startDesktopLocal({
+    userData: app.getPath("userData"),
+    commandLine: app.commandLine,
+    log: (message, data) => logger.log(message, data),
+  })
+  // On a first run, the requests Vector makes for itself at start wait until the person chooses how to run models.
+  const firstRun = startFirstRun({
+    userData: app.getPath("userData"),
+    store: getStore(LOCAL_STORE),
+    reported: getStore(USAGE_STORE).get("sent") !== undefined,
+  })
 
   app.on("second-instance", (_event: Event, argv: string[]) => {
     const urls = argv.filter((arg: string) => arg.startsWith("vector://"))
@@ -343,6 +358,14 @@ const main = Effect.gen(function* () {
   const serverReady = Deferred.makeUnsafe<ServerReadyData, unknown>()
 
   yield* Effect.promise(() => app.whenReady())
+  // Before any window or partition loads anything: one Vector Local dispatcher on every Chromium session.
+  installChromiumLocal({
+    app,
+    defaultSession: session.defaultSession,
+    fromPartition: (partition, options) => session.fromPartition(partition, options),
+    webContents: () => webContents.getAllWebContents(),
+    directory: join(app.getPath("userData"), "local-mode"),
+  })
   yield* Effect.tryPromise({
     try: () => setupSecureRuntimeSecrets(),
     catch: (error) => (error instanceof Error ? error : new Error(String(error))),
@@ -419,7 +442,9 @@ const main = Effect.gen(function* () {
     setUsageSharing: (enabled) => getStore(USAGE_STORE).set("enabled", enabled),
   })
   registerWslIpcHandlers(wslServers)
+  // Automatic checks wait for the first run's answer; Vector Local's own rules apply inside the updater.
   void updater.start()
+  if (firstRun.held()) void firstRun.answered().then(() => updater.start())
   const updateTimer = setInterval(() => void updater.poll(), 10 * 60 * 1000)
   updateTimer.unref()
   app.once("will-quit", () => clearInterval(updateTimer))
@@ -465,12 +490,17 @@ const main = Effect.gen(function* () {
     useEnvProxy()
 
     logger.log("spawning sidecar", { url })
+    // An engine started during the first run's hold loads the model catalog it has and refreshes it at the next start.
+    const holdCatalog = firstRun.held() && process.env.VECTOR_DISABLE_MODELS_FETCH === undefined
+    if (holdCatalog) process.env.VECTOR_DISABLE_MODELS_FETCH = "1"
     const { listener, health } = yield* Effect.promise(() =>
       spawnLocalServer(hostname, port, password, {
         userDataPath: app.getPath("userData"),
         onStdout: (message) => writeLog("server", "stdout", { message }),
         onStderr: (message) => writeLog("server", "stderr", { message }, "warn"),
         onExit: (code) => writeLog("utility", "sidecar exited", { code }, "warn"),
+      }).finally(() => {
+        if (holdCatalog) delete process.env.VECTOR_DISABLE_MODELS_FETCH
       }),
     )
     server = listener
@@ -488,6 +518,22 @@ const main = Effect.gen(function* () {
         }),
       ),
     )
+
+    // The engine's Vector Local against the app's, and the app's own requests into the engine's network log.
+    const local = connectDesktopLocal({ engine: { url, password }, log: (message, data) => logger.log(message, data) })
+    app.once("will-quit", () => local.stop())
+    if (firstRun.held()) {
+      const stop = watchFirstRun(firstRun, {
+        answered: () => answeredByEngine({ url, password }, () => vectorAccount.status().authenticated),
+      })
+      app.once("will-quit", stop)
+    }
+    // The engine trusts the company's certificate authorities from its start, so a change takes a restart.
+    const stopCertificates = watchCompanyCertificates({
+      userData: app.getPath("userData"),
+      changed: () => void askToRestartForCertificates(relaunch),
+    })
+    app.once("will-quit", stopCertificates)
 
     // Idle sleep freezes agents mid-run, so the machine stays awake while the engine has work running, and while the
     // desktop runs an external agent or a workspace's checks itself.
@@ -515,17 +561,20 @@ const main = Effect.gen(function* () {
 
   // The local engine keeps its history in <XDG_DATA_HOME>/vector, which preferAppEnv set above.
   const engineData = process.env.XDG_DATA_HOME
+  const usageEndpoint = usageCheckinEndpoint({
+    packaged: app.isPackaged,
+    channel: CHANNEL,
+    override: process.env.VECTOR_USAGE_URL,
+  })
   const usage = createUsageCheckin({
-    endpoint: usageCheckinEndpoint({
-      packaged: app.isPackaged,
-      channel: CHANNEL,
-      override: process.env.VECTOR_USAGE_URL,
-    }),
+    endpoint: usageEndpoint,
     store: getStore(USAGE_STORE),
     enabled: usageSharing,
+    allowed: () => (usageEndpoint ? usageCheckinAllowed(usageEndpoint) : false),
     engine: { url, username: "vector", password },
     token: () => vectorAccount.token(),
     fetch: (input, init) => fetch(input, init),
+    send: (input, init) => Egress.fetch("usage-checkin", input, init),
     now: Date.now,
     version: app.getVersion(),
     platform: process.platform,
@@ -543,6 +592,7 @@ const main = Effect.gen(function* () {
   })
   usage.start()
   app.once("will-quit", () => usage.stop())
+  if (firstRun.held()) void firstRun.answered().then(() => usage.checkin())
 
   // The tray is what makes staying resident survivable: without it a
   // background-mode keep-alive would leave a process the user can see no window
@@ -594,5 +644,21 @@ const main = Effect.gen(function* () {
     })
   }
 })
+
+// The company's certificate authorities changed while Vector runs: its engine trusts them once it restarts, which
+// stops what agents are running, so the person chooses when.
+async function askToRestartForCertificates(relaunch: () => void) {
+  const answer = await dialog.showMessageBox({
+    type: "question",
+    title: "Vector Local",
+    message: "Your company's certificates changed",
+    detail:
+      "Vector's engine uses certificate authorities from the start, so it needs a restart to trust the new ones. Restarting stops what agents are running now.",
+    buttons: ["Restart Vector", "Later"],
+    defaultId: 1,
+    cancelId: 1,
+  })
+  if (answer.response === 0) relaunch()
+}
 
 Effect.runFork(main)

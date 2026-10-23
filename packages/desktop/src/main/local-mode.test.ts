@@ -446,6 +446,7 @@ describe("the app and its engine", () => {
     })
     // The engine is not up yet: events wait, and the oldest go past the limit.
     for (let id = 0; id < 800; id++) listeners.forEach((listener) => listener(event(id)))
+    expect(listeners.size).toBe(1)
     await settle()
     expect(sent).toEqual([])
     accept.current = true
@@ -453,6 +454,19 @@ describe("the app and its engine", () => {
     expect(sent).toEqual([500, 200])
     forward.stop()
     expect(listeners.size).toBe(0)
+    // What was logged before the engine answered goes first.
+    const later: string[] = []
+    const early = forwardEgress({
+      initial: [event(1), event(2)],
+      subscribe: () => () => undefined,
+      send: async (events) => {
+        later.push(...events.map((item) => item.id))
+        return true
+      },
+    })
+    while (later.length < 2) await settle()
+    expect(later).toEqual(["1", "2"])
+    early.stop()
   })
 })
 

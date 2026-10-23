@@ -62,6 +62,7 @@ import type {
   PullRequestSummary,
 } from "../main/github-pr"
 import type { LocalMemoryState } from "../main/local-memory"
+import type { DesktopLocalStatus } from "../main/local-mode"
 import type { RuntimeName, RuntimeStatus } from "../main/runtime-bootstrap"
 export type { RuntimeName, RuntimeStatus } from "../main/runtime-bootstrap"
 import type { CiFailure, CiRepo, CiRun, CiUnavailable } from "../main/ci-watch"
@@ -90,6 +91,7 @@ export type { FailureMemory, FailureRepair, FailureSignatureRecord } from "../ma
 import type { AgentTeam, TeamCollaborationGraph, TeamMessage, TeamTopology } from "../main/agent-team-model"
 export type { AgentTeam, TeamCollaborationGraph, TeamLink, TeamMessage, TeamTopology } from "../main/agent-team-model"
 export type { LocalMemoryState } from "../main/local-memory"
+export type { DesktopLocalStatus } from "../main/local-mode"
 export type {
   AutoReviewSecret,
   AutoReviewSetup,
@@ -230,6 +232,11 @@ export type AgentTeamsAPI = {
 export type RuntimeAPI = {
   ensure: (name: RuntimeName) => Promise<RuntimeStatus>
   preparePluginCommand: (command: string[]) => Promise<{ command: string[]; status?: RuntimeStatus }>
+}
+
+/** Vector Local as the app's windows see it: the policy desktop main uses, the first run's hold and the mismatch. */
+export type VectorLocalAPI = {
+  status: () => Promise<DesktopLocalStatus>
 }
 
 export type LocalMemoryAPI = {
@@ -746,6 +753,7 @@ export type ElectronAPI = {
   agentTeams: AgentTeamsAPI
   convertHeic: (bytes: Uint8Array) => Promise<{ data: Uint8Array; mime: string } | { error: string }>
   runtime: RuntimeAPI
+  vectorLocal: VectorLocalAPI
   localMemory: LocalMemoryAPI
   repoRules: RepoRulesAPI
   pullRequests: PullRequestsAPI
