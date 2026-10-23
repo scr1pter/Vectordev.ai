@@ -169,7 +169,6 @@ export function createEgressFilter(deps: {
   }
 
   const log = (kind: Kind, details: OnBeforeRequestListenerDetails, decided: Decision) => {
-    if (decided.decision === "allow" && decided.class === "this-computer") return
     const contents = details.webContentsId ?? -1
     const known = pages.get(contents)
     const main = details.resourceType === "mainFrame"
@@ -184,6 +183,8 @@ export function createEgressFilter(deps: {
       pages.set(contents, current)
       if (pages.size > SEEN_LIMIT) pages.delete(pages.keys().next().value!)
     }
+    // A page on this computer is still a new page for what it loads, but stays out of the log.
+    if (decided.decision === "allow" && decided.class === "this-computer") return
     const origin = URL.canParse(details.url) ? new URL(details.url).origin : details.url
     const key = `${origin} ${decided.decision}`
     if (!fresh && current.seen.has(key)) return

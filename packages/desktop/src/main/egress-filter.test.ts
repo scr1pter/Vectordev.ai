@@ -317,12 +317,16 @@ describe("the Chromium dispatcher", () => {
     await send(session, details("https://cdn.example.net/app.js", "script"))
     // Another web contents' page is its own page.
     await send(session, details("https://cdn.example.net/app.js", "script", { webContentsId: 9 }))
+    // A page on this computer is not logged, but what it loads from the internet is logged for it.
+    await send(session, details("http://localhost:5173/", "mainFrame"))
+    await send(session, details("https://cdn.example.net/app.js", "script"))
     expect(recorded.map((item) => `${item.resource} ${item.origin}`)).toEqual([
       "page https://news.example.org",
       "subresource https://www.news.example.org",
       "subresource https://cdn.example.net",
       "subresource https://fonts.example.com",
       "page https://docs.example.org",
+      "subresource https://cdn.example.net",
       "subresource https://cdn.example.net",
       "subresource https://cdn.example.net",
     ])
