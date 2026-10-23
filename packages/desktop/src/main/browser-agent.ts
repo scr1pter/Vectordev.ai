@@ -1,5 +1,6 @@
 import { BrowserWindow, WebContentsView, session, type IpcMainInvokeEvent, type WebContents } from "electron"
 import { clickTargetLabel } from "./browser-click-target"
+import { clickElement, clickPoint, observePage, readPage, type ClickPoint, type Observed, type PageRead } from "./browser-page"
 import { isCredentialField } from "./browser-credential-field"
 import { CredentialFocusChangedError, sendGuardedCharacters } from "./browser-credential-input"
 import {
@@ -75,6 +76,10 @@ export const TURN_DEADLINE_MS = 60_000
 // The wait helpers run in their own JavaScript world, which shares the page's DOM but not its globals, so a page
 // cannot stop them by replacing setTimeout, MutationObserver or Promise.
 const WAIT_WORLD = 1_291
+// observePage's ref handles live in this world's globals, so they last as long as the page and the page cannot read them.
+const PAGE_WORLD = 1_292
+// The most of a page readPage serializes for the reader, as the research reader reads at most.
+const READ_BYTES = 5 * 1024 * 1024
 
 function currentContext() {
   const context = contextStorage.getStore()
@@ -748,6 +753,37 @@ async function runIsolatedScript<T>(script: string): Promise<T> {
   return (await contents.executeJavaScriptInIsolatedWorld(WAIT_WORLD, [{ code: script }], true)) as T
 }
 
+// Runs one of browser-page.ts's functions in the page's own world for Vector, with the window and these arguments.
+async function runPageScript<T>(fn: (win: Window, ...rest: never[]) => unknown, ...args: unknown[]): Promise<T> {
+  const contents = ensureView()
+  const values = args.map((value) => (typeof value === "function" ? value.toString() : JSON.stringify(value)))
+  return (await contents.executeJavaScriptInIsolatedWorld(
+    PAGE_WORLD,
+    [{ code: `(${fn.toString()})(window${values.map((value) => `, ${value}`).join("")})` }],
+    true,
+  )) as T
+}
+
+/**
+ * Clicks what observePage named `ref` with trusted input at its centre, as the user's own click would land, or with the
+ * DOM's click when something else covers that point. A file field, or a label for one, is refused.
+ */
+export async function clickRef(ref: string) {
+  const contents = ensureView()
+  const point = await runPageScript<ClickPoint>(clickPoint, ref)
+  if (!point.ok) throw new Error(point.reason)
+  // The page measures in CSS pixels; input goes to the view in its own coordinates.
+  const zoom = contents.getZoomFactor()
+  const at = { x: Math.round(point.x * zoom), y: Math.round(point.y * zoom) }
+  if (point.hit) {
+    contents.sendInputEvent({ type: "mouseMove", ...at })
+    contents.sendInputEvent({ type: "mouseDown", ...at, button: "left", clickCount: 1 })
+    contents.sendInputEvent({ type: "mouseUp", ...at, button: "left", clickCount: 1 })
+  }
+  if (!point.hit) await runPageScript(clickElement, ref)
+  pushAction(`Clicked ${ref}`)
+}
+
 export async function waitForSelector(selector: string) {
   await runIsolatedScript(`new Promise((resolve, reject) => {
     const selector = ${JSON.stringify(selector)};
@@ -980,6 +1016,8 @@ async function runBrowserAgentInContext(
   let screenshotDataUrl = ""
   let computedStyles: BrowserAgentComputedStyle[] | undefined
   let pageHtml: string | undefined
+  let page: PageRead | undefined
+  let observed: Observed | undefined
   let target: BrowserAutomationRun["target"]
 
   try {
@@ -1030,6 +1068,18 @@ async function runBrowserAgentInContext(
         if (!input.selector) throw new Error("The controlled browser needs a selector to click.")
         await click(input.selector)
         break
+      case "clickRef":
+        if (!input.ref) throw new Error("The controlled browser needs a ref from observe to click.")
+        await clickRef(input.ref)
+        break
+      case "readPage":
+        page = await runPageScript<PageRead>(readPage, { maxBytes: READ_BYTES })
+        pushAction("Read the page", true, undefined, `${page.html.length} characters`)
+        break
+      case "observePage":
+        observed = await runPageScript<Observed>(observePage, { maxText: 1_200, maxElements: 60 })
+        pushAction("Observed the page", true, undefined, `${observed.elements.length} controls`)
+        break
       case "type":
         if (!input.selector) throw new Error("The controlled browser needs a selector to type into.")
         await type(input.selector, input.text ?? "")
@@ -1076,8 +1126,18 @@ async function runBrowserAgentInContext(
         clearLogs()
         break
       case "inspectDom":
-        // With a selector, the engine is about to click it and needs the name of what it would press.
-        if (input.selector) {
+        // With a selector or a ref, the engine is about to click it and needs the name of what it would press.
+        if (input.ref) {
+          target = await runPageScript<NonNullable<BrowserAutomationRun["target"]>>(
+            (win: Window, ref: string, label: typeof clickTargetLabel) => {
+              const element = (win as unknown as { __vectorRefs?: Map<string, Element> }).__vectorRefs?.get(ref)
+              return element ? { found: true, label: label(element) } : { found: false, label: "" }
+            },
+            input.ref,
+            clickTargetLabel,
+          )
+        }
+        if (input.selector && !input.ref) {
           target = await runScript<NonNullable<BrowserAutomationRun["target"]>>(`(() => {
             const clickTargetLabel = ${clickTargetLabel.toString()};
             const el = document.querySelector(${JSON.stringify(input.selector)});
@@ -1147,6 +1207,8 @@ async function runBrowserAgentInContext(
     target,
     computedStyles,
     pageHtml,
+    ...(page ? { page } : {}),
+    ...(observed ? { observed } : {}),
     diagnostics: {
       consoleCount: context.consoleLogs.length,
       runtimeErrorCount: context.pageErrors.length,
