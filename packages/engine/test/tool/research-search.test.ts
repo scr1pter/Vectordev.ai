@@ -413,7 +413,7 @@ it.instance(
 for (const own of [false, true])
   it.instance(
     own
-      ? "a site the user's own config avoids clears its host names from the outbound check"
+      ? "a site the user's own config avoids clears its host name from the outbound check"
       : "a site a repository's config avoids, trusted or not, clears no host name from the outbound check",
     () =>
       Effect.gen(function* () {
@@ -447,7 +447,9 @@ for (const own of [false, true])
         const session = yield* sessions.create({ title: "Research", permission: allow })
         yield* test.llm.tool("research_plan", plan())
         yield* test.llm.tool("read", { filePath: path.join(test.dir, "notes", "hosts.md") })
-        yield* test.llm.tool("research_search", { query: "falcon-merger.victimcorp.com outage history" })
+        // The domain clears itself as a host name, never a host under it: falcon-merger.victimcorp.com still carries
+        // the private codename, so the query names the domain alone.
+        yield* test.llm.tool("research_search", { query: "victimcorp.com outage history" })
         yield* test.llm.text("Done.")
         yield* send({
           sessionID: session.id,

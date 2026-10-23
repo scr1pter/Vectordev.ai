@@ -182,7 +182,8 @@ it.instance(
       })
       yield* test.llm.tool("research_plan", { ...plan(), prefer_domains: ["acmecorp.com"] })
       yield* test.llm.tool("read", { filePath: path.join(test.dir, "notes", "hosts.md") })
-      yield* test.llm.tool("research_search", { query: "outage history", site: "status.acmecorp.com" })
+      // The approved domain clears itself as a site: value, not a host under it such as status.acmecorp.com.
+      yield* test.llm.tool("research_search", { query: "outage history", site: "acmecorp.com" })
       yield* test.llm.text("Done.")
       yield* send({ sessionID: session.id, agent: "research", text: "Research how often status pages report outages." })
       const [search] = yield* calls(session.id, "research_search")
