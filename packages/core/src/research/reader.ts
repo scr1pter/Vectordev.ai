@@ -196,6 +196,40 @@ export const read = Effect.fn("ResearchReader.read")(
 )
 
 /**
+ * Reads what a research browser holds as `read` reads an answer, with the same extraction, cleaning, chunks and paywall
+ * and challenge checks: the HTML of the page it rendered, or a PDF it fetched into memory since downloads are off.
+ * `status` is the page's HTTP status, when the browser knows it.
+ *
+ * `signedIn` is a page the user's own browser showed after a handoff, once they signed in or got past a paywall
+ * themselves and pressed Continue. Its paywall markers are not read: publishers keep `isAccessibleForFree: false` and
+ * their meter classes for subscribers too, so the page would read as the public excerpt of what the user unlocked.
+ */
+export const parse = Effect.fn("ResearchReader.parse")(function* (input: {
+  readonly url: string
+  readonly contentType: string
+  readonly body: Uint8Array
+  readonly status?: number
+  readonly chunkTokens?: number
+  readonly signedIn?: boolean
+}) {
+  return yield* page(
+    {
+      url: input.url,
+      ...(input.chunkTokens === undefined ? {} : { chunkTokens: input.chunkTokens }),
+      ...(input.signedIn ? { signedIn: true } : {}),
+    },
+    {
+      type: "answer",
+      status: input.status !== undefined && input.status > 0 ? input.status : 200,
+      headers: { "content-type": input.contentType },
+      body: input.body,
+      final: input.url,
+      private: false,
+    },
+  )
+})
+
+/**
  * A robots.txt cache whose reads go through the same guards as the pages: pinned names, and never the user's own
  * network. robots.txt is read only for addresses Vector found, and research never reads one of those on a private
  * destination, so a private host's file is not fetched or asked about: robots.txt does not apply there, and the
@@ -388,7 +422,7 @@ function failure(url: string, error: unknown): Fetched {
   return { type: "failed", final: url, reason: "Vector could not reach the site." }
 }
 
-const page = Effect.fnUntraced(function* (input: Input, fetched: Fetched) {
+const page = Effect.fnUntraced(function* (input: Input & { readonly signedIn?: boolean }, fetched: Fetched) {
   if (fetched.type === "robots") return unread(input.url, "robots", ROBOTS, fetched.final)
   if (fetched.type === "failed") return unread(input.url, "failed", fetched.reason, fetched.final)
   const contentType = fetched.headers["content-type"] ?? ""
@@ -420,7 +454,7 @@ const page = Effect.fnUntraced(function* (input: Input, fetched: Fetched) {
   ).pipe(Effect.orElseSucceed(() => BrainLimits.refuse("invalid", "Vector could not read this page.")))
   const paywall = walled
     ? "status"
-    : extracted
+    : extracted && !input.signedIn
       ? ResearchPaywall.marked({ html: decode(fetched.body, contentType), structured: extracted.structured })
       : undefined
   const final = ResearchCanonical.canonical(fetched.final) ?? fetched.final

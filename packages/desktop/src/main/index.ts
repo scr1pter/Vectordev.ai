@@ -8,7 +8,7 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { getCACertificates, setDefaultCACertificates } from "node:tls"
 import type { Event } from "electron"
-import { app, BrowserWindow, dialog, powerSaveBlocker } from "electron"
+import { app, dialog, powerSaveBlocker } from "electron"
 
 import { Deferred, Effect, Fiber } from "effect"
 import contextMenu from "electron-context-menu"
@@ -31,6 +31,7 @@ import {
 import { setupAutoUpdater, showUpdaterDialog } from "./updater"
 import {
   getLastFocusedWindow,
+  getMainWindow,
   registerRendererProtocol,
   setRelaunchHandler,
   setAppQuitting,
@@ -263,12 +264,15 @@ const main = Effect.gen(function* () {
   app.on("second-instance", (_event: Event, argv: string[]) => {
     const urls = argv.filter((arg: string) => arg.startsWith("vector://"))
     if (urls.length) void routeDeepLinks(urls)
-    const win = getLastFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
-    if (win) {
-      if (win.isMinimized()) win.restore()
-      win.show()
-      win.focus()
+    // A main window only: never a hidden helper window such as the research browsers' host.
+    const win = getMainWindow()
+    if (!win) {
+      restoreMainWindows()
+      return
     }
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
   })
 
   app.on("open-url", (event: Event, url: string) => {
@@ -311,7 +315,7 @@ const main = Effect.gen(function* () {
 
   app.on("activate", () => {
     if (quitting) return
-    const win = getLastFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    const win = getMainWindow()
     if (win) {
       if (win.isMinimized()) win.restore()
       win.show()
@@ -550,7 +554,7 @@ const main = Effect.gen(function* () {
   trayReady = createTray({
     readState: () => scheduledAgentWorkState(),
     openVector: () => {
-      const win = getLastFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+      const win = getMainWindow()
       if (!win) {
         restoreMainWindows()
         return

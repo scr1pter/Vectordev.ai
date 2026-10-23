@@ -99,11 +99,12 @@ it.instance(
       expect(body).not.toContain(test.dir)
       expect(body).not.toContain("Working directory")
       expect(bodies[0]).toContain(`Working directory: ${test.dir}`)
-      // The researcher was offered its own tools and nothing else.
+      // The researcher was offered its own tools and nothing else: its own research browser among them, never the
+      // user's.
       const tools = (JSON.parse(body) as { tools?: { function?: { name?: string } }[] }).tools?.map(
         (tool) => tool.function?.name,
       )
-      expect(tools?.toSorted()).toEqual(["research_note", "research_read", "research_search"])
+      expect(tools?.toSorted()).toEqual(["research_browser", "research_note", "research_read", "research_search"])
       // The lead's task list names its researchers and not the judge, which Vector launches itself.
       expect(bodies.some((item) => item.includes("- researcher:"))).toBe(true)
       expect(bodies.some((item) => item.includes("- research-judge:"))).toBe(false)

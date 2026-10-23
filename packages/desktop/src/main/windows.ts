@@ -138,6 +138,18 @@ export function getLastFocusedWindow() {
   return win
 }
 
+/** The main window a Dock click, a second launch or the tray shows; null when none is open. */
+export function getMainWindow() {
+  const win = registry.pick(BrowserWindow.getFocusedWindow())
+  if (!win || win.isDestroyed()) return null
+  return win
+}
+
+/** How many main windows are open: helper windows, such as the research browsers' hidden host, do not count. */
+export function getMainWindowCount() {
+  return registry.count()
+}
+
 export function restoreMainWindows() {
   // macOS emits "activate" for a Dock click while Vector is still starting,
   // before "ready". A window created then throws (electron-window-state reads
@@ -250,6 +262,12 @@ function registerWindow(win: BrowserWindow, id: string) {
   win.on("closed", () => {
     writeLog("window", "main window closed", { id })
     registry.closed(id)
+    // Electron sends window-all-closed only once no window at all is left. A hidden helper window (the research
+    // browsers' host, a cloud browser check) must not keep Vector open behind the user's back, so the last main window
+    // closing with only hidden windows left counts as every window closed.
+    const left = BrowserWindow.getAllWindows().filter((item) => item !== win && !item.isDestroyed())
+    if (registry.count() === 0 && left.length > 0 && left.every((item) => !item.isVisible()))
+      app.emit("window-all-closed")
   })
 }
 

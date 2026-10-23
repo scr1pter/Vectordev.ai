@@ -78,6 +78,7 @@ export function labels(signal: Research.Signal) {
     signal.references ? "Lists references" : undefined,
     signal.duplicate_of ? `Copy of ${signal.duplicate_of}` : undefined,
     signal.paywalled ? "Paywalled (excerpt only)" : undefined,
+    signal.signed_in ? "Read signed in, in your browser" : undefined,
     signal.addressed_to_ai ? "Contains text addressed to AI assistants" : undefined,
     signal.corroborated > 0
       ? `Also said by ${signal.corroborated} other site${signal.corroborated === 1 ? "" : "s"}`

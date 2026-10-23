@@ -76,13 +76,21 @@ import { ResearchSearchTool } from "./research-search"
 import { ResearchReadTool } from "./research-read"
 import { ResearchNoteTool } from "./research-note"
 import { ResearchReportTool } from "./research-report"
+import { ResearchBrowserTool } from "./research-browser"
 import { ResearchTool } from "./research"
 
 // Which research tool each research agent is offered (section 5.3). The agents' permissions say the same; offering
 // them only here keeps every other agent's tool list, and its provider cache, as it was.
 const RESEARCH_TOOLS: Record<string, readonly string[]> = {
-  [ResearchRun.LEAD]: ["research_plan", "research_search", "research_read", "research_note", "research_report"],
-  [ResearchRun.RESEARCHER]: ["research_search", "research_read", "research_note"],
+  [ResearchRun.LEAD]: [
+    "research_plan",
+    "research_search",
+    "research_read",
+    "research_browser",
+    "research_note",
+    "research_report",
+  ],
+  [ResearchRun.RESEARCHER]: ["research_search", "research_read", "research_browser", "research_note"],
 }
 const RESEARCH_TOOL_IDS = new Set(Object.values(RESEARCH_TOOLS).flat())
 
@@ -169,6 +177,7 @@ const layer = Layer.effect(
     const researchread = yield* ResearchReadTool
     const researchnote = yield* ResearchNoteTool
     const researchreport = yield* ResearchReportTool
+    const researchbrowser = yield* ResearchBrowserTool
     const researchtool = yield* ResearchTool
     const agent = yield* Agent.Service
 
@@ -304,6 +313,7 @@ const layer = Layer.effect(
           researchread: Tool.init(researchread),
           researchnote: Tool.init(researchnote),
           researchreport: Tool.init(researchreport),
+          researchbrowser: Tool.init(researchbrowser),
           research: Tool.init(researchtool),
         })
 
@@ -340,6 +350,9 @@ const layer = Layer.effect(
             tool.researchread,
             tool.researchnote,
             tool.researchreport,
+            // Each research agent's own browser. It is offered outside the desktop app too, and says there that it
+            // needs the desktop browser.
+            tool.researchbrowser,
             tool.research,
           ],
           task: tool.task,
@@ -393,10 +406,6 @@ const layer = Layer.effect(
         // The build agent researches as a tool on its own requests unless the user turned that off; the session
         // runtime's size decides the rest when the tool runs.
         if (tool.id === ResearchTool.id) return input.agent.name === "build" && researchSetting !== "off"
-        // The research lead reaches the user's own signed-in browser only to hand a sign-in or a paywall to the user
-        // and read the page they reached (section 5.6a). Until the browser tool limits research sessions to that, the
-        // lead is not offered it.
-        if (tool.id === BrowserTool.id && input.agent.name === ResearchRun.LEAD) return false
         if (tool.id === WebSearchTool.id) {
           return webSearchEnabled({
             exa: flags.enableExa || !!process.env.EXA_API_KEY || (exa?.type === "api" && !!exa.key),
