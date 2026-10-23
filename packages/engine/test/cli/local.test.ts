@@ -134,11 +134,11 @@ describe("vector local", () => {
         const held = yield* vector.spawn(["local", "status"])
         vector.expectExit(held, 0)
         expect(held.stderr).toContain(
-          "A change to your config would loosen Vector Local: it allows github. It waits for you: run vector local confirm. A Vector that is already running applies that when it next starts, except the desktop app, which keeps a record of its own.",
+          "A change to your config would loosen Vector Local: it allows github for any host. It waits for you: run vector local confirm. A Vector that is already running applies that when it next starts, except the desktop app, which keeps a record of its own.",
         )
         const confirm = yield* vector.spawn(["local", "confirm"])
         vector.expectExit(confirm, 1)
-        expect(confirm.stderr).toContain("It allows github.")
+        expect(confirm.stderr).toContain("It allows github for any host.")
       }),
     60_000,
   )
@@ -290,6 +290,13 @@ describe("vector local setup", () => {
         // Neither the list nor a provider.
         expect(readConfig(home).local).toBeUndefined()
         expect(readConfig(home).provider?.ollama).toBeUndefined()
+        // A typed server elsewhere is not even read, so nothing is sent to it.
+        const typed = yield* vector.spawn(["local", "setup", "http://10.9.9.9:8000"], {
+          env: { VECTOR_AGENT_SESSION: "ses_agent" },
+        })
+        vector.expectExit(typed, 1)
+        expect(typed.stderr).toContain("cannot loosen Vector Local")
+        expect(typed.stderr).not.toContain("No model server Vector knows answered")
       }),
     60_000,
   )
@@ -337,6 +344,38 @@ describe("vector run --local", () => {
         const result = yield* vector.run("say hi", { extraArgs: ["--local", "--attach", server.url] })
         vector.expectExit(result, 1)
         expect(result.stderr).toContain(`the server at ${server.url} has it off`)
+        expect(yield* llm.calls).toBe(0)
+      }),
+    60_000,
+  )
+
+  cliIt.live(
+    "with --attach, runs on a server that has Vector Local on, which sends the prompt to the model server on its list",
+    ({ vector, home, llm }) =>
+      Effect.gen(function* () {
+        yield* llm.text("hello from the attached server")
+        writeConfig(home, { local: { enabled: true, endpoints: [new URL(llm.url).origin] } })
+        const server = yield* vector.serve()
+        const result = yield* vector.run("say hi", { extraArgs: ["--local", "--attach", server.url] })
+        vector.expectExit(result, 0)
+        expect(result.stdout).toContain("hello from the attached server")
+        expect(yield* llm.calls).toBe(1)
+      }),
+    60_000,
+  )
+
+  cliIt.live(
+    "with --attach, says so before connecting when Vector Local here does not list the server, as under the agent marker",
+    ({ vector, llm }) =>
+      Effect.gen(function* () {
+        // A server on the user's network, which a Vector the agent started may not add to the list.
+        const result = yield* vector.run("say hi", {
+          extraArgs: ["--local", "--attach", "http://10.255.255.1:4096"],
+          env: { VECTOR_AGENT_SESSION: "ses_agent" },
+        })
+        vector.expectExit(result, 1)
+        expect(result.stderr).toContain("which kept this run from reaching http://10.255.255.1:4096")
+        expect(result.stderr).toContain("Ignored the model servers in VECTOR_LOCAL_POLICY")
         expect(yield* llm.calls).toBe(0)
       }),
     60_000,

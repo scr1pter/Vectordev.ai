@@ -109,8 +109,10 @@ const cli = yargs(args)
     process.env.VECTOR = "1"
     process.env.VECTOR_PID = String(process.pid)
 
-    // `vector run --local` is on Vector Local from here, before the account check below could reach vectordev.ai.
-    if (opts.local === true && String(opts._?.[0] ?? "") === "run") await runLocal()
+    // `vector run --local` is on Vector Local from here, before the account check below could reach vectordev.ai, with
+    // the server it attaches to, if any, on the model server list for the run.
+    if (opts.local === true && String(opts._?.[0] ?? "") === "run")
+      await runLocal(typeof opts.attach === "string" ? opts.attach : undefined)
 
     if (isVectorCli && !opts.help && !opts.version) {
       const command = String(opts._?.[0] ?? "")
