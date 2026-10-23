@@ -1,11 +1,21 @@
 // `vector run --research` (section 5.1): the research agent runs the message, the plan prints in full, each step of the
-// run streams as a line, and --report writes the report with its sources to a Markdown file. --depth is the request's
-// size, and --search and --scope hold the run to what the command line says, whatever the model plans. Subprocess
-// tests against the fake LLM server on this computer; nothing else is reached.
-import { describe, expect } from "bun:test"
+// run streams as a line, researchers' steps included, and --report writes the report with its sources to a Markdown
+// file. --research is the user's consent to read public pages for its run; every other approval still needs --auto.
+// --depth is the request's size, and --search and --scope hold the run to what the command line says, whatever the
+// model plans. Subprocess tests against the fake LLM server and the fake web on this computer; nothing else is reached.
+import { afterAll, describe, expect, test } from "bun:test"
 import path from "node:path"
 import { Effect } from "effect"
+import { EgressGuard } from "@vectordevai/core/local-mode/guard"
+import { runPermissionReply } from "../../src/cli/cmd/run"
 import { cliIt } from "../lib/cli-process"
+import { FakeWeb } from "../../../core/test/lib/fake-web"
+
+// The fake web, which the CLI reads in strict mode: its names are pinned to this computer and read as public there,
+// and any other connection off this computer is refused.
+const web = FakeWeb.start({ sites: FakeWeb.sites() })
+afterAll(() => web.close())
+const strict = { [EgressGuard.ENVIRONMENT.strict]: "strict", [EgressGuard.ENVIRONMENT.names]: FakeWeb.DOMAIN }
 
 const PLAN = {
   question: "How much do heat pumps cut heating bills in cold climates?",
@@ -15,7 +25,64 @@ const PLAN = {
   depth: "focused",
 }
 
+test("--research answers the run's read approval, and nothing else without --auto", () => {
+  expect(runPermissionReply(false, "research_read", [], true)).toBe("once")
+  expect(runPermissionReply(false, "private_network", ["http://127.0.0.1:9"], true)).toBe("reject")
+  expect(runPermissionReply(false, "bash", ["*"], true)).toBe("reject")
+  expect(runPermissionReply(false, "research_read", [])).toBe("reject")
+})
+
 describe("vector run --research", () => {
+  cliIt.concurrent(
+    "reads the pages the message names, streams a researcher's steps and writes the report",
+    ({ home, llm, vector }) =>
+      Effect.gen(function* () {
+        const file = path.join(home, "out", "heat-pumps.md")
+        const article = web.url("article", "/")
+        const before = web.count("article", "/")
+        yield* llm.tool("research_plan", { ...PLAN, subquestions: ["What did field studies measure?"] })
+        yield* llm.tool("task", {
+          description: "Field studies",
+          prompt: "What did field studies measure?",
+          subagent_type: "researcher",
+          background: false,
+        })
+        // The researcher reads the page the user typed and saves what it says.
+        yield* llm.tool("research_read", { url: article })
+        yield* llm.tool("research_note", {
+          subquestion: "What did field studies measure?",
+          claim: "The study followed 412 homes through two winters",
+          source: "S1",
+          quote: "The study followed 412 homes through two winters.",
+        })
+        yield* llm.text("The study followed 412 homes. Notes: N1.")
+        yield* llm.tool("research_report", {
+          title: "Heat pump savings in cold climates",
+          answer: "A field study followed 412 homes through two winters [N1].",
+          sections: [],
+          open_questions: ["How large were the savings?"],
+        })
+        yield* llm.text("A field study followed 412 homes [N1].")
+        const result = yield* vector.run(`Research how much heat pumps save in cold climates: ${article}`, {
+          extraArgs: ["--research", "--depth", "focused", "--search", "none", "--report", file],
+          env: strict,
+        })
+        vector.expectExit(result, 0)
+        // Nothing was rejected: --research approved the run's reads.
+        expect(result.stderr).not.toContain("auto-rejecting")
+        expect(web.count("article", "/")).toBeGreaterThan(before)
+        // The researcher's steps stream under the lead's.
+        expect(result.stderr).toContain("researcher · S1: ")
+        expect(result.stderr).toContain("researcher · N1: The study followed 412 homes")
+        expect(result.stderr).toContain("Report: Heat pump savings in cold climates")
+        expect(result.stdout).toBe("A field study followed 412 homes [N1].\n")
+        const written = yield* Effect.promise(() => Bun.file(file).text())
+        expect(written).toContain("The study followed 412 homes through two winters.")
+        expect(written).toContain(article)
+      }),
+    90_000,
+  )
+
   cliIt.concurrent(
     "prints the plan, streams the run and writes the report to --report",
     ({ home, llm, vector }) =>

@@ -789,6 +789,13 @@ export const TaskTool = Tool.define(
         }
       }
 
+      // The research judge checks a report's citations from the briefs the judge gate writes (fenced passages, nothing
+      // private): no model, and no agent the user named, launches it with a brief of its own.
+      if (subagentType === ResearchRun.JUDGE && ctx.extra?.[ResearchRun.GATE] !== true)
+        return yield* Effect.fail(
+          new Error(`${subagentType} runs only when Vector checks a report; it cannot be launched with task.`),
+        )
+
       // A session's rules come after its agent's, so one that allows task (a client's tools list) would otherwise hand
       // an agent a subagent its own rules deny: a research lead a general Subagent with a shell, or any agent a
       // researcher. What the calling agent itself denies stays denied, unless the user named the subagent.

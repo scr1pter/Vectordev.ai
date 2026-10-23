@@ -162,21 +162,47 @@ app.instance(
           yield* Effect.sleep(10)
         }
       }).pipe(Effect.forkScoped)
+      // Something the request recalls, so a second recall would show.
+      const brain = yield* Brain.Service
+      const instruction = yield* Instruction.Service
+      const entry = yield* brain.propose(yield* instruction.place(), {
+        kind: "preference",
+        text: "For heat pump research prefer field studies over vendor claims",
+        scope: "personal",
+        origin: "user",
+        evidence: { type: "user" },
+      })
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research" })
       yield* test.llm.tool("research_plan", plan())
       yield* test.llm.text("Starting.")
-      yield* send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." })
+      const bodies = yield* send({
+        sessionID: session.id,
+        agent: "research",
+        text: "Research how much heat pumps save.",
+      })
       expect(asked).toHaveLength(1)
       const [planned] = yield* calls(session.id, "research_plan")
       expect(planned?.state.status === "completed" ? planned.state.metadata : {}).toMatchObject({
         approved: true,
         answer: "start",
       })
-      const users = (yield* sessions.messages({ sessionID: session.id })).filter(
-        (message) => message.info.role === "user",
-      )
+      const messages = yield* sessions.messages({ sessionID: session.id })
+      const users = messages.filter((message) => message.info.role === "user")
       expect(users).toHaveLength(1)
+      // The request recalled once, for the question; the "ok" was no request, so it recalled nothing.
+      const recalls = messages.flatMap((message) => message.parts.flatMap((part) => SessionMemory.recall(part) ?? []))
+      expect(recalls).toHaveLength(1)
+      expect(SessionMemory.recalled(users[0]!)).toBe(true)
+      expect(recalls[0]?.ids).toEqual([entry.type === "added" ? entry.entry.id : "missing"])
+      // The step after the card sent the same recall the question's step did, and the "ok" as the card's answer only.
+      expect(bodies).toHaveLength(2)
+      expect(bodies.every((body) => body.includes("prefer field studies over vendor claims"))).toBe(true)
+      const texts = (body: string) =>
+        ((JSON.parse(body) as { messages?: { role?: string; content?: unknown }[] }).messages ?? [])
+          .filter((message) => message.role === "user")
+          .map((message) => JSON.stringify(message.content))
+      expect(texts(bodies[1]!)).toEqual(texts(bodies[0]!))
     }),
   60_000,
 )
@@ -253,11 +279,56 @@ app.instance(
       expect(SessionTaskSize.size({ messages, caching: false, lifetime: 0 }).at(-1)?.tier).toBe("thorough")
       // The step after the raise is offered everything Thorough is.
       expect(names(bodies.at(-1)!)).toContain("task")
-      const run = yield* (yield* SpendGuard.Service).snapshot(session.id)
+      const spend = yield* SpendGuard.Service
+      const run = yield* spend.snapshot(session.id)
       expect(run?.budget).toEqual({ usd: ResearchRun.LIMITS.deep.usd, steps: ResearchRun.LIMITS.deep.steps })
       // The approved plan names the caps it runs under: Deep's, not the Focused defaults it started with.
       const [planned] = yield* calls(session.id, "research_plan")
       expect(output(planned)).toContain(`Step cap ${ResearchRun.LIMITS.deep.steps}`)
+    }),
+  60_000,
+)
+
+app.instance(
+  "a request the user sized Focused is proposed Focused, whatever the model planned, and Start keeps it there",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web)
+      const question = yield* Question.Service
+      const offered: string[][] = []
+      yield* Effect.gen(function* () {
+        while (true) {
+          for (const request of yield* question.list()) {
+            offered.push(request.questions[0]?.options.map((option) => option.label) ?? [])
+            yield* question.reply({ requestID: request.id, answers: [["Start"]] }).pipe(Effect.ignore)
+          }
+          yield* Effect.sleep(10)
+        }
+      }).pipe(Effect.forkScoped)
+      const sessions = yield* Session.Service
+      const spend = yield* SpendGuard.Service
+      const session = yield* sessions.create({ title: "Research", permission: allow })
+      yield* test.llm.tool("research_plan", plan({ depth: "deep" }))
+      yield* test.llm.text("Researching.")
+      // The Depth chip's Focused: the composer sends the size standard.
+      yield* send({
+        sessionID: session.id,
+        agent: "research",
+        text: "Research how much heat pumps save.",
+        size: "standard",
+      })
+      // "Start deep" is still offered, as the one way up.
+      expect(offered).toEqual([["Start", "Start deep", "Cancel"]])
+      const [planned] = yield* calls(session.id, "research_plan")
+      const metadata = planned?.state.status === "completed" ? planned.state.metadata : {}
+      expect(metadata.plan?.depth).toBe("focused")
+      expect(metadata.to).toBeUndefined()
+      const messages = yield* sessions.messages({ sessionID: session.id })
+      expect(new Set(assistants(messages).map((info) => info.size))).toEqual(new Set(["standard"]))
+      expect((yield* spend.snapshot(session.id))?.budget).toEqual({
+        usd: ResearchRun.LIMITS.focused.usd,
+        steps: ResearchRun.LIMITS.focused.steps,
+      })
     }),
   60_000,
 )
@@ -313,28 +384,112 @@ it.instance(
   90_000,
 )
 
+// A test of the user's run budget in config: the user's config is read once, when the repository's instance first
+// loads its config, so each test sets one.
+const configured = Effect.fn("test.configured")(function* (run: Record<string, number>) {
+  const test = yield* setup(web)
+  const fs = yield* FSUtil.Service
+  const config = yield* Config.Service
+  const sessions = yield* Session.Service
+  const spend = yield* SpendGuard.Service
+  // The user's own run limits: a repository's config cannot set them.
+  yield* fs.writeWithDirs(
+    path.join(Global.Path.config, "vector.json"),
+    JSON.stringify({ research: { search: { provider: "searxng", url: web.url("searxng", "/") } }, budget: { run } }),
+  )
+  yield* config.invalidate()
+  const session = yield* sessions.create({ title: "Research", permission: allow })
+  yield* test.llm.text("Planning.")
+  yield* send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." })
+  return (yield* spend.snapshot(session.id))?.budget
+})
+
 it.instance(
   "a run's own cap in config stands for research too",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
-      // The user's own run limits: a repository's config cannot set them.
-      const fs = yield* FSUtil.Service
-      yield* fs.writeWithDirs(
-        path.join(Global.Path.config, "vector.json"),
-        JSON.stringify({
-          research: { search: { provider: "searxng", url: web.url("searxng", "/") } },
-          budget: { run: { steps: 30 } },
-        }),
-      )
-      yield* (yield* Config.Service).invalidate()
-      const sessions = yield* Session.Service
-      const session = yield* sessions.create({ title: "Research", permission: allow })
-      yield* test.llm.text("Planning.")
-      yield* send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." })
-      expect((yield* (yield* SpendGuard.Service).snapshot(session.id))?.budget).toEqual({ steps: 30 })
+      expect(yield* configured({ steps: 30 })).toEqual({ steps: 30 })
     }),
   60_000,
+)
+
+it.instance(
+  "a run budget in config that caps neither spend nor steps keeps research's caps beside it",
+  () =>
+    Effect.gen(function* () {
+      // When to warn is not a cap: research's caps apply, and the user's warning share with them.
+      expect(yield* configured({ warnAt: 0.5 })).toEqual({
+        warnAt: 0.5,
+        usd: ResearchRun.LIMITS.focused.usd,
+        steps: ResearchRun.LIMITS.focused.steps,
+      })
+    }),
+  60_000,
+)
+
+it.instance(
+  "a cap sent while a run goes stays when the request is raised to Deep, and a guest's limit holds Deep's caps too",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web)
+      const sessions = yield* Session.Service
+      const prompt = yield* SessionPrompt.Service
+      const spend = yield* SpendGuard.Service
+      // A research run on research's own caps, joined by a "be thorough" that brings a budget along.
+      const joined = Effect.fn("test.joined")(function* (budget: { usd: number }, guest: boolean) {
+        const session = yield* sessions.create({ title: "Research", permission: allow })
+        const release = Promise.withResolvers<void>()
+        yield* test.llm.push(reply().wait(release.promise).text("Thinking."))
+        yield* test.llm.text("Researching deeper.")
+        const before = (yield* test.llm.hits).length
+        const running = yield* prompt
+          .prompt({
+            sessionID: session.id,
+            agent: "research",
+            model: ref,
+            parts: [{ type: "text", text: "Research how much heat pumps save." }],
+          })
+          .pipe(Effect.forkScoped)
+        while ((yield* test.llm.hits).length <= before) yield* Effect.sleep(10)
+        expect((yield* spend.snapshot(session.id))?.budget).toEqual({
+          usd: ResearchRun.LIMITS.focused.usd,
+          steps: ResearchRun.LIMITS.focused.steps,
+        })
+        const steer = yield* prompt
+          .prompt(
+            {
+              sessionID: session.id,
+              agent: "research",
+              model: ref,
+              budget,
+              parts: [{ type: "text", text: "be thorough" }],
+            },
+            guest ? { tightenBudget: true, refuseTrainingFreeModels: true, dropResearchOptions: true } : undefined,
+          )
+          .pipe(Effect.forkScoped)
+        // The budget is armed before the message is saved.
+        while (
+          (yield* sessions.messages({ sessionID: session.id })).filter((message) => message.info.role === "user")
+            .length < 2
+        )
+          yield* Effect.sleep(10)
+        release.resolve()
+        yield* Fiber.join(running)
+        yield* Fiber.join(steer)
+        // The steer raised the request to Thorough.
+        expect(assistants(yield* sessions.messages({ sessionID: session.id })).map((info) => info.size)).toContain(
+          "thorough",
+        )
+        expect(yield* test.llm.pending).toBe(0)
+        expect(yield* test.llm.misses).toEqual([])
+        return (yield* spend.snapshot(session.id))?.budget
+      })
+      // The owner's own cap replaces research's and stays through the raise.
+      expect(yield* joined({ usd: 0.5 }, false)).toEqual({ usd: 0.5 })
+      // A guest's limit only tightens: research's caps move to Deep's, and the guest's $2 still holds them.
+      expect(yield* joined({ usd: 2 }, true)).toEqual({ usd: 2, steps: ResearchRun.LIMITS.deep.steps })
+    }),
+  90_000,
 )
 
 it.instance(
@@ -412,10 +567,20 @@ it.instance(
       const brain = yield* Brain.Service
       const instruction = yield* Instruction.Service
       const place = yield* instruction.place()
-      const own = (kind: "preference" | "fact", text: string) =>
+      const own = (kind: "preference" | "fact" | "decision", text: string) =>
         brain.propose(place, { kind, text, scope: "personal", origin: "user", evidence: { type: "user" } })
       yield* own("preference", "For heat pump research prefer field studies over vendor claims")
       yield* own("fact", "My heat pump at the Lisbon flat cost 9400 euros from Hooli Heating")
+      yield* own("decision", "We price heat pump research against field studies, never vendor brochures")
+      // Learned beside a private document: private whatever its kind.
+      yield* brain.propose(place, {
+        kind: "preference",
+        text: "For heat pump research use the Globex heat pump tender figures first",
+        scope: "personal",
+        origin: "user",
+        evidence: { type: "user" },
+        private: true,
+      })
       const sessions = yield* Session.Service
       const research = yield* sessions.create({ title: "Research", permission: allow })
       yield* test.llm.text("Planning.")
@@ -425,7 +590,9 @@ it.instance(
         text: "Research heat pump savings and what a heat pump costs.",
       })
       expect(asked).toContain("prefer field studies over vendor claims")
+      expect(asked).toContain("never vendor brochures")
       expect(asked).not.toContain("9400 euros")
+      expect(asked).not.toContain("Globex heat pump tender")
       // The build agent recalls both, as it always has.
       const build = yield* sessions.create({ title: "Build", permission: allow })
       yield* test.llm.text("Done.")
@@ -436,6 +603,7 @@ it.instance(
       })
       expect(built).toContain("prefer field studies over vendor claims")
       expect(built).toContain("9400 euros")
+      expect(built).toContain("Globex heat pump tender")
     }),
   60_000,
 )
@@ -488,6 +656,67 @@ it.instance(
       expect(names(bodies.at(-1)!)).toContain("research_read")
     }),
   60_000,
+)
+
+it.instance(
+  "once Run Guard warns, a research lead the build agent started starts no new researcher either",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web)
+      const sessions = yield* Session.Service
+      const prompt = yield* SessionPrompt.Service
+      const spend = yield* SpendGuard.Service
+      const build = yield* sessions.create({ title: "Build", permission: allow })
+      const child = (hit: { body: Record<string, unknown> }) =>
+        JSON.stringify(hit.body).includes("Plan the run with research_plan") && !researcher(hit)
+      const release = Promise.withResolvers<void>()
+      yield* test.llm.tool("research", {
+        question: "How much do heat pumps save in cold climates?",
+        background: false,
+      })
+      yield* test.llm.toolMatch(child, "research_plan", plan())
+      // The lead's next step is held while the build run's spend reaches Run Guard's warning (80% of its cap).
+      yield* test.llm.pushMatch(
+        child,
+        reply().wait(release.promise).tool("task", {
+          description: "Field studies",
+          prompt: "What did field studies measure?",
+          subagent_type: "researcher",
+          background: false,
+        }),
+      )
+      yield* test.llm.textMatch(child, "Researched it alone.")
+      yield* test.llm.text("Done.")
+      const running = yield* prompt
+        .prompt({
+          sessionID: build.id,
+          agent: "build",
+          model: ref,
+          budget: { usd: 1 },
+          parts: [{ type: "text", text: "Find out how much heat pumps save before we price them." }],
+        })
+        .pipe(Effect.forkScoped)
+      while ((yield* calls((yield* sessions.children(build.id))[0]?.id ?? build.id, "research_plan")).length === 0)
+        yield* Effect.sleep(10)
+      yield* spend.record(build.id, {
+        costKind: "priced",
+        costUsd: 0.85,
+        contextTokens: 0,
+        cachedTokens: 0,
+        continues: true,
+        tools: [],
+        patched: false,
+      })
+      expect((yield* spend.snapshot(build.id))?.warned).toBe(true)
+      release.resolve()
+      yield* Fiber.join(running)
+      const [lead] = yield* sessions.children(build.id)
+      const [task] = yield* calls(lead!.id, "task")
+      expect(task?.state.status).toBe("error")
+      expect(output(task)).toContain(ResearchRun.WARNED)
+      expect(yield* sessions.children(lead!.id)).toEqual([])
+    }),
+  90_000,
 )
 
 it.instance(

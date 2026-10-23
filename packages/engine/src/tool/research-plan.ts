@@ -159,17 +159,21 @@ export const ResearchPlanTool = Tool.define<
             : size?.capped || (unanswerable && !thorough(size, ctx))
               ? "focused"
               : "deep"
-          // A Thorough request (the Depth chip's Deep, `--depth deep`, "be thorough") researches deep (section 5.2).
+          // A Thorough request (the Depth chip's Deep, `--depth deep`, "be thorough") researches deep (section 5.2), and
+          // one the user sized Focused themselves (the Depth chip's Focused) is proposed Focused, whatever the model
+          // planned: "Start deep" is then the only way up.
           const proposed: Research.Plan = {
             ...plan,
-            depth: !lead.parentID && thorough(size, ctx) ? ceiling : deeper(plan.depth, ceiling),
+            depth:
+              !lead.parentID && thorough(size, ctx)
+                ? ceiling
+                : !lead.parentID && focused(ctx)
+                  ? "focused"
+                  : deeper(plan.depth, ceiling),
           }
           const provider = searchProvider(
             cfg.research,
-            yield* available().pipe(
-              Effect.provideService(Auth.Service, auth),
-              Effect.provideService(RuntimeFlags.Service, flags),
-            ),
+            yield* available().pipe(Effect.provideService(Auth.Service, auth)),
             chosen.search,
           )
           const estimate = yield* estimateLine(proposed, ctx, provider.provider)
@@ -355,6 +359,12 @@ function thorough(size: TaskSizeContext | undefined, ctx: Tool.Context) {
   if (size) return size.tier === "thorough"
   const request = ctx.messages.findLast((message) => message.info.role === "user")?.info
   return request?.role === "user" && request.size === "thorough"
+}
+
+// The user chose Focused for this request themselves: the composer sends Focused as the size standard.
+function focused(ctx: Tool.Context) {
+  const request = ctx.messages.findLast((message) => message.info.role === "user")?.info
+  return request?.role === "user" && request.size === "standard"
 }
 
 // The base prompt this session measured on its model: its last finished step's prompt, cached part included.

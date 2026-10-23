@@ -1,8 +1,22 @@
-import { describe, expect, test } from "bun:test"
-import { Effect } from "effect"
+import { afterAll, describe, expect, test } from "bun:test"
+import { Effect, Layer } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import type { SessionV1 } from "@vectordevai/core/v1/session"
-import { BROWSER, OPTIONS, options, paid, parsePaid, searchProvider } from "../../src/tool/research-search"
+import { Auth } from "@/auth"
+import { Session } from "@/session/session"
+import { McpWebSearch } from "../../src/tool/mcp-websearch"
+import {
+  BROWSER,
+  OPTIONS,
+  PAID,
+  UNDATED,
+  options,
+  paid,
+  parsePaid,
+  searchProvider,
+} from "../../src/tool/research-search"
+import { calls, output, plan, runtime, send, setup } from "../lib/research"
+import { FakeWeb } from "../../../core/test/lib/fake-web"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
 
 // Where Deep research searches (section 5.7): the user's own SearXNG server, else Exa or Parallel on their own key
@@ -11,6 +25,50 @@ import { NetworkGuard } from "../../../core/test/lib/network-guard"
 
 const guard = NetworkGuard.use()
 const SEARXNG = { search: { url: "https://searx.example.lan" } }
+
+// Exa on the fake web: what it was asked, and results that point back at the fake web's pages.
+const asked: string[] = []
+const web = FakeWeb.start({
+  sites: {
+    ...FakeWeb.sites(),
+    exa: {
+      "/mcp": async (request, context) => {
+        asked.push(await request.text())
+        return Response.json({
+          result: {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  results: [
+                    {
+                      url: context.url("article", "/"),
+                      title: "Heat pump field study",
+                      text: "The study followed 412 homes.",
+                    },
+                  ],
+                }),
+              },
+            ],
+          },
+        })
+      },
+    },
+  },
+})
+afterAll(() => web.close())
+// Every request goes out as it would, but Exa's address reaches the fake web instead.
+const it = runtime(web, {
+  http: Layer.effect(
+    HttpClient.HttpClient,
+    Effect.gen(function* () {
+      const http = yield* HttpClient.HttpClient
+      return HttpClient.mapRequest(http, (request) =>
+        request.url === McpWebSearch.EXA_URL ? HttpClientRequest.setUrl(request, web.direct("exa", "/mcp")) : request,
+      )
+    }),
+  ).pipe(Layer.provide(FetchHttpClient.layer)),
+})
 
 describe("research's search provider", () => {
   test("auto takes SearXNG, then Exa or Parallel, then none", () => {
@@ -158,7 +216,7 @@ describe("Exa and Parallel through research", () => {
             return yield* paid(
               HttpClient.mapRequest(http, (request) => HttpClientRequest.setUrl(request, server.url.href)),
               provider,
-              { query: "heat pump savings", site: "nature.com", limit: 3 },
+              { query: "heat pump savings", site: "nature.com", limit: 3, recency: "week" },
               `${provider}-test-key`,
             )
           }).pipe(Effect.provide(FetchHttpClient.layer)),
@@ -169,6 +227,15 @@ describe("Exa and Parallel through research", () => {
         })
         const body = JSON.parse(bodies[0] ?? "{}") as { params: { arguments: Record<string, unknown> } }
         expect(JSON.stringify(body.params.arguments)).toContain("heat pump savings site:nature.com")
+        // Neither filters by date: Parallel is asked for the period in its objective, and Exa gets the query alone.
+        expect(body.params.arguments).toMatchObject(
+          provider === "parallel"
+            ? {
+                objective: "heat pump savings site:nature.com (published in the past week)",
+                search_queries: ["heat pump savings site:nature.com"],
+              }
+            : { query: "heat pump savings site:nature.com" },
+        )
         expect(Object.keys(body.params.arguments)).not.toContain("session_id")
         expect(Object.keys(body.params.arguments)).not.toContain("model_name")
         expect(headers[0]?.get(provider === "exa" ? "x-api-key" : "authorization")).toBe(
@@ -201,3 +268,40 @@ describe("Exa and Parallel through research", () => {
     expect(guard.outside()).toEqual([])
   })
 })
+
+it.instance(
+  "research_search through Exa: a private query is never sent, results are labelled billed and join provenance",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web, { research: { search: { provider: "exa" } } })
+      const auth = yield* Auth.Service
+      yield* auth.set("exa", new Auth.Api({ type: "api", key: "exa-test-key" }))
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({
+        title: "Research",
+        permission: [{ permission: "research_read", pattern: "*", action: "allow" }],
+      })
+      const sent = asked.length
+      yield* test.llm.tool("research_plan", plan())
+      // The owner's MEMORY.md names their employer: a query with it is refused before it leaves.
+      yield* test.llm.tool("research_search", { query: "Hooli payments team heat pump savings" })
+      yield* test.llm.tool("research_search", { query: "heat pump field study savings", recency: "year" })
+      // A result's address, which the user never typed, is the run's to read.
+      yield* test.llm.tool("research_read", { url: web.url("article", "/") })
+      yield* test.llm.text("Done.")
+      yield* send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." })
+      const [refused, searched] = yield* calls(session.id, "research_search")
+      expect(refused?.state.status === "completed" ? refused.state.metadata.refused : undefined).toBe("outbound")
+      expect(asked.slice(sent)).toHaveLength(1)
+      expect(asked.slice(sent)[0]).toContain("heat pump field study savings")
+      expect(asked.slice(sent)[0]).not.toContain("Hooli")
+      expect(output(searched)).toContain(PAID.replaceAll("{name}", "Exa"))
+      expect(output(searched)).toContain(UNDATED.replaceAll("{name}", "Exa").replace("{recency}", "year"))
+      expect(output(searched)).toContain(web.url("article", "/"))
+      const [read] = yield* calls(session.id, "research_read")
+      expect(read?.state.status === "completed" ? read.state.metadata.refused : "error").toBeUndefined()
+      expect(output(read)).toContain("S1")
+      expect(guard.outside()).toEqual([])
+    }),
+  60_000,
+)

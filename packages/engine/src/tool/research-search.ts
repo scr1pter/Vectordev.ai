@@ -12,10 +12,9 @@ import { Cause, Effect, Option, Schema } from "effect"
 import { HttpClient } from "effect/unstable/http"
 import { Auth } from "@/auth"
 import { Config } from "@/config/config"
-import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Session } from "@/session/session"
 import { SessionTaskSize } from "../session/task-size"
-import * as McpWebSearch from "./mcp-websearch"
+import { McpWebSearch } from "./mcp-websearch"
 import { ResearchRun } from "./research-run"
 import { Tool } from "./tool"
 import { webSearchAuthHeaders } from "./websearch"
@@ -29,7 +28,9 @@ import DESCRIPTION from "./research-search.txt"
 // search server out, so a checked-in config cannot send the user's queries to a server its author runs):
 // - searxng: a SearXNG server the user set up, through its JSON API;
 // - exa, parallel: the existing search services on the user's own key, sent the query and nothing that ties it to the
-//   session or the model, and billed by them. Under Vector Local only when the user allowed them there;
+//   session or the model, and billed by them. Only with a key: the keyless access VECTOR_ENABLE_EXA and
+//   VECTOR_ENABLE_PARALLEL give the websearch tool is not research's. Under Vector Local only when the user allowed
+//   them there. Neither filters by date: Parallel is asked for the period in its objective, and the result says so;
 // - browser: a results page in a research browser, which is not built yet;
 // - none: nothing is searched; research uses the brain, the repository's files and the addresses the user typed;
 // - auto (the default): the first of SearXNG, Exa and Parallel that is set up and allowed, else none.
@@ -60,7 +61,7 @@ type Metadata = {
 }
 
 /** Where `vector run --research` puts its own choices for the run: a text part's metadata on its prompt. */
-export const OPTIONS = "vector.research"
+export const OPTIONS = ResearchRun.OPTIONS
 
 /** The search and scope `vector run --research` was given. */
 export const Options = Schema.Struct({
@@ -73,6 +74,7 @@ const decodeOptions = Schema.decodeUnknownOption(Options)
 export const BROWSER =
   "Searching through a results page in a research browser is not available yet. Set up a SearXNG server, or an Exa or Parallel key, for research."
 export const PAID = "Searches go to {name} on your key, billed by {name}."
+export const UNDATED = "{name} does not filter results by date, so check each one's date against the past {recency}."
 
 const PAID_URL = { exa: McpWebSearch.EXA_URL, parallel: McpWebSearch.PARALLEL_URL } as const
 const PAID_NAME = { exa: "Exa", parallel: "Parallel" } as const
@@ -128,14 +130,16 @@ function why(provider: ConfigResearchV1.Provider, available: Available) {
   return `Vector Local keeps research's searches off ${name} until you allow it. Research will use this repository's brain, its files and links you paste.`
 }
 
-/** What the user set up to search with, and what Vector Local lets through, read where research runs. */
+/**
+ * What the user set up to search with, and what Vector Local lets through, read where research runs. Research searches
+ * Exa and Parallel on the user's own key alone, so its searches are always billed to them as the plan card says.
+ */
 export const available = Effect.fn("ResearchSearchTool.available")(function* () {
   const auth = yield* Auth.Service
-  const flags = yield* RuntimeFlags.Service
   const policy = Egress.policy()
   return {
-    exa: flags.enableExa || !!(yield* searchKey(auth, "exa")),
-    parallel: flags.enableParallel || !!(yield* searchKey(auth, "parallel")),
+    exa: !!(yield* searchKey(auth, "exa")),
+    parallel: !!(yield* searchKey(auth, "parallel")),
     // A pure decision: nothing is logged for a request that is not made.
     ...(policy.enabled
       ? {
@@ -165,13 +169,7 @@ export function options(messages: readonly SessionV1.WithParts[]): Options {
 export const ResearchSearchTool = Tool.define<
   typeof Parameters,
   Metadata,
-  | ResearchRun.Service
-  | ResearchStore.Service
-  | Config.Service
-  | HttpClient.HttpClient
-  | Session.Service
-  | Auth.Service
-  | RuntimeFlags.Service
+  ResearchRun.Service | ResearchStore.Service | Config.Service | HttpClient.HttpClient | Session.Service | Auth.Service
 >(
   "research_search",
   Effect.gen(function* () {
@@ -181,7 +179,6 @@ export const ResearchSearchTool = Tool.define<
     const http = yield* HttpClient.HttpClient
     const sessions = yield* Session.Service
     const auth = yield* Auth.Service
-    const flags = yield* RuntimeFlags.Service
 
     return {
       description: DESCRIPTION,
@@ -208,10 +205,7 @@ export const ResearchSearchTool = Tool.define<
             }
           const provider = searchProvider(
             (yield* config.get()).research,
-            yield* available().pipe(
-              Effect.provideService(Auth.Service, auth),
-              Effect.provideService(RuntimeFlags.Service, flags),
-            ),
+            yield* available().pipe(Effect.provideService(Auth.Service, auth)),
             chosen.search,
           )
           if (provider.provider === "none")
@@ -290,7 +284,14 @@ export const ResearchSearchTool = Tool.define<
           })
           const billed =
             provider.provider === "exa" || provider.provider === "parallel"
-              ? `\n${PAID.replaceAll("{name}", PAID_NAME[provider.provider])}`
+              ? [
+                  `\n${PAID.replaceAll("{name}", PAID_NAME[provider.provider])}`,
+                  ...(params.recency
+                    ? [
+                        ` ${UNDATED.replaceAll("{name}", PAID_NAME[provider.provider]).replace("{recency}", params.recency)}`,
+                      ]
+                    : []),
+                ].join("")
               : ""
           return {
             title: `Searched: ${query}`,
@@ -342,7 +343,11 @@ export function paid(
           McpWebSearch.PARALLEL_URL,
           "web_search",
           McpWebSearch.ParallelSearchArgs,
-          { objective: text, search_queries: [text] },
+          // Parallel reads its objective as a request, so the period goes there; it is not a filter.
+          {
+            objective: query.recency ? `${text} (published in the past ${query.recency})` : text,
+            search_queries: [text],
+          },
           "25 seconds",
           webSearchAuthHeaders(provider, key),
         )

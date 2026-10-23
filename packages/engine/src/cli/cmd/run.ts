@@ -45,7 +45,15 @@ import { freeModelRunNotice } from "./run/free-model-notice"
 type ModelInput = Parameters<VectorClient["session"]["prompt"]>[0]["model"]
 
 /** @internal Exported for focused permission-policy tests. */
-export function runPermissionReply(auto: boolean, permission: string, always?: readonly string[]): "once" | "reject" {
+export function runPermissionReply(
+  auto: boolean,
+  permission: string,
+  always?: readonly string[],
+  research = false,
+): "once" | "reject" {
+  // `--research` is the user's consent to read public pages for its run, so the run's one read approval is answered.
+  // Every other ask, a page on the user's own network included, still needs --auto.
+  if (research && permission === "research_read") return "once"
   return auto && PermissionPolicy.canAutoApprove(permission, always) ? "once" : "reject"
 }
 
@@ -322,7 +330,7 @@ export const RunCommand = effectCmd({
       .option("research", {
         type: "boolean",
         describe:
-          "Deep research (preview): plan the question, search and read the web and this repository's brain, and write a report in which each claim cites a quote from its source. Makes no code changes",
+          "Deep research (preview): plan the question, search and read the web and this repository's brain, and write a report in which each claim cites a quote from its source. Makes no code changes. Reads public pages for the run without asking; any other approval, a page on your own network included, needs --auto",
       })
       .option("depth", {
         type: "string",
@@ -1181,7 +1189,9 @@ export const RunCommand = effectCmd({
               if (!(await inRun(permission.sessionID))) continue
 
               // Non-interactive auto mode cannot supply the fresh approval required for sensitive actions.
-              if (runPermissionReply(auto, permission.permission, permission.always) === "once") {
+              if (
+                runPermissionReply(auto, permission.permission, permission.always, args.research === true) === "once"
+              ) {
                 await client.permission.reply({
                   requestID: permission.id,
                   reply: "once",
