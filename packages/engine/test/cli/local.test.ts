@@ -4,6 +4,7 @@ import path from "node:path"
 import { Effect } from "effect"
 import { parse } from "jsonc-parser"
 import { ChildEnvironment } from "@vectordevai/core/child-environment"
+import { EgressGuard } from "@vectordevai/core/local-mode/guard"
 import { LocalProbe } from "@vectordevai/core/local-mode/probe"
 import { sinceOf } from "../../src/cli/cmd/local"
 import { cliIt } from "../lib/cli-process"
@@ -214,6 +215,13 @@ describe("the account gate", () => {
           VECTOR_SITE_URL: "http://vectordev.example",
           HTTP_PROXY: account.origin,
           NO_PROXY: "127.0.0.1,localhost,[::1]",
+          // The CLI inherits the test run's strict network guard, which would refuse the account check before it got
+          // here, and a sign-in from an earlier day then passes on its offline grace. The CLI keeps that guard, with
+          // this proxy as the guard's own and vectordev.example as a name it may reach through it.
+          [EgressGuard.ENVIRONMENT.proxy]: account.origin,
+          [EgressGuard.ENVIRONMENT.names]: [process.env[EgressGuard.ENVIRONMENT.names], "vectordev.example"]
+            .filter(Boolean)
+            .join(","),
         }
         const status = yield* vector.spawn(["local", "status"], { env })
         vector.expectExit(status, 0)
