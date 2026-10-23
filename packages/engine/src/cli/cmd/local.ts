@@ -1,0 +1,416 @@
+import type { Argv } from "yargs"
+import { EOL } from "os"
+import { confirm, select } from "@clack/prompts"
+import { Effect } from "effect"
+import type { LocalMode } from "@vectordevai/schema/local-mode"
+import type { LocalSettings } from "@/config/local-settings"
+import { cmd } from "./cmd"
+import { effectCmd, fail } from "../effect-cmd"
+import { UI } from "../ui"
+
+// `vector local`: Vector Local in a terminal, the same settings as the Local API (PATCH /local) changes. What makes it
+// stricter applies at once. What would loosen it (off, a looser Web access, a new model server, an allowed service)
+// asks first, at this terminal, and never applies in a Vector the agent or Vector's own terminal started. The account
+// gate leaves `vector local` reachable (index.ts), so a computer with no internet can still set it up.
+
+const WEB = ["ask", "network", "none"] as const
+const WEB_NAMES: Record<LocalMode.Web, string> = { ask: "Ask", network: "Your network only", none: "None" }
+const NEEDS_TERMINAL =
+  "This change would loosen Vector Local, so it needs your answer at a terminal. Run it yourself in a terminal, or use /local in the terminal UI."
+
+export const LocalCommand = cmd({
+  command: "local",
+  describe: "Vector Local: run Vector's AI features on model servers you or your company host",
+  builder: (yargs: Argv) =>
+    yargs
+      .command(LocalStatusCommand)
+      .command(LocalOnCommand)
+      .command(LocalOffCommand)
+      .command(LocalWebCommand)
+      .command(LocalDetectCommand)
+      .command(LocalSetupCommand)
+      .command(LocalCheckCommand)
+      .command(LocalLogCommand)
+      .command(LocalAllowCommand)
+      .command(LocalConfirmCommand)
+      .demandCommand(),
+  async handler() {},
+})
+
+// Applies a change, asking first at this terminal when it would loosen Vector Local.
+const change = Effect.fn("Cli.local.change")(function* (update: Omit<LocalSettings.Update, "by" | "confirm">) {
+  const { LocalSettings } = yield* Effect.promise(() => import("@/config/local-settings"))
+  const first = yield* LocalSettings.apply({ ...update, by: "cli" })
+  if (first.type === "applied") return first.status
+  if (first.type === "refused") return yield* fail(first.message)
+  if (!process.stdin.isTTY || !process.stdout.isTTY)
+    return yield* fail(`${NEEDS_TERMINAL} It ${first.changes.join(", ")}.`)
+  const answer = yield* Effect.promise(() =>
+    confirm({ message: `${LocalSettings.CONFIRM} It ${first.changes.join(", ")}.`, initialValue: false }),
+  )
+  if (answer !== true) return yield* fail("Nothing changed.")
+  const second = yield* LocalSettings.apply({ ...update, by: "cli", confirm: true })
+  if (second.type === "applied") return second.status
+  if (second.type === "refused") return yield* fail(second.message)
+  return yield* fail(`${NEEDS_TERMINAL} It ${second.changes.join(", ")}.`)
+})
+
+export const LocalStatusCommand = effectCmd({
+  command: "status",
+  describe: "show Vector Local: on or off, Web access, model servers and allowed services",
+  instance: false,
+  builder: (yargs) => yargs.option("json", { describe: "print JSON", type: "boolean", default: false }),
+  handler: Effect.fn("Cli.local.status")(function* (args) {
+    const { LocalSettings } = yield* Effect.promise(() => import("@/config/local-settings"))
+    const status = LocalSettings.status()
+    if (args.json) return void process.stdout.write(`${JSON.stringify(status, null, 2)}${EOL}`)
+    describe(status)
+  }),
+})
+
+export const LocalOnCommand = effectCmd({
+  command: "on",
+  describe: "turn Vector Local on",
+  instance: false,
+  builder: (yargs) =>
+    yargs.option("web", { describe: "Web access: ask, network (your network only) or none", choices: WEB }),
+  handler: Effect.fn("Cli.local.on")(function* (args) {
+    const status = yield* change({ enabled: true, ...(args.web ? { web: args.web } : {}) })
+    describe(status)
+    if (status.policy.endpoints.length === 0)
+      UI.println("No model servers are on your list yet, so model calls have nowhere to go. Run vector local setup.")
+  }),
+})
+
+export const LocalOffCommand = effectCmd({
+  command: "off",
+  describe: "turn Vector Local off (asks first)",
+  instance: false,
+  handler: Effect.fn("Cli.local.off")(function* () {
+    describe(yield* change({ enabled: false }))
+  }),
+})
+
+export const LocalWebCommand = effectCmd({
+  command: "web <setting>",
+  describe: "set what web pages and searches may reach with Vector Local on (a looser setting asks first)",
+  instance: false,
+  builder: (yargs) =>
+    yargs.positional("setting", {
+      describe: "ask: the sites you approve; network: your network only; none: no internet requests",
+      choices: WEB,
+      demandOption: true,
+    }),
+  handler: Effect.fn("Cli.local.web")(function* (args) {
+    describe(yield* change({ web: args.setting }))
+  }),
+})
+
+export const LocalDetectCommand = effectCmd({
+  command: "detect",
+  describe: "find the model servers running on this computer (never your network)",
+  instance: false,
+  builder: (yargs) =>
+    yargs
+      .option("port", { describe: "also ask this port on this computer", type: "number", array: true })
+      .option("json", { describe: "print JSON", type: "boolean", default: false }),
+  handler: Effect.fn("Cli.local.detect")(function* (args) {
+    const { LocalDetect } = yield* Effect.promise(() => import("@vectordevai/core/local-mode/detect"))
+    const ports = [...new Set([...LocalDetect.PORTS, ...(args.port ?? [])])]
+    const servers = yield* Effect.promise(() => LocalDetect.detect({ ports }))
+    if (args.json) return void process.stdout.write(`${JSON.stringify(servers, null, 2)}${EOL}`)
+    if (servers.length === 0)
+      return UI.println(
+        "No model server answered on this computer. Start Ollama, LM Studio, vLLM, llama.cpp or SGLang, or add a server elsewhere with vector local setup <address>.",
+      )
+    servers.forEach((server) => UI.println(serverLine(server)))
+  }),
+})
+
+export const LocalSetupCommand = effectCmd({
+  command: "setup [address]",
+  describe: "add a model server: find one on this computer, or read the one at an address",
+  builder: (yargs) =>
+    yargs
+      .positional("address", { describe: "the server's address, such as http://10.0.0.5:8000", type: "string" })
+      .option("provider", { describe: "the provider name to add it as, such as ollama", type: "string" }),
+  handler: Effect.fn("Cli.local.setup")(function* (args) {
+    const { LocalSettings } = yield* Effect.promise(() => import("@/config/local-settings"))
+    const { LocalDetect } = yield* Effect.promise(() => import("@vectordevai/core/local-mode/detect"))
+    const { LocalProbe } = yield* Effect.promise(() => import("@vectordevai/core/local-mode/probe"))
+    const { Config } = yield* Effect.promise(() => import("@/config/config"))
+    const config = yield* Config.Service
+    const servers = args.address
+      ? yield* Effect.promise(() => LocalSettings.probe({ url: args.address! })).pipe(
+          Effect.flatMap((read) =>
+            read.server ? Effect.succeed([read.server]) : fail(read.message ?? "Nothing answered."),
+          ),
+        )
+      : yield* Effect.promise(() => LocalDetect.detect())
+    if (servers.length === 0) return yield* noServer()
+    const server = yield* choose(servers)
+    const existing = Object.keys((yield* config.get()).provider ?? {})
+    const providerID = args.provider ?? freeID(server.kind, existing)
+    if (!/^[a-z0-9][a-z0-9-_]*$/.test(providerID) || (args.provider && existing.includes(providerID)))
+      return yield* fail(`Choose an unused provider name of lowercase letters, numbers, hyphens or underscores.`)
+    // The server goes on the list first: with Vector Local on that asks, and nothing is written if the answer is no.
+    yield* change({ endpoints: { add: [server.origin] }, pins: { [server.origin]: server.pin } })
+    const patch = LocalProbe.patch({ providerID, server, list: false })
+    const models = server.models.filter((model) => !model.cloud)
+    yield* config.updateGlobal({
+      provider: {
+        [providerID]: {
+          npm: "@ai-sdk/openai-compatible",
+          name: `${server.name} (${new URL(server.origin).host})`,
+          options: { baseURL: server.baseURL, ...patch.provider[providerID]?.options },
+          models: Object.fromEntries(
+            models.map((model) => [model.id, { name: model.id, ...patch.provider[providerID]?.models[model.id] }]),
+          ),
+        },
+      },
+    })
+    UI.println(
+      `Added ${serverLine(server)} as ${providerID}, with ${models.length} model${models.length === 1 ? "" : "s"}.`,
+    )
+    if (server.class !== "this-computer" && !server.encrypted) UI.println(LocalSettings.NOT_ENCRYPTED)
+    if (server.forwards) UI.println(LocalSettings.FORWARDS)
+    if (server.class === "this-computer") UI.println(LocalProbe.SHARED_MACHINE)
+    UI.println(`Check a model with vector local check --model ${providerID}/<model>.`)
+  }),
+})
+
+export const LocalCheckCommand = effectCmd({
+  command: "check",
+  describe: "check every layer of Vector Local; exits 0 when all pass, 1 when one fails, 2 when Vector Local is off",
+  builder: (yargs) =>
+    yargs
+      .option("model", { describe: "also run this model with the role's tools, as provider/model", type: "string" })
+      .option("role", {
+        describe: "the role --model is checked for",
+        choices: ["agent", "subagent", "research"] as const,
+      })
+      .option("yes", {
+        describe: "load the model even if it may not fit in free memory",
+        type: "boolean",
+        default: false,
+      })
+      .option("json", { describe: "print JSON", type: "boolean", default: false }),
+  handler: Effect.fn("Cli.local.check")(function* (args) {
+    const { LocalSettings } = yield* Effect.promise(() => import("@/config/local-settings"))
+    const models = yield* LocalSettings.modelsRow().pipe(Effect.orElseSucceed(() => undefined))
+    const report = yield* Effect.promise(() => LocalSettings.check({ models }))
+    const checked = args.model
+      ? yield* LocalSettings.checkModel({ model: args.model, role: args.role, confirmed: args.yes })
+      : undefined
+    if (checked?.type === "refused") return yield* fail(checked.message)
+    const model = checked?.checked
+    if (args.json) process.stdout.write(`${JSON.stringify({ ...report, ...(model ? { model } : {}) }, null, 2)}${EOL}`)
+    else {
+      report.rows.forEach((row) => {
+        UI.println(`${MARKS[row.status]} ${row.title}`)
+        if (row.detail) UI.println(`  ${UI.Style.TEXT_DIM}${row.detail}${UI.Style.TEXT_NORMAL}`)
+      })
+      if (model)
+        UI.println(
+          `${model.result === "works" ? MARKS.pass : model.result === "ask" ? MARKS.warn : MARKS.fail} ${model.model}: ${model.result}${model.message ? `. ${model.message}` : ""}`,
+        )
+    }
+    const code = LocalSettings.exitCode(report)
+    process.exitCode = code === 0 && model && model.result !== "works" ? 1 : code
+  }),
+})
+
+export const LocalLogCommand = effectCmd({
+  command: "log",
+  describe: "show what Vector sent or blocked while Vector Local was on (origins only)",
+  instance: false,
+  builder: (yargs) =>
+    yargs
+      .option("blocked", { describe: "only blocked requests", type: "boolean", default: false })
+      .option("since", { describe: "only since then: 30m, 2h, 7d or a date", type: "string" })
+      .option("session", { describe: "only this session, with its subagents and helpers", type: "string" })
+      .option("json", { describe: "print JSON", type: "boolean", default: false }),
+  handler: Effect.fn("Cli.local.log")(function* (args) {
+    const { Egress } = yield* Effect.promise(() => import("@vectordevai/core/local-mode/egress"))
+    const since = args.since === undefined ? undefined : sinceOf(args.since, Date.now())
+    if (since === null) return yield* fail(`--since takes a span such as 30m, 2h or 7d, or a date, not ${args.since}.`)
+    const events = yield* Effect.promise(() =>
+      Egress.exported({
+        ...(since === undefined ? {} : { since }),
+        ...(args.session ? { session: args.session } : {}),
+        ...(args.blocked ? { blocked: true } : {}),
+      }),
+    )
+    if (args.json) return void process.stdout.write(`${JSON.stringify(events, null, 2)}${EOL}`)
+    if (events.length === 0) return UI.println("Nothing in the network log matches.")
+    events.forEach((event) => UI.println(eventLine(event)))
+  }),
+})
+
+export const LocalAllowCommand = effectCmd({
+  command: "allow <source>",
+  describe: "allow a service with Vector Local on, with the reason (asks first), or take one back with --remove",
+  instance: false,
+  builder: (yargs) =>
+    yargs
+      .positional("source", {
+        describe: "the service, as vector local status --json lists it",
+        type: "string",
+        demandOption: true,
+      })
+      .option("reason", { describe: "why you allow it; shown beside it", type: "string" })
+      .option("host", { describe: "only these hosts of it", type: "string", array: true })
+      .option("remove", { describe: "take the allowance back", type: "boolean", default: false }),
+  handler: Effect.fn("Cli.local.allow")(function* (args) {
+    if (args.remove) return describe(yield* change({ allow: { remove: [args.source] } }))
+    if (!args.reason?.trim()) return yield* fail(`Say why you allow ${args.source} with --reason.`)
+    describe(
+      yield* change({
+        allow: {
+          add: [{ source: args.source, reason: args.reason, ...(args.host?.length ? { hosts: args.host } : {}) }],
+        },
+      }),
+    )
+  }),
+})
+
+export const LocalConfirmCommand = effectCmd({
+  command: "confirm",
+  describe: "apply a change to your config that would loosen Vector Local and waits for you (asks first)",
+  instance: false,
+  handler: Effect.fn("Cli.local.confirm")(function* () {
+    const { LocalSettings } = yield* Effect.promise(() => import("@/config/local-settings"))
+    const held = LocalSettings.status().held
+    if (!held) return UI.println("No change to Vector Local is waiting for you.")
+    if (LocalSettings.agentMarked()) return yield* fail(LocalSettings.AGENT)
+    if (!process.stdin.isTTY || !process.stdout.isTTY)
+      return yield* fail(`${NEEDS_TERMINAL} It ${held.changes.join(", ")}.`)
+    const answer = yield* Effect.promise(() =>
+      confirm({ message: `${LocalSettings.CONFIRM} It ${held.changes.join(", ")}.`, initialValue: false }),
+    )
+    if (answer !== true) return yield* fail("Nothing changed.")
+    const outcome = yield* LocalSettings.apply({ held: [...held.changes], confirm: true, by: "cli" })
+    if (outcome.type !== "applied") return yield* fail(outcome.type === "refused" ? outcome.message : NEEDS_TERMINAL)
+    describe(outcome.status)
+  }),
+})
+
+const MARKS = {
+  pass: `${UI.Style.TEXT_SUCCESS}✓${UI.Style.TEXT_NORMAL}`,
+  warn: `${UI.Style.TEXT_WARNING}!${UI.Style.TEXT_NORMAL}`,
+  fail: `${UI.Style.TEXT_DANGER}✗${UI.Style.TEXT_NORMAL}`,
+} as const
+
+// The status, as a person reads it.
+function describe(status: {
+  readonly policy: LocalMode.Policy
+  readonly held?: { readonly changes: readonly string[] }
+  readonly log: { readonly directory: string; readonly retain_days: number }
+}) {
+  const policy = status.policy
+  if (!policy.enabled) {
+    UI.println("Vector Local is off. Turn it on with vector local on.")
+    UI.println(
+      `${UI.Style.TEXT_DIM}Run Vector's AI features on model servers you or your company host.${UI.Style.TEXT_NORMAL}`,
+    )
+  }
+  if (policy.enabled)
+    UI.println(`Vector Local is on${policy.lock ? ". Set by your company. Ask your administrator to change it." : "."}`)
+  UI.println(`Web access: ${WEB_NAMES[policy.web]}`)
+  UI.println(
+    `Model servers: ${
+      policy.endpoints.length === 0
+        ? "none yet (vector local setup adds one)"
+        : policy.endpoints
+            .map(
+              (item) =>
+                `${item.origin}${item.from === "managed" ? " (listed by your company)" : ""}${policy.pins?.[item.origin] ? "" : " (no identity pin)"}`,
+            )
+            .join(", ")
+    }`,
+  )
+  if (policy.allow.length > 0)
+    UI.println(`Allowed services: ${policy.allow.map((item) => `${item.source} (${item.reason})`).join(", ")}`)
+  if (status.held)
+    UI.println(
+      `${UI.Style.TEXT_WARNING}A change to your config would loosen Vector Local: it ${status.held.changes.join(", ")}. It waits for you: run vector local confirm.${UI.Style.TEXT_NORMAL}`,
+    )
+  policy.warnings.forEach((warning) => UI.println(`${UI.Style.TEXT_WARNING}${warning}${UI.Style.TEXT_NORMAL}`))
+  UI.println(
+    `${UI.Style.TEXT_DIM}Network log: kept for ${status.log.retain_days} days in ${status.log.directory} while Vector Local is on.${UI.Style.TEXT_NORMAL}`,
+  )
+}
+
+function serverLine(server: {
+  readonly name: string
+  readonly version?: string
+  readonly origin: string
+  readonly class: string
+  readonly models: readonly { readonly cloud?: boolean }[]
+}) {
+  const place = { "this-computer": "this computer", "your-network": "your network", internet: "the internet" }[
+    server.class
+  ]
+  const models = server.models.filter((model) => !model.cloud).length
+  return `${[server.name, server.version].filter(Boolean).join(" ")} at ${server.origin} (${place ?? server.class}, ${models} model${models === 1 ? "" : "s"})`
+}
+
+function eventLine(event: LocalMode.Event) {
+  const time = new Date(event.time).toISOString().replace("T", " ").slice(0, 19)
+  const mark = event.decision === "allow" ? "sent   " : event.decision === "ask" ? "asked  " : "blocked"
+  const session = event.root_session_id ? `  ${event.root_session_id}` : ""
+  return `${time}  ${mark}  ${event.source.padEnd(22)} ${event.origin}  ${UI.Style.TEXT_DIM}${event.rule}${session}${UI.Style.TEXT_NORMAL}`
+}
+
+/**
+ * When `--since` starts, in milliseconds: a span back from `now` (30m, 2h, 7d) or a date. Null for anything else.
+ */
+export function sinceOf(input: string, now: number) {
+  const span = /^(\d+)\s*(m|h|d)$/i.exec(input.trim())
+  if (span) return now - Number(span[1]) * { m: 60_000, h: 3_600_000, d: 86_400_000 }[span[2]!.toLowerCase() as "m"]
+  const date = Date.parse(input)
+  return Number.isNaN(date) ? null : date
+}
+
+/** The provider name for a server: its kind, then kind-2, kind-3, … when that is taken. */
+export function freeID(base: string, existing: readonly string[]) {
+  if (!existing.includes(base)) return base
+  return Array.from({ length: 98 }, (_, index) => `${base}-${index + 2}`).find((id) => !existing.includes(id)) ?? base
+}
+
+// Which server to add: the only one found, or the one picked at this terminal.
+const choose = Effect.fn("Cli.local.choose")(function* <S extends { readonly origin: string; readonly name: string }>(
+  servers: readonly S[],
+) {
+  if (servers.length === 1) return servers[0]!
+  if (!process.stdin.isTTY || !process.stdout.isTTY)
+    return yield* fail(
+      `Several servers answered: ${servers.map((server) => server.origin).join(", ")}. Name one: vector local setup <address>.`,
+    )
+  const picked = yield* Effect.promise(() =>
+    select({
+      message: "Which server should Vector add?",
+      options: servers.map((server) => ({ value: server.origin, label: `${server.name} at ${server.origin}` })),
+    }),
+  )
+  const server = servers.find((item) => item.origin === picked)
+  if (!server) return yield* fail("Nothing changed.")
+  return server
+})
+
+// Nothing answered on this computer: what it has room for, and what to install.
+const noServer = Effect.fn("Cli.local.noServer")(function* () {
+  const { LocalHardware } = yield* Effect.promise(() => import("@vectordevai/core/local-mode/hardware"))
+  const { LocalRecommend } = yield* Effect.promise(() => import("@vectordevai/core/local-mode/recommend"))
+  const hardware = yield* Effect.promise(() => LocalHardware.read())
+  const suggested = LocalRecommend.recommend({ usable: hardware.usable })
+  UI.println("No model server answered on this computer.")
+  UI.println(LocalHardware.describe(hardware))
+  const agent = suggested.roles.agent
+  if (agent)
+    UI.println(
+      `For the agent: ${agent.name} (${agent.quantization}, about ${agent.memory_gb} GB). ${agent.links[0] ?? ""}`,
+    )
+  UI.println(`${UI.Style.TEXT_DIM}${suggested.label}${UI.Style.TEXT_NORMAL}`)
+  UI.println("Start a server, then run vector local setup again, or name one elsewhere: vector local setup <address>.")
+})

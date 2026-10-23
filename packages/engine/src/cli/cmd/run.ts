@@ -339,6 +339,11 @@ export const RunCommand = effectCmd({
         hidden: true,
         default: false,
       })
+      .option("local", {
+        type: "boolean",
+        describe:
+          "keep this run on Vector Local: model calls go only to the model servers on your list, and Vector's own requests to vectordev.ai are blocked. It only tightens, and changes no setting",
+      })
       .option("demo", {
         type: "boolean",
         default: false,
@@ -818,6 +823,14 @@ export const RunCommand = effectCmd({
       async function execute(sdk: VectorClient) {
         const available = await sdk.config.providers({}, { throwOnError: true })
         if (!available.data.providers.some((provider) => Object.keys(provider.models).length > 0)) {
+          // With Vector Local on, models whose servers are not on the list are off; say which, not how to sign in.
+          const off = (available.data.unavailable ?? []).filter((item) => item.reason === "off-in-local")
+          if (off.length > 0) {
+            UI.error(
+              `Vector Local is on, and it keeps every model you have off. ${off.map((item) => item.message).join(" ")} Add a model server with vector local setup.`,
+            )
+            process.exit(1)
+          }
           // Only a local engine can say whether signing in would list free models; an attached server runs elsewhere.
           const signIn =
             !args.attach &&
@@ -1358,6 +1371,18 @@ type MiniCommandInput = {
   demo?: boolean
 }
 
+/**
+ * `vector run --local`: Vector Local for this run only, as the VECTOR_LOCAL floor in the environment, which can only
+ * tighten the policy the user's config and their company's set. It takes effect before anything connects (the CLI
+ * calls this before its account check), the programs the run starts inherit it, and nothing is written, so the next
+ * run is as the user's config says.
+ */
+export async function runLocal() {
+  process.env.VECTOR_LOCAL = "1"
+  const { Config } = await import("@/config/config")
+  return Config.refreshLocal()
+}
+
 export async function runMini(input: MiniCommandInput) {
   if (!RunCommand.handler) throw new Error("Mini command handler is unavailable")
   await RunCommand.handler({
@@ -1390,6 +1415,7 @@ export async function runMini(input: MiniCommandInput) {
     yolo: false,
     "dangerously-skip-permissions": false,
     dangerouslySkipPermissions: false,
+    local: undefined,
     "max-cost": undefined,
     maxCost: undefined,
     "max-steps": undefined,
