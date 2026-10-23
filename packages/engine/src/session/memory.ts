@@ -160,7 +160,8 @@ export const HOLD = "hold"
 /**
  * What the user typed in a message, without Vector's synthetic notes or attached file contents. A slash command's text
  * is someone else's words (a template, an MCP server's prompt, a skill, a snippet's output), so of it only the
- * arguments the user typed count, and text from outside (an imported transcript, an issue) does not count at all.
+ * arguments the user typed count, and text from outside (an imported transcript, an issue) or that the user pasted (an
+ * email, a log, someone else's message) does not count at all: Vector learns what the user likes only from this.
  */
 export function typed(message: SessionV1.WithParts) {
   return message.parts
@@ -567,10 +568,17 @@ export function taint(messages: readonly SessionV1.WithParts[]): BrainSchema.Hol
   if (tools.some((tool) => WEB_TOOLS.has(tool))) return "web"
   if (messages.some((message) => WEB_AGENTS.has(message.info.agent))) return "web"
   if (calls.some((part) => part.state.status !== "pending" && part.state.metadata?.[HOLD] === "web")) return "web"
-  // A local file an editor embedded is this computer's, like what the read tool returns; other outside text is not.
+  // A local file an editor embedded is this computer's, like what the read tool returns, and what the user pasted they
+  // chose to send; other outside text is not.
   if (
     messages.some((message) =>
-      message.parts.some((part) => part.type === "text" && outside(part) && part.metadata?.[BrainSchema.OUTSIDE] !== "file"),
+      message.parts.some(
+        (part) =>
+          part.type === "text" &&
+          outside(part) &&
+          part.metadata?.[BrainSchema.OUTSIDE] !== "file" &&
+          part.metadata?.[BrainSchema.OUTSIDE] !== BrainSchema.PASTE,
+      ),
     )
   )
     return "web"
