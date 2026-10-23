@@ -27,12 +27,20 @@ export const MEMORY_SOURCE = "memory_source"
  */
 export const NETWORK_COMMAND = "network_command"
 
+/** Why a network command asks, as the ask shows it. */
+export const NETWORK_COMMAND_REASON =
+  "Vector Local is on, and this command may connect to the network. Vector cannot see where it connects."
+
 /**
  * The pattern prefix of a web address the agent chose after the conversation read the web, while Vector Local is on
  * (`after-web https://…`). A page can steer the agent into putting the user's data in an address, so it asks every
  * time: no saved "Always allow" for a site matches it, and neither configuration nor auto-accept answers it.
  */
 export const AFTER_WEB = "after-web "
+
+/** Why an address after the web asks, as the ask shows it. */
+export const AFTER_WEB_REASON =
+  "This conversation read the web, and this address is new: neither you nor an earlier result gave it. A page can steer the agent into putting your data in an address."
 
 /**
  * Whether a request asks the user every time: account mutations, changes to memory's own files, and the asks Vector

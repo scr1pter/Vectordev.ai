@@ -14,6 +14,8 @@ import { fromRow } from "./info"
 export interface Interface {
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info | undefined>
   readonly context: (sessionID: SessionSchema.ID) => Effect.Effect<SessionMessage.Message[], MessageDecodeError>
+  /** Every message, with what a compaction folded away, for rules about what the whole conversation took in. */
+  readonly all: (sessionID: SessionSchema.ID) => Effect.Effect<SessionMessage.Message[], MessageDecodeError>
   readonly runnerContext: (
     sessionID: SessionSchema.ID,
     baselineSeq: number,
@@ -38,6 +40,9 @@ const layer = Layer.effect(
       }),
       context: Effect.fn("SessionStore.context")(function* (sessionID) {
         return yield* SessionHistory.load(db, sessionID)
+      }),
+      all: Effect.fn("SessionStore.all")(function* (sessionID) {
+        return yield* SessionHistory.loadAll(db, sessionID)
       }),
       runnerContext: Effect.fn("SessionStore.runnerContext")(function* (sessionID, baselineSeq) {
         return yield* SessionHistory.loadForRunner(db, sessionID, baselineSeq)

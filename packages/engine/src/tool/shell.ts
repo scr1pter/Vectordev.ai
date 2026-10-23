@@ -27,7 +27,7 @@ import { ShellPrompt, type Parameters } from "./shell/prompt"
 import { BashArity } from "@/permission/arity"
 import { Egress } from "@vectordevai/core/local-mode/egress"
 import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
-import { SessionMemory } from "../session/memory"
+import { LocalCommand } from "@vectordevai/core/local-mode/command"
 
 export { Parameters } from "./shell/prompt"
 
@@ -729,18 +729,18 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan,
   }
 
   // With Vector Local on, a command that may reach the network asks first, with the command shown: one whose output is
-  // not this computer's own (SessionMemory.local: a fetch, a push, a publish, a program Vector does not know), a
-  // package install, a build that fetches dependencies, or a web address opened in the default browser. Vector does
-  // not see where such a command connects, so it asks every time: no saved approval, rule or auto-accept answers it
-  // (PermissionPolicy.requiresApproval).
-  if (scan.patterns.size > 0 && Egress.policy().enabled && networked(input.command)) {
+  // not this computer's own (LocalCommand.local: a fetch, a push, a publish, a program Vector does not know, commands a
+  // shell reads from its input), a package install, a build that fetches dependencies, or a web address opened in the
+  // default browser. Vector does not see where such a command connects, so it asks every time: no saved approval, rule
+  // or auto-accept answers it (PermissionPolicy.requiresApproval).
+  if (scan.patterns.size > 0 && Egress.policy().enabled && LocalCommand.networked(input.command)) {
     yield* ctx.ask({
       permission: PermissionPolicy.NETWORK_COMMAND,
       patterns: [input.command],
       always: [],
       metadata: {
         command: input.command,
-        reason: "Vector Local is on, and this command may connect to the network. Vector cannot see where it connects.",
+        reason: PermissionPolicy.NETWORK_COMMAND_REASON,
       },
     })
   }
@@ -781,35 +781,6 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan,
     })
   }
 })
-
-// Package installs reach a registry, though what they print is this computer's own, so they count as network commands.
-const INSTALLS =
-  /(?:^|[\s;&|(])(?:(?:npm|pnpm|yarn|bun)\s+(?:install|i|add|ci|update|up|upgrade)|(?:pip3?|uv|poetry|pipenv)\s+(?:install|add|sync|lock|update)|uv\s+pip\s+install|gem\s+install|cargo\s+(?:install|fetch|update)|go\s+(?:get|install|mod\s+download)|brew\s+(?:install|upgrade|update)|(?:apt|apt-get|dnf|yum)\s+(?:install|update|upgrade))\b/
-
-// Builds that fetch the dependencies they lack: Maven and Gradle unless told to stay offline, dotnet's restore (which
-// build, run, test and publish start with), SwiftPM, Mix's deps and Hex, Cargo unless offline, and Go's module
-// downloads.
-const FETCHING_BUILDS =
-  /(?:^|[\s;&|(])(?:(?:(?:\.\/)?(?:mvnw?|gradlew?))(?![^;&|]*\s(?:-o|--offline)\b)|dotnet\s+(?:restore|build|run|test|publish|pack|add|workload|tool\s+(?:install|update|restore))|swift\s+(?:build|run|test|package\s+(?:resolve|update|fetch|edit))|mix\s+(?:deps\.get|deps\.update|hex\.\S+|archive\.install|local\.hex|local\.rebar)|cargo\s+(?:build|b|run|r|test|t|check|c|clippy|doc|bench|add|vendor|generate-lockfile)(?![^;&|]*\s(?:--offline|--frozen)\b)|go\s+(?:build|run|test|generate|mod\s+tidy|work\s+sync))(?=[\s;&|)]|$)/
-
-// A web address opened in the default browser, which is signed in to the user's accounts. A file opened is not, nor
-// is a Windows path such as C:\notes.txt.
-const OPENS_ADDRESS =
-  /(?:^|[\s;&|(])(?:open|xdg-open|start|wslview|gio\s+open|explorer(?:\.exe)?)\s+(?:[^;&|]*\s)?["']?(?!file:)[a-z][a-z0-9+.-]+:/i
-
-/**
- * Whether a shell command may reach the network: its output is not this computer's own, it installs packages, it
- * builds with dependencies it may fetch, or it opens a web address. A script an interpreter runs (`node script.js`,
- * `python3 build.py`) or a repository's own script (`npm test`, `make`) counts as local, so it may still connect.
- */
-export function networked(command: string) {
-  return (
-    !SessionMemory.local(command) ||
-    INSTALLS.test(command) ||
-    FETCHING_BUILDS.test(command) ||
-    OPENS_ADDRESS.test(command)
-  )
-}
 
 const cmd = Effect.fn("ShellTool.cmd")(function* (
   shell: string,

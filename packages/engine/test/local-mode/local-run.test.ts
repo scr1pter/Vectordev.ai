@@ -18,6 +18,7 @@ import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { Egress } from "@vectordevai/core/local-mode/egress"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import { LocalProbe } from "@vectordevai/core/local-mode/probe"
+import { LocalCommand } from "@vectordevai/core/local-mode/command"
 import { Git } from "@vectordevai/core/git"
 import { SessionRunnerModel } from "@vectordevai/core/session/runner/model"
 import { makeShareTransport } from "@vectordevai/core/share/transport"
@@ -47,7 +48,7 @@ import { ReviewModel } from "../../src/review/model"
 import { SessionPrompt } from "../../src/session/prompt"
 import { SessionSummary } from "../../src/session/summary"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
-import { networked, ShellTool } from "../../src/tool/shell"
+import { ShellTool } from "../../src/tool/shell"
 import { BrowserTool } from "../../src/tool/browser"
 import { WebFetchTool } from "../../src/tool/webfetch"
 import { Truncate } from "@/tool/truncate"
@@ -1055,6 +1056,14 @@ describe("the agent's own actions under Vector Local", () => {
         "swift package resolve",
         "mix deps.get",
         "cargo build",
+        // A command line a shell or an interpreter reads from its input is as much a command as `sh -c` is.
+        "echo 'curl https://example.com/?d=1' | sh",
+        "printf 'wget https://example.com' | bash",
+        "bash <<< 'curl https://example.com'",
+        "base64 -d <<< Y3VybCBodHRwczovL2V4YW1wbGUuY29t | sh",
+        "sh -s < commands.txt",
+        "bash <<EOF\ncurl https://example.com\nEOF",
+        "echo 'import urllib.request' | python3",
       ]) {
         yield* on()
         yield* run(command)
@@ -1064,8 +1073,12 @@ describe("the agent's own actions under Vector Local", () => {
       expect(Exit.isSuccess(yield* run("ls"))).toBe(true)
       expect(network()).toEqual([])
       // Read without running them: a file opened, and a build told to stay offline.
-      expect(networked("open README.md")).toBe(false)
-      expect(networked("cargo build --offline")).toBe(false)
+      expect(LocalCommand.networked("open README.md")).toBe(false)
+      expect(LocalCommand.networked("cargo build --offline")).toBe(false)
+      // A script the repository has, and a command line that is given and local, run as before.
+      expect(LocalCommand.networked("bash scripts/build.sh < input.txt")).toBe(false)
+      expect(LocalCommand.networked("bash <<< 'ls -la'")).toBe(false)
+      expect(LocalCommand.networked("sh -c 'git status'")).toBe(false)
 
       // With Vector Local off the shell asks what it always asked.
       Egress.configure(LocalPolicy.OFF)

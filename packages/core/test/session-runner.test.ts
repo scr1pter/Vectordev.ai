@@ -1392,6 +1392,14 @@ describe("SessionRunnerLLM", () => {
         type: "compaction",
         summary: "## Goal\n- Preserve the task",
       })
+      // The whole conversation still holds what the summary folded away, for rules about what it took in.
+      const all = yield* (yield* SessionStore.Service).all(sessionID)
+      const folded = all.slice(
+        0,
+        all.findIndex((message) => message.type === "compaction"),
+      )
+      expect(folded.map((message) => message.type)).toEqual(expect.arrayContaining(["user", "assistant"]))
+      expect(all.slice(-2).map((message) => message.type)).toEqual(["compaction", "assistant"])
 
       requests.length = 0
       executions.length = 0

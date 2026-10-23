@@ -3,7 +3,7 @@ import { WebFence } from "@vectordevai/core/research/fence"
 
 import { Tool } from "./tool"
 import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
-import { AFTER_WEB_REASON, newAddress, webAccess } from "./webfetch"
+import { newAddress, webAccess } from "./webfetch"
 
 const Action = Schema.Literals([
   "observe",
@@ -293,7 +293,11 @@ export const BrowserTool = Tool.define<typeof Parameters, Metadata, never>(
             permission: params.action === "open_url" ? "browser_external" : "browser_interact",
             patterns: [after ? `${PermissionPolicy.AFTER_WEB}${targetUrl}` : origin],
             always: after ? [] : [origin],
-            metadata: { action: params.action, url: targetUrl, ...(after ? { reason: AFTER_WEB_REASON } : {}) },
+            metadata: {
+              action: params.action,
+              url: targetUrl,
+              ...(after ? { reason: PermissionPolicy.AFTER_WEB_REASON } : {}),
+            },
           })
           const sensitive = describeSensitiveBrowserAction(params, current)
           if (sensitive) {

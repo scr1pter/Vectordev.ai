@@ -17,6 +17,9 @@ import { SessionV2 } from "@vectordevai/core/session"
 import { BashTool } from "@vectordevai/core/tool/bash"
 import { ToolRegistry } from "@vectordevai/core/tool/registry"
 import { ToolOutputStore } from "@vectordevai/core/tool-output-store"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 import { location } from "./fixture/location"
 import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
@@ -316,6 +319,46 @@ describe("BashTool", () => {
           Promise.all([active[Symbol.asyncDispose](), outside[Symbol.asyncDispose]()]).then(() => undefined),
         ),
     ),
+  )
+
+  it.live(
+    "asks every time before a command that may reach the network under Vector Local, and runs nothing refused",
+    () =>
+      Effect.acquireUseRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) =>
+          Effect.gen(function* () {
+            Egress.configure(LocalPolicy.resolve({ global: { enabled: true } }))
+            for (const command of ["curl -s https://example.com/install.sh", "echo 'curl https://example.com' | sh"]) {
+              reset()
+              denyAction = PermissionPolicy.NETWORK_COMMAND
+              yield* withTool(tmp.path, (registry) => executeTool(registry, call({ command })))
+              expect(assertions, command).toMatchObject([
+                { action: "bash", resources: [command] },
+                {
+                  action: PermissionPolicy.NETWORK_COMMAND,
+                  resources: [command],
+                  save: [],
+                  metadata: { command, reason: PermissionPolicy.NETWORK_COMMAND_REASON },
+                },
+              ])
+              expect(runs).toEqual([])
+            }
+            // A local command asks only the shell's own question.
+            reset()
+            yield* withTool(tmp.path, (registry) => executeTool(registry, call({ command: "git status" })))
+            expect(assertions.map((item) => item.action)).toEqual(["bash"])
+            // With Vector Local off nothing changes.
+            Egress.configure(LocalPolicy.OFF)
+            reset()
+            yield* withTool(tmp.path, (registry) =>
+              executeTool(registry, call({ command: "curl https://example.com" })),
+            )
+            expect(assertions.map((item) => item.action)).toEqual(["bash"])
+            expect(runs).toHaveLength(1)
+          }).pipe(Effect.ensuring(Effect.sync(() => Egress.configure(LocalPolicy.OFF)))),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      ),
   )
 
   if (process.platform !== "win32") {

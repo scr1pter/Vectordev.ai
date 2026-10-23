@@ -95,7 +95,7 @@ export const WebFetchTool = Tool.define(
                     url,
                     format: params.format,
                     timeout: params.timeout,
-                    ...(after ? { reason: AFTER_WEB_REASON } : {}),
+                    ...(after ? { reason: PermissionPolicy.AFTER_WEB_REASON } : {}),
                   },
                 })
               },
@@ -170,9 +170,6 @@ export const WebFetchTool = Tool.define(
     }
   }),
 )
-
-export const AFTER_WEB_REASON =
-  "This conversation read the web, and this address is new: neither you nor an earlier result gave it. A page can steer the agent into putting your data in an address."
 
 /**
  * Whether the agent's own choice of `address` asks again under Vector Local's rule for after the web (section 4.4):
