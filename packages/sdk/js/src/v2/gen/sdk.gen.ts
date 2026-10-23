@@ -193,8 +193,14 @@ import type {
   MemoryDocumentsUploadResponses,
   MemoryEraseErrors,
   MemoryEraseResponses,
+  MemoryEraseSessionErrors,
+  MemoryEraseSessionResponses,
+  MemoryExportErrors,
+  MemoryExportResponses,
   MemoryGetErrors,
   MemoryGetResponses,
+  MemoryImportErrors,
+  MemoryImportResponses,
   MemoryKnowledgeErrors,
   MemoryKnowledgeResponses,
   MemoryLinksErrors,
@@ -203,6 +209,7 @@ import type {
   MemoryListResponses,
   MemoryModelGetErrors,
   MemoryModelGetResponses,
+  MemoryModelLearner,
   MemoryModelPayload,
   MemoryModelUpdateErrors,
   MemoryModelUpdateResponses,
@@ -3634,7 +3641,7 @@ export class Settings extends HeyApiClient {
   /**
    * Get memory settings
    *
-   * Whether Vector may add to its memory as it works.
+   * Whether Vector may add to its memory as it works, which facets of how you work it may learn, and when the optional model learner runs.
    */
   public get<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -3664,7 +3671,7 @@ export class Settings extends HeyApiClient {
   /**
    * Change memory settings
    *
-   * Turn Vector's learning on or off, reading the repository's own docs, and keeping originals of added documents. Memory already saved stays until you erase it; turning repository docs off forgets what Vector read of them, and turning originals off deletes the kept copies.
+   * Turn Vector's learning on or off, each facet of how you work it may learn, the optional model learner, reading the repository's own docs, and keeping originals of added documents. Memory already saved stays until you erase it; turning repository docs off forgets what Vector read of them, and turning originals off deletes the kept copies.
    */
   public update<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -3673,6 +3680,15 @@ export class Settings extends HeyApiClient {
       learning?: boolean
       repositoryDocs?: boolean
       keepOriginals?: boolean
+      facets?: {
+        format?: boolean
+        workflow?: boolean
+        vocabulary?: boolean
+        tooling?: boolean
+        sources?: boolean
+        style?: boolean
+      }
+      modelLearner?: MemoryModelLearner
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -3686,6 +3702,8 @@ export class Settings extends HeyApiClient {
             { in: "body", key: "learning" },
             { in: "body", key: "repositoryDocs" },
             { in: "body", key: "keepOriginals" },
+            { in: "body", key: "facets" },
+            { in: "body", key: "modelLearner" },
           ],
         },
       ],
@@ -4851,7 +4869,7 @@ export class Memory extends HeyApiClient {
     parameters?: {
       directory?: string
       workspace?: string
-      kind?: "preference" | "decision" | "lesson" | "fact"
+      kind?: "preference" | "decision" | "lesson" | "fact" | "term"
       text?: string
       scope?: "repository" | "personal"
     },
@@ -4959,6 +4977,7 @@ export class Memory extends HeyApiClient {
       workspace?: string
       text?: string
       pinned?: boolean
+      facet?: "format" | "workflow" | "vocabulary" | "tooling" | "sources" | "style"
       action?: "approve" | "reject" | "archive" | "restore" | "undo"
     },
     options?: Options<never, ThrowOnError>,
@@ -4973,6 +4992,7 @@ export class Memory extends HeyApiClient {
             { in: "query", key: "workspace" },
             { in: "body", key: "text" },
             { in: "body", key: "pinned" },
+            { in: "body", key: "facet" },
             { in: "body", key: "action" },
           ],
         },
@@ -5017,6 +5037,111 @@ export class Memory extends HeyApiClient {
     )
     return (options?.client ?? this.client).post<MemoryEraseResponses, MemoryEraseErrors, ThrowOnError>({
       url: "/memory/erase",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Erase what Vector learned in a session
+   *
+   * Forget every entry Vector learned whose only evidence is this session, so it is not learned again. What you wrote and what other sessions also taught stay. The session keeps its messages until you delete them.
+   */
+  public eraseSession<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<MemoryEraseSessionResponses, MemoryEraseSessionErrors, ThrowOnError>(
+      {
+        url: "/memory/sessions/{sessionID}",
+        ...options,
+        ...params,
+      },
+    )
+  }
+
+  /**
+   * Export memory
+   *
+   * Everything Vector keeps for this repository, for you, or both, as an attachment: a Markdown page per kind with each entry's evidence and what Vector read from documents, or with `format=json` the same as data. Never the documents' files.
+   */
+  public export<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      scope?: "personal" | "repository" | "all"
+      format?: "markdown" | "json"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "scope" },
+            { in: "query", key: "format" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<MemoryExportResponses, MemoryExportErrors, ThrowOnError>({
+      url: "/memory/export",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Import memory
+   *
+   * Read an export (Markdown or JSON) back in. Every preference, term, decision, lesson and fact it holds lands waiting for your approval, so a changed file cannot put memory in use; rules stay in their files. What you forgot is not imported again.
+   */
+  public import<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      text?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "text" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<MemoryImportResponses, MemoryImportErrors, ThrowOnError>({
+      url: "/memory/import",
       ...options,
       ...params,
       headers: {
