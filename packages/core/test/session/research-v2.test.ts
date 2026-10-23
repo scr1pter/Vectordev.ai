@@ -331,7 +331,8 @@ const research = (text: string, extra: Partial<Prompt> = {}) => Prompt.make({ te
 const tools = (request: LLMRequest | undefined) => (request?.tools ?? []).map((tool) => tool.name).toSorted()
 const system = (request: LLMRequest | undefined) => (request?.system ?? []).map((part) => part.text).join("\n")
 const agentPrompt = Effect.gen(function* () {
-  return (yield* (yield* AgentV2.Service).get(RESEARCH))?.system ?? ""
+  const agents = yield* AgentV2.Service
+  return (yield* agents.get(RESEARCH))?.system ?? ""
 })
 
 // The completed research tool calls of the session, with what each recorded and the text the model read.
@@ -590,7 +591,8 @@ describe("Deep research on the V2 runner", () => {
       expect(typeof runID).toBe("string")
       expect(planned?.structured).toMatchObject({ approved: true, answer: "start", plan: { depth: "focused" } })
       const run = yield* ResearchRunV2.Service
-      const detail = yield* (yield* ResearchStore.Service).get(run.place(), runID as string)
+      const store = yield* ResearchStore.Service
+      const detail = yield* store.get(run.place(), runID as string)
       expect(detail).toBeDefined()
       expect(ResearchScript.rows(detail!, web)).toEqual(
         yield* Effect.promise(() => Bun.file(ResearchScript.FIXTURE).json()),
@@ -686,7 +688,9 @@ describe("Deep research on the V2 runner", () => {
       // Only the public query reached the search server, and only it counts against the run's budget.
       expect(web.count("searxng") - before).toBe(1)
       const runID = (yield* recorded("research_plan"))[0]?.structured.runID as string
-      const detail = yield* (yield* ResearchStore.Service).get((yield* ResearchRunV2.Service).place(), runID)
+      const run = yield* ResearchRunV2.Service
+      const store = yield* ResearchStore.Service
+      const detail = yield* store.get(run.place(), runID)
       expect(detail?.queries).toEqual(["ledger service migration without downtime"])
       expect(guard.outside()).toEqual([])
     }),
