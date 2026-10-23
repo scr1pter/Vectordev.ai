@@ -700,7 +700,7 @@ const scenarios: Scenario[] = [
     .at((ctx) => ({ path: "/memory/erase", headers: ctx.headers(), body: { scope: "repository" } }))
     .json(200, (body) => check(typeof body === "number", "memory erase should return a count"), "status"),
   http.protected
-    .delete("/memory/sessions/{sessionID}", "memory.session.erase")
+    .delete("/memory/sessions/{sessionID}", "memory.eraseSession")
     .mutating()
     .at((ctx) => ({ path: route("/memory/sessions/{sessionID}", { sessionID: "ses_none" }), headers: ctx.headers() }))
     .json(200, (body) => check(body === 0, "a session that taught nothing erases nothing"), "status"),

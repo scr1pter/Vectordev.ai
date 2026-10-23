@@ -671,7 +671,7 @@ export const MemoryApi = HttpApi.make("memory")
           success: described(Schema.Finite, "How many entries were erased"),
         }).annotateMerge(
           OpenApi.annotations({
-            identifier: "memory.session.erase",
+            identifier: "memory.eraseSession",
             summary: "Erase what Vector learned in a session",
             description:
               "Forget every entry Vector learned whose only evidence is this session, so it is not learned again. What you wrote and what other sessions also taught stay. The session keeps its messages until you delete them.",
