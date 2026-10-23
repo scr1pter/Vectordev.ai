@@ -1,5 +1,9 @@
 import { afterAll, expect } from "bun:test"
+import path from "path"
 import { Effect } from "effect"
+import { FSUtil } from "@vectordevai/core/fs-util"
+import { Global } from "@vectordevai/core/global"
+import { Config } from "@/config/config"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { ResearchStore } from "@vectordevai/core/research/store"
 import { ResearchReport } from "@vectordevai/core/research/report"
@@ -291,6 +295,46 @@ it.instance(
       const [planned] = yield* calls(skipped.id, "research_plan")
       expect(planned?.state.status === "completed" ? planned.state.metadata.plan.depth : undefined).toBe("deep")
       expect(judgeParts(yield* sessions.messages({ sessionID: skipped.id }))).toEqual([])
+    }),
+  120_000,
+)
+
+it.instance(
+  "the user's own judge setting off turns the research judge off",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web)
+      // The user's config, read when the repository's instance first loads its config.
+      const fs = yield* FSUtil.Service
+      yield* fs.writeWithDirs(
+        path.join(Global.Path.config, "vector.json"),
+        JSON.stringify({
+          research: { search: { provider: "searxng", url: web.url("searxng", "/") } },
+          sizing: { judge: "off" },
+        }),
+      )
+      yield* (yield* Config.Service).invalidate()
+      const sessions = yield* Session.Service
+      const article = web.url("article", "/")
+      const session = yield* sessions.create({ title: "Configured", permission: allow })
+      yield* test.llm.tool("research_plan", plan({ depth: "deep" }))
+      yield* test.llm.tool("research_read", { url: article })
+      yield* test.llm.tool("research_note", note(QUOTES[0]!))
+      yield* test.llm.tool("research_report", {
+        title: "Heat pumps",
+        answer: "The study followed 412 homes [N1].",
+        sections: [],
+        open_questions: [],
+      })
+      yield* test.llm.text("Done.")
+      yield* send({
+        sessionID: session.id,
+        agent: "research",
+        text: `Research heat pumps: ${article}`,
+        size: "thorough",
+      })
+      expect(yield* calls(session.id, "research_report")).toHaveLength(1)
+      expect(judgeParts(yield* sessions.messages({ sessionID: session.id }))).toEqual([])
     }),
   120_000,
 )
