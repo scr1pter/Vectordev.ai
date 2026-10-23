@@ -7,8 +7,9 @@ import { ResearchStore } from "@vectordevai/core/research/store"
 import { Permission } from "../../src/permission"
 import { Question } from "../../src/question"
 import { Session } from "@/session/session"
-import { AFTER_HANDOFF, CONTINUE, HANDOFF_QUESTION, NO_IMAGES, RESEARCH_ONLY } from "../../src/tool/browser"
+import { AFTER_HANDOFF, CONTINUE, HANDOFF_QUESTION, INSIDE, NO_IMAGES, RESEARCH_ONLY } from "../../src/tool/browser"
 import { ResearchRun } from "../../src/tool/research-run"
+import { ResearchSource } from "../../src/tool/research-source"
 import { FakeBridge } from "../lib/fake-bridge"
 import { calls, output, plan, runtime, send, setup } from "../lib/research"
 import { FakeWeb } from "../../../core/test/lib/fake-web"
@@ -19,8 +20,22 @@ import { NetworkGuard } from "../../../core/test/lib/network-guard"
 // Deep research the lead may only hand a page over and then read the page the user reached; that page is a private
 // source of the run, read signed in. The desktop is a fake bridge on loopback.
 
+// Links a page offers that reach this computer and the user's network.
+const INWARD = ["http://localhost:3000/admin/reset?all=1", "http://10.0.0.5/admin"] as const
 const guard = NetworkGuard.use()
-const web = FakeWeb.start({ sites: FakeWeb.sites() })
+const web = FakeWeb.start({
+  sites: {
+    ...FakeWeb.sites(),
+    // A public page that links to the user's own computer and network, as a hostile page can: an admin action on a
+    // local server, and a router.
+    inward: {
+      "/": {
+        headers: { "content-type": "text/html; charset=utf-8" },
+        body: `<!doctype html><html><head><title>Heat pump installers</title></head><body><main><h1>Heat pump installers</h1><p>Installers in three countries supply most of the market, and each of them keeps a price list for the season.</p><p>Compare the lists before you choose an installer for a cold climate.</p><p><a href="${INWARD[0]}">Reset the price list</a> or <a href="${INWARD[1]}">open the router</a>.</p></main></body></html>`,
+      },
+    },
+  },
+})
 const bridge = FakeBridge.start()
 const pointed = FakeBridge.use(bridge)
 const it = runtime(web, { client: "app" })
@@ -80,6 +95,9 @@ const visible = (start = "", html = SIGNED_IN) => {
     },
   }
 }
+
+// A model request from a researcher: its brief is the research assignment.
+const researcher = (hit: { body: Record<string, unknown> }) => JSON.stringify(hit.body).includes("research_assignment")
 
 // Answers each handoff with `reply`, a research plan card with Start, and each permission once, keeping what was asked.
 const answer = (reply: string) =>
@@ -306,6 +324,120 @@ it.instance(
       const excerpt = yield* store.source(yield* research.place(), runID, "S1")
       expect(excerpt?.source.status).toBe("paywalled")
       expect(excerpt?.private).toBe(false)
+      expect(guard.outside()).toEqual([])
+    }),
+  120_000,
+)
+
+it.instance(
+  "in Deep research the lead hands over no page a page offered on this computer or the user's network, and asks first",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web)
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({
+        title: "Research",
+        permission: [{ permission: "research_read", pattern: "*", action: "allow" }],
+      })
+      const inward = web.url("inward", "/")
+      bridge.answer(visible("about:blank").handler)
+      const asked = yield* answer(CONTINUE)
+      const before = bridge.calls().length
+      yield* test.llm.tool("research_plan", plan())
+      yield* test.llm.tool("research_read", { url: inward, links: true })
+      yield* test.llm.tool("browser", { action: "handoff", url: INWARD[0], reason: "Reset the list." })
+      yield* test.llm.tool("browser", { action: "handoff", url: INWARD[1], reason: "Open the router." })
+      // The user typed this one: it is handed over, though it is on this computer, and asked about first.
+      yield* test.llm.tool("browser", { action: "handoff", url: LOGIN, reason: "Sign in to your dashboard." })
+      yield* test.llm.text("Done.")
+      yield* send({
+        sessionID: session.id,
+        agent: "research",
+        text: `Research heat pump installers from ${inward}, and my own dashboard at ${LOGIN}`,
+      })
+
+      // The page offered both links, so they are addresses this research may read.
+      const [read] = yield* calls(session.id, "research_read")
+      expect(read?.state.status === "completed" ? read.state.metadata.links : []).toEqual(
+        expect.arrayContaining(INWARD),
+      )
+      const browsed = yield* calls(session.id, "browser")
+      expect(output(browsed[0])).toBe(INSIDE)
+      expect(output(browsed[1])).toBe(INSIDE)
+      expect(output(browsed[2])).toContain("The user finished in the browser.")
+      // Neither reached the user's browser: only the address the user typed did, once they were asked about it.
+      const opened = bridge
+        .calls()
+        .slice(before)
+        .filter((call) => call.path === "/command" && call.body.command === "openUrl")
+        .map((call) => call.body.url)
+      expect(opened).toEqual([LOGIN])
+      expect(
+        asked.permissions
+          .filter((request) => request.permission === "browser_external")
+          .map((request) => request.metadata.url),
+      ).toEqual([LOGIN])
+      expect(guard.outside()).toEqual([])
+    }),
+  120_000,
+)
+
+it.instance(
+  "a researcher is shown nothing the lead read signed in, by its address or by its S#",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web)
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({
+        title: "Research",
+        permission: [{ permission: "research_read", pattern: "*", action: "allow" }],
+      })
+      const paywall = web.url("paywall", "/")
+      bridge.answer(visible("about:blank", MEMBERS).handler)
+      yield* answer(CONTINUE)
+      yield* test.llm.tool("research_plan", plan({ depth: "deep" }))
+      // The lead hands the article off and reads it signed in: S1, private.
+      yield* test.llm.tool("browser", { action: "handoff", url: paywall, reason: "The article is for subscribers." })
+      yield* test.llm.tool("browser", { action: "read" })
+      yield* test.llm.tool("task", {
+        description: "Supply",
+        prompt: "Which countries supply most heat pump compressors?",
+        subagent_type: "researcher",
+        background: false,
+      })
+      yield* test.llm.toolMatch(researcher, "research_read", { url: paywall })
+      yield* test.llm.toolMatch(researcher, "research_read", { source: "S1" })
+      // Nor can it test a guess at the signed-in words with a note.
+      yield* test.llm.toolMatch(researcher, "research_note", {
+        subquestion: "Which countries supply most heat pump compressors?",
+        claim: "Prices rise next spring.",
+        source: "S1",
+        quote: "Members only: prices rise by nine percent next spring.",
+      })
+      yield* test.llm.textMatch(researcher, "Found it.")
+      yield* test.llm.text("Done.")
+      yield* send({ sessionID: session.id, agent: "research", text: `Research heat pump supply prices: ${paywall}` })
+
+      const browsed = yield* calls(session.id, "browser")
+      expect(browsed[1]?.state.status === "completed" ? browsed[1].state.metadata : {}).toMatchObject({
+        private: true,
+        source: "S1",
+      })
+      const [child] = yield* sessions.children(session.id)
+      const [byAddress, bySource] = yield* calls(child!.id, "research_read")
+      // Its own public read of the address: the paywall's excerpt, as a source of its own, with none of the text the
+      // user unlocked.
+      expect(output(byAddress)).toContain("S2 · ")
+      expect(byAddress?.state.status === "completed" ? byAddress.state.metadata : {}).toMatchObject({
+        source: "S2",
+        status: "paywalled",
+      })
+      expect(output(byAddress)).not.toContain("for subscribers: the makers plan")
+      expect(output(byAddress)).not.toContain("nine percent next spring")
+      // Nor by the signed-in source's number.
+      expect(output(bySource)).toBe(ResearchSource.HIDDEN)
+      const [noted] = yield* calls(child!.id, "research_note")
+      expect(output(noted)).toBe(ResearchSource.HIDDEN)
       expect(guard.outside()).toEqual([])
     }),
   120_000,

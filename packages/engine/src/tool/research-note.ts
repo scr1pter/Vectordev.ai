@@ -2,6 +2,7 @@ import { ResearchStore } from "@vectordevai/core/research/store"
 import { Research } from "@vectordevai/schema/research"
 import { Effect, Schema } from "effect"
 import { ResearchRun } from "./research-run"
+import { ResearchSource } from "./research-source"
 import { Tool } from "./tool"
 import DESCRIPTION from "./research-note.txt"
 
@@ -45,10 +46,19 @@ export const ResearchNoteTool = Tool.define<typeof Parameters, Metadata, Researc
         Effect.gen(function* () {
           const found = yield* research.current(ctx)
           if ("refused" in found) return { title: "Not saved", output: found.refused, metadata: {} }
+          const source = params.source.trim().toUpperCase()
+          // A researcher cites no source it may not see, so a note cannot test guesses at a private page's words.
+          const saved = yield* store.source(found.place, found.run.id, source)
+          if (saved && ResearchSource.hidden(saved, ctx.agent === ResearchRun.LEAD))
+            return {
+              title: "Note refused",
+              output: ResearchSource.HIDDEN,
+              metadata: { runID: found.run.id, source: params.source, refused: true },
+            }
           const noted = yield* store.note(found.place, found.run.id, {
             subquestion: params.subquestion,
             claim: params.claim,
-            source: params.source.trim().toUpperCase(),
+            source,
             quote: params.quote,
             ...(params.page ? { page: params.page } : {}),
             ...(params.stance ? { stance: params.stance } : {}),

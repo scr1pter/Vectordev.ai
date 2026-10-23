@@ -14,6 +14,7 @@ import { Permission } from "../../src/permission"
 import { ResearchBrowser } from "../../src/tool/research-browser"
 import { RENDER } from "../../src/tool/research-read"
 import { ResearchRun } from "../../src/tool/research-run"
+import { ResearchSource } from "../../src/tool/research-source"
 import { FakeBridge } from "../lib/fake-bridge"
 import { calls, output, plan, runtime, send, setup } from "../lib/research"
 import { lines, pdf } from "../../../core/test/brain/fixture/pdf"
@@ -28,6 +29,7 @@ import { NetworkGuard } from "../../../core/test/lib/network-guard"
 
 const guard = NetworkGuard.use()
 const ARTICLE_HTML = await Bun.file(path.join(FakeWeb.FIXTURES, "article.html")).text()
+const PLANNER_HTML = `<html><head><title>Sizing notes</title></head><body><main><h1>Sizing notes</h1><p>Our internal tool, the Zephyr planner, sizes every heat pump from the floor area and the coldest design day.</p><p>It is only for the installers on our team.</p></main></body></html>`
 const web = FakeWeb.start({
   sites: {
     ...FakeWeb.sites(),
@@ -36,7 +38,7 @@ const web = FakeWeb.start({
     planner: {
       "/": {
         headers: { "content-type": "text/html; charset=utf-8" },
-        body: `<html><head><title>Sizing notes</title></head><body><main><h1>Sizing notes</h1><p>Our internal tool, the Zephyr planner, sizes every heat pump from the floor area and the coldest design day.</p><p>It is only for the installers on our team.</p></main></body></html>`,
+        body: PLANNER_HTML,
       },
     },
     numbers: {
@@ -65,8 +67,9 @@ const allow = [
 const ARTICLE = web.url("article", "/")
 const COPY = web.url("copy", "/heat-pumps")
 
-// A desktop that keeps one copy of the run's provenance and answers each command as the research browser would.
-const desktop = (pages: Record<string, unknown> = {}) => {
+// A desktop that keeps one copy of the run's provenance and answers each command as the research browser would; `html`
+// is the page a read shows at an address (the article by default).
+const desktop = (pages: Record<string, unknown> = {}, html: (url: string) => string = () => ARTICLE_HTML) => {
   const state = { generation: "desktop-copy-1", url: "" }
   return (call: FakeBridge.Call) => {
     if (call.path !== "/research") return FakeBridge.visible()
@@ -84,7 +87,7 @@ const desktop = (pages: Record<string, unknown> = {}) => {
       return FakeBridge.research({
         ...shown,
         read: {
-          html: ARTICLE_HTML,
+          html: html(state.url),
           title: shown.title,
           url: state.url,
           links: [{ url: COPY, text: "A copy", main: true }],
@@ -359,6 +362,58 @@ it.instance(
         (call) => call.body.sessionID === child!.id && call.body.command === "research.type",
       )
       expect(sent.map((call) => call.body.text)).toEqual(["heat pump sizing"])
+    }),
+  90_000,
+)
+
+it.instance(
+  "a researcher is shown no private source of the run, by its address in its own browser or by its S#",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web)
+      const sessions = yield* Session.Service
+      const lead = yield* sessions.create({ title: "Research", permission: allow })
+      const notes = web.direct("planner", "/")
+      bridge.answer(desktop({}, (url) => (url === notes ? PLANNER_HTML : ARTICLE_HTML)))
+      yield* approve
+      // The lead reads a page on the user's own network: S1, private.
+      yield* test.llm.tool("research_plan", plan({ depth: "deep" }))
+      yield* test.llm.tool("research_read", { url: notes })
+      yield* test.llm.tool("task", {
+        description: "Sizing",
+        prompt: "How are heat pumps sized for a home?",
+        subagent_type: "researcher",
+        background: false,
+      })
+      // The researcher's browser reaches the same address, and the store already holds it.
+      yield* test.llm.toolMatch(researcher, "research_browser", { action: "open", url: notes })
+      yield* test.llm.toolMatch(researcher, "research_browser", { action: "read" })
+      yield* test.llm.toolMatch(researcher, "research_read", { source: "S1" })
+      yield* test.llm.toolMatch(researcher, "research_read", { url: notes })
+      yield* test.llm.textMatch(researcher, "Found it.")
+      yield* test.llm.text("Done.")
+      const fetched = web.count("planner", "/")
+      yield* send({
+        sessionID: lead.id,
+        agent: "research",
+        text: `Research how heat pumps are sized, from ${notes} and ${ARTICLE}.`,
+      })
+      const [read] = yield* calls(lead.id, "research_read")
+      expect(read?.state.status === "completed" ? read.state.metadata : {}).toMatchObject({
+        source: "S1",
+        private: true,
+      })
+      const [child] = yield* sessions.children(lead.id)
+      const browsed = yield* calls(child!.id, "research_browser")
+      expect(output(browsed[1])).toBe(ResearchSource.HIDDEN)
+      expect(output(browsed[1])).not.toContain("Zephyr")
+      const [bySource, byAddress] = yield* calls(child!.id, "research_read")
+      expect(output(bySource)).toBe(ResearchSource.HIDDEN)
+      // Nor by its address: the page stays the lead's, and it is not fetched again for the researcher.
+      expect(output(byAddress)).toBe(ResearchSource.HIDDEN)
+      expect(web.count("planner", "/") - fetched).toBe(1)
+      // The lead may read its own source again.
+      expect(output(read)).toContain("Zephyr planner")
     }),
   90_000,
 )

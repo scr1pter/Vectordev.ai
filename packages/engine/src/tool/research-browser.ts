@@ -267,13 +267,6 @@ const parsePdf = (pdf: NonNullable<Report["pdf"]>, chunkTokens: number) =>
     chunkTokens,
   })
 
-// The outbound check as research browsers apply it: a public source in the run clears no number, so a hostile page
-// that lists every 5-digit number or every host name of a company cannot make one of the user's sendable. Runs of 6
-// words a public source holds stay clear, as they do for searches.
-function strict(context: ResearchOutbound.Context): ResearchOutbound.Context {
-  return { ...context, public: context.public.map((text) => text.replace(/\p{Nd}/gu, " ")) }
-}
-
 export const ResearchBrowserTool = Tool.define<
   typeof Parameters,
   Metadata,
@@ -337,9 +330,15 @@ export const ResearchBrowserTool = Tool.define<
             send({ research, ctx, found, body: { command: `research.${action}`, ...body } })
           // A page read in the browser is a source of the run, as research_read's pages are.
           const keep = (parsed: ResearchReader.Page, view: ResearchSource.View) =>
-            ResearchSource.keep({ research, store, found, page: parsed, view, tool: "research_browser" }).pipe(
-              Effect.map((kept): Result => ({ ...kept, metadata: { ...kept.metadata, action } })),
-            )
+            ResearchSource.keep({
+              research,
+              store,
+              found,
+              page: parsed,
+              view,
+              lead: ctx.agent === ResearchRun.LEAD,
+              tool: "research_browser",
+            }).pipe(Effect.map((kept): Result => ({ ...kept, metadata: { ...kept.metadata, action } })))
           // What every command reports besides its own answer: links a navigation followed, which join the run's
           // provenance as links of the source the browser last read ("via S#"), and navigations the rule refused.
           const done = (report: Report, result: Result): Result => {
@@ -376,7 +375,10 @@ export const ResearchBrowserTool = Tool.define<
             if (!params.url) return fail("Give the address to open.")
             const checked = ResearchProvenance.check(yield* research.provenance(ctx, found), params.url)
             if (!checked.ok) return fail(checked.message, { url: params.url, refused: "provenance" })
-            const outbound = ResearchOutbound.address(checked.url, strict(yield* research.context(ctx, found)))
+            const outbound = ResearchOutbound.address(
+              checked.url,
+              ResearchOutbound.strict(yield* research.context(ctx, found)),
+            )
             if (!outbound.ok) return fail(ResearchSource.OUTBOUND, { url: checked.url, refused: "outbound" })
             webAccess("research-browser", checked.url)
             yield* research.approve(ctx, found, checked.url)
@@ -397,7 +399,7 @@ export const ResearchBrowserTool = Tool.define<
           if (action === "type") {
             if (!params.ref) return fail("Give the ref of the field to type into, from observe.")
             const text = params.text ?? ""
-            if (!ResearchOutbound.check(text, strict(yield* research.context(ctx, found))).ok)
+            if (!ResearchOutbound.check(text, ResearchOutbound.strict(yield* research.context(ctx, found))).ok)
               return fail(TYPED, { refused: "outbound" })
             const report = yield* run({ ref: params.ref, text })
             if (!report.ok) return done(report, fail(report.error ?? BROWSER_DOWN))

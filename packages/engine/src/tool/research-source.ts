@@ -42,10 +42,21 @@ export const MAX_LINKS = 60
 export const OUTBOUND =
   "That address would send text from your private context. Choose a result or a link that does not carry it."
 export const SCOPE = "This research's scope is the brain and the repository's files, so it reads no web pages."
+export const HIDDEN =
+  "That source is for the research lead only: it was read in the user's own signed-in browser, or it is on their computer or network. Researchers read public pages; read a public address instead."
 
 /**
- * Saves a page the run read and shows it. `tool` names who read it in the fence; `private` marks a page the user's own
- * signed-in browser showed, whose text is private context like a private document's.
+ * Whether a saved source is kept from the agent asking (sections 5.6a and 6.4a): a researcher, a web worker, sees no
+ * private source of the run and nothing read signed in. Only the lead holds those.
+ */
+export function hidden(saved: ResearchStore.Saved, lead: boolean) {
+  return !lead && (saved.private || saved.source.signals?.signed_in === true)
+}
+
+/**
+ * Saves a page the run read and shows it. `tool` names who read it in the fence; `signedIn` marks a page the user's own
+ * signed-in browser showed, whose text is private context like a private document's. `lead` says whether the agent
+ * reading is the run's lead, who alone is shown a private source another read saved.
  */
 export const keep = Effect.fnUntraced(function* (input: {
   readonly research: ResearchRun.Interface
@@ -53,6 +64,7 @@ export const keep = Effect.fnUntraced(function* (input: {
   readonly found: ResearchRun.Found
   readonly page: ResearchReader.Page
   readonly view: View
+  readonly lead: boolean
   readonly tool?: string
   readonly signedIn?: boolean
 }) {
@@ -113,6 +125,12 @@ export const keep = Effect.fnUntraced(function* (input: {
   // Another agent of the run read it meanwhile.
   if (added.type === "known") {
     const saved = yield* input.store.source(found.place, runID, added.source.id)
+    if (saved && hidden(saved, input.lead))
+      return {
+        title: "Not read",
+        output: HIDDEN,
+        metadata: { runID, url: page.final } satisfies Metadata as Metadata,
+      }
     if (saved && saved.chunks.length > 0) return shown(runID, saved, view)
   }
   const source = added.source

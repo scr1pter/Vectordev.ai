@@ -1,9 +1,12 @@
+import { lookup } from "node:dns/promises"
 import { Effect, Option, Schema } from "effect"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import { WebFence } from "@vectordevai/core/research/fence"
 import { ResearchOutbound } from "@vectordevai/core/research/outbound"
 import { ResearchProvenance } from "@vectordevai/core/research/provenance"
 import { ResearchReader } from "@vectordevai/core/research/reader"
 import { ResearchStore } from "@vectordevai/core/research/store"
+import { WebFetchRequest } from "@vectordevai/core/util/webfetch-request"
 import type { SessionV1 } from "@vectordevai/core/v1/session"
 
 import { Tool } from "./tool"
@@ -326,10 +329,13 @@ function cloudDashboard(url?: string) {
 const RESEARCH_ACTIONS = new Set<Schema.Schema.Type<typeof Action>>(["handoff", "read", "links", "find", "observe"])
 const READING = new Set<Schema.Schema.Type<typeof Action>>(["read", "links", "find", "observe"])
 
+const NO_RUN = "Vector cannot check that address against this research here, so it hands no page over."
 export const RESEARCH_ONLY =
   "In Deep research the browser only hands a page to the user (handoff) and then reads the page they reached. Use research_browser to browse."
 export const AFTER_HANDOFF =
   "In Deep research the browser reads only the page the user reached after a handoff, and this is not that page. Use handoff first."
+export const INSIDE =
+  "In Deep research the browser hands over only public pages: that address is on this computer or the user's network, and the user did not type it. If they want it opened, they can type it in their message."
 export const HANDOFF_QUESTION = "Sign in or get past the paywall yourself in Preview, then press Continue."
 export const CONTINUE = "Continue"
 export const NO_IMAGES = "This model does not read images, so no screenshot was taken."
@@ -453,29 +459,20 @@ export const BrowserTool = Tool.define<typeof Parameters, Metadata, never>(
     }
 
     // handoff: shows the page in Preview (opening `url` first, when given) and waits until the user says they are
-    // done. In Deep research the address must be one the run may read, and it passes the outbound check like any.
+    // done. In Deep research the address must be one the run may hand over (`handed`), and it is asked about first.
     function handoff(params: Params, ctx: Tool.Context, lead: boolean) {
       return Effect.gen(function* () {
         const metadata = (extra: Partial<Metadata> = {}): Metadata => ({ url: "", action: "handoff", ...extra })
         if (!question)
           return { title: "Not handed off", output: "Vector cannot ask the user here.", metadata: metadata() }
-        const found = lead && research ? yield* research.current(ctx) : undefined
-        if (found && "refused" in found) return { title: "Not handed off", output: found.refused, metadata: metadata() }
-        if (lead && !params.url)
-          return {
-            title: "Not handed off",
-            output: "Give the address of the page to hand to the user: a search result, a page link or the user's own.",
-            metadata: metadata(),
-          }
-        if (params.url && found && research) {
-          const checked = ResearchProvenance.check(yield* research.provenance(ctx, found), params.url)
-          if (!checked.ok) return { title: "Not handed off", output: checked.message, metadata: metadata() }
-          if (!ResearchOutbound.address(checked.url, yield* research.context(ctx, found)).ok)
-            return { title: "Not handed off", output: ResearchSource.OUTBOUND, metadata: metadata() }
-        }
-        const address = params.url
+        const checked = lead ? yield* handed(params, ctx) : undefined
+        if (checked && !checked.ok) return { title: "Not handed off", output: checked.message, metadata: metadata() }
+        const address = checked?.url ?? params.url
         if (address) {
-          if (!isLocalUrl(address)) yield* approve(params, ctx, address, undefined)
+          // The lead is asked about every address it hands over, this computer's included: the user's own browser holds
+          // their sign-ins, local ones too. For the build agent a page on this computer is its own work, such as a dev
+          // server, and asks nothing.
+          if (lead || !isLocalUrl(address)) yield* approve(params, ctx, address, undefined)
           yield* Effect.promise(() =>
             bridgeRequest(
               { contextId: ctx.sessionID, command: "openUrl", url: address, allowExternal: !isLocalUrl(address) },
@@ -519,6 +516,31 @@ export const BrowserTool = Tool.define<typeof Parameters, Metadata, never>(
           )}`,
           metadata: metadata({ handoff: "continued", url: reached.finalUrl }),
         }
+      })
+    }
+
+    // The address the research lead may hand to the user (section 5.6a): one the run may read, through the outbound check
+    // as research browsers apply it, and on the public web unless the user typed it. A page of the run can offer a link to
+    // this computer or the user's network (an admin page on localhost, a router), and the user's own browser, with
+    // their local sign-ins, would send that request for it.
+    function handed(params: Params, ctx: Tool.Context) {
+      return Effect.gen(function* () {
+        if (!research) return { ok: false, message: NO_RUN } as const
+        const found = yield* research.current(ctx)
+        if ("refused" in found) return { ok: false, message: found.refused } as const
+        if (!params.url)
+          return {
+            ok: false,
+            message:
+              "Give the address of the page to hand to the user: a search result, a page link or the user's own.",
+          } as const
+        const checked = ResearchProvenance.check(yield* research.provenance(ctx, found), params.url)
+        if (!checked.ok) return checked
+        if (!ResearchOutbound.address(checked.url, ResearchOutbound.strict(yield* research.context(ctx, found))).ok)
+          return { ok: false, message: ResearchSource.OUTBOUND } as const
+        if (checked.from !== "typed" && (yield* inside(checked.url, research.network)))
+          return { ok: false, message: INSIDE } as const
+        return { ok: true, url: checked.url } as const
       })
     }
 
@@ -594,6 +616,7 @@ export const BrowserTool = Tool.define<typeof Parameters, Metadata, never>(
             found,
             page: parsed,
             view: { ...(params.chunk ? { chunk: params.chunk } : {}) },
+            lead: true,
             tool: "browser",
             signedIn: true,
           })
@@ -638,6 +661,19 @@ function reached(messages: readonly SessionV1.WithParts[]) {
   if (!last || last.state.status !== "completed" || last.state.metadata?.handoff !== "continued") return undefined
   const url = last.state.metadata.url
   return typeof url === "string" && url ? url : undefined
+}
+
+// Whether an address reaches this computer or the user's network: by its name or address, or by what its name resolves
+// to, so a public-looking name that points inside counts too. A name that does not resolve here is left to the ask.
+function inside(url: string, network: ResearchRun.Network) {
+  return Effect.gen(function* () {
+    const host = new URL(url).hostname
+    if (isLocalUrl(url) || LocalPolicy.hostClass(host) !== "internet") return true
+    if (network.publicNames?.some((name) => LocalPolicy.domainMatches(host, name))) return false
+    const resolve = network.resolver ?? ((name: string) => lookup(name, { all: true, verbatim: true }))
+    const addresses = yield* Effect.promise(() => resolve(host).catch(() => []))
+    return addresses.some((address) => WebFetchRequest.isPrivateAddress(address.address))
+  })
 }
 
 function withoutFragment(url: string) {

@@ -73,11 +73,15 @@ export const ResearchReadTool = Tool.define<
           if ("refused" in found) return { title: "Not read", output: found.refused, metadata: {} }
           const runID = found.run.id
           const show = (saved: ResearchStore.Saved) => ResearchSource.shown(runID, saved, params)
+          // A researcher is shown no private source of the run and nothing read signed in; only the lead holds those.
+          const lead = ctx.agent === ResearchRun.LEAD
 
           if (params.source) {
             const saved = yield* store.source(found.place, runID, params.source)
             if (!saved)
               return { title: "Not read", output: `There is no ${params.source} in this run.`, metadata: { runID } }
+            if (ResearchSource.hidden(saved, lead))
+              return { title: "Not read", output: ResearchSource.HIDDEN, metadata: { runID } }
             return show(saved)
           }
           if (!params.url)
@@ -104,15 +108,21 @@ export const ResearchReadTool = Tool.define<
               metadata: { runID, url: checked.url, refused: "outbound" as const },
             }
 
-          // A page the run read is read again from what it saved.
+          // A page the run read is read again from what it saved, unless what it saved is not this agent's to see: a
+          // researcher then reads the page itself, and its public read is a source of its own.
           const known = found.detail.sources.find(
             (source) =>
               (source.canonical_url === checked.canonical ||
                 ResearchCanonical.canonical(source.url) === checked.canonical) &&
-              (source.status === "read" || source.status === "paywalled"),
+              (source.status === "read" || source.status === "paywalled") &&
+              (lead || source.signals?.signed_in !== true),
           )
           if (known) {
             const saved = yield* store.source(found.place, runID, known.id)
+            // A page on the user's own computer or network stays the lead's: a researcher's own read of the same
+            // address would be private too, so it is not fetched again.
+            if (saved && ResearchSource.hidden(saved, lead))
+              return { title: "Not read", output: ResearchSource.HIDDEN, metadata: { runID, url: checked.url } }
             if (saved && !saved.forgotten) {
               const shown = show(saved)
               return params.links
@@ -174,7 +184,7 @@ export const ResearchReadTool = Tool.define<
               output: `${checked.url} could not be rendered: ${rendered && "error" in rendered ? rendered.error : RENDER}`,
               metadata: { runID, url: checked.url },
             }
-          return yield* ResearchSource.keep({ research, store, found, page, view: params })
+          return yield* ResearchSource.keep({ research, store, found, page, view: params, lead })
         }).pipe(Effect.orDie),
     }
   }),
