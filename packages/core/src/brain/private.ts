@@ -17,8 +17,11 @@ export const SHAPED: readonly Kind[] = ["email", "host", "number"]
 /** Every kind: what private facts are compared by. */
 export const RARE: readonly Kind[] = ["email", "host", "number", "identifier", "path"]
 
-/** The kinds the outward screen reads closely, since they often carry a private detail: "we drop Acme in Q3". */
-export const PARTICULAR: readonly string[] = ["decision", "lesson", "failure"]
+/**
+ * The kinds the outward screen reads closely, since they often carry a private detail: "we drop Acme in Q3", and a
+ * term's meaning as much ("when I say the falcon deal, I mean Globex's $2.4M Q3 renewal").
+ */
+export const PARTICULAR: readonly string[] = ["decision", "lesson", "failure", "term"]
 
 // Top-level domains common enough that `a.b` ending in one is a host name rather than `Effect.fn` or `package.json`.
 const TLD = new Set(
@@ -179,10 +182,10 @@ export function tokens(text: string, kinds: readonly Kind[] = RARE): Token[] {
 
 /**
  * The outward screen (section 6.4a): whether a how-you-work line may reach a role whose output leaves the machine or
- * reaches the web. A decision, lesson or past failure passes only with nothing particular in it: no rare token, email,
- * URL, host name or machine address, no currency amount, no number of 3 or more digits, no quarter, month or year,
- * and no name (a capitalised word inside a sentence), since "we drop Acme in Q3" is a decision too. A preference or a
- * rule passes the secret check only.
+ * reaches the web. A decision, lesson, past failure or term passes only with nothing particular in it: no rare token,
+ * email, URL, host name or machine address, no currency amount, no number of 3 or more digits, no quarter, month or
+ * year, and no name (a capitalised word inside a sentence), since "we drop Acme in Q3" is a decision too. A preference
+ * or a rule passes the secret check only.
  */
 export function screened(line: { readonly kind: string; readonly text: string; readonly private?: boolean }) {
   if (line.private) return false

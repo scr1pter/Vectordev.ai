@@ -1,6 +1,6 @@
 // What the Memory page says about each entry, kept apart from the page so the wording is tested and stays honest.
 
-export type MemoryKind = "rule" | "preference" | "decision" | "lesson" | "fact" | "failure" | "review"
+export type MemoryKind = "rule" | "preference" | "decision" | "lesson" | "fact" | "failure" | "review" | "term"
 export type MemoryStatus = "active" | "proposed" | "quarantined" | "archived" | "superseded"
 export type MemoryHold =
   | "web"
@@ -17,7 +17,7 @@ export type MemoryEntryView = {
   id: string
   scope: "repository" | "personal"
   kind: MemoryKind
-  origin: "file" | "user" | "agent" | "failure-memory"
+  origin: "file" | "user" | "agent" | "failure-memory" | "import"
   status: MemoryStatus
   pinned: boolean
   text: string
@@ -69,6 +69,7 @@ export function kindLabel(kind: MemoryKind) {
     fact: "Fact",
     failure: "Past failure",
     review: "Review note",
+    term: "Term",
   }[kind]
 }
 
@@ -81,6 +82,7 @@ export function originLabel(entry: Pick<MemoryEntryView, "origin" | "source" | "
   if (entry.origin === "user") return "You added this"
   if (entry.origin === "agent") return "Vector learned this"
   if (entry.origin === "failure-memory") return "Failure memory from checks Vector ran"
+  if (entry.origin === "import") return "You imported this"
   const file = entry.source?.file ?? ""
   if (files && file === files.memory) return "From your MEMORY.md"
   if (files && file === files.rules) return "From your RULES.md"
@@ -124,7 +126,7 @@ export function savedNotice(
 
 /** Only what Vector or the user saved here can be edited here; a file someone wrote is changed in that file. */
 export function editable(entry: Pick<MemoryEntryView, "origin">) {
-  return entry.origin === "user" || entry.origin === "agent"
+  return entry.origin === "user" || entry.origin === "agent" || entry.origin === "import"
 }
 
 /** Where to change an entry that comes from a file: the user's own file by name, a repository file by its path in it. */

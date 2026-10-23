@@ -20,7 +20,8 @@ export const RECALL = "vector.memory.recall"
 
 /**
  * Metadata key of a text part a slash command wrote: its template, an MCP server's prompt, a skill, or what its shell
- * snippets printed. The value says which arguments the user typed and whether the text came from outside.
+ * snippets printed. The value says which arguments the user typed, which spans of them they pasted, and whether the
+ * text came from outside.
  */
 export const COMMAND = "vector.command"
 
@@ -160,16 +161,57 @@ export const HOLD = "hold"
 /**
  * What the user typed in a message, without Vector's synthetic notes or attached file contents. A slash command's text
  * is someone else's words (a template, an MCP server's prompt, a skill, a snippet's output), so of it only the
- * arguments the user typed count, and text from outside (an imported transcript, an issue) does not count at all.
+ * arguments the user typed count, and text from outside (an imported transcript, an issue) or that the user pasted (an
+ * email, a log, someone else's message), as a part of its own or a span of a typed one or of a command's arguments,
+ * does not count at all: Vector learns what the user likes only from this.
  */
 export function typed(message: SessionV1.WithParts) {
   return message.parts
     .flatMap((part) => {
-      if (part.type !== "text" || part.synthetic || part.ignored || outside(part)) return []
-      return [command(part)?.arguments ?? part.text]
+      if (part.type !== "text" || part.synthetic || part.ignored) return []
+      // Where text from outside sat, two blank lines: what the user typed after it is a paragraph of its own, and not
+      // the one a line before it such as "Here is the email:" introduces.
+      if (outside(part)) return [PASTE_BREAK]
+      const found = command(part)
+      return [
+        found ? unpasted(found.arguments, found.pasted) : unpasted(part.text, part.metadata?.[BrainSchema.PASTED]),
+      ]
     })
     .join("\n")
     .trim()
+}
+
+// A typed part's text without the spans the user pasted into it, each left as two blank lines so the words on either
+// side neither join nor run into a quote across it, and a line before the paste that introduces it ("Bob wrote:")
+// introduces nothing the user typed. Spans that do not fit the text leave nothing of it: a part that says it holds
+// pasted text, but not where, vouches for none of its words.
+function unpasted(text: string, spans: unknown) {
+  if (spans === undefined) return text
+  if (!Array.isArray(spans) || !spans.every((span) => fits(span, text.length))) return ""
+  const cut = (spans as [number, number][])
+    .toSorted((a, b) => a[0] - b[0])
+    .reduce(
+      (out, span) => ({
+        at: Math.max(out.at, span[1]),
+        text: span[0] > out.at ? `${out.text}${text.slice(out.at, span[0])}${PASTE_BREAK}` : out.text,
+      }),
+      { at: 0, text: "" },
+    )
+  return cut.text + text.slice(cut.at)
+}
+
+const PASTE_BREAK = "\n\n\n"
+
+function fits(span: unknown, length: number) {
+  return (
+    Array.isArray(span) &&
+    span.length === 2 &&
+    Number.isInteger(span[0]) &&
+    Number.isInteger(span[1]) &&
+    span[0] >= 0 &&
+    span[0] < span[1] &&
+    span[1] <= length
+  )
 }
 
 /** What a message asks for, a slash command's text included: what recall reads a request by. */
@@ -187,6 +229,8 @@ export function command(part: SessionV1.Part) {
   if (!value || typeof value !== "object") return undefined
   return {
     arguments: "arguments" in value && typeof value.arguments === "string" ? value.arguments : "",
+    /** The spans of the arguments the user pasted, as the composer sent them. */
+    pasted: "pasted" in value ? value.pasted : undefined,
     outside: "outside" in value && (value.outside === "web" || value.outside === "mcp") ? value.outside : undefined,
   }
 }
@@ -567,10 +611,17 @@ export function taint(messages: readonly SessionV1.WithParts[]): BrainSchema.Hol
   if (tools.some((tool) => WEB_TOOLS.has(tool))) return "web"
   if (messages.some((message) => WEB_AGENTS.has(message.info.agent))) return "web"
   if (calls.some((part) => part.state.status !== "pending" && part.state.metadata?.[HOLD] === "web")) return "web"
-  // A local file an editor embedded is this computer's, like what the read tool returns; other outside text is not.
+  // A local file an editor embedded is this computer's, like what the read tool returns, and what the user pasted they
+  // chose to send; other outside text is not.
   if (
     messages.some((message) =>
-      message.parts.some((part) => part.type === "text" && outside(part) && part.metadata?.[BrainSchema.OUTSIDE] !== "file"),
+      message.parts.some(
+        (part) =>
+          part.type === "text" &&
+          outside(part) &&
+          part.metadata?.[BrainSchema.OUTSIDE] !== "file" &&
+          part.metadata?.[BrainSchema.OUTSIDE] !== BrainSchema.PASTE,
+      ),
     )
   )
     return "web"

@@ -22,8 +22,62 @@ function isPastedTextPart(part: unknown): part is { type: "text"; text: string; 
 }
 
 export function expandTrackedPastedText(text: string, ranges: { start: number; end: number; text: string }[]) {
-  return ranges
-    .slice()
-    .sort((a, b) => b.start - a.start)
-    .reduce((result, part) => displaySlice(result, 0, part.start) + part.text + displaySlice(result, part.end), text)
+  return expandPastedText(text, ranges).text
+}
+
+/**
+ * The prompt's text with each tracked paste's placeholder replaced by what was pasted, and the spans of the result the
+ * user pasted rather than typed, as `[start, end]` string offsets: those pastes, and pastes inserted as they were
+ * (`inline`). Offsets in are the prompt's display offsets, as its extmarks keep them. The spans go with the sent part,
+ * so Vector never learns what the user likes from what they pasted.
+ */
+export function expandPastedText(
+  text: string,
+  tracked: readonly { start: number; end: number; text: string }[],
+  inline: readonly { start: number; end: number }[] = [],
+) {
+  const marks = [...tracked, ...inline.map((mark) => ({ ...mark, text: undefined }))].toSorted(
+    (a, b) => a.start - b.start,
+  )
+  const out = marks.reduce(
+    (acc, mark) => {
+      // A mark inside one already read was read with it.
+      if (mark.start < acc.at) return acc
+      const before = acc.text + displaySlice(text, acc.at, mark.start)
+      const pasted = mark.text ?? displaySlice(text, mark.start, mark.end)
+      return {
+        at: mark.end,
+        text: before + pasted,
+        pasted: pasted
+          ? [...acc.pasted, [before.length, before.length + pasted.length] as [number, number]]
+          : acc.pasted,
+      }
+    },
+    { at: 0, text: "", pasted: [] as [number, number][] },
+  )
+  return { text: out.text + displaySlice(text, out.at), pasted: out.pasted }
+}
+
+/**
+ * A slash command's name and arguments from the prompt's expanded text, as the command route takes them: the name is
+ * the first line's first word, and the arguments the rest of that line and every line after it. The spans the user
+ * pasted are moved to the arguments' own offsets, so Vector never learns how they work from what they pasted after a
+ * command either.
+ */
+export function slashCommand(text: string, pasted: readonly (readonly [number, number])[]) {
+  const firstLineEnd = text.indexOf("\n")
+  const firstLine = firstLineEnd === -1 ? text : text.slice(0, firstLineEnd)
+  const name = firstLine.split(" ")[0]
+  const restOfInput = firstLineEnd === -1 ? "" : text.slice(firstLineEnd + 1)
+  // The arguments are the text from just past the name's space, so an offset in them is one in the text less `start`.
+  const start = name.length + (firstLine.includes(" ") ? 1 : 0)
+  const args = firstLine.slice(start) + (restOfInput ? "\n" + restOfInput : "")
+  return {
+    name: name.slice(1),
+    arguments: args,
+    pasted: pasted.flatMap(([from, to]) => {
+      const span = [Math.max(from, start) - start, Math.min(to - start, args.length)] as [number, number]
+      return span[1] > span[0] ? [span] : []
+    }),
+  }
 }

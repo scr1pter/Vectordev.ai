@@ -11,6 +11,7 @@ import { LegacyEvent } from "./legacy-event"
 import { LocalEvent } from "./local-event"
 import { LspEvent } from "./lsp-event"
 import { McpEvent } from "./mcp-event"
+import { MemoryEvent } from "./memory-event"
 import { ModelCatalog } from "./model-catalog"
 import { Permission } from "./permission"
 import { PermissionV1 } from "./permission-v1"
@@ -79,6 +80,7 @@ export const Definitions = Event.inventory(
   ...SessionCompactionEvent.Definitions,
   ...Research.Event.Definitions,
   ...LocalEvent.Definitions,
+  ...MemoryEvent.Definitions,
   ...VcsEvent.Definitions,
   ...WorkspaceEvent.Definitions,
   ...WorktreeEvent.Definitions,

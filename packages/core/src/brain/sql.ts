@@ -45,6 +45,10 @@ export const BrainEntryTable = sqliteTable(
     // Learned after reading a private document, so withheld where that document is: from guests and models that may
     // train on prompts.
     private: integer({ mode: "boolean" }).notNull().default(false),
+    // What a preference or a term is about (migration 20261202000000_facets).
+    facet: text().$type<BrainSchema.Facet>(),
+    // A term's word or phrase, lowercased with its punctuation as spaces, which recall looks for in a request's words.
+    term_key: text(),
   },
   (table) => [
     index("brain_entry_repository_status_idx").on(table.repository_id, table.status),
@@ -142,6 +146,9 @@ export const BrainStateTable = sqliteTable("brain_state", {
   // commit history was last read at, so co-change is read again only after a commit.
   code_revision: integer().notNull().default(0),
   code_head: text(),
+  // The personal row only: the facets Vector may learn (all of them when unset), and when the model learner runs.
+  learn_facets: text({ mode: "json" }).$type<Partial<Record<BrainSchema.Facet, boolean>>>(),
+  model_learner: text().$type<"local-only" | "always" | "off">(),
 })
 
 // Which entries reached which session, and through which tier. Pruned after 30 days.

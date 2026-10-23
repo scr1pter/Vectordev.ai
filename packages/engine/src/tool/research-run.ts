@@ -4,6 +4,7 @@ import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { httpClient } from "@vectordevai/core/effect/app-node-platform"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
+import { BrainPrivate } from "@vectordevai/core/brain/private"
 import { BrainSchema } from "@vectordevai/core/brain/schema"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { Egress } from "@vectordevai/core/local-mode/egress"
@@ -482,8 +483,22 @@ const layer = Layer.effect(
         ].filter(Boolean),
         typed: yield* typedOf(ctx),
         public: [...results.flatMap((result) => [result.title, result.snippet]), ...sources.open],
-        // The user's own sites become site: filters.
-        domains: [...chosen.prefer, ...chosen.avoid],
+        // The user's own sites become site: filters: the ones they chose, and the sites their own preferences about
+        // sources name (section 6.4a), of those the run was shown and that pass the outward screen, read as the check
+        // reads tokens. Only public host names among them exempt anything.
+        domains: [
+          ...chosen.prefer,
+          ...chosen.avoid,
+          ...entries
+            .filter(
+              (entry) =>
+                entry.scope === "personal" &&
+                entry.kind === "preference" &&
+                entry.facet === "sources" &&
+                BrainPrivate.screened({ kind: entry.kind, text: entry.text, private: entry.private }),
+            )
+            .flatMap((entry) => ResearchOutbound.rare(entry.text)),
+        ],
       } satisfies ResearchOutbound.Context
     })
 
