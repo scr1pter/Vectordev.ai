@@ -657,6 +657,51 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
   const suggest = createMemo(() => !hasUserPrompt())
 
+  // The mode is per session. Deep research is sticky: a session whose latest request went to the research agent stays
+  // in it, and a new session starts in it when it was the last mode picked in this repository. Normal, Quick and Fast
+  // last until the composer changes session, as before.
+  const [pickedModes, setPickedModes] = createStore<Record<string, ExecutionMode>>({})
+  const modeKey = () => props.controls.session.id ?? `new:${sdk().directory}`
+  const executionMode = createMemo<ExecutionMode>(() => {
+    const picked = pickedModes[modeKey()]
+    if (picked) return picked
+    const id = props.controls.session.id
+    if (id) return stickyMode(sync().data.message?.[id] ?? []) ?? "normal"
+    return rememberedMode(browserStorage(), sdk().directory) ?? "normal"
+  })
+  const setExecutionMode = (mode: ExecutionMode) => {
+    setPickedModes(modeKey(), mode)
+    rememberMode(browserStorage(), sdk().directory, mode)
+  }
+  // The first message of a new session gives this composer its session: the mode picked for it stays.
+  createEffect(
+    on(
+      () => props.controls.session.id,
+      (id, previous) => {
+        if (!id || previous !== undefined) return
+        const picked = pickedModes[`new:${sdk().directory}`]
+        if (picked && !pickedModes[id]) setPickedModes(id, picked)
+      },
+      { defer: true },
+    ),
+  )
+  const researching = createMemo(() => executionMode() === "research" && store.mode !== "shell")
+  const [researchDepth, setResearchDepth] = createSignal<Depth>("auto")
+  const [researchScope, setResearchScope] = createSignal<Research.Scope>("web+brain")
+  // A model on a server the user hosts has no per-token price, so its research cap is a step count.
+  const hostedModel = createMemo(() => {
+    const url = props.controls.model.selection.current()?.api?.url
+    if (!url || !URL.canParse(url)) return false
+    return LocalPolicy.hostClass(new URL(url).hostname) !== "internet"
+  })
+  const researchCap = createMemo(() =>
+    capLabel({
+      depth: researchDepth(),
+      local: hostedModel(),
+      own: sync().data.config.budget?.run,
+      limits: sync().data.config.research?.limits,
+    }),
+  )
   const placeholder = createMemo(() =>
     store.mode !== "shell" && executionMode() === "research" && !commentCount()
       ? RESEARCH_PLACEHOLDER
@@ -1563,39 +1608,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const isMaxEffort = createMemo(() => modelVariantLabel(props.controls.model.selection.variant.current()) === "Max")
   // Check provider variants directly: `variants` also includes the UI-only default option.
   const showVariantControl = createMemo(() => props.controls.model.selection.variant.list().length > 0)
-  // The mode is per session. Deep research is sticky: a session whose latest request went to the research agent stays
-  // in it, and a new session starts in it when it was the last mode picked in this repository. Normal, Quick and Fast
-  // last until the composer changes session, as before.
-  const [pickedModes, setPickedModes] = createStore<Record<string, ExecutionMode>>({})
-  const modeKey = () => props.controls.session.id ?? `new:${sdk().directory}`
-  const executionMode = createMemo<ExecutionMode>(() => {
-    const picked = pickedModes[modeKey()]
-    if (picked) return picked
-    const id = props.controls.session.id
-    if (id) return stickyMode(sync().data.message?.[id] ?? []) ?? "normal"
-    return rememberedMode(browserStorage(), sdk().directory) ?? "normal"
-  })
-  const setExecutionMode = (mode: ExecutionMode) => {
-    setPickedModes(modeKey(), mode)
-    rememberMode(browserStorage(), sdk().directory, mode)
-  }
-  const researching = createMemo(() => executionMode() === "research" && store.mode !== "shell")
-  const [researchDepth, setResearchDepth] = createSignal<Depth>("auto")
-  const [researchScope, setResearchScope] = createSignal<Research.Scope>("web+brain")
-  // A model on a server the user hosts has no per-token price, so its research cap is a step count.
-  const hostedModel = createMemo(() => {
-    const url = props.controls.model.selection.current()?.api?.url
-    if (!url || !URL.canParse(url)) return false
-    return LocalPolicy.hostClass(new URL(url).hostname) !== "internet"
-  })
-  const researchCap = createMemo(() =>
-    capLabel({
-      depth: researchDepth(),
-      local: hostedModel(),
-      own: sync().data.config.budget?.run,
-      limits: sync().data.config.research?.limits,
-    }),
-  )
   const [executionModeMenuOpen, setExecutionModeMenuOpen] = createSignal(false)
   const executionModeMeta = createMemo(
     () => EXECUTION_MODES.find((mode) => mode.id === executionMode()) ?? EXECUTION_MODES[0],
