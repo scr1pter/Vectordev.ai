@@ -52,7 +52,9 @@ export const ResearchTool = Tool.define(
               output:
                 setting === "off"
                   ? "Research as a tool is turned off in the settings for this repository (research.tool)."
-                  : "Research as a tool runs on Thorough requests only in these settings (research.tool: thorough). Call escalate if the work needs it.",
+                  : setting === "thorough"
+                    ? "Research as a tool runs on Thorough requests only in these settings (research.tool: thorough). Call escalate if the work needs it."
+                    : "Research as a tool runs on Work and Thorough requests, not on a Light one. Call escalate if the work needs it.",
               metadata: {},
             }
           const deep = params.depth === "deep" && size?.tier === "thorough"

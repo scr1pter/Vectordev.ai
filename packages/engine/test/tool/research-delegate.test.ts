@@ -1,8 +1,10 @@
 import { afterAll, expect } from "bun:test"
+import { rmSync } from "node:fs"
 import path from "path"
 import { Effect } from "effect"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { FSUtil } from "@vectordevai/core/fs-util"
+import { Global } from "@vectordevai/core/global"
 import { Session } from "@/session/session"
 import { Instruction } from "../../src/session/instruction"
 import { SessionMemory } from "../../src/session/memory"
@@ -391,6 +393,79 @@ it.instance(
     }),
   { git: true },
   90_000,
+)
+
+it.instance(
+  "the instruction files and agent prompt in the lead's system prompt count against its searches and researchers' briefs",
+  () =>
+    Effect.gen(function* () {
+      // A prompt the repository's config sets for the lead is the work too.
+      const test = yield* setup(web, {
+        agent: { research: { prompt: "Research for the team that ships the zephyrDeploy pipeline." } },
+      })
+      const fs = yield* FSUtil.Service
+      // The repository's file is the work: its identifiers and host names stay out. The user's own file is private:
+      // its names stay out too.
+      yield* fs.writeWithDirs(
+        path.join(test.dir, "AGENTS.md"),
+        "# Rules\n\nDeploy through ci07.quarry-ops.internal with the reconcileLedgerEntries job.\n",
+      )
+      const personal = path.join((yield* Global.Service).config, "AGENTS.md")
+      yield* fs.writeWithDirs(personal, "# Mine\n\nMy manager Dana Whitfield signs off every Falcon release.\n")
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(personal, { force: true })))
+      const sessions = yield* Session.Service
+      // The fake web's SearXNG is on this computer, which asks once for its origin.
+      const lead = yield* sessions.create({
+        title: "Research",
+        permission: [...allow, { permission: "private_network", pattern: "*", action: "allow" }],
+      })
+      yield* test.llm.tool("research_plan", plan({ depth: "deep" }))
+      for (const query of [
+        "reconcileLedgerEntries heat pumps",
+        "ci07.quarry-ops.internal heat pumps",
+        "Dana Whitfield heat pumps",
+        "zephyrDeploy heat pumps",
+      ])
+        yield* test.llm.tool("research_search", { query })
+      for (const prompt of [
+        "How does the reconcileLedgerEntries job store heat pump readings?",
+        "What does Dana Whitfield say about heat pumps in cold climates?",
+      ])
+        yield* test.llm.tool("task", {
+          description: "Heat pumps",
+          prompt,
+          subagent_type: "researcher",
+          background: false,
+        })
+      yield* test.llm.tool("research_search", { query: "heat pump savings in cold climates" })
+      yield* test.llm.text("Done.")
+      const before = web.count("searxng")
+      const bodies = yield* send({
+        sessionID: lead.id,
+        agent: "research",
+        text: "Research how much heat pumps cut heating bills.",
+      })
+      // All three reach the lead.
+      expect(bodies[0]).toContain("reconcileLedgerEntries")
+      expect(bodies[0]).toContain("Dana Whitfield")
+      expect(bodies[0]).toContain("zephyrDeploy")
+      const searches = yield* calls(lead.id, "research_search")
+      expect(searches.slice(0, 4).map(output)).toEqual(Array(4).fill(ResearchOutbound.REFUSAL))
+      // A query in public terms still goes out, and it is the only one that did.
+      expect(searches[4]?.state.status).toBe("completed")
+      expect(output(searches[4])).not.toBe(ResearchOutbound.REFUSAL)
+      expect(web.count("searxng") - before).toBe(1)
+      const tasks = yield* calls(lead.id, "task")
+      expect(tasks).toHaveLength(2)
+      for (const task of tasks) {
+        expect(task.state.status).toBe("error")
+        expect(output(task)).toContain(ResearchRun.BRIEF_REFUSAL)
+      }
+      expect(yield* sessions.children(lead.id)).toEqual([])
+      expect(guard.outside()).toEqual([])
+    }),
+  { git: true },
+  120_000,
 )
 
 it.instance(

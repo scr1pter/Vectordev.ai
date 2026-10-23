@@ -374,6 +374,8 @@ export const TaskTool = Tool.define(
     // Briefs for the research agents are checked and shaped by the research run. Without it (a test that builds the
     // task tool on its own) they are refused rather than sent unchecked.
     const research = yield* Effect.serviceOption(ResearchRun.Service)
+    // Deep research's agents: they edit nothing, and what they take in and send is checked by the research run.
+    const researchAgents = new Set([ResearchRun.LEAD, ResearchRun.RESEARCHER, ResearchRun.JUDGE])
     // Notes waiting to reach each parent, so tasks that end close together reach it as one message.
     const notes = new Map<
       SessionID,
@@ -617,9 +619,34 @@ export const TaskTool = Tool.define(
         }
       }
 
+      // No subagent_type, or a general-purpose alias, means the general Subagent,
+      // except that resuming a task with no type continues the agent it ran.
+      const agents = yield* agent.list()
+      const known = new Set(agents.map((item) => item.name))
+      const ran = session ? (SubagentLifecycle.read(session)?.agent ?? session.agent) : undefined
+      const requested = params.subagent_type?.trim() || ran
+      const subagentType = resolveSubagentType(requested, (name) => known.has(name))
+      // A research session continues only as the agent it ran: resumed as another, its history of web pages would
+      // reach an agent with a shell and edits, and another agent's history would reach a research agent unchecked.
+      if (ran && ran !== subagentType && (researchAgents.has(ran) || researchAgents.has(subagentType)))
+        return yield* Effect.fail(
+          new Error(
+            `Task ${params.task_id} ran the ${ran} agent, so it resumes only as ${ran}. Start a new task for ${subagentType}.`,
+          ),
+        )
+
       const instance = yield* InstanceState.context
       const ownedPaths = yield* Effect.try({
         try: () => {
+          // The research agents edit nothing, so they own no path, and a path would reach the lead with its brief
+          // unchecked. One the parent's assignment carries is left out.
+          if (researchAgents.has(subagentType)) {
+            if (params.owned_paths?.some((item) => item.trim()))
+              throw new Error(
+                `The ${subagentType} agent edits nothing, so it owns no paths. Leave owned_paths out and put what it needs in the brief, in public terms.`,
+              )
+            return []
+          }
           const canonical = (owned: string) =>
             normalizedPath(
               path.relative(FSUtil.realpath(instance.directory), FSUtil.realpath(path.resolve(instance.directory, owned))) || ".",
@@ -732,15 +759,6 @@ export const TaskTool = Tool.define(
       }
       const busy = runningSiblings + 1 > BUSY_SUBAGENTS_PER_SESSION
 
-      // No subagent_type, or a general-purpose alias, means the general Subagent,
-      // except that resuming a task with no type continues the agent it ran.
-      const agents = yield* agent.list()
-      const known = new Set(agents.map((item) => item.name))
-      const requested =
-        params.subagent_type?.trim() ||
-        (session ? (SubagentLifecycle.read(session)?.agent ?? session.agent) : undefined)
-      const subagentType = resolveSubagentType(requested, (name) => known.has(name))
-
       // A disabled general (agent.general.disable) is missing from the agent list altogether, so
       // fail before any permission prompt whether it was omitted, named, aliased or resumed.
       const generalOff = subagentType === GENERAL_SUBAGENT && !known.has(GENERAL_SUBAGENT)
@@ -796,9 +814,10 @@ export const TaskTool = Tool.define(
               agent: subagentType,
               ctx,
               prompt: params.prompt,
+              // The context pack's own strings, not its JSON: an escaped line break would join two words into one.
               extra: [
                 ...(params.success_criteria ?? []),
-                ...(params.context_pack ? [JSON.stringify(params.context_pack)] : []),
+                ...Object.values(params.context_pack ?? {}).flatMap((items) => items ?? []),
               ],
               ...(params.task_id ? { resume: params.task_id } : {}),
               ...(batch ? { index: batch.index } : {}),

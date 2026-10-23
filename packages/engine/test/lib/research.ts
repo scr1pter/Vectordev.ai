@@ -168,6 +168,8 @@ const root = LayerNode.group([
   FreeModelGuests.node,
   ResearchStore.node,
   ResearchRun.node,
+  // Where the user's own files live (their RULES.md, MEMORY.md and global AGENTS.md), for tests that write one.
+  Global.node,
   LayerNode.make({ service: TestLLMServer, layer: TestLLMServer.layer, deps: [] }),
 ])
 
@@ -270,7 +272,7 @@ export const send = Effect.fn("ResearchTest.send")(function* (input: {
   readonly sessionID: SessionID
   readonly agent: string
   readonly text: string
-  readonly size?: "standard" | "thorough"
+  readonly size?: "light" | "standard" | "thorough"
 }) {
   const llm = yield* TestLLMServer
   const prompt = yield* SessionPrompt.Service

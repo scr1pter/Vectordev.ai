@@ -15,11 +15,17 @@ import { ResearchStore } from "@vectordevai/core/research/store"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import type { WebFetchRequest } from "@vectordevai/core/util/webfetch-request"
 import { SessionV1 } from "@vectordevai/core/v1/session"
+import { Location } from "@vectordevai/core/location"
+import { LocationServiceMap, locationServiceMapLayer } from "@vectordevai/core/location-services"
+import { Reference } from "@vectordevai/core/reference"
+import { AbsolutePath } from "@vectordevai/core/schema"
 import { Research } from "@vectordevai/schema/research"
 import type { RunBudget } from "@vectordevai/schema/run-budget"
 import { Context, Effect, Layer, Option, Schema, Scope, Semaphore } from "effect"
 import { HttpClient } from "effect/unstable/http"
 import { Config } from "@/config/config"
+import { InstanceState } from "@/effect/instance-state"
+import { MCP } from "@/mcp"
 import { Session } from "@/session/session"
 import { Instruction } from "../session/instruction"
 import { SessionMemory } from "../session/memory"
@@ -37,8 +43,10 @@ import type { Tool } from "./tool"
 //   the memory lines recalled, found or pinned for it whatever their scope (a researcher's how-you-work lines
 //   included), MEMORY.md, the document titles and cards it was shown, every tool's output but the web's (files read,
 //   commands run, a subagent's report, an MCP server's answer), files attached to a message, pages read in the user's
-//   signed-in browser, and pages read or fetched from the user's own network. Only the root user's typed words are
-//   exempt: a sub-question, a task brief or a message to a task is written by an agent.
+//   signed-in browser, pages read or fetched from the user's own network, and what the system prompts carry beside
+//   the brain's digest (instruction files, agents' prompts set in config, references, MCP servers' instructions).
+//   Only the root user's typed words are exempt: a sub-question, a task brief or a message to a task is written by an
+//   agent.
 
 export const LEAD = "research"
 export const RESEARCHER = "researcher"
@@ -185,6 +193,8 @@ const layer = Layer.effect(
     const guard = yield* SpendGuard.Service
     const http = yield* HttpClient.HttpClient
     const network = yield* NetworkService
+    const locations = yield* LocationServiceMap.Service
+    const mcp = yield* MCP.Service
 
     // Runs whose user approved reading public pages, in this process. A restart asks once more.
     const approved = new Set<string>()
@@ -251,7 +261,7 @@ const layer = Layer.effect(
         return [own, ...below.flat()]
       })
 
-    // Every session of the run: the lead and the research agents it launched.
+    // Every session of the run: the lead and the research agents it launched. Provenance comes from these alone.
     const members = Effect.fn("ResearchRun.members")(function* (ctx: Tool.Context, leader: Session.Info) {
       const children = (yield* sessions.children(leader.id)).filter((child) => {
         const agent = SubagentLifecycle.read(child)?.agent ?? child.agent
@@ -310,10 +320,12 @@ const layer = Layer.effect(
     const context = Effect.fn("ResearchRun.context")(function* (ctx: Tool.Context, found?: Found) {
       const where = found?.place ?? (yield* place())
       const root = yield* top(ctx.sessionID)
-      // Without a run (the build agent's research request, or a message to a research agent) everything in the
-      // session tree the caller is in counts: what build took in, and what each subagent took in, since its report or
-      // a message may relay it. Stored history counts too: what was read before a compaction may be in the summary.
-      const messages = (found ? yield* members(ctx, found.lead) : yield* lineage(ctx, root.id)).flat()
+      // Everything in a session tree counts, since a subagent's report or message may relay what it took in: without a
+      // run (the build agent's research request, or a message to a research agent) the tree the caller is in; in a run
+      // the lead's session and every subagent below it, the run's researchers and judge, and the subagents build ran
+      // in a session that changed to Deep research. Stored history counts too: what was read before a compaction may
+      // be in the summary.
+      const messages = (yield* lineage(ctx, found ? found.lead.id : root.id)).flat()
       const parts = messages.flatMap((message) => message.parts)
       const saved = new Set(parts.flatMap(savedPrivately))
       const taken = messages.map((message) => intake(message, saved))
@@ -340,6 +352,16 @@ const layer = Layer.effect(
       const rules = yield* Effect.forEach([files.rules, ...where.sources.map((source) => source.path)], text)
       // The digest names the repository's documents by title, a private document's to the owner.
       const titles = yield* knowledge.titles(where, { personal: !guest })
+      // What the lead's and build's system prompts carry beside the digest: the instruction files, the agents' prompts
+      // set in config, the references the environment names and MCP servers' instructions. The repository's are the
+      // work; the user's own instruction files, and their own prompts for agents, are private.
+      const carried = yield* instruction.contents().pipe(Effect.orDie)
+      const own = (yield* config.getGlobal()).agent ?? {}
+      const prompts = Object.entries((yield* config.get()).agent ?? {}).flatMap(([name, item]) =>
+        item?.prompt ? [{ text: item.prompt, user: own[name]?.prompt === item.prompt }] : [],
+      )
+      const named = yield* references()
+      const servers = yield* mcp.instructions()
 
       // Document cards and passages the run was shown, rendered again from their ids as each request renders them: a
       // private document's are private, the repository's the work.
@@ -386,6 +408,8 @@ const layer = Layer.effect(
           ...card(true),
           ...taken.flatMap((item) => item.private),
           ...sources.closed,
+          ...carried.private,
+          ...prompts.flatMap((item) => (item.user ? [item.text] : [])),
         ].filter(Boolean),
         work: [
           ...rules,
@@ -396,12 +420,25 @@ const layer = Layer.effect(
           ...titles.flatMap((item) => (item.visibility === "private" ? [] : [item.title])),
           ...card(false),
           ...taken.flatMap((item) => item.work),
+          ...carried.work,
+          ...prompts.flatMap((item) => (item.user ? [] : [item.text])),
+          ...named.flatMap((reference) => [reference.name, reference.path, reference.description ?? ""]),
+          ...servers.map((server) => server.instructions),
         ].filter(Boolean),
         typed: yield* typedOf(ctx),
         public: [...results.flatMap((result) => [result.title, result.snippet]), ...sources.open],
         // The user's own sites become site: filters.
         domains: [...chosen.prefer, ...chosen.avoid],
       } satisfies ResearchOutbound.Context
+    })
+
+    // The references the environment block names: each one's name, path and description.
+    const references = Effect.fn("ResearchRun.references")(function* () {
+      const ctx = yield* InstanceState.context
+      return yield* Effect.gen(function* () {
+        const service = yield* Reference.Service
+        return (yield* service.list()).filter((reference) => reference.description !== undefined)
+      }).pipe(Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) }))))
     })
 
     const domains = Effect.fn("ResearchRun.domains")(function* (found?: Found) {
@@ -658,6 +695,12 @@ const layer = Layer.effect(
   }),
 )
 
+const locationServiceMapNode = LayerNode.make({
+  service: LocationServiceMap.Service,
+  layer: locationServiceMapLayer,
+  deps: [],
+})
+
 export const node = LayerNode.make({
   service: Service,
   layer,
@@ -672,6 +715,8 @@ export const node = LayerNode.make({
     SpendGuard.node,
     httpClient,
     networkNode,
+    locationServiceMapNode,
+    MCP.node,
   ],
 })
 

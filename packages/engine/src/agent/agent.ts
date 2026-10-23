@@ -333,6 +333,23 @@ const layer = Layer.effect(
           const subagents = [...RESEARCH_AGENTS[name].subagents]
           const reads = tools.includes("read")
           const browses = tools.includes("browser")
+          // A blanket read allow ("*": "allow", `read: allow`) lands after the read defaults, so secret files would
+          // stop asking. Their asks follow each such allow again, except for a path one of the rules names itself.
+          const blanket = (pattern: string) => /^[*/]*$/.test(pattern)
+          const secrets = Permission.fromConfig({
+            read: Object.fromEntries(
+              Object.entries(readDefaults).filter(
+                ([pattern]) =>
+                  pattern !== "*" &&
+                  !rules.some(
+                    (rule) =>
+                      rule.permission === "read" &&
+                      !blanket(rule.pattern) &&
+                      (Wildcard.match(rule.pattern, pattern) || Wildcard.match(pattern, rule.pattern)),
+                  ),
+              ),
+            ),
+          })
           return Permission.merge(
             defaults,
             Permission.fromConfig({
@@ -361,10 +378,18 @@ const layer = Layer.effect(
             // The run's first read asks however broad an allow is ("*", "research_*"): only a rule for research_read
             // itself answers it.
             rules.flatMap((rule) =>
-              narrow(rule, tools, [], { subagents, external: reads }).filter(
-                (item) =>
-                  item.permission !== "research_read" || item.action !== "allow" || rule.permission === "research_read",
-              ),
+              narrow(rule, tools, [], { subagents, external: reads })
+                .filter(
+                  (item) =>
+                    item.permission !== "research_read" ||
+                    item.action !== "allow" ||
+                    rule.permission === "research_read",
+                )
+                .flatMap((item) =>
+                  reads && item.permission === "read" && item.action === "allow" && blanket(item.pattern)
+                    ? [item, ...secrets]
+                    : [item],
+                ),
             ),
             Permission.fromConfig({
               ...Object.fromEntries(RESEARCH_DENIED.map((tool) => [tool, "deny" as const])),
@@ -539,7 +564,7 @@ const layer = Layer.effect(
           [RESEARCH]: {
             name: RESEARCH,
             description:
-              "Deep research. Researches a question across the web and this repository's brain, then writes a report where each claim cites a quote found in its source. Makes no code changes.",
+              "Deep research (in development). Researches a question across the web and this repository's brain, then writes a report where each claim cites a quote found in its source. Makes no code changes.",
             permission: researchAgent(RESEARCH, user),
             prompt: PROMPT_RESEARCH,
             options: {},

@@ -21,7 +21,7 @@ export type Depth = typeof Depth.Type
 
 // The smallest request size at which the build agent may run research as a tool on its own, besides the Deep
 // research mode: "work" offers it on Work and Thorough requests, "thorough" on Thorough requests only, "off" never.
-// A Chat-sized request never gets it.
+// A Chat or Light request never gets it: Light is a small action done directly, without subagents.
 export const Tool = Schema.Literals(["work", "thorough", "off"]).annotate({ identifier: "ResearchToolConfig" })
 export type Tool = typeof Tool.Type
 
@@ -71,6 +71,6 @@ export type Info = Schema.Schema.Type<typeof Info>
 // Whether the build agent gets research as a tool on a request of this size. This is the seam the research tools
 // read; the Deep research mode itself does not depend on it.
 export function buildTool(tier: TaskSize.Tier, setting: Tool = "work") {
-  if (tier === "chat" || setting === "off") return false
-  return setting === "work" || tier === "thorough"
+  if (setting === "off") return false
+  return tier === "thorough" || (setting === "work" && tier === "standard")
 }

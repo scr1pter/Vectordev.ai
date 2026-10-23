@@ -121,6 +121,8 @@ it.instance("by default the run's first read asks, a private address asks, and s
     expect(action(research, "browser_external", "https://example.com")).toBe("ask")
     expect(research.mode).toBe("all")
     expect(researcher.mode).toBe("subagent")
+    // Its sizing, judge, app surfaces and research browsers are still being built, and it is selectable.
+    expect(research.description).toStartWith("Deep research (in development).")
   }),
 )
 
@@ -195,4 +197,29 @@ it.instance(
       for (const agent of [research, researcher]) expect(action(agent, "research_read", "run_1")).toBe("allow")
     }),
   { trusted: true, config: { permission: { "research_*": "allow", research_read: "allow" } } },
+)
+
+it.instance(
+  "a blanket allow keeps the lead's secret files asking, and a rule that names one answers it",
+  () =>
+    Effect.gen(function* () {
+      const research = (yield* get("research"))!
+      expect(action(research, "read", "src/app.ts")).toBe("allow")
+      expect(action(research, "read", ".env")).toBe("ask")
+      expect(action(research, "read", "config/prod.env")).toBe("ask")
+      expect(action(research, "read", "keys/server.pem")).toBe("ask")
+      expect(action(research, "read", ".ssh/id_ed25519")).toBe("ask")
+      expect(action(research, "read", ".env.example")).toBe("allow")
+      // The user named this one before their blanket allow, so it keeps their answer.
+      expect(action(research, "read", "certs/dev.key")).toBe("allow")
+      // A deny after the allow still holds.
+      expect(action(research, "read", "secrets/token.txt")).toBe("deny")
+    }),
+  {
+    trusted: true,
+    config: {
+      permission: { read: { "*.key": "allow" }, "*": "allow" },
+      agent: { research: { permission: { read: { "*": "allow", "secrets/*": "deny" } } } },
+    },
+  },
 )
