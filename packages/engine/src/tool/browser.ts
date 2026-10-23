@@ -2,6 +2,8 @@ import { Effect, Schema } from "effect"
 import { WebFence } from "@vectordevai/core/research/fence"
 
 import { Tool } from "./tool"
+import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
+import { newAddress, webAccess } from "./webfetch"
 
 const Action = Schema.Literals([
   "observe",
@@ -283,11 +285,19 @@ export const BrowserTool = Tool.define<typeof Parameters, Metadata, never>(
         const external = Boolean(targetUrl && !isLocalUrl(targetUrl))
         if (external) {
           const origin = new URL(targetUrl!).origin
+          // With Vector Local on, Web access applies to the browser's pages too, before anything is asked, and after the
+          // web an address the agent chose that is new asks each time.
+          webAccess("agent-browser", targetUrl!)
+          const after = params.action === "open_url" && (yield* newAddress(targetUrl!, ctx))
           yield* ctx.ask({
             permission: params.action === "open_url" ? "browser_external" : "browser_interact",
-            patterns: [origin],
-            always: [origin],
-            metadata: { action: params.action, url: targetUrl },
+            patterns: [after ? `${PermissionPolicy.AFTER_WEB}${targetUrl}` : origin],
+            always: after ? [] : [origin],
+            metadata: {
+              action: params.action,
+              url: targetUrl,
+              ...(after ? { reason: PermissionPolicy.AFTER_WEB_REASON } : {}),
+            },
           })
           const sensitive = describeSensitiveBrowserAction(params, current)
           if (sensitive) {

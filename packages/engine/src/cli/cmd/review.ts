@@ -78,6 +78,7 @@ import { UI } from "../ui"
 import { effectCmd } from "../effect-cmd"
 import type { ReviewGitHub, ReviewGitHubOptions } from "./github.review-api"
 import { renderLocalReview, type LocalTarget } from "./review.render"
+import { githubFetch } from "./github.shared"
 
 // --no-relative and the prefixes keep paths repository-relative and parseable whatever the user's diff config says.
 const DIFF = ["--no-color", "--no-ext-diff", "--no-textconv", "--no-relative", "--src-prefix=a/", "--dst-prefix=b/"]
@@ -718,7 +719,7 @@ const GITHUB: GitHubAccess = {
     return result?.code === 0 ? result.text.trim() || undefined : undefined
   },
   login: async (token, baseUrl = "https://api.github.com") => {
-    const response = await fetch(`${baseUrl}/user`, {
+    const response = await githubFetch(`${baseUrl}/user`, {
       headers: {
         authorization: `Bearer ${token}`,
         accept: "application/vnd.github+json",

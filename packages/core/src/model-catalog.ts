@@ -12,6 +12,10 @@ import { InstallationChannel, InstallationVersion } from "./installation/version
 import { EventV2 } from "./event"
 import { makeGlobalNode } from "./effect/app-node"
 import { httpClient } from "./effect/app-node-platform"
+import { Egress } from "./local-mode/egress"
+import { EgressHttpClient } from "./local-mode/http-client"
+import { LocalPolicy } from "./local-mode/policy"
+import { LocalSources } from "./local-mode/sources"
 
 const decodeJson = Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)
 
@@ -46,6 +50,13 @@ export class Service extends Context.Service<Service, Interface>()("@vector/Mode
 
 export const DEFAULT_MIRROR = "https://vectordev.ai/models"
 
+// Vector Local blocks the catalog's refresh unless the user allowed it or the mirror is on this computer, so nothing is
+// sent. The cached and bundled catalogs still load.
+const LOCAL_SOURCE = LocalSources.get("model-catalog")!
+const offline = (mirror: string) =>
+  LocalPolicy.decide(Egress.policy(), { purpose: LOCAL_SOURCE.purpose, url: mirror, source: LOCAL_SOURCE.id })
+    .decision !== "allow"
+
 export function mirrorURL(value: string | undefined) {
   const url = URL.parse(value || DEFAULT_MIRROR)
   if (!url || !["https:", "http:"].includes(url.protocol) || url.username || url.password || url.search || url.hash)
@@ -68,7 +79,7 @@ const layer = Layer.effect(
     const fs = yield* FSUtil.Service
     const events = yield* EventV2.Service
     const http = HttpClient.filterStatusOk(
-      (yield* HttpClient.HttpClient).pipe(
+      EgressHttpClient.make(yield* HttpClient.HttpClient).pipe(
         HttpClient.retryTransient({
           retryOn: "errors-and-responses",
           times: 2,
@@ -136,6 +147,7 @@ const layer = Layer.effect(
         Effect.provideService(FetchHttpClient.RequestInit, { redirect: "error" }),
         Effect.flatMap((res) => res.text),
         Effect.timeout("10 seconds"),
+        EgressHttpClient.labelled(LOCAL_SOURCE.id),
       )
     })
 
@@ -226,7 +238,7 @@ const layer = Layer.effect(
       if (fromDisk) return fromDisk
       const snapshot = yield* loadSnapshot
       if (snapshot) return snapshot
-      if (!source || Flag.VECTOR_MODELS_PATH || Flag.VECTOR_DISABLE_MODELS_FETCH) return {}
+      if (!source || Flag.VECTOR_MODELS_PATH || Flag.VECTOR_DISABLE_MODELS_FETCH || offline(source)) return {}
       // Flock is cross-process: concurrent Vector CLIs can race on this cache file.
       // A failed fetch degrades to an empty catalog so configured and custom providers still resolve.
       return yield* Effect.scoped(
@@ -247,7 +259,7 @@ const layer = Layer.effect(
     const get = (): Effect.Effect<Record<string, Provider>> => Effect.uninterruptible(cachedGet)
 
     const refresh = Effect.fn("ModelCatalog.refresh")(function* (force = false) {
-      if (!source || Flag.VECTOR_MODELS_PATH || Flag.VECTOR_DISABLE_MODELS_FETCH) return
+      if (!source || Flag.VECTOR_MODELS_PATH || Flag.VECTOR_DISABLE_MODELS_FETCH || offline(source)) return
       if (!force && (yield* fresh())) return
       yield* Effect.scoped(
         Effect.gen(function* () {

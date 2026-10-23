@@ -51,6 +51,7 @@ export interface FetchInput {
 export const ensureObjects = Effect.fn("ReviewSource.ensureObjects")(function* (input: FetchInput) {
   const git = yield* Git.Service
   const remote = input.remote ?? "origin"
+  // With Vector Local on, Git.run decides each fetch by the URL git would use for the remote before git starts.
   const env = input.authEnvironment ?? (input.token ? authEnv(input.token, input.server) : undefined)
   const fetch = (depth: number, refs: string[]) =>
     git.run(["fetch", "--no-tags", "--no-recurse-submodules", `--depth=${depth}`, remote, ...refs], {

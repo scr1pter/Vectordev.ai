@@ -96,7 +96,7 @@ export const Plugin = define({
           }
           const entrypoint = path.isAbsolute(ref.package)
             ? pathToFileURL(ref.package).href
-            : (yield* npm.add(ref.package)).entrypoint
+            : (yield* npm.addAs("npm-plugins", ref.package)).entrypoint
           if (!entrypoint || blockedPluginEntry(entrypoint)) return
 
           const inspected = yield* Effect.sync(() => inspectOAuthPluginForLoad(entrypoint))

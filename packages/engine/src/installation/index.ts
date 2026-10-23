@@ -3,7 +3,9 @@ import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { httpClient } from "@vectordevai/core/effect/app-node-platform"
 import { Effect, Layer, Schema, Context } from "effect"
 import { serviceUse } from "@vectordevai/core/effect/service-use"
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { EgressHttpClient } from "@vectordevai/core/local-mode/http-client"
 import { withTransientReadRetry } from "@/util/effect-http-client"
 import { errorMessage } from "@/util/error"
 import { ChildProcess } from "effect/unstable/process"
@@ -65,11 +67,15 @@ export class UpgradeFailedError extends Schema.TaggedErrorClass<UpgradeFailedErr
 
 const NpmPackage = Schema.Struct({ version: Schema.String })
 
+/** Where Vector Local reads an update check as going, for its decision before a check or an upgrade starts. */
+export const UPDATES_SITE = "https://vectordev.ai/"
+
 export interface Interface {
   readonly info: () => Effect.Effect<Info>
   readonly method: () => Effect.Effect<Method>
   readonly ownership: () => Effect.Effect<InstallationOwnership.Owner>
-  readonly latest: (method?: Method) => Effect.Effect<string>
+  /** `manual`: a check the user started and confirmed (vector upgrade), the only kind Vector Local lets through. */
+  readonly latest: (method?: Method, options?: { readonly manual?: boolean }) => Effect.Effect<string>
   readonly upgrade: (method: Method, target: string) => Effect.Effect<UpgradeResult, UpgradeFailedError>
   readonly uninstall: (method: Method) => Effect.Effect<UpgradeResult, UpgradeFailedError>
 }
@@ -81,7 +87,8 @@ export const use = serviceUse(Service)
 const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProcess.Service> = Layer.effect(
   Service,
   Effect.gen(function* () {
-    const http = yield* HttpClient.HttpClient
+    // Update checks are labelled `updates`, so Vector Local decides them: off unless the user started the check.
+    const http = EgressHttpClient.make(yield* HttpClient.HttpClient)
     const httpOk = HttpClient.filterStatusOk(withTransientReadRetry(http))
     const appProcess = yield* AppProcess.Service
 
@@ -118,13 +125,19 @@ const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProcess.Serv
         }
       }),
       method: () => ownership().pipe(Effect.map((owner) => owner.method)),
-      latest: Effect.fn("Installation.latest")(function* (installMethod?: Method) {
+      latest: Effect.fn("Installation.latest")(function* (installMethod?: Method, options?: { manual?: boolean }) {
+        // With Vector Local on, automatic update checks are off: the version running is reported as the latest. A
+        // check the user started asks first (vector upgrade), and its requests are decided as that check.
+        if (Egress.policy().enabled && !options?.manual) return InstallationVersion
+        const manual: Egress.FetchInit = { manual: options?.manual === true }
         const owner = yield* ownership()
         const method = installMethod ?? owner.method
         if (method === "unknown") return InstallationVersion
         if (method === "standalone" && owner.method === "standalone") {
           const { Standalone } = yield* Effect.promise(() => import("./standalone"))
-          return yield* Effect.tryPromise(() => Standalone.latest(owner.receipt))
+          return yield* Effect.tryPromise(() =>
+            Standalone.latest(owner.receipt, (url, init) => Egress.fetch("updates", url, { ...init, ...manual })),
+          )
         }
         if (method === "homebrew" || method === "scoop") {
           if (owner.method !== method)
@@ -135,9 +148,11 @@ const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProcess.Serv
           return yield* Effect.die(new Error("The running executable has no valid standalone receipt."))
         const registry = yield* NpmConfig.registry(process.cwd())
         const channel = ["local", "dev"].includes(InstallationChannel) ? "latest" : InstallationChannel
-        const response = yield* httpOk.execute(
-          HttpClientRequest.get(`${registry}/@vectordevai%2fcli/${channel}`).pipe(HttpClientRequest.acceptJson),
-        )
+        const response = yield* httpOk
+          .execute(
+            HttpClientRequest.get(`${registry}/@vectordevai%2fcli/${channel}`).pipe(HttpClientRequest.acceptJson),
+          )
+          .pipe(EgressHttpClient.labelled("updates"), Effect.provideService(FetchHttpClient.RequestInit, manual))
         const data = yield* HttpClientResponse.schemaBodyJson(NpmPackage)(response)
         return data.version
       }, Effect.orDie),
@@ -150,6 +165,19 @@ const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProcess.Serv
         }
         if (!semver.valid(target)) {
           return yield* new UpgradeFailedError({ stderr: `Invalid Vector version: ${target}` })
+        }
+        // A package manager or installer Vector starts is a program of its own, which the backstop never sees, so with
+        // Vector Local on an upgrade runs only once the user confirmed the check (vector upgrade) or from the company's
+        // mirror.
+        if (Egress.policy().enabled) {
+          const decided = Egress.decide({ source: "updates", url: UPDATES_SITE, manual: true })
+          if (decided.decision === "ask")
+            return yield* new UpgradeFailedError({
+              stderr:
+                "Vector Local is on, so Vector asks before it checks for or installs a new version. Run vector upgrade in a terminal to confirm.",
+            })
+          if (decided.decision !== "allow")
+            return yield* new UpgradeFailedError({ stderr: `Vector Local did not upgrade Vector. ${decided.reason}` })
         }
         const owner = yield* ownership()
         if (owner.method !== "unknown" && owner.method !== m)

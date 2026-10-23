@@ -6,6 +6,7 @@ import { APICallError } from "ai"
 import { Egress } from "@vectordevai/core/local-mode/egress"
 import { EgressGuard } from "@vectordevai/core/local-mode/guard"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import { LocalSources } from "@vectordevai/core/local-mode/sources"
 import { ProviderError } from "@/provider/error"
 import { errorMessage } from "@/util/error"
 import { ProxyEnv } from "@/util/proxy-env"
@@ -103,9 +104,9 @@ export function route(url: string): Route | EgressGuard.EgressBlocked {
   const target = url.replace(/^wss:/i, "https:").replace(/^ws:/i, "http:")
   const host = URL.canParse(target) ? new URL(target).hostname : ""
   const place = LocalPolicy.hostClass(host)
-  // Only a model server on the list may get it, a listed one with an internet name included.
-  const cloud = LocalPolicy.classify(Egress.policy(), target) === "internet"
-  const decided = Egress.decide({ source: cloud ? "cloud-inference" : "local-inference", url: target })
+  // Only a model server on the list may get it, a listed one with an internet name included; a cloud AI host is a
+  // cloud-inference call whether or not the company lists it.
+  const decided = Egress.decide({ source: LocalSources.inference(target), url: target })
   if (decided.decision !== "allow")
     return new EgressGuard.EgressBlocked(host, "websocket", decided.rule, decided.reason)
   if (typeof Bun === "undefined" || (decided.rule !== "local-off" && place !== "internet")) return {}

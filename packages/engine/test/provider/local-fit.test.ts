@@ -527,17 +527,18 @@ it.live("a company endpoint on the model server list is fitted like a server som
   ),
 )
 
-it.live("a private server the company lists has no per-token price, and one an edit still held adds has one", () => {
+it.live("a private server the company lists has no per-token price, and one an edit still held adds is off until confirmed", () => {
   const globalFile = path.join(Global.Path.config, "vector.json")
   const managedDirectory = process.env.VECTOR_TEST_MANAGED_CONFIG_DIR!
-  // A repository's config may not point a provider at the user's network, so, as a plugin can, `preconnect` names the
-  // server the provider's requests go to. Nothing is sent: only the line is read.
+  // A repository's config may not point a provider at the user's network, so the user's own config does. Nothing is
+  // sent: only the line is read.
   const server = (origin: string) => ({
     name: "Model server",
     npm: "@ai-sdk/openai-compatible",
     models: { qwen: { id: "qwen", name: "qwen", tool_call: true, cost: { input: 0, output: 0 } } },
-    options: { apiKey: "test-key", baseURL: "http://127.0.0.1:9/v1", preconnect: origin },
+    options: { apiKey: "test-key", baseURL: `${origin}/v1` },
   })
+  const providers = { kimi: server("http://10.0.0.5:8000"), held: server("http://10.0.0.9:8000") }
   return provideTmpdirInstance(
     () =>
       Effect.gen(function* () {
@@ -546,9 +547,12 @@ it.live("a private server the company lists has no per-token price, and one an e
           path.join(managedDirectory, "vector.json"),
           JSON.stringify({ local: { endpoints: ["http://10.0.0.5:8000"] } }),
         )
-        writeFileSync(globalFile, JSON.stringify({ local: { enabled: true } }))
+        writeFileSync(globalFile, JSON.stringify({ provider: providers, local: { enabled: true } }))
         Config.refreshLocal()
-        writeFileSync(globalFile, JSON.stringify({ local: { enabled: true, endpoints: ["http://10.0.0.9:8000"] } }))
+        writeFileSync(
+          globalFile,
+          JSON.stringify({ provider: providers, local: { enabled: true, endpoints: ["http://10.0.0.9:8000"] } }),
+        )
         Config.refreshLocal()
         expect(Config.localPending()?.changes).toEqual(["adds the model server http://10.0.0.9:8000"])
 
@@ -556,7 +560,9 @@ it.live("a private server the company lists has no per-token price, and one an e
         const line = (providerID: string) =>
           provider.getModel(ProviderV2.ID.make(providerID), MODEL).pipe(Effect.flatMap((model) => provider.line(model)))
         expect(yield* line("kimi")).toMatchObject({ hosted: true, local: true })
-        expect(yield* line("held")).toMatchObject({ hosted: true, local: false })
+        // Until the owner confirms the edit, its server is not on the list in effect, so Vector Local keeps it off.
+        const held = yield* line("held").pipe(Effect.flip)
+        expect(held.unavailable?.reason).toBe("off-in-local")
         Config.confirmLocal()
         expect(yield* line("held")).toMatchObject({ hosted: true, local: true })
         expect(guard.outside()).toEqual([])
@@ -571,10 +577,7 @@ it.live("a private server the company lists has no per-token price, and one an e
           }),
         ),
       ),
-    {
-      trusted: true,
-      config: { provider: { kimi: server("http://10.0.0.5:8000"), held: server("http://10.0.0.9:8000") } },
-    },
+    { trusted: true },
   )
 })
 

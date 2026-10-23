@@ -38,7 +38,7 @@ import { formatUsd } from "@vectordevai/core/review/format"
 import { escapeVectorMarkers, inlineTitle, parseFindingMarker } from "@vectordevai/core/review/state"
 import { wrapUntrusted } from "@vectordevai/core/review/prompt"
 import { DEFAULT_REVIEW_CONFIG } from "@vectordevai/core/review/types"
-import { extractResponseText, formatPromptTooLargeError } from "./github.shared"
+import { extractResponseText, formatPromptTooLargeError, githubFetch } from "./github.shared"
 import { buildEvidenceBody, judgeTextFromMessages, parseNumstat, type EvidenceChange } from "./github.evidence"
 import { sameLogin } from "./github.review-api"
 import { TASK_MENTIONS, mentionsFrom, routeGithubEvent, type GithubRoute } from "./github.route"
@@ -431,7 +431,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
       if (routed.action === "reply") {
         const token = process.env["GITHUB_TOKEN"]
         if (token)
-          await answerReviewVerb(new Octokit({ auth: token }), {
+          await answerReviewVerb(new Octokit({ auth: token, request: { fetch: githubFetch } }), {
             ...context.repo,
             pr: routed.pr,
             actor: context.actor,
@@ -576,10 +576,10 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
           resources.git = await resources.preparation
           signal.throwIfAborted()
         }
-        octoRest = new Octokit({ auth: appToken, request: { signal } })
+        octoRest = new Octokit({ auth: appToken, request: { signal, fetch: githubFetch } })
         octoGraph = graphql.defaults({
           headers: { authorization: `token ${appToken}` },
-          request: { signal },
+          request: { signal, fetch: githubFetch },
         })
 
         const { userPrompt, promptFiles } = await getUserPrompt()

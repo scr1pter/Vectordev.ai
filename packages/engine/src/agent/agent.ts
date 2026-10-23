@@ -238,6 +238,8 @@ const layer = Layer.effect(
           webfetch: "ask",
           private_network: "ask",
           websearch: "ask",
+          // With Vector Local on, a shell command that may reach the network asks first (tool/shell.ts).
+          network_command: "ask",
           // Vector Cloud actions that publish, change a database or write a
           // host's environment act on the user's own accounts and may bill them.
           vector_cloud_publish: "ask",

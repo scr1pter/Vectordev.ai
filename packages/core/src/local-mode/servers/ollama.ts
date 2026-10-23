@@ -1,6 +1,7 @@
 export * as OllamaServer from "./ollama"
 
 import { Option, Schema } from "effect"
+import { Egress } from "../egress"
 import { LocalErrors } from "../errors"
 import type { LocalProbe } from "../probe"
 
@@ -162,7 +163,8 @@ export function copy(model: string, required: number): Copy {
  * never makes it itself. Resolves with the server's error as plain text when it refuses.
  */
 export async function create(origin: string, offer: Copy, signal?: AbortSignal) {
-  const response = await fetch(`${origin}/api/create`, {
+  // Decided as the server check's reads are (LocalProbe.SERVER_CHECK): this computer and the servers on the list.
+  const response = await Egress.fetch("local-server-check", `${origin}/api/create`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({

@@ -5,6 +5,7 @@ import { OpenAICompatibleChat } from "@vectordevai/llm/protocols/openai-compatib
 import { Auth } from "@vectordevai/llm/route"
 import { freeModelRequest, serializeFreeModelRequest } from "../../free-model-request"
 import { FreeModels } from "../../free-models"
+import { Egress } from "../../local-mode/egress"
 import { ModelV2 } from "../../model"
 
 /** `guest` says whether an invited guest has worked in the session this route serves (FreeModelGuests.marked). */
@@ -24,6 +25,10 @@ export function freeModelRoute(
         ...transport,
         prepare: (input) =>
           Effect.gen(function* () {
+            // Vector Local keeps free models off. The runner refuses them before a route is built
+            // (SessionRunnerModel.allowedInLocal); this holds for any other caller of the route.
+            const decided = Egress.decide({ source: "vector-free-models", url: FreeModels.SHARED_CHAT_URL })
+            if (decided.decision !== "allow") return yield* Effect.fail(invalidRequest(decided.reason))
             const route = yield* Effect.tryPromise({
               try: () =>
                 FreeModels.resolveRoute({

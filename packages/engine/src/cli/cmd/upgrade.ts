@@ -3,6 +3,7 @@ import { UI } from "../ui"
 import * as prompts from "@clack/prompts"
 import { Installation } from "../../installation"
 import { InstallationVersion } from "@vectordevai/core/installation/version"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 
 export const UpgradeCommand = {
   command: "upgrade [target]",
@@ -35,9 +36,37 @@ export const UpgradeCommand = {
       return
     }
     prompts.log.info("Using method: " + method)
+    // With Vector Local on, a check you start asks once, for the check and the upgrade it leads to (section 4.1, rule
+    // 6): its requests and the package manager it starts then go for this run only.
+    if (Egress.policy().enabled) {
+      const decided = Egress.decide({ source: "updates", url: Installation.UPDATES_SITE, manual: true })
+      if (decided.decision === "block") {
+        prompts.log.error(`Vector Local did not check for updates. ${decided.reason}`)
+        process.exitCode = 1
+        return
+      }
+      if (decided.decision === "ask") {
+        if (!process.stdin.isTTY) {
+          prompts.log.error(
+            "Vector Local is on, so Vector asks before it checks for updates. Run vector upgrade in a terminal.",
+          )
+          process.exitCode = 1
+          return
+        }
+        const confirmed = await prompts.confirm({
+          message:
+            "Vector Local is on. Checking for a new version contacts vectordev.ai or your package registry. Check now?",
+        })
+        if (confirmed !== true) {
+          prompts.outro("Not checked")
+          return
+        }
+        Egress.grant("updates", { once: false })
+      }
+    }
     const target = args.target
       ? args.target.replace(/^v/, "")
-      : await Installation.latest(method).catch(() => {
+      : await Installation.latest(method, { manual: true }).catch(() => {
           prompts.log.error(
             ["npm", "pnpm", "bun"].includes(method)
               ? "Could not reach the configured npm registry. Check your registry configuration and connection, then retry."

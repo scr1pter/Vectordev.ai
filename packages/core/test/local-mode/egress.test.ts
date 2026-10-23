@@ -133,6 +133,9 @@ describe("Egress.decide", () => {
     expect([download(), download()]).toEqual(["allow", "ask"])
     Egress.grant("embedding-model", { once: false })
     expect([download(), download()]).toEqual(["allow", "allow"])
+    // Taken back, the next one asks again.
+    Egress.revoke("embedding-model")
+    expect(download()).toBe("ask")
   })
 
   test("attributes each event to its session, and rolls helpers up into the session that launched them", () => {

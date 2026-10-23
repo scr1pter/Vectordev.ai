@@ -287,6 +287,11 @@ export function grant(source: string, options: { readonly once: boolean } = { on
   state.grants.set(source, options.once ? left + 1 : Number.POSITIVE_INFINITY)
 }
 
+/** Takes back what `grant` let through for `source`, so its next ask asks again. */
+export function revoke(source: string) {
+  state.grants.delete(source)
+}
+
 /**
  * Sends one labelled request: every hop is decided and logged before it is made, the way `decide` does, and runs with
  * only that hop's destinations granted. A model call (purpose inference) never follows a redirect. A blocked hop, or

@@ -10,6 +10,8 @@ import { FSUtil } from "../fs-util"
 import { Global } from "../global"
 import { which } from "../util/which"
 import { WindowsPowerShell } from "../util/windows-powershell"
+import { EgressGuard } from "../local-mode/guard"
+import { EgressHttpClient } from "../local-mode/http-client"
 
 export namespace RipgrepBinary {
   const VERSION = "15.1.0"
@@ -33,7 +35,7 @@ export namespace RipgrepBinary {
     Service,
     Effect.gen(function* () {
       const fs = yield* FSUtil.Service
-      const http = HttpClient.filterStatusOk(yield* HttpClient.HttpClient)
+      const http = HttpClient.filterStatusOk(EgressHttpClient.make(yield* HttpClient.HttpClient))
       const spawner = yield* ChildProcessSpawner
 
       const run = Effect.fnUntraced(function* (command: string, args: string[]) {
@@ -117,7 +119,14 @@ export namespace RipgrepBinary {
           const bytes = yield* HttpClientRequest.get(url).pipe(
             http.execute,
             Effect.flatMap((response) => response.arrayBuffer),
-            Effect.mapError((cause) => (cause instanceof Error ? cause : new Error(String(cause)))),
+            EgressHttpClient.labelled("ripgrep-download"),
+            Effect.mapError((cause) => {
+              // Vector Local asks before this download, so say how to search without it.
+              const refused = refusedByLocal(cause)
+              if (refused)
+                return new Error(`${refused.message} Install ripgrep (rg) on this computer so Vector can search.`)
+              return cause instanceof Error ? cause : new Error(String(cause))
+            }),
           )
           if (bytes.byteLength === 0) throw new Error(`failed to download ripgrep from ${url}`)
 
@@ -145,4 +154,12 @@ export namespace RipgrepBinary {
     layer: layer,
     deps: [FSUtil.node, httpClient, CrossSpawnSpawner.node],
   })
+
+  // The refusal Vector Local gave a request, wherever the HTTP client wrapped it.
+  function refusedByLocal(error: unknown): EgressGuard.EgressBlocked | undefined {
+    if (error instanceof EgressGuard.EgressBlocked) return error
+    if (typeof error !== "object" || error === null) return undefined
+    const inner = (error as { cause?: unknown; reason?: unknown }).cause ?? (error as { reason?: unknown }).reason
+    return inner === error ? undefined : refusedByLocal(inner)
+  }
 }

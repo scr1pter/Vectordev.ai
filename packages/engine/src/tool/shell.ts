@@ -25,6 +25,9 @@ import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { ShellPrompt, type Parameters } from "./shell/prompt"
 import { BashArity } from "@/permission/arity"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
+import { LocalCommand } from "@vectordevai/core/local-mode/command"
 
 export { Parameters } from "./shell/prompt"
 
@@ -721,6 +724,23 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan,
       always: Array.from(scan.always),
       metadata: {
         command: input.command,
+      },
+    })
+  }
+
+  // With Vector Local on, a command that may reach the network asks first, with the command shown: one whose output is
+  // not this computer's own (LocalCommand.local: a fetch, a push, a publish, a program Vector does not know, commands a
+  // shell reads from its input), a package install, a build that fetches dependencies, or a web address opened in the
+  // default browser. Vector does not see where such a command connects, so it asks every time: no saved approval, rule
+  // or auto-accept answers it (PermissionPolicy.requiresApproval).
+  if (scan.patterns.size > 0 && Egress.policy().enabled && LocalCommand.networked(input.command)) {
+    yield* ctx.ask({
+      permission: PermissionPolicy.NETWORK_COMMAND,
+      patterns: [input.command],
+      always: [],
+      metadata: {
+        command: input.command,
+        reason: PermissionPolicy.NETWORK_COMMAND_REASON,
       },
     })
   }

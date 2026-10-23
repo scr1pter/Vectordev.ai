@@ -91,7 +91,8 @@ const DOWNLOADS = new Set<LocalMode.Purpose>(["model-download", "tool-download",
 const CONNECTED = new Set<LocalMode.Purpose>(["integration", "mcp", "config-remote"])
 // Vector's own inference (free models and Vector Codium) is never allowable under Vector Local, and no list holds it.
 const VECTOR_HOSTS = ["vectordev.ai"]
-const VECTOR_REFUSED = "Vector's own models run on vectordev.ai, outside the servers you host."
+const VECTOR_REFUSED =
+  "Free models provided by Vector and Vector Codium send prompts through vectordev.ai to the services that run them, outside the servers you list."
 const WEB_ORDER: Record<LocalMode.Web, number> = { ask: 0, network: 1, none: 2 }
 const WEB_SETTINGS = ["ask", "network", "none"] as const satisfies readonly LocalMode.Web[]
 
@@ -250,14 +251,15 @@ export function decide(policy: LocalMode.Policy, request: Request): Verdict {
         )
   const allowed = allowEntry(policy, request.source, name)
   const offline = policy.web === "none" && place === "internet"
-  // A source the registry marks not allowable stays blocked whatever the user allows. Only a model server the company
-  // lists itself (a private cloud deployment) lets a cloud model through.
+  // A source the registry marks not allowable stays blocked whatever the user allows. Only a cloud AI service the
+  // company lists itself (a private cloud deployment) lets its model calls through; a listed Ollama server's cloud
+  // models, free models and Vector Codium stay off, since the company listed the server, not where they go.
   const registered = request.source === undefined ? undefined : LocalSources.get(request.source)
-  if (registered?.local === "not-allowable" && !(request.purpose === "inference" && companyListed(policy, url)))
+  if (registered?.local === "not-allowable" && !(request.source === "cloud-inference" && companyListed(policy, url)))
     return verdict(
       "block",
       "not-allowable",
-      "This service sends your work outside the servers you host, so Vector Local keeps it off.",
+      "This service sends your work outside the servers you listed, so Vector Local keeps it off.",
     )
 
   if (request.purpose === "inference") {
@@ -414,8 +416,20 @@ export function resolve(input: Sources): LocalMode.Policy {
     user_may: lock ? [...userMay] : [],
     locked_keys: managed.locked_keys ?? [],
     endpoint_domains: managed.endpoint_domains ?? [],
+    ...pinsOf(managed, user),
     warnings,
   }
+}
+
+// The servers' identity pins, by origin as requests name it. A company's pin for a server wins over the user's.
+function pinsOf(managed: ConfigLocalV1.Info, user: ConfigLocalV1.Info) {
+  const pins = Object.fromEntries(
+    [...Object.entries(user.pins ?? {}), ...Object.entries(managed.pins ?? {})].flatMap(([key, pin]) => {
+      const at = origin(key)
+      return at ? [[at, pin] as const] : []
+    }),
+  )
+  return Object.keys(pins).length > 0 ? { pins } : {}
 }
 
 function parse(input: string | URL) {

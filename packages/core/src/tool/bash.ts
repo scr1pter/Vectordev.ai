@@ -15,6 +15,9 @@ import { which } from "../util/which"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
+import { Egress } from "../local-mode/egress"
+import { LocalCommand } from "../local-mode/command"
+import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 
 export const name = "bash"
 export const DEFAULT_TIMEOUT_MS = 2 * 60 * 1_000
@@ -175,6 +178,18 @@ const layer = Layer.effectDiscard(
                 agent: context.agent,
                 source,
               })
+              // With Vector Local on, a command that may reach the network asks first, every time: Vector cannot see where
+              // it connects, so no saved approval, rule or auto-accept answers it (PermissionPolicy.requiresApproval).
+              if (Egress.policy().enabled && LocalCommand.networked(input.command))
+                yield* permission.assert({
+                  action: PermissionPolicy.NETWORK_COMMAND,
+                  resources: [input.command],
+                  save: [],
+                  metadata: { command: input.command, reason: PermissionPolicy.NETWORK_COMMAND_REASON },
+                  sessionID: context.sessionID,
+                  agent: context.agent,
+                  source,
+                })
               if ((yield* fs.stat(target.canonical)).type !== "Directory")
                 return yield* Effect.fail(new Error(`Working directory is not a directory: ${target.canonical}`))
               const command = ChildProcess.make(input.command, [], {

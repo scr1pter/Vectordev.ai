@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs"
 import path from "path"
 import { Effect, Layer } from "effect"
-import { HttpClient } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { httpClient } from "@vectordevai/core/effect/app-node-platform"
 import { FSUtil } from "@vectordevai/core/fs-util"
@@ -1315,4 +1315,35 @@ describe("what counts as loosening", () => {
       "stops blocking ads.example",
     ])
   })
+})
+
+describe("an organization's config", () => {
+  const ORG = "https://org.example.invalid"
+  const org = testEffect(
+    LayerNode.compile(LayerNode.group([Config.node, FSUtil.node, Env.node, CrossSpawnSpawner.node]), [
+      [
+        Auth.node,
+        Layer.mock(Auth.Service)({
+          all: () =>
+            Effect.succeed({ [ORG]: new Auth.WellKnown({ type: "wellknown", key: "ORG_TOKEN", token: "org-token" }) }),
+        }),
+      ],
+      [Npm.node, NpmTest.noop],
+      [httpClient, FetchHttpClient.layer],
+    ]),
+  )
+
+  org.instance(
+    "is read as remote config, and while Vector Local blocks it the rest of the config still loads",
+    Effect.gen(function* () {
+      writeGlobal({ enabled: true })
+      Config.refreshLocal()
+      const config = yield* Config.use.get()
+      expect(config.model).toBe("repository/model")
+      expect(Egress.events().filter((event) => event.source === "remote-config" && event.origin === ORG)).toEqual([
+        expect.objectContaining({ decision: "block", purpose: "config-remote" }),
+      ])
+    }),
+    { trusted: true, config: { model: "repository/model" } },
+  )
 })

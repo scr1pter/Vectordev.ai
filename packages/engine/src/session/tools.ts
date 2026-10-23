@@ -71,9 +71,17 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   const mcp = yield* MCP.Service
   const truncate = yield* Truncate.Service
   const brain = yield* Brain.Service
+  // What a compaction folded away still counts for the rules that ask about outside content, so they read the session's
+  // stored messages as well as the window the model sees.
+  const history = () =>
+    sessions.messages({ sessionID: input.session.id }).pipe(
+      Effect.catch(() => Effect.succeed([] as SessionV1.WithParts[])),
+      Effect.map((stored) => [...stored, ...input.messages]),
+    )
 
   const context = (args: Record<string, unknown>, options: ToolExecutionOptions): Tool.Context => ({
     sessionID: input.session.id,
+    parentID: input.session.parentID,
     abort: options.abortSignal!,
     messageID: input.processor.message.id,
     callID: options.toolCallId,
@@ -97,6 +105,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
       ),
     agent: input.agent.name,
     messages: input.messages,
+    history,
     metadata: (val) =>
       input.processor.updateToolCall(options.toolCallId, (match) => {
         if (!["running", "pending"].includes(match.state.status)) return match
@@ -140,14 +149,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
           SessionMemory.source(path.resolve(instance.worktree, pattern), brain.files()),
         )
         if (files.length === 0) return
-        const hold = input.session.parentID
-          ? "subagent"
-          : SessionMemory.taint([
-              ...(yield* sessions
-                .messages({ sessionID: input.session.id })
-                .pipe(Effect.catch(() => Effect.succeed([] as SessionV1.WithParts[])))),
-              ...input.messages,
-            ])
+        const hold = input.session.parentID ? "subagent" : SessionMemory.taint(yield* history())
         if (!hold) return
         yield* permission.ask({
           permission: PermissionPolicy.MEMORY_SOURCE,

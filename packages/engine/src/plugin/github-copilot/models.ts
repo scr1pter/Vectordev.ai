@@ -1,5 +1,6 @@
 import type { Model } from "@vectordevai/sdk/v2"
 import { Option, Schema } from "effect"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 
 const item = Schema.Struct({
   model_picker_enabled: Schema.Boolean,
@@ -217,7 +218,9 @@ export async function get(
   headers: HeadersInit = {},
   existing: Record<string, Model> = {},
 ): Promise<{ models: Record<string, Model>; pickerEnabled: Set<string> }> {
-  const data = await fetch(`${baseURL}/models`, {
+  // Copilot's models run on GitHub's cloud, so with Vector Local on the list is decided as their model calls are: off
+  // unless the company's policy lists the host.
+  const data = await Egress.fetch("cloud-inference", `${baseURL}/models`, {
     redirect: "error",
     headers,
     signal: AbortSignal.timeout(5_000),

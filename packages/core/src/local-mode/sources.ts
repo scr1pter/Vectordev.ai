@@ -182,8 +182,21 @@ export const SOURCES: readonly Source[] = [
     callSites: [
       "packages/engine/src/provider/provider.ts",
       "packages/llm/src/route/executor.ts",
+      "packages/core/src/effect/app-node-platform.ts",
       "packages/engine/src/plugin/openai/ws.ts",
+      "packages/core/src/local-mode/probe.ts",
     ],
+  },
+  {
+    id: "local-server-check",
+    purpose: "integration",
+    hosts: [],
+    sends: "Requests for a model server's name, version and models, and a larger-context copy you ask for; no prompts",
+    why: "Finds model servers on this computer, checks a server you add, and checks a listed server's identity before its first model call",
+    local: "allow-with-reason",
+    where: ["engine"],
+    callSites: ["packages/core/src/local-mode/probe.ts", "packages/core/src/local-mode/servers/ollama.ts"],
+    note: "Reaches this computer and the servers on your list; add a server to the list, or allow this source, to check another one",
   },
   {
     id: "cloud-inference",
@@ -196,7 +209,12 @@ export const SOURCES: readonly Source[] = [
     callSites: [
       "packages/engine/src/provider/provider.ts",
       "packages/llm/src/route/executor.ts",
+      "packages/core/src/effect/app-node-platform.ts",
       "packages/engine/src/plugin/openai/ws.ts",
+      "packages/core/src/plugin/provider/google-vertex.ts",
+      "packages/engine/src/plugin/snowflake-cortex.ts",
+      "packages/core/src/plugin/provider/snowflake-cortex.ts",
+      "packages/engine/src/plugin/github-copilot/models.ts",
     ],
     note: "Allowed only when your company's policy lists the host, labelled Company endpoint (listed by your company)",
   },
@@ -239,7 +257,11 @@ export const SOURCES: readonly Source[] = [
     why: "Sign in with ChatGPT",
     local: "not-allowable",
     where: ["engine"],
-    callSites: ["packages/engine/src/plugin/openai/ws.ts"],
+    callSites: [
+      "packages/engine/src/plugin/openai/ws.ts",
+      "packages/engine/src/plugin/openai/codex.ts",
+      "packages/core/src/plugin/provider/openai.ts",
+    ],
   },
   {
     id: "model-catalog",
@@ -289,7 +311,11 @@ export const SOURCES: readonly Source[] = [
     why: "Signs you in to Vector and checks your licence",
     local: "blocked",
     where: ["engine", "desktop"],
-    callSites: ["packages/engine/src/cli/vector-account.ts", "packages/desktop/src/main/vector-account.ts"],
+    callSites: [
+      "packages/engine/src/cli/vector-account.ts",
+      "packages/engine/src/cli/cmd/github.app.ts",
+      "packages/desktop/src/main/vector-account.ts",
+    ],
   },
   {
     id: "teams",
@@ -372,7 +398,9 @@ export const SOURCES: readonly Source[] = [
     callSites: [
       "packages/desktop/src/main/updater.ts",
       "packages/engine/src/cli/upgrade.ts",
+      "packages/engine/src/cli/cmd/upgrade.ts",
       "packages/engine/src/installation/standalone.ts",
+      "packages/engine/src/installation/index.ts",
     ],
     note: "Automatic checks are off; a check you start asks each time, and a company mirror is allowed",
   },
@@ -435,7 +463,7 @@ export const SOURCES: readonly Source[] = [
     why: "Installs language servers for code intelligence",
     local: "ask-once",
     where: ["engine"],
-    callSites: ["packages/engine/src/lsp/server.ts"],
+    callSites: ["packages/engine/src/lsp/server.ts", "packages/core/src/npm.ts"],
   },
   {
     id: "npm-plugins",
@@ -445,7 +473,7 @@ export const SOURCES: readonly Source[] = [
     why: "Installs plugins and provider packages you configured",
     local: "ask-once",
     where: ["engine"],
-    callSites: ["packages/core/src/npm.ts", "packages/engine/src/plugin/index.ts"],
+    callSites: ["packages/core/src/npm.ts"],
   },
   {
     id: "remote-config",
@@ -455,7 +483,12 @@ export const SOURCES: readonly Source[] = [
     why: "Reads config and skills from addresses in your config",
     local: "allow-with-reason",
     where: ["engine"],
-    callSites: ["packages/engine/src/config/config.ts", "packages/core/src/skill/discovery.ts"],
+    callSites: [
+      "packages/engine/src/config/config.ts",
+      "packages/core/src/skill/discovery.ts",
+      "packages/engine/src/session/instruction.ts",
+      "packages/engine/src/cli/cmd/providers.ts",
+    ],
   },
   {
     id: "mcp-remote",
@@ -465,18 +498,23 @@ export const SOURCES: readonly Source[] = [
     why: "Remote MCP servers you configured",
     local: "allow-with-reason",
     where: ["engine"],
-    callSites: ["packages/engine/src/mcp/index.ts"],
+    callSites: ["packages/engine/src/mcp/index.ts", "packages/engine/src/cli/cmd/mcp.ts"],
   },
   {
     id: "github",
     purpose: "integration",
-    hosts: ["github.com", "api.github.com"],
-    sends: "Pull requests, review comments and your GitHub sign-in",
+    hosts: ["github.com", "api.github.com", ...VECTOR],
+    sends:
+      "Pull requests, review comments, your GitHub sign-in, and in GitHub Actions the workflow's identity token for the Vector GitHub App",
     why: "Pull requests and reviews on GitHub",
     local: "allow-with-reason",
     where: ["engine", "desktop"],
     callSites: [
+      "packages/engine/src/cli/cmd/github.shared.ts",
+      "packages/engine/src/cli/cmd/github.auth.ts",
       "packages/engine/src/cli/cmd/github.handler.ts",
+      "packages/engine/src/cli/cmd/github.attachment.ts",
+      "packages/engine/src/cli/cmd/review.ts",
       "packages/desktop/src/main/github-pr.ts",
       "packages/desktop/src/main/github-api.ts",
     ],
@@ -512,6 +550,7 @@ export const SOURCES: readonly Source[] = [
     where: ["engine"],
     callSites: [
       "packages/core/src/git.ts",
+      "packages/engine/src/git/index.ts",
       "packages/engine/src/worktree/index.ts",
       "packages/engine/src/review/source.ts",
     ],
@@ -525,7 +564,11 @@ export const SOURCES: readonly Source[] = [
     why: "Web search with your Exa key",
     local: "allow-with-reason",
     where: ["engine"],
-    callSites: ["packages/engine/src/tool/websearch.ts", "packages/core/src/tool/websearch.ts"],
+    callSites: [
+      "packages/engine/src/tool/websearch.ts",
+      "packages/engine/src/tool/mcp-websearch.ts",
+      "packages/core/src/tool/websearch.ts",
+    ],
     note: "Exa sees your search queries; billed by Exa on your key",
   },
   {
@@ -536,7 +579,11 @@ export const SOURCES: readonly Source[] = [
     why: "Web search with your Parallel key",
     local: "allow-with-reason",
     where: ["engine"],
-    callSites: ["packages/engine/src/tool/websearch.ts", "packages/core/src/tool/websearch.ts"],
+    callSites: [
+      "packages/engine/src/tool/websearch.ts",
+      "packages/engine/src/tool/mcp-websearch.ts",
+      "packages/core/src/tool/websearch.ts",
+    ],
     note: "Parallel sees your search queries; billed by Parallel on your key",
   },
   {
@@ -633,6 +680,19 @@ export const SOURCES: readonly Source[] = [
 ]
 
 const BY_ID = new Map(SOURCES.map((source) => [source.id, source]))
+
+/**
+ * The registry source a model call to `url` is decided and logged as: a cloud AI service, known by its host whether or
+ * not a company lists it (cloud-inference, which only the company's own listing lets through, labelled as listed by
+ * the company), or else a model server someone hosts (local-inference), listed or not. An Ollama cloud model, which a
+ * server on the list passes on, is told apart by its name where the model is known.
+ */
+export function inference(url: string | URL) {
+  const name = URL.canParse(String(url)) ? new URL(String(url)).hostname : ""
+  if (!name || LocalPolicy.hostClass(name) !== "internet") return "local-inference"
+  const cloud = CLOUD_INFERENCE_HOSTS.some((pattern) => LocalPolicy.hostMatches(name, pattern)) || digestListed(name)
+  return cloud ? "cloud-inference" : "local-inference"
+}
 
 export function get(id: string) {
   return BY_ID.get(id)

@@ -123,6 +123,16 @@ export const Endpoint = Schema.Struct({
 }).annotate({ identifier: "LocalEndpoint" })
 export type Endpoint = typeof Endpoint.Type
 
+// The identity a model server had when it was added: what kind of server answered, its version, a hash of its model
+// list and, for https, its public key. A server that answers as another one is held until the user confirms it.
+export const Pin = Schema.Struct({
+  kind: Schema.String,
+  version: optional(Schema.String),
+  models: optional(Schema.String),
+  spki: optional(Schema.NullOr(Schema.String)),
+}).annotate({ identifier: "LocalPin" })
+export type Pin = typeof Pin.Type
+
 // The policy in effect for this process, resolved once at start from managed and global sources only. `pending` is
 // the fail-closed policy used until it is resolved: only this computer is reachable.
 export const Policy = Schema.Struct({
@@ -137,6 +147,8 @@ export const Policy = Schema.Struct({
   user_may: Schema.Array(Schema.String),
   locked_keys: Schema.Array(Schema.String),
   endpoint_domains: Schema.Array(Schema.String),
+  // Each listed server's identity pin, by origin: the company's pin for a server wins over the user's.
+  pins: optional(Schema.Record(Schema.String, Pin)),
   // What the resolver ignored and why, for the Vector Local pane.
   warnings: Schema.Array(Schema.String),
 }).annotate({ identifier: "LocalPolicy" })

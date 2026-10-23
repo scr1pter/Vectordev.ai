@@ -1,6 +1,14 @@
 import type { SessionV1 } from "@vectordevai/core/v1/session"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 
 export { parseGitHubRemote } from "@/util/repository"
+
+/**
+ * The fetch Vector's own GitHub requests go through (Octokit's REST and GraphQL clients, the review's sign-in check),
+ * labelled as the github source, so with Vector Local on they go only when the user allowed GitHub or listed their
+ * GitHub Enterprise host. With Vector Local off it is the global fetch.
+ */
+export const githubFetch = (input: RequestInfo | URL, init?: RequestInit) => Egress.fetch("github", input, init)
 
 /**
  * Extracts displayable text from assistant response parts.

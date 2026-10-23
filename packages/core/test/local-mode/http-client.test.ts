@@ -6,6 +6,8 @@ import { Egress } from "../../src/local-mode/egress"
 import { EgressGuard } from "../../src/local-mode/guard"
 import { EgressHttpClient } from "../../src/local-mode/http-client"
 import { LocalPolicy } from "../../src/local-mode/policy"
+import { LocalProbe } from "../../src/local-mode/probe"
+import { LocalServers } from "../fixture/local-servers/serve"
 import { FakeWeb } from "../lib/fake-web"
 
 const web = FakeWeb.start({
@@ -125,6 +127,115 @@ describe("EgressHttpClient", () => {
     )
     expect(exit).toEqual(Exit.succeed("models"))
     expect(sent).toEqual([web.url("catalog", "/models")])
+  })
+
+  test("decides a model call as one, whatever label the scope it is made in has", async () => {
+    Egress.configure(policy)
+    const before = web.count("catalog", "/models")
+    const call = (url: string, scope?: string) =>
+      Effect.gen(function* () {
+        const client = EgressHttpClient.models(yield* HttpClient.HttpClient, LocalProbe.makeHolds())
+        const response = yield* client.execute(HttpClientRequest.get(url))
+        return yield* response.text
+      }).pipe(
+        scope ? EgressHttpClient.labelled(scope) : (effect) => effect,
+        Effect.provide(FetchHttpClient.layer),
+        Effect.runPromiseExit,
+      )
+    // Inside a web tool's scope a model call still goes only to a server on the list, decided as a model call.
+    expect(await call(`${MODEL}/v1`, "webfetch")).toEqual(Exit.succeed("completion"))
+    expect(failure(await call(web.url("catalog", "/models"), "webfetch"))).toBeInstanceOf(EgressGuard.EgressBlocked)
+    expect(failure(await call(web.url("catalog", "/models")))).toBeInstanceOf(EgressGuard.EgressBlocked)
+    expect(web.count("catalog", "/models")).toBe(before)
+    expect(
+      Egress.events()
+        .filter((event) => event.purpose === "inference")
+        .map((event) => [event.source, event.purpose, event.decision]),
+    ).toEqual([
+      ["local-inference", "inference", "allow"],
+      ["local-inference", "inference", "block"],
+      ["local-inference", "inference", "block"],
+    ])
+    // The listed server, which has no pin, was asked once whether it is Ollama, before its first model call.
+    expect(Egress.events().filter((event) => event.source === LocalProbe.SERVER_CHECK)).toHaveLength(1)
+  })
+
+  test("refuses a model call whose body names a model the server passes on, whatever the route resolved", async () => {
+    const server = await LocalServers.serve("ollama", {
+      routes: {
+        "GET /api/tags": () =>
+          Response.json({
+            models: [
+              { name: "qwen3:8b", size: 1 },
+              { name: "mymodel:latest", size: 1 },
+            ],
+          }),
+        "POST /api/show": async (_request, body) =>
+          JSON.parse(body).model === "mymodel:latest"
+            ? Response.json({ remote_host: "https://ollama.com:443", remote_model: "gpt-oss:120b" })
+            : Response.json({ capabilities: ["completion", "tools"] }),
+        "POST /v1/chat/completions": () => new Response("completion"),
+      },
+    })
+    try {
+      Egress.configure(LocalPolicy.resolve({ global: { enabled: true, endpoints: [server.origin] } }))
+      const holds = LocalProbe.makeHolds()
+      const call = (model: string) =>
+        Effect.gen(function* () {
+          const client = EgressHttpClient.models(yield* HttpClient.HttpClient, holds)
+          const response = yield* client.execute(
+            HttpClientRequest.post(`${server.origin}/v1/chat/completions`).pipe(
+              HttpClientRequest.bodyText(JSON.stringify({ model, messages: [] }), "application/json"),
+            ),
+          )
+          return yield* response.text
+        }).pipe(Effect.provide(FetchHttpClient.layer), Effect.runPromiseExit)
+      expect(await call("qwen3:8b")).toEqual(Exit.succeed("completion"))
+      expect(failure(await call("mymodel"))).toBeInstanceOf(EgressGuard.EgressBlocked)
+      expect(server.hits().filter((hit) => hit.path === "/v1/chat/completions")).toHaveLength(1)
+      expect(
+        Egress.events()
+          .filter((event) => event.purpose === "inference")
+          .map((event) => [event.source, event.decision]),
+      ).toEqual([
+        ["local-inference", "allow"],
+        ["ollama-cloud-models", "block"],
+      ])
+    } finally {
+      await server.close()
+    }
+  })
+
+  test("reads a server again before the next model call once a model call found nothing answering", async () => {
+    const down = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("x") })
+    const origin = `http://127.0.0.1:${down.port}`
+    await down.stop(true)
+    const rechecked: string[] = []
+    const holds = { ...LocalProbe.makeHolds(), recheck: (url: string | URL) => void rechecked.push(String(url)) }
+    Egress.configure(LocalPolicy.resolve({ global: { enabled: true, endpoints: [origin] } }))
+    const exit = await Effect.gen(function* () {
+      const client = EgressHttpClient.models(yield* HttpClient.HttpClient, holds)
+      return yield* client.execute(HttpClientRequest.get(`${origin}/v1/models`))
+    }).pipe(Effect.provide(FetchHttpClient.layer), Effect.runPromiseExit)
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(rechecked).toEqual([`${origin}/v1/models`])
+    // A proxy in front of a server that could not reach it answers Bad Gateway, which counts the same.
+    const gateway = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("", { status: 502 }) })
+    const behind = `http://127.0.0.1:${gateway.port}`
+    Egress.configure(LocalPolicy.resolve({ global: { enabled: true, endpoints: [origin, behind] } }))
+    await Effect.gen(function* () {
+      const client = EgressHttpClient.models(yield* HttpClient.HttpClient, holds)
+      return yield* client.execute(HttpClientRequest.get(`${behind}/v1/models`))
+    }).pipe(Effect.provide(FetchHttpClient.layer), Effect.runPromiseExit)
+    await gateway.stop(true)
+    expect(rechecked).toEqual([`${origin}/v1/models`, `${behind}/v1/models`])
+    // A call Vector Local refused reached nothing, so it reads nothing again.
+    const refused = await Effect.gen(function* () {
+      const client = EgressHttpClient.models(yield* HttpClient.HttpClient, holds)
+      return yield* client.execute(HttpClientRequest.get(web.url("catalog", "/models")))
+    }).pipe(Effect.provide(FetchHttpClient.layer), Effect.runPromiseExit)
+    expect(failure(refused)).toBeInstanceOf(EgressGuard.EgressBlocked)
+    expect(rechecked).toHaveLength(2)
   })
 
   test("passes everything and logs nothing with Vector Local off", async () => {

@@ -4,6 +4,8 @@ import os from "node:os"
 import path from "node:path"
 import { mkdtemp, rm } from "node:fs/promises"
 import { LocalProbe } from "../../src/local-mode/probe"
+import { Egress } from "../../src/local-mode/egress"
+import { LocalPolicy } from "../../src/local-mode/policy"
 import { OllamaServer } from "../../src/local-mode/servers/ollama"
 import { BashTool } from "../../src/tool/bash"
 import { EditTool } from "../../src/tool/edit"
@@ -242,6 +244,209 @@ describe("identity pins", () => {
   test("a server that does not speak TLS gives no key", async () => {
     const plain = await fake("vllm")
     expect(await LocalProbe.spki(plain.origin.replace("http:", "https:"), 1_000)).toBeNull()
+  })
+})
+
+describe("checking a listed server before its first model call", () => {
+  afterEach(async () => {
+    Egress.configure(LocalPolicy.OFF)
+    await Egress.erase()
+  })
+  const policy = (origin: string, pin?: LocalProbe.Pin) =>
+    LocalPolicy.resolve({
+      global: { enabled: true, endpoints: [origin], ...(pin ? { pins: { [`${origin}/`]: pin } } : {}) },
+    })
+
+  test("reads a pinned server once per policy, and holds it when it answers as a different one", async () => {
+    const server = await fake("vllm")
+    const added = (await LocalProbe.probe(server.origin))!
+    const holds = LocalProbe.makeHolds()
+    const first = policy(server.origin, added.pin)
+    Egress.configure(first)
+    // The pin is read by origin, whatever form the config wrote it in.
+    expect(first.pins).toEqual({ [server.origin]: added.pin })
+    const before = server.hits().length
+    await Promise.all([holds.check(`${server.origin}/v1/chat/completions`, first), holds.check(server.origin, first)])
+    const read = server.hits().length - before
+    expect(read).toBeGreaterThan(0)
+    expect(holds.held(server.origin)).toBeUndefined()
+    // Every model call after the first waits on the same check.
+    await holds.check(`${server.origin}/v1/chat/completions`, first)
+    expect(server.hits().length - before).toBe(read)
+    // The reads are the server check's, decided and logged as such.
+    expect(Egress.events().filter((event) => event.source === LocalProbe.SERVER_CHECK).length).toBe(read)
+
+    // Something else now answers on the port; a new policy checks again and holds the server.
+    server.route("GET /v1/models", () => Response.json({ object: "list", data: [{ id: "other/model" }] }))
+    const next = policy(server.origin, added.pin)
+    Egress.configure(next)
+    await holds.check(server.origin, next)
+    expect(holds.held(server.origin)).toBe(LocalProbe.changedMessage(server.origin))
+    expect(() => holds.gate(`${server.origin}/v1/chat/completions`)).toThrow(LocalProbe.IdentityChanged)
+  })
+
+  test("reads nothing for a server not on the list or with Vector Local off, and only asks one with no pin if it is Ollama", async () => {
+    const server = await fake("vllm")
+    const added = (await LocalProbe.probe(server.origin))!
+    const holds = LocalProbe.makeHolds()
+    const before = server.hits().length
+    await holds.check(server.origin, policy("http://127.0.0.1:9", added.pin))
+    await holds.check(server.origin, { ...policy(server.origin, added.pin), enabled: false })
+    expect(server.hits().length).toBe(before)
+    // A listed server with no pin answers Ollama's identity read, and is not held: there is no pin to compare with.
+    const unpinned = policy(server.origin)
+    Egress.configure(unpinned)
+    await holds.check(`${server.origin}/v1/chat/completions`, unpinned)
+    await holds.check(server.origin, unpinned)
+    expect(
+      server
+        .hits()
+        .slice(before)
+        .map((hit) => `${hit.method} ${hit.path}`),
+    ).toEqual(["GET /api/version"])
+    expect(holds.held(server.origin)).toBeUndefined()
+  })
+
+  test("learns which models an Ollama server the company lists passes on, with no pin to compare", async () => {
+    const server = await fake("ollama", {
+      "GET /api/tags": () =>
+        Response.json({
+          models: [
+            { name: "qwen3:8b", size: 1 },
+            { name: "mymodel:latest", size: 1 },
+          ],
+        }),
+      "POST /api/show": async (_request, body) =>
+        JSON.parse(body).model === "mymodel:latest"
+          ? Response.json({ remote_host: "https://ollama.com:443", remote_model: "gpt-oss:120b" })
+          : Response.json({ capabilities: ["completion", "tools"] }),
+    })
+    const company = LocalPolicy.resolve({ managed: { enabled: true, endpoints: [server.origin] } })
+    expect(company.pins?.[server.origin]).toBeUndefined()
+    Egress.configure(company)
+    const holds = LocalProbe.makeHolds()
+    expect(holds.revision()).toBe(0)
+    await holds.check(`${server.origin}/v1/chat/completions`, company, ["qwen3:8b"])
+    expect(holds.held(server.origin)).toBeUndefined()
+    expect(holds.revision()).toBe(1)
+    // Whatever form the name takes: Ollama reads a name with no tag as `:latest`.
+    for (const name of ["mymodel:latest", "mymodel", "MyModel:Latest"])
+      expect(holds.passesOn(`${server.origin}/v1/chat/completions`, ["qwen3:8b", name], company), name).toBe(true)
+    expect(holds.passesOn(server.origin, ["qwen3:8b"], company)).toBe(false)
+    // A cloud model's name says it on any server someone hosts, and nothing on a cloud API.
+    expect(holds.passesOn(server.origin, ["gpt-oss:120b-cloud"], company)).toBe(true)
+    expect(holds.passesOn("https://api.openai.com/v1", ["gpt-oss:120b-cloud"], company)).toBe(false)
+  })
+
+  test("reads a server again when a call names a model it did not list, once for each model", async () => {
+    const server = await fake("ollama", {
+      "GET /api/tags": () => Response.json({ models: [{ name: "qwen3:8b", size: 1 }] }),
+      "POST /api/show": () => Response.json({ capabilities: ["completion", "tools"] }),
+    })
+    const listed = policy(server.origin)
+    Egress.configure(listed)
+    const holds = LocalProbe.makeHolds()
+    await holds.check(server.origin, listed, ["qwen3:8b"])
+    // `ollama cp gpt-oss:120b-cloud mymodel` while Vector runs: the copy keeps the remote fields.
+    server.route("GET /api/tags", () =>
+      Response.json({
+        models: [
+          { name: "qwen3:8b", size: 1 },
+          { name: "mymodel:latest", size: 1 },
+        ],
+      }),
+    )
+    server.route("POST /api/show", async (_request, body) =>
+      JSON.parse(body).model === "mymodel:latest"
+        ? Response.json({ remote_host: "https://ollama.com:443", remote_model: "gpt-oss:120b" })
+        : Response.json({ capabilities: ["completion", "tools"] }),
+    )
+    const before = server.hits().length
+    await holds.check(server.origin, listed, ["qwen3:8b"])
+    expect(server.hits().length).toBe(before)
+    await holds.check(server.origin, listed, ["mymodel"])
+    expect(holds.forwards(server.origin, "mymodel")).toBe(true)
+    const read = server.hits().length
+    expect(read).toBeGreaterThan(before)
+    // A name the server does not list at all is read for once, not on every call.
+    await holds.check(server.origin, listed, ["missing:7b"])
+    const once = server.hits().length
+    await holds.check(server.origin, listed, ["missing:7b"])
+    expect(server.hits().length).toBe(once)
+  })
+
+  test("reads a server that did not answer again at its next model call, so one that takes its port is held", async () => {
+    const real = await LocalServers.serve("vllm")
+    const added = (await LocalProbe.probe(real.origin))!
+    const origin = real.origin
+    const port = real.port
+    await real.close()
+    const pinned = policy(origin, added.pin)
+    Egress.configure(pinned)
+    const holds = LocalProbe.makeHolds()
+    // The first model call finds nothing on the port.
+    await holds.check(`${origin}/v1/chat/completions`, pinned)
+    expect(holds.held(origin)).toBeUndefined()
+    // Another server now answers there, as another user of this computer could start one.
+    const other = await LocalServers.serve("ollama", { port })
+    fakes.push(other)
+    await holds.check(`${origin}/v1/chat/completions`, pinned)
+    expect(holds.held(origin)).toBe(LocalProbe.changedMessage(origin))
+  })
+
+  test("reads a server again after a model call to it found nothing answering", async () => {
+    const real = await LocalServers.serve("vllm")
+    const added = (await LocalProbe.probe(real.origin))!
+    const origin = real.origin
+    const port = real.port
+    const pinned = policy(origin, added.pin)
+    Egress.configure(pinned)
+    const holds = LocalProbe.makeHolds()
+    await holds.check(origin, pinned)
+    expect(holds.held(origin)).toBeUndefined()
+    await real.close()
+    // A model call failed to connect: the caller says so, and the next call reads the server again.
+    holds.recheck(`${origin}/v1/chat/completions`)
+    const other = await LocalServers.serve("ollama", { port })
+    fakes.push(other)
+    await holds.check(origin, pinned)
+    expect(holds.held(origin)).toBe(LocalProbe.changedMessage(origin))
+  })
+
+  test("learns which models an Ollama server passes on, whatever their names", async () => {
+    // A copy of a cloud model made with `ollama cp` keeps the remote fields but loses the -cloud name.
+    const server = await fake("ollama", {
+      "GET /api/tags": () =>
+        Response.json({
+          models: [
+            { name: "qwen3-coder:30b", size: 1 },
+            { name: "mymodel:latest", size: 1 },
+          ],
+        }),
+      "POST /api/show": async (_request, body) =>
+        JSON.parse(body).model === "mymodel:latest"
+          ? Response.json({ remote_host: "https://ollama.com:443", remote_model: "gpt-oss:120b" })
+          : Response.json({ capabilities: ["completion", "tools"] }),
+    })
+    const added = (await LocalProbe.probe(server.origin))!
+    const holds = LocalProbe.makeHolds()
+    const listed = policy(server.origin, added.pin)
+    Egress.configure(listed)
+    expect(holds.forwards(server.origin, "mymodel:latest")).toBe(false)
+    await holds.check(server.origin, listed)
+    expect(holds.forwards(`${server.origin}/v1/chat/completions`, "mymodel:latest")).toBe(true)
+    expect(holds.forwards(server.origin, "qwen3-coder:30b")).toBe(false)
+  })
+
+  test("decides each read with Vector Local on: a server elsewhere is not reached until it is listed", async () => {
+    Egress.configure(LocalPolicy.resolve({ global: { enabled: true } }))
+    // An address on the user's network, which the strict guard would refuse to reach.
+    expect(await LocalProbe.probe("http://10.20.30.40:8000")).toBeUndefined()
+    const refused = Egress.events().filter((event) => event.source === LocalProbe.SERVER_CHECK)
+    expect(refused.length).toBeGreaterThan(0)
+    expect(refused.every((event) => event.decision === "block" && event.origin === "http://10.20.30.40:8000")).toBe(
+      true,
+    )
   })
 })
 

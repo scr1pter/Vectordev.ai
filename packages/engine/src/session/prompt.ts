@@ -72,6 +72,8 @@ import { eq } from "drizzle-orm"
 import { SessionTable } from "@vectordevai/core/session/sql"
 import { SessionReminders } from "./reminders"
 import { SessionMemory } from "./memory"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import type { LocalMode } from "@vectordevai/schema/local-mode"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { ownerBlock, scopeOf, scopeQuery } from "@vectordevai/core/review/prompt"
@@ -260,7 +262,11 @@ const layer = Layer.effect(
     // context is re-written anyway: after compaction gives the session a new history start, on another model, or once
     // the provider's cache has expired. An edit the agent makes itself is already in its context. Keyed by session, so
     // concurrent sessions keep their own snapshot.
-    const instructionSnapshots = new Map<SessionID, { key: string; instructions: string[]; documents: boolean }>()
+    // `personal` counts the owner's own entries the digest carries, for Vector Local's network log.
+    const instructionSnapshots = new Map<
+      SessionID,
+      { key: string; instructions: string[]; documents: boolean; personal: number }
+    >()
     // Request messages whose recall already ran in this process, so a message that recalled nothing is not scored again
     // on every step.
     const recallsTried = new Set<MessageID>()
@@ -296,7 +302,12 @@ const layer = Layer.effect(
         : undefined
       const digest = yield* brain.digest(place, { ...memory, ...(documents ? { documents } : {}) })
       const instructions = [...(memory.files ? yield* instruction.system() : []), ...(digest.text ? [digest.text] : [])]
-      const next = { key: full, instructions, documents: documents !== undefined }
+      const next = {
+        key: full,
+        instructions,
+        documents: documents !== undefined,
+        personal: digest.personal?.length ?? 0,
+      }
       instructionSnapshots.set(sessionID, next)
       if (instructionSnapshots.size > MAX_INSTRUCTION_SNAPSHOTS)
         instructionSnapshots.delete(instructionSnapshots.keys().next().value!)
@@ -1986,6 +1997,8 @@ const layer = Layer.effect(
         // found for it is not filled in from the owner's personal memory or private documents.
         const audience = audienceOf(session, agent.name)
         msgs = yield* withheldRecall(sessionID, msgs, personal, audience)
+        // What the request carries out of the brain, for Vector Local's network log; counted only while it is on.
+        const carried = Egress.policy().enabled ? carriedOf(msgs, personal, personal && audience === "owner") : undefined
         msgs = yield* SessionReminders.apply({ messages: msgs, agent, session }).pipe(
           Effect.provideService(RuntimeFlags.Service, flags),
           Effect.provideService(FSUtil.Service, fsys),
@@ -2143,7 +2156,7 @@ const layer = Layer.effect(
                   ),
                 ),
             quick
-              ? Effect.succeed({ instructions: [], documents: false })
+              ? Effect.succeed({ instructions: [], documents: false, personal: 0 })
               : sessionInstructions(
                   sessionID,
                   `${msgs[0]?.info.id}|${model.providerID}/${model.id}`,
@@ -2224,6 +2237,8 @@ const layer = Layer.effect(
             toolChoice: format.type === "json_schema" ? "required" : undefined,
             retries: lastUser.executionMode === "fast" ? 1 : undefined,
             answering: () => Deferred.doneUnsafe(answering, Effect.succeed(true)),
+            // The digest in the system prompt carries the owner's rules, MEMORY.md and pinned entries too.
+            carried: carried && { ...carried, personal: carried.personal + snapshot.personal },
           })
 
           if (structured !== undefined) {
@@ -3441,5 +3456,27 @@ export const node = LayerNode.make({
     Git.node,
   ],
 })
+
+/**
+ * How many items of the owner's brain a request carries, for Vector Local's network log: personal memory entries,
+ * document cards and passages, and the repository's own memory lines. Counted from the recall and memory-tool parts the
+ * request fills in (withheldRecall), so nothing is read; `found` is whether what a tool found is filled in from personal
+ * memory and private documents.
+ */
+function carriedOf(msgs: readonly SessionV1.WithParts[], personal: boolean, found: boolean): LocalMode.Carried {
+  const parts = msgs.flatMap((message) => message.parts)
+  const recalls = parts.flatMap((part) => SessionMemory.recall(part) ?? [])
+  const known = parts.flatMap((part) => SessionMemory.knowledge(part) ?? [])
+  const own = new Set([
+    ...(personal ? recalls.flatMap((recall) => recall.personal) : []),
+    ...(found ? parts.flatMap((part) => SessionMemory.personal(part)) : []),
+  ])
+  const cards = new Set([...recalls.flatMap((recall) => recall.cards), ...known.flatMap((item) => item.cards)])
+  const passages = found ? known.flatMap((item) => item.get).length : 0
+  const repository = new Set(
+    recalls.flatMap((recall) => recall.ids.filter((id) => !recall.personal.includes(id) && !recall.cards.includes(id))),
+  )
+  return { personal: own.size, documents: cards.size + passages, repository: repository.size }
+}
 
 export * as SessionPrompt from "./prompt"

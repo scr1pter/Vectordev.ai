@@ -12,6 +12,9 @@ import { FSUtil } from "@vectordevai/core/fs-util"
 import { withTransientReadRetry } from "@/util/effect-http-client"
 import { Global } from "@vectordevai/core/global"
 import { WebFetchRequest } from "@vectordevai/core/util/webfetch-request"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { EgressHttpClient } from "@vectordevai/core/local-mode/http-client"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import { collectBoundedResponseBody } from "@vectordevai/core/tool/http-body"
 import { containsPath } from "@/project/instance-context"
 import { Brain } from "@vectordevai/core/brain/brain"
@@ -139,7 +142,7 @@ const layer: Layer.Layer<
     const flags = yield* RuntimeFlags.Service
     const brain = yield* Brain.Service
     const knowledge = yield* BrainKnowledge.Service
-    const http = HttpClient.filterStatusOk(withTransientReadRetry(yield* HttpClient.HttpClient))
+    const http = HttpClient.filterStatusOk(withTransientReadRetry(EgressHttpClient.make(yield* HttpClient.HttpClient)))
     const globalFiles = [
       path.join(global.config, "AGENTS.md"),
       ...(!flags.disableClaudeCodePrompt ? [path.join(global.home, ".claude", "CLAUDE.md")] : []),
@@ -216,6 +219,10 @@ const layer: Layer.Layer<
       )
 
     const fetch = Effect.fnUntraced(function* (url: string) {
+      // Instruction URLs are remote config: with Vector Local on, one that is not on this computer or the list, or
+      // allowed, is skipped without a request, and the rest are decided and logged as they are sent.
+      const decided = LocalPolicy.decide(Egress.policy(), { purpose: "config-remote", url, source: "remote-config" })
+      if (decided.decision !== "allow") return ""
       // Instruction URLs come from the user's own config (or a project they trusted), so an intranet page is fine.
       return yield* WebFetchRequest.execute(http, HttpClientRequest.get(url), {
         authorize: () => Effect.void,
@@ -227,6 +234,7 @@ const layer: Layer.Layer<
         Effect.map((body) => new TextDecoder().decode(body)),
         Effect.scoped,
         Effect.timeout(5000),
+        EgressHttpClient.labelled("remote-config"),
         Effect.catch(() => Effect.succeed("")),
       )
     })

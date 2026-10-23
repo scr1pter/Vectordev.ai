@@ -4,6 +4,7 @@ import { InstallationVersion } from "@vectordevai/core/installation/version"
 import { OauthCallbackPage } from "@vectordevai/core/oauth/page"
 import { createServer } from "http"
 import open from "open"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 
 const OAUTH_CLIENT_ID = "LOCAL_APPLICATION"
 const OAUTH_CALLBACK_HOST = "127.0.0.1"
@@ -102,21 +103,27 @@ function buildAuthorizeUrl(account: string, role: string | undefined, state: str
   return `https://${account}.snowflakecomputing.com/oauth/authorize?${params.toString()}`
 }
 
+// Snowflake's sign-in is part of its cloud models, so with Vector Local on it is decided as their model calls are: off
+// unless the company's policy lists the account's host.
 async function exchangeCodeForToken(account: string, code: string, pkce: PkceCodes) {
-  const response = await fetch(`https://${account}.snowflakecomputing.com/oauth/token-request`, {
-    method: "POST",
-    headers: {
-      ...authHeaders(),
-      Authorization: authBasicHeader(),
+  const response = await Egress.fetch(
+    "cloud-inference",
+    `https://${account}.snowflakecomputing.com/oauth/token-request`,
+    {
+      method: "POST",
+      headers: {
+        ...authHeaders(),
+        Authorization: authBasicHeader(),
+      },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: callbackUrl(),
+        client_id: OAUTH_CLIENT_ID,
+        code_verifier: pkce.verifier,
+      }).toString(),
     },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: callbackUrl(),
-      client_id: OAUTH_CLIENT_ID,
-      code_verifier: pkce.verifier,
-    }).toString(),
-  })
+  )
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "")
@@ -134,18 +141,22 @@ async function exchangeCodeForToken(account: string, code: string, pkce: PkceCod
 }
 
 async function refreshAccessToken(account: string, refreshToken: string) {
-  const response = await fetch(`https://${account}.snowflakecomputing.com/oauth/token-request`, {
-    method: "POST",
-    headers: {
-      ...authHeaders(),
-      Authorization: authBasicHeader(),
+  const response = await Egress.fetch(
+    "cloud-inference",
+    `https://${account}.snowflakecomputing.com/oauth/token-request`,
+    {
+      method: "POST",
+      headers: {
+        ...authHeaders(),
+        Authorization: authBasicHeader(),
+      },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+        client_id: OAUTH_CLIENT_ID,
+      }).toString(),
     },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-      client_id: OAUTH_CLIENT_ID,
-    }).toString(),
-  })
+  )
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "")

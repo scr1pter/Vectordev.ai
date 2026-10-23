@@ -268,7 +268,7 @@ describe("plugin.loader.shared", () => {
       },
       (tmp) =>
         Effect.gen(function* () {
-          const add = spyOn(Npm, "add").mockImplementation(async (pkg) => {
+          const add = spyOn(Npm, "addAs").mockImplementation(async (_source, pkg) => {
             if (pkg === "acme-plugin@latest") return { directory: tmp.extra.acme, entrypoint: undefined }
             return { directory: tmp.extra.scope, entrypoint: undefined }
           })
@@ -276,8 +276,8 @@ describe("plugin.loader.shared", () => {
           try {
             yield* load(tmp.path, undefined, "global")
 
-            expect(add.mock.calls).toContainEqual(["acme-plugin@latest"])
-            expect(add.mock.calls).toContainEqual(["scope-plugin@2.3.4"])
+            expect(add.mock.calls).toContainEqual(["npm-plugins", "acme-plugin@latest"])
+            expect(add.mock.calls).toContainEqual(["npm-plugins", "scope-plugin@2.3.4"])
           } finally {
             add.mockRestore()
           }
@@ -312,7 +312,7 @@ describe("plugin.loader.shared", () => {
       },
       (tmp) =>
         Effect.gen(function* () {
-          const add = spyOn(Npm, "add").mockImplementation(async (pkg) => {
+          const add = spyOn(Npm, "addAs").mockImplementation(async (_source, pkg) => {
             if (pkg === "acme-plugin") return { directory: tmp.extra.acme, entrypoint: undefined }
             return { directory: tmp.extra.scope, entrypoint: undefined }
           })
@@ -320,9 +320,9 @@ describe("plugin.loader.shared", () => {
           try {
             yield* load(tmp.path)
 
-            expect(add.mock.calls).not.toContainEqual(["acme-plugin"])
-            expect(add.mock.calls).not.toContainEqual(["acme-plugin@latest"])
-            expect(add.mock.calls).toContainEqual(["scope-plugin@2.3.4"])
+            expect(add.mock.calls).not.toContainEqual(["npm-plugins", "acme-plugin"])
+            expect(add.mock.calls).not.toContainEqual(["npm-plugins", "acme-plugin@latest"])
+            expect(add.mock.calls).toContainEqual(["npm-plugins", "scope-plugin@2.3.4"])
           } finally {
             add.mockRestore()
           }
@@ -378,7 +378,7 @@ describe("plugin.loader.shared", () => {
       },
       (tmp) =>
         Effect.gen(function* () {
-          const install = spyOn(Npm, "add").mockResolvedValue({ directory: tmp.extra.mod, entrypoint: undefined })
+          const install = spyOn(Npm, "addAs").mockResolvedValue({ directory: tmp.extra.mod, entrypoint: undefined })
 
           try {
             yield* load(tmp.path)
@@ -437,7 +437,7 @@ describe("plugin.loader.shared", () => {
       },
       (tmp) =>
         Effect.gen(function* () {
-          const install = spyOn(Npm, "add").mockResolvedValue({ directory: tmp.extra.mod, entrypoint: undefined })
+          const install = spyOn(Npm, "addAs").mockResolvedValue({ directory: tmp.extra.mod, entrypoint: undefined })
 
           try {
             yield* load(tmp.path)
@@ -491,7 +491,7 @@ describe("plugin.loader.shared", () => {
       },
       (tmp) =>
         Effect.gen(function* () {
-          const install = spyOn(Npm, "add").mockResolvedValue({ directory: tmp.extra.mod, entrypoint: undefined })
+          const install = spyOn(Npm, "addAs").mockResolvedValue({ directory: tmp.extra.mod, entrypoint: undefined })
 
           try {
             yield* load(tmp.path)
@@ -538,7 +538,7 @@ describe("plugin.loader.shared", () => {
       },
       (tmp) =>
         Effect.gen(function* () {
-          const install = spyOn(Npm, "add").mockResolvedValue({ directory: tmp.extra.mod, entrypoint: undefined })
+          const install = spyOn(Npm, "addAs").mockResolvedValue({ directory: tmp.extra.mod, entrypoint: undefined })
 
           try {
             yield* load(tmp.path)
@@ -605,7 +605,7 @@ describe("plugin.loader.shared", () => {
       },
       (tmp) =>
         Effect.gen(function* () {
-          const install = spyOn(Npm, "add").mockResolvedValue({ directory: tmp.extra.mod, entrypoint: undefined })
+          const install = spyOn(Npm, "addAs").mockResolvedValue({ directory: tmp.extra.mod, entrypoint: undefined })
 
           try {
             yield* load(tmp.path)
@@ -639,13 +639,13 @@ describe("plugin.loader.shared", () => {
       },
       (_tmp) =>
         Effect.gen(function* () {
-          const install = spyOn(Npm, "add").mockResolvedValue({ directory: "", entrypoint: undefined })
+          const install = spyOn(Npm, "addAs").mockResolvedValue({ directory: "", entrypoint: undefined })
           const warning = spyOn(console, "warn").mockImplementation(() => {})
 
           try {
             yield* load(_tmp.path)
 
-            const pkgs = install.mock.calls.map((call) => call[0])
+            const pkgs = install.mock.calls.map((call) => call[1])
             expect(pkgs).toContain("regular-plugin@1.0.0")
             expect(pkgs).not.toContain("fixture-openai-codex-auth@1.0.0")
             expect(pkgs).not.toContain("different-copilot-auth@1.0.0")
@@ -685,11 +685,11 @@ describe("plugin.loader.shared", () => {
       },
       (tmp) =>
         Effect.gen(function* () {
-          const install = spyOn(Npm, "add").mockRejectedValue(new Error("boom"))
+          const install = spyOn(Npm, "addAs").mockRejectedValue(new Error("boom"))
 
           try {
             yield* load(tmp.path)
-            expect(install).toHaveBeenCalledWith("broken-plugin@9.9.9")
+            expect(install).toHaveBeenCalledWith("npm-plugins", "broken-plugin@9.9.9")
             expect(yield* Effect.promise(() => Bun.file(tmp.extra.mark).text())).toBe("ok")
           } finally {
             install.mockRestore()
@@ -1030,7 +1030,7 @@ export default {
       },
       (tmp) =>
         Effect.gen(function* () {
-          const install = spyOn(Npm, "add").mockResolvedValue({ directory: tmp.extra.mod, entrypoint: undefined })
+          const install = spyOn(Npm, "addAs").mockResolvedValue({ directory: tmp.extra.mod, entrypoint: undefined })
           const missing: string[] = []
 
           try {
@@ -1103,7 +1103,7 @@ export default {
       },
       (tmp) =>
         Effect.gen(function* () {
-          const install = spyOn(Npm, "add").mockResolvedValue({ directory: tmp.extra.mod, entrypoint: undefined })
+          const install = spyOn(Npm, "addAs").mockResolvedValue({ directory: tmp.extra.mod, entrypoint: undefined })
 
           try {
             const loaded = yield* Effect.promise(() =>
@@ -1298,7 +1298,7 @@ export default {
 
   it.live("does not wait or retry npm plugin failures", () =>
     Effect.gen(function* () {
-      const install = spyOn(Npm, "add").mockRejectedValue(new Error("boom"))
+      const install = spyOn(Npm, "addAs").mockRejectedValue(new Error("boom"))
       let wait = 0
       const errors: Array<[string, boolean]> = []
 
