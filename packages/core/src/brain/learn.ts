@@ -23,8 +23,8 @@ import type { BrainSchema } from "./schema"
 // evidence the same clause, so the brain's quote check holds by construction. What a short message says briefly goes
 // into use at once; anything longer, a clause that gives its reason ("because…", "since…") and a name given with
 // "call it" wait for a second sighting or one click. A clause that tells Vector something sensitive about the user
-// themselves (health, money, religion, politics, relationships, sexuality) is dropped, while a preference about a
-// sensitive research topic stays.
+// themselves (health, money, religion, politics, relationships, sexuality, gender) is dropped, while a preference about
+// a sensitive research topic stays.
 
 export const LIMIT = {
   /** Characters of one learned entry: the user's own clause, trimmed. */
@@ -98,23 +98,35 @@ export function scoped(text: string) {
 
 /**
  * Whether a clause names something in particular: a capitalised word after its first ("run the Acme billing tests"),
- * which is a company, a product or a person more often than not, or someone to copy or ping in any case ("always cc
- * jane on releases"). A common acronym, a day or month, and a tool, format or source the facets know by name
- * ("TypeScript", "Markdown", "PubMed") name nothing of one repository.
+ * which is a company, a product or a person more often than not; someone to copy, ping, ask, tag, tell, notify, assign
+ * to, email or ask for a review, or a team, in any case ("always cc jane on releases", "always ask priya before
+ * merging", "always tag @priya", "assign PRs to dkumar", "request review from the payments team"); or a system or
+ * company by the shape of its name ("the acme-prod cluster", "acmecorp staging", "us-east-1"). A common acronym, a day
+ * or month, a tool, format or source the facets know by name ("TypeScript", "Markdown", "PubMed"), the user, the agent
+ * and a role every repository has ("ask me", "notify the reviewers", "request review from code owners") name nothing
+ * of one repository.
  */
 export function particular(text: string) {
-  if (ADDRESSED.test(text)) return true
-  return text
+  if (ADDRESSED.test(text) || HANDLE.test(text)) return true
+  if ([...text.matchAll(ADDRESSEE), ...text.matchAll(ADDRESSEE_TO)].some((match) => !anyone(match.groups!.who!)))
+    return true
+  if ([...text.matchAll(PLACE)].some((match) => !anyone(match.groups!.name!) && !which(match.groups!.name!)))
+    return true
+  const words = text
     .split(/\s+/)
-    .slice(1)
     .map((word) => word.replace(/^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu, "").replace(/['’]s$/, ""))
-    .some(
-      (word) =>
-        /^\p{Lu}/u.test(word) &&
-        !COMMON_NAMES.has(word.toLowerCase()) &&
-        !COMMON_NAMES.has(word.toLowerCase().replace(/s$/, "")) &&
-        !known(word),
-    )
+  return (
+    words.some(system) ||
+    words
+      .slice(1)
+      .some(
+        (word) =>
+          /^\p{Lu}/u.test(word) &&
+          !COMMON_NAMES.has(word.toLowerCase()) &&
+          !COMMON_NAMES.has(word.toLowerCase().replace(/s$/, "")) &&
+          !known(word),
+      )
+  )
 }
 
 /** Whether a word is a tool, format, source or way of working the facets know by name ("TypeScript", "PubMed"). */
@@ -162,9 +174,11 @@ export function facetOf(text: string): Facet {
 }
 
 /**
- * Whether text tells Vector something sensitive about the user themselves: their health, money, religion, politics,
- * relationships or sexuality, said in the first person ("my diagnosis", "I have ADHD", "my salary"). A preference about
- * such a topic as research ("I prefer FDA sources for diabetes research") says nothing about them, so it passes.
+ * Whether text tells Vector something sensitive about the user themselves: their health (a condition, a medicine, a
+ * treatment, their eyesight or hearing), money, religion, politics, relationships, sexuality or gender, said in the
+ * first person ("my diagnosis", "I have ADHD", "my salary", "my insulin", "when I'm at dialysis", "my pronouns") or of
+ * them ("use she/her for me"). A preference about such a topic as research ("I prefer FDA sources for diabetes
+ * research") says nothing about them, so it passes.
  */
 export function sensitive(text: string) {
   return SELF.test(text.replace(/[‘’]/g, "'"))
@@ -230,8 +244,14 @@ const Reply = Schema.fromJsonString(
  * A model learner's suggestion as something learned, or nothing when it fails a check: its quote has to be the user's
  * own typed words (normalised), outside every quote, code span and quoted line of them, as the rules read them, and
  * neither its text nor its quote may hold a secret, read as instructions to the agent, or say something sensitive about
- * the user. In a session that read outside content it only ever waits for the user, so outside text cannot steer a
- * model into writing memory that is in use; elsewhere it goes into use when its quote states it.
+ * the user. A correction is about the task at hand far more often than about how the user works, so the clauses its
+ * quote comes from are held to the rules' own checks: a question, a step of the task ("for now", "that file", "the old
+ * API here") or feedback on this answer ("option B") teaches nothing, and neither does a suggestion whose own words are
+ * such a step. The model only finds what the user said and never words memory in use: its suggestion goes into use at
+ * once only when it is the user's own clause, which the rules would learn as it is once the correction's opening words
+ * ("no, I meant", "I said") are gone, and never in a session that read outside content. Anything else waits for the
+ * user, so a model's paraphrase that widens what was said ("skip all checks" for "skip the flaky checks") is never in
+ * use on its word.
  */
 export function accept(
   suggestion: Suggestion,
@@ -243,19 +263,50 @@ export function accept(
   if (!text || quote.length < 3 || quote.length > LIMIT.text || quote.includes(MASK)) return undefined
   // Someone else's words the user quoted ("the vendor email says: …") are masked, so a quote of them is not found.
   if (!normal(mask(input.typed)).includes(normal(quote))) return undefined
+  // The clauses the quote comes from: the one that holds it, or for a quote that runs across clauses ("I prefer tables;
+  // always cite sources") the one that holds each of its own.
+  const parts = clauses(quote).map((clause) => normal(clause.masked))
+  const own = clauses(input.typed).filter((clause) => parts.some((part) => normal(clause.masked).includes(part)))
+  if (parts.length === 0 || !parts.every((part) => own.some((clause) => normal(clause.masked).includes(part))))
+    return undefined
+  // A definition of the user's words is no step of the task, whatever its words ("when I say ship it…").
+  const defines = (clause: Clause) => learnable(parseTerm(told(clause.text), told(clause.masked))) !== undefined
+  if (
+    own.some(
+      (clause) => clause.question || (!defines(clause) && (step(told(clause.masked)) || feedback(told(clause.masked)))),
+    )
+  )
+    return undefined
+  if (!(suggestion.kind === "term" && own.some(defines)) && (step(text) || feedback(text))) return undefined
   if ([text, quote].some((value) => BrainScan.credential(value) || BrainScan.redact(value, {}).redacted))
     return undefined
   if ([text, quote].some((value) => BrainScan.instructionLike(value) || sensitive(value))) return undefined
   if (suggestion.kind === "term" && !learnable(parseTerm(text, mask(text)))) return undefined
   const facet = suggestion.kind === "term" ? "vocabulary" : facetOf(text)
   if (input.facets?.[facet] === false) return undefined
+  const theirs = own
+    .flatMap((clause) => learn(told(clause.text), { facets: input.facets }))
+    .some((item) => item.kind === suggestion.kind && item.status === "active" && key(item.text) === key(text))
   return {
     kind: suggestion.kind,
     facet,
     text,
     quote,
-    status: !input.tainted && BrainLexical.states(text, quote) ? "active" : "proposed",
+    status: !input.tainted && theirs && BrainLexical.states(text, quote) ? "active" : "proposed",
   }
+}
+
+// A clause without the words a correction opens with ("no, I meant", "I said", "I told you to"), which say nothing of
+// what the user wants.
+function told(clause: string) {
+  return clause.trim().replace(CORRECTED, "").replace(LEAD, "").trim()
+}
+
+// Feedback on this answer, said plainly ("option B", "the first one", "go with yours") or in the first person ("I
+// prefer the second approach").
+function feedback(clause: string) {
+  const first = FIRST.exec(clause)
+  return FEEDBACK.test(first ? (first[1] ?? first[2]!).trim().replace(OPENER, "") : clause)
 }
 
 // --- Reading clauses --------------------------------------------------------------------------------------------------
@@ -277,9 +328,15 @@ type Clause = {
 // email's lines are all masked. A straight double quote right after a digit is an inch mark ('27" wide'), which opens
 // nothing. A straight single quote opens after and closes before something that is not a letter or digit, within a
 // paragraph, so an apostrophe ("don't", "the users' settings") opens or closes nothing and one inside a quote ('don't do
-// that') does not end it. A masked character is no letter, space or punctuation, so no pattern starts or matches in it.
+// that') does not end it. A line that says whose words follow ("Bob wrote:", "the vendor said:", "From the vendor's
+// guide:", "From: Dana", "Here is the email:") masks itself and the paragraph after it, past one blank line, as a quote
+// that never closes does; where the caller took out what the user pasted it leaves two, so the user's own paragraph
+// after a paste stays theirs. A masked character is no letter, space or punctuation, so no pattern starts or matches
+// in it.
 const MASK = "░"
 const OTHERS = [
+  /(?<=^|\n)[^\n]*\b(?:wrote|writes|said|says|replied|replies|commented|comments|posted|posts|forwarded|asked|asks|added|adds|e-?mail(?:ed)?|messaged|message|reply|comment|thread|excerpt|transcript)[ \t]*:[ \t]*\n(?:[ \t]*\n)?(?=[ \t]*\S)[\s\S]*?(?=\n[ \t]*\n|$)/gi,
+  /(?<=^|\n)[ \t]*from(?:[ \t]*:|[ \t]+(?!now\b|here\b|today\b|then\b|scratch\b|this\s+point\b)[^\n]*:[ \t]*\n(?:[ \t]*\n)?(?=[ \t]*\S))[\s\S]*?(?=\n[ \t]*\n|$)/gi,
   /```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)/g,
   /(?<=^|\n[ \t]*\n)(?: {4}|\t)[^\n]*(?:\n(?: {4}|\t)[^\n]*)*/g,
   /<(pre|code|samp|kbd|q|blockquote)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi,
@@ -441,9 +498,93 @@ const ATTRIBUTED = /,\s*(?:says|said|writes|wrote)\b|\baccording\s+to\b/i
 const REASON = /\b(?:because|since|due\s+to|given\s+(?:that|my)|as\s+i(?:'m|\s+am|\s+have|'ve)?)\b/i
 // Someone to copy, ping or loop in on something: a person or a team of one company, written in lowercase too.
 const ADDRESSED = /\b(?:b?cc|ping|loop\s+in|dm)\s+(?!(?:me|myself|you|yourself)\b)[\p{L}@]/iu
+// Someone's handle: "@priya", never the "@" of an email address.
+const HANDLE = /(?<![\p{L}\p{N}._%+-])@[\p{L}\p{N}][\p{L}\p{N}._-]*/u
+// Whom to ask, tag, tell, notify, assign, email or ask for a review, and whom to assign or email something to.
+const DETERMINER = "(?:(?:the|a|an|our|my|your|their|this|that|these|those|every|each|all|any|some)\\s+)?"
+const WHO = "(?<who>[\\p{L}\\p{N}@][\\p{L}\\p{N}._-]*)"
+const ADDRESSEE = new RegExp(
+  `\\b(?:request(?:\\s+an?)?\\s+reviews?\\s+from|ask\\s+for\\s+(?:an?\\s+)?reviews?\\s+from|ask|tag|tell|notify|assign|e-?mail)\\s+${DETERMINER}${WHO}`,
+  "giu",
+)
+const ADDRESSEE_TO = new RegExp(
+  `\\b(?:assign|e-?mail)\\b(?:\\s+[\\p{L}\\p{N}'-]+){0,4}?\\s+to\\s+${DETERMINER}${WHO}`,
+  "giu",
+)
+// The name before a team, or a place a company runs its systems: "the payments team", "acmecorp staging", "the acme-prod
+// cluster". A word that says which of any repository's places it is ("the staging cluster", "against staging") names
+// nothing.
+const PLACE =
+  /\b(?<name>[\p{L}\p{N}][\p{L}\p{N}_-]*)\s+(?:cluster|clusters|staging|production|prod|environment|env|tenant|tenants|namespace|datacenter|region|team|teams|squad|guild|tribe|department|dept|org|organisation|organization)\b/giu
+const MODIFIER = new Set(
+  `the a an our my your their this that these those every each any all same right wrong correct other own new old main
+  primary secondary default shared local remote test testing tests dev development staging prod production live real
+  fresh clean separate temporary throwaway ephemeral isolated single whole entire full core preview sandbox canary qa
+  uat against to on in from into onto at of for with without via using use run deploy deploying push pushing and or
+  non pre k8s kubernetes`
+    .split(/\s+/)
+    .filter(Boolean),
+)
+// Whom anyone may mean: the user, the agent, a role every repository has, or no one ("ask before…", "notify on…").
+const ANYONE = new Set(
+  `me myself you yourself us ourselves him her them it its everyone everybody someone somebody anyone anybody whoever
+  people person user users human team reviewer reviewers review owner owners codeowners code maintainer maintainers
+  author authors reporter assignee operator customer customers before after first again instead rather when whenever
+  if whether what which why how who whom for about on in at of by via with once to from as up out back questions
+  question clarifying follow-up permission confirmation approval help feedback addresses address notifications
+  notification templates template lists list threads thread updates update summary summaries versions version labels
+  label images image builds build tags tag`
+    .split(/\s+/)
+    .filter(Boolean),
+)
+// The parts of a system's name that say where it runs ("acme-prod", "payments-staging", "us-east-1"), and those such a
+// part shares a word with that name nothing ("pre-prod", "dev-only", "prod-ready", "dev-server").
+const ENVIRONMENT = new Set(
+  `prod production staging stage stg dev develop development qa uat sandbox preview canary internal intranet corp
+  cluster east west north south central eu us apac emea`
+    .split(/\s+/)
+    .filter(Boolean),
+)
+const ALONGSIDE = new Set(
+  `pre non post only ready like mode server servers build builds branch branches env environment environments data db
+  database databases deps dependencies dependency config configs safe first`
+    .split(/\s+/)
+    .filter(Boolean),
+)
 // "in this repo", "for this codebase": an instruction for one repository, which follows the user nowhere else.
 const REPOSITORY =
   /\b(?:in|for|across|within|throughout|of)\s+(?:this|the|our)\s+(?:repo|repository|codebase|code\s+base|monorepo|workspace)\b/i
+
+// Whether a word names whom anyone may mean, or a tool, format, source or name the facets and every repository know.
+function anyone(word: string) {
+  const lower = word.toLowerCase()
+  return ANYONE.has(lower) || COMMON_NAMES.has(lower) || known(word)
+}
+
+// Whether a word before a team or a place says only which of any repository's it is: "the staging cluster", "against
+// staging", "the pre-prod cluster".
+function which(word: string) {
+  return word
+    .toLowerCase()
+    .split("-")
+    .every((part) => MODIFIER.has(part) || ENVIRONMENT.has(part) || ALONGSIDE.has(part))
+}
+
+// A system or company by the shape of its name: a hyphenated part that says where it runs beside one that names
+// nothing of that ("acme-prod", "us-east-1"; not "pre-prod", "utf-8"), or a company's suffix ("acmecorp").
+function system(word: string) {
+  const lower = word.toLowerCase()
+  if (!lower || COMMON_NAMES.has(lower) || known(word)) return false
+  const parts = lower.split("-")
+  if (
+    parts.length > 1 &&
+    parts.every(Boolean) &&
+    parts.some((part) => ENVIRONMENT.has(part)) &&
+    !parts.every((part) => ENVIRONMENT.has(part) || ALONGSIDE.has(part))
+  )
+    return true
+  return /^[a-z]{3,}(?:corp|inc|labs|hq|ltd|llc|gmbh)$/.test(lower)
+}
 
 function preference(masked: string) {
   if (ATTRIBUTED.test(masked)) return false
@@ -562,6 +703,79 @@ const SENSITIVE = [
   "ivf",
   "mental health",
   "burn(?:ed|t)?[- ]?out",
+  "health(?![- ]?(?:checks?|checking|endpoints?|probes?|status|monitor\\w*|dashboards?|scores?))",
+  "insulin",
+  "dialysis",
+  "(?:aa|na) meetings?",
+  "alcoholics anonymous",
+  "narcotics anonymous",
+  "sobriety",
+  "relapse",
+  "alcohol(?:ic|ism)?",
+  "eyesight",
+  "(?:poor|bad|low|failing|blurry|impaired) (?:vision|eyesight|hearing)",
+  "vision (?:is|was|has|loss|problems?|issues?)",
+  "visually impaired",
+  "hearing (?:aids?|loss|impair(?:ed|ment))",
+  "tinnitus",
+  "inhaler",
+  "epipen",
+  "antidepressants?",
+  "adderall",
+  "ritalin",
+  "prozac",
+  "zoloft",
+  "lexapro",
+  "xanax",
+  "wellbutrin",
+  "lithium",
+  "metformin",
+  "ozempic",
+  "wegovy",
+  "birth control",
+  "hrt",
+  "prescriptions?",
+  "pills?",
+  "physio(?:therapy|therapist)?",
+  "counsel(?:l)?(?:ing|or)",
+  "psycholog(?:ist|y)",
+  "nurse",
+  "clinic",
+  "dentist",
+  "disorder",
+  "syndrome",
+  "symptoms?",
+  "(?:medical|health|skin|chronic|heart) conditions?",
+  "injur(?:y|ies|ed)",
+  "pain(?![- ]?points?)",
+  "arthritis",
+  "crohn'?s",
+  "celiac",
+  "coeliac",
+  "lupus",
+  "multiple sclerosis",
+  "parkinson'?s",
+  "alzheimer'?s",
+  "dementia",
+  "stroke",
+  "heart (?:condition|attack|disease|problems?)",
+  "blood (?:pressure|sugar)",
+  "hypertension",
+  "carpal tunnel",
+  "rsi",
+  "tendonitis",
+  "sleep apno?ea",
+  "narcolepsy",
+  "fibromyalgia",
+  "eating disorder",
+  "anorexi(?:a|c)",
+  "bulimi(?:a|c)",
+  "miscarriage",
+  "menopause",
+  "tumou?r",
+  "transplant",
+  "immunocompromised",
+  "autoimmune",
   // money
   "salary",
   "income",
@@ -637,14 +851,24 @@ const SENSITIVE = [
   "sexual orientation",
   "non-?binary",
   "lgbtq?\\+?",
+  "pronouns?",
+  "gender(?: identity)?",
+  "(?:she|he|they|xe|ze)/(?:her|him|them|hers|his|theirs|xem|zir)",
+  "transition(?:ing|ed)?",
 ].join("|")
 
-// The user saying something about themselves: "my …", "I have / I am / I'd / I take / I earn …", or a reason ("because
-// of …", "due to …", "as a …"), up to a few words before the sensitive word.
+// The user saying something about themselves: "my …", "I have / I am / I'd / I take / I use / I earn …", or a reason
+// ("because of …", "due to …", "as a …"), up to a few words before the sensitive word, or the word a few before "for
+// me" ("use she/her for me").
 const SELF = new RegExp(
-  `\\b(?:my|i'm|i am|i'd|i've|i have|i had|i was|i've been|i take|i earn|i make|i owe|i vote|i voted|i pray|i'm on|i go to|i see a|because of|due to|as an?)\\b(?:\\s+[\\p{L}'-]+){0,4}?\\s+(?:${SENSITIVE})\\b`,
+  `\\b(?:${SENSITIVE})\\b(?:\\s+[\\p{L}'-]+){0,3}?\\s+(?:for|about|of|to|with)\\s+me\\b|\\b(?:my|i'm|i am|i'd|i've|i have|i had|i was|i've been|i take|i earn|i make|i owe|i vote|i voted|i pray|i'm on|i go to|i see a|i use|i wear|i need|i suffer from|i struggle with|i live with|i deal with|i'm recovering from|i got|i've got|i get|i went|because of|due to|as an?)\\b(?:\\s+[\\p{L}'-]+){0,4}?\\s+(?:${SENSITIVE})\\b`,
   "iu",
 )
+
+// The words a correction opens a clause with, which say nothing of what the user wants: "no, I meant", "what I meant
+// was", "I said", "I told you to", "I asked for".
+const CORRECTED =
+  /^(?:(?:no|nope|not quite|wrong|actually|wait|sorry|hmm|ugh)\b[\s,.!-]*)*(?:i meant|what i meant (?:was|is)|i said|i told you|i asked(?: you)?(?: for)?)\b[\s,:-]*(?:(?:that|to)\s+)?/i
 
 const CORRECTION =
   /(?:^|[.!?\n]\s*)(?:(?:no|nope|not quite|wrong|actually|wait|sorry|hmm|ugh)[\s,.!-]+)?(?:i meant\b|what i meant (?:was|is)\b|that's not what i (?:meant|asked for|wanted|said)\b|that is not what i (?:meant|asked for|wanted|said)\b|not what i (?:meant|asked for|wanted)\b|i said\b|i told you\b|i asked (?:you )?(?:for|to)\b)/i

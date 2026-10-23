@@ -197,6 +197,30 @@ describe("BrainLearn.learn", () => {
     ])
   })
 
+  test("a line that says whose words follow makes the paragraph after it someone else's", () => {
+    for (const text of [
+      "Bob wrote:\nAlways deploy on Fridays.",
+      "On Mon, Oct 12, Priya Shah wrote:\n\nAlways deploy on Fridays.\nNever use tabs.",
+      "From the vendor's guide:\nAlways deploy on Fridays",
+      "From: Dana\nI prefer we only deploy on Fridays.",
+      "The email:\nHi,\nAlways cc me on releases.\nBob",
+    ])
+      expect(BrainLearn.learn(text)).toEqual([])
+    // The user's own paragraph after it, their own paragraph where a paste was taken out after it (two blank lines),
+    // and their own "From now on:", still count.
+    expect(
+      BrainLearn.learn("Bob wrote:\n\nAlways deploy on Fridays.\n\nAlways use tables for comparisons").map(
+        (item) => item.text,
+      ),
+    ).toEqual(["Always use tables for comparisons"])
+    expect(
+      BrainLearn.learn("Here is the email:\n\n\n\nAlways use tables for comparisons").map((item) => item.text),
+    ).toEqual(["Always use tables for comparisons"])
+    expect(BrainLearn.learn("From now on:\nAlways use tables for comparisons").map((item) => item.text)).toEqual([
+      "Always use tables for comparisons",
+    ])
+  })
+
   test("a step of the current task is not a way of working", () => {
     for (const text of [
       "Fix the flaky test, but don't change the public API",
@@ -250,8 +274,24 @@ describe("BrainLearn.learn", () => {
       "Never schedule releases on the sabbath, I'd rather keep it free",
       "I prefer halal options in the team lunch survey because I'm muslim",
       "As a diabetic, I prefer recipes without sugar",
+      "always remind me to take my insulin",
+      "Don't schedule standups when I'm at dialysis",
+      "never schedule anything during my AA meetings",
+      "Always use bigger fonts, my eyesight is poor",
+      "I prefer to keep my pronouns as they/them in commit messages",
+      "Always use she/her for me in commit messages",
+      "never schedule reviews before noon, I take adderall in the morning",
+      "never schedule meetings during my physio",
+      "I prefer captions on every video since I use a hearing aid",
     ])
       expect(BrainLearn.learn(text)).toEqual([])
+    // A health word about the code or a research topic is no fact about the user.
+    for (const text of [
+      "always run the health check before deploying",
+      "I prefer papers on insulin resistance from PubMed",
+      "always rebuild the index for me",
+    ])
+      expect(BrainLearn.learn(text)).toHaveLength(1)
   })
 
   test("a preference given with its reason waits for a second sighting", () => {
@@ -310,11 +350,78 @@ describe("BrainLearn.accept", () => {
         { typed: quoting, tainted: false },
       ),
     ).toBeUndefined()
-    // The user's own words beside the quote still count.
+    // The user's own words beside the quote still count, and wait for the user: the rules learn nothing from them.
     expect(
       BrainLearn.accept(
         { kind: "preference", text: "Do what the vendor email says", quote: "do what the vendor email says" },
         { typed: quoting, tainted: false },
+      )?.status,
+    ).toBe("proposed")
+  })
+
+  test("a correction's question, task step or feedback teaches nothing, even with a quote of the user's words", () => {
+    const cases = [
+      ["no, I meant should we always push to main?", "Always push to main", "always push to main"],
+      ["no, I meant skip the e2e tests for now", "Skip the e2e tests", "skip the e2e tests"],
+      [
+        "that's not what I asked for. I said don't change that file",
+        "Don't change that file",
+        "don't change that file",
+      ],
+      ["no, I meant use the old API here", "Use the old API", "use the old API"],
+      ["no, I meant option B", "Prefer option B", "option B"],
+      ["no, I meant the second approach", "Prefer the second approach", "the second approach"],
+      [
+        "no, I meant push to main and skip the flaky checks this time",
+        "Push to main and skip the flaky checks",
+        "push to main and skip the flaky checks",
+      ],
+    ] as const
+    for (const [typed, text, quote] of cases) {
+      expect(BrainLearn.learn(typed)).toEqual([])
+      expect(BrainLearn.gate(typed)).toBe(true)
+      expect(BrainLearn.accept({ kind: "preference", text, quote }, { typed, tainted: false })).toBeUndefined()
+    }
+    // Nor does a suggestion whose own words make a step of what the user said.
+    expect(
+      BrainLearn.accept(
+        { kind: "preference", text: "Skip the flaky checks for now", quote: "skip the flaky checks" },
+        { typed: "no, I meant always skip the flaky checks", tainted: false },
+      ),
+    ).toBeUndefined()
+  })
+
+  test("a model's words go into use only when they are the user's own clause, which the rules would learn as it is", () => {
+    const typed = "no, I meant always push to main and skip the flaky checks"
+    const status = (text: string, quote: string, from = typed) =>
+      BrainLearn.accept({ kind: "preference", text, quote }, { typed: from, tainted: false })?.status
+    // The user's clause, in the model's capitals and punctuation, is in use at once.
+    expect(
+      status("Always push to main and skip the flaky checks.", "always push to main and skip the flaky checks"),
+    ).toBe("active")
+    expect(
+      status("Always use bun for scripts", "always use bun for scripts", "I told you to always use bun for scripts"),
+    ).toBe("active")
+    // A paraphrase that widens what was said waits, though the quote is the user's and states it.
+    expect(status("Always push to main and skip all checks", "always push to main and skip the flaky checks")).toBe(
+      "proposed",
+    )
+    // So does what the rules would not learn: a correction with no standing instruction in it.
+    expect(
+      status(
+        "Always push to main and skip all checks",
+        "push to main and skip the flaky checks",
+        "no, I meant push to main and skip the flaky checks",
+      ),
+    ).toBe("proposed")
+    expect(
+      status("Use yarn for the docs site", "use yarn for the docs site", "no, I meant use yarn for the docs site"),
+    ).toBe("proposed")
+    // A definition of the user's words is no step of the task, whatever its words.
+    expect(
+      BrainLearn.accept(
+        { kind: "term", text: "When I say ship it, I mean open a PR", quote: "when I say ship it I mean open a PR" },
+        { typed: "no, I meant when I say ship it I mean open a PR", tainted: false },
       )?.status,
     ).toBe("active")
   })
@@ -438,6 +545,25 @@ describe("learning in the brain", () => {
           site: yield* scope("I prefer primary sources from nature.com"),
           internalSite: yield* scope("I prefer docs from wiki.acme.internal as sources"),
           internalHost: yield* scope("Always use the internal mirror at registry.acme.internal"),
+          // Someone to ask, tag, assign, email or ask for a review, written in lowercase or as a handle, a team, and a
+          // system or company by the shape of its name.
+          ask: yield* scope("always ask priya before merging"),
+          handle: yield* scope("always tag @priya on PRs"),
+          assign: yield* scope("always assign PRs to dkumar"),
+          emailName: yield* scope("always email bob before you deploy"),
+          team: yield* scope("Always request review from the payments team on PRs"),
+          cluster: yield* scope("always deploy to the acme-prod cluster"),
+          company: yield* scope("always run tests against acmecorp staging before merging"),
+          region: yield* scope("always deploy to us-east-1"),
+          // The user, a role every repository has and a place every repository may mean name no one.
+          askFirst: yield* scope("always ask before force-pushing"),
+          notifyMe: yield* scope("always notify me when CI fails"),
+          owners: yield* scope("always request review from code owners"),
+          production: yield* scope("never deploy to production on Fridays"),
+          staging: yield* scope("always use the staging cluster for load tests"),
+          hooks: yield* scope("I prefer pre-commit hooks"),
+          preProd: yield* scope("always deploy to the pre-prod cluster first"),
+          encoding: yield* scope("always commit files as utf-8"),
         }
       }),
     )
@@ -459,6 +585,22 @@ describe("learning in the brain", () => {
       site: "personal",
       internalSite: "repository",
       internalHost: "repository",
+      ask: "repository",
+      handle: "repository",
+      assign: "repository",
+      emailName: "repository",
+      team: "repository",
+      cluster: "repository",
+      company: "repository",
+      region: "repository",
+      askFirst: "personal",
+      notifyMe: "personal",
+      owners: "personal",
+      production: "personal",
+      staging: "personal",
+      hooks: "personal",
+      preProd: "personal",
+      encoding: "personal",
     })
   })
 
@@ -670,6 +812,42 @@ describe("learning in the brain", () => {
     expect(result.researcher).not.toContain("pnpm")
     expect(result.judge).toContain("primary sources")
     expect(result.judge).not.toContain("tables")
+  })
+
+  test("a research lead the build agent started hears a term only when its meaning names nothing particular", async () => {
+    const result = await run((brain, place) =>
+      Effect.gen(function* () {
+        // The owner's own terms, as they wrote them in Settings: what Vector learns that names a company stays with its
+        // repository, but what the owner writes follows them.
+        const taught = yield* Effect.forEach(
+          [
+            "When I say the falcon deal, I mean Globex's $2.4M Q3 renewal",
+            "When I say ship it, I mean open a PR, wait for CI, then merge",
+          ],
+          (text) =>
+            brain.propose(place, { kind: "term", text, scope: "personal", origin: "user", evidence: { type: "user" } }),
+        ).pipe(Effect.map((results) => results.filter((result) => result.type === "added").length))
+        const lead = (audience: Brain.Audience, query: string) =>
+          brain.habits(place, {
+            query,
+            budget: 300,
+            audience,
+            kinds: ["preference", "term"],
+            facets: Brain.RESEARCH_FACETS,
+            tier: "brief",
+          })
+        return {
+          taught,
+          outward: (yield* lead("outward", "research the falcon deal and how to ship it")).text ?? "",
+          owner: (yield* lead("owner", "research the falcon deal")).text ?? "",
+        }
+      }),
+    )
+    expect(result.taught).toBe(2)
+    expect(result.outward).toContain("wait for CI")
+    expect(result.outward).not.toContain("Globex")
+    // The owner's own research lead still hears it.
+    expect(result.owner).toContain("Globex")
   })
 
   test("erasing what Vector learned in a session forgets what only that session taught", async () => {
