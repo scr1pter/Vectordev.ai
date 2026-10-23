@@ -212,8 +212,8 @@ export const apply = Effect.fn("LocalSettings.apply")(function* (update: Update,
   Object.entries(update.pins ?? {}).forEach(([origin, pin]) => {
     if (pin) holds?.confirm(origin)
   })
-  // Config holds what the write loosened, as it holds any edit, and the owner confirmed exactly these lines. A change
-  // someone else made in the meantime stays held until it is confirmed too.
+  // Config holds what the write loosened, as it holds any edit, and the owner confirmed these lines and no others.
+  // A change someone else made in the meantime stays held until it is confirmed too.
   const held = Config.localPending()
   if (changes.length > 0 && held) {
     if (held.changes.some((line) => !changes.includes(line))) return refused("changed", CHANGED, held.changes)

@@ -24,12 +24,15 @@ const ASKS = new Set<LocalMode.Purpose>(["model-download", "tool-download", "plu
 export const localHandlers = HttpApiBuilder.group(InstanceHttpApi, "local", (handlers) =>
   Effect.gen(function* () {
     const holds = yield* LocalProbe.HoldsService
+    const config = yield* Config.Service
     // The app and the terminal UI reload GET /local on local.updated, and tell the user about a block on
     // local.blocked. Both go to every client of this server, like the policy they describe.
     yield* Effect.acquireRelease(Effect.sync(announce), (stop) => Effect.sync(stop))
 
+    // The policy as this repository's instance reports it: with a note when the repository's own config has a local
+    // block, which never applies.
     const get = Effect.fn("LocalHttpApi.get")(function* () {
-      return LocalSettings.status()
+      return LocalSettings.status(yield* config.localPolicy())
     })
 
     const update = Effect.fn("LocalHttpApi.update")(function* (ctx: { payload: LocalSettings.Update }) {

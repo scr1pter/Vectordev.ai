@@ -378,6 +378,18 @@ describe("the Local API", () => {
     }
   })
 
+  test("GET /local says so when the repository's own config has a local block, which never applies", async () => {
+    await using repository = await tmpdir({ git: true, config: { local: { enabled: false, web: "ask" } } as never })
+    const url = new URL("/local", listener.url)
+    url.searchParams.set("directory", repository.path)
+    const status = (await (await fetch(url, { headers: owner, keepalive: false })).json()) as {
+      policy: { warnings: string[] }
+    }
+    expect(status.policy.warnings).toContain(
+      "Ignored the local block in this repository's config: only your user config and your company's policy can set Vector Local.",
+    )
+  })
+
   test("with Web access None, reading a typed internet server is refused before anything connects", async () => {
     await turnOn({ web: "none" })
     const read = await json(await send("POST", "/local/probe", { url: "https://models.example.com/v1" }))
