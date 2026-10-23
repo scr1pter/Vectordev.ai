@@ -39,7 +39,10 @@ export const make = (client: HttpClient.HttpClient) =>
         EgressAttribution.run(attribution ?? {}, () =>
           source ? Egress.fetch(source, input, init, inner) : inner(input, init),
         )) as typeof globalThis.fetch
-      fetch.preconnect = (provided ?? globalThis.fetch).preconnect
+      // Bun's fetch has a preconnect the wrapped one keeps; Node's types have none, so it is copied untyped.
+      Object.assign(fetch, {
+        preconnect: ((provided ?? globalThis.fetch) as { readonly preconnect?: unknown }).preconnect,
+      })
       return yield* effect.pipe(Effect.provideService(FetchHttpClient.Fetch, fetch))
     }),
   )
