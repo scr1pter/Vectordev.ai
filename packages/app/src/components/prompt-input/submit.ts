@@ -39,6 +39,8 @@ import { modelDisplayName } from "@/utils/provider-brand"
 import { FREE_MODEL_POLICY_NOTICE, firstFreeModelPolicyNotice } from "@/utils/free-model-policy-notice"
 import { freeModelMayTrain, type FreeModelChoice } from "@vectordevai/core/free-model-choice"
 import { cachedSpendPolicy, promptRunBudget } from "@/features/economics/spend-limits-api"
+import { AGENT as RESEARCH, sizeOf, type Depth } from "@/features/research/research-model"
+import type { Research } from "@vectordevai/schema/research"
 
 type PendingPrompt = {
   abort: AbortController
@@ -63,9 +65,13 @@ export function resolveSubmissionAgent(input: {
 export function resolveExecutionAgent(input: {
   planMode: boolean
   quickRequested: boolean
+  /** The composer's Deep research mode: every message goes to the research agent, a greeting aside. */
+  researchRequested?: boolean
   difficulty: TaskDifficulty
   current: string
 }) {
+  // A greeting in Deep research still takes the quick lane, so "hi" plans no research and recalls nothing.
+  if (input.researchRequested) return input.difficulty === "trivial" ? "quick" : RESEARCH
   if (input.planMode) return input.current
   if (input.quickRequested) return "quick"
   // A greeting, thanks or a farewell takes the quick lane from here on every agent, with or without the judge, so an
@@ -74,7 +80,9 @@ export function resolveExecutionAgent(input: {
   // still goes on as Work. "yes" or "continue", a bare "ok" after a plan from Plan mode, and anything sent while work
   // waits on the user, are not trivial: they continue the work before them, which the engine sizes.
   if (input.difficulty === "trivial") return "quick"
-  return input.current === "quick" ? "build" : input.current
+  // A session can remember the quick lane or the research agent from its last message; outside their modes neither
+  // takes ordinary work.
+  return input.current === "quick" || input.current === RESEARCH ? "build" : input.current
 }
 
 export type FollowupDraft = {
@@ -91,7 +99,10 @@ export type FollowupDraft = {
   judge?: "thorough" | "changes"
   llmJudge?: boolean
   // The composer's Quick mode: the person picked the quick lane, so the engine answers there and never escalates it.
-  size?: "chat"
+  // In Deep research the Depth chip sets it: Focused is Work and Deep is Thorough.
+  size?: "chat" | "standard" | "thorough"
+  // Deep research's Sources chip: where the run may look, which the plan the model proposes keeps.
+  research?: { scope?: Research.Scope }
 }
 
 type FollowupSendInput = {
@@ -136,6 +147,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
   const agent = resolveExecutionAgent({
     planMode: input.draft.agent === "plan",
     quickRequested: input.draft.agent === "quick",
+    researchRequested: input.draft.agent === RESEARCH,
     difficulty,
     current: input.draft.agent,
   })
@@ -202,16 +214,19 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
   }
 
   const messageID = input.messageID ?? Identifier.ascending("message")
-  const baseParts = buildRequestParts({
-    prompt: input.draft.prompt,
-    context: input.draft.context,
-    images,
-    text,
-    sessionID: input.draft.sessionID,
-    messageID,
-    sessionDirectory: input.draft.sessionDirectory,
-    syntheticSlots: SYNTHETIC_SLOTS,
-  })
+  const baseParts = withResearchOptions(
+    buildRequestParts({
+      prompt: input.draft.prompt,
+      context: input.draft.context,
+      images,
+      text,
+      sessionID: input.draft.sessionID,
+      messageID,
+      sessionDirectory: input.draft.sessionDirectory,
+      syntheticSlots: SYNTHETIC_SLOTS,
+    }),
+    agent === RESEARCH ? input.draft.research : undefined,
+  )
 
   const message: Message = {
     id: messageID,
@@ -256,8 +271,9 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
     // be sent again on every request, while the agent already knows the code it has read; a greeting needs none.
     const history = input.sync.data.message?.[input.draft.sessionID] ?? []
     const replied = history.some((message) => message.role === "assistant")
+    // Deep research reads the repository through its own tools when its scope takes the brain and files.
     const preparation =
-      difficulty === "trivial" || replied
+      difficulty === "trivial" || replied || agent === RESEARCH
         ? undefined
         : await globalThis.window?.api?.prepareAgentTask?.(input.draft.sessionDirectory, text).catch(() => undefined)
     const syntheticText = [
@@ -280,7 +296,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       executionMode: input.draft.executionMode,
       ...(budget ? { budget } : {}),
       ...(judge ? { judge } : {}),
-      ...(input.draft.size && agent === "quick" ? { size: input.draft.size } : {}),
+      ...(input.draft.size && sized(agent, input.draft.size) ? { size: input.draft.size } : {}),
     })
     return true
   } catch (err) {
@@ -291,6 +307,32 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
     throw err
   }
 }
+
+// The size a draft carries goes with the lane it was picked for: Chat with Quick, Work or Thorough with Deep research.
+function sized(agent: string, size: NonNullable<FollowupDraft["size"]>) {
+  if (agent === "quick") return size === "chat"
+  return agent === RESEARCH && size !== "chat"
+}
+
+/**
+ * The typed text carries Deep research's Sources chip as `vector.research`, where research_plan reads the scope the
+ * user chose (the CLI's --scope goes the same way). The echo carries it too, so the two stay the same part.
+ */
+function withResearchOptions(built: ReturnType<typeof buildRequestParts>, research: FollowupDraft["research"]) {
+  if (!research?.scope) return built
+  const metadata = { [RESEARCH_OPTIONS]: { scope: research.scope } }
+  const [typed, ...rest] = built.requestParts
+  const [echo, ...echoed] = built.optimisticParts
+  if (typed?.type !== "text" || echo?.type !== "text") return built
+  return {
+    ...built,
+    requestParts: [{ ...typed, metadata: { ...typed.metadata, ...metadata } }, ...rest],
+    optimisticParts: [{ ...echo, metadata: { ...echo.metadata, ...metadata } }, ...echoed],
+  }
+}
+
+/** Where the engine reads `vector run --research`'s choices and the composer's (engine `ResearchRun.OPTIONS`). */
+const RESEARCH_OPTIONS = "vector.research"
 
 type PromptSubmitInput = {
   prompt: ReturnType<typeof usePrompt>
@@ -313,7 +355,10 @@ type PromptSubmitInput = {
   onQueue?: (draft: FollowupDraft) => boolean | void
   onAbort?: () => void
   onSubmit?: () => void
-  executionMode?: Accessor<"normal" | "quick" | "fast">
+  executionMode?: Accessor<"normal" | "quick" | "fast" | "research">
+  /** Deep research's Depth and Sources chips. */
+  researchDepth?: Accessor<Depth>
+  researchScope?: Accessor<Research.Scope>
   llmJudge?: Accessor<boolean>
   judgeScope?: Accessor<"thorough" | "changes">
   autoModelRouting?: Accessor<boolean>
@@ -549,9 +594,12 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     const agent = resolveExecutionAgent({
       planMode: isPlanMode,
       quickRequested: requestedExecutionMode === "quick",
+      researchRequested: requestedExecutionMode === "research",
       difficulty,
       current: resolvedAgent,
     })
+    const researchSize = agent === RESEARCH ? sizeOf(input.researchDepth?.() ?? "auto") : undefined
+    const researchScope = agent === RESEARCH ? input.researchScope?.() : undefined
 
     if (!(await workspaceAvailable())) return
     // Before anything is created or sent: the draft stays in the editor if the user does not accept.
@@ -678,6 +726,8 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       executionMode,
       ...(judge ? { judge } : {}),
       ...(requestedExecutionMode === "quick" && agent === "quick" ? { size: "chat" as const } : {}),
+      ...(researchSize ? { size: researchSize } : {}),
+      ...(researchScope ? { research: { scope: researchScope } } : {}),
     }
 
     const clearInput = () => {

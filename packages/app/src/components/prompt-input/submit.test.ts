@@ -23,7 +23,12 @@ const promoted: Array<{ directory: string; sessionID: string }> = []
 const sentShell: string[] = []
 const sentPrompts: Array<{
   directory: string
-  input: { executionMode?: "normal" | "fast"; agent?: string }
+  input: {
+    executionMode?: "normal" | "fast"
+    agent?: string
+    size?: string
+    parts?: Array<{ type: string; text?: string; metadata?: Record<string, unknown> }>
+  }
 }> = []
 const syncedDirectories: string[] = []
 const promotedDrafts: Array<{ draftID: string; server: string; sessionId: string }> = []
@@ -87,7 +92,7 @@ const clientFor = (directory: string) => {
         return { data: undefined }
       },
       prompt: async () => ({ data: undefined }),
-      promptAsync: async (input: { executionMode?: "normal" | "fast"; agent?: string }) => {
+      promptAsync: async (input: (typeof sentPrompts)[number]["input"]) => {
         sentPrompts.push({ directory, input })
         return { data: undefined }
       },
@@ -488,6 +493,57 @@ describe("prompt submit worktree selection", () => {
     })
   })
 
+  const researchSubmit = (depth: "auto" | "focused" | "deep", scope?: "web" | "web+brain" | "brain") =>
+    createPromptSubmit({
+      prompt,
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      executionMode: () => "research",
+      researchDepth: () => depth,
+      ...(scope ? { researchScope: () => scope } : {}),
+      onSubmit: () => undefined,
+    })
+
+  test("sends Deep research to the research agent, sized by the Depth chip, with the Sources chip's scope", async () => {
+    params = { id: "session-1" }
+    for (const [depth, size] of [
+      ["focused", "standard"],
+      ["deep", "thorough"],
+    ] as const) {
+      await researchSubmit(depth, "brain").handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      // Research is an agent on the message, not an execution mode of its own.
+      expect(sentPrompts.at(-1)?.input).toMatchObject({ agent: "research", executionMode: "normal", size })
+      expect(sentPrompts.at(-1)?.input.parts?.[0]).toMatchObject({
+        type: "text",
+        text: "ls",
+        metadata: { "vector.research": { scope: "brain" } },
+      })
+      // The echo is the same part, so it carries the scope too.
+      expect(optimistic.at(-1)?.message.agent).toBe("research")
+    }
+  })
+
+  test("leaves the size to Vector at Auto, and sends no scope when the chip has none", async () => {
+    params = { id: "session-1" }
+    await researchSubmit("auto").handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(sentPrompts.at(-1)?.input).toMatchObject({ agent: "research", executionMode: "normal" })
+    expect(sentPrompts.at(-1)?.input.size).toBeUndefined()
+    expect(sentPrompts.at(-1)?.input.parts?.[0]?.metadata).toBeUndefined()
+  })
+
   test("seeds new sessions before optimistic prompts are added", async () => {
     const submit = createPromptSubmit({
       prompt,
@@ -714,6 +770,43 @@ describe("follow-up optimistic echo", () => {
     expect((await send({ prompt: [{ type: "text", content: "hi", start: 0, end: 2 }] })).at(-1)?.agent).toBe("quick")
   })
 
+  test("in Deep research sends a greeting to the quick lane, with no research size, and research to the research agent", async () => {
+    const hi = await send({
+      agent: "research",
+      size: "thorough",
+      research: { scope: "web" },
+      prompt: [{ type: "text", content: "hi", start: 0, end: 2 }],
+    })
+    // "hi" plans no research: one small request on the quick lane, which takes no Work or Thorough size.
+    expect(hi.at(-1)).toMatchObject({ kind: "request", agent: "quick" })
+    expect(hi.at(-1)?.size).toBeUndefined()
+    expect(hi.at(-1)?.parts[0]).not.toHaveProperty("metadata")
+    const question = await withDesktopContext(() =>
+      send({
+        agent: "research",
+        size: "standard",
+        research: { scope: "web+brain" },
+        prompt: [{ type: "text", content: text, start: 0, end: text.length }],
+      }),
+    )
+    expect(question.at(-1)).toMatchObject({ kind: "request", agent: "research", size: "standard" })
+    // Research reads the repository through its own tools, so the desktop's file map is not added.
+    expect(question.at(-1)?.parts.filter((part) => part.synthetic)).toHaveLength(0)
+    const [echo, request] = question.map((step) => step.parts[0] as SentPart & { metadata?: unknown })
+    expect(request?.metadata).toEqual({ "vector.research": { scope: "web+brain" } })
+    expect(echo?.metadata).toEqual(request?.metadata)
+  })
+
+  test("never sends a research size to an agent outside Deep research", async () => {
+    // A draft queued in Deep research keeps its size only on the research agent; Quick's Chat size only on quick.
+    expect((await send({ agent: "build", size: "thorough" })).at(-1)?.size).toBeUndefined()
+    expect((await send({ agent: "research", size: "chat" })).at(-1)?.size).toBeUndefined()
+    expect(
+      (await send({ agent: "quick", size: "chat", prompt: [{ type: "text", content: "hi", start: 0, end: 2 }] })).at(-1)
+        ?.size,
+    ).toBe("chat")
+  })
+
   test("sends exactly the echoed parts when nothing is added", async () => {
     expectOneEchoBeforeRequest(await send(), 0)
   })
@@ -833,6 +926,47 @@ describe("submission agent selection", () => {
   test("repairs a stale quick agent for ordinary work", () => {
     expect(
       resolveExecutionAgent({ planMode: false, quickRequested: false, difficulty: "standard", current: "quick" }),
+    ).toBe("build")
+  })
+
+  test("Deep research sends work to the research agent and a greeting to the quick lane", () => {
+    for (const difficulty of ["simple", "standard", "complex"] as const)
+      expect(
+        resolveExecutionAgent({
+          planMode: false,
+          quickRequested: false,
+          researchRequested: true,
+          difficulty,
+          current: "build",
+        }),
+      ).toBe("research")
+    expect(
+      resolveExecutionAgent({
+        planMode: false,
+        quickRequested: false,
+        researchRequested: true,
+        difficulty: "trivial",
+        current: "build",
+      }),
+    ).toBe("quick")
+    // The mode is the user's pick for this message, so Plan mode's agent does not take it.
+    expect(
+      resolveExecutionAgent({
+        planMode: true,
+        quickRequested: false,
+        researchRequested: true,
+        difficulty: "standard",
+        current: "plan",
+      }),
+    ).toBe("research")
+  })
+
+  test("outside Deep research, a session that remembers the research agent sends work to build", () => {
+    expect(
+      resolveExecutionAgent({ planMode: false, quickRequested: false, difficulty: "standard", current: "research" }),
+    ).toBe("build")
+    expect(
+      resolveExecutionAgent({ planMode: false, quickRequested: false, difficulty: "standard", current: "build" }),
     ).toBe("build")
   })
 })
