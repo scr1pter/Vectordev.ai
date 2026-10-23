@@ -2705,16 +2705,18 @@ const layer = Layer.effect(
         // in the background.
         const later = yield* learnRun(session, taught).pipe(
           Effect.catchCause((cause) =>
-            Effect.logWarning("learning failed", { error: Cause.squash(cause) }).pipe(Effect.as(Effect.void)),
+            Effect.logWarning("learning failed", { error: Cause.squash(cause) }).pipe(Effect.as(undefined)),
           ),
         )
-        const learner = yield* later.pipe(Effect.catchCause(() => Effect.void), Effect.forkIn(background.scope))
-        learners.set(sessionID, learner)
-        background.titles.add(learner)
-        learner.addObserver(() => {
-          background.titles.delete(learner)
-          if (learners.get(sessionID) === learner) learners.delete(sessionID)
-        })
+        if (later) {
+          const learner = yield* later.pipe(Effect.catchCause(() => Effect.void), Effect.forkIn(background.scope))
+          learners.set(sessionID, learner)
+          background.titles.add(learner)
+          learner.addObserver(() => {
+            background.titles.delete(learner)
+            if (learners.get(sessionID) === learner) learners.delete(sessionID)
+          })
+        }
         // The repository's tracked docs are read beside it, and what documents are linked to is checked against the
         // code, each at most every 10 minutes per repository.
         yield* instruction
@@ -2734,13 +2736,13 @@ const layer = Layer.effect(
     // an invited guest is in, a subagent or Vector's own helpers, whose messages Vector or another agent wrote. Each
     // message keeps the per-message cap and the facets the user turned off; what a short message says goes into use at
     // once and the rest waits for a second sighting. A correction the rules found nothing in goes to the optional model
-    // learner, returned here to run in the background. Each message's writes are announced for the app's "Learned" chip.
+    // learner, returned to run in the background (nothing when it has no work). Each message's writes are announced for
+    // the app's "Learned" chip.
     const learnRun = Effect.fn("SessionPrompt.learnRun")(function* (
       session: Session.Info,
       taught: ReadonlyMap<MessageID, TaskSize.Tier>,
     ) {
-      const none = Effect.void
-      if (session.parentID || session.internal || ![...taught.values()].some((tier) => tier !== "chat")) return none
+      if (session.parentID || session.internal || ![...taught.values()].some((tier) => tier !== "chat")) return undefined
       const msgs = yield* sessions.messages({ sessionID: session.id })
       const requests = msgs.flatMap((message, index) => {
         const tier = taught.get(message.info.id)
@@ -2750,10 +2752,10 @@ const layer = Layer.effect(
       })
       // Most messages teach nothing, and finding that out is plain code: nothing else is read for them.
       if (requests.every((request) => BrainLearn.learn(request.typed).length === 0 && !BrainLearn.gate(request.typed)))
-        return none
-      if (yield* guests.marked(session.id)) return none
+        return undefined
+      if (yield* guests.marked(session.id)) return undefined
       const settings = yield* brain.learnSettings()
-      if (!settings.learning) return none
+      if (!settings.learning) return undefined
       const tainted = SessionMemory.taint(msgs) !== undefined
       const place = yield* instruction.place()
       const write = Effect.fnUntraced(function* (
@@ -2789,7 +2791,7 @@ const layer = Layer.effect(
       ).pipe(Effect.map((all) => all.flat()))
       const last = corrections.at(-1)
       const user = last?.message.info
-      if (!last || user?.role !== "user") return none
+      if (!last || user?.role !== "user") return undefined
       return Effect.gen(function* () {
         const learned = yield* modelLearn({
           session,

@@ -1682,7 +1682,7 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     return { type: "added" as const, entry, ...extra }
   })
 
-  // The term in use for the same words, in this repository or the user's own, unless it says exactly this already.
+  // The term in use for the same words, in this repository or the user's own, unless it already says these words.
   const sameTerm = Effect.fnUntraced(function* (place: Place, key: string, hash: string) {
     return yield* db
       .select()
