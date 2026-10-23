@@ -83,6 +83,9 @@ export type Run = {
   readonly loops: ReadonlyMap<SessionID, Loop>
   // Off for a root that polices its own loops; see ignoreLoops.
   readonly loopRules: boolean
+  // Set while the budget is begin()'s fallback, which no one has armed over since, with every budget tighten() has
+  // held it to: what refall() may move to another fallback. Unset once the owner arms a budget of their own.
+  readonly fallback?: { readonly tightened?: RunBudget.Info }
 }
 
 export type Step = {
@@ -345,6 +348,10 @@ export interface Interface {
   readonly tighten: (sessionID: SessionID, budget: RunBudget.Info) => Effect.Effect<void>
   // Starts a run for a root session with the armed budget, else `fallback`. A no-op while the run is active.
   readonly begin: (rootID: SessionID, fallback?: RunBudget.Info) => Effect.Effect<void>
+  // Moves the active run of `sessionID`'s root from begin()'s fallback to `fallback`, held to every budget tighten()
+  // gave it, such as research's default caps moving from Focused's to Deep's. A run the owner armed a budget for keeps
+  // that budget, and a root with no run going is left alone.
+  readonly replaceFallback: (sessionID: SessionID, fallback: RunBudget.Info) => Effect.Effect<void>
   // Turns the loop rules off for a session that polices itself, such as a Vectorscope specialist: it has its own
   // step, cost and time limits, never edits files (so nothing would ever reset the loop window), and must account for
   // every stop it gets. Spend, step and cap checks still apply, in its own run or the run it is linked to.
@@ -477,9 +484,13 @@ const layer = Layer.effect(
           if (!ledger || key === undefined)
             return { ...current, armed: new Map(current.armed).set(rootID, { budget, tighten: false }) }
           const warned = ledger.run.warned && ledger.run.budget.usd === budget.usd
+          // The owner's own budget: no fallback moves it again.
           return {
             ...current,
-            ledgers: new Map(current.ledgers).set(key, { ...ledger, run: { ...ledger.run, budget, warned } }),
+            ledgers: new Map(current.ledgers).set(key, {
+              ...ledger,
+              run: { ...ledger.run, budget, warned, fallback: undefined },
+            }),
           }
         })
       }),
@@ -491,9 +502,13 @@ const layer = Layer.effect(
           if (ledger && key !== undefined) {
             const next = tighter(ledger.run.budget, budget)
             const warned = ledger.run.warned && ledger.run.budget.usd === next.usd
+            const fallback = ledger.run.fallback && { tightened: tighter(ledger.run.fallback.tightened, budget) }
             return {
               ...current,
-              ledgers: new Map(current.ledgers).set(key, { ...ledger, run: { ...ledger.run, budget: next, warned } }),
+              ledgers: new Map(current.ledgers).set(key, {
+                ...ledger,
+                run: { ...ledger.run, budget: next, warned, fallback },
+              }),
             }
           }
           const held = current.armed.get(rootID)
@@ -528,8 +543,25 @@ const layer = Layer.effect(
               kind: "run",
               id: `run:${current.next}`,
               lineage: current.next,
-              run: start(rootID, budget, !current.quiet.has(rootID)),
+              run: {
+                ...start(rootID, budget, !current.quiet.has(rootID)),
+                ...(held && !held.tighten ? {} : { fallback: held ? { tightened: held.budget } : {} }),
+              },
             }),
+          }
+        })
+      }),
+      replaceFallback: Effect.fn("SpendGuard.replaceFallback")(function* (sessionID, fallback) {
+        yield* Ref.update(state, (current) => {
+          const key = current.active.get(rootIn(current, sessionID))
+          const ledger = key === undefined ? undefined : current.ledgers.get(key)
+          if (!ledger || key === undefined || !ledger.run.fallback) return current
+          const tightened = ledger.run.fallback.tightened
+          const budget = tightened ? tighter(fallback, tightened) : fallback
+          const warned = ledger.run.warned && ledger.run.budget.usd === budget.usd
+          return {
+            ...current,
+            ledgers: new Map(current.ledgers).set(key, { ...ledger, run: { ...ledger.run, budget, warned } }),
           }
         })
       }),

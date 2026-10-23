@@ -78,13 +78,7 @@ export function found(input: {
   const quote = normalize(input.quote)
   if (quote.length < MIN_CHARS) return { ok: false, reason: "short", message: SHORT }
   const normal = input.parts.map((part) => normalize(part.text))
-  // Where each part starts in the parts joined by one space.
-  const state = { at: 0 }
-  const starts = normal.map((text) => {
-    const start = state.at
-    state.at += text.length + 1
-    return start
-  })
+  const starts = offsets(normal)
   const at = normal.join(" ").indexOf(quote)
   if (at < 0)
     return { ok: false, reason: "missing", message: missing(input.source, closest(input.parts, normal, quote)) }
@@ -96,6 +90,39 @@ export function found(input: {
     ...(part.page === undefined ? {} : { page: part.page }),
     quote: span(input.parts, starts, at, at + quote.length),
   }
+}
+
+/**
+ * The source's own words around a quote, `around` characters of them on either side, with their spacing made single
+ * spaces: the passage a reader judges the quote in. The quote is found as `found` finds it, in the normalised text,
+ * so it may cross a line break or a chunk. Undefined when the parts do not hold it.
+ */
+export function passage(input: { readonly parts: readonly Part[]; readonly quote: string; readonly around: number }) {
+  const quote = normalize(input.quote)
+  const normal = input.parts.map((part) => normalize(part.text))
+  const at = quote ? normal.join(" ").indexOf(quote) : -1
+  if (at < 0) return undefined
+  const starts = offsets(normal)
+  const first = starts.findLastIndex((start) => start <= at)
+  const last = starts.findLastIndex((start) => start < at + quote.length)
+  const raw = input.parts.map((part) => part.text)
+  // Where each part starts in the source's own text joined by one space.
+  const own = offsets(raw)
+  const from = own[first]! + opening(raw[first]!, at - starts[first]!)
+  const to = own[last]! + closing(raw[last]!, at + quote.length - starts[last]!)
+  return WebFence.clean(raw.join(" ").slice(Math.max(0, from - input.around), to + input.around))
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+// Where each text starts in the texts joined by one space.
+function offsets(texts: readonly string[]) {
+  const state = { at: 0 }
+  return texts.map((text) => {
+    const start = state.at
+    state.at += text.length + 1
+    return start
+  })
 }
 
 /** Whether the quote says the claim, the same way round. False makes the note a paraphrase. */
