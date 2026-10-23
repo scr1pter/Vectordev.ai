@@ -431,6 +431,10 @@ test("the report card cites with chips that show their quote and open the source
   await expect(badge).toHaveAttribute("data-level", "high")
   await expect(badge).toHaveAttribute("title", /^Vector's estimate\./)
 
+  // Each research call is a one-line row: what it did, in a few words.
+  for (const text of ["Research plan", "approved, focused", "Search · SearXNG", "1 result", "Read S1", "Note N1"])
+    await expect(page.getByText(text, { exact: true }).first()).toBeVisible()
+
   await chip.click()
   const sources = page.locator('[data-component="research-sources"]')
   await expect(sources).toBeVisible()
