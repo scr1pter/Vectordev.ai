@@ -254,8 +254,7 @@ function hiddenSubstitution(root: Node, zsh: boolean) {
     opened.add(start + node.text.length - 1)
     backticks.push([start, start + node.text.length])
   }
-  const within = (ranges: [number, number][], index: number) =>
-    ranges.some(([start, end]) => index >= start && index < end)
+  const within = (ranges: [number, number][], index: number) => ranges.some(([start, end]) => index >= start && index < end)
   // zsh runs code through syntax the bash grammar does not model: parameter flags (`${(e)X}`) and glob qualifiers
   // (`*(e:...:)`, `*(+fn)`). Outside quotes, a parenthesised group stuck to a word is read as one; inside double
   // quotes only the flags are live.
@@ -891,17 +890,15 @@ const grammar = (wasm: () => Promise<{ default: string }>) =>
     parser.setLanguage(await Language.load(resolveWasm(asset)))
     return parser
   })
-const bashParser = grammar(
-  () =>
-    import("tree-sitter-bash/tree-sitter-bash.wasm" as string, {
-      with: { type: "wasm" },
-    }),
+const bashParser = grammar(() =>
+  import("tree-sitter-bash/tree-sitter-bash.wasm" as string, {
+    with: { type: "wasm" },
+  }),
 )
-const psParser = grammar(
-  () =>
-    import("tree-sitter-powershell/tree-sitter-powershell.wasm" as string, {
-      with: { type: "wasm" },
-    }),
+const psParser = grammar(() =>
+  import("tree-sitter-powershell/tree-sitter-powershell.wasm" as string, {
+    with: { type: "wasm" },
+  }),
 )
 
 export const ShellTool = Tool.define(
@@ -1017,9 +1014,7 @@ export const ShellTool = Tool.define(
         // open. A name that is only an expansion (`$file`) may be anything, as `cat $file` may be in bash.
         // bash's brace expansion (`.e{n,}v`) and zsh's glob syntax (`.e(n|x)v`, `.env(N)`) open names a plain wildcard
         // would, so each group counts as one.
-        const named = win
-          ? file.name
-          : file.name.replace(/\{[^{}]*(?:,|\.\.)[^{}]*\}/g, "*").replace(/\([^()]*\)/g, "*")
+        const named = win ? file.name : file.name.replace(/\{[^{}]*(?:,|\.\.)[^{}]*\}/g, "*").replace(/\([^()]*\)/g, "*")
         const glob = named.replace(expansion, "*")
         if (!file.name.replace(expansion, "") || !/[*?[]/.test(glob)) return yield* linkedEnv(file.dir + file.name)
         const folder = /[*?[]/.test(file.dir) ? undefined : yield* wordPath(file.dir || ".", cwd, ps, shell)
@@ -1233,9 +1228,7 @@ export const ShellTool = Tool.define(
         if (root.hasError || hiddenSubstitution(root, Shell.name(shell) === "zsh")) unread(scan, root.text)
         for (const node of root.descendantsOfType("redirected_statement")) {
           if (!node) continue
-          if (
-            node.namedChildren.every((child) => child?.type === "file_redirect" || child?.type === "heredoc_redirect")
-          )
+          if (node.namedChildren.every((child) => child?.type === "file_redirect" || child?.type === "heredoc_redirect"))
             unread(scan, node.text)
         }
       }
