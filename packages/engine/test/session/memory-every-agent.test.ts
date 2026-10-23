@@ -785,11 +785,17 @@ it.instance(
       const llm = yield* TestLLMServer
       const child = yield* subagent("thorough", "research")
       yield* llm.text("Done.")
-      const [body] = yield* send({ sessionID: child.id, agent: "research", text: `Research ${QUESTION}` })
+      // Its task names the owner's decision about pull requests, which is no research facet, so it is not heard.
+      const [body] = yield* send({
+        sessionID: child.id,
+        agent: "research",
+        text: `Research ${QUESTION}, and how to review migrations before handlers in every pull request`,
+      })
       const recall = blocks(body!, "vector_memory_recall").join("\n")
       expect(recall).toContain(FORMAT)
       expect(recall).not.toContain(TOOLING)
       expect(body).not.toContain(TOOLING)
+      expect(body).not.toContain(DECISION)
       expect(body).not.toContain("badge number")
       // A subagent of the owner's own, with the same task, hears their tooling too.
       const general = yield* subagent("thorough")

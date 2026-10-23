@@ -133,7 +133,8 @@ export function audienceOf(session: Pick<Session.Info, "internal" | "parentID">,
  * hears preferences about format, sources and style (no vocabulary: the lead resolves the owner's words when it writes
  * sub-questions, and a private code name would otherwise reach queries), and the research judge the sources facet
  * alone. A Vectorscope reviewer hears no terms, and of a pull request Vector cannot trust only preferences and review
- * notes. A research lead the build agent started hears the research facets.
+ * notes. A research lead the build agent started hears the research facets: preferences and terms of them, and no
+ * decision or lesson, which has no facet and is no part of how the owner researches.
  */
 export function habitsOf(
   session: Pick<Session.Info, "internal" | "parentID">,
@@ -145,7 +146,7 @@ export function habitsOf(
   if (session.internal?.startsWith(VECTORSCOPE))
     return { kinds: scope?.trust === "trusted" ? [...Brain.HABIT_KINDS, "review"] : ["preference", "review"] }
   if (agent === ResearchRun.LEAD && session.parentID)
-    return { kinds: [...Brain.HABIT_KINDS, "term"], facets: Brain.RESEARCH_FACETS }
+    return { kinds: ["preference", "term"], facets: Brain.RESEARCH_FACETS }
   return { kinds: [...Brain.HABIT_KINDS, "term"] }
 }
 
