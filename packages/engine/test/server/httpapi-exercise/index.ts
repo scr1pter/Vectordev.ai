@@ -857,6 +857,13 @@ const scenarios: Scenario[] = [
     }))
     .json(400, object, "status"),
   http.protected
+    .post("/memory/posting-check", "memory.posting.check")
+    .at((ctx) => ({ path: "/memory/posting-check", headers: ctx.headers(), body: { parts: ["Fixed the retry loop."], typed: false } }))
+    .json(200, (body) => {
+      object(body)
+      check(body.status === "clean", "text that repeats nothing of the owner's memory posts as it is")
+    }),
+  http.protected
     .get("/memory/knowledge", "memory.knowledge")
     .at((ctx) => ({ path: "/memory/knowledge?ids=rnone,dnone", headers: ctx.headers() }))
     .json(200, (body) => check(Array.isArray(body) && body.length === 0, "ids nothing holds give no cards")),
