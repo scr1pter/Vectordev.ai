@@ -524,7 +524,8 @@ await new Promise((resolve, reject) => process.stdout.write(${method === "exitCo
     // On Windows cross-spawn reports exit status 1 from a command it did not resolve itself, which is every command
     // run under a shell (cmd's `dir *.log` finding nothing, a failing test run), as ENOENT: the child emits error in
     // place of exit. Every child spawned here does the same, so the spawner meets it on any platform. The child exits
-    // while a process it started still holds its output open, so the error always arrives before the output ends.
+    // while a process it started still holds its output open, so the error always arrives before the output ends. That
+    // process is detached: on Windows libuv kills a child that is not when its parent exits.
     fx.live(
       "keeps the output and exit status of a child whose exit is reported as an error",
       Effect.gen(function* () {
@@ -552,7 +553,7 @@ await new Promise((resolve, reject) => process.stdout.write(${method === "exitCo
               else Reflect.deleteProperty(proto, "emit")
             }),
         )
-        const code = `require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => console.log(\\'late\\'), 500)'], { stdio: ['ignore', 'inherit', 'inherit'] }).unref(); console.log('early'); process.exit(1)`
+        const code = `require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => console.log(\\'late\\'), 500)'], { stdio: ['ignore', 'inherit', 'inherit'], detached: true }).unref(); console.log('early'); process.exit(1)`
         const handle = yield* ChildProcess.make(`"${process.execPath}" -e "${code}"`, [], { shell: true })
         const [output, exit] = yield* Effect.all([decodeByteStream(handle.all), handle.exitCode], {
           concurrency: 2,
