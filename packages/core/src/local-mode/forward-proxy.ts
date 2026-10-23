@@ -177,13 +177,7 @@ function create(decide: Decide, options: Options) {
             if (current.upstream === upstream) client.destroy()
             return
           }
-          // A refusal the network guard made after a lookup reads as one, not as an unreachable host.
-          const blocked = error instanceof Error && error.name === "EgressBlocked"
-          refuse(client, {
-            status: blocked ? 403 : 502,
-            reason: blocked ? "Forbidden" : "Bad Gateway",
-            message: blocked ? error.message : `Could not reach ${destination.host}.`,
-          })
+          refuse(client, unreachable(error, destination.host))
         })
       }
       Promise.resolve()
@@ -192,6 +186,8 @@ function create(decide: Decide, options: Options) {
           (route) => (route.refuse ? refuse(client, route.refuse) : relay(route.connect)),
           () => refuse(client, { status: 502, reason: "Bad Gateway", message: `Could not reach ${destination.host}.` }),
         )
+        // A guard that refuses the connection as it is made throws there, before the socket exists to report it.
+        .catch((error: unknown) => refuse(client, unreachable(error, destination.host)))
     }
     // A client that never finishes its first request would hold its connection open; one with the secret has sent it
     // in that request.
@@ -218,6 +214,17 @@ function create(decide: Decide, options: Options) {
           }),
       }
     },
+  }
+}
+
+// Why an upstream could not be reached. A refusal the network guard made after a lookup reads as one, not as an
+// unreachable host.
+function unreachable(error: unknown, host: string): Refusal {
+  const blocked = error instanceof Error && error.name === "EgressBlocked"
+  return {
+    status: blocked ? 403 : 502,
+    reason: blocked ? "Forbidden" : "Bad Gateway",
+    message: blocked ? error.message : `Could not reach ${host}.`,
   }
 }
 
