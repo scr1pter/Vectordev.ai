@@ -99,8 +99,6 @@ const DECIDED_ELSEWHERE: Readonly<Record<string, string>> = {
     "Decides each git command that connects with Git.refusal (core git.ts) before git starts: the review's and the GitHub handler's fetches and pushes.",
   "packages/engine/src/review/source.ts":
     "Fetches a review's commits through Git.run (git/index.ts), which decides each fetch.",
-  "packages/engine/src/tool/research-browser.ts":
-    "Asks the desktop app's research browsers over the bridge on this computer; the desktop's research proxy (EgressProxy, core local-mode/egress-proxy.ts) decides every page they reach as research-browser.",
   "packages/engine/src/worktree/index.ts":
     "Decides each git command that connects with Git.refusal (core git.ts) before git starts: a reset's fetch, a submodule update.",
   "packages/core/src/research/reader.ts":
@@ -311,7 +309,7 @@ const UNLABELLED_CALLS: ReadonlyArray<{ readonly file: string; readonly call: st
   {
     file: "packages/engine/src/tool/research-browser.ts",
     call: "fetch(`${process.env.VECTOR_BROWSER_BRIDGE_URL}/research`",
-    why: "The desktop app's browser bridge on this computer; the desktop's research proxy decides every page a research browser reaches.",
+    why: "The desktop app's browser bridge on this computer; each address an agent opens is decided before (webAccess), and the desktop's research proxy decides every page a research browser reaches.",
   },
 ]
 

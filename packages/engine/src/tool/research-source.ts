@@ -143,7 +143,9 @@ export const keep = Effect.fnUntraced(function* (input: {
         ? ["This page is on your own computer or network, so its text stays out of searches and addresses."]
         : []),
       ...(input.signedIn
-        ? ["This page was read in your own signed-in browser, so its text stays out of searches, addresses and researchers' sub-questions."]
+        ? [
+            "This page was read in your own signed-in browser, so its text stays out of searches, addresses and researchers' sub-questions.",
+          ]
         : []),
       ...(links.length ? [linkList(page.final, links, input.tool ?? "research_read")] : []),
     ].join("\n\n"),

@@ -650,7 +650,7 @@ export const SOURCES: readonly Source[] = [
       "packages/desktop/src/main/research-browser.ts",
       "packages/engine/src/tool/research-browser.ts",
     ],
-    note: "Goes through Vector's research proxy, which never reaches this computer, your network or a cloud metadata address. It follows Web access as it was set when the app started",
+    note: "Goes through Vector's research proxy, which never reaches this computer, your network or a cloud metadata address. Each address an agent opens follows Web access as it is now; the pages' own requests follow it as it was set when the app started",
   },
   {
     id: "external-agents",

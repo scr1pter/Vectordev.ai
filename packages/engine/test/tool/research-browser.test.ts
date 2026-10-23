@@ -2,10 +2,13 @@ import { afterAll, expect } from "bun:test"
 import path from "node:path"
 import { Effect } from "effect"
 import { FSUtil } from "@vectordevai/core/fs-util"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { Global } from "@vectordevai/core/global"
 import type { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { ResearchProvenance } from "@vectordevai/core/research/provenance"
 import { ResearchReader } from "@vectordevai/core/research/reader"
 import { ResearchStore } from "@vectordevai/core/research/store"
+import { Config } from "@/config/config"
 import { Session } from "@/session/session"
 import { Permission } from "../../src/permission"
 import { ResearchBrowser } from "../../src/tool/research-browser"
@@ -13,6 +16,7 @@ import { RENDER } from "../../src/tool/research-read"
 import { ResearchRun } from "../../src/tool/research-run"
 import { FakeBridge } from "../lib/fake-bridge"
 import { calls, output, plan, runtime, send, setup } from "../lib/research"
+import { lines, pdf } from "../../../core/test/brain/fixture/pdf"
 import { FakeWeb } from "../../../core/test/lib/fake-web"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
 
@@ -67,18 +71,36 @@ const desktop = (pages: Record<string, unknown> = {}) => {
   return (call: FakeBridge.Call) => {
     if (call.path !== "/research") return FakeBridge.visible()
     const body = call.body
-    if (body.generation !== undefined && body.generation !== state.generation) return FakeBridge.research({ ok: false, resync: true })
+    if (body.generation !== undefined && body.generation !== state.generation)
+      return FakeBridge.research({ ok: false, resync: true })
     if (body.command === "research.open") state.url = String(body.url)
-    const shown = { generation: state.generation, url: state.url, address: state.url, title: "How heat pumps cut heating bills" }
+    const shown = {
+      generation: state.generation,
+      url: state.url,
+      address: state.url,
+      title: "How heat pumps cut heating bills",
+    }
     if (body.command === "research.read" || body.command === "research.find" || body.command === "research.links")
       return FakeBridge.research({
         ...shown,
-        read: { html: ARTICLE_HTML, title: shown.title, url: state.url, links: [{ url: COPY, text: "A copy", main: true }], forms: [], truncated: false },
+        read: {
+          html: ARTICLE_HTML,
+          title: shown.title,
+          url: state.url,
+          links: [{ url: COPY, text: "A copy", main: true }],
+          forms: [],
+          truncated: false,
+        },
       })
     if (body.command === "research.observe")
       return FakeBridge.research({
         ...shown,
-        observed: { title: shown.title, url: state.url, text: "Search the study", elements: [{ ref: "ref_1", role: "searchbox", name: "Search", tag: "input", type: "search" }] },
+        observed: {
+          title: shown.title,
+          url: state.url,
+          text: "Search the study",
+          elements: [{ ref: "ref_1", role: "searchbox", name: "Search", tag: "input", type: "search" }],
+        },
       })
     return FakeBridge.research({ ...shown, ...(pages[String(body.command)] as object | undefined) })
   }
@@ -105,7 +127,12 @@ const approve = Effect.gen(function* () {
 const settled = (from: number) =>
   Effect.gen(function* () {
     for (const _ of Array.from({ length: 50 })) {
-      if (researchCalls().slice(from).some((call) => call.body.command === "research.close")) break
+      if (
+        researchCalls()
+          .slice(from)
+          .some((call) => call.body.command === "research.close")
+      )
+        break
       yield* Effect.sleep(20)
     }
     return researchCalls().slice(from)
@@ -189,7 +216,11 @@ it.instance(
       yield* test.llm.tool("research_browser", { action: "open", url: ARTICLE })
       yield* test.llm.tool("research_browser", { action: "observe" })
       yield* test.llm.text("Done.")
-      yield* send({ sessionID: session.id, agent: "research", text: `Research heat pump savings, starting at ${ARTICLE}` })
+      yield* send({
+        sessionID: session.id,
+        agent: "research",
+        text: `Research heat pump savings, starting at ${ARTICLE}`,
+      })
       const sent = researchCalls().slice(before, before + 3)
       expect(sent.map((call) => [call.body.command, call.body.generation])).toEqual([
         ["research.open", undefined],
@@ -219,7 +250,11 @@ it.instance(
       yield* test.llm.tool("research_browser", { action: "click", ref: "ref_1" })
       yield* test.llm.tool("research_read", { url: COPY })
       yield* test.llm.text("Done.")
-      yield* send({ sessionID: session.id, agent: "research", text: `Research heat pump savings, starting at ${ARTICLE}` })
+      yield* send({
+        sessionID: session.id,
+        agent: "research",
+        text: `Research heat pump savings, starting at ${ARTICLE}`,
+      })
       const reads = yield* calls(session.id, "research_read")
       expect(output(reads[0])).toContain(ResearchProvenance.REFUSAL)
       const [, click] = yield* calls(session.id, "research_browser")
@@ -275,7 +310,61 @@ it.instance(
 )
 
 it.instance(
-  "a researcher's typing is checked against the whole run, and its sub-question exempts nothing",
+  "a researcher's typing is checked against the lead's private context too: the whole run's",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web)
+      const sessions = yield* Session.Service
+      const lead = yield* sessions.create({ title: "Research", permission: allow })
+      bridge.answer(desktop())
+      yield* approve
+      // The lead reads a page on the user's own network: what it says is private context of the run.
+      const notes = web.direct("planner", "/")
+      yield* test.llm.tool("research_plan", plan({ depth: "deep" }))
+      yield* test.llm.tool("research_read", { url: notes })
+      // The sub-question names nothing private, so it passes its check.
+      yield* test.llm.tool("task", {
+        description: "Sizing",
+        prompt: "How are heat pumps sized for a home?",
+        subagent_type: "researcher",
+        background: false,
+      })
+      yield* test.llm.toolMatch(researcher, "research_browser", { action: "open", url: ARTICLE })
+      // The researcher never read the notes; the lead did, and they are the run's.
+      yield* test.llm.toolMatch(researcher, "research_browser", {
+        action: "type",
+        ref: "ref_1",
+        text: "Zephyr planner sizing",
+      })
+      yield* test.llm.toolMatch(researcher, "research_browser", {
+        action: "type",
+        ref: "ref_1",
+        text: "heat pump sizing",
+      })
+      yield* test.llm.textMatch(researcher, "Found it.")
+      yield* test.llm.text("Done.")
+      yield* send({
+        sessionID: lead.id,
+        agent: "research",
+        text: `Research how heat pumps are sized, from ${notes} and ${ARTICLE}.`,
+      })
+      const [read] = yield* calls(lead.id, "research_read")
+      expect(read?.state.status === "completed" ? read.state.metadata.private : undefined).toBe(true)
+      const [child] = yield* sessions.children(lead.id)
+      expect(yield* calls(child!.id, "research_read")).toEqual([])
+      const typed = yield* calls(child!.id, "research_browser")
+      expect(output(typed[1])).toBe(ResearchBrowser.TYPED)
+      expect(output(typed[2])).toContain("Typed into ref_1.")
+      const sent = researchCalls().filter(
+        (call) => call.body.sessionID === child!.id && call.body.command === "research.type",
+      )
+      expect(sent.map((call) => call.body.text)).toEqual(["heat pump sizing"])
+    }),
+  90_000,
+)
+
+it.instance(
+  "a researcher's typing is checked against what it read itself, and its sub-question exempts nothing",
   () =>
     Effect.gen(function* () {
       const test = yield* setup(web)
@@ -296,9 +385,17 @@ it.instance(
       yield* test.llm.toolMatch(researcher, "research_read", { url: notes })
       yield* test.llm.toolMatch(researcher, "research_browser", { action: "open", url: ARTICLE })
       // Zephyr is in the researcher's own sub-question, which the lead wrote and the user did not type.
-      yield* test.llm.toolMatch(researcher, "research_browser", { action: "type", ref: "ref_1", text: "Zephyr planner sizing" })
+      yield* test.llm.toolMatch(researcher, "research_browser", {
+        action: "type",
+        ref: "ref_1",
+        text: "Zephyr planner sizing",
+      })
       // The user typed Hooli.
-      yield* test.llm.toolMatch(researcher, "research_browser", { action: "type", ref: "ref_1", text: "Hooli heat pump sizing" })
+      yield* test.llm.toolMatch(researcher, "research_browser", {
+        action: "type",
+        ref: "ref_1",
+        text: "Hooli heat pump sizing",
+      })
       yield* test.llm.textMatch(researcher, "Found it.")
       yield* test.llm.text("Done.")
       yield* send({
@@ -314,12 +411,97 @@ it.instance(
       expect(output(typed[2])).toContain("Typed into ref_1.")
       // The researcher's browser is its own, attributed to the lead's run, and counted in the run's browsers (a plan
       // no one could answer stays Focused here).
-      const opened = researchCalls().find((call) => call.body.sessionID === child!.id && call.body.command === "research.open")
+      const opened = researchCalls().find(
+        (call) => call.body.sessionID === child!.id && call.body.command === "research.open",
+      )
       expect(opened?.body).toMatchObject({
         agent: "researcher",
         rootID: lead.id,
         max: 1 + ResearchRun.LIMITS.focused.researchers,
       })
+    }),
+  90_000,
+)
+
+it.instance(
+  "a PDF that a click reaches is read into memory and saved as a source, as an opened one is",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web)
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "Research", permission: allow })
+      const report = web.url("docs", "/report.pdf")
+      const bytes = pdf({
+        title: "Heat pump field study",
+        pages: [{ runs: lines(["Heat pump field study.", "Delivered heating energy fell by 61 percent."]) }],
+      })
+      bridge.answer(
+        desktop({
+          "research.click": {
+            url: report,
+            address: report,
+            joined: [report],
+            pdf: { url: report, base64: Buffer.from(bytes).toString("base64"), contentType: "application/pdf" },
+          },
+        }),
+      )
+      yield* test.llm.tool("research_plan", plan())
+      yield* test.llm.tool("research_browser", { action: "open", url: ARTICLE })
+      yield* test.llm.tool("research_browser", { action: "click", ref: "ref_1" })
+      yield* test.llm.text("Done.")
+      yield* send({
+        sessionID: session.id,
+        agent: "research",
+        text: `Research heat pump savings, starting at ${ARTICLE}`,
+      })
+      const [, click] = yield* calls(session.id, "research_browser")
+      expect(output(click)).toContain("S1 · ")
+      expect(output(click)).toContain("Delivered heating energy fell by 61 percent.")
+      expect(click?.state.status === "completed" ? click.state.metadata : {}).toMatchObject({
+        source: "S1",
+        action: "click",
+      })
+    }),
+  90_000,
+)
+
+it.instance(
+  "with Vector Local's Web access set to None, a research browser opens nothing, whatever the desktop's proxy holds",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web)
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "Research", permission: allow })
+      bridge.answer(desktop())
+      const before = researchCalls().length
+      yield* test.llm.tool("research_plan", plan())
+      yield* test.llm.tool("research_browser", { action: "open", url: ARTICLE })
+      yield* test.llm.text("Done.")
+      // Vector Local on, in the user's own config, as Settings writes it.
+      const file = path.join(Global.Path.config, "vector.json")
+      const config = yield* Effect.promise(() => Bun.file(file).json())
+      const local = (block?: object) =>
+        Effect.promise(async () => {
+          await Bun.write(file, JSON.stringify(block ? { ...config, local: block } : config))
+          Config.refreshLocal()
+          Config.confirmLocal()
+        })
+      // The fake model server is on the list of model servers, as a company's own would be.
+      yield* local({ enabled: true, web: "none", endpoints: [new URL(test.llm.url).origin] })
+      yield* send({
+        sessionID: session.id,
+        agent: "research",
+        text: `Research heat pump savings, starting at ${ARTICLE}`,
+      }).pipe(Effect.ensuring(local().pipe(Effect.orDie)))
+      const [opened] = yield* calls(session.id, "research_browser")
+      expect(opened?.state.status).toBe("error")
+      expect(output(opened)).toContain("Web access")
+      expect(
+        researchCalls()
+          .slice(before)
+          .filter((call) => call.body.command === "research.open"),
+      ).toEqual([])
+      expect(Egress.policy().enabled).toBe(false)
     }),
   90_000,
 )
@@ -355,7 +537,11 @@ it.instance(
       const rendered = `<!doctype html><html><head><title>Heat pump planner</title></head><body><main><h1>Heat pump planner</h1><p>Rendered by script: the planner sizes a heat pump from the floor area and the coldest design temperature of the home.</p><p>It lists installers that fit the size it chose.</p></main></body></html>`
       bridge.answer((call) =>
         call.body.command === "research.read"
-          ? FakeBridge.research({ url: spa, address: spa, read: { html: rendered, title: "Heat pump planner", url: spa, links: [], forms: [], truncated: false } })
+          ? FakeBridge.research({
+              url: spa,
+              address: spa,
+              read: { html: rendered, title: "Heat pump planner", url: spa, links: [], forms: [], truncated: false },
+            })
           : FakeBridge.research({ url: spa, address: spa }),
       )
       const before = researchCalls().length
@@ -402,9 +588,18 @@ it.instance(
         expect(reads[0]?.state.status === "completed" ? reads[0].state.metadata.status : undefined).toBe("needs-render")
         expect(output(reads[1])).toBe(RENDER)
         expect(bridge.calls().length).toBe(before)
-        // The skipped page is in the run, with why.
+        // The skipped page is in the run, with why, and no text.
+        const research = yield* ResearchRun.Service
         const store = yield* ResearchStore.Service
-        expect(store).toBeDefined()
+        const runID = reads[0]?.state.status === "completed" ? String(reads[0].state.metadata.runID) : ""
+        const skipped = yield* store.source(yield* research.place(), runID, "S1")
+        expect(skipped?.source).toMatchObject({
+          id: "S1",
+          url: spa,
+          status: "needs-render",
+          reason: ResearchReader.NEEDS_RENDER,
+        })
+        expect(skipped?.chunks).toEqual([])
       } finally {
         FakeBridge.use(bridge)
       }

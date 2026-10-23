@@ -12,6 +12,7 @@ import { SessionStatus } from "@/session/status"
 import { ResearchRun } from "./research-run"
 import { ResearchSource } from "./research-source"
 import { Tool } from "./tool"
+import { webAccess } from "./webfetch"
 import DESCRIPTION from "./research-browser.txt"
 
 // research_browser (section 5.6a): every research agent, the lead and each researcher, drives a research browser of its
@@ -26,6 +27,8 @@ import DESCRIPTION from "./research-browser.txt"
 //   exempt anything: a sub-question is written by the lead, not typed. A page cannot make a private number public
 //   either: a public source clears no number here, since a hostile page could list every 5-digit number.
 // - A screenshot is taken only for a model that reads images, and images load only for one.
+// - With Vector Local on, Web access as it is now decides each address an agent opens, before the desktop does: the
+//   desktop's research proxy follows Web access as it was when the app started, so the stricter of the two applies.
 // The run and the agent's session come from the tool context, never from the model's input. A browser closes when its
 // agent's session finishes, as well as on the desktop's own idle timeout. Outside the desktop app (the CLI, WSL, a
 // remote server, a headless run) there is no research browser, and the tool says so.
@@ -65,9 +68,9 @@ export const Parameters = Schema.Struct({
   text: Schema.optional(Schema.String.check(Schema.isMaxLength(300))).annotate({
     description: "type: the text to type; find: the phrase to find on the page",
   }),
-  key: Schema.optional(Schema.Literals(["Enter", "Tab", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"])).annotate(
-    { description: "press: the key" },
-  ),
+  key: Schema.optional(
+    Schema.Literals(["Enter", "Tab", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]),
+  ).annotate({ description: "press: the key" }),
   chunk: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))).annotate({
     description: "read: which chunk to show (1 by default); the first read shows the outline",
   }),
@@ -134,7 +137,10 @@ type Synced = { readonly generation: string; readonly sent: ReadonlySet<string> 
 // The copy of each run's provenance the desktop holds, by the generation it named, and what was sent to it.
 const synced = new Map<string, Synced>()
 // Each open browser, by run and session, for closing it when its agent's session finishes.
-const opened = new Map<string, { readonly runID: string; readonly sessionID: string; readonly agent: string; readonly max: number }>()
+const opened = new Map<
+  string,
+  { readonly runID: string; readonly sessionID: string; readonly agent: string; readonly max: number }
+>()
 // The source each browser's page was saved as, so a link followed from it reads as "via S#".
 const pages = new Map<string, { readonly url: string; readonly source: string }>()
 
@@ -224,6 +230,17 @@ export const render = Effect.fnUntraced(function* (input: {
   readonly chunkTokens: number
 }) {
   if (!available()) return undefined
+  // Vector Local's Web access as it is now, which the desktop's proxy may not have yet.
+  const refused = yield* Effect.try({
+    try: () => webAccess("research-browser", input.url),
+    catch: (cause) => cause,
+  }).pipe(
+    Effect.match({
+      onFailure: (cause) => (cause instanceof Error ? cause.message : String(cause)),
+      onSuccess: () => undefined,
+    }),
+  )
+  if (refused) return { error: refused } as const
   const opened = yield* send({ ...input, body: { command: "research.open", url: input.url } })
   if (!opened.ok) return { error: opened.error ?? BROWSER_DOWN } as const
   if (opened.pdf) return yield* parsePdf(opened.pdf, input.chunkTokens)
@@ -245,7 +262,8 @@ const parsePdf = (pdf: NonNullable<Report["pdf"]>, chunkTokens: number) =>
   ResearchReader.parse({
     url: pdf.url,
     contentType: pdf.contentType || "application/pdf",
-    body: Buffer.from(pdf.base64, "base64"),
+    // A plain copy: a small Buffer is a view into a larger pooled one, which the PDF reader would read whole.
+    body: new Uint8Array(Buffer.from(pdf.base64, "base64")),
     chunkTokens,
   })
 
@@ -299,8 +317,13 @@ export const ResearchBrowserTool = Tool.define<
           if ("refused" in found) return { title: "Not done", output: found.refused, metadata: { action } }
           const runID = found.run.id
           if (found.plan.scope === "brain")
-            return { title: "Not done", output: ResearchSource.SCOPE, metadata: { runID, action, refused: "scope" as const } }
-          if (!available()) return { title: "Needs the desktop browser", output: NEEDS_DESKTOP, metadata: { runID, action } }
+            return {
+              title: "Not done",
+              output: ResearchSource.SCOPE,
+              metadata: { runID, action, refused: "scope" as const },
+            }
+          if (!available())
+            return { title: "Needs the desktop browser", output: NEEDS_DESKTOP, metadata: { runID, action } }
           const model = ctx.extra?.model as Provider.Model | undefined
           const chunkTokens =
             (model?.limit.context ?? Infinity) < 32_000 ? ResearchReader.COMPACT_TOKENS : ResearchReader.CHUNK_TOKENS
@@ -355,6 +378,7 @@ export const ResearchBrowserTool = Tool.define<
             if (!checked.ok) return fail(checked.message, { url: params.url, refused: "provenance" })
             const outbound = ResearchOutbound.address(checked.url, strict(yield* research.context(ctx, found)))
             if (!outbound.ok) return fail(ResearchSource.OUTBOUND, { url: checked.url, refused: "outbound" })
+            webAccess("research-browser", checked.url)
             yield* research.approve(ctx, found, checked.url)
             yield* ctx.metadata({ title: `Opening ${checked.url}`, metadata: { runID, action, url: checked.url } })
             const report = yield* run({ url: checked.url })
@@ -410,6 +434,11 @@ export const ResearchBrowserTool = Tool.define<
             ...(params.key ? { key: params.key } : {}),
           })
           if (!report.ok) return done(report, fail(report.error ?? BROWSER_DOWN))
+          // A PDF that a click, a key or going back reached is read into memory as open's is: a source as it opens.
+          if (report.pdf && (action === "click" || action === "press" || action === "back")) {
+            if (yield* spent(found)) return done(report, fail(ResearchStore.PAGES, { refused: "budget" }))
+            return done(report, yield* keep(yield* parsePdf(report.pdf, chunkTokens), {}))
+          }
 
           if (action === "read") {
             if (!report.read) return done(report, fail(BROWSER_DOWN))
@@ -470,7 +499,11 @@ export const ResearchBrowserTool = Tool.define<
             })
           }
           if (action === "close")
-            return { title: "Closed the research browser", output: "Your research browser is closed.", metadata: { runID, action } }
+            return {
+              title: "Closed the research browser",
+              output: "Your research browser is closed.",
+              metadata: { runID, action },
+            }
           return done(report, {
             title: `${action} — ${report.title || report.url || "research browser"}`,
             output: page(report, action === "scroll" ? "Scrolled." : `Done: ${action}.`),
