@@ -309,8 +309,8 @@ export function checking<T>(source: string, origin: string | URL, run: () => Pro
   state.checks.set(key, (state.checks.get(key) ?? 0) + 1)
   const done = () => {
     const left = (state.checks.get(key) ?? 1) - 1
-    if (left > 0) state.checks.set(key, left)
-    else state.checks.delete(key)
+    if (left > 0) return void state.checks.set(key, left)
+    state.checks.delete(key)
   }
   return Promise.resolve()
     .then(run)

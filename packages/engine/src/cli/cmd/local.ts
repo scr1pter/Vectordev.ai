@@ -17,6 +17,10 @@ const WEB = ["ask", "network", "none"] as const
 const WEB_NAMES: Record<LocalMode.Web, string> = { ask: "Ask", network: "Your network only", none: "None" }
 const NEEDS_TERMINAL =
   "This change would loosen Vector Local, so it needs your answer at a terminal. Run it yourself in a terminal, or use /local in the terminal UI."
+// What a confirmation in this process does for a Vector that runs on its own: `vector local confirm` writes the copy
+// of the block the owner let apply that the terminal's Vector reads when it starts, never the desktop app's.
+const ELSEWHERE =
+  "A Vector that is already running keeps holding it until it next starts, or until you confirm it with /local in its terminal UI. The desktop app keeps a record of its own, so it still holds the change."
 
 export const LocalCommand = cmd({
   command: "local",
@@ -46,7 +50,7 @@ const asked = Effect.fn("Cli.local.asked")(function* <A, R>(
   const first = yield* attempt(false)
   const done = (result: typeof first) =>
     isOutcome(result) && result.type === "refused"
-      ? fail(result.message)
+      ? fail(result.changes?.length ? `${result.message} It ${result.changes.join(", ")}.` : result.message)
       : isOutcome(result) && result.type === "confirm"
         ? fail(`${NEEDS_TERMINAL} It ${result.changes.join(", ")}.`)
         : Effect.succeed(result as A)
@@ -170,7 +174,14 @@ export const LocalSetupCommand = effectCmd({
       : yield* Effect.promise(() => LocalDetect.detect())
     if (servers.length === 0) return yield* noServer()
     const server = yield* choose(servers)
-    // With Vector Local on, putting the server on the list asks first, and nothing is written if the answer is no.
+    // A server on the list that answers differently now may be another one in its place, on a shared computer too.
+    const changed = LocalSettings.identity(server)
+    if (changed.length > 0)
+      UI.println(
+        `${UI.Style.TEXT_WARNING}${LocalProbe.changedMessage(server.origin)} Changed since it was added: ${changed.join(", ")}.${UI.Style.TEXT_NORMAL}`,
+      )
+    // With Vector Local on, putting the server on the list asks first, as does a new identity for one on it, and
+    // nothing is written if the answer is no.
     const added = yield* asked((confirmed) =>
       LocalSettings.addServer({ server, provider: args.provider, by: "cli", confirm: confirmed }),
     )
@@ -191,8 +202,8 @@ export const LocalCheckCommand = effectCmd({
     yargs
       .option("model", { describe: "also run this model with the role's tools, as provider/model", type: "string" })
       .option("role", {
-        describe: "the role --model is checked for",
-        choices: ["agent", "subagent", "research"] as const,
+        describe: "the role --model is checked for (review: Vectorscope)",
+        choices: ["agent", "subagent", "review", "judge", "research"] as const,
       })
       .option("yes", {
         describe: "load the model even if it may not fit in free memory",
@@ -209,19 +220,18 @@ export const LocalCheckCommand = effectCmd({
       : undefined
     if (checked?.type === "refused") return yield* fail(checked.message)
     const model = checked?.checked
-    if (args.json) process.stdout.write(`${JSON.stringify({ ...report, ...(model ? { model } : {}) }, null, 2)}${EOL}`)
-    else {
-      report.rows.forEach((row) => {
-        UI.println(`${MARKS[row.status]} ${row.title}`)
-        if (row.detail) UI.println(`  ${UI.Style.TEXT_DIM}${row.detail}${UI.Style.TEXT_NORMAL}`)
-      })
-      if (model)
-        UI.println(
-          `${model.result === "works" ? MARKS.pass : model.result === "ask" ? MARKS.warn : MARKS.fail} ${model.model}: ${model.result}${model.message ? `. ${model.message}` : ""}`,
-        )
-    }
     const code = LocalSettings.exitCode(report)
     process.exitCode = code === 0 && model && model.result !== "works" ? 1 : code
+    if (args.json)
+      return void process.stdout.write(`${JSON.stringify({ ...report, ...(model ? { model } : {}) }, null, 2)}${EOL}`)
+    report.rows.forEach((row) => {
+      UI.println(`${MARKS[row.status]} ${row.title}`)
+      if (row.detail) UI.println(`  ${UI.Style.TEXT_DIM}${row.detail}${UI.Style.TEXT_NORMAL}`)
+    })
+    if (model)
+      UI.println(
+        `${model.result === "works" ? MARKS.pass : model.result === "ask" ? MARKS.warn : MARKS.fail} ${model.model}: ${model.result}${model.message ? `. ${model.message}` : ""}`,
+      )
   }),
 })
 
@@ -297,6 +307,7 @@ export const LocalConfirmCommand = effectCmd({
     const outcome = yield* LocalSettings.apply({ held: [...held.changes], confirm: true, by: "cli" })
     if (outcome.type !== "applied") return yield* fail(outcome.type === "refused" ? outcome.message : NEEDS_TERMINAL)
     describe(outcome.status)
+    UI.println(`${UI.Style.TEXT_DIM}${ELSEWHERE}${UI.Style.TEXT_NORMAL}`)
   }),
 })
 
@@ -338,7 +349,7 @@ function describe(status: {
     UI.println(`Allowed services: ${policy.allow.map((item) => `${item.source} (${item.reason})`).join(", ")}`)
   if (status.held)
     UI.println(
-      `${UI.Style.TEXT_WARNING}A change to your config would loosen Vector Local: it ${status.held.changes.join(", ")}. It waits for you: run vector local confirm.${UI.Style.TEXT_NORMAL}`,
+      `${UI.Style.TEXT_WARNING}A change to your config would loosen Vector Local: it ${status.held.changes.join(", ")}. It waits for you: run vector local confirm. A Vector that is already running applies that when it next starts, except the desktop app, which keeps a record of its own.${UI.Style.TEXT_NORMAL}`,
     )
   policy.warnings.forEach((warning) => UI.println(`${UI.Style.TEXT_WARNING}${warning}${UI.Style.TEXT_NORMAL}`))
   UI.println(

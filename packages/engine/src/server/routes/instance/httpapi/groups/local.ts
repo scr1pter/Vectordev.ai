@@ -40,6 +40,11 @@ export class LocalConfirmError extends Schema.ErrorClass<LocalConfirmError>("Loc
       message: Schema.String,
       /** What the change would loosen, for the owner's dialog: "turns Vector Local off", "allows github". */
       changes: Schema.Array(Schema.String),
+      /**
+       * For Add server: what changed about a server already on the list since it was pinned (its kind, version,
+       * models or https key), for the warning that it now answers as a different server.
+       */
+      identity: Schema.optional(Schema.Array(LocalProbe.Change)),
     }),
   },
   { httpApiStatus: 409 },
@@ -103,12 +108,15 @@ export const LocalAddedServer = Schema.Struct({
   models: Schema.Array(Schema.String),
   server: LocalProbe.Server,
   status: LocalSettings.Status,
+  /** What changed about a server already pinned since it was pinned, when it answers differently now. */
+  identity: Schema.optional(Schema.Array(LocalProbe.Change)),
 }).annotate({ identifier: "LocalAddedServer" })
 
 export const LocalCheckPayload = Schema.Struct({
   /** A model to run through the requests the role makes, as provider/model. Without it, every layer is checked. */
   model: Schema.optional(Schema.String),
-  role: Schema.optional(Schema.Literals(["agent", "subagent", "research"])),
+  /** The role the model is checked for: its tools, and the context it needs. Default: agent. */
+  role: Schema.optional(LocalSettings.Role),
   /** The owner accepted the warning that the model may not fit in free memory. */
   confirmed: Schema.optional(Schema.Boolean),
 })
@@ -132,8 +140,6 @@ export const LocalCheckResult = Schema.Struct({
 
 export const LocalGrantPayload = Schema.Struct({
   source: Schema.String,
-  /** Let the next request through (true, the default), or every one while this Vector runs (false). */
-  once: Schema.optional(Schema.Boolean),
 })
 
 const Suggestion = Schema.Struct({
@@ -196,7 +202,7 @@ export const LocalApi = HttpApi.make("local")
             identifier: "local.update",
             summary: "Change Vector Local",
             description:
-              "Change Vector Local in your user config. A change that makes it stricter applies at once. One that would loosen it (turn it off, a looser Web access, a new model server, a newly allowed service or site) fails with LocalConfirmError and the list of what it loosens, unless the request says `confirm: true`, which an owner's app sends only after asking. With `held`, it applies the change your config holds instead. A Vector an agent started cannot loosen it, and under a company lock only the keys your company left to you change.",
+              "Change Vector Local in your user config. A change is judged by what it changes in the settings in effect, so a change your config holds is never part of it. A change that makes it stricter applies at once. One that would loosen it (turn it off, a looser Web access, a new model server, a new or removed identity pin for a server on the list, a newly allowed service or site) fails with LocalConfirmError and the list of what it loosens, unless the request says `confirm: true`, which an owner's app sends only after asking. Turning Vector Local on applies at once, and holds the services, internet model servers and sites your config lets through until you confirm them. With `held`, it applies the change your config holds instead, and only as `held` lists it. A Vector an agent started cannot loosen it, even while Vector Local is off, and under a company lock only the keys your company left to you change.",
           }),
         ),
         HttpApiEndpoint.get("egress", `${root}/egress`, {
@@ -235,11 +241,13 @@ export const LocalApi = HttpApi.make("local")
         HttpApiEndpoint.delete("egressClear", `${root}/egress`, {
           query: WorkspaceRoutingQuery,
           success: described(Schema.Boolean, "The network log was erased"),
+          error: LocalApiError,
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "local.egress.clear",
             summary: "Erase what Vector sent",
-            description: "Erase the network log: the events in memory, the counters and the files on this computer.",
+            description:
+              "Erase the network log: the events in memory, the counters and the files on this computer. Under a company lock the company sets how long the log is kept, so it fails with LocalError (locked).",
           }),
         ),
         HttpApiEndpoint.post("egressReport", `${root}/egress/report`, {
@@ -288,7 +296,7 @@ export const LocalApi = HttpApi.make("local")
             identifier: "local.servers.add",
             summary: "Add a model server",
             description:
-              "Read the server at an address, put it on the model server list with the identity it answered with, and add it to your user config as a provider with the models it runs, each with its context, reply limit, tool calling and image input. Its cloud models are left out. With Vector Local on, listing a server loosens it, so the request needs `confirm: true`, and fails with LocalConfirmError otherwise. Headers are used to read the server and are not saved.",
+              "Read the server at an address, put it on the model server list with the identity it answered with, and add it to your user config as a provider with the models it runs, each with its context, reply limit, tool calling and image input. Its cloud models are left out. With Vector Local on, listing a server loosens it, so the request needs `confirm: true`, and fails with LocalConfirmError otherwise; so does adding a server on the list again when it answers as a different server, and `identity` says what changed. Headers are used to read the server and are not saved.",
           }),
         ),
         HttpApiEndpoint.post("check", `${root}/check`, {
@@ -301,7 +309,7 @@ export const LocalApi = HttpApi.make("local")
             identifier: "local.check",
             summary: "Check Vector Local",
             description:
-              "Read every layer of Vector Local, one row each: the switch, the policy, a held change, the network guard, unlabelled requests, Vector's own services, Web access, each model server on the list (it answers, as the server it was when added) and the network log. With `model`, it also runs that model through 2 or 3 requests with the role's real tools and records the result in your user config. It never loads a model too big for free memory without `confirmed`.",
+              "Read every layer of Vector Local, one row each: the switch, the policy, a held change, the network guard, unlabelled requests, Vector's own services, Web access, each model server on the list (it answers, as the server it was when added) and the network log. With `model`, it also runs that model through 2 or 3 requests with the role's real tools (agent, subagent, review for Vectorscope, judge or research) and records the result in your user config; a model the model catalog lists at a cloud address keeps the catalog's limits. It reads only servers you or your company host: never a cloud AI service, and never a server on the internet that is not on your model server list. It never loads a model too big for free memory without `confirmed`.",
           }),
         ),
         HttpApiEndpoint.post("grant", `${root}/grant`, {
@@ -314,7 +322,7 @@ export const LocalApi = HttpApi.make("local")
             identifier: "local.grant",
             summary: "Allow a request once",
             description:
-              "Let the next request of a kind Vector Local asks about through, such as a model download or a manual update check, or every one while this Vector runs. It is never saved. Allow a service for good with PATCH /local instead.",
+              "Let the next request of a kind Vector Local asks about through, such as a model download or a manual update check. Each grant answers one ask and is never saved. Allow a service for good with PATCH /local instead.",
           }),
         ),
         HttpApiEndpoint.get("recommend", `${root}/recommend`, {

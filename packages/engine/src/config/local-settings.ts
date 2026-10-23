@@ -16,6 +16,7 @@ import { Token } from "@vectordevai/core/util/token"
 import { ConfigLocalV1 } from "@vectordevai/core/v1/config/local"
 import type { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import { Agent } from "@/agent/agent"
+import { Permission } from "@/permission"
 import { Provider } from "@/provider/provider"
 import { requirement } from "@/session/overflow"
 import { SystemPrompt } from "@/session/system"
@@ -25,10 +26,11 @@ import { Config } from "./config"
 
 // Vector Local's settings as the Local API (PATCH /local) and `vector local` change them: what is in effect, a change
 // to the user's own local block, and the check that reads every layer. A change that would loosen Vector Local (turn
-// it off, a looser Web access, a new model server, a newly allowed service or site) applies only after the owner
-// confirms it: in an owner's app or terminal UI, which send `confirm` after a dialog, or at a terminal prompt. It never
-// applies in a Vector the agent or Vector's own terminal started (the agent marker), and under a company lock only the
-// keys the company left to the user change. Config holds what loosens if it is written any other way.
+// it off, a looser Web access, a new model server or a new identity for one, a newly allowed service or site) applies
+// only after the owner confirms it: in an owner's app or terminal UI, which send `confirm` after a dialog, or at a
+// terminal prompt. It never applies in a Vector the agent or Vector's own terminal started (the agent marker), even
+// with Vector Local off, and under a company lock only the keys the company left to the user change. Config holds
+// what loosens if it is written any other way, and what turning Vector Local on would let reach the internet.
 
 const Strings = Schema.Array(Schema.String)
 const ListChange = Schema.Struct({ add: Schema.optional(Strings), remove: Schema.optional(Strings) })
@@ -130,7 +132,12 @@ export type Refusal = "agent" | "locked" | "invalid" | "changed" | "not-found"
 
 export type Outcome =
   | { readonly type: "applied"; readonly status: Status }
-  | { readonly type: "confirm"; readonly changes: readonly string[] }
+  | {
+      readonly type: "confirm"
+      readonly changes: readonly string[]
+      /** For Add server: what changed about a server already on the list since it was pinned. */
+      readonly identity?: readonly LocalProbe.Change[]
+    }
   | {
       readonly type: "refused"
       readonly reason: Refusal
@@ -193,7 +200,7 @@ export function locked(policy: LocalMode.Policy) {
  */
 export const apply = Effect.fn("LocalSettings.apply")(function* (update: Update, holds?: LocalProbe.Holds) {
   const config = yield* Config.Service
-  if (update.held) return confirmHeld(update)
+  if (update.held) return confirmHeld(update, holds)
   const policy = Config.local()
   const refusal = validate(policy, update)
   if (refusal) return refusal
@@ -203,27 +210,29 @@ export const apply = Effect.fn("LocalSettings.apply")(function* (update: Update,
       "invalid",
       `Vector could not read the local block in ${current.unreadable.join(", ")}. Fix it there before changing Vector Local.`,
     )
-  const next = block(current.block, update, update.by ?? "app", Date.now())
-  const changes = Config.localLoosening(next)
+  const by = update.by ?? "app"
+  const now = Date.now()
+  // The request is judged by what it changes in the block in effect, so an edit config is holding is never taken for
+  // part of it: that edit stays in the files as it is, and stays held until the owner confirms it on its own.
+  const own = block(Config.localConfirmedBlock(), update, by, now)
+  const changes = Config.localLoosening(own)
   if (changes.length > 0 && agentMarked()) return refused("agent", AGENT, changes)
   if (changes.length > 0 && update.confirm !== true) return { type: "confirm" as const, changes }
-  // The config writer takes the mutable config shape; nothing here changes the block after it is built.
-  yield* config.updateGlobal({ local: next as Block })
+  if (changes.length > 0) Config.confirmingLocal(own)
+  // The config writer takes the mutable config shape; nothing here changes the block after it is built. Resolving
+  // again after the write applies the owner's confirmation even when the files already said the same.
+  yield* config
+    .updateGlobal({ local: block(current.block, update, by, now) as Block })
+    .pipe(Effect.ensuring(Effect.sync(() => Config.refreshLocal())))
   Object.entries(update.pins ?? {}).forEach(([origin, pin]) => {
     if (pin) holds?.confirm(origin)
   })
-  // Config holds what the write loosened, as it holds any edit, and the owner confirmed these lines and no others.
-  // A change someone else made in the meantime stays held until it is confirmed too.
-  const held = Config.localPending()
-  if (changes.length > 0 && held) {
-    if (held.changes.some((line) => !changes.includes(line))) return refused("changed", CHANGED, held.changes)
-    Config.confirmLocal()
-  }
   return { type: "applied" as const, status: status() }
 })
 
-// Applies the change config holds, when it is still the one the owner saw.
-function confirmHeld(update: Update): Outcome {
+// Applies the change config holds, when it is still the one the owner saw, and lets a server whose new identity it
+// records answer again.
+function confirmHeld(update: Update, holds: LocalProbe.Holds | undefined): Outcome {
   const extra = Object.keys(update).filter((key) => !["held", "confirm", "by"].includes(key))
   if (extra.length > 0)
     return refused("invalid", `Confirm a held change on its own, without ${extra.join(", ")} in the same request.`)
@@ -234,7 +243,10 @@ function confirmHeld(update: Update): Outcome {
   const seen = new Set(update.held ?? [])
   if (held.changes.length !== seen.size || held.changes.some((line) => !seen.has(line)))
     return refused("changed", CHANGED, held.changes)
-  Config.confirmLocal()
+  const before = Config.local().pins ?? {}
+  Object.entries(Config.confirmLocal().pins ?? {})
+    .filter(([origin, pin]) => JSON.stringify(before[origin]) !== JSON.stringify(pin))
+    .forEach(([origin]) => holds?.confirm(origin))
   return { type: "applied", status: status() }
 }
 
@@ -442,7 +454,7 @@ export async function check(input: {
             layer: "held" as const,
             status: "warn" as const,
             title: "A change to your config would loosen Vector Local",
-            detail: `It ${held.changes.join(", ")}. It waits for you: run vector local confirm.`,
+            detail: `It ${held.changes.join(", ")}. ${Config.localHeldAdvice()}`,
           },
         ]
       : []),
@@ -629,10 +641,20 @@ export function freeID(base: string, taken: readonly string[]) {
 }
 
 /**
+ * What changed about a server already pinned since it was pinned (its kind, version, models or https key), as it
+ * answers now: empty for a server with no pin, or one that answers as it did.
+ */
+export function identity(server: LocalProbe.Server) {
+  const pin = Config.local().pins?.[server.origin]
+  return pin ? LocalProbe.changes(pin, server) : []
+}
+
+/**
  * Add server: puts the server on the model server list with the identity it answered with (a change that loosens
- * Vector Local while it is on, so it needs `confirm` then), and adds it to the user's global config as a provider with
- * the models it runs there, each with its context, reply limit, tool calling and image input. Its cloud models are
- * left out. Nothing is written when the listing is refused or waits for confirmation.
+ * Vector Local while it is on, so it needs `confirm` then, as a new identity for a server on the list does), and adds
+ * it to the user's global config as a provider with the models it runs there, each with its context, reply limit,
+ * tool calling and image input. Its cloud models are left out. Nothing is written when the listing is refused or waits
+ * for confirmation. `identity` says what changed when the server was pinned before and answers differently now.
  */
 export const addServer = Effect.fn("LocalSettings.addServer")(function* (input: {
   readonly server: LocalProbe.Server
@@ -658,6 +680,7 @@ export const addServer = Effect.fn("LocalSettings.addServer")(function* (input: 
       `Choose an unused provider name of lowercase letters, numbers, hyphens or underscores, not ${providerID}.`,
     )
   const server = input.server
+  const changed = identity(server)
   const listed = yield* apply(
     {
       endpoints: { add: [server.origin] },
@@ -667,6 +690,11 @@ export const addServer = Effect.fn("LocalSettings.addServer")(function* (input: 
     },
     input.holds,
   )
+  if (listed.type === "confirm") {
+    // Typed as the outcome it is, so a caller that asks the owner and tries again still tells it from the result.
+    const asking: Extract<Outcome, { type: "confirm" }> = { ...listed, identity: changed }
+    return asking
+  }
   if (listed.type !== "applied") return listed
   const patch = LocalProbe.patch({ providerID, server, list: false })
   const models = server.models.filter((model) => !model.cloud)
@@ -682,24 +710,35 @@ export const addServer = Effect.fn("LocalSettings.addServer")(function* (input: 
       },
     },
   } as ConfigV1.Info)
-  return { type: "added" as const, provider: providerID, models: models.map((model) => model.id), status: status() }
+  return {
+    type: "added" as const,
+    provider: providerID,
+    models: models.map((model) => model.id),
+    identity: changed,
+    status: status(),
+  }
 })
 
-export const Role = Schema.Literals(["agent", "subagent", "research"])
+export const Role = Schema.Literals(["agent", "subagent", "review", "judge", "research"])
 export type Role = typeof Role.Type
 
-// The agent whose tools each role's check sends, and who needs the context, for the message.
+// The agent whose tools each role's check sends, and who needs the context, for the message. Vectorscope reviews with
+// the review agent; the judge's tools are the read-only specialist's, which Deep research's judge (no tools) fits in.
 const ROLES: Record<Role, { readonly agent: string; readonly label: string }> = {
   agent: { agent: "build", label: "Vector's agent" },
   subagent: { agent: "general", label: "Vector's subagents" },
+  review: { agent: "review", label: "Vectorscope" },
+  judge: { agent: "judge", label: "Vector's judge" },
   research: { agent: "research", label: "Deep research" },
 }
 
 /**
  * Check models for one model: 2 or 3 requests to its server with the role's real tools, as the agent sends them
  * (LocalProbe.check), after reading the server and comparing it with its identity pin. A result is written to the
- * user's global config: the model's tool calling and limits, and `local.checked`. With Vector Local on it reaches only
- * a server on the list, since its requests are model calls.
+ * user's global config: the model's tool calling and limits, and `local.checked`; a model the catalog lists at a cloud
+ * address keeps the catalog's limits. It reads only servers you or your company host: never a cloud AI service, and
+ * never a server on the internet that is not on the list, since its requests carry the role's tools and the
+ * provider's key. With Vector Local on it reaches only a server on the list, since its requests are model calls.
  */
 export const checkModel = Effect.fn("LocalSettings.checkModel")(function* (input: {
   readonly model: string
@@ -730,11 +769,8 @@ export const checkModel = Effect.fn("LocalSettings.checkModel")(function* (input
   const apiKey = provider?.key ?? (typeof options.apiKey === "string" ? options.apiKey : undefined)
   const policy = Config.local()
   const place = LocalProbe.locate(baseURL)
-  if (policy.enabled && (!place || !LocalPolicy.listed(policy, place.origin)))
-    return refused(
-      "invalid",
-      `${place?.origin ?? baseURL} is not on your model server list, so Vector Local sends it no model calls. Add it with vector local setup.`,
-    )
+  const problem = checkProblem(policy, baseURL)
+  if (problem) return refused("invalid", problem)
   const server = yield* Effect.promise(() => LocalProbe.probe(baseURL, { headers }).catch(() => undefined))
   if (!server) return refused("not-found", `No model server Vector knows answered at ${place?.origin ?? baseURL}.`)
   const pin = policy.pins?.[server.origin]
@@ -742,11 +778,19 @@ export const checkModel = Effect.fn("LocalSettings.checkModel")(function* (input
   if (changed.length > 0) return refused("changed", LocalProbe.changedMessage(server.origin))
   const role = ROLES[input.role ?? "agent"]
   const agent = yield* agents.get(role.agent)
-  const tools = (yield* registry.tools({ providerID: ref.providerID, modelID: ref.modelID, agent })).map((tool) => ({
-    name: tool.id,
-    description: tool.description,
-    parameters: ToolJsonSchema.fromTool(tool) as Record<string, unknown>,
-  }))
+  const offered = yield* registry.tools({ providerID: ref.providerID, modelID: ref.modelID, agent })
+  // The tools the agent's own rules turn off are left out, as a session's request leaves them out (resolveTools).
+  const off = Permission.disabled(
+    offered.map((tool) => tool.id),
+    agent.permission,
+  )
+  const tools = offered
+    .filter((tool) => !off.has(tool.id))
+    .map((tool) => ({
+      name: tool.id,
+      description: tool.description,
+      parameters: ToolJsonSchema.fromTool(tool) as Record<string, unknown>,
+    }))
   const model = yield* providers.getModel(ref.providerID, ref.modelID).pipe(Effect.option)
   const system = agent.prompt ? [agent.prompt] : Option.isSome(model) ? SystemPrompt.provider(model.value) : []
   const required = requirement(Token.estimate([...system, ...tools.map((tool) => JSON.stringify(tool))].join("\n")))
@@ -774,13 +818,38 @@ export const checkModel = Effect.fn("LocalSettings.checkModel")(function* (input
   if (checked.result === "ask") return { type: "checked" as const, checked }
   const current = Config.localUserBlock().block
   const patch = LocalProbe.patch({ providerID: ref.providerID, server, checks: [checked], current, list: false })
-  const entry = patch.provider[ref.providerID]?.models[ref.modelID]
+  // A model the catalog lists at a cloud address keeps the catalog's limits: the server checked here, such as a proxy
+  // the user hosts, passes its requests on to that service.
+  const listedAt = Option.isSome(model) ? model.value.api.url : ""
+  const catalogued = URL.canParse(listedAt) && LocalPolicy.hostClass(new URL(listedAt).hostname) === "internet"
+  const entry = catalogued ? undefined : patch.provider[ref.providerID]?.models[ref.modelID]
   yield* config.updateGlobal({
     ...(entry ? { provider: { [ref.providerID]: { models: { [ref.modelID]: entry } } } } : {}),
     local: { checked: { ...current?.checked, ...patch.local.checked } },
   } as ConfigV1.Info)
   return { type: "checked" as const, checked }
 })
+
+// Why Check models does not read the server at `address`: a cloud AI service the company did not list, whose limits
+// come from the model catalog; a server on the internet that is not on the list; or, with Vector Local on, any server
+// that is not on the list.
+function checkProblem(policy: LocalMode.Policy, address: string) {
+  const place = LocalProbe.locate(address)
+  const unlisted =
+    "is not on your model server list, so Vector Local sends it no model calls. Add it with vector local setup."
+  if (!place) return policy.enabled ? `${address} ${unlisted}` : undefined
+  if (LocalPolicy.listed(policy, place.origin)) return undefined
+  const name = new URL(place.origin).hostname
+  if (
+    Config.localCloudHosts().some((pattern) => LocalPolicy.hostMatches(name, pattern)) ||
+    LocalSources.digestListed(name)
+  )
+    return `${place.origin} is a cloud AI service, not a server you host. Check models reads only model servers you or your company host; a cloud model's limits come from the model catalog.`
+  if (policy.enabled) return `${place.origin} ${unlisted}`
+  if (LocalPolicy.hostClass(name) === "internet")
+    return `${place.origin} is on the internet and not on your model server list, so Check models sends it neither the role's tools nor the provider's key. Add it with vector local setup first.`
+  return undefined
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)

@@ -71,7 +71,13 @@ export const localHandlers = HttpApiBuilder.group(InstanceHttpApi, "local", (han
       })
     })
 
+    // Under a company lock the company sets how long the network log is kept, so only it erases the log.
     const egressClear = Effect.fn("LocalHttpApi.egressClear")(function* () {
+      if (Config.local().lock)
+        return yield* failure(
+          "locked",
+          `${LocalSettings.LOCKED} Your company sets how long the network log is kept, so it is not erased here.`,
+        )
       yield* Effect.promise(() => Egress.erase())
       return true
     })
@@ -107,12 +113,21 @@ export const localHandlers = HttpApiBuilder.group(InstanceHttpApi, "local", (han
         by: "app",
         holds,
       })
+      // A server already on the list that answers differently says what changed, for the identity-changed copy.
+      const identity = (changed: readonly LocalProbe.Change[] | undefined) =>
+        changed && changed.length > 0 ? { identity: [...changed] } : {}
       if (outcome.type === "added")
-        return { provider: outcome.provider, models: outcome.models, server: read.server, status: outcome.status }
+        return {
+          provider: outcome.provider,
+          models: outcome.models,
+          server: read.server,
+          status: outcome.status,
+          ...identity(outcome.identity),
+        }
       if (outcome.type === "confirm")
         return yield* new LocalConfirmError({
           name: "LocalConfirmError",
-          data: { message: LocalSettings.CONFIRM, changes: [...outcome.changes] },
+          data: { message: LocalSettings.CONFIRM, changes: [...outcome.changes], ...identity(outcome.identity) },
         })
       return yield* failure(outcome.reason, outcome.message, outcome.changes)
     })
@@ -146,7 +161,8 @@ export const localHandlers = HttpApiBuilder.group(InstanceHttpApi, "local", (han
       }
     })
 
-    const grant = Effect.fn("LocalHttpApi.grant")(function* (ctx: { payload: { source: string; once?: boolean } }) {
+    // A grant answers one ask (rule 7): it lets the next request of that kind through, never every one after it.
+    const grant = Effect.fn("LocalHttpApi.grant")(function* (ctx: { payload: { source: string } }) {
       const source = LocalSources.get(ctx.payload.source)
       if (!source) return yield* failure("not-found", `Vector has no service called ${ctx.payload.source}.`)
       if (!ASKS.has(source.purpose) && source.local !== "ask-once")
@@ -155,7 +171,7 @@ export const localHandlers = HttpApiBuilder.group(InstanceHttpApi, "local", (han
           `Vector Local does not ask before ${source.id}, so there is nothing to answer once. Allow it for good instead (PATCH /local, or vector local allow).`,
         )
       if (LocalSettings.agentMarked()) return yield* failure("agent", LocalSettings.AGENT)
-      Egress.grant(source.id, { once: ctx.payload.once ?? true })
+      Egress.grant(source.id, { once: true })
       return true
     })
 

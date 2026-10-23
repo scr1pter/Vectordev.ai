@@ -15,6 +15,7 @@ import { LocalServers } from "../../../core/test/fixture/local-servers/serve"
 // Vector Local on for one run without changing a setting.
 
 const AGENT = { VECTOR_AGENT_SESSION: "ses_agent", VECTOR_LOCAL: "1" }
+const SERVER = "http://127.0.0.1:11434"
 
 // The CLI runs as the owner runs it in their own terminal: without the agent marker, which every child of a process
 // that resolved Vector Local otherwise inherits. The agent's own runs pass it themselves.
@@ -34,6 +35,29 @@ const readConfig = (home: string) => {
     .find((item) => existsSync(item))
   return file ? (parse(readFileSync(file, "utf8")) as Record<string, any>) : {}
 }
+
+// The CLI's way out to the internet for the test's scope: an HTTP proxy on 127.0.0.1 that answers every request as a
+// vectordev.ai that turns the token down, and lists each request that reached it. A request Vector Local blocked never
+// gets here, and one it let leave always does, since the CLI is pointed at it through HTTP_PROXY.
+const proxy = () =>
+  Effect.acquireRelease(
+    Effect.sync(() => {
+      const hits: string[] = []
+      const server = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        fetch(request) {
+          hits.push(`${request.method} ${request.url}`)
+          return Response.json(
+            { ok: false, error: { code: "CLI_TOKEN_INVALID", message: "Not a token" } },
+            { status: 401 },
+          )
+        },
+      })
+      return { origin: server.url.origin, hits: () => [...hits], stop: () => server.stop(true) }
+    }),
+    (item) => Effect.promise(() => item.stop()),
+  )
 
 // A fake Ollama on 127.0.0.1 for the test's scope, with its identity pin as Add server records it.
 const ollama = (routes?: Record<string, LocalServers.Route>) =>
@@ -65,7 +89,8 @@ describe("vector local", () => {
     "refuses to loosen Vector Local under the agent marker, but still tightens it",
     ({ vector, home }) =>
       Effect.gen(function* () {
-        writeConfig(home, { local: { enabled: true } })
+        // The user's model server is one this Vector does not count: under the marker, the user's config only tightens.
+        writeConfig(home, { local: { enabled: true, endpoints: [SERVER] } })
         const off = yield* vector.spawn(["local", "off"], { env: AGENT })
         vector.expectExit(off, 1)
         expect(off.stderr).toContain(
@@ -74,11 +99,11 @@ describe("vector local", () => {
         const allow = yield* vector.spawn(["local", "allow", "github", "--reason", "Pull requests"], { env: AGENT })
         vector.expectExit(allow, 1)
         expect(allow.stderr).toContain("cannot loosen Vector Local")
-        expect(readConfig(home).local).toEqual({ enabled: true })
-        // A stricter Web access is a tightening, which the marker does not stop.
+        expect(readConfig(home).local).toEqual({ enabled: true, endpoints: [SERVER] })
+        // A stricter Web access is a tightening, which the marker does not stop, and the server stays on the list.
         const web = yield* vector.spawn(["local", "web", "none"], { env: AGENT })
         vector.expectExit(web, 0)
-        expect(readConfig(home).local).toEqual({ enabled: true, web: "none" })
+        expect(readConfig(home).local).toEqual({ enabled: true, endpoints: [SERVER], web: "none" })
       }),
     60_000,
   )
@@ -98,6 +123,22 @@ describe("vector local", () => {
         const status = yield* vector.spawn(["local", "status", "--json"])
         vector.expectExit(status, 0)
         expect(JSON.parse(status.stdout).policy).toMatchObject({ enabled: true, web: "none" })
+        // An edit by hand is held, and the status says where confirming it applies.
+        writeConfig(home, {
+          local: {
+            enabled: true,
+            web: "none",
+            allow: [{ source: "github", reason: "Pull requests", added_at: 1, added_by: "cli" }],
+          },
+        })
+        const held = yield* vector.spawn(["local", "status"])
+        vector.expectExit(held, 0)
+        expect(held.stderr).toContain(
+          "A change to your config would loosen Vector Local: it allows github. It waits for you: run vector local confirm. A Vector that is already running applies that when it next starts, except the desktop app, which keeps a record of its own.",
+        )
+        const confirm = yield* vector.spawn(["local", "confirm"])
+        vector.expectExit(confirm, 1)
+        expect(confirm.stderr).toContain("It allows github.")
       }),
     60_000,
   )
@@ -165,15 +206,45 @@ describe("vector local", () => {
 describe("the account gate", () => {
   cliIt.live(
     "leaves every vector local command open, and keeps vector run --local behind it, on Vector Local from the start",
-    ({ vector }) =>
+    ({ vector, home }) =>
       Effect.gen(function* () {
-        const status = yield* vector.spawn(["local", "status"], { env: { VECTOR_CLI: "1" } })
+        const account = yield* proxy()
+        const env = {
+          VECTOR_CLI: "1",
+          VECTOR_SITE_URL: "http://vectordev.example",
+          HTTP_PROXY: account.origin,
+          NO_PROXY: "127.0.0.1,localhost,[::1]",
+        }
+        const status = yield* vector.spawn(["local", "status"], { env })
         vector.expectExit(status, 0)
         expect(status.stderr).toContain("Vector Local is off")
-        // --local applies before the account check, so the check knows vectordev.ai is blocked and sends nothing.
-        const run = yield* vector.spawn(["run", "--local", "say hi"], { env: { VECTOR_CLI: "1" } })
-        vector.expectExit(run, 1)
-        expect(run.stderr).toContain("A free Vector account is required. Vector Local blocks requests to vectordev.ai")
+        // With no sign-in, --local applies before the account check, which knows vectordev.ai is blocked.
+        const unsigned = yield* vector.spawn(["run", "--local", "say hi"], { env })
+        vector.expectExit(unsigned, 1)
+        expect(unsigned.stderr).toContain(
+          "A free Vector account is required. Vector Local blocks requests to vectordev.ai",
+        )
+        expect(account.hits()).toEqual([])
+        // Signed in on an earlier day, the check would ask vectordev.ai again; under --local it sends nothing, and the
+        // run stops at the model, which is not on a model server list.
+        const auth = path.join(home, ".local", "share", "vector", "cli-auth.json")
+        mkdirSync(path.dirname(auth), { recursive: true })
+        writeFileSync(
+          auth,
+          JSON.stringify({
+            token: "vct_test_not_a_token",
+            user: { id: "usr_test", email: "owner@example.com" },
+            verifiedAt: Date.now() - 2 * 24 * 60 * 60 * 1000,
+          }),
+        )
+        const signed = yield* vector.spawn(["run", "--local", "say hi"], { env })
+        expect(signed.exitCode).not.toBe(0)
+        expect(`${signed.stdout}${signed.stderr}`).toContain("off in Vector Local")
+        expect(account.hits()).toEqual([])
+        // Without --local the same check goes out through the proxy, so a request that left would have shown above.
+        const plain = yield* vector.spawn(["run", "say hi"], { env })
+        vector.expectExit(plain, 1)
+        expect(account.hits()).toContain("POST http://vectordev.example/api/account/cli-verify")
       }),
     60_000,
   )
@@ -201,6 +272,24 @@ describe("vector local setup", () => {
         // Nothing was written: neither the list nor a second provider.
         expect(readConfig(home).local.endpoints).toEqual([server.fake.origin])
         expect(Object.keys(readConfig(home).provider)).toEqual(["ollama"])
+      }),
+    60_000,
+  )
+
+  cliIt.live(
+    "under the agent marker, adds no server even with Vector Local off, since turning it on would let the server in",
+    ({ vector, home }) =>
+      Effect.gen(function* () {
+        const server = yield* ollama()
+        const added = yield* vector.spawn(["local", "setup", server.fake.origin], {
+          env: { VECTOR_AGENT_SESSION: "ses_agent" },
+        })
+        vector.expectExit(added, 1)
+        expect(added.stderr).toContain("cannot loosen Vector Local")
+        expect(added.stderr).toContain(`adds the model server ${server.fake.origin}`)
+        // Neither the list nor a provider.
+        expect(readConfig(home).local).toBeUndefined()
+        expect(readConfig(home).provider?.ollama).toBeUndefined()
       }),
     60_000,
   )
