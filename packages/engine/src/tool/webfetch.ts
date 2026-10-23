@@ -27,6 +27,13 @@ export const Parameters = Schema.Struct({
   timeout: Schema.optional(Schema.Number).annotate({ description: "Optional timeout in seconds (max 120)" }),
 })
 
+type Metadata = {
+  truncated?: boolean
+  outputPath?: string
+  /** A hop reached the user's own computer or network. */
+  private?: boolean
+}
+
 export const WebFetchTool = Tool.define(
   "webfetch",
   Effect.gen(function* () {
@@ -68,6 +75,10 @@ export const WebFetchTool = Tool.define(
           }
 
           const request = HttpClientRequest.get(params.url).pipe(HttpClientRequest.setHeaders(headers))
+          // Whether a hop reached the user's own computer or network: the page is then theirs, and research counts it
+          // as private context, as it does a page research_read read there.
+          const reached = { private: false }
+          const marked = (): Metadata => (reached.private ? { private: true } : {})
 
           const { response, body } = yield* Effect.gen(function* () {
             const response = yield* WebFetchRequest.execute(http, request, {
@@ -86,12 +97,14 @@ export const WebFetchTool = Tool.define(
               // A dev server, an intranet page or a cloud metadata address is reached only with its own approval,
               // since a model reading a hostile page could otherwise be steered into the user's network.
               authorizePrivate: (url) =>
-                ctx.ask({
-                  permission: "private_network",
-                  patterns: [new URL(url).origin],
-                  always: [new URL(url).origin],
-                  metadata: { url },
-                }),
+                ctx
+                  .ask({
+                    permission: "private_network",
+                    patterns: [new URL(url).origin],
+                    always: [new URL(url).origin],
+                    metadata: { url },
+                  })
+                  .pipe(Effect.tap(() => Effect.sync(() => (reached.private = true)))),
             })
             const body = yield* collectBoundedResponseBody(
               response,
@@ -113,7 +126,7 @@ export const WebFetchTool = Tool.define(
             return {
               title,
               output: "Image fetched successfully",
-              metadata: {},
+              metadata: marked(),
               attachments: [
                 {
                   type: "file" as const,
@@ -147,7 +160,11 @@ export const WebFetchTool = Tool.define(
           return {
             output: page.truncated ? fenceTruncated(page.content, text, fence) : fence(page.content),
             title,
-            metadata: { truncated: page.truncated, ...(page.truncated && { outputPath: page.outputPath }) },
+            metadata: {
+              ...marked(),
+              truncated: page.truncated,
+              ...(page.truncated && { outputPath: page.outputPath }),
+            },
           }
         }).pipe(Effect.orDie),
     }

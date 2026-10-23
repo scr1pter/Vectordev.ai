@@ -275,6 +275,47 @@ describe("Instruction.system", () => {
     }),
   )
 
+  it.live("tells the repository's instruction files from the user's own, remote ones included", () =>
+    Effect.gen(function* () {
+      const globalTmp = yield* tmpWithFiles({ "AGENTS.md": "# Global Instructions" })
+      const repositoryTmp = yield* tmpWithFiles({ "AGENTS.md": "# Repository Instructions" })
+      const requests: string[] = []
+      const client = HttpClient.make((request) =>
+        Effect.sync(() => {
+          requests.push(request.url)
+          return HttpClientResponse.fromWeb(request, new Response("Remote rules"))
+        }),
+      )
+      const layer = AppNodeBuilder.build(LayerNode.group([Instruction.node, Brain.node]), [
+        [
+          Config.node,
+          Layer.succeed(
+            Config.Service,
+            TestConfig.make({ get: () => Effect.succeed({ instructions: ["https://1.1.1.1/rules"] }) }),
+          ),
+        ],
+        [Global.node, Global.layerWith({ home: globalTmp, config: globalTmp })],
+        [RuntimeFlags.node, RuntimeFlags.layer({})],
+        [httpClient, Layer.succeed(HttpClient.HttpClient, client)],
+      ])
+
+      yield* Effect.gen(function* () {
+        const svc = yield* Instruction.Service
+        const repository = `Instructions from: ${path.join(repositoryTmp, "AGENTS.md")}\n# Repository Instructions`
+        const own = `Instructions from: ${path.join(globalTmp, "AGENTS.md")}\n# Global Instructions`
+        // No prompt has been sent the remote instructions yet, and contents() fetches nothing itself.
+        expect(yield* svc.contents()).toEqual({ work: [repository], private: [own] })
+        expect(requests).toEqual([])
+        yield* svc.system()
+        expect(yield* svc.contents()).toEqual({
+          work: [repository],
+          private: [own, "Instructions from: https://1.1.1.1/rules\nRemote rules"],
+        })
+        expect(requests).toEqual(["https://1.1.1.1/rules"])
+      }).pipe(provideInstance(repositoryTmp), Effect.provide(layer))
+    }),
+  )
+
   it.live("skips project and global CLAUDE.md when Claude Code prompt is disabled", () =>
     Effect.gen(function* () {
       const globalTmp = yield* tmpWithFiles({ ".claude/CLAUDE.md": "# Global Claude" })

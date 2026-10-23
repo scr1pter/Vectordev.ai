@@ -69,6 +69,22 @@ import { ModelV2 } from "@vectordevai/core/model"
 import { BrowserTool } from "./browser"
 import { VectorCloudTool } from "./vector-cloud"
 import { Auth } from "@/auth"
+import { ResearchStore } from "@vectordevai/core/research/store"
+import { ResearchRun } from "./research-run"
+import { ResearchPlanTool } from "./research-plan"
+import { ResearchSearchTool } from "./research-search"
+import { ResearchReadTool } from "./research-read"
+import { ResearchNoteTool } from "./research-note"
+import { ResearchReportTool } from "./research-report"
+import { ResearchTool } from "./research"
+
+// Which research tool each research agent is offered (section 5.3). The agents' permissions say the same; offering
+// them only here keeps every other agent's tool list, and its provider cache, as it was.
+const RESEARCH_TOOLS: Record<string, readonly string[]> = {
+  [ResearchRun.LEAD]: ["research_plan", "research_search", "research_read", "research_note", "research_report"],
+  [ResearchRun.RESEARCHER]: ["research_search", "research_read", "research_note"],
+}
+const RESEARCH_TOOL_IDS = new Set(Object.values(RESEARCH_TOOLS).flat())
 
 export function webSearchEnabled(flags = { exa: false, parallel: false }) {
   return (
@@ -148,6 +164,12 @@ const layer = Layer.effect(
     const memorytool = yield* MemoryTool
     const browsertool = yield* BrowserTool
     const vectorcloudtool = yield* VectorCloudTool
+    const researchplan = yield* ResearchPlanTool
+    const researchsearch = yield* ResearchSearchTool
+    const researchread = yield* ResearchReadTool
+    const researchnote = yield* ResearchNoteTool
+    const researchreport = yield* ResearchReportTool
+    const researchtool = yield* ResearchTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -277,6 +299,12 @@ const layer = Layer.effect(
           plan: Tool.init(plan),
           browser: Tool.init(browsertool),
           vectorcloud: Tool.init(vectorcloudtool),
+          researchplan: Tool.init(researchplan),
+          researchsearch: Tool.init(researchsearch),
+          researchread: Tool.init(researchread),
+          researchnote: Tool.init(researchnote),
+          researchreport: Tool.init(researchreport),
+          research: Tool.init(researchtool),
         })
 
         return {
@@ -306,6 +334,13 @@ const layer = Layer.effect(
             ...(process.env.VECTOR_CLOUD_BRIDGE_URL && process.env.VECTOR_CLOUD_BRIDGE_TOKEN ? [tool.vectorcloud] : []),
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
             ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
+            // Deep research's tools, offered to the research agents alone (below), and the build agent's research tool.
+            tool.researchplan,
+            tool.researchsearch,
+            tool.researchread,
+            tool.researchnote,
+            tool.researchreport,
+            tool.research,
           ],
           task: tool.task,
           taskSchema: JSON.stringify(tool.task.jsonSchema),
@@ -325,7 +360,10 @@ const layer = Layer.effect(
     })
 
     const describeTask = Effect.fn("ToolRegistry.describeTask")(function* (agent: Agent.Info) {
-      const items = (yield* agents.list()).filter((item) => item.mode !== "primary")
+      // A hidden built-in subagent (the research judge) is Vector's to launch, so no model is told about it.
+      const items = (yield* agents.list()).filter(
+        (item) => item.mode !== "primary" && !(item.native && item.hidden && item.mode === "subagent"),
+      )
       const filtered = items.filter(
         (item) => Permission.evaluate("task", item.name, agent.permission).action !== "deny",
       )
@@ -343,7 +381,20 @@ const layer = Layer.effect(
       const builtin = yield* InstanceState.get(state)
       const exa = yield* auth.get("exa").pipe(Effect.orDie)
       const parallel = yield* auth.get("parallel").pipe(Effect.orDie)
+      const researchSetting = (yield* config.get()).research?.tool
+      // A research agent is offered its own tools and nothing else, whatever a session's or the user's rules allow:
+      // no edit, shell, plugin or custom tool reaches Deep research (RC1).
+      const own = Agent.researchTools(input.agent.name)
       const filtered = (yield* all()).filter((tool) => {
+        if (own && tool.id !== InvalidTool.id && !own.includes(tool.id)) return false
+        if (RESEARCH_TOOL_IDS.has(tool.id)) return RESEARCH_TOOLS[input.agent.name]?.includes(tool.id) ?? false
+        // The build agent researches as a tool on its own requests unless the user turned that off; the session
+        // runtime's size decides the rest when the tool runs.
+        if (tool.id === ResearchTool.id) return input.agent.name === "build" && researchSetting !== "off"
+        // The research lead reaches the user's own signed-in browser only to hand a sign-in or a paywall to the user
+        // and read the page they reached (section 5.6a). Until the browser tool limits research sessions to that, the
+        // lead is not offered it.
+        if (tool.id === BrowserTool.id && input.agent.name === ResearchRun.LEAD) return false
         if (tool.id === WebSearchTool.id) {
           return webSearchEnabled({
             exa: flags.enableExa || !!process.env.EXA_API_KEY || (exa?.type === "api" && !!exa.key),
@@ -518,6 +569,8 @@ export const node = LayerNode.make({
     SpendGuard.node,
     TaskManager.node,
     Global.node,
+    ResearchStore.node,
+    ResearchRun.node,
   ],
 })
 

@@ -1229,6 +1229,8 @@ it.instance(
       agent: {
         build: { disable: true },
         plan: { disable: true },
+        // Deep research's lead is a primary agent too.
+        research: { disable: true },
       },
     },
   },

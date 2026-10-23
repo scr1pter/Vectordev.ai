@@ -6,9 +6,11 @@ import { ConfigResearchV1 } from "@vectordevai/core/v1/config/research"
 const decode = Schema.decodeUnknownSync(ConfigV1.Info)
 
 describe("research and local config", () => {
-  test("the build agent may research as a tool on Work and Thorough requests by default, never on Chat", () => {
+  test("the build agent may research as a tool on Work and Thorough requests by default, never on Chat or Light", () => {
     expect(ConfigResearchV1.buildTool("chat")).toBe(false)
-    expect(ConfigResearchV1.buildTool("light")).toBe(true)
+    expect(ConfigResearchV1.buildTool("light")).toBe(false)
+    expect(ConfigResearchV1.buildTool("light", "work")).toBe(false)
+    expect(ConfigResearchV1.buildTool("light", "thorough")).toBe(false)
     expect(ConfigResearchV1.buildTool("standard")).toBe(true)
     expect(ConfigResearchV1.buildTool("thorough")).toBe(true)
     expect(ConfigResearchV1.buildTool("standard", "thorough")).toBe(false)

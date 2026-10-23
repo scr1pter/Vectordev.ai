@@ -105,8 +105,11 @@ const OUTWARD_AGENTS = new Set(["researcher", "research-judge"])
  * Who a session's memory is for (section 6.4a). A role whose output leaves the machine or reaches the web gets the
  * outward digest: how the owner works, and no MEMORY.md, fact or entry learned beside a private document.
  */
-export function audienceOf(session: Pick<Session.Info, "internal">, agent: string): Brain.Audience {
-  return session.internal?.startsWith(VECTORSCOPE) || OUTWARD_AGENTS.has(agent) ? "outward" : "owner"
+export function audienceOf(session: Pick<Session.Info, "internal" | "parentID">, agent: string): Brain.Audience {
+  if (session.internal?.startsWith(VECTORSCOPE) || OUTWARD_AGENTS.has(agent)) return "outward"
+  // A research lead the build agent started works from build's request alone and sends queries to the web: it hears
+  // how the owner works, screened, and nothing about them. The lead of the user's own Deep research is the owner's.
+  return agent === "research" && session.parentID ? "outward" : "owner"
 }
 
 /**
@@ -272,10 +275,12 @@ const layer = Layer.effect(
         readonly index: boolean
         readonly audience: Brain.Audience
         readonly kinds?: readonly Brain.HabitKind[]
+        /** Whether the instruction files (AGENTS.md and the rest) go too. */
+        readonly files: boolean
       },
     ) {
       const snapshot = instructionSnapshots.get(sessionID)
-      const full = `${key}|${memory.personal ? "personal" : "shared"}|${memory.index ? "index" : "plain"}|${memory.audience}|${memory.kinds?.join(",") ?? "all"}`
+      const full = `${key}|${memory.personal ? "personal" : "shared"}|${memory.index ? "index" : "plain"}|${memory.audience}|${memory.kinds?.join(",") ?? "all"}|${memory.files ? "files" : "brief"}`
       // Re-inserting keeps the most recently used sessions at the end; the oldest go once there are too many.
       instructionSnapshots.delete(sessionID)
       if (snapshot && snapshot.key === full && !cold) {
@@ -290,7 +295,7 @@ const layer = Layer.effect(
         ? yield* knowledge.digest(place, { personal: memory.personal && memory.audience === "owner" })
         : undefined
       const digest = yield* brain.digest(place, { ...memory, ...(documents ? { documents } : {}) })
-      const instructions = [...(yield* instruction.system()), ...(digest.text ? [digest.text] : [])]
+      const instructions = [...(memory.files ? yield* instruction.system() : []), ...(digest.text ? [digest.text] : [])]
       const next = { key: full, instructions, documents: documents !== undefined }
       instructionSnapshots.set(sessionID, next)
       if (instructionSnapshots.size > MAX_INSTRUCTION_SNAPSHOTS)
@@ -2129,6 +2134,9 @@ const layer = Layer.effect(
                       },
                       tools: offered,
                       nested: session.parentID !== undefined,
+                      // A research worker and the judge are not told the working tree: its path names folders, and
+                      // what they send leaves the machine.
+                      workspace: !OUTWARD_AGENTS.has(agent.name),
                       // The day the history starts on; a later day is noted on the user message that starts it.
                       date: msgs.find((message) => message.info.role === "user")?.info.time.created,
                     }),
@@ -2145,6 +2153,9 @@ const layer = Layer.effect(
                     personal,
                     index: offered.includes("memory"),
                     audience,
+                    // A research worker and the judge work from their brief: the repository's instruction files name
+                    // its code, hosts and people, and what a worker sends leaves the machine.
+                    files: !OUTWARD_AGENTS.has(agent.name),
                     // An outward digest pins only the kinds the role hears: preferences alone for a pull request
                     // Vector cannot trust.
                     ...(audience === "outward"

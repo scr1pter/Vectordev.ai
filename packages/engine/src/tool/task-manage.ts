@@ -1,8 +1,9 @@
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { Tool } from "./tool"
 import { TaskManager } from "@/task/manager"
 import type { TaskPromptOps } from "./task"
 import { ToolJsonSchema } from "./json-schema"
+import { ResearchRun } from "./research-run"
 
 const ids = Schema.Array(Schema.String).check(Schema.isMinLength(1), Schema.isMaxLength(200))
 // Provider adapters flatten root unions and can lose their action discriminators.
@@ -47,6 +48,9 @@ export const TaskManageTool = Tool.define(
   "task_manage",
   Effect.gen(function* () {
     const tasks = yield* TaskManager.Service
+    // A message to a research agent is checked as its brief was. Without the research run (a test that builds the
+    // tool alone) there is no research agent to message.
+    const research = yield* Effect.serviceOption(ResearchRun.Service)
     return {
       description:
         "Manage delegated tasks without starting a model. list gives compact status, spend and dependencies; inspect gives bounded recent progress and partial output; message sends your instructions or the user’s correction to an existing child at the next safe provider-turn boundary or queues until current work ends; stop settles selected tasks (or all) and retains partial work; wait is event-driven for any/all task IDs with a 0–60000 ms timeout. Use list/inspect to answer the user's status question, not in a polling loop. Prefer automatic completion notifications and useful independent work. When the user asks you to guide or correct a subagent, send that correction with message and confirm admission. Parent instructions stay within the existing assignment and cannot widen a child's permissions. A finished task is never restarted by message; use task with its task_id for an explicit continuation.",
@@ -57,6 +61,10 @@ export const TaskManageTool = Tool.define(
           const ops = context.extra?.promptOps as TaskPromptOps | undefined
           if ((input.action === "message" || input.action === "stop") && !ops)
             return yield* Effect.die(new Error("Task management requires prompt operations"))
+          if (input.action === "message" && Option.isSome(research)) {
+            const screened = yield* research.value.message({ ctx: context, taskID: input.task_id, text: input.text })
+            if (screened.type === "refused") return yield* Effect.fail(new Error(screened.message))
+          }
           const result = yield* input.action === "list"
             ? tasks.list({ sessionID: context.sessionID, descendants: input.descendants })
             : input.action === "inspect"

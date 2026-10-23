@@ -504,6 +504,11 @@ export interface Interface {
   readonly count: (place: Brain.Place, options: { readonly personal: boolean }) => Effect.Effect<number>
   /** The digest's line about the repository's documents, or nothing without any. */
   readonly digest: (place: Brain.Place, options: { readonly personal: boolean }) => Effect.Effect<string | undefined>
+  /** The titles the digest's line names from, with their documents' visibility: usable, and visible to it. */
+  readonly titles: (
+    place: Brain.Place,
+    options: { readonly personal: boolean },
+  ) => Effect.Effect<readonly { readonly title: string; readonly visibility: BrainSchema.Visibility }[]>
   readonly recall: (
     place: Brain.Place,
     input: {
@@ -1976,9 +1981,9 @@ function make(input: {
     return row?.count ?? 0
   })
 
-  const digest = Effect.fn("BrainKnowledge.digest")(function* (place: Brain.Place, options: { personal: boolean }) {
-    const rows = yield* db
-      .select({ title: BrainDocumentTable.title })
+  const titles = Effect.fn("BrainKnowledge.titles")(function* (place: Brain.Place, options: { personal: boolean }) {
+    return yield* db
+      .select({ title: BrainDocumentTable.title, visibility: BrainDocumentTable.visibility })
       .from(BrainDocumentTable)
       .where(
         and(
@@ -1989,11 +1994,15 @@ function make(input: {
       )
       .all()
       .pipe(Effect.orDie)
+  })
+
+  const digest = Effect.fn("BrainKnowledge.digest")(function* (place: Brain.Place, options: { personal: boolean }) {
+    const rows = yield* titles(place, options)
     if (rows.length === 0) return undefined
-    const titles = rows
+    const clipped = rows
       .map((row) => BrainCard.escape(BrainCard.clip(row.title, 24)))
       .toSorted((a, b) => a.localeCompare(b))
-    const named = [...titles.slice(0, 3), ...(titles.length > 3 ? ["…"] : [])].join(", ")
+    const named = [...clipped.slice(0, 3), ...(clipped.length > 3 ? ["…"] : [])].join(", ")
     const line = (names: string) =>
       `Vector also holds ${rows.length} document${rows.length === 1 ? "" : "s"} for this repository${names ? ` (${names})` : ""}; memory search finds their cards.`
     // At most 30 tokens: titles go before the line does.
@@ -6609,6 +6618,7 @@ function make(input: {
     update,
     count,
     digest,
+    titles,
     recall,
     lines,
     outline,
