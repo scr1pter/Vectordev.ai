@@ -17,92 +17,18 @@ export function local(command: string) {
 
 // Text utilities, shell builtins and the repository's own build and check tools. Their output is this computer's.
 const LOCAL_PROGRAMS = new Set([
-  ...[
-    "ls",
-    "cat",
-    "head",
-    "tail",
-    "less",
-    "more",
-    "grep",
-    "egrep",
-    "fgrep",
-    "rg",
-    "ag",
-    "ack",
-    "find",
-    "fd",
-    "sed",
-    "awk",
-  ],
-  ...["gawk", "cut", "tr", "wc", "sort", "uniq", "diff", "cmp", "comm", "echo", "printf", "pwd", "cd", "pushd", "popd"],
+  ...["ls", "cat", "head", "tail", "less", "more", "grep", "egrep", "fgrep", "rg", "ag", "ack", "find", "fd", "sed"],
+  ...["cut", "tr", "wc", "sort", "uniq", "diff", "cmp", "comm", "echo", "printf", "pwd", "cd", "pushd", "popd"],
   ...["mkdir", "rmdir", "rm", "cp", "mv", "touch", "chmod", "chown", "ln", "stat", "file", "which", "whereis", "type"],
   ...["test", "[", "[[", "]", "]]", "true", "false", ":", "export", "set", "unset", "source", ".", "tree", "jq", "yq"],
   ...["xxd", "hexdump", "od", "basename", "dirname", "realpath", "readlink", "date", "sleep", "tee", "seq", "column"],
-  ...[
-    "paste",
-    "join",
-    "split",
-    "tar",
-    "gzip",
-    "gunzip",
-    "zip",
-    "unzip",
-    "shasum",
-    "sha1sum",
-    "sha256sum",
-    "md5",
-    "md5sum",
-  ],
-  ...[
-    "du",
-    "df",
-    "ps",
-    "kill",
-    "pkill",
-    "pgrep",
-    "uname",
-    "whoami",
-    "id",
-    "clear",
-    "exit",
-    "read",
-    "wait",
-    "trap",
-    "nl",
-  ],
+  ...["paste", "join", "split", "gzip", "gunzip", "unzip", "shasum", "sha1sum", "sha256sum", "md5", "md5sum"],
+  ...["du", "df", "ps", "kill", "pkill", "pgrep", "uname", "whoami", "id", "clear", "exit", "read", "wait", "nl"],
   ...["rev", "fold", "fmt", "iconv", "strings", "base64", "bc", "expr", "let", "local", "declare", "printenv", "patch"],
   ...["in", "return", "shift", "open", "lsof", "tsc", "tsgo", "vitest", "jest", "pytest", "mypy", "pyright", "ruff"],
-  ...[
-    "eslint",
-    "biome",
-    "oxlint",
-    "prettier",
-    "rspec",
-    "phpunit",
-    "xcodebuild",
-    "xcrun",
-    "swiftc",
-    "clang",
-    "gcc",
-    "cc",
-  ],
-  ...[
-    "c++",
-    "make",
-    "cmake",
-    "ninja",
-    "mvn",
-    "gradle",
-    "gradlew",
-    "dotnet",
-    "swift",
-    "mix",
-    "turbo",
-    "playwright",
-    "tsx",
-  ],
-  ...["ts-node", "mocha", "knip", "vite", "drizzle-kit", "stylelint", "rustc", "rustfmt", "gofmt", "black", "isort"],
+  ...["eslint", "biome", "oxlint", "prettier", "rspec", "phpunit", "xcodebuild", "swiftc", "clang", "gcc", "cc"],
+  ...["c++", "cmake", "ninja", "mvn", "gradle", "gradlew", "dotnet", "swift", "mix", "turbo", "playwright"],
+  ...["mocha", "knip", "vite", "drizzle-kit", "stylelint", "rustc", "rustfmt", "gofmt", "black", "isort"],
 ])
 
 // What `npx` and its kin may run without counting as a registry download: tools a repository installs itself.
@@ -174,11 +100,22 @@ const WRAPPERS = new Set([
   "timeout",
   "stdbuf",
 ])
-const RUNTIMES = new Set(["node", "deno", "python", "python3", "ruby", "perl", "php", "lua"])
+const RUNTIMES = new Set(["node", "deno", "python", "python3", "ruby", "perl", "php", "lua", "tsx", "ts-node"])
 const PACKAGES = new Set(["bun", "npm", "pnpm", "yarn"])
 const PYTHON_PACKAGES = new Set(["pip", "pip3", "uv", "poetry", "pipenv"])
 const INLINE = new Set(["-e", "--eval", "-p", "--print", "-c", "-r", "eval"])
-const URL_ARG = /^(?:[a-z][a-z0-9+.-]*:\/\/|git@|github:|gitlab:|bitbucket:|gist:)/i
+// An interpreter's code given inline: one of INLINE, its long form with a value (`--eval=…`), or a short option that
+// combines one of them (`perl -le …`, `node -pe …`, `python3 -Sc …`, `perl -E …`).
+const INLINE_CODE = /^(?:--(?:eval|print)=|-[A-Za-z]*[epcrE])/
+// A registry's package named as a script (`deno run npm:cowsay`, `deno run jsr:@std/http`) is fetched to run it.
+const URL_ARG = /^(?:[a-z][a-z0-9+.-]*:\/\/|git@|github:|gitlab:|bitbucket:|gist:|npm:|jsr:)/i
+// awk's own ways to run a command: `system(…)` (a pattern may call it too), `"cmd" | getline`, a print to a command
+// inside an action, and gawk's network files. A file named system.log calls nothing.
+const AWK_RUNS = /system\s*\(|getline|\/inet\/|\{[\s\S]*\|/
+// tar options that run a program (a filter, a remote shell, a script between volumes, a checkpoint action), and a
+// short option group with -I or -F, which take such a program.
+const TAR_RUNS =
+  /^--(?:to-command|use-compress-program|rsh-command|info-script|new-volume-script|checkpoint-action)|^-[A-Za-z]*[IF]/
 
 function runsLocally(words: readonly string[]): boolean {
   const [first, ...rest] = words
@@ -192,9 +129,39 @@ function runsLocally(words: readonly string[]): boolean {
   const redirect = REDIRECT.exec(first)?.[0]
   if (redirect !== undefined) return runsLocally(rest.slice(redirect === first ? 1 : 0))
   const name = first.split("/").pop() ?? first
+  if (name === "env") {
+    const split = rest.findIndex((word) => /^-[A-Za-z]*S|^--split-string/.test(word))
+    if (split >= 0)
+      return simple(
+        [rest[split].replace(/^-[A-Za-z]*S|^--split-string=?/, ""), ...rest.slice(split + 1)].join(" "),
+      ).every(runsLocally)
+  }
+  if (name === "xcrun") {
+    const tool = rest.findIndex(
+      (word, index) => !word.startsWith("-") && !/^-{1,2}(?:sdk|toolchain|log)$/.test(rest[index - 1] ?? ""),
+    )
+    return tool < 0 || runsLocally(rest.slice(tool))
+  }
   if (WRAPPERS.has(name))
     return runsLocally(rest.slice(rest.findIndex((word) => !/^-|^\d+[smhd]?$|^[A-Za-z_]\w*=/.test(word)) >>> 0))
   if (name === "eval") return simple(rest.join(" ")).every(runsLocally)
+  // `trap 'curl …' EXIT` runs its first argument as a command line when the signal comes.
+  if (name === "trap") return rest[0] === undefined || rest[0].startsWith("-") || local(rest[0])
+  if (name === "awk" || name === "gawk" || name === "mawk" || name === "nawk")
+    return !rest.some((word) => AWK_RUNS.test(word)) && !readsProgram(rest, ["-f", "--file", "-E", "--exec"])
+  if (name === "sed")
+    return !rest.some((word) =>
+      sedRuns(word.startsWith("--expression=") ? word.slice(13) : word.startsWith("-") ? "" : word),
+    )
+  if (name === "tar")
+    return !rest.some((word) => TAR_RUNS.test(word) || (!rest.includes("--force-local") && remoteArchive(word)))
+  // zip tests an archive with the command `-TT` names.
+  if (name === "zip") return !rest.some((word) => word === "-TT" || word.startsWith("--unzip-command"))
+  if (name === "make")
+    return (
+      !rest.some((word) => word === "--eval" || word.startsWith("--eval=") || word === "-E") &&
+      !readsProgram(rest, ["-f", "--file", "--makefile"])
+    )
   if (SHELLS.has(name)) return shellLocally(rest)
   if (name === "find") {
     const at = rest.findIndex((word) => word === "-exec" || word === "-execdir" || word === "-ok")
@@ -203,18 +170,18 @@ function runsLocally(words: readonly string[]): boolean {
   if (name === "git") return gitLocally(rest)
   if (LOCAL_PROGRAMS.has(name)) return true
   if (rest.some((word) => URL_ARG.test(word))) return false
-  if (name === "npx" || name === "bunx" || name === "pnpx")
-    return LOCAL_TOOLS_RUN.has(rest.find((word) => !word.startsWith("-")) ?? "")
+  if (name === "npx" || name === "bunx" || name === "pnpx") return toolLocally(rest)
   if (PACKAGES.has(name)) {
-    if (rest.some((word) => INLINE.has(word) && word !== "-c" && word !== "-r")) return false
     const sub = rest.find((word) => !word.startsWith("-"))
-    if (sub === "exec")
-      return LOCAL_TOOLS_RUN.has(rest.slice(rest.indexOf("exec") + 1).find((word) => !word.startsWith("-")) ?? "")
+    // `bun -e …` runs code inline; an option after the command (`npm exec -- tsc -p .`) is the command's own.
+    const options = rest.slice(0, sub === undefined ? rest.length : rest.indexOf(sub))
+    if (options.some((word) => INLINE.has(word) && word !== "-c" && word !== "-r")) return false
+    if (sub === "exec") return toolLocally(rest.slice(rest.indexOf("exec") + 1))
     if (sub === "pm") return !["view", "whoami"].includes(rest[rest.indexOf("pm") + 1] ?? "")
     return sub === undefined || !REGISTRY.has(sub)
   }
   if (RUNTIMES.has(name)) {
-    if (rest.some((word) => INLINE.has(word)) || stdinCode(rest)) return false
+    if (rest.some((word) => INLINE.has(word) || INLINE_CODE.test(word)) || stdinCode(rest)) return false
     // `python -m pip download` fetches like `pip download` does.
     const module = rest.indexOf("-m")
     return (
@@ -278,6 +245,39 @@ function stdinCode(words: readonly string[]) {
   if (words.length === 0 || words.includes("-")) return true
   const at = words.findIndex((word) => REDIRECT.test(word) && /</.test(REDIRECT.exec(word)?.[0] ?? ""))
   return at >= 0 && words.slice(0, at).every((word) => word.startsWith("-"))
+}
+
+// A repository's own tool run through npx or `npm exec`; one that runs code, such as tsx, is read as itself, so
+// `npx tsx -e …` counts as inline code.
+function toolLocally(words: readonly string[]) {
+  const at = words.findIndex((word) => !word.startsWith("-"))
+  const tool = words[at] ?? ""
+  return LOCAL_TOOLS_RUN.has(tool) && (!RUNTIMES.has(tool) || runsLocally(words.slice(at)))
+}
+
+// GNU sed runs a command with its `e` command (`1e curl …`) and the `e` flag of `s` (`s/x/curl …/e`). A standalone
+// `e`, or a final `e` among a substitution's flags, counts; one inside a word, such as a file name, does not.
+function sedRuns(word: string) {
+  return /(?:^|[^A-Za-z\\])e(?:\s|;|\}|$)/.test(word) || /\/[gpiImMw0-9]*e[gpiImMw0-9]*(?:\s|;|\}|$)/.test(word)
+}
+
+// An archive on another host (`host:path`, `user@host:path`), which tar reaches through a remote shell. A Windows
+// path such as C:\backup.tar is a local file.
+function remoteArchive(word: string) {
+  const file = word.startsWith("--file=") ? word.slice("--file=".length) : word
+  return !file.startsWith("-") && /^[^/\\]+:/.test(file) && !/^[A-Za-z]:[\\/]/.test(file)
+}
+
+// Whether a program that reads its code from a file named by one of `options` (make's makefile, awk's program file)
+// reads it from its input instead (`-f -`, `-f /dev/stdin`), where a heredoc or herestring is as much a command line
+// as `sh -c`. A file the repository has is its own, as a script is.
+function readsProgram(words: readonly string[], options: readonly string[]) {
+  return words.some((word, index) => {
+    const named = options.includes(word)
+      ? (words[index + 1] ?? "")
+      : options.flatMap((option) => (word.startsWith(`${option}=`) ? [word.slice(option.length + 1)] : []))[0]
+    return named !== undefined && (named === "-" || /^\/(?:dev|proc)\//.test(named))
+  })
 }
 
 function gitLocally(words: readonly string[]): boolean {
@@ -397,13 +397,13 @@ function simple(line: string) {
 
 // Package installs reach a registry, though what they print is this computer's own, so they count as network commands.
 const INSTALLS =
-  /(?:^|[\s;&|(])(?:(?:npm|pnpm|yarn|bun)\s+(?:install|i|add|ci|update|up|upgrade)|(?:pip3?|uv|poetry|pipenv)\s+(?:install|add|sync|lock|update)|uv\s+pip\s+install|gem\s+install|cargo\s+(?:install|fetch|update)|go\s+(?:get|install|mod\s+download)|brew\s+(?:install|upgrade|update)|(?:apt|apt-get|dnf|yum)\s+(?:install|update|upgrade))\b/
+  /(?:^|[\s;&|(])(?:(?:npm|pnpm|yarn|bun)\s+(?:install|i|add|ci|update|up|upgrade)|(?:pip3?|uv|poetry|pipenv)\s+(?:install|add|sync|lock|update)|uv\s+pip\s+install|gem\s+install|cargo\s+(?:install|fetch|update)|go\s+(?:get|install|mod\s+download)|brew\s+(?:install|upgrade|update)|(?:apt|apt-get|dnf|yum)\s+(?:install|update|upgrade)|playwright\s+install)\b/
 
 // Builds that fetch the dependencies they lack: Maven and Gradle unless told to stay offline, dotnet's restore (which
-// build, run, test and publish start with), SwiftPM, Mix's deps and Hex, Cargo unless offline, and Go's module
-// downloads.
+// build, run, test and publish start with), SwiftPM and Xcode's package resolution, Mix's deps and Hex, Cargo unless
+// offline, and Go's module downloads.
 const FETCHING_BUILDS =
-  /(?:^|[\s;&|(])(?:(?:(?:\.\/)?(?:mvnw?|gradlew?))(?![^;&|]*\s(?:-o|--offline)\b)|dotnet\s+(?:restore|build|run|test|publish|pack|add|workload|tool\s+(?:install|update|restore))|swift\s+(?:build|run|test|package\s+(?:resolve|update|fetch|edit))|mix\s+(?:deps\.get|deps\.update|hex\.\S+|archive\.install|local\.hex|local\.rebar)|cargo\s+(?:build|b|run|r|test|t|check|c|clippy|doc|bench|add|vendor|generate-lockfile)(?![^;&|]*\s(?:--offline|--frozen)\b)|go\s+(?:build|run|test|generate|mod\s+tidy|work\s+sync))(?=[\s;&|)]|$)/
+  /(?:^|[\s;&|(])(?:(?:(?:\.\/)?(?:mvnw?|gradlew?))(?![^;&|]*\s(?:-o|--offline)\b)|dotnet\s+(?:restore|build|run|test|publish|pack|add|workload|tool\s+(?:install|update|restore))|swift\s+(?:build|run|test|package\s+(?:resolve|update|fetch|edit))|mix\s+(?:deps\.get|deps\.update|hex\.\S+|archive\.install|local\.hex|local\.rebar)|cargo\s+(?:build|b|run|r|test|t|check|c|clippy|doc|bench|add|vendor|generate-lockfile)(?![^;&|]*\s(?:--offline|--frozen)\b)|go\s+(?:build|run|test|generate|mod\s+tidy|work\s+sync)|xcodebuild(?![^;&|]*\s(?:-disableAutomaticPackageResolution|-version|-help|-usage|-showsdks)\b))(?=[\s;&|)]|$)/
 
 // A web address opened in the default browser, which is signed in to the user's accounts. A file opened is not, nor
 // is a Windows path such as C:\notes.txt.
