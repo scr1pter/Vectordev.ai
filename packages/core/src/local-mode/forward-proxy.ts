@@ -6,9 +6,10 @@ import net from "node:net"
 // An HTTP forward proxy on 127.0.0.1 that decides each request a client sends it on its own, a later one on a
 // kept-alive connection included: CONNECT tunnels (https, wss) and absolute-form http requests. A refused request is
 // answered with its status and a plain-text reason. An allowed one is connected where the decision says, and its
-// request and body are passed on and the response relayed. It never keeps a process alive. The strict test guard and
-// the research browsers' egress proxy are both built on it. A request that upgrades (a WebSocket over plain http)
-// becomes a tunnel once its server answers 101, and a client must send its first request within HEAD_TIMEOUT.
+// request and body are passed on and the response relayed; the connection then waits for the client's next request
+// when the response's end can be told, and closes otherwise (`responseHead`). It never keeps a process alive. The strict test guard and the research browsers' egress proxy are both built on it.
+// A request that upgrades (a WebSocket over plain http) becomes a tunnel once its server answers 101, and a client
+// must send its first request within HEAD_TIMEOUT.
 //
 // With a secret, only a client that sends it may use the proxy: any program on this computer can reach loopback, the
 // ones the agent runs included, so an open proxy would be a way around the network guard.
@@ -55,6 +56,8 @@ type Decide = (destination: Destination) => Route | Promise<Route>
 
 const MAX_HEAD_BYTES = 64 * 1024
 const HEAD_TIMEOUT = 30_000
+// How long a kept-alive connection may wait for its client's next request. It keeps no process alive meanwhile.
+const KEEP_ALIVE = 300_000
 const AUTHENTICATE = 'Proxy-Authenticate: Basic realm="Vector", charset="UTF-8"'
 
 export const FORBIDDEN = (message: string): Route => ({ refuse: { status: 403, reason: "Forbidden", message } })
@@ -87,14 +90,25 @@ function create(decide: Decide, options: Options) {
   // Every open connection, so stopping the proxy also ends the tunnels and requests it is carrying.
   const open = new Set<net.Socket>()
   const server = net.createServer((client) => {
-    const current: { upstream?: net.Socket } = {}
+    const current: { upstream?: net.Socket; idle?: ReturnType<typeof setTimeout> } = {}
     open.add(client)
     client.on("error", () => client.destroy())
     client.on("close", () => {
       open.delete(client)
+      clearTimeout(current.idle)
       current.upstream?.destroy()
     })
+    // A response whose end the client can tell leaves its connection open for the client's next request, whatever the
+    // response said: Bun's fetch sends one on it after a refused answer (4xx, 5xx, a redirect) even when told to close.
+    const idle = () => {
+      clearTimeout(current.idle)
+      client.unref()
+      current.idle = setTimeout(() => client.destroy(), KEEP_ALIVE)
+      current.idle.unref()
+    }
     const serve = (head: string, rest: Buffer) => {
+      clearTimeout(current.idle)
+      client.ref()
       // The client sent its next request, so it has read all of the last response. The last upstream is let go first,
       // so its end does not close the client while this request is still being decided.
       const previous = current.upstream
@@ -131,8 +145,13 @@ function create(decide: Decide, options: Options) {
             return
           }
           upstream.write(originForm(method, destination, version, fields))
+          const response = { framed: false }
+          // The upstream closes after one response. A response without a length or chunks ends only with the
+          // connection, so the client's is closed too; otherwise it waits for the client's next request.
           upstream.on("end", () => {
-            if (current.upstream === upstream) client.end()
+            if (current.upstream !== upstream) return
+            if (!response.framed) return client.end()
+            idle()
           })
           // A request that asks to upgrade (a WebSocket over plain http) becomes a tunnel to this destination once it
           // answers 101: the client's bytes after the request are the new protocol's, not another request.
@@ -146,24 +165,30 @@ function create(decide: Decide, options: Options) {
             client.pipe(upstream)
             client.resume()
           }
-          statusLine(upstream, (status, read) => {
-            // With a secret, a site's 407 would read as this proxy asking for it again.
-            if (status === "407" && options.secret !== undefined) {
-              // Let go first, so a body still on its way to it does not close the client before the answer is sent.
-              current.upstream = undefined
-              upstream.destroy()
-              return refuse(client, {
-                status: 502,
-                reason: "Bad Gateway",
-                message: `${destination.host} asked for proxy credentials, which this proxy never passes on.`,
-              })
-            }
-            client.write(read)
-            upstream.pipe(client, { end: false })
-            if (!upgrade.asked) return
-            upgrade.status = status ?? ""
-            settle()
-          })
+          responseHead(
+            upstream,
+            destination.method,
+            (interim) => client.write(interim),
+            (status, read, framed) => {
+              response.framed = framed
+              // With a secret, a site's 407 would read as this proxy asking for it again.
+              if (status === "407" && options.secret !== undefined) {
+                // Let go first, so a body still on its way to it does not close the client before the answer is sent.
+                current.upstream = undefined
+                upstream.destroy()
+                return refuse(client, {
+                  status: 502,
+                  reason: "Bad Gateway",
+                  message: `${destination.host} asked for proxy credentials, which this proxy never passes on.`,
+                })
+              }
+              client.write(read)
+              upstream.pipe(client, { end: false })
+              if (!upgrade.asked) return
+              upgrade.status = status ?? ""
+              settle()
+            },
+          )
           // Only this request's body goes on to this destination; the bytes after it are the client's next request.
           forwardBody(client, upstream, fields, rest, (next) => {
             if (!upgrade.asked) return readHead(client, serve, next)
@@ -232,19 +257,52 @@ function authorized(fields: readonly string[], secret: string) {
   return given.length === expected.length && timingSafeEqual(given, expected)
 }
 
-// Reads an upstream response until its status line is in, then hands back the status and the bytes read so far, with
-// the upstream paused.
-function statusLine(upstream: net.Socket, done: (status: string | undefined, read: Buffer) => void) {
+// Reads an upstream response until its head is in, then hands back its status, the bytes to send the client and
+// whether the client can tell where the response ends without the connection closing (`framed`), with the upstream
+// paused. The bytes are the head, then whatever of the body came with it. The upstream's own connection fields are
+// about its hop, which closes after this response, so they are dropped: a framed response keeps the client's connection
+// open for its next request, and any other says `Connection: close`, since the client's connection then closes with the
+// upstream's. An interim head (100 Continue) goes to the client at once, since a client may wait for it before it sends
+// its body. A head longer than MAX_HEAD_BYTES, and a 101 that switches protocols, are passed on as they are.
+function responseHead(
+  upstream: net.Socket,
+  method: string,
+  interim: (head: Buffer) => void,
+  done: (status: string | undefined, read: Buffer, framed: boolean) => void,
+) {
   const chunks: Buffer[] = []
   const take = (chunk: Buffer) => {
     chunks.push(chunk)
     const all = Buffer.concat(chunks)
-    if (all.indexOf("\r\n") < 0 && all.length < MAX_HEAD_BYTES) return
+    const end = all.indexOf("\r\n\r\n")
+    if (end < 0 && all.length < MAX_HEAD_BYTES) return
+    const status = /^HTTP\/\d(?:\.\d)? (\d{3})/.exec(all.toString("latin1", 0, 64))?.[1]
+    if (end >= 0 && status?.startsWith("1") && status !== "101") {
+      interim(all.subarray(0, end + 4))
+      chunks.length = 0
+      const rest = all.subarray(end + 4)
+      if (rest.length > 0) take(rest)
+      return
+    }
     upstream.off("data", take)
     upstream.pause()
-    done(/^HTTP\/\d(?:\.\d)? (\d{3})/.exec(all.toString("latin1", 0, 64))?.[1], all)
+    if (end < 0 || status === "101") return done(status, all, false)
+    const [line = "", ...fields] = all.subarray(0, end).toString("latin1").split("\r\n")
+    const ends = framed(status, method, fields)
+    const kept = fields.filter((field) => !/^(?:connection|keep-alive|proxy-connection)\s*:/i.test(field))
+    const head = [line, ...kept, ...(ends ? [] : ["Connection: close"])].join("\r\n")
+    done(status, Buffer.concat([Buffer.from(head, "latin1"), all.subarray(end)]), ends)
   }
   upstream.on("data", take)
+}
+
+// Whether a response's end is known without its connection closing: it has no body (HEAD, 204, 304), or a length or
+// chunks.
+function framed(status: string | undefined, method: string, fields: readonly string[]) {
+  if (method === "HEAD" || status === "204" || status === "304") return true
+  return fields.some(
+    (field) => /^content-length\s*:\s*\d+\s*$/i.test(field) || /^transfer-encoding\s*:.*\bchunked\b/i.test(field),
+  )
 }
 
 function readHead(client: net.Socket, done: (head: string, rest: Buffer) => void, first: Buffer = Buffer.alloc(0)) {

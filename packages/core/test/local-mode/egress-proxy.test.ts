@@ -328,6 +328,115 @@ describe("ForwardProxy", () => {
     }
   })
 
+  // A client on one connection: each request is written once the answer to the one before is in, as a kept-alive client
+  // sends them, and `done` reads when an answer is complete.
+  const exchange = (port: number, requests: readonly string[], done: (text: string, index: number) => boolean) =>
+    new Promise<{ readonly answers: string[]; readonly closed: boolean }>((resolve) => {
+      const answers: string[] = []
+      const state = { text: "", closed: false }
+      const socket = net.connect(port, "127.0.0.1", () => socket.write(requests[0]!))
+      const finish = () => {
+        socket.destroy()
+        resolve({ answers, closed: state.closed })
+      }
+      socket.on("data", (chunk: Buffer) => {
+        state.text += chunk.toString("latin1")
+        if (!done(state.text, answers.length)) return
+        answers.push(state.text)
+        state.text = ""
+        if (answers.length === requests.length) return setTimeout(finish, 200)
+        socket.write(requests[answers.length]!)
+      })
+      socket.on("end", () => {
+        state.closed = true
+        if (state.text) answers.push(state.text)
+        finish()
+      })
+      setTimeout(finish, 1_500)
+    })
+  const fields = (answer: string) => answer.split("\r\n\r\n")[0]!.split("\r\n").slice(1)
+  const connection = (answer: string) => fields(answer).filter((field) => /^(?:connection|keep-alive)\s*:/i.test(field))
+
+  test("keeps the client's connection for its next request after an answer whose end it can tell", async () => {
+    // Bun's fetch sends its next request on a pooled connection after a 4xx, 5xx or redirect answer, whatever the
+    // answer said, so a proxy that closed it after the answer failed that request. The server here answers with a length
+    // and says it closes, as the proxy asked it to.
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: (request) =>
+        new Response(new URL(request.url).pathname, {
+          status: request.url.endsWith("/denied") ? 401 : 200,
+          headers: { connection: "close" },
+        }),
+    })
+    const proxy = await ForwardProxy.start(direct)
+    try {
+      const here = `127.0.0.1:${server.port}`
+      const request = (path: string) => `GET http://${here}${path} HTTP/1.1\r\nHost: ${here}\r\n\r\n`
+      const result = await exchange(proxy.port, [request("/denied"), request("/second"), request("/third")], (text) =>
+        /\/(?:denied|second|third)$/.test(text),
+      )
+      expect(result.answers.map((answer) => [answer.split("\r\n")[0], answer.split("\r\n\r\n")[1]])).toEqual([
+        ["HTTP/1.1 401 Unauthorized", "/denied"],
+        ["HTTP/1.1 200 OK", "/second"],
+        ["HTTP/1.1 200 OK", "/third"],
+      ])
+      // The upstream's own `Connection: close` was about its hop; this connection stays open.
+      expect(result.answers.flatMap(connection)).toEqual([])
+      expect(result.closed).toBe(false)
+    } finally {
+      await proxy.stop()
+      server.stop(true)
+    }
+  })
+
+  test("says an answer that ends only with its connection closes it, and closes it", async () => {
+    const upstream = net.createServer((socket) =>
+      socket.once("data", () => socket.end("HTTP/1.1 200 OK\r\nConnection: keep-alive\r\n\r\nuntil the end")),
+    )
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve))
+    const here = `127.0.0.1:${(upstream.address() as net.AddressInfo).port}`
+    const proxy = await ForwardProxy.start(direct)
+    try {
+      const result = await exchange(proxy.port, [`GET http://${here}/ HTTP/1.1\r\nHost: ${here}\r\n\r\n`], () => false)
+      expect(result.answers).toEqual(["HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nuntil the end"])
+      expect(result.closed).toBe(true)
+    } finally {
+      await proxy.stop()
+      upstream.close()
+    }
+  })
+
+  test("passes an interim 100 Continue on at once, before the client sends its body", async () => {
+    const upstream = net.createServer((socket) => {
+      socket.once("data", () => {
+        socket.write("HTTP/1.1 100 Continue\r\n\r\n")
+        socket.once("data", (body: Buffer) =>
+          socket.end(`HTTP/1.1 200 OK\r\nContent-Length: ${body.length}\r\n\r\n${body.toString()}`),
+        )
+      })
+    })
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve))
+    const here = `127.0.0.1:${(upstream.address() as net.AddressInfo).port}`
+    const proxy = await ForwardProxy.start(direct)
+    try {
+      const result = await exchange(
+        proxy.port,
+        [`PUT http://${here}/ HTTP/1.1\r\nHost: ${here}\r\nExpect: 100-continue\r\nContent-Length: 4\r\n\r\n`, "body"],
+        // The body goes only once the server said to continue.
+        (text, index) => (index === 0 ? text === "HTTP/1.1 100 Continue\r\n\r\n" : text.endsWith("body")),
+      )
+      expect(result.answers).toEqual([
+        "HTTP/1.1 100 Continue\r\n\r\n",
+        "HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nbody",
+      ])
+    } finally {
+      await proxy.stop()
+      upstream.close()
+    }
+  })
+
   test("closes a connection that does not send its first request in time", async () => {
     const proxy = await ForwardProxy.start(direct, { headTimeout: 100 })
     try {
