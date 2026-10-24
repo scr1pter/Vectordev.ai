@@ -161,7 +161,7 @@ const LICENCE = /(?<![\w-])[a-z0-9]{5}(?:-[a-z0-9]{5}){4}(?![\w-])/gi
 // "password = bcrypt2b") says how passwords are kept, not what one is. Only a scheme's own spellings count, so a
 // password that starts with one ("sha1lover99", "md5_Hunter2024", "bcryptFan2024") is still a password.
 const SCHEME =
-  /^(?:argon2(?:id|i|d)?|bcrypt(?:2[abxy])?|scrypt|yescrypt|pbkdf2(?:[-_]?(?:with)?[-_]?hmac)?(?:[-_]?sha-?\d+)?|md5(?:crypt)?|(?:hmac[-_]?)?sha-?\d+(?:[-_]\d+)?(?:crypt)?|blake(?:2[bs]?|3))(?:[-_](?:hashed|based))?$/
+  /^(?:argon2(?:id|i|d)?|bcrypt(?:2[abxy])?|scrypt|yescrypt|pbkdf2(?:[-_]?(?:with)?[-_]?hmac)?(?:[-_]?sha-?\d+)?|md5(?:crypt)?|(?:hmac[-_]?)?sha-?\d+(?:[-_]\d+)?(?:crypt)?|(?:sha-?\d+|md5|des|bsdi)[-_]?crypt|bcrypt[-_]sha-?\d+|ldap[-_](?:salted[-_])?(?:md5|sha\d*|crypt|bcrypt|pbkdf2[-_]sha\d+)|blake(?:2[bs]?|3))(?:[-_](?:hashed|based))?$/i
 // Quotes, brackets and punctuation around a value that are not part of it.
 const EDGE = /^["'`\u201c\u2018([{<]+|["'`\u201d\u2019)\]}>,.;:!?]+$/gu
 // What a reader reads past: accents and other combining marks once NFKD has split them off, and invisible characters.
@@ -188,7 +188,8 @@ const YEAR_FIRST = /(?<!\d)(?=\d{4}([-/.]))(?<!\d\1)(?:19|20)\d\d\1(\d{1,2})\1(\
 const YEAR_LAST = /(?<!\d)(?=\d{1,2}([-/.]))(?<!\d\1)(\d{1,2})\1(\d{1,2})\1(?:19|20)\d\d(?!\1?\d)/g
 const MONTH_NAMED =
   /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(?:19|20)\d\d(?!\d)/g
-const COMPACT_DATE = /(?<!\d[\s./_\u2010-\u2015\u2212()-]?)(?:19|20)\d\d(\d\d)(\d\d)(?!\d)/gu
+const COMPACT_DATE =
+  /(?<!\d\)?[\s./_\u2010-\u2015\u2212()-]?)(?:19|20)\d\d(\d\d)(\d\d)(?!\d|[-/._\u2010-\u2015\u2212]\d|\s\d{5})/gu
 const DOTTED = /(?<![\d.])\d+(?:\.\d+)+/g
 const DOTTED_PHONE = /^(?:1\.)?\d{3}\.\d{3}\.\d{4}$/
 const PUBLIC_ID = /\b10\.\d{4,9}\/\S+|\bisbn(?:-1[03])?[\s:]*\d[\d -]{8,16}[\dx]?/gi

@@ -563,6 +563,11 @@ describe("ResearchOutbound.check", () => {
         "Decision: password = bcrypt2b, cost 12.",
         "Decision: password hashing PBKDF2WithHmacSHA256 on the JVM, sha512crypt on the old hosts.",
         "Home Wi-Fi: network Heron, password correcthorse42.",
+        "Decision: password: sha512_crypt for the legacy hosts.",
+        "Decision: password = bcrypt_sha256 (passlib).",
+        "Lesson: passwords - md5_crypt on the old NAS.",
+        "Decision: pw: SHA512-CRYPT in dovecot.",
+        "Decision: password = ldap_salted_sha1 on the directory.",
       ],
       work: ["PASSWORD_HASHER=pbkdf2_sha256\nLEGACY_PASSWORD=md5crypt"],
       typed: ["Which argon2id memory parameters does OWASP recommend?"],
@@ -576,17 +581,22 @@ describe("ResearchOutbound.check", () => {
       "PBKDF2WithHmacSHA256 iterations java",
       "sha512crypt vs yescrypt",
       "md5crypt still safe",
+      "sha512_crypt rounds",
+      "bcrypt_sha256 passlib",
+      "md5_crypt vs sha512_crypt",
+      "SHA512-CRYPT dovecot",
+      "ldap_salted_sha1 migrate",
     ]
     expect(fair.filter((query) => !check(query, decisions).ok)).toEqual([])
     expect(check("correcthorse42", decisions)).toMatchObject({ ok: false, reason: "secret" })
     const prefixed = {
-      private: ["The NAS password is sha1lover99.", "password: md5_Hunter2024"],
+      private: ["The NAS password is sha1lover99.", "password: md5_Hunter2024", "password: ldap_Secret123"],
       work: ["ADMIN_PASSWORD=argon2-Pa55word\nDB_PASSWORD=bcryptFan2024"],
       typed: [],
       public: [],
     }
     expect(
-      ["sha1lover99", "md5_Hunter2024", "argon2-Pa55word", "bcryptFan2024"].filter(
+      ["sha1lover99", "md5_Hunter2024", "ldap_Secret123", "argon2-Pa55word", "bcryptFan2024"].filter(
         (query) => check(query, prefixed).ok,
       ),
     ).toEqual([])
@@ -788,6 +798,11 @@ describe("ResearchOutbound.check", () => {
       ["Card 4532-12-10-2019-9113-77.", "4532 12 10 2019 9113 77"],
       ["Phone 1-12-2019-5555.", "1-12-2019-5555"],
       ["ID 110105 19491231 0021.", "110105 19491231 0021"],
+      // A compact date that starts a longer number, as a Swedish personnummer does, stays in it.
+      ["My personnummer is 19850312-1234.", "personnummer 19850312-1234 skatteverket"],
+      ["Nordea transfer ref 20190415-778899.", "nordea 20190415-778899 transfer"],
+      ["Account 20190415 778899 at Nordea.", "account 20190415 778899"],
+      ["Customer 20210630/4455667 wants a refund.", "customer 20210630/4455667 refund"],
     ]
     expect(numbers.filter(([line, query]) => check(query!, { private: [line!], typed: [], public: [] }).ok)).toEqual([])
   })
