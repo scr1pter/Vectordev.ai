@@ -159,10 +159,20 @@ export function domains(
   proposed?: readonly string[],
   own?: readonly string[],
 ) {
-  const all = [
-    ...new Set([...(proposed ?? []), ...(own ?? [])].map((item) => item.trim().toLowerCase()).filter(Boolean)),
-  ]
-  return all.length ? { [key]: all.slice(0, 50) } : {}
+  const all = sites(proposed, own)
+  return all.length ? { [key]: all } : {}
+}
+
+/** Sites as a plan keeps them: trimmed, lowercased, each once, at most 50. */
+export function sites(...lists: (readonly string[] | undefined)[]) {
+  return [
+    ...new Set(
+      lists
+        .flatMap((list) => list ?? [])
+        .map((item) => item.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  ].slice(0, 50)
 }
 
 /** What the plan card calls a scope. */

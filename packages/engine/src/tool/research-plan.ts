@@ -298,8 +298,8 @@ export const ResearchPlanTool = Tool.define<
                       ? { provider: "none", ...(provider.reason ? { reason: provider.reason } : {}) }
                       : { provider: provider.provider },
                 preferences: {
-                  prefer: sites(cfg.research?.domains?.prefer, kept.prefer_domains),
-                  avoid: sites(cfg.research?.domains?.avoid, kept.avoid_domains),
+                  prefer: ResearchPlan.sites(cfg.research?.domains?.prefer, kept.prefer_domains),
+                  avoid: ResearchPlan.sites(cfg.research?.domains?.avoid, kept.avoid_domains),
                   ...(kept.format ? { format: kept.format } : {}),
                 },
                 offline,
@@ -583,18 +583,6 @@ function measured(ctx: Tool.Context) {
   if (last?.role !== "assistant") return undefined
   const tokens = last.tokens.input + last.tokens.cache.read + last.tokens.cache.write
   return tokens > 0 ? tokens : undefined
-}
-
-// Sites as a plan keeps them: trimmed, lowercased, each once, at most 50.
-function sites(...lists: (readonly string[] | undefined)[]) {
-  return [
-    ...new Set(
-      lists
-        .flatMap((list) => list ?? [])
-        .map((item) => item.trim().toLowerCase())
-        .filter(Boolean),
-    ),
-  ].slice(0, 50)
 }
 
 // What of the plan its card marks "from your preferences": the sites and the format the user's preferences gave it,
