@@ -22,7 +22,12 @@ export function useLocalStatus() {
     (input) =>
       input.client.local
         .get({}, { throwOnError: false })
-        .then((result) => ({ data: result.data, status: result.response?.status }))
+        // An engine from before the Local API answers 404, and a server that is not Vector's may answer anything:
+        // only a status with a policy is Vector Local's.
+        .then((result) => ({
+          data: result.data?.policy ? result.data : undefined,
+          status: result.response?.status,
+        }))
         .catch(() => ({ data: undefined, status: undefined })),
   )
 
