@@ -20,6 +20,7 @@ import { dynamicTool, jsonSchema, type Tool } from "ai"
 import { fileURLToPath, pathToFileURL } from "url"
 import { NamedError } from "@vectordevai/core/util/error"
 import { Agent as AgentSvc } from "../../src/agent/agent"
+import { NATIVE_SPECIALISTS } from "@vectordevai/core/agent/specialists"
 import { BackgroundJob } from "@/background/job"
 import { Command } from "../../src/command"
 import { Config } from "@/config/config"
@@ -1345,6 +1346,41 @@ it.instance(
       expect(body).not.toContain("the default when you omit subagent_type")
       // task.txt, also in the body, gives the big-task rule only "when general is in the list".
       expect(body).not.toContain("MUST launch general Subagents with the task tool (omit subagent_type)")
+    }),
+  15_000,
+)
+
+it.instance(
+  "loop suggests explore for a search that spans several areas while explore is on",
+  () =>
+    Effect.gen(function* () {
+      const body = yield* firstRequestBody({})
+      expect(body).toContain('prefer it with subagent_type \\"explore\\"')
+    }),
+  15_000,
+)
+
+// With explore turned off a prompt that still suggested it would send the model's first task call to a missing agent.
+it.instance(
+  "loop points a search at the task tool's list when config turns explore off",
+  () =>
+    Effect.gen(function* () {
+      const body = yield* firstRequestBody({ config: { agent: { explore: { disable: true } } } })
+      expect(body).not.toContain('subagent_type \\"explore\\"')
+      expect(body).toContain("prefer it with a search specialist from the task tool's list")
+      expect(body).not.toContain("explore for read-only discovery")
+    }),
+  15_000,
+)
+
+it.instance(
+  "loop's plan reminder names no explore agents when config turns explore off",
+  () =>
+    Effect.gen(function* () {
+      const body = yield* firstRequestBody({ agent: "plan", config: { agent: { explore: { disable: true } } } })
+      expect(body).not.toContain("delegate explore agents")
+      expect(body).toContain("delegate to specialists from the task tool's list")
+      expect(body).not.toContain('subagent_type \\"explore\\"')
     }),
   15_000,
 )
@@ -4015,6 +4051,70 @@ noLLMServer.instance(
       }
     }),
   30_000,
+)
+
+// Vectorscope prompts its reviewers as the review and security specialists in helper sessions. Settings → Agents can
+// turn every specialist off, which must not turn Vectorscope off with them.
+it.instance(
+  "a helper session still runs as its specialist when every specialist is turned off",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig((url) => ({
+        ...providerCfg(url),
+        agent: Object.fromEntries(NATIVE_SPECIALISTS.map((name) => [name, { disable: true }])),
+      }))
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const helper = yield* sessions.create({ title: "Review", internal: "vectorscope.review" })
+      yield* prompt.prompt({
+        sessionID: helper.id,
+        agent: "review",
+        noReply: true,
+        parts: [{ type: "text", text: "review this diff" }],
+      })
+      yield* llm.text("reviewed")
+
+      const result = yield* prompt.loop({ sessionID: helper.id })
+
+      expect(result.info.role).toBe("assistant")
+      expect(result.parts.some((part) => part.type === "text" && part.text === "reviewed")).toBe(true)
+      expect(yield* llm.hits).toHaveLength(1)
+      // It ran as review: the specialist's own prompt went out with the request.
+      expect(JSON.stringify((yield* llm.inputs)[0])).toContain("You are a senior code review specialist.")
+
+      // A later turn of the helper still runs as review.
+      yield* prompt.prompt({
+        sessionID: helper.id,
+        agent: "review",
+        noReply: true,
+        parts: [{ type: "text", text: "and this one" }],
+      })
+      yield* llm.text("reviewed again")
+      const again = yield* prompt.loop({ sessionID: helper.id })
+      expect(again.parts.some((part) => part.type === "text" && part.text === "reviewed again")).toBe(true)
+      expect(JSON.stringify((yield* llm.inputs)[1])).toContain("You are a senior code review specialist.")
+
+      // A session of the user's own still cannot reach a specialist that is turned off, by its own name or any other.
+      const chat = yield* sessions.create({})
+      for (const agent of ["review", "helper:review"]) {
+        const exit = yield* prompt
+          .prompt({ sessionID: chat.id, agent, noReply: true, parts: [{ type: "text", text: "review" }] })
+          .pipe(Effect.exit)
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (Exit.isFailure(exit)) {
+          const err = Cause.squash(exit.cause)
+          expect(NamedError.Unknown.isInstance(err) && err.data.message).toContain(`Agent not found: "${agent}"`)
+        }
+        const shell = yield* prompt.shell({ sessionID: chat.id, agent, command: "echo hi" }).pipe(Effect.exit)
+        expect(Exit.isFailure(shell)).toBe(true)
+        if (Exit.isFailure(shell)) {
+          const err = Cause.squash(shell.cause)
+          expect(NamedError.Unknown.isInstance(err) && err.data.message).toContain(`Agent not found: "${agent}"`)
+        }
+      }
+      expect(yield* llm.hits).toHaveLength(2)
+    }),
+  60_000,
 )
 
 noLLMServer.instance(

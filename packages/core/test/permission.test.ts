@@ -175,6 +175,27 @@ describe("PermissionV2", () => {
     }),
   )
 
+  // The desktop swarm planner runs as explore. Turning explore off in Settings removes it, and without an agent every
+  // tool call would be denied.
+  it.effect("keeps a helper session's agent after configuration turns it off", () =>
+    Effect.gen(function* () {
+      yield* setup([{ action: "read", resource: "*", effect: "allow" }])
+      const agents = yield* AgentV2.Service
+      yield* agents.transform((editor) => editor.remove(AgentV2.ID.make("test")))
+      const service = yield* PermissionV2.Service
+      expect(yield* service.ask(assertion())).toMatchObject({ effect: "deny" })
+
+      const database = yield* Database.Service
+      yield* database.db
+        .update(SessionTable)
+        .set({ internal: "swarm.planner" })
+        .where(eq(SessionTable.id, SessionV2.ID.make("ses_test")))
+        .run()
+        .pipe(Effect.orDie)
+      expect(yield* service.ask(assertion())).toMatchObject({ effect: "allow" })
+    }),
+  )
+
   it.effect("returns the evaluated effect and only queues prompts", () =>
     Effect.gen(function* () {
       yield* setup([{ action: "read", resource: "*", effect: "allow" }])

@@ -548,7 +548,11 @@ const layer = Layer.effect(
               return
             }
 
-            const agent = yield* agents.get(ctx.assistantMessage.agent)
+            // A helper session's agent may be a Subagent specialist Settings turned off, which only `helper` finds.
+            const internal = (yield* session.get(ctx.sessionID).pipe(Effect.orDie)).internal
+            const agent = internal
+              ? yield* agents.helper(ctx.assistantMessage.agent)
+              : yield* agents.get(ctx.assistantMessage.agent)
             yield* permission.ask({
               permission: "doom_loop",
               patterns: [value.name],

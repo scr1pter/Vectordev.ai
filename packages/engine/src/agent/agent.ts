@@ -41,6 +41,7 @@ import { Reference } from "@vectordevai/core/reference"
 import { Location } from "@vectordevai/core/location"
 import { PluginV2 } from "@vectordevai/core/plugin"
 import { FSUtil } from "@vectordevai/core/fs-util"
+import { isNativeSpecialist } from "@vectordevai/core/agent/specialists"
 
 export const Info = Schema.Struct({
   name: Schema.String,
@@ -84,6 +85,13 @@ const GeneratedAgent = Schema.Struct({
 
 export interface Interface {
   readonly get: (agent: string) => Effect.Effect<Info>
+  /**
+   * The agent one of Vector's helper sessions (`internal` set, such as a Vectorscope reviewer) runs as. A Subagent
+   * specialist turned off in Settings leaves `get` and `list`, so the user, the task tool and the @ list no longer
+   * reach it, but the helpers that run as one keep it: only this finds it, so every lookup of a helper session's agent
+   * goes through here.
+   */
+  readonly helper: (agent: string) => Effect.Effect<Info>
   readonly list: () => Effect.Effect<Info[]>
   readonly defaultInfo: () => Effect.Effect<Info>
   readonly defaultAgent: () => Effect.Effect<string>
@@ -520,11 +528,14 @@ const layer = Layer.effect(
           },
         }
 
+        // A Subagent specialist turned off still takes its config, for the copy its helpers keep (below).
+        const off = new Set<string>()
         for (const [key, value] of Object.entries(cfg.agent ?? {})) {
-          if (value.disable) {
+          if (value.disable && !isNativeSpecialist(key)) {
             delete agents[key]
             continue
           }
+          if (value.disable) off.add(key)
           let item = agents[key]
           if (!item)
             item = agents[key] = {
@@ -618,8 +629,19 @@ const layer = Layer.effect(
           )
         }
 
+        // Vector's own helpers run as Subagent specialists: a Vectorscope review prompts review and security. One
+        // turned off leaves the agent list and `get`, but a helper session still gets it, hidden, from `helper`.
+        const helpers: Record<string, Info> = Object.fromEntries(
+          [...off].map((name) => [name, { ...agents[name], hidden: true }]),
+        )
+        for (const name of off) delete agents[name]
+
         const get = Effect.fnUntraced(function* (agent: string) {
           return agents[agent]
+        })
+
+        const helper = Effect.fnUntraced(function* (agent: string) {
+          return agents[agent] ?? helpers[agent]
         })
 
         const list = Effect.fnUntraced(function* () {
@@ -654,6 +676,7 @@ const layer = Layer.effect(
 
         return {
           get,
+          helper,
           list,
           defaultInfo,
           defaultAgent,
@@ -664,6 +687,9 @@ const layer = Layer.effect(
     return Service.of({
       get: Effect.fn("Agent.get")(function* (agent: string) {
         return yield* InstanceState.useEffect(state, (s) => s.get(agent))
+      }),
+      helper: Effect.fn("Agent.helper")(function* (agent: string) {
+        return yield* InstanceState.useEffect(state, (s) => s.helper(agent))
       }),
       list: Effect.fn("Agent.list")(function* () {
         return yield* InstanceState.useEffect(state, (s) => s.list())

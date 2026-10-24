@@ -24,20 +24,31 @@ import { Reference } from "@vectordevai/core/reference"
 import { MCP } from "@/mcp"
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
 
-export function provider(model: Provider.Model) {
-  if (model.api.id.includes("gpt-4") || model.api.id.includes("o1") || model.api.id.includes("o3"))
-    return [PROMPT_BEAST]
+/**
+ * The provider's prompt. Some suggest the explore specialist for a search that spans several areas; with `explore`
+ * false (Settings turned explore off, or this agent may not launch it) a task call naming it would fail, so they point
+ * at the task tool's list instead.
+ */
+export function provider(model: Provider.Model, explore = true) {
+  const prompt = providerPrompt(model)
+  return [
+    explore ? prompt : prompt.replaceAll('subagent_type "explore"', "a search specialist from the task tool's list"),
+  ]
+}
+
+function providerPrompt(model: Provider.Model) {
+  if (model.api.id.includes("gpt-4") || model.api.id.includes("o1") || model.api.id.includes("o3")) return PROMPT_BEAST
   if (model.api.id.includes("gpt")) {
     if (model.api.id.includes("codex")) {
-      return [PROMPT_CODEX]
+      return PROMPT_CODEX
     }
-    return [PROMPT_GPT]
+    return PROMPT_GPT
   }
-  if (model.api.id.includes("gemini-")) return [PROMPT_GEMINI]
-  if (model.api.id.includes("claude")) return [PROMPT_ANTHROPIC]
-  if (model.api.id.toLowerCase().includes("trinity")) return [PROMPT_TRINITY]
-  if (model.api.id.toLowerCase().includes("kimi")) return [PROMPT_KIMI]
-  return [PROMPT_DEFAULT]
+  if (model.api.id.includes("gemini-")) return PROMPT_GEMINI
+  if (model.api.id.includes("claude")) return PROMPT_ANTHROPIC
+  if (model.api.id.toLowerCase().includes("trinity")) return PROMPT_TRINITY
+  if (model.api.id.toLowerCase().includes("kimi")) return PROMPT_KIMI
+  return PROMPT_DEFAULT
 }
 
 /** What the current agent may launch through the task tool in this session. */

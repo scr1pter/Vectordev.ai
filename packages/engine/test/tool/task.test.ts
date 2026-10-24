@@ -845,6 +845,63 @@ describe("tool.task", () => {
     { trusted: true, config: { agent: { general: { disable: true } } } },
   )
 
+  it.instance(
+    "execute fails before any permission prompt when a specialist is turned off",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const { chat, assistant } = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* singleTaskDefinition(tool)
+        let asked = 0
+        const exit = yield* Effect.exit(
+          def.execute(
+            { description: "review the diff", prompt: "review the auth middleware change", subagent_type: "review" },
+            {
+              sessionID: chat.id,
+              messageID: assistant.id,
+              agent: "build",
+              abort: new AbortController().signal,
+              extra: { promptOps: stubOps({}) },
+              messages: [],
+              metadata: () => Effect.void,
+              ask: () =>
+                Effect.sync(() => {
+                  asked += 1
+                }),
+            },
+          ),
+        )
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (Exit.isFailure(exit)) {
+          const message = Cause.pretty(exit.cause)
+          expect(message).toContain("The review Subagent specialist is turned off in Vector settings")
+          expect(message).toContain("agent.review.disable")
+          expect(message).toContain("explore")
+          expect(message).not.toMatch(/one of: [^\n]*\breview\b/)
+        }
+        expect(asked).toBe(0)
+        expect(yield* sessions.children(chat.id)).toHaveLength(0)
+      }),
+    { trusted: true, config: { agent: { review: { disable: true } } } },
+  )
+
+  it.instance(
+    "description leaves out a specialist that is turned off",
+    () =>
+      Effect.gen(function* () {
+        const agent = yield* Agent.Service
+        const build = yield* agent.get("build")
+        const registry = yield* ToolRegistry.Service
+        const tools = yield* registry.tools({ ...ref, agent: build })
+        const description = tools.find((tool) => tool.id === TaskTool.id)?.description ?? ""
+        expect(description).toContain("- general:")
+        expect(description).toContain("- explore:")
+        expect(description).not.toContain("- review:")
+      }),
+    { trusted: true, config: { agent: { review: { disable: true } } } },
+  )
+
   it.instance("inherits the parent BYOK model and variant in a child session", () =>
     Effect.gen(function* () {
       const { chat, assistant } = yield* seed()

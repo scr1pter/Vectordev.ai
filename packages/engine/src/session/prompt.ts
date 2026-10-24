@@ -849,7 +849,7 @@ const layer = Layer.effect(
             if (session.revert) {
               yield* revert.cleanup(session)
             }
-            const agent = yield* agents.get(input.agent)
+            const agent = session.internal ? yield* agents.helper(input.agent) : yield* agents.get(input.agent)
             if (!agent) {
               const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
               const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
@@ -1041,7 +1041,14 @@ const layer = Layer.effect(
       options?: PromptOptions,
     ) {
       const agentName = input.agent
-      const ag = agentName ? yield* agents.get(agentName) : yield* agents.defaultInfo()
+      const current = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+      // One of Vector's helpers, such as a Vectorscope reviewer, keeps the specialist it runs as when Settings turns
+      // that specialist off.
+      const ag = !agentName
+        ? yield* agents.defaultInfo()
+        : current.internal
+          ? yield* agents.helper(agentName)
+          : yield* agents.get(agentName)
       if (!ag) {
         const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
         const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
@@ -1099,7 +1106,6 @@ const layer = Layer.effect(
         ...(input.judge ? { judge: input.judge } : {}),
       }
 
-      const current = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       if (
         current.agent !== info.agent ||
         current.model?.providerID !== info.model.providerID ||
@@ -1877,7 +1883,9 @@ const layer = Layer.effect(
           )
 
         // An app's own quick-lane message is sized as a build request, so it runs on the build agent once it is work.
-        const agent = yield* agents.get(onBuild(lastUser) ? "build" : lastUser.agent)
+        // A helper session's agent may be a Subagent specialist Settings turned off, which only `helper` finds.
+        const agentName = onBuild(lastUser) ? "build" : lastUser.agent
+        const agent = session.internal ? yield* agents.helper(agentName) : yield* agents.get(agentName)
         if (!agent) {
           const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
           const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
@@ -1922,7 +1930,18 @@ const layer = Layer.effect(
         // A subagent a Thorough request launched starts with a brief, saved on its first message as ids.
         if (session.parentID && !session.internal) msgs = yield* briefFor({ session, msgs, personal })
         msgs = yield* withheldRecall(sessionID, msgs, personal)
-        msgs = yield* SessionReminders.apply({ messages: msgs, agent, session }).pipe(
+        // What this agent may launch here: a general or specialist turned off is missing from the list, Plan mode or a
+        // child session denies one by permission, and a subagent's own session is told not to start general Subagents
+        // of its own. The prompts that suggest explore point at the task tool's list instead where it is not permitted.
+        const subagents = SystemPrompt.subagentAvailability({
+          agents: yield* agents.list(),
+          permission: agent.permission,
+          session: session.permission,
+          agent: agent.name,
+          nested: session.parentID !== undefined,
+        })
+        const explore = subagents.permitted?.includes("explore")
+        msgs = yield* SessionReminders.apply({ messages: msgs, agent, session, explore }).pipe(
           Effect.provideService(RuntimeFlags.Service, flags),
           Effect.provideService(FSUtil.Service, fsys),
           Effect.provideService(Session.Service, sessions),
@@ -2046,32 +2065,20 @@ const layer = Layer.effect(
             quick ? Effect.succeed(undefined) : sys.skills(agent),
             quick
               ? Effect.succeed({ stable: [], session: [] })
-              : agents.list().pipe(
-                  // The subagent policy follows what this agent may launch here: a disabled general is
-                  // missing from the list, Plan mode or a child session denies it by permission, and a
-                  // subagent's own session is told not to start general Subagents of its own.
-                  Effect.flatMap((list) =>
-                    sys.environment(model, {
-                      subagents: {
-                        ...delegation(
-                          SystemPrompt.subagentAvailability({
-                            agents: list,
-                            permission: agent.permission,
-                            session: session.permission,
-                            agent: agent.name,
-                            nested: session.parentID !== undefined,
-                          }),
-                          build && { offered: offered.includes("task"), named: build.result.agents, tier: build.tier },
-                        ),
-                        teammates: offered.includes("send_teammate_message"),
-                      },
-                      tools: offered,
-                      nested: session.parentID !== undefined,
-                      // The day the history starts on; a later day is noted on the user message that starts it.
-                      date: msgs.find((message) => message.info.role === "user")?.info.time.created,
-                    }),
-                  ),
-                ),
+              : sys.environment(model, {
+                  // The subagent policy follows what this agent may launch here.
+                  subagents: {
+                    ...delegation(
+                      subagents,
+                      build && { offered: offered.includes("task"), named: build.result.agents, tier: build.tier },
+                    ),
+                    teammates: offered.includes("send_teammate_message"),
+                  },
+                  tools: offered,
+                  nested: session.parentID !== undefined,
+                  // The day the history starts on; a later day is noted on the user message that starts it.
+                  date: msgs.find((message) => message.info.role === "user")?.info.time.created,
+                }),
             quick
               ? Effect.succeed({ instructions: [], documents: false })
               : sessionInstructions(
@@ -2113,6 +2120,7 @@ const layer = Layer.effect(
           const result = yield* handle.process({
             user: lastUser,
             agent: stepAgent,
+            explore,
             // A greeting never reasons; otherwise the size sets effort where the user left it on its default. Changing
             // thinking settings rewrites Anthropic's cached messages, so there effort follows the size the tools do.
             effort: quick
@@ -2685,7 +2693,12 @@ const layer = Layer.effect(
         throw error
       }
       const agentName = cmd.agent ?? input.agent
-      const agent = agentName ? yield* agents.get(agentName) : yield* agents.defaultInfo()
+      const currentSession = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+      const agent = !agentName
+        ? yield* agents.defaultInfo()
+        : currentSession.internal
+          ? yield* agents.helper(agentName)
+          : yield* agents.get(agentName)
       if (!agent) {
         const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
         const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
@@ -2693,7 +2706,6 @@ const layer = Layer.effect(
         yield* events.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
         throw error
       }
-      const currentSession = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       const messageID = input.messageID ?? MessageID.ascending()
 
       const prepared = prepareCommandTemplate(
@@ -2745,11 +2757,8 @@ const layer = Layer.effect(
       })
       const template = prepared.render(shellOutputs)
 
-      const commandModel = cmd.model
-        ? Provider.parseModel(cmd.model)
-        : cmd.agent
-          ? (yield* agents.get(cmd.agent))?.model
-          : undefined
+      // A command's own agent is the one resolved above.
+      const commandModel = cmd.model ? Provider.parseModel(cmd.model) : cmd.agent ? agent.model : undefined
       const selectedModel = input.model
         ? Provider.parseModel(input.model)
         : yield* currentModel(input.sessionID, commandModel)
