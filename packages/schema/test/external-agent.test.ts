@@ -66,8 +66,10 @@ describe("external agent catalog", () => {
   })
 
   test("only the agents whose event parser ships run in Vector's chat", () => {
-    expect(ExternalAgent.chatIds).toEqual(["claude-code", "codex", "cursor"])
-    expect(ExternalAgent.isChatId("gemini")).toBe(false)
+    expect(ExternalAgent.chatIds).toEqual(["claude-code", "codex", "cursor", "gemini", "pi", "amp", "qwen"])
+    expect(ExternalAgent.isChatId("gemini")).toBe(true)
+    for (const id of ["copilot", "antigravity", "muse-code", "kilo", "cline", "droid", "kimi", "goose", "junie"])
+      expect(ExternalAgent.isChatId(id)).toBe(false)
     expect(ExternalAgent.isChatId("vector")).toBe(false)
     expect(ExternalAgent.isId("junie")).toBe(true)
     expect(ExternalAgent.isId("vector")).toBe(false)
@@ -271,6 +273,75 @@ describe("external agent command builders", () => {
       prompt,
     ])
     expect(() => ExternalAgent.headlessArguments(cursor, { prompt, cwd, promptOnStdin: true })).toThrow("argv only")
+  })
+
+  // Each form is the vendor's documented one: geminicli headless.md and cli-reference.md, Qwen Code's headless.md,
+  // ampcode.com/docs/cli/streaming-json and /threads, pi's docs/cli.md and docs/json.md.
+  test("the agents added to chat run their documented headless forms", () => {
+    const gemini = ExternalAgent.find("gemini")!
+    const qwen = ExternalAgent.find("qwen")!
+    const amp = ExternalAgent.find("amp")!
+    const pi = ExternalAgent.find("pi")!
+    const geminiFlags = ["--output-format", "stream-json", "--approval-mode", "auto_edit"]
+    expect(ExternalAgent.headlessArguments(gemini, { prompt, cwd, model: "flash" })).toEqual([
+      "-p",
+      prompt,
+      ...geminiFlags,
+      "-m",
+      "flash",
+    ])
+    expect(ExternalAgent.headlessArguments(gemini, { prompt, cwd, session: "g-1", promptOnStdin: true })).toEqual([
+      "--resume",
+      "g-1",
+      ...geminiFlags,
+    ])
+    const qwenFlags = ["--output-format", "stream-json", "--include-partial-messages", "--approval-mode", "auto-edit"]
+    expect(ExternalAgent.headlessArguments(qwen, { prompt, cwd, session: "q-1", model: "qwen3-coder-plus" })).toEqual([
+      "--resume",
+      "q-1",
+      "-p",
+      prompt,
+      ...qwenFlags,
+      "-m",
+      "qwen3-coder-plus",
+    ])
+    expect(ExternalAgent.headlessArguments(qwen, { prompt, cwd, promptOnStdin: true })).toEqual(qwenFlags)
+    expect(ExternalAgent.headlessArguments(amp, { prompt, cwd })).toEqual(["--execute", prompt, "--stream-json"])
+    expect(ExternalAgent.headlessArguments(amp, { prompt, cwd, promptOnStdin: true })).toEqual([
+      "--execute",
+      "--stream-json",
+    ])
+    expect(ExternalAgent.headlessArguments(amp, { prompt, cwd, session: "T-1" })).toEqual([
+      "threads",
+      "continue",
+      "T-1",
+      "--execute",
+      prompt,
+      "--stream-json",
+    ])
+    expect(ExternalAgent.headlessArguments(pi, { prompt, cwd, session: "p-1", model: "sonnet" })).toEqual([
+      "--mode",
+      "json",
+      "--session",
+      "p-1",
+      "--exclude-tools",
+      "bash,powershell",
+      "--model",
+      "sonnet",
+      "--",
+      prompt,
+    ])
+    expect(() => ExternalAgent.headlessArguments(pi, { prompt, cwd, promptOnStdin: true })).toThrow("argv only")
+  })
+
+  // A follow-up message in Vector's chat resumes the agent's own session, so a chat agent needs a resume form too.
+  test("every agent that runs in chat has a headless form with a parser and a resume form", () => {
+    for (const agent of agents.filter((agent) => agent.tier === "chat"))
+      expect({
+        id: agent.id,
+        parser: Boolean(agent.headless?.parser),
+        resume: Boolean(agent.headless?.resume),
+      }).toEqual({ id: agent.id, parser: true, resume: true })
   })
 
   test("a prompt or session that looks like a placeholder is passed through untouched", () => {

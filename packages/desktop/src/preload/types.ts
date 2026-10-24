@@ -515,7 +515,7 @@ export type ParallelWorkspaceRecord = {
   revision?: number
   name: string
   taskPrompt: string
-  runtime: "vector" | "claude-code" | "codex" | "cursor"
+  runtime: "vector" | ExternalAgent.ChatId
   provider: string
   model: string
   sourcePath: string
@@ -574,7 +574,7 @@ export type CreateParallelWorkspaceInput = {
   engineParentSessionId?: string
   name?: string
   taskPrompt: string
-  runtime?: "vector" | "claude-code" | "codex" | "cursor"
+  runtime?: "vector" | ExternalAgent.ChatId
   provider?: string
   model?: string
   runtimeModel?: string

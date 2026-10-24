@@ -6,8 +6,9 @@ export * as ExternalAgent from "./external-agent"
  * choice) both read. Vector only ever starts the vendor's unchanged command. Nothing here, and nothing built on it,
  * reads, copies or passes an agent's credentials, keychain entries or tokens.
  *
- * Facts come from each vendor's own documentation, linked per entry. Headless forms of agents in the "terminal" tier
- * are recorded for the event parsers that come next and have not been run against recorded output yet.
+ * Facts come from each vendor's own documentation, linked per entry. An agent is "chat" only once desktop reads its
+ * event stream, tested against the vendor's documented examples. The headless forms of the "terminal" agents are kept
+ * for that work and have not been run.
  */
 
 export const platforms = ["darwin", "linux", "win32"] as const
@@ -43,6 +44,9 @@ export const SESSION = "<session>"
 export const CWD = "<cwd>"
 export const MODEL = "<model>"
 export const MODEL_FLAG = "<model-flag>"
+/** The prompt together with the flag that takes it as its value (`promptFlag`), so both leave argv when the prompt
+    goes on stdin instead. */
+export const PROMPT_FLAG = "<prompt-flag>"
 
 export type Install = {
   /** Unique within one agent, so the app can name the option it wants run. */
@@ -68,10 +72,13 @@ export type StatusProbe = { args: readonly string[]; read: "logged-in" | "creden
 export type Headless = {
   fresh: readonly string[]
   resume?: readonly string[]
+  /** What PROMPT_FLAG stands for, such as ["-p", PROMPT] for an agent whose -p takes the prompt as its value. */
+  promptFlag?: readonly string[]
   /** The model flag for a fresh run, and for a resumed one when `resumeModel` is unset. */
   model?: readonly string[]
   resumeModel?: readonly string[]
-  /** How the prompt leaves argv when it goes on stdin: "omit" drops it, "dash" passes "-". Unset: no stdin form. */
+  /** How the prompt leaves argv when it goes on stdin: "omit" drops it (and its PROMPT_FLAG), "dash" passes "-".
+      Unset: no stdin form. */
   stdinPrompt?: "omit" | "dash"
   parser: Parser
   docsUrl: string
@@ -418,6 +425,7 @@ export const catalog = [
       },
     ],
     signIn: { args: [], interactive: true, hint: "Type /login inside Copilot CLI, then follow its steps." },
+    // Stays in the terminal: GitHub documents that --output-format json prints JSONL, but not the events in it.
     headless: {
       fresh: [
         "-p",
@@ -451,7 +459,7 @@ export const catalog = [
     name: "Gemini CLI",
     vendor: "Google",
     binaries: [{ name: "gemini" }],
-    tier: "terminal",
+    tier: "chat",
     label: "Work or API accounts",
     install: [
       {
@@ -470,11 +478,26 @@ export const catalog = [
       },
     ],
     signIn: { args: [], interactive: true, hint: "Choose how to sign in when Gemini CLI starts." },
+    // auto_edit approves file edits, and a headless run denies every call that would still ask (Gemini's policy
+    // engine). -p takes the prompt as its value, so a prompt on stdin drops the flag too: piped input with no -p runs
+    // headless because stdin is not a terminal. --resume takes the session_id of the init event.
     headless: {
-      fresh: ["-p", PROMPT, "--output-format", "stream-json", "--approval-mode", "auto_edit", MODEL_FLAG],
+      fresh: [PROMPT_FLAG, "--output-format", "stream-json", "--approval-mode", "auto_edit", MODEL_FLAG],
+      resume: [
+        "--resume",
+        SESSION,
+        PROMPT_FLAG,
+        "--output-format",
+        "stream-json",
+        "--approval-mode",
+        "auto_edit",
+        MODEL_FLAG,
+      ],
+      promptFlag: ["-p", PROMPT],
       model: ["-m", MODEL],
+      stdinPrompt: "omit",
       parser: "gemini",
-      docsUrl: "https://github.com/google-gemini/gemini-cli",
+      docsUrl: "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/headless.md",
     },
     interactive: { args: [MODEL_FLAG], model: ["-m", MODEL] },
     models: {
@@ -561,8 +584,9 @@ export const catalog = [
       interactive: true,
       hint: "Muse Code asks you to sign in the first time it starts. Type /login to sign in again later.",
     },
-    // `muse serve` is Meta's recommended session protocol; this one-shot form is the fallback and its events are
-    // undocumented.
+    // Stays in the terminal: dev.meta.ai documents no event shapes for this one-shot form's JSONL, and `muse serve`
+    // speaks Meta's session protocol, a two-way JSON-RPC connection with its own handshake and approvals, which
+    // needs a client of its own rather than an event parser.
     headless: {
       fresh: ["exec", "--json", PROMPT],
       parser: "muse",
@@ -613,7 +637,8 @@ export const catalog = [
     signIn: { args: ["auth", "login"], interactive: false },
     // Prints provider names and a total, never a key. Only the total is read.
     statusProbe: { args: ["auth", "list"], read: "credential-count" },
-    // Without --auto every permission request is rejected, so this form only reads until an approval flow exists.
+    // Stays in the terminal: Kilo documents no shape for the JSON events of `--format json`, and without --auto every
+    // permission request is rejected, so this form could only read until an approval flow exists.
     headless: {
       fresh: ["run", "--format", "json", MODEL_FLAG, PROMPT],
       resume: ["run", "--format", "json", "-s", SESSION, MODEL_FLAG, PROMPT],
@@ -662,7 +687,9 @@ export const catalog = [
       },
     ],
     signIn: { args: ["auth"], interactive: false },
-    // --auto-approve defaults to true, so it is always passed explicitly.
+    // --auto-approve defaults to true, so it is always passed explicitly. Stays in the terminal: Cline names the line
+    // types of --json but documents the fields of only its final ones, and not what a run without auto-approval does
+    // when a tool needs approval.
     headless: {
       fresh: ["--json", "--auto-approve", "false", MODEL_FLAG, PROMPT],
       resume: ["--json", "--auto-approve", "false", "--id", SESSION, MODEL_FLAG, PROMPT],
@@ -693,7 +720,7 @@ export const catalog = [
     name: "pi",
     vendor: "Earendil",
     binaries: [{ name: "pi" }],
-    tier: "terminal",
+    tier: "chat",
     install: [
       {
         id: "script",
@@ -718,17 +745,27 @@ export const catalog = [
       },
     ],
     signIn: { args: [], interactive: true, hint: "Type /login inside pi to connect a provider." },
+    // pi asks no approval before a tool call, so Vector's chat leaves out its shell tools (bash, and powershell on
+    // Windows): file edits run, commands do not, the same posture as Claude Code's acceptEdits. `--` keeps a prompt
+    // that starts with a dash from reading as a flag. --session takes the id of the session header.
     headless: {
-      fresh: ["--mode", "json", MODEL_FLAG, PROMPT],
-      resume: ["--mode", "json", "--session", SESSION, MODEL_FLAG, PROMPT],
+      fresh: ["--mode", "json", "--exclude-tools", "bash,powershell", MODEL_FLAG, "--", PROMPT],
+      resume: ["--mode", "json", "--session", SESSION, "--exclude-tools", "bash,powershell", MODEL_FLAG, "--", PROMPT],
       model: ["--model", MODEL],
       parser: "pi",
-      docsUrl: "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/cli.md",
+      docsUrl: "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/json.md",
     },
     interactive: { args: [MODEL_FLAG], model: ["--model", MODEL] },
     models: { kind: "fixed", models: [] },
     logo: { show: "letters", letters: "PI", tone: "rose", pending: "No logo permission found in the repository." },
-    notes: [{ kind: "billing", text: "Runs on the provider you connect with /login inside pi." }],
+    notes: [
+      { kind: "billing", text: "Runs on the provider you connect with /login inside pi." },
+      {
+        kind: "terms",
+        text: "In Vector's chat, pi runs without its shell tools, so it can read and edit files in the isolated copy but not run commands.",
+        source: "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/security.md",
+      },
+    ],
     docsUrl: "https://github.com/earendil-works/pi",
     domains: ["pi.dev", "github.com/earendil-works"],
   },
@@ -769,7 +806,9 @@ export const catalog = [
       },
     ],
     signIn: { args: [], interactive: true, hint: "Droid asks you to sign in through your browser when it starts." },
-    // --auto low is Factory's "safe edits" level: file edits and non-destructive commands.
+    // --auto low is Factory's "safe edits" level: file edits and non-destructive commands. Stays in the terminal:
+    // Factory names the stream-json events (system, message, tool_call, tool_result, completion) but documents only
+    // one of their fields.
     headless: {
       fresh: ["exec", "--output-format", "stream-json", "--auto", "low", MODEL_FLAG, PROMPT],
       resume: ["exec", "--output-format", "stream-json", "--auto", "low", "-s", SESSION, MODEL_FLAG, PROMPT],
@@ -795,7 +834,7 @@ export const catalog = [
     name: "Amp",
     vendor: "Amp",
     binaries: [{ name: "amp" }],
-    tier: "terminal",
+    tier: "chat",
     install: [
       {
         id: "script",
@@ -806,10 +845,15 @@ export const catalog = [
       },
     ],
     signIn: { args: ["login"], interactive: false },
+    // The documented forms: `amp --execute "<prompt>" --stream-json`, the same with the prompt piped and no value
+    // after --execute, and `amp threads continue <thread id>` for the session_id of the init message. Amp has no
+    // approval flag; it does not ask before running tools.
     headless: {
-      fresh: ["-x", "--stream-json", PROMPT],
+      fresh: ["--execute", PROMPT, "--stream-json"],
+      resume: ["threads", "continue", SESSION, "--execute", PROMPT, "--stream-json"],
+      stdinPrompt: "omit",
       parser: "amp",
-      docsUrl: "https://ampcode.com/docs/cli/execute-mode",
+      docsUrl: "https://ampcode.com/docs/cli/streaming-json",
     },
     interactive: { args: [] },
     models: { kind: "none" },
@@ -820,6 +864,11 @@ export const catalog = [
         text: "Amp bills through its own plans and credits.",
         source: "https://ampcode.com/docs/pricing",
       },
+      {
+        kind: "terms",
+        text: "Amp does not ask before running tools, so in the isolated copy it can change files and run commands without asking.",
+        source: "https://ampcode.com/docs/tools",
+      },
     ],
     docsUrl: "https://ampcode.com/docs/cli",
     domains: ["ampcode.com"],
@@ -829,7 +878,7 @@ export const catalog = [
     name: "Qwen Code",
     vendor: "Alibaba",
     binaries: [{ name: "qwen" }],
-    tier: "terminal",
+    tier: "chat",
     install: [
       {
         id: "npm",
@@ -863,10 +912,11 @@ export const catalog = [
       },
     ],
     signIn: { args: [], interactive: true, hint: "Type /auth inside Qwen Code." },
+    // Claude Code's stream-json shape. Like Claude's, --resume takes an optional value, so its id follows at once; -p
+    // takes the prompt as its value, so a prompt on stdin drops the flag too (`echo "…" | qwen` runs headless).
     headless: {
       fresh: [
-        "-p",
-        PROMPT,
+        PROMPT_FLAG,
         "--output-format",
         "stream-json",
         "--include-partial-messages",
@@ -877,8 +927,7 @@ export const catalog = [
       resume: [
         "--resume",
         SESSION,
-        "-p",
-        PROMPT,
+        PROMPT_FLAG,
         "--output-format",
         "stream-json",
         "--include-partial-messages",
@@ -886,7 +935,9 @@ export const catalog = [
         "auto-edit",
         MODEL_FLAG,
       ],
+      promptFlag: ["-p", PROMPT],
       model: ["-m", MODEL],
+      stdinPrompt: "omit",
       parser: "qwen",
       docsUrl: "https://github.com/QwenLM/qwen-code/blob/main/docs/users/features/headless.md",
     },
@@ -974,6 +1025,7 @@ export const catalog = [
       },
     ],
     signIn: { args: ["configure"], interactive: false, hint: "Choose Configure Providers, then pick a provider." },
+    // Stays in the terminal: goose documents --output-format stream-json without the events it prints.
     headless: {
       fresh: ["run", "--output-format", "stream-json", "--no-session", "-t", PROMPT],
       parser: "goose",
@@ -1071,6 +1123,10 @@ export function headlessArguments(
   return template.flatMap((part): string[] => {
     if (part === MODEL_FLAG)
       return input.model && flag ? flag.map((value) => value.replaceAll(MODEL, input.model!)) : []
+    if (part === PROMPT_FLAG) {
+      if (input.promptOnStdin) return []
+      return (headless.promptFlag ?? [PROMPT]).map((value) => (value === PROMPT ? input.prompt : value))
+    }
     if (part === PROMPT) {
       if (!input.promptOnStdin) return [input.prompt]
       return headless.stdinPrompt === "dash" ? ["-"] : []

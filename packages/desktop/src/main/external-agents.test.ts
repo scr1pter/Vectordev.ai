@@ -15,10 +15,8 @@ import {
   modelsFromOutput,
   signedInFromCredentialCount,
   terminalLaunch,
-  createAgentChat,
   agentEnvironment,
   agentOutcome,
-  agentTurnFinished,
   detectExternalAgents,
   executableNames,
   externalModelValue,
@@ -29,10 +27,10 @@ import {
   runsThroughCmd,
   signedInFromProbe,
   runtimeArguments,
-  sessionFromAgentLine,
   shimmedCommand,
   windowsTaskkillArguments,
 } from "./external-agents"
+import { agentTurnFinished, createAgentChat, sessionFromAgentLine } from "./external-agent-events"
 
 // A real executable in a real directory: the bug being guarded is a CLI that
 // exists but is invisible to a GUI-launched app, so nothing here may be faked.
@@ -1271,8 +1269,8 @@ describe("external agent detection through the env seam", () => {
   })
 
   test("a terminal-only agent never reaches a headless spawn", async () => {
-    const { env } = await fakeAgents("terminal-only", { gemini: `echo should-not-run` })
-    await expect(runExternalCodingAgent({ runtime: "gemini" as never, cwd: root, prompt: "x", env })).rejects.toThrow(
+    const { env } = await fakeAgents("terminal-only", { kilo: `echo should-not-run` })
+    await expect(runExternalCodingAgent({ runtime: "kilo" as never, cwd: root, prompt: "x", env })).rejects.toThrow(
       "runs in Vector's terminal only",
     )
   })

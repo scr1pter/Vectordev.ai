@@ -1,13 +1,27 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { randomUUID } from "node:crypto"
-import { constants, realpathSync } from "node:fs"
+import { constants } from "node:fs"
 import { access, cp, mkdir, rm, stat } from "node:fs/promises"
 import { homedir } from "node:os"
-import { dirname, isAbsolute, join, normalize, relative, sep } from "node:path"
+import { dirname, join } from "node:path"
 import { StringDecoder } from "node:string_decoder"
 import type { AgentChat } from "./parallel-workspace-turns"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 import { ExternalAgent } from "@vectordevai/schema/external-agent"
+import {
+  activityFromAgentLine,
+  agentTurnFinished,
+  costReader,
+  createAgentChat,
+  object,
+  redactAgentOutput,
+  reportedAgentError,
+  sessionFromAgentLine,
+  summaryFromAgentLine,
+  textAt,
+  workspaceRoots,
+  type AgentTurnFinish,
+} from "./external-agent-events"
 
 import {
   fallbackBinDirectories,
@@ -736,13 +750,14 @@ export type RunExternalAgentInput = {
   finishGraceMs?: number
 }
 
-const SECRET_VALUE_PATTERN =
-  /((?:api[_-]?key|access[_-]?token|auth(?:orization)?|password|secret)\s*["'=:\s]+\s*)([^\s"',}]+)/gi
-const BEARER_PATTERN = /(bearer\s+)[a-z0-9._~+/=-]+/gi
-
-function redactAgentOutput(value: string) {
-  return value.replace(SECRET_VALUE_PATTERN, "$1[redacted]").replace(BEARER_PATTERN, "$1[redacted]")
-}
+// The chat agents that can read their task from stdin, which is how a prompt
+// survives a Windows command script: "Claude Code, Codex, … or Qwen Code".
+const STDIN_AGENTS = ExternalAgent.chatIds
+  .map((id) => ExternalAgent.find(id)!)
+  .filter((agent) => agent.headless?.stdinPrompt)
+  .map((agent) => agent.name)
+  .join(", ")
+  .replace(/, ([^,]*)$/, " or $1")
 
 // The catalog entry for a runtime Vector runs in its own chat. A terminal-only
 // agent never reaches a headless spawn, whatever the renderer sent.
@@ -795,301 +810,20 @@ export function externalModelValue(value: unknown) {
   return model
 }
 
-function object(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" ? (value as Record<string, unknown>) : {}
-}
-
-const CODEX_TURN_ACTIVITY = "codex-turn"
-const MAX_ACTIVITY_FILES = 20
-const CLAUDE_EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"])
-
-// A path an edit tool named, relative to the workspace with "/" separators.
-// Undefined for anything that is not a string or would leave the workspace, so
-// no path outside it ever reaches the renderer.
-function workspaceFile(raw: unknown, roots: string[]) {
-  if (typeof raw !== "string") return undefined
-  const value = raw.trim()
-  if (!value || value.length > 4_096 || value.includes("\0")) return undefined
-  const candidates = isAbsolute(value) ? roots.map((root) => relative(root, value)) : [normalize(value)]
-  for (const candidate of candidates) {
-    if (isAbsolute(candidate)) continue
-    const parts = candidate.split(sep).filter(Boolean)
-    if (!parts.length || parts[0] === ".." || parts.every((part) => part === ".")) continue
-    return parts.join("/")
-  }
-  return undefined
-}
-
-// The CLI may report paths under the canonical spelling of its cwd (macOS's
-// /var is /private/var), so both spellings count as the workspace.
-function workspaceRoots(cwd: string) {
-  try {
-    const real = realpathSync.native(cwd)
-    return real === cwd ? [cwd] : [cwd, real]
-  } catch {
-    return [cwd]
-  }
-}
-
-function claudeEditedPaths(block: Record<string, unknown>) {
-  if (!CLAUDE_EDIT_TOOLS.has(String(block.name))) return []
-  const input = object(block.input)
-  return [input.file_path, input.notebook_path]
-}
-
-// Cursor keys a call by its tool, e.g. {"editToolCall": {"args": {"path"}}} or
-// {"writeToolCall": ...}. A generic call is {"function": {"name", "arguments"}}
-// with JSON-encoded arguments. Only edit and write calls name a changed file.
-function cursorEditedPaths(call: Record<string, unknown>) {
-  return Object.entries(call).flatMap(([key, value]) => {
-    const body = object(value)
-    const generic = key === "function"
-    if (!/edit|write/i.test(generic ? String(body.name ?? "") : key)) return []
-    const args = generic ? jsonObject(body.arguments) : object(body.args)
-    return ["path", "file_path", "filePath", "target_file", "targetFile"].map((name) => args[name])
-  })
-}
-
-function jsonObject(value: unknown) {
-  if (typeof value !== "string") return object(value)
-  try {
-    return object(JSON.parse(value))
-  } catch {
-    return {}
-  }
-}
-
-// Protocol allowlist: raw output, tool arguments, reasoning content and unknown
-// envelopes remain diagnostics. Only explicit assistant text becomes chat. The
-// one argument that crosses is the path an edit or write call names, relative
-// to the workspace (`roots`), so the renderer can follow the file being
-// changed. File contents and paths outside the workspace never cross.
-export function createAgentChat(runtime: CodingAgentRuntime, roots: string[] = []) {
-  const messages: AgentChat["messages"] = []
-  const activity: AgentChat["activity"] = []
-  let current = "assistant-0"
-  // Cursor thinks in phases: a burst of deltas, then one "completed". One entry
-  // per phase keeps a burst from pushing real tool calls out of the 60-entry cap.
-  let thinkingRound = 0
-  const streamedMessages = new Set<string>()
-  const assistantBlocks = new Set<string>()
-  const message = (id: string, text: string, append = false) => {
-    if (!text) return
-    const previous = messages.find((entry) => entry.id === id)
-    const value = redactAgentOutput((append ? (previous?.text ?? "") : "") + text).slice(-200_000)
-    if (previous) previous.text = value
-    if (!previous) messages.push({ id, text: value })
-    if (messages.length > 120) messages.shift()
-  }
-  const tool = (id: string, name: string, state: AgentChat["activity"][number]["state"], files: unknown[] = []) => {
-    const kind = name === "reasoning" || name === "thinking" ? "thinking" : "tool"
-    const label =
-      kind === "thinking"
-        ? "Thinking"
-        : /read|search|grep|glob/i.test(name)
-          ? "Reading repository"
-          : /edit|write|patch|file_change/i.test(name)
-            ? "Updating files"
-            : /shell|bash|command|exec/i.test(name)
-              ? "Running a command"
-              : "Using a tool"
-    const index = activity.findIndex((item) => item.id === id)
-    // A later event for the same call (codex item.completed, cursor "completed")
-    // keeps the paths an earlier one named. New arrays only: snapshots share them.
-    const known = [
-      ...new Set([
-        ...(activity[index]?.files ?? []),
-        ...files.map((file) => workspaceFile(file, roots)).filter((file): file is string => Boolean(file)),
-      ]),
-    ].slice(0, MAX_ACTIVITY_FILES)
-    const entry = { id, label, kind, state, ...(known.length ? { files: known } : {}) } as AgentChat["activity"][number]
-    if (index < 0) activity.push(entry)
-    if (index >= 0) activity[index] = entry
-    if (activity.length > 60) activity.shift()
-  }
-  return (line: string): AgentChat => {
-    const event = parseAgentJson(line) ?? {}
-    const item = object(event.item)
-    if (runtime === "codex") {
-      // codex exec --json sends no text deltas: its first complete item came
-      // 6.6 s in (codex-cli 0.154), while thread.started and turn.started land at
-      // about 3 s and are the earliest real sign that the model is working.
-      const turn = activity.find((entry) => entry.id === CODEX_TURN_ACTIVITY)
-      if (event.type === "thread.started" || event.type === "turn.started") {
-        tool(CODEX_TURN_ACTIVITY, "thinking", "running")
-      } else if (turn && event.type === "turn.failed") {
-        turn.state = "failed"
-      } else if (
-        turn?.state === "running" &&
-        (String(event.type).startsWith("item.") || event.type === "turn.completed")
-      ) {
-        turn.state = "done"
-      }
-    }
-    if (runtime === "codex" && ["item.started", "item.updated", "item.completed"].includes(String(event.type))) {
-      const id = textAt(item, ["id"]) ?? current
-      if (item.type === "agent_message") message(id, textAt(item, ["text"]) ?? "")
-      if (
-        ["command_execution", "file_change", "mcp_tool_call", "web_search", "reasoning"].includes(String(item.type))
-      ) {
-        tool(
-          id,
-          String(item.type),
-          item.status === "failed" ? "failed" : event.type === "item.completed" ? "done" : "running",
-          // Codex's file_change item lists every path its patch touches.
-          item.type === "file_change" && Array.isArray(item.changes)
-            ? item.changes.map((change) => object(change).path)
-            : [],
-        )
-      }
-    }
-    if (runtime !== "codex") {
-      const stream = object(event.event)
-      if (event.type === "stream_event" && stream.type === "message_start")
-        current = textAt(object(stream.message), ["id"]) ?? `assistant-${messages.length}`
-      if (event.type === "stream_event" && stream.type === "content_block_delta") {
-        const delta = object(stream.delta)
-        if (delta.type === "text_delta" && typeof delta.text === "string") {
-          streamedMessages.add(current)
-          message(current, delta.text, true)
-        }
-      }
-      if (event.type === "stream_event" && stream.type === "content_block_start") {
-        const block = object(stream.content_block)
-        if (block.type === "text" && typeof block.text === "string" && block.text) {
-          streamedMessages.add(current)
-          message(current, block.text, true)
-        }
-        // Tool execution starts with the complete assistant tool_use below;
-        // content-block stop only means its arguments finished streaming.
-        if (block.type === "thinking") tool(`${current}-${stream.index}`, String(block.name ?? block.type), "running")
-      }
-      if (event.type === "stream_event" && stream.type === "content_block_stop") {
-        const entry = activity.find((entry) => entry.id === `${current}-${stream.index}`)
-        if (entry) entry.state = "done"
-      }
-      if (event.type === "assistant") {
-        const body = object(event.message)
-        const id = textAt(body, ["id"]) ?? current
-        const content = Array.isArray(body.content) ? body.content.map(object) : []
-        const text = content
-          .filter((block) => block.type === "text" && typeof block.text === "string")
-          .map((block) => block.text)
-          .join("")
-        // Claude emits one assistant envelope per completed content block,
-        // sharing message.id. Its partial events already accumulated that block.
-        const blockID = textAt(event, ["uuid"])
-        if (runtime !== "claude-code" || !streamedMessages.has(id)) {
-          if (!blockID || !assistantBlocks.has(blockID)) message(id, text, runtime === "cursor" || Boolean(blockID))
-        }
-        if (blockID) assistantBlocks.add(blockID)
-        content
-          .filter((block) => block.type === "tool_use")
-          .forEach((block) =>
-            tool(textAt(block, ["id"]) ?? `${id}-tool`, String(block.name), "running", claudeEditedPaths(block)),
-          )
-        current = id
-      }
-      // Cursor's top-level thinking events. The reasoning text never becomes
-      // chat; only the fact that a phase is open does.
-      if (event.type === "thinking") {
-        tool(`${current}-thinking-${thinkingRound}`, "thinking", event.subtype === "completed" ? "done" : "running")
-        if (event.subtype === "completed") thinkingRound += 1
-      }
-      if (event.type === "tool_call") {
-        const call = object(event.tool_call)
-        tool(
-          textAt(event, ["call_id", "id"]) ?? "tool",
-          Object.keys(call)[0] ?? "tool",
-          event.subtype === "completed" ? "done" : "running",
-          cursorEditedPaths(call),
-        )
-      }
-      if (event.type === "user") {
-        const content = object(event.message).content
-        if (Array.isArray(content))
-          content
-            .map(object)
-            .filter((block) => block.type === "tool_result")
-            .forEach((block) => {
-              const entry = activity.find((entry) => entry.id === block.tool_use_id)
-              if (entry) entry.state = block.is_error === true ? "failed" : "done"
-            })
-      }
-      if (event.type === "result" && event.is_error !== true && typeof event.result === "string") {
-        // Result repeats the final assistant response, not a new message.
-        if (runtime === "cursor" || !messages.length) message(messages.at(-1)?.id ?? current, event.result)
-      }
-    }
-    return { messages: messages.map((entry) => ({ ...entry })), activity: activity.map((entry) => ({ ...entry })) }
-  }
-}
-
-function parseAgentJson(line: string) {
-  const body = line.replace(/^\[(?:stdout|stderr)\]\s+/, "")
-  if (!body.startsWith("{")) return undefined
-  try {
-    const value = JSON.parse(body)
-    return value && typeof value === "object" ? (value as Record<string, unknown>) : undefined
-  } catch {
-    return undefined
-  }
-}
-
-function textAt(value: unknown, keys: string[]) {
-  if (!value || typeof value !== "object") return undefined
-  return keys
-    .map((key) => (value as Record<string, unknown>)[key])
-    .find((item): item is string => typeof item === "string" && item.trim().length > 0)
-}
-
-function activityFromAgentLine(line: string) {
-  const event = parseAgentJson(line)
-  if (!event) return line
-  const type = typeof event.type === "string" ? event.type : "event"
-  const item = event.item && typeof event.item === "object" ? event.item : undefined
-  const message =
-    textAt(event, ["result", "message", "summary", "text"]) ??
-    textAt(item, ["text", "message", "command", "path", "name"])
-  return message ? `${type}: ${message}` : type.replace(/[._-]+/g, " ")
-}
-
-function summaryFromAgentLine(line: string) {
-  const event = parseAgentJson(line)
-  if (!event) return undefined
-  if (event.type === "result") return textAt(event, ["result"])
-  if (event.type === "item.completed" && object(event.item).type === "agent_message")
-    return textAt(event.item, ["text"])
-  return undefined
-}
-
-// One rule covers all three runtimes: codex puts the id on thread.started as
-// thread_id, claude puts it on system/init as session_id, and cursor's envelope
-// mirrors claude's but its docs call the value a chatId. The keys do not
-// collide, so branching on runtime would buy nothing. Top-level only, matching
-// textAt — a nested id is a different protocol version, better treated as
-// absent than guessed at.
-export function sessionFromAgentLine(line: string) {
-  return textAt(parseAgentJson(line), ["session_id", "thread_id", "sessionId", "threadId", "chat_id", "chatId"])
-}
-
 // A resume the CLI itself refused, as opposed to a task that failed. Only
 // consulted when a resume id was actually passed, so an unrelated "unknown
 // option" inside agent output cannot silently downgrade a working conversation.
+// Gemini CLI says "Invalid session identifier" or "No previous sessions found",
+// Qwen Code "No saved session found with ID".
 const RESUME_REJECTED_PATTERN =
-  /unexpected argument|unknown (?:option|command)|unrecognized (?:option|argument)|invalid (?:option|argument)|no conversation found|session id .*(?:not found|already in use)/i
-
-function costFromAgentLine(line: string) {
-  const event = parseAgentJson(line)
-  const value = event?.total_cost_usd ?? event?.cost_usd
-  return typeof value === "number" && Number.isFinite(value) ? `$${value.toFixed(4)}` : undefined
-}
+  /unexpected argument|unknown (?:option|command)|unrecognized (?:option|argument)|invalid (?:option|argument)|no conversation found|session id .*(?:not found|already in use)|invalid session identifier|no previous sessions found|no saved session found/i
 
 // What a signed-out CLI says instead of doing the work. Only ever matched
 // against a line the runtime already flagged as an error, so a file the agent
-// happens to edit that mentions "unauthorized" can't trip it.
+// happens to edit that mentions "unauthorized" can't trip it. Gemini CLI with
+// no sign-in at all asks to "set an Auth method".
 const SIGNED_OUT_PATTERN =
-  /not logged ?in|not (?:signed|authenticated)|log ?in required|login required|please run \/?login|run `?[\w-]+ login|unauthorized|\b401\b|invalid api key|no credentials|credentials (?:are )?(?:missing|expired)|(?:token|session) (?:has )?expired/i
+  /not logged ?in|not (?:signed|authenticated)|log ?in required|login required|please run \/?login|run `?[\w-]+ login|unauthorized|\b401\b|invalid api key|no credentials|credentials (?:are )?(?:missing|expired)|(?:token|session) (?:has )?expired|set an auth method/i
 
 // The CLI's own words for a model it will not run: Claude Code's "issue with
 // the selected model ... may not exist", Codex's "model is not supported", or
@@ -1105,24 +839,6 @@ export function modelRejected(model: string | undefined, outcome: AgentOutcome) 
 
 export type AgentOutcome = { exitCode: number; error?: string }
 
-export type AgentTurnFinish = "success" | "failure"
-
-// The protocol's own end-of-turn event, which can come long before the process
-// exits: codex-cli 0.154 prints turn.completed and keeps running for about 11 s.
-// Codex's top-level {"type":"error"} is not an end. Codex also prints errors it
-// recovers from, such as a reconnect notice, and a fatal one is still followed
-// by turn.failed or an exit. Claude Code and Cursor end on `result`.
-export function agentTurnFinished(runtime: CodingAgentRuntime, line: string): AgentTurnFinish | undefined {
-  const event = parseAgentJson(line)
-  if (!event) return undefined
-  if (runtime === "codex") {
-    if (event.type === "turn.completed") return "success"
-    return event.type === "turn.failed" ? "failure" : undefined
-  }
-  if (event.type !== "result") return undefined
-  return event.is_error === true ? "failure" : "success"
-}
-
 // The exit code alone does not decide whether a run worked: Claude Code exits 0
 // while reporting {"type":"result","subtype":"success","is_error":true,
 // "result":"Not logged in · Please run /login"}, which used to be recorded as a
@@ -1137,27 +853,18 @@ export function agentOutcome(
 ): AgentOutcome {
   const agent = chatAgent(runtime)
   const setup = { label: agent.name, signIn: ExternalAgent.signInCommand(agent) }
-  const reported = output
-    .map((line) => {
-      const event = parseAgentJson(line)
-      if (!event) return undefined
-      // Codex has no is_error: a failed turn carries its reason on error.message.
-      if (runtime === "codex" && event.type === "turn.failed") {
-        return textAt(object(event.error), ["message"]) ?? `${setup.label} reported an error.`
-      }
-      if (event.is_error !== true) return undefined
-      return textAt(event, ["result", "error", "message", "summary"]) ?? `${setup.label} reported an error.`
-    })
-    .find((text): text is string => Boolean(text))
+  const reported = reportedAgentError(runtime, output, `${setup.label} reported an error.`)
   const failed = exitCode !== 0 || Boolean(reported)
   if (!failed) return { exitCode }
 
   const stderr = output.filter((line) => line.startsWith("[stderr] ")).join("\n")
   const evidence = reported ?? stderr
   if (SIGNED_OUT_PATTERN.test(evidence)) {
+    // An agent that signs in inside its own screen says where, such as Qwen Code's "Type /auth inside Qwen Code."
+    const hint = agent.signIn.hint?.replace(/\.$/, "")
     return {
       exitCode: exitCode === 0 ? 1 : exitCode,
-      error: `${setup.label} is installed but not signed in${reported ? ` (${reported})` : ""}. Run \`${setup.signIn}\` in a terminal to sign in, then run this again.`,
+      error: `${setup.label} is installed but not signed in${reported ? ` (${reported})` : ""}. Run \`${setup.signIn}\` in a terminal to sign in${hint ? `. ${hint}` : ""}, then run this again.`,
     }
   }
   const said = model
@@ -1253,12 +960,12 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
       path,
       runtimeArguments(input.runtime, input.cwd, input.prompt, input.resumeSessionId, promptOnStdin, model),
     )
-    // Only Cursor gets here: it has no stdin prompt form, and its Windows install may provide no other entry point than
-    // this script, so the error names a way forward that exists rather than a reinstall that might not.
+    // Only an agent with no stdin prompt form gets here, such as Cursor, whose Windows install may provide no other
+    // entry point than this script, so the error names a way forward that exists rather than a reinstall that might not.
     if (launch.windowsVerbatimArguments && launch.args.some((arg) => /[\r\n]/.test(arg))) {
       reject(
         new Error(
-          `${setup.label} on Windows runs through a command script (${path}), and Windows cuts a prompt passed that way at its first line, so Vector cannot send it this task. Choose Claude Code or Codex for this task instead.`,
+          `${setup.label} on Windows runs through a command script (${path}), and Windows cuts a prompt passed that way at its first line, so Vector cannot send it this task. Choose ${STDIN_AGENTS} for this task instead.`,
         ),
       )
       return
@@ -1274,6 +981,10 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
     const output: string[] = []
     const summaries: string[] = []
     const chat = createAgentChat(input.runtime, workspaceRoots(input.cwd))
+    const cost = costReader(input.runtime)
+    // The chat as of the last line: an agent whose final event carries no answer (Gemini CLI, pi) is summarised by
+    // its last message instead.
+    let latestChat: AgentChat | undefined
     const decoders = { stdout: new StringDecoder("utf8"), stderr: new StringDecoder("utf8") }
     let actualCost: string | undefined
     let sessionId: string | undefined
@@ -1294,20 +1005,21 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
       if (output.length > 240) output.shift()
       const summary = summaryFromAgentLine(text)
       if (summary) summaries.push(summary)
-      actualCost = costFromAgentLine(text) ?? actualCost
+      actualCost = cost(text) ?? actualCost
       // FIRST wins, inverted from actualCost above: claude repeats session_id on
       // nearly every event, and codex emits thread_id exactly once, on line 1.
       // This must happen here rather than as a post-hoc scan of `output`, which
       // is capped at 240 lines FIFO — every real-length run has already evicted
       // codex's thread.started by the time close fires.
       if (!sessionId) {
-        sessionId = sessionFromAgentLine(text)
+        sessionId = sessionFromAgentLine(text, input.runtime)
         if (sessionId) input.onSessionId?.(sessionId)
       }
       input.onEvent?.({ stream, text })
       input.onEvent?.({ stream: "activity", text: activityFromAgentLine(text) })
       if (stream !== "stdout") return
-      input.onChat?.(chat(text))
+      latestChat = chat(text)
+      input.onChat?.(latestChat)
       // The CLI gets a short grace to exit by itself (and finish saving its
       // session) before it is stopped. Both pipes keep draining until close
       // either way, so nothing printed after the final event is lost.
@@ -1389,7 +1101,11 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
       const outcome = agentOutcome(input.runtime, exitCode, output, model)
       resolve({
         exitCode: outcome.exitCode,
-        summary: outcome.error ?? summaries.at(-1) ?? `${setup.label} completed the isolated task.`,
+        summary:
+          outcome.error ??
+          summaries.at(-1) ??
+          latestChat?.messages.at(-1)?.text ??
+          `${setup.label} completed the isolated task.`,
         error: outcome.error,
         actualCost,
         // Not seeded from resumeSessionId before the stream: if a runtime mints
