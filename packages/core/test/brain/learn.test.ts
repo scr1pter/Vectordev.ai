@@ -604,6 +604,55 @@ describe("learning in the brain", () => {
     })
   })
 
+  test("what the learner keeps for a repository because it names someone is private, so a guest or a model that may train recalls none of it", async () => {
+    const result = await run((brain, place) =>
+      Effect.gen(function* () {
+        const taught = [
+          "always cc jane@acme.com on release PRs",
+          "always ask Priya before merging",
+          "never deploy to acme-prod on Fridays",
+          "Always use the internal mirror at registry.acme.internal",
+          // What names only the code is the repository's, as the code a guest works on is.
+          "Always use pnpm in this repo",
+          "Never call the billing client directly",
+        ].flatMap((text) => BrainLearn.learn(text))
+        yield* Effect.forEach(taught, (item, index) => write(brain, place, item, { sessionID: `ses_${index}` }))
+        // The same words learned again keep the entry private.
+        yield* write(brain, place, BrainLearn.learn("always ask Priya before merging")[0]!, { sessionID: "ses_again" })
+        const entries = yield* brain.list(place, { scope: "repository" })
+        const query = {
+          query:
+            "release PRs cc jane ask Priya merging deploy acme-prod Fridays internal mirror registry pnpm billing client",
+          budget: 600,
+        }
+        return {
+          entries: Object.fromEntries(entries.map((entry) => [entry.text, [entry.status, entry.private === true]])),
+          owner: (yield* brain.recall(place, { ...query, personal: true })).text ?? "",
+          guest: (yield* brain.recall(place, { ...query, personal: false })).text ?? "",
+          searched: (yield* brain.search(place, { query: query.query, personal: false })).map((hit) =>
+            JSON.stringify(hit),
+          ),
+          digest: (yield* brain.digest(place, { personal: false, index: true })).text ?? "",
+        }
+      }),
+    )
+    expect(result.entries).toEqual({
+      "always cc jane@acme.com on release PRs": ["active", true],
+      "always ask Priya before merging": ["active", true],
+      "never deploy to acme-prod on Fridays": ["active", true],
+      "Always use the internal mirror at registry.acme.internal": ["active", true],
+      "Always use pnpm in this repo": ["active", false],
+      "Never call the billing client directly": ["active", false],
+    })
+    for (const text of ["jane@acme.com", "Priya", "acme-prod", "registry.acme.internal"]) {
+      expect(result.owner).toContain(text)
+      expect(result.guest).not.toContain(text)
+      expect(result.searched.join("\n")).not.toContain(text)
+      expect(result.digest).not.toContain(text)
+    }
+    expect(result.guest).toContain("Never call the billing client directly")
+  })
+
   test("a reviewer or researcher in another repository hears how the user works and no name learned in the first", async () => {
     const result = await run((brain, place) =>
       Effect.gen(function* () {

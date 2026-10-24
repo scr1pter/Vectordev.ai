@@ -195,6 +195,8 @@ const lagunaFree = {
 }
 const laguna = { providerID: ProviderV2.ID.openrouter, modelID: ModelV2.ID.make(lagunaFree.id) }
 const called: string[] = []
+// What each model call would send: its system prompt and messages.
+const sent: { readonly agent: string; readonly body: string }[] = []
 const training = testEffect(
   LayerNode.compile(root, [
     ...replacements,
@@ -219,6 +221,13 @@ const training = testEffect(
       Layer.succeed(LLM.Service, {
         stream: (input) => {
           called.push(input.agent.name)
+          sent.push({
+            agent: input.agent.name,
+            body: JSON.stringify({
+              system: [...(input.stableSystem ?? []), ...input.system],
+              messages: input.messages,
+            }),
+          })
           return Stream.make(
             LLMEvent.textStart({ id: "reply" }),
             LLMEvent.textDelta({ id: "reply", text: "Done." }),
@@ -703,6 +712,73 @@ it.instance(
       expect(announced).toEqual([])
       // No model learner ran for the guest's correction either.
       expect((yield* llm.hits).slice(before).filter(learnerRequest)).toEqual([])
+    }),
+  120_000,
+)
+
+// What the owner types that names someone or something in particular: the learner keeps it for the repository, in use
+// for the owner, and private, so a session an invited guest is in and a free model that may train get none of it.
+const NAMED = [
+  "always cc jane@acme.com on release PRs",
+  "always ask Priya before merging",
+  "never deploy to acme-prod on Fridays",
+] as const
+const RELEASE = "prepare the release PRs for Friday: cc jane, ask Priya before merging, and deploy to acme-prod"
+
+const teachNamed = Effect.fn("test.teachNamed")(function* () {
+  for (const text of NAMED) yield* send({ text })
+  const entries = yield* learned()
+  expect(entries.map((entry) => [entry.text, entry.scope, entry.status, entry.private]).toSorted()).toEqual(
+    NAMED.map((text) => [text, "repository", "active", true]).toSorted(),
+  )
+})
+
+it.instance(
+  "what the learner keeps because it names someone reaches the owner's own sessions and none an invited guest is in",
+  () =>
+    Effect.gen(function* () {
+      yield* setup()
+      yield* teachNamed()
+      const owner = yield* send({ text: RELEASE })
+      for (const text of NAMED) expect(owner.bodies[0]).toContain(text)
+
+      const sessions = yield* Session.Service
+      const guests = yield* FreeModelGuests.Service
+      const shared = yield* sessions.create({ title: "Shared", permission: allow })
+      yield* guests.mark(shared.id)
+      const guest = yield* send({ sessionID: shared.id, text: RELEASE })
+      expect(guest.bodies.length).toBeGreaterThan(0)
+      for (const body of guest.bodies) {
+        for (const text of NAMED) expect(body).not.toContain(text)
+        expect(body).not.toContain("jane@acme.com")
+      }
+    }),
+  120_000,
+)
+
+training.instance(
+  "a free model that may train gets none of what the learner kept, and the owner's own model gets all of it",
+  () =>
+    Effect.gen(function* () {
+      yield* setup()
+      yield* teachNamed()
+      const sessions = yield* Session.Service
+      const prompt = yield* SessionPrompt.Service
+      const ask = Effect.fnUntraced(function* (model: typeof ref) {
+        const session = yield* sessions.create({ title: "Release", permission: allow })
+        sent.length = 0
+        yield* prompt.prompt({ sessionID: session.id, agent: "build", model, parts: [{ type: "text", text: RELEASE }] })
+        return sent.filter((item) => item.agent === "build").map((item) => item.body)
+      })
+      const own = yield* ask(ref)
+      expect(own.length).toBeGreaterThan(0)
+      for (const text of NAMED) expect(own.join("\n")).toContain(text)
+      const trains = yield* ask(laguna)
+      expect(trains.length).toBeGreaterThan(0)
+      for (const body of trains) {
+        for (const text of NAMED) expect(body).not.toContain(text)
+        expect(body).not.toContain("jane@acme.com")
+      }
     }),
   120_000,
 )

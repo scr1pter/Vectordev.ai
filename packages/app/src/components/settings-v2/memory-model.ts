@@ -31,7 +31,10 @@ export type MemoryEntryView = {
   lastUsedAt?: number
   createdAt?: number
   updatedAt: number
-  /** Learned from a private document: kept from guests and from models that may train on prompts. */
+  /**
+   * Kept from guests and from models that may train on prompts: learned from a private document, or from what the
+   * user typed that names someone or something in particular.
+   */
   private?: boolean
   /** What a preference or a term is about. */
   facet?: MemoryFacet

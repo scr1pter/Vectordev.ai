@@ -1518,6 +1518,15 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
       )
     const scope: BrainSchema.Scope = (previous?.scope ?? proposal.scope) === "personal" && own ? "personal" : "repository"
     const repository = scope === "personal" ? PERSONAL : place.repository
+    // What Vector's learner keeps for this repository because it names someone or something in particular ("always
+    // cc jane@acme.com", "always ask Priya before merging", "never deploy to acme-prod on Fridays") is memory of the
+    // owner, not of the code (section 6.4a). It is kept private, so it goes only where personal memory goes: never to
+    // a session an invited guest is in nor to a model that may train on prompts, and no outward role hears it. What
+    // names only the code ("always use pnpm in this repo") is the repository's, like the code a guest works on.
+    const named =
+      proposal.learner === true &&
+      scope === "repository" &&
+      [text, evidence?.type === "message" ? evidence.quote : text].some((value) => names(value, facet))
     const hash = normHash(text)
     // What the user took out of their own memory is not learned for a repository instead either, nor imported again.
     if ((agent || imported) && ((yield* tombstoned(repository, hash)) || (yield* tombstoned(PERSONAL, hash))))
@@ -1588,6 +1597,8 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
         confidence: Math.max(exact.confidence, confidence(proposal, verified)),
         updated_at: now,
         paths: [...new Set([...exact.paths, ...(proposal.paths ?? [])])],
+        // The learner's words make the entry the owner's, as a new entry would be.
+        private: exact.private || named,
       }
       // Words already in memory: in use now, or as they were (held, put away or in use), and never held anew.
       const outcome = (entry: BrainSchema.Entry) => ({
@@ -1598,7 +1609,8 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
         status !== exact.status ||
         origin !== exact.origin ||
         next.confidence !== exact.confidence ||
-        next.paths.length !== exact.paths.length
+        next.paths.length !== exact.paths.length ||
+        next.private !== exact.private
       // The agent repeating itself changes nothing; the user saving the same words again marks it as just confirmed.
       if (agent && repeated && !changed) return outcome(toEntry(exact))
       yield* db
@@ -1713,7 +1725,7 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
       origin_session_id: proposal.sessionID ?? null,
       signature: null,
       // A replacement for a private entry stays private.
-      private: proposal.private === true || previous?.private === true,
+      private: proposal.private === true || previous?.private === true || named,
       facet: facet ?? null,
       term_key: term?.key ?? null,
     }
@@ -2791,11 +2803,9 @@ function general(text: string, quote: string, facet: BrainSchema.Facet | undefin
   const plain = [text, quote].every(
     (value) =>
       !BrainLearn.scoped(value) &&
-      !BrainLearn.particular(value) &&
-      BrainPrivate.tokens(value, ["path", "identifier", "email", "host", "number"]).every(
-        (token) =>
-          (token.kind === "identifier" && BrainLearn.known(token.value)) ||
-          (token.kind === "host" && facet === "sources" && publicHost(token.value)),
+      !names(value, facet) &&
+      BrainPrivate.tokens(value, ["path", "identifier"]).every(
+        (token) => token.kind === "identifier" && BrainLearn.known(token.value),
       ),
   )
   if (!plain) return false
@@ -2803,6 +2813,18 @@ function general(text: string, quote: string, facet: BrainSchema.Facet | undefin
   return normalise(text) === normalise(quote) && GENERAL_FACETS.has(facet) && BrainLearn.instruction(quote)
 }
 const GENERAL_FACETS: ReadonlySet<BrainSchema.Facet> = new Set(["format", "workflow", "tooling", "sources"])
+
+// Whether words the learner read name someone or something in particular, which is the owner's and not the code's: a
+// person, team, client or system (BrainLearn.particular), an email, a host but a public site a sources preference
+// names, or a long number. A path or an identifier names the code.
+function names(value: string, facet: BrainSchema.Facet | undefined) {
+  return (
+    BrainLearn.particular(value) ||
+    BrainPrivate.tokens(value, BrainPrivate.SHAPED).some(
+      (token) => !(token.kind === "host" && facet === "sources" && publicHost(token.value)),
+    )
+  )
+}
 // Parts of a codebase a style line may name, which make it about that codebase.
 const CODE_PART =
   /\b(?:clients?|controllers?|services?|modules?|components?|handlers?|functions?|methods?|class(?:es)?|endpoints?|routes?|apis?|files?|folders?|director(?:y|ies)|schemas?|migrations?|quer(?:y|ies)|databases?|config(?:s|uration)?|scripts?|jobs?|workers?|queues?|hooks?|utils?|helpers?|packages?|librar(?:y|ies)|dependenc(?:y|ies)|variables?|fields?|columns?|pages?|screens?|dashboards?|views?|buttons?|forms?)\b/i

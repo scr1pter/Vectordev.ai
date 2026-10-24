@@ -121,8 +121,9 @@ export const Entry = Schema.Struct({
   createdAt: Schema.Finite,
   updatedAt: Schema.Finite,
   /**
-   * Learned in a session that read a private document, so kept from the same places the document is: sessions an
-   * invited guest is in and models that may train on prompts.
+   * Kept from the same places personal memory is (sessions an invited guest is in and models that may train on
+   * prompts): learned in a session that read a private document, or by Vector's learner from the owner's own words
+   * when they name someone or something in particular ("always cc jane@acme.com on release PRs").
    */
   private: Schema.optional(Schema.Boolean),
   /** What a preference or a term is about. */

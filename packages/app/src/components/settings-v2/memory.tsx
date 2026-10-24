@@ -57,7 +57,8 @@ import "@/features/research/research.css"
 
 type Scope = "repository" | "personal"
 
-const PRIVATE = "Learned from a private document, so it is kept from guests and from models that may train on prompts."
+const PRIVATE =
+  "Kept from guests and from models that may train on prompts: it was learned from a private document, or it names someone or something from what you typed."
 
 // Settings > Memory: one place for what steers Vector. Rules people wrote and the user's MEMORY.md are shown as they
 // are read (and changed in their files); what Vector learned is listed with where it came from, and can be searched,
