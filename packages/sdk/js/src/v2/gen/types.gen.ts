@@ -10581,7 +10581,7 @@ export type GlobalConfigUpdateResponses = {
   /**
    * Successfully updated global config
    */
-  200: Config
+  200: ConfigWithLocks
 }
 
 export type GlobalConfigUpdateResponse = GlobalConfigUpdateResponses[keyof GlobalConfigUpdateResponses]
