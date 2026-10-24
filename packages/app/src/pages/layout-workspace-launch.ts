@@ -1,3 +1,4 @@
+import type { ExternalAgent } from "@vectordevai/schema/external-agent"
 import { sessionHref } from "@/utils/session-route"
 import { taskScopeSearch, type TaskScope } from "@/utils/task-scope"
 
@@ -18,7 +19,8 @@ export function editorWorkspacePreparation(input: { commandReady: boolean; draft
   return "materialize" as const
 }
 
-export type ParallelWorkspaceRuntime = "vector" | "claude-code" | "codex" | "cursor"
+/** Vector's own agent, or a coding agent the catalog runs in Vector's chat. */
+export type ParallelWorkspaceRuntime = "vector" | ExternalAgent.ChatId
 export type ParallelWorkspaceView = "chat" | "files" | "changes" | "terminal" | "browser" | "activity"
 
 export function parallelWorkspacePresentation(runtime: ParallelWorkspaceRuntime) {

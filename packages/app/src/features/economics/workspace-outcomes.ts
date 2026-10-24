@@ -1,3 +1,4 @@
+import { ExternalAgent } from "@vectordevai/schema/external-agent"
 import { isTerminalWorkspace, type WorkspaceRecordForEconomics } from "./economics-repository"
 
 export type WorkspaceOutcomeRecord = WorkspaceRecordForEconomics & {
@@ -5,6 +6,9 @@ export type WorkspaceOutcomeRecord = WorkspaceRecordForEconomics & {
   isolatedPath: string
   agentSessionId?: string
   taskPrompt: string
+  /** Vector's own agent ("vector") or a user's own coding agent, whose runs are never recorded. */
+  runtime?: string
+  excludedFromLearning?: boolean
 }
 
 // Polls repeat terminal records frequently. Retry failed captures, but only remeasure successful ones
@@ -54,6 +58,9 @@ export function createWorkspaceOutcomeRecorder(
   return {
     observe(input: WorkspaceOutcomeRecord, force = false): Promise<boolean> {
       if (lifecycle.disposed) return Promise.resolve(false)
+      // A run of a user's own coding agent is never measured into the recommendations: its vendor's terms bar using
+      // it to evaluate or rank models (ExternalAgent.excludedFromLearning).
+      if (ExternalAgent.excludedFromLearning(input)) return Promise.resolve(false)
       const key = JSON.stringify([input.sourcePath, input.id])
       const previous = states.get(key)
       if (previous && (input.revision ?? 0) < (previous.workspace.revision ?? 0))

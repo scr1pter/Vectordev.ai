@@ -20,6 +20,7 @@ import { dynamicTool, jsonSchema, type Tool } from "ai"
 import { fileURLToPath, pathToFileURL } from "url"
 import { NamedError } from "@vectordevai/core/util/error"
 import { Agent as AgentSvc } from "../../src/agent/agent"
+import { NATIVE_SPECIALISTS } from "@vectordevai/core/agent/specialists"
 import { BackgroundJob } from "@/background/job"
 import { Command } from "../../src/command"
 import { Config } from "@/config/config"
@@ -478,6 +479,8 @@ const cfg = {
       options: {
         apiKey: "test-key",
         baseURL: "http://localhost:1/v1",
+        // The fake server answers any number of requests at once, unlike a model server whose count nobody set.
+        concurrency: 64,
       },
     },
   },
@@ -894,7 +897,7 @@ it.instance("title generation sends only what the user typed", () =>
     yield* prompt.awaitTitles()
     const database = yield* Database.Service
     const recorded = yield* database.db.select().from(EventTable).where(eq(EventTable.aggregate_id, chat.id)).all()
-    const usage = recorded.filter((event) => event.type === `${SessionEvent.AncillaryUsage.type}.1`)
+    const usage = recorded.filter((event) => event.type === `${SessionEvent.AncillaryUsage.type}.2`)
     expect(usage).toHaveLength(1)
     // The server's automatic title reply reports no usage; keep its spend unknown rather than inventing tokens.
     expect(usage[0]?.data).toMatchObject({ incomplete: true, unpriced: true })
@@ -907,6 +910,30 @@ it.instance("title generation sends only what the user typed", () =>
     expect(bodies[0]).not.toContain("Generate a title")
     expect(bodies[1]).toContain("Generate a title")
     expect((yield* sessions.get(chat.id)).title).toBe("E2E Title")
+  }),
+)
+
+it.instance("a title on a model server on this computer is brief, and one cut off while thinking is not used", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({ permission: [{ permission: "*", pattern: "*", action: "allow" }] })
+    // A model that thinks aloud reaches its reply limit before it closes its thinking.
+    yield* llm.title("<think>The user wants a short title about the login redirect, so")
+    yield* llm.text("done")
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      model: ref,
+      parts: [{ type: "text", text: "Fix the login redirect" }],
+    })
+    yield* prompt.awaitTitles()
+    const title = (yield* llm.hits).find((hit) => JSON.stringify(hit.body).includes("Generate a title"))
+    // The fake server is on this computer, so the title's reply is held to a few hundred tokens.
+    expect(title?.body.max_tokens).toBe(ProviderSvc.BRIEF_REPLY)
+    expect((yield* sessions.get(chat.id)).title).toBe("Fix the login redirect")
+    yield* llm.title("E2E Title")
   }),
 )
 
@@ -933,7 +960,7 @@ codiumPrompts.instance("a Codium session's title goes through the gateway and co
     expect((yield* sessions.get(chat.id)).title).toBe("Fix the login redirect")
     const database = yield* Database.Service
     const recorded = yield* database.db.select().from(EventTable).where(eq(EventTable.aggregate_id, chat.id)).all()
-    const usage = recorded.filter((event) => event.type === `${SessionEvent.AncillaryUsage.type}.1`)
+    const usage = recorded.filter((event) => event.type === `${SessionEvent.AncillaryUsage.type}.2`)
     expect(usage).toHaveLength(1)
     // Title spend counts toward the session in tokens; credits are a share of the plan, never dollars to add up.
     expect(usage[0]?.data).toMatchObject({
@@ -1088,7 +1115,7 @@ for (const ending of ["cancel", "reject"] as const)
         expect(yield* llm.hits).toHaveLength(1)
         const database = yield* Database.Service
         const recorded = yield* database.db.select().from(EventTable).where(eq(EventTable.aggregate_id, chat.id)).all()
-        expect(recorded.filter((event) => event.type === `${SessionEvent.AncillaryUsage.type}.1`)).toEqual([])
+        expect(recorded.filter((event) => event.type === `${SessionEvent.AncillaryUsage.type}.2`)).toEqual([])
       }),
     30_000,
   )
@@ -1345,6 +1372,41 @@ it.instance(
       expect(body).not.toContain("the default when you omit subagent_type")
       // task.txt, also in the body, gives the big-task rule only "when general is in the list".
       expect(body).not.toContain("MUST launch general Subagents with the task tool (omit subagent_type)")
+    }),
+  15_000,
+)
+
+it.instance(
+  "loop suggests explore for a search that spans several areas while explore is on",
+  () =>
+    Effect.gen(function* () {
+      const body = yield* firstRequestBody({})
+      expect(body).toContain('prefer it with subagent_type \\"explore\\"')
+    }),
+  15_000,
+)
+
+// With explore turned off a prompt that still suggested it would send the model's first task call to a missing agent.
+it.instance(
+  "loop points a search at the task tool's list when config turns explore off",
+  () =>
+    Effect.gen(function* () {
+      const body = yield* firstRequestBody({ config: { agent: { explore: { disable: true } } } })
+      expect(body).not.toContain('subagent_type \\"explore\\"')
+      expect(body).toContain("prefer it with a search specialist from the task tool's list")
+      expect(body).not.toContain("explore for read-only discovery")
+    }),
+  15_000,
+)
+
+it.instance(
+  "loop's plan reminder names no explore agents when config turns explore off",
+  () =>
+    Effect.gen(function* () {
+      const body = yield* firstRequestBody({ agent: "plan", config: { agent: { explore: { disable: true } } } })
+      expect(body).not.toContain("delegate explore agents")
+      expect(body).toContain("delegate to specialists from the task tool's list")
+      expect(body).not.toContain('subagent_type \\"explore\\"')
     }),
   15_000,
 )
@@ -4015,6 +4077,70 @@ noLLMServer.instance(
       }
     }),
   30_000,
+)
+
+// Vectorscope prompts its reviewers as the review and security specialists in helper sessions. Settings → Agents can
+// turn every specialist off, which must not turn Vectorscope off with them.
+it.instance(
+  "a helper session still runs as its specialist when every specialist is turned off",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig((url) => ({
+        ...providerCfg(url),
+        agent: Object.fromEntries(NATIVE_SPECIALISTS.map((name) => [name, { disable: true }])),
+      }))
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const helper = yield* sessions.create({ title: "Review", internal: "vectorscope.review" })
+      yield* prompt.prompt({
+        sessionID: helper.id,
+        agent: "review",
+        noReply: true,
+        parts: [{ type: "text", text: "review this diff" }],
+      })
+      yield* llm.text("reviewed")
+
+      const result = yield* prompt.loop({ sessionID: helper.id })
+
+      expect(result.info.role).toBe("assistant")
+      expect(result.parts.some((part) => part.type === "text" && part.text === "reviewed")).toBe(true)
+      expect(yield* llm.hits).toHaveLength(1)
+      // It ran as review: the specialist's own prompt went out with the request.
+      expect(JSON.stringify((yield* llm.inputs)[0])).toContain("You are a senior code review specialist.")
+
+      // A later turn of the helper still runs as review.
+      yield* prompt.prompt({
+        sessionID: helper.id,
+        agent: "review",
+        noReply: true,
+        parts: [{ type: "text", text: "and this one" }],
+      })
+      yield* llm.text("reviewed again")
+      const again = yield* prompt.loop({ sessionID: helper.id })
+      expect(again.parts.some((part) => part.type === "text" && part.text === "reviewed again")).toBe(true)
+      expect(JSON.stringify((yield* llm.inputs)[1])).toContain("You are a senior code review specialist.")
+
+      // A session of the user's own still cannot reach a specialist that is turned off, by its own name or any other.
+      const chat = yield* sessions.create({})
+      for (const agent of ["review", "helper:review"]) {
+        const exit = yield* prompt
+          .prompt({ sessionID: chat.id, agent, noReply: true, parts: [{ type: "text", text: "review" }] })
+          .pipe(Effect.exit)
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (Exit.isFailure(exit)) {
+          const err = Cause.squash(exit.cause)
+          expect(NamedError.Unknown.isInstance(err) && err.data.message).toContain(`Agent not found: "${agent}"`)
+        }
+        const shell = yield* prompt.shell({ sessionID: chat.id, agent, command: "echo hi" }).pipe(Effect.exit)
+        expect(Exit.isFailure(shell)).toBe(true)
+        if (Exit.isFailure(shell)) {
+          const err = Cause.squash(shell.cause)
+          expect(NamedError.Unknown.isInstance(err) && err.data.message).toContain(`Agent not found: "${agent}"`)
+        }
+      }
+      expect(yield* llm.hits).toHaveLength(2)
+    }),
+  60_000,
 )
 
 noLLMServer.instance(

@@ -1077,7 +1077,7 @@ describe("model plan HTTP inference", () => {
         data_collection: "deny",
         zdr: true,
         require_parameters: true,
-        max_price: { prompt: 1, completion: 2, request: 0, image: 0 },
+        max_price: { prompt: 1, completion: 2, request: 0 },
       },
     })
     expect(JSON.stringify(chats()[0]!.body)).not.toContain("strip me")
@@ -1315,7 +1315,7 @@ describe("Codium credits used from Vector", () => {
     expect(chats()[0]!.headers.get("authorization")).toBe("Bearer fixture-paid-secret-1")
     expect(JSON.stringify(chats()[0]!.body)).not.toContain(token)
     const status = await ModelPlanStatus.fetchStatus(token, forward)
-    expect(status).toMatchObject({ signedIn: true, enabled: true, plan: { name: "Codium 10", left: 0.9 } })
+    expect(status).toMatchObject({ signedIn: true, enabled: true, plan: { name: "Plus", left: 0.9 } })
     expect(ModelPlanStatus.describe(status)[0]).toContain("90% of this month's credits left")
 
     // The monthly credits run out: the next turn is refused before any model request, with Buy credits.
@@ -1348,7 +1348,7 @@ describe("Codium credits used from Vector", () => {
       access: true,
       plan: {
         id: "vector-10",
-        name: "Codium 10",
+        name: "Plus",
         left: 0.75,
         renewsAt: current.items.data[0]!.current_period_end * 1000,
         cancelAtPeriodEnd: false,

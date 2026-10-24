@@ -1,5 +1,6 @@
 import { Button } from "@vectordevai/ui/button"
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
+import { CodiumPlan } from "@vectordevai/schema/codium-plan"
 import { createSignal, onCleanup, onMount, Show } from "solid-js"
 import { usePlatform } from "@/context/platform"
 import { CodiumBillingStatus, createCodiumBilling, useCodiumPurchase } from "./codium-purchase"
@@ -70,7 +71,7 @@ export function SettingsVectorCodium() {
                 <dl data-slot="codium-balance">
                   <div>
                     <dt>Plan</dt>
-                    <dd>{plan()?.name ?? "No subscription"}</dd>
+                    <dd>{plan()?.name ?? CodiumPlan.FREE}</dd>
                   </div>
                   <Show when={plan()}>
                     {(active) => (

@@ -629,6 +629,8 @@ namespace TestLLMServer {
     readonly error: (status: number, body: unknown) => Effect.Effect<void>
     readonly hang: Effect.Effect<void>
     readonly hold: (value: string, wait: PromiseLike<unknown>) => Effect.Effect<void>
+    /** What every title request is answered with from now on, instead of "E2E Title". */
+    readonly title: (value: string) => Effect.Effect<void>
     readonly reset: Effect.Effect<void>
     readonly hits: Effect.Effect<Hit[]>
     readonly calls: Effect.Effect<number>
@@ -650,6 +652,7 @@ export class TestLLMServer extends Context.Service<TestLLMServer, TestLLMServer.
       let list: Queue[] = []
       let waits: Wait[] = []
       let misses: Hit[] = []
+      let titleText = "E2E Title"
 
       const queue = (...input: (Item | Reply)[]) => {
         list = [...list, ...input.map((value) => ({ item: item(value) }))]
@@ -681,7 +684,7 @@ export class TestLLMServer extends Context.Service<TestLLMServer, TestLLMServer.
         if (isTitleRequest(body)) {
           hits = [...hits, current]
           yield* notify()
-          const auto: Sse = { type: "sse", head: [role()], tail: [textLine("E2E Title"), finishLine("stop")] }
+          const auto: Sse = { type: "sse", head: [role()], tail: [textLine(titleText), finishLine("stop")] }
           if (mode === "responses") return send(responses(auto, modelFrom(body)))
           return send(auto)
         }
@@ -706,6 +709,16 @@ export class TestLLMServer extends Context.Service<TestLLMServer, TestLLMServer.
 
       yield* router.add("POST", "/v1/chat/completions", handle("chat"))
       yield* router.add("POST", "/v1/responses", handle("responses"))
+      // What a generic OpenAI-compatible server says about itself, which Vector Local's identity check reads.
+      yield* router.add(
+        "GET",
+        "/v1/models",
+        Effect.succeed(
+          HttpServerResponse.text(JSON.stringify({ object: "list", data: [{ id: "test-model" }] }), {
+            contentType: "application/json",
+          }),
+        ),
+      )
 
       yield* server.serve(router.asHttpEffect())
 
@@ -761,11 +774,15 @@ export class TestLLMServer extends Context.Service<TestLLMServer, TestLLMServer.
         hold: Effect.fn("TestLLMServer.hold")(function* (value: string, wait: PromiseLike<unknown>) {
           queue(reply().wait(wait).text(value).stop().item())
         }),
+        title: Effect.fn("TestLLMServer.title")(function* (value: string) {
+          titleText = value
+        }),
         reset: Effect.sync(() => {
           hits = []
           list = []
           waits = []
           misses = []
+          titleText = "E2E Title"
         }),
         hits: Effect.sync(() => [...hits]),
         calls: Effect.sync(() => hits.length),

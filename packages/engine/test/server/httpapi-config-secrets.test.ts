@@ -459,6 +459,39 @@ describe("global config responses", () => {
     },
   )
 
+  // Settings keeps the PATCH response as its copy of the global config, so it must be every global file merged, as
+  // GET reads it, not only the file the update wrote.
+  test("PATCH answers with every global file merged, as GET does", async () => {
+    await using tmp = await tmpdir()
+    const content = { $schema: "https://vectordev.ai/config.json", agent: { general: { disable: true } } }
+    await withGlobalConfig(tmp.path, "vector.json", content, async (file) => {
+      await Bun.write(
+        path.join(Global.Path.config, "config.json"),
+        JSON.stringify({ agent: { review: { disable: true } } }, null, 2),
+      )
+      const response = await patch("/global/config", tmp.path, { agent: { security: { disable: true } } })
+      expect(response.status).toBe(200)
+      const echoed = await response.json()
+      expect(echoed.agent).toMatchObject({
+        general: { disable: true },
+        review: { disable: true },
+        security: { disable: true },
+      })
+      expect(echoed).toEqual(JSON.parse(await text("/global/config", tmp.path)))
+      // The update still wrote only its own file.
+      expect((await Bun.file(file).json()).agent.review).toBeUndefined()
+
+      // An update that changes nothing still answers with the files as they are, edits made outside Vector included.
+      await Bun.write(
+        path.join(Global.Path.config, "config.json"),
+        JSON.stringify({ agent: { review: { disable: false } } }, null, 2),
+      )
+      const unchanged = await patch("/global/config", tmp.path, { agent: { security: { disable: true } } })
+      expect(unchanged.status).toBe(200)
+      expect((await unchanged.json()).agent).toMatchObject({ review: { disable: false }, security: { disable: true } })
+    })
+  })
+
   test("writing the redacted config to the project never overrides a secret the global config holds", async () => {
     await using tmp = await tmpdir({
       init: (dir) => Bun.write(path.join(dir, PLUGIN_FILE), "export default async () => ({})\n"),

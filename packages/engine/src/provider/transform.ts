@@ -1420,8 +1420,13 @@ export function providerOptions(model: Provider.Model, options: { [x: string]: a
   return { [key]: normalized }
 }
 
+// A model that lists no output limit replies within a quarter of its context, so the reply never takes the room the
+// conversation needs: a 16K model asked for 32K of output would leave no window and compact on every step. A model with
+// no listed context keeps the full cap; the session refuses it for the agent on a server someone hosts.
 export function maxOutputTokens(model: Provider.Model, outputTokenMax = OUTPUT_TOKEN_MAX): number {
-  return Math.min(model.limit.output, outputTokenMax) || outputTokenMax
+  if (model.limit.output > 0) return Math.min(model.limit.output, outputTokenMax)
+  if (model.limit.context > 0) return Math.min(Math.max(1, Math.floor(model.limit.context / 4)), outputTokenMax)
+  return outputTokenMax
 }
 
 type JsonRecord = Record<string, unknown>

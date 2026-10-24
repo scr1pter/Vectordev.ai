@@ -33,7 +33,12 @@ import {
   freeModelCatalogName,
   freeModelMayTrain,
 } from "@vectordevai/core/free-model-choice"
-import { ProviderUnavailable, providerRetired, providerUnavailable } from "@vectordevai/schema/provider-unavailable"
+import {
+  OFF_IN_LOCAL,
+  ProviderUnavailable,
+  providerRetired,
+  providerUnavailable,
+} from "@vectordevai/schema/provider-unavailable"
 import { renamedModel } from "@vectordevai/schema/provider-policy"
 import {
   providerAllowed,
@@ -55,7 +60,7 @@ import { Npm } from "@vectordevai/core/npm"
 import { Hash } from "@vectordevai/core/util/hash"
 import { Plugin } from "../plugin"
 import { serviceUse } from "@vectordevai/core/effect/service-use"
-import { type LanguageModelV3 } from "@ai-sdk/provider"
+import { type LanguageModelV3, type LanguageModelV3CallOptions } from "@ai-sdk/provider"
 import { ModelCatalog } from "@vectordevai/core/model-catalog"
 import { OAUTH_DUMMY_KEY } from "@/auth"
 import { Auth } from "../auth"
@@ -81,8 +86,19 @@ import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderError } from "./error"
 import { ResponseTerminal } from "./response-terminal"
+import { ModelSlots } from "@vectordevai/core/local-mode/model-slots"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { EgressGuard } from "@vectordevai/core/local-mode/guard"
+import { LocalSources } from "@vectordevai/core/local-mode/sources"
+import { LocalProbe } from "@vectordevai/core/local-mode/probe"
+import type { LocalMode } from "@vectordevai/schema/local-mode"
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 10_000
+// A server someone hosts may load the model before it answers, which can take minutes on the first request, and a
+// large prompt can keep it busy between chunks. A provider's own headerTimeout or chunkTimeout replaces these.
+export const LOCAL_HEADER_TIMEOUT = 600_000
+export const LOCAL_CHUNK_TIMEOUT = 120_000
 
 function wrapSSE(res: Response, ms: number, ctl: AbortController) {
   if (typeof ms !== "number" || ms <= 0) return res
@@ -162,20 +178,224 @@ const SDK_ORIGINS: Record<string, string> = {
   "@ai-sdk/google": "https://generativelanguage.googleapis.com",
 }
 
-// The origin a model's requests go to: a plugin that sends them elsewhere names it in the `preconnect` option.
-function requestOrigin(
+// The origins a model's requests count as going to, first the one they wait in line for: the origin of the base URL
+// the SDK sends to (variables filled in, or the SDK's own), and, before it, the one a plugin that sends them elsewhere
+// names in the `preconnect` option (ChatGPT sign-in's Codex endpoint). Config can set `preconnect` too, so it only adds
+// an address: a model counts as on a server someone hosts, or on the list, only when every address is, and a base URL
+// nobody can tell leaves none. A repository therefore cannot make a cloud API on the user's key count as a free local
+// server, or as one on the list, by naming a loopback `preconnect`.
+function requestOrigins(
   model: Model,
   options: Record<string, unknown>,
   loader: CustomVarsLoader | undefined,
   envs: Record<string, string | undefined>,
 ) {
-  const url =
-    typeof options["preconnect"] === "string"
-      ? options["preconnect"]
-      : (resolveBaseURL(model, options, loader, envs) ?? SDK_ORIGINS[model.api.npm])
-  if (!url || !URL.canParse(url)) return
-  const parsed = new URL(url)
-  return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.origin : undefined
+  const origin = (url: string | undefined) => {
+    if (!url || !URL.canParse(url)) return
+    const parsed = new URL(url)
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.origin : undefined
+  }
+  const sent = origin(resolveBaseURL(model, options, loader, envs) ?? SDK_ORIGINS[model.api.npm])
+  if (!sent) return []
+  const named = typeof options["preconnect"] === "string" ? origin(options["preconnect"]) : undefined
+  return named && named !== sent ? [named, sent] : [sent]
+}
+
+// The registry source a model call to `target` naming `models` is decided as (LocalSources): an Ollama cloud model,
+// which the server passes on to ollama.com (known by its name, or by the remote fields the server gave when it was
+// checked), a cloud AI service by its host (listed by a company or not), or a model server someone hosts, listed or
+// not.
+function inferenceSource(models: readonly string[], target: string, policy: LocalMode.Policy, holds: LocalProbe.Holds) {
+  if (holds.passesOn(target, models, policy)) return "ollama-cloud-models"
+  return LocalSources.inference(target)
+}
+
+// The model a model call's JSON body names (`model`, as OpenAI-compatible and Ollama requests send it): model and
+// provider options can replace the one the SDK was made for.
+function bodyModel(body: unknown) {
+  if (typeof body !== "string") return undefined
+  const sent = Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(body))
+  return isRecord(sent) && typeof sent.model === "string" ? sent.model : undefined
+}
+
+// The notice for a model Vector Local keeps off, or undefined when its requests go to a model server on the list. It
+// reads where the requests go as the fetch below sends them (a plugin's `preconnect`, variables filled in), and decides
+// without logging: the network log records requests, not lists. The saved credential stays, so no notice says to remove
+// it.
+function offInLocal(
+  model: Model,
+  options: Record<string, unknown>,
+  loader: CustomVarsLoader | undefined,
+  envs: Record<string, string | undefined>,
+  policy: LocalMode.Policy,
+  holds: LocalProbe.Holds,
+): ProviderUnavailable | undefined {
+  const notice = (why: string) => ({
+    id: model.providerID,
+    reason: "off-in-local" as const,
+    message: `${model.providerID}: off in Vector Local. ${why}`,
+  })
+  if (model.providerID === ProviderV2.ID.vector || model.providerID === ModelPlans.PROVIDER_ID || model.freeModel)
+    return notice(OFF_IN_LOCAL.vector)
+  const origins = requestOrigins(model, options, loader, envs)
+  if (origins.length === 0) return notice(OFF_IN_LOCAL.unknown)
+  // The first address Vector Local would not let a model call reach decides the notice.
+  const refused = origins.flatMap((origin) => {
+    const source = inferenceSource([model.api.id], origin, policy, holds)
+    if (source === "ollama-cloud-models") return [notice(OFF_IN_LOCAL.ollama)]
+    const verdict = LocalPolicy.decide(policy, { purpose: "inference", url: origin, source })
+    if (verdict.decision === "allow") return []
+    if (verdict.rule === "not-allowable") return [notice(OFF_IN_LOCAL.cloud(origin))]
+    return [providerUnavailable(model.providerID, "off-in-local")]
+  })
+  return refused[0]
+}
+
+// The lane a model's requests take in a server's line. The session processor names the user's turn and its
+// subagents, and a title or a name is brief; any other request, such as a summary or a generated agent, is a helper.
+const lanes = new WeakMap<Model, { readonly priority: ModelSlots.Priority; readonly brief?: boolean }>()
+
+/** A copy of `model` whose requests to a model server someone hosts wait in line as `priority`. */
+export function withPriority(model: Model, priority: ModelSlots.Priority): Model {
+  const copy = { ...model }
+  lanes.set(copy, { priority })
+  return copy
+}
+
+/** The lane `model`'s requests wait in at a server's line: a helper unless the session processor named it. */
+export function priorityOf(model: Model): ModelSlots.Priority {
+  return lanes.get(model)?.priority ?? "helper"
+}
+
+/**
+ * A copy of `model` for a title or a name: a helper whose reply from a model server someone hosts stays within
+ * BRIEF_REPLY tokens, so it never holds a single-slot server through a long answer while the user's next step waits.
+ */
+export function brief(model: Model): Model {
+  const copy = { ...model }
+  lanes.set(copy, { priority: "helper", brief: true })
+  return copy
+}
+
+/** The most a title or a name may reply with on a model server someone hosts. */
+export const BRIEF_REPLY = 512
+
+// The most a model that lists no reply limit of its own may reply with on a model server someone hosts: what Check
+// models writes for a model (LocalProbe.output), so a model replies the same whether or not it was checked.
+const HOSTED_REPLY = 8_192
+
+/** The line a model's requests wait in at a model server. */
+export type Line = {
+  /** The server's origin, which every provider pointing at it shares. */
+  readonly origin: string
+  /**
+   * Whether someone hosts the server: it is on this computer, on the user's network or on the model server list. Such a
+   * server gets the slower timeouts, the context checks, a reply that fits its context and the fixes for its errors. A
+   * cloud API whose provider configures `concurrency` has a line too, and none of the rest.
+   */
+  readonly hosted: boolean
+  /** The smallest `concurrency` this provider or another one pointing at the same server configures. */
+  readonly permits?: number
+  /** Whether its steps have no per-token price (ModelSlots.local). */
+  readonly local: boolean
+}
+
+// The most a reply from a model server someone hosts may take: a title's or a name's few hundred tokens, and for a
+// model that lists no reply limit of its own what Check models would write for its context.
+function hostedCeiling(model: Model, brief: boolean) {
+  if (brief) return BRIEF_REPLY
+  if (model.limit.output > 0) return undefined
+  if (model.limit.context <= 0) return HOSTED_REPLY
+  return Math.max(1, Math.min(HOSTED_REPLY, Math.floor(model.limit.context / 4)))
+}
+
+// Holds each request to a model server to a permit, and on a server someone hosts keeps its reply inside the server's
+// context and within the reply limits above. The permit is taken before the SDK calls fetch, where the header timeout
+// starts, and given back when the reply ends, fails, is cancelled or its request is aborted. `context` is 0 for a server
+// whose context is not known, or a cloud API that configures `concurrency`: neither has its reply fitted to it.
+function fitted(
+  language: LanguageModelV3,
+  input: {
+    readonly slots: ModelSlots.Interface
+    readonly origin: string
+    readonly permits: number | undefined
+    readonly priority: ModelSlots.Priority
+    readonly context: number
+    /** The most the reply may take, or undefined to leave the caller's limit. */
+    readonly ceiling: number | undefined
+  },
+): LanguageModelV3 {
+  const acquire = (options: LanguageModelV3CallOptions) =>
+    input.slots.acquire({
+      origin: input.origin,
+      permits: input.permits,
+      priority: input.priority,
+      signal: options.abortSignal,
+    })
+  const clamp = (options: LanguageModelV3CallOptions) => {
+    const asked =
+      input.ceiling === undefined
+        ? options.maxOutputTokens
+        : Math.min(options.maxOutputTokens ?? input.ceiling, input.ceiling)
+    if (asked === undefined) return options
+    const room = input.context > 0 ? input.context - promptTokens(options) : 0
+    // A request that does not fit at all keeps its limit; the server's refusal starts compaction.
+    const limit = room >= 1 ? Math.min(asked, room) : asked
+    return limit === options.maxOutputTokens ? options : { ...options, maxOutputTokens: limit }
+  }
+  // Everything else, such as the model's name and supported URLs, reads through to the SDK's own model.
+  const wrapped: LanguageModelV3 = Object.create(language)
+  return Object.assign(wrapped, {
+    doGenerate: async (options: LanguageModelV3CallOptions) => {
+      const release = await acquire(options)
+      return Promise.resolve(language.doGenerate(clamp(options))).finally(release)
+    },
+    doStream: async (options: LanguageModelV3CallOptions) => {
+      const held = await acquire(options)
+      // The release stops listening for the abort, so a signal that outlives the reply keeps nothing of it.
+      const release = () => {
+        options.abortSignal?.removeEventListener("abort", release)
+        held()
+      }
+      options.abortSignal?.addEventListener("abort", release, { once: true })
+      const result = await Promise.resolve(language.doStream(clamp(options))).catch((error: unknown) => {
+        release()
+        throw error
+      })
+      return { ...result, stream: releasing(result.stream, release) }
+    },
+  })
+}
+
+// Prompts with code and JSON run nearer three characters a token than four, so this leans high: a reply cut a little
+// short is better than a request the server refuses. File contents are left out; they are not sent as text.
+function promptTokens(options: LanguageModelV3CallOptions) {
+  const text = JSON.stringify([options.prompt, options.tools ?? []], (key, value) =>
+    value instanceof Uint8Array || value instanceof URL || (key === "data" && typeof value === "string") ? "" : value,
+  )
+  return Math.ceil(text.length / 3)
+}
+
+function releasing<T>(stream: ReadableStream<T>, release: () => void) {
+  const reader = stream.getReader()
+  return new ReadableStream<T>({
+    async pull(controller) {
+      const part = await reader.read().catch((error: unknown) => {
+        release()
+        throw error
+      })
+      if (part.done) {
+        release()
+        controller.close()
+        return
+      }
+      controller.enqueue(part.value)
+    },
+    cancel(reason) {
+      release()
+      return reader.cancel(reason)
+    },
+  })
 }
 
 // Opens the connection a model's first request will use, so its DNS lookup and TCP and TLS handshakes overlap the
@@ -1052,7 +1272,7 @@ export const Model = Schema.Struct({
   freeModel: optional(
     Schema.Struct({
       source: Schema.Literals(["shared", "openrouter"]),
-      // "may-train" and "unreviewed" models carry the "May train on your prompts" label and need one-time consent.
+      // A model that is not "no-training" carries the "May train on your prompts" label and needs one-time consent.
       dataPolicy: optional(FreeDataPolicy),
       // "optional" when Vector may switch the model's reasoning off for a greeting.
       reasoning: optional(Schema.Literals(["optional", "mandatory"])),
@@ -1083,11 +1303,28 @@ export type Info = Types.DeepMutable<Schema.Schema.Type<typeof Info>>
 
 const DefaultModelIDs = Schema.Record(Schema.String, Schema.String)
 
+// A connected model whose requests go to a model server someone hosts (this computer, the user's network or the model
+// server list), read the way the engine sends them (Provider.line): a server added in Vector sets the provider's base
+// URL and leaves the model's `api.url` empty, so a client cannot tell this from the model alone.
+export const HostedModel = Schema.Struct({
+  providerID: ProviderV2.ID,
+  modelID: ModelV2.ID,
+  /** The server's origin. */
+  origin: Schema.String,
+  /**
+   * Whether the run guard counts its steps as `local`, with no per-token price: a server on this computer or a private
+   * one on the list, that passes nothing on, for a model with no price set. Otherwise dollar caps apply to it.
+   */
+  local: Schema.Boolean,
+}).annotate({ identifier: "HostedModel" })
+export type HostedModel = Types.DeepMutable<Schema.Schema.Type<typeof HostedModel>>
+
 export const ListResult = Schema.Struct({
   all: Schema.Array(Info),
   default: DefaultModelIDs,
   connected: Schema.Array(Schema.String),
   unavailable: Schema.optional(Schema.Array(ProviderUnavailable)),
+  hosted: Schema.optional(Schema.Array(HostedModel)),
 })
 export type ListResult = Types.DeepMutable<Schema.Schema.Type<typeof ListResult>>
 
@@ -1226,6 +1463,11 @@ export interface Interface {
   readonly getProvider: (providerID: ProviderV2.ID) => Effect.Effect<Info>
   readonly getModel: (providerID: ProviderV2.ID, modelID: ModelV2.ID) => Effect.Effect<Model, ModelNotFoundError>
   readonly getLanguage: (model: Model) => Effect.Effect<LanguageModelV3, ModelNotFoundError>
+  /**
+   * The line the model's requests wait in at its server, as getLanguage holds them: undefined for a cloud API that
+   * configures no `concurrency`, a free model and Vector Codium.
+   */
+  readonly line: (model: Model) => Effect.Effect<Line | undefined>
   /** Opens the connection the model's next request will use, so a session's first request does not wait for it. */
   readonly preconnect: (model: Model) => Effect.Effect<void>
   readonly closest: (
@@ -1250,6 +1492,12 @@ interface State {
   models: Map<string, LanguageModelV3>
   providers: Record<ProviderV2.ID, Info>
   unavailable: ProviderUnavailable[]
+  // Models Vector Local keeps off, by "provider/model", with the notice choosing one fails with, and the policy that
+  // decided it.
+  withheld: Map<string, ProviderUnavailable>
+  local: LocalMode.Policy
+  // What the server checks had learned about the models servers pass on (Holds.revision) when it was decided.
+  revision: number
   // Every provider ID configuration or a plugin names, whether or not it loaded.
   declared: Set<string>
   catalogIDs: Record<string, true>
@@ -1577,6 +1825,9 @@ const layer = Layer.effect(
     const freeCredentials = yield* FreeModels.CredentialsService
     const guests = yield* FreeModelGuests.Service
     const events = yield* EventV2Bridge.Service
+    const slots = yield* ModelSlots.Service
+    // Servers whose identity changed since they were added: their model calls are refused until the user confirms them.
+    const holds = yield* LocalProbe.HoldsService
     const runtimeBridge = yield* EffectBridge.make()
     const planID = ProviderV2.ID.make(ModelPlans.PROVIDER_ID)
 
@@ -1584,9 +1835,10 @@ const layer = Layer.effect(
       Effect.gen(function* () {
         const bridge = yield* EffectBridge.make()
         const cfg = yield* config.get()
-        const modelCatalog = Object.fromEntries(
-          Object.entries(yield* modelCatalogSvc.get()).filter(([id]) => providerAllowed(id)),
-        )
+        const loaded = yield* modelCatalogSvc.get()
+        // Under Vector Local, a catalog provider's cloud address cannot be listed as one of the user's model servers.
+        Config.localCatalog(loaded)
+        const modelCatalog = Object.fromEntries(Object.entries(loaded).filter(([id]) => providerAllowed(id)))
         const catalogIDs = Object.fromEntries(Object.keys(modelCatalog).map((id) => [id, true as const]))
         const catalog = new Map<string, Info>()
         const freeCatalog = yield* freeModels.catalog()
@@ -1930,8 +2182,8 @@ const layer = Layer.effect(
         const openRouterKey = yield* freeCredentials.get("openrouter")
         const ownedFree = openRouterKey ? yield* freeModels.forKey(openRouterKey) : []
         // OpenRouter models that run on free endpoints, zero-price ones and its free router included, return below
-        // only as reviewed free models. That holds under any provider pointed at openrouter.ai, and for a model
-        // configured under another name, whose API ID is what is sent.
+        // only as the free models the catalogs list. That holds under any provider pointed at openrouter.ai, and for a
+        // model configured under another name, whose API ID is what is sent.
         delete providers[ProviderV2.ID.vector]
         for (const [providerID, item] of Object.entries(providers)) {
           for (const [modelID, model] of Object.entries(item.models)) {
@@ -2020,20 +2272,47 @@ const layer = Layer.effect(
           }
         }
 
-        const unavailable = Object.entries(auths).flatMap(([id, credential]) => {
-          if (credential.type === "wellknown") return []
-          const rejected = providerCredentialUnavailable(id, credential, userProviders.has(id))
-          if (rejected) return [rejected]
-          if (disabled.has(id) || (enabled && !enabled.has(id))) return [providerUnavailable(id, "disabled")]
-          if (!providers[ProviderV2.ID.make(id)]) return [providerUnavailable(id, "no-models")]
-          return []
-        })
+        // Vector Local keeps every model call on the model servers on the list, read from the policy in effect, which
+        // is resolved before any provider loads. A model whose requests would go anywhere else is not offered, and a
+        // provider left with none is listed off-in-local with why, so choosing either fails before a stream starts.
+        const policy = Config.local()
+        const withheld = new Map<string, ProviderUnavailable>()
+        if (policy.enabled)
+          for (const [id, item] of Object.entries(providers)) {
+            const providerID = ProviderV2.ID.make(id)
+            for (const [modelID, model] of Object.entries(item.models)) {
+              const notice = offInLocal(model, item.options, varsLoaders[providerID], envs, policy, holds)
+              if (!notice) continue
+              withheld.set(`${providerID}/${modelID}`, notice)
+              delete item.models[modelID]
+            }
+            if (Object.keys(item.models).length === 0) delete providers[providerID]
+          }
+        const off = [...new Map([...withheld.values()].map((notice) => [notice.id, notice])).values()].filter(
+          (notice) => !providers[ProviderV2.ID.make(notice.id)],
+        )
+
+        const unavailable = [
+          ...Object.entries(auths).flatMap(([id, credential]) => {
+            if (credential.type === "wellknown") return []
+            const rejected = providerCredentialUnavailable(id, credential, userProviders.has(id))
+            if (rejected) return [rejected]
+            if (disabled.has(id) || (enabled && !enabled.has(id))) return [providerUnavailable(id, "disabled")]
+            if (off.some((notice) => notice.id === id)) return []
+            if (!providers[ProviderV2.ID.make(id)]) return [providerUnavailable(id, "no-models")]
+            return []
+          }),
+          ...off,
+        ]
         for (const notice of unavailable) yield* Effect.logWarning(notice.message)
 
         return {
           models: languages,
           providers,
           unavailable,
+          withheld,
+          local: policy,
+          revision: holds.revision(),
           declared: new Set([
             ...Object.keys(cfg.provider ?? {}),
             ...(cfg.disabled_providers ?? []),
@@ -2063,15 +2342,27 @@ const layer = Layer.effect(
       Stream.runForEach(() => InstanceState.invalidateAll(state)),
       Effect.forkScoped({ startImmediately: true }),
     )
+    // Which models Vector Local keeps off follows the policy in effect and what server checks learned about the models
+    // servers pass on: state built under another policy, or before a check learned that a model is passed on, is built
+    // again on its next read. With Vector Local off before and now, nothing is compared.
+    const providerState = Effect.gen(function* () {
+      const s = yield* InstanceState.get(state)
+      const policy = Config.local()
+      if (!s.local.enabled && !policy.enabled) return s
+      if (JSON.stringify(policy) === JSON.stringify(s.local) && s.revision === holds.revision()) return s
+      yield* InstanceState.invalidate(state)
+      return yield* InstanceState.get(state)
+    })
 
     // A plan bought, a sign-in or a sign-out must not require restarting the local engine.
     const refreshCodium = Effect.fn("Provider.refreshCodium")(function* (options?: ModelPlans.CatalogOptions) {
-      const s = yield* InstanceState.get(state)
+      const s = yield* providerState
       const current = yield* modelPlans.catalog(yield* freeCredentials.get("vector"), options)
       const cfg = yield* config.get()
       delete s.providers[planID]
       if (
         current.enabled &&
+        !Config.local().enabled &&
         !cfg.disabled_providers?.includes(planID) &&
         (!cfg.enabled_providers || cfg.enabled_providers.includes(planID))
       )
@@ -2081,7 +2372,7 @@ const layer = Layer.effect(
 
     const list = Effect.fn("Provider.list")(() => refreshCodium())
 
-    const unavailable = Effect.fn("Provider.unavailable")(() => InstanceState.use(state, (s) => s.unavailable))
+    const unavailable = Effect.fn("Provider.unavailable")(() => Effect.map(providerState, (s) => s.unavailable))
 
     // Every session request names its session (LLMRequestPrep), and so does every model call a guest can cause: prompts,
     // compaction, titles, summaries, subagents and retries all run inside one. A request with none, such as generating
@@ -2144,7 +2435,7 @@ const layer = Layer.effect(
                   }),
                   route.url === FreeModels.SHARED_CHAT_URL,
                 )
-                return fetch(route.url, {
+                return Egress.fetch("vector-free-models", route.url, {
                   method: "POST",
                   redirect: "error",
                   signal: init?.signal,
@@ -2219,9 +2510,11 @@ const layer = Layer.effect(
             ...model.headers,
           }
 
+        // One SDK per model: its fetch below decides each call by the model it was made for.
         const key = Hash.fast(
           JSON.stringify({
             providerID: model.providerID,
+            model: model.api.id,
             npm: model.api.npm,
             options,
           }),
@@ -2230,11 +2523,19 @@ const layer = Layer.effect(
         if (existing) return existing
 
         const customFetch = options["fetch"]
-        const chunkTimeout = options["chunkTimeout"]
-        const headerTimeout = options["headerTimeout"]
+        const hosted =
+          ModelSlots.server(
+            typeof options["preconnect"] === "string" ? options["preconnect"] : baseURL,
+            Config.local(),
+          ) !== undefined
+        const chunkTimeout = options["chunkTimeout"] ?? (hosted ? LOCAL_CHUNK_TIMEOUT : undefined)
+        const headerTimeout = options["headerTimeout"] ?? (hosted ? LOCAL_HEADER_TIMEOUT : undefined)
         delete options["chunkTimeout"]
         delete options["headerTimeout"]
         delete options["preconnect"]
+        // Read by the model's line for the server's permits and its cost; the SDK has no use for them.
+        delete options["concurrency"]
+        delete options["forwards"]
 
         options["fetch"] = async (input: any, init?: BunFetchRequestInit) => {
           const fetchFn = customFetch ?? fetch
@@ -2278,6 +2579,19 @@ const layer = Layer.effect(
               throw new Error("Plugin OAuth approval or credential changed. Reconnect to continue.")
             opts.redirect = "error"
           }
+          // With Vector Local on, a listed server is read before its first model call (and again once the policy
+          // changes, a call names a model it did not list, or nothing answered): a pinned one is checked against its
+          // pin, and no model call goes to a server whose identity changed since it was added until the user confirms
+          // the server. The read also learns which of its models the server passes on, which the decision below
+          // refuses by this model's name and by the one the request sends.
+          const target = input instanceof Request ? input.url : String(input)
+          const policy = Egress.policy()
+          const sent = policy.enabled && ModelSlots.server(target, policy) ? bodyModel(opts.body) : undefined
+          const names = sent === undefined || sent === model.api.id ? [model.api.id] : [model.api.id, sent]
+          if (policy.enabled) {
+            await holds.check(target, policy, names)
+            holds.gate(target)
+          }
           const chunkAbortCtl = typeof chunkTimeout === "number" && chunkTimeout > 0 ? new AbortController() : undefined
           const headerTimeoutMs = headerTimeout === false ? undefined : headerTimeout
           const headerTimeoutCtl = typeof headerTimeoutMs === "number" ? timeoutController(headerTimeoutMs) : undefined
@@ -2292,12 +2606,34 @@ const layer = Layer.effect(
           const combined = signals.length === 0 ? null : signals.length === 1 ? signals[0] : AbortSignal.any(signals)
           if (combined) opts.signal = combined
 
+          // Vector Local decides every model call here, before a plugin's own fetch runs or its WebSocket opens (ChatGPT
+          // sign-in's Responses transport starts inside that fetch): only a model server on the list gets it, and it
+          // follows no redirect. With Vector Local off it goes to fetchFn as it is.
           const res = ResponseTerminal.wrap(
-            await fetchFn(input, {
-              ...opts,
-              // @ts-ignore see here: https://github.com/oven-sh/bun/issues/16682
-              timeout: false,
-            }).finally(() => headerTimeoutCtl?.clear()),
+            await Egress.fetch(
+              policy.enabled ? inferenceSource(names, target, policy, holds) : "local-inference",
+              input,
+              {
+                ...opts,
+                // @ts-ignore see here: https://github.com/oven-sh/bun/issues/16682
+                timeout: false,
+              },
+              fetchFn,
+            )
+              .then(
+                (response) => {
+                  // A proxy in front of the server could not reach it (Bad Gateway): it is read again, as below.
+                  if (policy.enabled && response.status === 502) holds.recheck(target)
+                  return response
+                },
+                (error: unknown) => {
+                  // Nothing answered, so another server may take the port: it is read again before the next call.
+                  if (policy.enabled && !combined?.aborted && !(error instanceof EgressGuard.EgressBlocked))
+                    holds.recheck(target)
+                  throw error
+                },
+              )
+              .finally(() => headerTimeoutCtl?.clear()),
           )
 
           if (!chunkAbortCtl) return res
@@ -2319,7 +2655,9 @@ const layer = Layer.effect(
           if (model.api.npm.startsWith("file://")) {
             return model.api.npm
           }
-          const item = await Npm.add(model.api.npm)
+          // Under Vector Local, a package the config names (npm-plugins): a copy installed earlier loads, and a missing
+          // one installs only when allowed, and the error says why.
+          const item = await Npm.addAs("npm-plugins", model.api.npm)
           if (!item.entrypoint) throw new Error(`Package ${model.api.npm} has no import entrypoint`)
           return item.entrypoint
         })()
@@ -2342,13 +2680,26 @@ const layer = Layer.effect(
     }
 
     const getProvider = Effect.fn("Provider.getProvider")((providerID: ProviderV2.ID) =>
-      InstanceState.use(state, (s) => s.providers[providerID]),
+      Effect.map(providerState, (s) => s.providers[providerID]),
     )
 
     const getModel = Effect.fn("Provider.getModel")(function* (providerID: ProviderV2.ID, modelID: ModelV2.ID) {
+      // Vector Local keeps Vector's own models off; that is the reason to give, not a sign-in or credits.
+      if (Config.local().enabled && (providerID === planID || providerID === ProviderV2.ID.vector))
+        return yield* new ModelNotFoundError({
+          providerID,
+          modelID,
+          unavailable: {
+            id: providerID,
+            reason: "off-in-local",
+            message: `${providerID}: off in Vector Local. ${OFF_IN_LOCAL.vector}`,
+          },
+        })
       // A turn waits for vectordev.ai's answer when this account has no Codium catalog yet.
       if (providerID === planID) yield* refreshCodium({ wait: true })
-      const s = yield* InstanceState.get(state)
+      const s = yield* providerState
+      const withheld = s.withheld.get(`${providerID}/${modelID}`)
+      if (withheld) return yield* new ModelNotFoundError({ providerID, modelID, unavailable: withheld })
       const provider = Object.hasOwn(s.providers, providerID) ? s.providers[providerID] : undefined
       // Never move a Codium conversation to another provider; say why it cannot run and what fixes it.
       if (!provider && providerID === planID) {
@@ -2398,49 +2749,104 @@ const layer = Layer.effect(
     })
 
     const getLanguage = Effect.fn("Provider.getLanguage")(function* (model: Model) {
-      const s = yield* InstanceState.get(state)
+      const s = yield* providerState
       const envs = yield* env.all()
       const key = `${model.providerID}/${model.id}`
-      if (s.models.has(key)) return s.models.get(key)!
-
       const provider = s.providers[model.providerID]
-      return yield* EffectPromise.refineRejection(
-        async () => {
-          const sdk = await resolveSDK(model, s, envs)
-          const language = s.modelLoaders[model.providerID]
-            ? await s.modelLoaders[model.providerID](
-                sdk,
-                model.api.id,
-                {
-                  ...provider.options,
-                  ...model.options,
-                },
-                model,
-              )
-            : sdk.languageModel(model.api.id)
-          s.models.set(key, language)
-          return language
-        },
-        (cause) =>
-          cause instanceof NoSuchModelError
-            ? new ModelNotFoundError({ modelID: model.id, providerID: model.providerID, cause })
-            : undefined,
-      )
+      const language =
+        s.models.get(key) ??
+        (yield* EffectPromise.refineRejection(
+          async () => {
+            const sdk = await resolveSDK(model, s, envs)
+            const loaded = s.modelLoaders[model.providerID]
+              ? await s.modelLoaders[model.providerID](
+                  sdk,
+                  model.api.id,
+                  {
+                    ...provider.options,
+                    ...model.options,
+                  },
+                  model,
+                )
+              : sdk.languageModel(model.api.id)
+            s.models.set(key, loaded)
+            return loaded
+          },
+          (cause) =>
+            cause instanceof NoSuchModelError
+              ? new ModelNotFoundError({ modelID: model.id, providerID: model.providerID, cause })
+              : undefined,
+        ))
+      const at = lineOf(model, s, envs)
+      if (!at) return language
+      return fitted(language, {
+        slots,
+        origin: at.origin,
+        permits: at.permits,
+        priority: priorityOf(model),
+        context: at.hosted ? model.limit.context : 0,
+        ceiling: at.hosted ? hostedCeiling(model, lanes.get(model)?.brief === true) : undefined,
+      })
+    })
+
+    // Where a model's requests wait, as getLanguage holds them and the session processor, Vectorscope and the
+    // document reader read it: undefined for a cloud API that configures no `concurrency`, a free model and Vector
+    // Codium. It reads the request's own origin (a plugin's `preconnect`, variables filled in) and the server list.
+    const lineOf = (model: Model, s: State, envs: Record<string, string | undefined>): Line | undefined => {
+      const provider = s.providers[model.providerID]
+      // Free models and Vector Codium choose their route per request and are never on a server someone hosts.
+      if (!provider || model.providerID === "vector" || model.providerID === planID || model.freeModel) return undefined
+      const origins = requestOrigins(model, provider.options, s.varsLoaders[model.providerID], envs)
+      const origin = origins[0]
+      if (!origin) return undefined
+      const policy = Config.local()
+      const hosted = ModelSlots.server(origin, policy)
+      // How many requests the server takes: the smallest concurrency this provider or any other provider pointing at
+      // the same server configures, since they share it. Undefined when none does.
+      const counts = Object.values(s.providers).flatMap((item) => {
+        const value = item.options["concurrency"]
+        if (typeof value !== "number") return []
+        if (item === provider) return [value]
+        const other =
+          typeof item.options["baseURL"] === "string" ? LocalPolicy.origin(item.options["baseURL"]) : undefined
+        return other && other === LocalPolicy.origin(origin) ? [value] : []
+      })
+      const permits = counts.length ? Math.min(...counts) : undefined
+      // A cloud API is left as it is unless a provider configures how many requests it takes.
+      if (!hosted && permits === undefined) return undefined
+      return {
+        origin: hosted ?? origin,
+        hosted: hosted !== undefined,
+        permits,
+        // A model the server said it passes on (an Ollama cloud model, whatever its name) is never a free local one.
+        local: origins.every((item) =>
+          ModelSlots.local(item, {
+            policy,
+            model: model.api.id,
+            forwards: provider.options["forwards"] === true || holds.forwards(item, model.api.id),
+          }),
+        ),
+      }
+    }
+
+    const line = Effect.fn("Provider.line")(function* (model: Model) {
+      const s = yield* providerState
+      return lineOf(model, s, yield* env.all())
     })
 
     const preconnect = Effect.fn("Provider.preconnect")(function* (model: Model) {
-      const s = yield* InstanceState.get(state)
+      const s = yield* providerState
       const provider = s.providers[model.providerID]
       // Free models choose their route per request, so there is no one connection to open ahead of it.
       if (!provider || model.providerID === "vector" || model.freeModel) return
       const envs = yield* env.all()
-      const origin = requestOrigin(model, provider.options, s.varsLoaders[model.providerID], envs)
+      const origin = requestOrigins(model, provider.options, s.varsLoaders[model.providerID], envs)[0]
       // A speculative connection must never prevent the SDK from making its actual request.
       if (origin) yield* Effect.sync(() => preconnectOrigin(origin, envs)).pipe(Effect.catchDefect(() => Effect.void))
     })
 
     const closest = Effect.fn("Provider.closest")(function* (providerID: ProviderV2.ID, query: string[]) {
-      const s = yield* InstanceState.get(state)
+      const s = yield* providerState
       const provider = s.providers[providerID]
       if (!provider) return undefined
       for (const item of query) {
@@ -2455,7 +2861,7 @@ const layer = Layer.effect(
       providerID: ProviderV2.ID,
       primaryID?: ModelV2.ID,
     ) {
-      const s = yield* InstanceState.get(state)
+      const s = yield* providerState
       const provider = s.providers[providerID]
       if (!provider) return undefined
       const primary = primaryID ? provider.models[primaryID] : undefined
@@ -2548,7 +2954,7 @@ const layer = Layer.effect(
     })
 
     const savedModel = Effect.fn("Provider.savedModel")(function* (model: { providerID: string; modelID: string }) {
-      const s = yield* InstanceState.get(state)
+      const s = yield* providerState
       // A saved Vector model stays on the shared allowance, even when the user's own OpenRouter account lists it too.
       const current = renamedModel(model)
       if (providerRetired(current.providerID, (id) => s.declared.has(id) || id in s.providers)) return
@@ -2573,7 +2979,7 @@ const layer = Layer.effect(
       const saved = cfg.model ? yield* savedModel(parseModel(cfg.model)) : undefined
       if (saved && providerEnabled(saved.providerID)) return saved
 
-      const s = yield* InstanceState.get(state)
+      const s = yield* providerState
       const recent = yield* fs.readJson(path.join(Global.Path.state, "model.json")).pipe(
         Effect.map((x): { providerID: ProviderV2.ID; modelID: ModelV2.ID }[] => {
           if (!isRecord(x) || !Array.isArray(x.recent)) return []
@@ -2589,8 +2995,9 @@ const layer = Layer.effect(
       )
       for (const entry of recent) {
         const provider = s.providers[entry.providerID]
-        // A vanished free choice must fail as unavailable, never quietly select a paid model.
-        if (isFreeModelRef(entry)) return entry
+        // A vanished free choice must fail as unavailable, never quietly select a paid model. With Vector Local on, free
+        // models are off and every model left runs on a server on the list, so the next recent choice is taken.
+        if (isFreeModelRef(entry) && !Config.local().enabled) return entry
         if (!provider) continue
         if (!provider.models[entry.modelID]) continue
         return { providerID: entry.providerID, modelID: entry.modelID }
@@ -2623,6 +3030,7 @@ const layer = Layer.effect(
       getProvider,
       getModel,
       getLanguage,
+      line,
       preconnect,
       closest,
       getSmallModel,
@@ -2687,6 +3095,8 @@ export const node = LayerNode.make({
     FreeModels.credentialsNode,
     FreeModelGuests.node,
     EventV2Bridge.node,
+    ModelSlots.node,
+    LocalProbe.holdsNode,
   ],
 })
 

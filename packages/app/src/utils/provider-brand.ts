@@ -3,7 +3,9 @@ import {
   freeModelName,
   freeModelSource,
   freeModelTrainingLabel,
+  freeModelRegionLabel,
   freeModelChoices,
+  freeModelOrder,
 } from "@vectordevai/core/free-model-choice"
 import type { FreeDataPolicy } from "@vectordevai/schema/free-model"
 import { providerAllowed, providerUsable } from "@vectordevai/schema/provider-policy"
@@ -230,6 +232,7 @@ export function modelAriaLabel(model: PickerModel, now: number) {
     isNewRelease(model, now) ? "new" : "",
     freeModelSource(model) ?? access.spoken,
     freeModelTrainingLabel(model) ?? "",
+    freeModelRegionLabel(model) ?? "",
   ]
     .filter(Boolean)
     .join(", ")
@@ -253,6 +256,7 @@ export function modelTitle(model: PickerModel) {
     releaseTitle(model),
     freeModelSource(model) ?? access.title,
     freeModelTrainingLabel(model) ?? "",
+    freeModelRegionLabel(model) ?? "",
   ]
     .filter(Boolean)
     .join("\n")
@@ -334,7 +338,12 @@ export function buildModelSections<T extends PickerModel>(input: {
       providedByVector(model) && !taken.has(pickerModelKey(model)) && matchRank(model, term, input.now) !== undefined,
   )
   if (free.length) {
-    sections.push({ id: "free", kind: "free", label: FREE_MODELS_TITLE, items: free.sort(byRelease) })
+    sections.push({
+      id: "free",
+      kind: "free",
+      label: FREE_MODELS_TITLE,
+      items: free.sort((a, b) => freeModelOrder(a, b) || byRelease(a, b)),
+    })
     free.forEach((model) => taken.add(pickerModelKey(model)))
   }
 

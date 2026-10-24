@@ -1,0 +1,347 @@
+import { afterAll, expect } from "bun:test"
+import path from "path"
+import { Effect } from "effect"
+import { Brain } from "@vectordevai/core/brain/brain"
+import { FSUtil } from "@vectordevai/core/fs-util"
+import { ResearchSearch } from "@vectordevai/core/research/search"
+import { ResearchStore } from "@vectordevai/core/research/store"
+import type { SessionV1 } from "@vectordevai/core/v1/session"
+import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
+import { MemoryEvent } from "@vectordevai/schema/memory-event"
+import { EventV2Bridge } from "@/event-v2-bridge"
+import { Question } from "../../src/question"
+import { Session } from "@/session/session"
+import { Instruction } from "../../src/session/instruction"
+import { ResearchRun } from "../../src/tool/research-run"
+import { FakeBridge } from "../lib/fake-bridge"
+import { calls, output, plan, runtime, send, setup } from "../lib/research"
+import { FakeWeb } from "../../../core/test/lib/fake-web"
+import { NetworkGuard } from "../../../core/test/lib/network-guard"
+
+// research_plan's plan card (sections 5.2 and 5.4), in the app, where someone can answer it: Start keeps the plan's
+// depth, Start deep raises the run to Thorough with the user as its source, a typed reply is a steer that starts
+// nothing, the card's own JSON answer carries the user's edits, Cancel stops, and a call that only moves sub-questions
+// along never asks again.
+
+const guard = NetworkGuard.use()
+const web = FakeWeb.start({ sites: FakeWeb.sites() })
+const it = runtime(web, { client: "app" })
+// A desktop whose research browsers answer each search with the fake web's pages, for the tests that search.
+const bridge = FakeBridge.start(FakeBridge.searching(web))
+afterAll(async () => {
+  await bridge.close()
+  await web.close()
+})
+
+// Answers each plan card with the next of `replies`, and keeps the questions asked.
+const answer = (replies: string[]) =>
+  Effect.gen(function* () {
+    const question = yield* Question.Service
+    const asked: string[] = []
+    yield* Effect.gen(function* () {
+      while (true) {
+        for (const request of yield* question.list()) {
+          asked.push(request.questions[0]?.question ?? "")
+          yield* question.reply({ requestID: request.id, answers: [[replies.shift() ?? "Cancel"]] }).pipe(Effect.ignore)
+        }
+        yield* Effect.sleep(10)
+      }
+    }).pipe(Effect.forkScoped)
+    return asked
+  })
+
+const metadataOf = (part: SessionV1.ToolPart | undefined): SessionV1.ToolStateCompleted["metadata"] =>
+  part?.state.status === "completed" ? part.state.metadata : {}
+
+it.instance(
+  "Start deep raises the run to Thorough from the user's own answer, and a status-only call never asks again",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup()
+      const asked = yield* answer(["Start deep"])
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "Research" })
+      yield* test.llm.tool("research_plan", plan())
+      yield* test.llm.tool("research_plan", { ...plan(), status: ["answered", "open"] })
+      yield* test.llm.text("Done.")
+      yield* send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." })
+
+      expect(asked).toHaveLength(1)
+      expect(asked[0]).toContain("Research: How much do heat pumps cut heating bills in cold climates?")
+      expect(asked[0]).toContain("1. What did field studies measure?")
+      expect(asked[0]).toContain("About 15 pages and 8 searches")
+      const [first, second] = yield* calls(session.id, "research_plan")
+      expect(metadataOf(first)).toMatchObject({
+        approved: true,
+        answer: "start-deep",
+        to: "thorough",
+        source: "user",
+        plan: { depth: "deep" },
+      })
+      expect(metadataOf(second)).toMatchObject({ approved: true, answer: "status", runID: metadataOf(first).runID })
+      const store = yield* ResearchStore.Service
+      const instruction = yield* Instruction.Service
+      const place = yield* instruction.place()
+      const detail = yield* store.get(place, metadataOf(first).runID)
+      expect(detail?.run).toMatchObject({ depth: "deep", status: "running" })
+      expect(detail?.run.plan?.status).toEqual(["answered", "open"])
+    }),
+  90_000,
+)
+
+it.instance(
+  "a typed reply is a steer that starts nothing, the card's JSON answer carries edits, and Cancel stops",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup()
+      const edited = `vector-plan:${JSON.stringify({
+        action: "start",
+        plan: { subquestions: ["Which homes did the study follow?"], avoid_domains: ["example.com"] },
+        always: ["avoid_domains"],
+      })}`
+      yield* answer(["Look at Nordic studies first", edited, "Cancel"])
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "Research" })
+      const store = yield* ResearchStore.Service
+      const instruction = yield* Instruction.Service
+      const place = yield* instruction.place()
+      const before = (yield* store.list(place)).length
+      yield* test.llm.tool("research_plan", plan())
+      yield* test.llm.tool("research_read", { url: web.url("article", "/") })
+      yield* test.llm.tool("research_plan", plan({ question: "What did Nordic heat pump field studies find?" }))
+      yield* test.llm.tool("research_plan", plan({ question: "Should I stop researching heat pumps?" }))
+      yield* test.llm.text("Done.")
+      yield* send({ sessionID: session.id, agent: "research", text: `Research heat pumps, ${web.url("article", "/")}` })
+
+      const [steer, approved, cancelled] = yield* calls(session.id, "research_plan")
+      expect(metadataOf(steer)).toMatchObject({ approved: false, answer: "steer" })
+      expect(output(steer)).toContain("Look at Nordic studies first")
+      // Nothing is read while no plan is approved.
+      const [read] = yield* calls(session.id, "research_read")
+      expect(output(read)).toBe(ResearchRun.NO_PLAN)
+      expect(web.count("article")).toBe(0)
+      expect(metadataOf(approved)).toMatchObject({
+        approved: true,
+        answer: "start",
+        always: ["avoid_domains"],
+        plan: { subquestions: ["Which homes did the study follow?"], avoid_domains: ["example.com"], depth: "focused" },
+      })
+      expect(metadataOf(approved).to).toBeUndefined()
+      expect(metadataOf(cancelled)).toMatchObject({ approved: false, answer: "cancel" })
+      expect(output(cancelled)).toContain("cancelled")
+      // Only the approved plan started a run.
+      expect((yield* store.list(place)).length - before).toBe(1)
+      expect(guard.outside()).toEqual([])
+    }),
+  90_000,
+)
+
+for (const size of [undefined, "thorough" as const])
+  it.instance(
+    `a headless run, which denies questions, has its plan approved within its ${size ?? "Work"} size and never asks`,
+    () =>
+      Effect.gen(function* () {
+        const test = yield* setup()
+        const asked = yield* answer([])
+        const sessions = yield* Session.Service
+        // What `vector run` gives a session that no one can answer.
+        const session = yield* sessions.create({
+          title: "Research",
+          permission: [{ permission: "question", pattern: "*", action: "deny" }],
+        })
+        yield* test.llm.tool("research_plan", plan({ depth: "deep" }))
+        yield* test.llm.text("Done.")
+        yield* send({
+          sessionID: session.id,
+          agent: "research",
+          text: "Research how much heat pumps save.",
+          ...(size ? { size } : {}),
+        })
+        expect(asked).toEqual([])
+        const [planned] = yield* calls(session.id, "research_plan")
+        // The model asked for deep; only a Thorough request lets a plan no one approved go deep, with its caps.
+        expect(metadataOf(planned)).toMatchObject({
+          approved: true,
+          answer: "automatic",
+          plan: { depth: size === "thorough" ? "deep" : "focused" },
+        })
+        // Only the user's own answer raises a run to Thorough.
+        expect(metadataOf(planned).to).toBeUndefined()
+        const store = yield* ResearchStore.Service
+        const instruction = yield* Instruction.Service
+        const detail = yield* store.get(yield* instruction.place(), metadataOf(planned).runID)
+        expect(detail?.run.depth).toBe(size === "thorough" ? "deep" : "focused")
+      }),
+    60_000,
+  )
+
+it.instance(
+  "a site the user approved on the plan card may be searched though the run read it in a file",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup()
+      const fs = yield* FSUtil.Service
+      yield* fs.writeWithDirs(
+        path.join(test.dir, "notes", "hosts.md"),
+        "# Hosts\n\nOur status page is status.acmecorp.com.\n",
+      )
+      yield* answer(["Start"])
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({
+        title: "Research",
+        permission: [{ permission: "private_network", pattern: "*", action: "allow" }],
+      })
+      yield* test.llm.tool("research_plan", { ...plan(), prefer_domains: ["acmecorp.com"] })
+      yield* test.llm.tool("read", { filePath: path.join(test.dir, "notes", "hosts.md") })
+      // The approved domain clears itself as a site: value, not a host under it such as status.acmecorp.com.
+      yield* test.llm.tool("research_search", { query: "outage history", site: "acmecorp.com" })
+      yield* test.llm.text("Done.")
+      yield* FakeBridge.within(
+        bridge,
+        send({ sessionID: session.id, agent: "research", text: "Research how often status pages report outages." }),
+      )
+      const [search] = yield* calls(session.id, "research_search")
+      expect(output(search)).toContain("untrusted_web_page")
+    }),
+  90_000,
+)
+
+it.instance(
+  "while the plan card is open, its running part carries the plan as Vector would run it, both estimates, the search set up and the user's own sites",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup({ research: { domains: { prefer: [" Nature.com "], avoid: ["example.com"] } } })
+      const question = yield* Question.Service
+      const sessions = yield* Session.Service
+      // What the app's plan card reads: the research_plan part while its question waits for the user. The first card
+      // ticks Always for a site and a format, so the second card carries them as the user's preferences.
+      const seen: Record<string, unknown>[] = []
+      const replies = [
+        `vector-plan:${JSON.stringify({ action: "start", plan: { prefer_domains: ["nature.com", "arxiv.org"], format: "table" }, always: ["prefer_domains", "format"] })}`,
+        "Start",
+      ]
+      const first = yield* sessions.create({ title: "Research" })
+      const second = yield* sessions.create({ title: "Research" })
+      yield* Effect.gen(function* () {
+        while (true) {
+          for (const request of yield* question.list()) {
+            // The fake model numbers its calls per response, so a call is found in the session that asked.
+            const session = request.sessionID === first.id ? first.id : second.id
+            const part = (yield* calls(session, "research_plan")).find((item) => item.callID === request.tool?.callID)
+            // The card's data is on the part before the question is asked; read it as the app would.
+            if (part?.state.status !== "running" || !part.state.metadata?.card) continue
+            seen.push(part.state.metadata)
+            yield* question
+              .reply({ requestID: request.id, answers: [[replies.shift() ?? "Cancel"]] })
+              .pipe(Effect.ignore)
+          }
+          yield* Effect.sleep(10)
+        }
+      }).pipe(Effect.forkScoped)
+      // The first card is the desktop app's, which searches in research browsers; the second is shown where there is
+      // no desktop browser.
+      for (const session of [first, second]) {
+        yield* test.llm.tool("research_plan", plan())
+        yield* test.llm.text("Done.")
+        const sent = send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." })
+        yield* session === first ? FakeBridge.within(bridge, sent) : sent
+      }
+
+      expect(seen).toHaveLength(2)
+      expect(seen[0]).toMatchObject({
+        plan: { depth: "focused", prefer_domains: ["nature.com"], avoid_domains: ["example.com"] },
+        estimate: expect.stringContaining("About 15 pages and 8 searches"),
+        card: {
+          deep: true,
+          deepEstimate: expect.stringContaining("About 40 pages and 24 searches"),
+          search: { provider: "browser" },
+          preferences: { prefer: ["nature.com"], avoid: ["example.com"] },
+          offline: false,
+        },
+      })
+      // The second card marks what the first card's Always kept, with the config's own sites.
+      expect(seen[1]).toMatchObject({
+        plan: { prefer_domains: ["nature.com", "arxiv.org"], format: "table" },
+        learned: { prefer_domains: ["nature.com", "arxiv.org"], format: "table" },
+        card: {
+          search: { provider: "none", reason: ResearchSearch.NEEDS_DESKTOP },
+          preferences: { prefer: ["nature.com", "arxiv.org"], avoid: ["example.com"], format: "table" },
+        },
+      })
+      // Once answered, the part keeps what the run started with, not the card.
+      const [planned] = yield* calls(second.id, "research_plan")
+      expect(metadataOf(planned)).toMatchObject({ approved: true, answer: "start" })
+      expect(metadataOf(planned).card).toBeUndefined()
+    }),
+  90_000,
+)
+
+it.instance(
+  "what the user ticks Always for on the plan card is kept as their preference in use, carried by the next plan, and a later choice adds to it",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup()
+      const card = (edits: Record<string, unknown>, always: string[]) =>
+        `vector-plan:${JSON.stringify({ action: "start", plan: edits, always })}`
+      const asked = yield* answer([
+        card({ prefer_domains: ["Nature.com"], format: "table" }, ["prefer_domains", "format"]),
+        // Sites to avoid that were not ticked are not kept.
+        card({ prefer_domains: ["nih.gov", "nature.com"], avoid_domains: ["example.com"] }, ["prefer_domains"]),
+        "Start",
+      ])
+      const events = yield* EventV2Bridge.Service
+      const announced: unknown[] = []
+      const unsubscribe = yield* events.listen((event) => {
+        if (event.type === MemoryEvent.Learned.type) announced.push(event.data)
+        return Effect.void
+      })
+      const sessions = yield* Session.Service
+      const first = yield* sessions.create({ title: "Research" })
+      yield* test.llm.tool("research_plan", plan())
+      yield* test.llm.text("Done.")
+      yield* send({ sessionID: first.id, agent: "research", text: "Research how much heat pumps save." })
+      const second = yield* sessions.create({ title: "Research" })
+      yield* test.llm.tool("research_plan", plan())
+      yield* test.llm.text("Done.")
+      yield* send({ sessionID: second.id, agent: "research", text: "Research how loud heat pumps are." })
+      yield* unsubscribe
+      // A session an invited guest acted in gets none of the owner's preferences.
+      const guests = yield* FreeModelGuests.Service
+      const shared = yield* sessions.create({ title: "Research" })
+      yield* guests.mark(shared.id)
+      yield* test.llm.tool("research_plan", plan())
+      yield* test.llm.text("Done.")
+      yield* send({ sessionID: shared.id, agent: "research", text: "Research how long heat pumps last." })
+
+      // The model proposed no sites and no format: the second plan carries what the first card's Always kept, marked.
+      expect(asked[0]).not.toContain("Prefer:")
+      expect(asked[1]).toContain("Prefer: nature.com (from your preferences)")
+      expect(asked[1]).toContain("Format: table (from your preferences)")
+      const [later] = yield* calls(second.id, "research_plan")
+      expect(metadataOf(later)).toMatchObject({
+        plan: { prefer_domains: ["nih.gov", "nature.com"], format: "table" },
+        learned: { prefer_domains: ["nature.com"], format: "table" },
+      })
+      expect(asked[2]).not.toContain("nature.com")
+      expect(asked[2]).not.toContain("from your preferences")
+      const [guest] = yield* calls(shared.id, "research_plan")
+      expect(metadataOf(guest).learned).toBeUndefined()
+
+      const brain = yield* Brain.Service
+      const instruction = yield* Instruction.Service
+      const kept = (yield* brain.list(yield* instruction.place(), { filter: "all" }))
+        .filter((entry) => entry.origin === "agent")
+        .map((entry) => [entry.text, entry.facet, entry.scope, entry.status])
+        .toSorted((a, b) => String(a[0]).localeCompare(String(b[0])))
+      expect(kept).toEqual([
+        ["Always prefer these sites as research sources: nature.com", "sources", "personal", "superseded"],
+        ["Always prefer these sites as research sources: nih.gov, nature.com", "sources", "personal", "active"],
+        ["Always write research reports as a table", "format", "personal", "active"],
+      ])
+      expect(announced).toEqual([
+        { sessionID: first.id, entryIDs: [expect.any(String), expect.any(String)], messageID: expect.any(String) },
+        { sessionID: second.id, entryIDs: [expect.any(String)], messageID: expect.any(String) },
+      ])
+    }),
+  90_000,
+)

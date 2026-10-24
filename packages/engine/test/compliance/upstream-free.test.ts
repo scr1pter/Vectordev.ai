@@ -18,8 +18,8 @@ const notices = new Set([
   "DEPENDENCY_NOTICES.md",
 ])
 const borrowedClients = /Ov23li8tweQw6odWQebz|app_EMoamEEZ73f0CkXaXp7hrann|b1a00492-073a-47ea-816f-4c329264a828/
-// The owner re-enabled Sign in with ChatGPT through the Codex CLI client on 10 October 2026
-// (docs/vector/owner-actions/chatgpt.md); only the provider policy may carry that client.
+// Sign in with ChatGPT used the Codex CLI client and is off by default since 23 October 2026
+// (docs/vector/owner-actions/chatgpt.md); only the provider policy may still carry that client.
 const chatgptClient = { file: "packages/core/src/provider-policy.ts", id: "app_EMoamEEZ73f0CkXaXp7hrann" }
 
 async function trackedText() {

@@ -12,6 +12,7 @@ import { Instruction } from "../session/instruction"
 import { SessionMemory } from "../session/memory"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { isPdfAttachment, sniffAttachmentMime } from "@/util/media"
+import { WebFence } from "@vectordevai/core/research/fence"
 
 const DEFAULT_READ_LIMIT = 2000
 const MAX_LINE_LENGTH = 2000
@@ -405,7 +406,14 @@ export const ReadTool = Tool.define<
       }
 
       let output = [`<path>${filepath}</path>`, `<type>file</type>`, "<content>\n"].join("\n")
-      output += file.raw.map((line, i) => `${i + file.offset}: ${line}`).join("\n")
+      // A page a web tool saved whole is web text, so whichever of its lines are read come back fenced again.
+      output += WebFence.savedFile(filepath)
+        ? WebFence.fenceLines(
+            { tool: "read", file: filepath },
+            file.raw.map((text, i) => ({ line: i + file.offset, text })),
+            (line) => `${line.line}: ${line.text}`,
+          )
+        : file.raw.map((line, i) => `${i + file.offset}: ${line}`).join("\n")
 
       const last = file.offset + file.raw.length - 1
       const next = last + 1

@@ -161,6 +161,14 @@
   flex-direction: column;
   gap: 26px;
 }
+/* Whose agent this is: one quiet line above the conversation, never a banner. */
+.vector-agent-ownership {
+  margin: 0 0 -12px;
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--vx-workspace-text-tertiary, #878787);
+}
 .vector-agent-turn {
   min-width: 0;
   user-select: text;
@@ -346,6 +354,77 @@
   font-size: 12px;
   line-height: 1.6;
   color: #d5aeb7;
+}
+/* A failed check waiting for the user: its output, and Try a fix, which is the only way the agent runs on it. */
+.vector-agent-check-failed {
+  margin: 22px 0 0;
+  border: 1px solid color-mix(in srgb, #b56e80 30%, var(--vx-line));
+  border-radius: 10px;
+  background: #b56e800a;
+  padding: 12px 14px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--vx-workspace-text-secondary, #a8a8a8);
+}
+.vector-agent-check-failed-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+.vector-agent-check-failed-head strong {
+  font-weight: 500;
+  color: #d5aeb7;
+}
+.vector-agent-check-failed-head code,
+.vector-agent-check-failed pre {
+  font-family: var(--font-family-mono, ui-monospace, monospace);
+  font-size: 11px;
+}
+.vector-agent-check-failed pre {
+  margin: 8px 0 10px;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--vx-workspace-text-tertiary, #878787);
+}
+.vector-agent-check-failed-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 14px;
+}
+.vector-agent-check-failed-actions p {
+  margin: 0;
+  flex: 1 1 240px;
+}
+.vector-agent-check-failed-actions button {
+  border: 1px solid var(--vx-line);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--vx-purple, #a68acb) 12%, transparent);
+  padding: 6px 12px;
+  font: inherit;
+  color: var(--vx-workspace-text-primary, #e8e8e8);
+  cursor: pointer;
+}
+.vector-agent-check-failed-actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+/* What the agent itself printed about its sign-in, plan or usage, kept word for word under its reply. */
+.vector-agent-notices {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--vx-workspace-text-secondary, #a8a8a8);
+}
+.vector-agent-notices li {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .vector-agent-empty {
   display: grid;

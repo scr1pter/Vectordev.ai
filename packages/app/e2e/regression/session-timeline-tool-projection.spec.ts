@@ -79,23 +79,17 @@ test("transitions shell and question through running error outcomes", async ({ p
   await expect(page.locator(`[data-timeline-part-id="${questionID}"]`)).toContainText(/dismissed/i)
 })
 
-test("labels all web search provider variants", async ({ page }) => {
+// Sessions from earlier versions hold web search calls that named the search service they used; they all read as
+// Web Search now.
+test("labels web search calls from earlier versions without their search service", async ({ page }) => {
   const parts = [
-    toolPart(
-      "prt_search_parallel",
-      "websearch",
-      "completed",
-      { query: "parallel" },
-      { metadata: { provider: "parallel" } },
-    ),
-    toolPart("prt_search_exa", "websearch", "completed", { query: "exa" }, { metadata: { provider: "exa" } }),
+    toolPart("prt_search_old", "websearch", "completed", { query: "older" }, { metadata: { provider: "exa" } }),
     toolPart("prt_search_generic", "websearch", "completed", { query: "generic" }),
   ]
   await setupTimeline(page, { messages: [userMessage(), assistantMessage(parts)] })
 
-  await expect(page.getByRole("button", { name: /Parallel Web Search/ })).toBeVisible()
-  await expect(page.getByRole("button", { name: /Exa Web Search/ })).toBeVisible()
-  await expect(page.getByRole("button", { name: /^Web Search/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Web Search/ })).toHaveCount(2)
+  await expect(page.getByRole("button", { name: /Exa/ })).toHaveCount(0)
 })
 
 function questionInput() {

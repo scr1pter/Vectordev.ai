@@ -12,6 +12,7 @@ const updaterHandler = (_: unknown, state: UpdaterState) => {
 }
 
 let taskBoardSubscribers = 0
+let researchWatchers = 0
 const api: ElectronAPI = {
   killSidecar: () => ipcRenderer.invoke("kill-sidecar"),
   awaitInitialization: () => ipcRenderer.invoke("await-initialization"),
@@ -75,6 +76,9 @@ const api: ElectronAPI = {
   runtime: {
     ensure: (name) => ipcRenderer.invoke("runtime-ensure", name),
     preparePluginCommand: (command) => ipcRenderer.invoke("runtime-prepare-plugin-command", command),
+  },
+  vectorLocal: {
+    status: () => ipcRenderer.invoke("vector-local-status"),
   },
   localMemory: {
     read: () => ipcRenderer.invoke("local-memory-read"),
@@ -197,6 +201,7 @@ const api: ElectronAPI = {
     refresh: (id) => ipcRenderer.invoke("parallel-workspaces-refresh", id),
     run: (id, concurrency) => ipcRenderer.invoke("parallel-workspaces-run", id, concurrency),
     followUp: (id, text) => ipcRenderer.invoke("parallel-workspaces-follow-up", id, text),
+    repair: (id) => ipcRenderer.invoke("parallel-workspaces-repair", id),
     setRuntimeModel: (id, model) => ipcRenderer.invoke("parallel-workspaces-set-runtime-model", id, model),
     stop: (id) => ipcRenderer.invoke("parallel-workspaces-stop", id),
     merge: (id, force, commit) => ipcRenderer.invoke("parallel-workspaces-merge", id, force, commit),
@@ -206,6 +211,19 @@ const api: ElectronAPI = {
       ipcRenderer.invoke("parallel-workspaces-merge-selection", id, selection, force),
     discard: (id) => ipcRenderer.invoke("parallel-workspaces-discard", id),
     remove: (id) => ipcRenderer.invoke("parallel-workspaces-remove", id),
+  },
+  researchWatch: {
+    list: () => ipcRenderer.invoke("research-watch-list"),
+    snapshot: (id) => ipcRenderer.invoke("research-watch-snapshot", id),
+    stop: (id) => ipcRenderer.invoke("research-watch-stop", id),
+    onChange: (callback) => {
+      if (researchWatchers++ === 0) void ipcRenderer.invoke("research-watch-subscribe")
+      ipcRenderer.on("research-watch-changed", callback)
+      return () => {
+        ipcRenderer.removeListener("research-watch-changed", callback)
+        if (--researchWatchers === 0) void ipcRenderer.invoke("research-watch-unsubscribe")
+      }
+    },
   },
   agentTasks: {
     list: (input) => ipcRenderer.invoke("agent-tasks-list", input),
@@ -368,7 +386,10 @@ const api: ElectronAPI = {
     remove: (id) => ipcRenderer.invoke("scheduled-agents-remove", id),
   },
   externalAgents: {
-    detect: () => ipcRenderer.invoke("external-agents-detect"),
+    detect: (options) => ipcRenderer.invoke("external-agents-detect", options),
+    models: (id, options) => ipcRenderer.invoke("external-agents-models", id, options),
+    commands: (id) => ipcRenderer.invoke("external-agents-commands", id),
+    launchTerminal: (input) => ipcRenderer.invoke("external-agents-launch-terminal", input),
     openInEditor: (input) => ipcRenderer.invoke("external-agents-open-editor", input),
     prepareWorkspace: (projectPath) => ipcRenderer.invoke("external-agents-prepare-workspace", projectPath),
   },

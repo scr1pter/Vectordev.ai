@@ -1,6 +1,7 @@
 import type { FreeModelInfo } from "@vectordevai/schema/free-model"
 import { BARRED_FREE_PROVIDERS, freeModelDataPolicy, isFreeModelID, isFreeRouter } from "./free-model-catalog.js"
 import {
+  FREE_MODEL_EXPIRED,
   FREE_MODEL_TRAINING_CONSENT_REQUIRED,
   FREE_MODEL_TRAINING_GUEST_SESSION,
   FREE_MODELS_TITLE,
@@ -46,13 +47,17 @@ export class FreeModelGuestSessionError extends Error {
 export function freeModelRequest(
   body: unknown,
   models: readonly FreeModelInfo[],
-  options: { trainingConsent?: boolean; guest?: boolean } = {},
+  options: { trainingConsent?: boolean; guest?: boolean; now?: number } = {},
 ) {
   if (!isRecord(body) || typeof body.model !== "string" || !Array.isArray(body.messages) || !body.messages.length)
     throw new Error("Choose a free model and include conversation messages.")
   const selected = models.find((model) => model.id === body.model && isFreeModelID(model.id))
   if (!selected)
     throw new Error(`That free model is no longer available. Choose another model from ${FREE_MODELS_TITLE}.`)
+  // A catalog read before a model's free endpoints ended can still list it: it is refused, and never a fallback.
+  const now = options.now ?? Date.now()
+  const expired = (model: FreeModelInfo) => model.expiresAt !== undefined && model.expiresAt <= now
+  if (expired(selected)) throw new Error(FREE_MODEL_EXPIRED)
   const policy = freeModelDataPolicy(selected)
   if (policy !== "no-training" && options.guest) throw new FreeModelGuestSessionError()
   if (policy !== "no-training" && !options.trainingConsent) throw new FreeModelTrainingConsentError()
@@ -105,16 +110,17 @@ export function freeModelRequest(
   )
     throw new Error(`Only local function tools are supported by ${FREE_MODELS_TITLE}.`)
   // A fallback never weakens the chosen model's policy, and data_collection below is set once for the whole list. A
-  // no-training or unreviewed choice falls back only to no-training models, all sent "deny". An accepted may-train
-  // choice falls back only to may-train models served by the same provider: a different provider has its own terms,
-  // and a no-training model must never receive "allow".
+  // no-training choice falls back only to no-training models, all sent "deny". An accepted may-train choice, one Vector
+  // has not reviewed included, falls back only to may-train models served by the same provider: a different provider
+  // has its own terms, and a no-training model must never receive "allow".
   // The free router picks its own model and is never a fallback for another: it has no providers to name.
   const router = isFreeRouter(selected.id)
   const providerSlugs = (model: FreeModelInfo) => model.providers.map((provider) => provider.id.split("/")[0] ?? "")
   const fallbacks = [
     selected,
     ...models.filter((model) => {
-      if (router || model.id === selected.id || !isFreeModelID(model.id) || isFreeRouter(model.id)) return false
+      if (router || model.id === selected.id || !isFreeModelID(model.id) || isFreeRouter(model.id) || expired(model))
+        return false
       if (policy !== "may-train") return freeModelDataPolicy(model) === "no-training"
       return (
         freeModelDataPolicy(model) === "may-train" &&
@@ -127,9 +133,11 @@ export function freeModelRequest(
   if (typeof requested !== "number" || !Number.isSafeInteger(requested) || requested < 1)
     throw new Error("The requested response length is invalid.")
   // The free router picks among OpenRouter's free models, so it cannot name providers; it asks OpenRouter to skip
-  // barred ones instead.
+  // barred ones instead, while any are barred.
   const routing: { only?: string[]; ignore?: string[] } = router
-    ? { ignore: [...BARRED_FREE_PROVIDERS] }
+    ? BARRED_FREE_PROVIDERS.length
+      ? { ignore: [...BARRED_FREE_PROVIDERS] }
+      : {}
     : { only: [...new Set(fallbacks.flatMap((model) => model.providers.map((provider) => provider.id)))] }
   // An endpoint without tool_choice still calls tools on its own; an automatic choice is the same request without it.
   const dropToolChoice =
@@ -166,9 +174,10 @@ export function freeModelRequest(
     plugins: DISABLED_PLUGINS.map((id) => ({ id, enabled: false })),
     // Zero data retention is not requested: most free endpoints keep prompts under their own policy, and requiring it
     // would exclude them. data_collection: "deny" asks OpenRouter to exclude endpoints it records as training on
-    // prompts. It is lifted only for a reviewed may-train model the user has accepted; an unreviewed model always keeps
-    // it. The provider list plus zero max_price leave no paid endpoint to fall back to. OpenRouter does not document
-    // whether a router honours the free router's `ignore`; the zero max_price holds either way.
+    // prompts. It is lifted for a may-train model the user has accepted, one Vector has not reviewed included, since
+    // "deny" would leave such a model no endpoint to answer from. The provider list plus zero max_price leave no paid
+    // endpoint to fall back to. OpenRouter does not document whether a router honours the free router's `ignore`; the
+    // zero max_price holds either way.
     provider: {
       data_collection: policy === "may-train" ? "allow" : "deny",
       require_parameters: true,

@@ -16,6 +16,14 @@ describe("SpendGuard cost kind and price", () => {
     expect(SpendGuard.costKindOf({ free: false, oauthPlan: false, listed: false })).toBe("unknown")
   })
 
+  test("costKindOf counts a local server as local unless a price is configured for it", () => {
+    expect(SpendGuard.costKindOf({ free: false, oauthPlan: false, listed: false, local: true })).toBe("local")
+    expect(SpendGuard.costKindOf({ free: false, oauthPlan: false, listed: true, local: true })).toBe("priced")
+    expect(SpendGuard.costKindOf({ free: true, oauthPlan: false, listed: false, local: true })).toBe("free")
+    // An unpriced company endpoint on the internet is not local, so the unpriced-step stop still covers it.
+    expect(SpendGuard.costKindOf({ free: false, oauthPlan: false, listed: false, local: false })).toBe("unknown")
+  })
+
   test("priceOf has no price for all-zero rates", () => {
     expect(SpendGuard.priceOf({ input: 0, output: 0, cache: { read: 0.5, write: 1 } })).toBeUndefined()
     expect(SpendGuard.priceOf({ input: 0, output: 0 })).toBeUndefined()
@@ -183,9 +191,30 @@ describe("SpendGuard.afterStep", () => {
       state: "stopped",
       reason: "unpriced",
       message:
-        "Stopped after 40 unpriced steps: this model has no catalog price, so Vector cannot count its spend against your $5.00 cap.",
+        "Stopped after 40 unpriced steps: Vector has no per-token price for this model, so it cannot count what they cost against your $5.00 cap. Without a dollar cap, step and loop limits still apply.",
     })
     expect(result.run.spentUsd).toBe(0)
+  })
+
+  test("never stops a local model on dollars, however many steps it takes, but does on steps", () => {
+    const local = Array.from({ length: 100 }, () => step({ costKind: "local", costUsd: 3 }))
+    const capped = play({ usd: 1 }, local)
+    expect(capped.verdicts.every((verdict) => verdict.state === "ok")).toBe(true)
+    expect(capped.run).toMatchObject({ steps: 100, spentUsd: 0, unpricedSteps: 0, costKind: "local" })
+
+    const limited = play({ usd: 1, steps: 100 }, local)
+    expect(limited.verdicts.slice(0, 99).every((verdict) => verdict.state === "ok")).toBe(true)
+    expect(limited.verdicts[99]).toEqual({
+      state: "stopped",
+      reason: "steps",
+      message: "Step limit reached: 100 of 100 steps used for this run.",
+    })
+  })
+
+  test("still pauses a local model's loops", () => {
+    const repeated = step({ costKind: "local", tools: [{ tool: "read", input: "a.ts", output: "same" }] })
+    const result = play({ usd: 1 }, [repeated, repeated, repeated])
+    expect(result.verdicts.at(-1)).toMatchObject({ state: "stopped", reason: "loop" })
   })
 
   test("never stops plan or free models on dollars, but does on steps", () => {
@@ -695,6 +724,115 @@ describe("SpendGuard service", () => {
       yield* guard.begin(armed, { usd: 2 })
       expect((yield* guard.snapshot(armed))?.budget).toEqual({ usd: 5, steps: 20 })
       yield* guard.end(armed)
+    }),
+  )
+
+  it.effect("moves a run from one fallback to another only while no owner armed a budget over it", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      const focused = { usd: 1, steps: 80 }
+      const deep = { usd: 3, steps: 240 }
+
+      const plain = SessionID.make("ses_fallback_plain")
+      yield* guard.begin(plain, focused)
+      yield* guard.replaceFallback(plain, deep)
+      expect((yield* guard.snapshot(plain))?.budget).toEqual(deep)
+      yield* guard.end(plain)
+
+      // A budget the owner armed before the run began, or while it runs, stays, even one equal to the fallback.
+      const before = SessionID.make("ses_fallback_before")
+      yield* guard.arm(before, focused)
+      yield* guard.begin(before, focused)
+      yield* guard.replaceFallback(before, deep)
+      expect((yield* guard.snapshot(before))?.budget).toEqual(focused)
+      yield* guard.end(before)
+      const during = SessionID.make("ses_fallback_during")
+      yield* guard.begin(during, focused)
+      yield* guard.arm(during, { usd: 0.5 })
+      yield* guard.replaceFallback(during, deep)
+      expect((yield* guard.snapshot(during))?.budget).toEqual({ usd: 0.5 })
+      yield* guard.end(during)
+
+      // A guest's limits, held before the run or given during it, hold the new fallback too.
+      const held = SessionID.make("ses_fallback_held")
+      yield* guard.tighten(held, { usd: 2 })
+      yield* guard.begin(held, focused)
+      expect((yield* guard.snapshot(held))?.budget).toEqual(focused)
+      yield* guard.replaceFallback(held, deep)
+      expect((yield* guard.snapshot(held))?.budget).toEqual({ usd: 2, steps: 240 })
+      yield* guard.end(held)
+      const given = SessionID.make("ses_fallback_given")
+      yield* guard.begin(given, focused)
+      yield* guard.tighten(given, { steps: 100 })
+      yield* guard.replaceFallback(given, deep)
+      expect((yield* guard.snapshot(given))?.budget).toEqual({ usd: 3, steps: 100 })
+      yield* guard.end(given)
+
+      // No run going: nothing to move, and nothing is held for the next one.
+      const idle = SessionID.make("ses_fallback_idle")
+      yield* guard.replaceFallback(idle, deep)
+      yield* guard.begin(idle, focused)
+      expect((yield* guard.snapshot(idle))?.budget).toEqual(focused)
+      yield* guard.end(idle)
+    }),
+  )
+
+  it.effect("carries a stopped run's budget on, the owner's staying the owner's and a fallback staying movable", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      const focused = { usd: 1, steps: 80 }
+      const deep = { usd: 3, steps: 240 }
+      const priced = (costUsd: number): SpendGuard.Step => ({
+        costUsd,
+        costKind: "priced",
+        contextTokens: 1_000,
+        cachedTokens: 0,
+        continues: false,
+        tools: [],
+        patched: false,
+      })
+      // Stops the run at its cap and returns it, as a successor drain reads it before it begins.
+      const stopped = (id: SessionID, costUsd: number) =>
+        Effect.gen(function* () {
+          expect((yield* guard.record(id, priced(costUsd))).state).toBe("stopped")
+          yield* guard.end(id)
+          return (yield* guard.snapshot(id))!
+        })
+
+      // The owner's cap: no fallback replaces it in the run that carries on.
+      const owned = SessionID.make("ses_carry_owned")
+      yield* guard.arm(owned, { usd: 0.25 })
+      yield* guard.begin(owned)
+      yield* guard.begin(owned, undefined, yield* stopped(owned, 0.3))
+      yield* guard.replaceFallback(owned, focused)
+      expect((yield* guard.snapshot(owned))?.budget).toEqual({ usd: 0.25 })
+      // A guest's tighter limit given for the successor joins the owner's cap, and still no fallback moves it.
+      yield* guard.end(owned)
+      yield* guard.tighten(owned, { steps: 10 })
+      yield* guard.begin(owned, undefined, (yield* guard.snapshot(owned))!)
+      yield* guard.replaceFallback(owned, deep)
+      expect((yield* guard.snapshot(owned))?.budget).toEqual({ usd: 0.25, steps: 10 })
+      yield* guard.end(owned)
+
+      // A fallback stays one, held to what a guest gave the run it carries on from.
+      const fallback = SessionID.make("ses_carry_fallback")
+      yield* guard.begin(fallback, focused)
+      yield* guard.tighten(fallback, { usd: 2 })
+      yield* guard.begin(fallback, undefined, yield* stopped(fallback, 1.2))
+      expect((yield* guard.snapshot(fallback))?.budget).toEqual(focused)
+      yield* guard.replaceFallback(fallback, deep)
+      expect((yield* guard.snapshot(fallback))?.budget).toEqual({ usd: 2, steps: 240 })
+      yield* guard.end(fallback)
+
+      // A budget the owner arms before the successor begins replaces the carried one.
+      const rearmed = SessionID.make("ses_carry_rearmed")
+      yield* guard.begin(rearmed, focused)
+      const before = yield* stopped(rearmed, 1.5)
+      yield* guard.arm(rearmed, { usd: 5 })
+      yield* guard.begin(rearmed, undefined, before)
+      yield* guard.replaceFallback(rearmed, deep)
+      expect((yield* guard.snapshot(rearmed))?.budget).toEqual({ usd: 5 })
+      yield* guard.end(rearmed)
     }),
   )
 

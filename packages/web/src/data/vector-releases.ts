@@ -49,6 +49,20 @@ export function brainCopy(published: string) {
 
 export const brainRelease = brainCopy(publishedDesktopVersion)
 
+// Deep research, the research browsers, Vector Local in the app, memory of you in every agent and learning about you
+// arrive in desktop 1.99.111. Their docs say they are coming in it until the download page offers it, and from then on
+// that they are in it. test/release-111-docs.test.ts holds the pages to this.
+export const release111Version = "1.99.111"
+
+export function release111Copy(published: string) {
+  const [major = 0, minor = 0, patch = 0] = published.split(".").map(Number)
+  if (major > 1 || (major === 1 && (minor > 99 || (minor === 99 && patch >= 111))))
+    return { since: "From desktop 1.99.111:", stage: "Desktop 1.99.111", shipped: true }
+  return { since: "Coming in desktop 1.99.111:", stage: "Coming in 1.99.111", shipped: false }
+}
+
+export const release111 = release111Copy(publishedDesktopVersion)
+
 export const releaseSeries: VectorRelease[] = [
   {
     version: "1.0",

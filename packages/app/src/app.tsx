@@ -56,9 +56,11 @@ import DirectoryLayout, { DirectoryDataProvider } from "@/pages/directory-layout
 import LegacyLayout from "@/pages/layout"
 import NewLayout from "@/pages/layout-new"
 import { ErrorPage } from "./pages/error"
+import type { ExternalAgent } from "@vectordevai/schema/external-agent"
 import { LaunchAttach, LaunchReadyProbe, LaunchSettingsMirror } from "@/features/launch/launch-handoff"
 import { LaunchYield, yieldLaunchScreen } from "@/features/launch/launch-yield"
 import { useCheckServerHealth } from "./utils/server-health"
+import { afterFirstRun } from "./utils/desktop-local"
 import { legacySessionServer, requireServerKey, sessionHref } from "./utils/session-route"
 
 import { SessionPage, TargetSessionRouteContent } from "@/pages/session"
@@ -214,7 +216,7 @@ type ParallelWorkspaceRecord = {
   id: string
   name: string
   taskPrompt: string
-  runtime: "vector" | "claude-code" | "codex" | "cursor"
+  runtime: "vector" | ExternalAgent.ChatId
   provider: string
   model: string
   sourcePath: string
@@ -278,7 +280,7 @@ type CreateParallelWorkspaceInput = {
   parentSessionId?: string
   name?: string
   taskPrompt: string
-  runtime?: "vector" | "claude-code" | "codex" | "cursor"
+  runtime?: "vector" | ExternalAgent.ChatId
   provider?: string
   model?: string
   agent?: string
@@ -385,6 +387,13 @@ declare global {
         }) => Promise<import("@vectordevai/schema/task").StopResult>
         onChange: (callback: () => void) => () => void
       }
+      // Research browsers' chips, snapshots and Stop, for the Sources tab (desktop only).
+      researchWatch?: {
+        list: () => Promise<import("@/features/research/research-model").BrowserChip[]>
+        snapshot: (id: string) => Promise<string | undefined>
+        stop: (id: string) => Promise<boolean>
+        onChange: (callback: () => void) => () => void
+      }
       setTitlebar?: (theme: { mode: "light" | "dark" }) => Promise<void>
       openLink?: (url: string) => void
       exportDebugLogs?: () => Promise<string>
@@ -401,6 +410,9 @@ declare global {
         cb: (event: import("@/features/browser-agent/types").BrowserAgentPageEvent) => void,
       ) => () => void
       onZoomFactorChanged?: (cb: (factor: number) => void) => () => void
+      vectorLocal?: {
+        status: () => Promise<import("@/utils/desktop-local").DesktopLocal>
+      }
       voice?: {
         speak: (text: string) => Promise<{
           status: "spoken" | "unavailable" | "stopped" | "failed"
@@ -756,12 +768,22 @@ export function AppInterface(props: {
   // Desktop dictation transcribes on-device with Whisper; pre-warm the worker
   // and its ~40MB model during idle time so the first dictation doesn't stall
   // on a download. No-op on web, which uses the browser speech engine instead.
+  // A first run holds the pre-warm until the person has chosen how to run models
+  // (asked again every 15 seconds, with no timeout), and with Vector Local on the
+  // worker loads only a model already on this computer (local-transcription.ts).
   onMount(() => {
     if (!globalThis.window?.api) return
+    const timer: { current?: ReturnType<typeof setTimeout> } = {}
+    onCleanup(() => clearTimeout(timer.current))
     const warm = () =>
       void import("@/services/local-transcription").then((mod) => mod.warmupLocalTranscription()).catch(() => undefined)
-    if (typeof globalThis.requestIdleCallback === "function") globalThis.requestIdleCallback(warm, { timeout: 5000 })
-    else setTimeout(warm, 2500)
+    onCleanup(
+      afterFirstRun(() => {
+        if (typeof globalThis.requestIdleCallback === "function")
+          globalThis.requestIdleCallback(warm, { timeout: 5000 })
+        else timer.current = setTimeout(warm, 2500)
+      }),
+    )
   })
 
   // The visual new layout lives in the router root so it remains mounted across

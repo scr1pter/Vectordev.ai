@@ -348,6 +348,16 @@
               "type": "integer",
               "maximum": 9007199254740991,
               "description": "Timeout in milliseconds between streamed SSE chunks for this provider. If no chunk arrives within this window, the request is aborted."
+            },
+            "concurrency": {
+              "exclusiveMinimum": 0,
+              "type": "integer",
+              "maximum": 9007199254740991,
+              "description": "How many requests Vector sends to this provider's server at once. Providers that point at one server share its limit. Without it, a server on this computer or your network takes one at a time. Check models sets it for the servers it finds."
+            },
+            "forwards": {
+              "type": "boolean",
+              "description": "Whether this provider's server passes prompts on to other services, as a LiteLLM proxy does. Its steps then count as unpriced rather than local, so a dollar cap still stops them. Check models sets it for a LiteLLM proxy."
             }
           }
         },
@@ -757,6 +767,369 @@
         "thorough",
         "changes"
       ]
+    },
+    "LocalWeb": {
+      "type": "string",
+      "enum": [
+        "ask",
+        "network",
+        "none"
+      ]
+    },
+    "LocalAllowed": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "hosts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reason": {
+          "type": "string"
+        },
+        "added_at": {
+          "minimum": 0,
+          "type": "integer",
+          "maximum": 9007199254740991
+        },
+        "added_by": {
+          "type": "string",
+          "enum": [
+            "app",
+            "cli",
+            "managed"
+          ]
+        }
+      },
+      "required": [
+        "source",
+        "reason",
+        "added_at",
+        "added_by"
+      ],
+      "additionalProperties": false
+    },
+    "LocalPinConfig": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "description": "The kind of server Vector found, such as ollama or vllm"
+        },
+        "version": {
+          "type": "string"
+        },
+        "models": {
+          "type": "string",
+          "description": "A hash of the model list when it was added"
+        },
+        "spki": {
+          "type": "string",
+          "description": "SHA-256 of an https server's public key when it was added"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false
+    },
+    "LocalCheckedConfig": {
+      "type": "object",
+      "properties": {
+        "server_version": {
+          "type": "string"
+        },
+        "checked_at": {
+          "minimum": 0,
+          "type": "integer",
+          "maximum": 9007199254740991
+        },
+        "result": {
+          "type": "string",
+          "enum": [
+            "works",
+            "no-tools",
+            "schema-rejected",
+            "context-too-small",
+            "failed"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "ttft_ms": {
+          "minimum": 0,
+          "type": "integer",
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "checked_at",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "LocalConfig": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Run Vector's AI features only on the model servers in endpoints (default: false)"
+        },
+        "web": {
+          "$ref": "#/$defs/LocalWeb",
+          "description": "What web pages and searches may reach with Vector Local on: ask (sites you approve), network (your network and sites your company lists) or none. Default: ask."
+        },
+        "endpoints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Origins of the model servers Vector may send prompts to, such as http://127.0.0.1:11434. Wildcard hosts (https://*.ml.corp.example.com) and address ranges (10.0.0.0/8) are read from managed config only."
+        },
+        "web_domains": {
+          "type": "object",
+          "properties": {
+            "allow": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "deny": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "description": "Sites web pages may always reach (allow) or never reach (deny) with Vector Local on"
+        },
+        "allow": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LocalAllowed"
+          },
+          "description": "Services you allowed with Vector Local on, each with the reason you gave"
+        },
+        "pins": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/LocalPinConfig"
+          },
+          "description": "The identity each model server had when it was added, by origin"
+        },
+        "checked": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/LocalCheckedConfig"
+          },
+          "description": "Results of Check models, by provider/model"
+        },
+        "ca": {
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "description": "Certificate files added to the system and default certificates"
+        },
+        "log": {
+          "type": "object",
+          "properties": {
+            "retain_days": {
+              "exclusiveMinimum": 0,
+              "type": "integer",
+              "maximum": 9007199254740991
+            }
+          },
+          "additionalProperties": false,
+          "description": "How long the network log is kept on this computer (default: 30 days)"
+        },
+        "lock": {
+          "type": "boolean",
+          "description": "Managed only: the managed block is authoritative and Vector Local stays on"
+        },
+        "user_may": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "endpoints",
+              "allow",
+              "web_domains",
+              "web"
+            ]
+          },
+          "description": "Managed only: keys a user may still change under a lock (web only to a stricter setting)"
+        },
+        "locked_keys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Managed only: other config keys a user may not change under a lock"
+        },
+        "endpoint_domains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Managed only: patterns that endpoints a user adds must match under a lock"
+        },
+        "updates": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "url"
+          ],
+          "additionalProperties": false,
+          "description": "Managed only: a company mirror for updates"
+        },
+        "models_dir": {
+          "type": "string",
+          "description": "Managed only: a folder holding the memory-search and dictation model files"
+        },
+        "catalog_path": {
+          "type": "string",
+          "description": "Managed only: a model catalog file to use instead of downloading one"
+        },
+        "recommend": {
+          "description": "Managed only: replaces the bundled model recommendations"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ResearchDepthConfig": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "focused",
+        "deep"
+      ]
+    },
+    "ResearchToolConfig": {
+      "type": "string",
+      "enum": [
+        "work",
+        "thorough",
+        "off"
+      ]
+    },
+    "ResearchLimitsConfig": {
+      "type": "object",
+      "properties": {
+        "usd": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "steps": {
+          "exclusiveMinimum": 0,
+          "type": "integer",
+          "maximum": 9007199254740991
+        },
+        "pages": {
+          "exclusiveMinimum": 0,
+          "type": "integer",
+          "maximum": 9007199254740991
+        },
+        "searches": {
+          "minimum": 0,
+          "type": "integer",
+          "maximum": 9007199254740991
+        },
+        "researchers": {
+          "type": "integer",
+          "allOf": [
+            {
+              "minimum": 0
+            },
+            {
+              "maximum": 4
+            }
+          ],
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "ResearchConfig": {
+      "type": "object",
+      "properties": {
+        "depth": {
+          "$ref": "#/$defs/ResearchDepthConfig",
+          "description": "Focused: one agent, plus up to 2 researchers when the question has independent parts. Deep: up to 4 researchers and a citation judge (default: auto)"
+        },
+        "tool": {
+          "$ref": "#/$defs/ResearchToolConfig",
+          "description": "When the build agent may research as a tool on its own requests: work (Work and Thorough requests), thorough (Thorough only) or off. Default: work. A repository's config may only turn it down."
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "focused": {
+              "$ref": "#/$defs/ResearchLimitsConfig"
+            },
+            "deep": {
+              "$ref": "#/$defs/ResearchLimitsConfig"
+            }
+          },
+          "additionalProperties": false,
+          "description": "Caps for one research run, used when you have no spend cap of your own. Read from your user config only."
+        },
+        "domains": {
+          "type": "object",
+          "properties": {
+            "prefer": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "avoid": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "description": "Sites research prefers or avoids. A repository's config may only add to avoid."
+        },
+        "robots": {
+          "type": "boolean",
+          "description": "Respect robots.txt for links Vector finds itself (default: true). Read from your user config only."
+        },
+        "retain_days": {
+          "exclusiveMinimum": 0,
+          "type": "integer",
+          "maximum": 9007199254740991,
+          "description": "Days an unkept research run stays in the brain (default: 30)"
+        },
+        "search": {
+          "type": "object",
+          "description": "@deprecated Research searches the web in each research agent's own browser in the desktop app, with no search service or key; this setting is ignored."
+        },
+        "browser_search": {
+          "type": "boolean",
+          "description": "@deprecated Research always searches in each research agent's own browser in the desktop app; this setting is ignored."
+        }
+      },
+      "additionalProperties": false
     },
     "Policy.Effect": {
       "type": "string",
@@ -1314,11 +1687,19 @@
             },
             "judge": {
               "$ref": "#/$defs/TaskJudgeMode",
-              "description": "When Vector runs LLM-as-a-judge after a run that changed files: off, thorough (large tasks only) or changes (every task that changed files). Default: off. A prompt's own judge setting overrides it."
+              "description": "When Vector runs LLM-as-a-judge after a run that changed files: off, thorough (large tasks only) or changes (every task that changed files). Default: off for those runs. A prompt's own judge setting overrides it. Deep research's citation judge reads it too, and runs when it is unset: unset or thorough checks Deep reports and Focused ones that cite 8 or more notes, changes checks every report, and off turns it off."
             }
           },
           "additionalProperties": false,
           "description": "Task sizing: how much harness, reasoning and verification each request gets."
+        },
+        "local": {
+          "$ref": "#/$defs/LocalConfig",
+          "description": "Vector Local: run Vector's AI features only on model servers you or your company host. Read from your user config and your company's managed config, never a repository's."
+        },
+        "research": {
+          "$ref": "#/$defs/ResearchConfig",
+          "description": "Deep research (preview): when the build agent may research as a tool, what one run may spend and read, the sites it prefers or avoids, and robots.txt. Research searches the web in each research agent's own browser in the desktop app; there is no search service to set up. depth and retain_days do not apply yet. Read from your user config; a repository's config may only add sites to avoid and turn the research tool down."
         },
         "experimental": {
           "type": "object",

@@ -53,7 +53,7 @@ export function codiumGateway(token: string) {
       active: true,
       customer: true,
       access: true,
-      plan: { id: "vector-50", name: "Codium 50", left: 0.06, renewsAt: 1_790_000_000_000, cancelAtPeriodEnd: false },
+      plan: { id: "vector-50", name: "Pro", left: 0.06, renewsAt: 1_790_000_000_000, cancelAtPeriodEnd: false },
       purchased: { bought: true, state: "low" },
       empty: false,
       low: true,

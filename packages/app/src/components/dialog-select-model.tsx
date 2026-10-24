@@ -1,4 +1,4 @@
-import { freeModelTrainingLabel } from "@vectordevai/core/free-model-choice"
+import { freeModelRegionLabel, freeModelTrainingLabel } from "@vectordevai/core/free-model-choice"
 import { Popover as Kobalte } from "@kobalte/core/popover"
 import {
   Component,
@@ -25,7 +25,9 @@ import { MenuV2 } from "@vectordevai/ui/v2/menu-v2"
 import { Dialog as DialogV2, DialogBody, DialogTitle } from "@vectordevai/ui/v2/dialog-v2"
 import { useLanguage } from "@/context/language"
 import { decode64 } from "@/utils/base64"
+import { offInLocalProviders, type OffModel } from "@/features/local/local-model"
 import {
+  brandProviderName,
   buildModelSections,
   contextLabel,
   modelAriaLabel,
@@ -178,6 +180,9 @@ function ModelRow(props: { item: ModelItem; mark: boolean }) {
       <Show when={freeModelTrainingLabel(props.item)}>
         {(label) => <span data-slot="model-row-training">{label()}</span>}
       </Show>
+      <Show when={freeModelRegionLabel(props.item)}>
+        {(label) => <span data-slot="model-row-region">{label()}</span>}
+      </Show>
       <span data-slot="model-row-context">{contextLabel(props.item.limit?.context)}</span>
     </>
   )
@@ -263,6 +268,55 @@ function PickerSearch(props: {
   )
 }
 
+/** What Vector Local keeps out of the picker, from the provider list the picker reads, so nothing leaves it silently. */
+function useOffInLocal(directory?: () => string | undefined) {
+  const serverSync = useServerSync()
+  return createMemo(() => {
+    const dir = directory?.()
+    const child = dir ? serverSync().child(dir)[0] : undefined
+    const catalog = child?.provider_ready ? child.provider : serverSync().data.provider
+    return offInLocalProviders(catalog.unavailable).map((item) => ({
+      ...item,
+      name: brandProviderName(item.id, catalog.all.get(item.id)?.name),
+    }))
+  })
+}
+
+/** The collapsed "Off in Vector Local" group under the models: each provider Vector Local keeps off, and why. */
+function OffInLocalGroup(props: { items: readonly (OffModel & { name: string })[] }) {
+  const [open, setOpen] = createSignal(false)
+  return (
+    <Show when={props.items.length > 0}>
+      <div data-model-section="off-in-local" data-component="model-off-in-local" class="flex flex-col">
+        <button
+          type="button"
+          data-slot="menu-v2-group-label"
+          data-action="model-off-in-local-toggle"
+          aria-expanded={open()}
+          class="flex w-full items-center gap-1.5 text-left"
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={() => setOpen((value) => !value)}
+        >
+          <span class="flex shrink-0 transition-transform" classList={{ "-rotate-90": !open() }} aria-hidden="true">
+            <Icon name="chevron-down" size="small" />
+          </span>
+          <span data-slot="model-section-name">Off in Vector Local ({props.items.length})</span>
+        </button>
+        <Show when={open()}>
+          <For each={props.items}>
+            {(item) => (
+              <div data-slot="model-off-in-local-row" class="flex flex-col gap-0.5 py-1.5 pr-3 pl-[34px]">
+                <span class="text-sm leading-5 text-v2-text-text-muted">{item.name}</span>
+                <span class="text-[11px] leading-4 text-v2-text-text-faint">{item.why}</span>
+              </div>
+            )}
+          </For>
+        </Show>
+      </div>
+    </Show>
+  )
+}
+
 function PickerEmpty(props: { term: string }) {
   const language = useLanguage()
   return (
@@ -315,6 +369,7 @@ export function ModelSelectorPopoverV2(props: {
     fixed: props.fixedCatalog,
   })
   const sections = picker.sections
+  const offInLocal = useOffInLocal()
   const keys = () => picker.navigation().keys
   const uid = createUniqueId()
   // An unset or stale highlight (the list changed under it, or its section closed) falls back to the current model's
@@ -501,6 +556,9 @@ export function ModelSelectorPopoverV2(props: {
                   }}
                 </For>
               </Show>
+              <Show when={!store.search.trim()}>
+                <OffInLocalGroup items={offInLocal()} />
+              </Show>
             </div>
           </ScrollView>
           <Show when={!props.fixedCatalog}>
@@ -546,6 +604,7 @@ export const DialogSelectModelV2: Component<{ provider?: string; model?: ModelSt
 
   const picker = createModelSections({ model, provider: () => props.provider, search, now: () => now })
   const sections = picker.sections
+  const offInLocal = useOffInLocal(directory)
   // Navigation order is render order, as in the popover: every visible header and row, then Connect provider.
   const keys = () => picker.navigation().keys
   const uid = createUniqueId()
@@ -685,6 +744,9 @@ export const DialogSelectModelV2: Component<{ provider?: string; model?: ModelSt
                   )
                 }}
               </For>
+            </Show>
+            <Show when={!search().trim()}>
+              <OffInLocalGroup items={offInLocal()} />
             </Show>
           </div>
         </ScrollView>

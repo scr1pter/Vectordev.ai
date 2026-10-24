@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test"
+import { CodiumPlan } from "@vectordevai/schema/codium-plan"
 import { billingNotice, billingProgress, offerAction, offerPrice, offersPlanChange } from "./codium-billing"
 
-const offer = (id: string, price: number, available = true) => ({ id, name: `Codium ${price}`, price, available })
+const offer = (id: string, price: number, available = true) => ({
+  id,
+  name: CodiumPlan.name(id) ?? id,
+  price,
+  available,
+})
 
 describe("Codium offers in Vector", () => {
   test("nothing can be bought while Codium is not on sale: every button reads Coming soon", () => {

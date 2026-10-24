@@ -7,6 +7,7 @@ import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecy
 import { InstallationVersion } from "@vectordevai/core/installation/version"
 import { Redaction } from "@vectordevai/core/redaction"
 import { Effect, Queue, Schema } from "effect"
+import { omit } from "remeda"
 import * as Stream from "effect/Stream"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -14,6 +15,7 @@ import * as Sse from "effect/unstable/encoding/Sse"
 import { RootHttpApi } from "../api"
 import { type Principal, RequestPrincipal } from "@vectordevai/protocol/middleware/authorization"
 import { GlobalUpgradeInput } from "../groups/global"
+import { configLocked } from "./config"
 
 function eventData(data: unknown): Sse.Event {
   return {
@@ -92,13 +94,23 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     })
 
     const configGet = Effect.fn("GlobalHttpApi.configGet")(function* () {
-      return Redaction.redactConfig(yield* config.getGlobal())
+      const global = { ...Redaction.redactConfig(yield* config.getGlobal()), locked: Config.lockedKeys() }
+      // Vector Local's block is the owner's: their model servers' addresses, identities and the services they allowed.
+      // A guest loads the app from this route but cannot change it, so it gets the rest.
+      if ((yield* RequestPrincipal).kind !== "owner") return omit(global, ["local"])
+      return global
     })
 
+    // The global config as GET returns it after the save: every global file merged, not only the one the update
+    // wrote, so a client can keep the response as its copy (the app's Settings switches do).
     const configUpdate = Effect.fn("GlobalHttpApi.configUpdate")(function* (ctx) {
+      const locked = Config.lockedIn(ctx.payload, "global")
+      if (locked.length > 0) return yield* configLocked(locked)
       const result = yield* config.updateGlobal(ctx.payload)
       if (result.changed) bridge.fork(disposeAllInstancesAndEmitGlobalDisposed({ swallowErrors: true }))
-      return Redaction.redactConfig(result.info)
+      // An update that wrote nothing keeps the cached config, which may predate an edit made outside Vector.
+      if (!result.changed) yield* config.invalidate()
+      return Redaction.redactConfig(yield* config.getGlobal())
     })
 
     const dispose = Effect.fn("GlobalHttpApi.dispose")(function* () {

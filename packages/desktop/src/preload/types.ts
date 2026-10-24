@@ -16,6 +16,8 @@ import type {
   CloudProviderProjectLink,
   CloudProviderResource,
 } from "../main/cloud-connections"
+import type { Observed, PageRead } from "../main/browser-page"
+import type { Chip as ResearchBrowserChip } from "../main/research-browser"
 import type { CloudOverview } from "../main/cloud-overview"
 import type { SupabaseCommand, SupabaseProgressEvent } from "../main/cloud-supabase"
 import type { VercelCloudApi } from "../main/cloud-vercel-ipc"
@@ -48,7 +50,9 @@ import type {
   OpenInEditorInput,
   OpenInEditorResult,
   PrepareWorkspaceResult,
+  TerminalAgentInput,
 } from "../main/external-agents"
+import type { ExternalAgent } from "@vectordevai/schema/external-agent"
 import type { AgentTaskPreparation } from "../main/context-budget"
 import type { VoiceSpeechResult } from "../main/voice-synthesis"
 import type {
@@ -62,6 +66,7 @@ import type {
   PullRequestSummary,
 } from "../main/github-pr"
 import type { LocalMemoryState } from "../main/local-memory"
+import type { DesktopLocalStatus } from "../main/local-mode"
 import type { RuntimeName, RuntimeStatus } from "../main/runtime-bootstrap"
 export type { RuntimeName, RuntimeStatus } from "../main/runtime-bootstrap"
 import type { CiFailure, CiRepo, CiRun, CiUnavailable } from "../main/ci-watch"
@@ -90,6 +95,7 @@ export type { FailureMemory, FailureRepair, FailureSignatureRecord } from "../ma
 import type { AgentTeam, TeamCollaborationGraph, TeamMessage, TeamTopology } from "../main/agent-team-model"
 export type { AgentTeam, TeamCollaborationGraph, TeamLink, TeamMessage, TeamTopology } from "../main/agent-team-model"
 export type { LocalMemoryState } from "../main/local-memory"
+export type { DesktopLocalStatus } from "../main/local-mode"
 export type {
   AutoReviewSecret,
   AutoReviewSetup,
@@ -232,6 +238,11 @@ export type RuntimeAPI = {
   preparePluginCommand: (command: string[]) => Promise<{ command: string[]; status?: RuntimeStatus }>
 }
 
+/** Vector Local as the app's windows see it: the policy desktop main uses, the first run's hold and the mismatch. */
+export type VectorLocalAPI = {
+  status: () => Promise<DesktopLocalStatus>
+}
+
 export type LocalMemoryAPI = {
   read: () => Promise<LocalMemoryState>
   write: (content: string) => Promise<LocalMemoryState>
@@ -295,6 +306,10 @@ export type PullRequestsAPI = {
     // using fallbackBody (or body) as its body.
     comments?: PullRequestReviewComment[]
     fallbackBody?: string
+    // The review's sessions, whose recalled memory the posting check compares the text with, and whether the pull
+    // request comes from someone Vector cannot trust (its links and images may then point only at GitHub).
+    sessionIDs?: string[]
+    untrusted?: boolean
   }) => Promise<{ posted: boolean; inline?: number }>
   merge: (input: {
     cwd: string
@@ -411,6 +426,10 @@ export type BrowserAutomationRun = {
     rect: { x: number; y: number; width: number; height: number }
   }[]
   pageHtml?: string
+  /** For readPage: the page as the research reader reads it. */
+  page?: PageRead
+  /** For observePage: the page's text and its controls, each with a ref handle clickRef takes. */
+  observed?: Observed
   diagnostics?: {
     consoleCount: number
     runtimeErrorCount: number
@@ -450,9 +469,14 @@ export type BrowserAgentInput = {
     | "scroll"
     | "clearLogs"
     | "setVisible"
+    | "readPage"
+    | "observePage"
+    | "clickRef"
   url?: string
   allowExternal?: boolean
   selector?: string
+  /** A ref_N handle from observePage, for clickRef, or for inspectDom to name what a click there would press. */
+  ref?: string
   text?: string
   key?: string
   milliseconds?: number
@@ -513,7 +537,7 @@ export type ParallelWorkspaceRecord = {
   revision?: number
   name: string
   taskPrompt: string
-  runtime: "vector" | "claude-code" | "codex" | "cursor"
+  runtime: "vector" | ExternalAgent.ChatId
   provider: string
   model: string
   sourcePath: string
@@ -572,7 +596,7 @@ export type CreateParallelWorkspaceInput = {
   engineParentSessionId?: string
   name?: string
   taskPrompt: string
-  runtime?: "vector" | "claude-code" | "codex" | "cursor"
+  runtime?: "vector" | ExternalAgent.ChatId
   provider?: string
   model?: string
   runtimeModel?: string
@@ -747,6 +771,7 @@ export type ElectronAPI = {
   agentTeams: AgentTeamsAPI
   convertHeic: (bytes: Uint8Array) => Promise<{ data: Uint8Array; mime: string } | { error: string }>
   runtime: RuntimeAPI
+  vectorLocal: VectorLocalAPI
   localMemory: LocalMemoryAPI
   repoRules: RepoRulesAPI
   pullRequests: PullRequestsAPI
@@ -822,6 +847,8 @@ export type ElectronAPI = {
     refresh: (id: string) => Promise<ParallelWorkspaceRecord>
     run: (id: string, concurrency?: number) => Promise<ParallelWorkspaceRecord>
     followUp: (id: string, text: string) => Promise<ParallelWorkspaceRecord>
+    /** Try a fix: sends the failed check to the user's own coding agent, once. */
+    repair: (id: string) => Promise<ParallelWorkspaceRecord>
     /** The external CLI's model from its next turn; undefined goes back to the CLI's default. */
     setRuntimeModel: (id: string, model?: string) => Promise<ParallelWorkspaceRecord>
     stop: (id: string) => Promise<ParallelWorkspaceRecord>
@@ -857,6 +884,16 @@ export type ElectronAPI = {
       sourcePath: string
       taskID: string
     }) => Promise<import("@vectordevai/schema/task").StopResult>
+    onChange: (callback: () => void) => () => void
+  }
+  /**
+   * Watching research browsers from the Sources tab: one chip per browser, snapshots of its page (about two a second is
+   * what a watcher needs) and Stop. There is no way to send input to one.
+   */
+  researchWatch: {
+    list: () => Promise<ResearchBrowserChip[]>
+    snapshot: (id: string) => Promise<string | undefined>
+    stop: (id: string) => Promise<boolean>
     onChange: (callback: () => void) => () => void
   }
   swarmOrchestrator: {
@@ -981,7 +1018,13 @@ export type ElectronAPI = {
     remove: (id: string) => Promise<ScheduledAgentRecord[]>
   }
   externalAgents: {
-    detect: () => Promise<ExternalAgentStatus[]>
+    /** `refresh` re-probes the login shell and skips the 60-second detection cache, after an install or sign-in. */
+    detect: (options?: { refresh?: boolean }) => Promise<ExternalAgentStatus[]>
+    models: (id: string, options?: { refresh?: boolean }) => Promise<ExternalAgent.ModelList>
+    /** The official install commands for this platform and the agent's sign-in, ready for the built-in terminal. */
+    commands: (id: string) => Promise<ExternalAgent.Commands>
+    /** Prepares the isolated workspace and returns the agent's own screen to open in the built-in terminal there. */
+    launchTerminal: (input: TerminalAgentInput) => Promise<ExternalAgent.TerminalAgentLaunch>
     openInEditor: (input: OpenInEditorInput) => Promise<OpenInEditorResult>
     prepareWorkspace: (projectPath: string) => Promise<PrepareWorkspaceResult>
   }

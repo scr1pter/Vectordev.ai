@@ -1,5 +1,7 @@
 // The documentation's shape: groups in order, each leaf a page under /docs.
 // Edit here and the sidebar, the pager and the search index all follow.
+import { release111 } from "./vector-releases"
+
 export type DocLink = { id: string; title: string; blurb: string }
 export type DocGroup = { label: string; links: DocLink[] }
 
@@ -39,9 +41,9 @@ export const docsNav: DocGroup[] = [
       },
       {
         id: "external-agents",
-        title: "Orchestrate Claude Code, Codex and Cursor",
+        title: "Run your own coding agents",
         blurb:
-          "Run Claude Code, Codex and Cursor in Vector workspaces, on the CLIs and subscriptions you already have.",
+          "Run Claude Code, Codex, Cursor CLI and twelve more agents you installed yourself in Vector workspaces, each with its own sign-in.",
       },
       {
         id: "automations",
@@ -57,6 +59,11 @@ export const docsNav: DocGroup[] = [
         id: "browser-agent",
         title: "Browser agent",
         blurb: "A real Chromium view inside Vector that the agent drives against your running product.",
+      },
+      {
+        id: "research",
+        title: "Deep research",
+        blurb: `${release111.since} a preview that researches a question across the web and this repository's brain, then writes a report in which each claim cites a quote.`,
       },
       {
         id: "vectorscope",
@@ -111,6 +118,11 @@ export const docsNav: DocGroup[] = [
         id: "models",
         title: "Models, free models and your own keys",
         blurb: "Sign in to Vector for free models, or connect a provider account or API key.",
+      },
+      {
+        id: "local",
+        title: "Vector Local",
+        blurb: `${release111.since} run Vector's AI features on model servers you or your company host, with a log of what Vector sent.`,
       },
       {
         id: "cloud-services",

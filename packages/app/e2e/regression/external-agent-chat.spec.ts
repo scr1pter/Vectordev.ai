@@ -6,7 +6,7 @@ const parentSessionId = "ses_external_chat_parent"
 const runtimes = [
   { id: "codex", label: "Codex" },
   { id: "claude-code", label: "Claude Code" },
-  { id: "cursor", label: "Cursor Agent" },
+  { id: "cursor", label: "Cursor CLI" },
 ]
 
 for (const runtime of runtimes) {

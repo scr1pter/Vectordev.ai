@@ -79,6 +79,14 @@ export const load = Effect.fn("SessionHistory.load")(function* (db: DatabaseServ
   return yield* Effect.forEach(yield* messageRows(db, sessionID, compaction, epoch?.baselineSeq), decodeMessageRow)
 })
 
+/** Every message the session holds, oldest first, with what a compaction folded away. */
+export const loadAll = Effect.fn("SessionHistory.loadAll")(function* (
+  db: DatabaseService,
+  sessionID: SessionSchema.ID,
+) {
+  return yield* Effect.forEach(yield* messageRows(db, sessionID, undefined), decodeMessageRow)
+})
+
 export const loadForRunner = Effect.fn("SessionHistory.loadForRunner")(function* (
   db: DatabaseService,
   sessionID: SessionSchema.ID,

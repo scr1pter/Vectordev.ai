@@ -7,6 +7,12 @@ import { Option, Schema } from "effect"
 import { Flag } from "./flag/flag"
 import { Global } from "./global"
 import { applyRemoteProviderPolicy } from "./provider-policy"
+import { Egress } from "./local-mode/egress"
+import { LocalPolicy } from "./local-mode/policy"
+import { LocalSources } from "./local-mode/sources"
+import { StartupHold } from "./startup-hold"
+
+const LOCAL_SOURCE = LocalSources.get("provider-policy")!
 
 // The owner's off-switch for Sign in with ChatGPT, published with the website so it can change without a
 // release. docs/vector/owner-actions/chatgpt.md says how to flip it.
@@ -24,6 +30,13 @@ export function createClient(input: {
   apply: (policy: Policy) => void
   request?: (url: string, init: RequestInit) => Promise<Response>
   disabled?: () => boolean
+  /**
+   * Whether a desktop first run still holds Vector's startup fetches (StartupHold): a startup check then keeps the last
+   * switch read, and a sign-in reads the switch anyway, since starting one is the person choosing how to run models.
+   */
+  held?: () => boolean
+  /** Whether Vector Local blocks the read; the last switch read stays in effect. */
+  offline?: () => boolean
   now?: () => number
   /** How long a check waits for vectordev.ai before keeping the last value seen. */
   wait?: number
@@ -51,6 +64,7 @@ export function createClient(input: {
     const pending = (async () => {
       if (input.disabled?.()) return
       await restore()
+      if (input.offline?.() || (!force && input.held?.())) return
       const response = await request(POLICY_URL, {
         redirect: "error",
         signal: AbortSignal.timeout(input.wait ?? 3_000),
@@ -84,7 +98,14 @@ const client = createClient({
   apply: applyRemoteProviderPolicy,
   // Operators who turn off Vector's metadata fetches follow the release default.
   disabled: () => Flag.VECTOR_DISABLE_MODELS_FETCH,
+  // A desktop first run reads the switch at startup once the person has chosen how to run models; a ChatGPT sign-in
+  // reads it before then too, so the owner's off-switch holds for a new install.
+  held: StartupHold.held,
+  offline: () => LocalPolicy.blocks(Egress.policy(), LOCAL_SOURCE),
+  request: (url, init) => Egress.fetch(LOCAL_SOURCE.id, url, init),
 })
+
+StartupHold.onRelease(() => void client.check())
 
 export const restore = client.restore
 export const check = client.check

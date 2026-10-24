@@ -316,6 +316,27 @@ describe("session.system", () => {
     }),
   )
 
+  // Settings can turn explore off and an agent's permissions can deny it: a provider prompt that still suggested it
+  // would send the model's first task call to an agent it cannot launch.
+  it.effect("a provider prompt suggests explore only where the agent may launch it", () =>
+    Effect.sync(() => {
+      for (const id of ["claude-sonnet-4-5", "trinity-large", "model", "gpt-5", "gpt-5-codex", "gemini-2.5-pro"]) {
+        const model = { api: { id }, providerID: "provider" } as unknown as Provider.Model
+        const [on] = SystemPrompt.provider(model)
+        const [off] = SystemPrompt.provider(model, false)
+        expect(SystemPrompt.provider(model, true)).toEqual([on])
+        expect(off).not.toContain('"explore"')
+        if (on.includes('subagent_type "explore"'))
+          expect(off).toContain("prefer it with a search specialist from the task tool's list")
+      }
+      // The prompts that suggest it today: Claude's, Trinity's and the default.
+      for (const id of ["claude-sonnet-4-5", "trinity-large", "model"]) {
+        const model = { api: { id }, providerID: "provider" } as unknown as Provider.Model
+        expect(SystemPrompt.provider(model)[0]).toContain('subagent_type "explore"')
+      }
+    }),
+  )
+
   it.instance("sends the Vector Cloud rules only to an agent offered the cloud tool", () =>
     Effect.gen(function* () {
       const prompt = yield* SystemPrompt.Service

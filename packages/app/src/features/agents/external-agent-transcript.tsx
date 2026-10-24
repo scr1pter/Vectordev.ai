@@ -17,7 +17,13 @@ export {
   type ExternalAgentTurn,
 } from "./external-agent-transcript-model"
 
-export function ExternalAgentTranscript(props: { turns: ExternalAgentTurn[]; runtimeLabel: string }) {
+/** `ownership` says whose agent this is (agentOwnership in agent-runtime-copy.ts). It is required, so no outside
+    agent's conversation shows without it. */
+export function ExternalAgentTranscript(props: {
+  turns: ExternalAgentTurn[]
+  runtimeLabel: string
+  ownership: string | undefined
+}) {
   const [state, setState] = createStore({ copied: "" })
   // One clock for the whole transcript. It ticks only while a turn is running,
   // so a finished conversation holds no timer.
@@ -37,6 +43,13 @@ export function ExternalAgentTranscript(props: { turns: ExternalAgentTurn[]; run
       role="log"
       aria-label={`${props.runtimeLabel} conversation`}
     >
+      <Show when={props.ownership}>
+        {(text) => (
+          <p class="vector-agent-ownership" data-agent-ownership>
+            {text()}
+          </p>
+        )}
+      </Show>
       {/* Polling replaces records, not conversations. Key by durable turn IDs so
           streaming updates preserve selection and expanded tool details. */}
       <For each={props.turns.map((turn) => turn.id)}>
@@ -103,6 +116,15 @@ export function ExternalAgentTranscript(props: { turns: ExternalAgentTurn[]; run
                     />
                   )}
                 </For>
+                <Show when={turn().notices?.length}>
+                  <ul
+                    class="vector-agent-notices"
+                    data-agent-notices
+                    aria-label={`What ${props.runtimeLabel} said about its sign-in or usage`}
+                  >
+                    <For each={turn().notices}>{(notice) => <li>{notice}</li>}</For>
+                  </ul>
+                </Show>
                 <Show when={turn().state === "failed" || turn().state === "stopped"}>
                   <p class="vector-agent-chat-notice" role="status">
                     {turn().state === "stopped"

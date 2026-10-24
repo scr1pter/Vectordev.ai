@@ -13,7 +13,7 @@ export function codiumPricing(config: ModelPlanConfig) {
   const offers = (plans: ModelPlan[]) =>
     plans.map((plan) => ({
       id: plan.id,
-      // The account page's name too, such as "Codium 10 top-up", so a top-up never shares a plan's name.
+      // The account page's name too, such as "Pro" or "$10 credit top-up", so a top-up never shares a plan's name.
       name: plan.name,
       price: plan.price,
       available: config.enabled && plan.available,

@@ -8,6 +8,9 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { Installation } from "../../src/installation"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { testEffect } from "../lib/effect"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import { InstallationVersion } from "@vectordevai/core/installation/version"
 
 const encoder = new TextEncoder()
 
@@ -143,6 +146,46 @@ describe("Vector installation", () => {
       expect(error.stderr).toBe("Upgrade failed for npm (exit code 1).")
       expect(error.stderr).not.toContain("secret-token")
     }),
+  )
+
+  const local = { requests: [] as string[], commands: [] as string[][] }
+  testEffect(
+    testLayer(
+      (request) => {
+        local.requests.push(request.url)
+        return jsonResponse({ version: "1.99.92" })
+      },
+      (command, args) => {
+        local.commands.push([command, ...args])
+        return ""
+      },
+    ),
+  ).effect("with Vector Local on, checks only when asked and upgrades only once the check was confirmed", () =>
+    Effect.gen(function* () {
+      Egress.configure(LocalPolicy.resolve({ global: { enabled: true } }))
+      // Automatic checks are off: the running version is reported, and nothing is sent.
+      expect(yield* Installation.use.latest("npm")).toBe(InstallationVersion)
+      expect(local.requests).toEqual([])
+      // The package manager is a program of its own, so it never starts before the person confirms the check.
+      const refused = yield* Effect.flip(Installation.use.upgrade("npm", "1.99.92"))
+      expect(refused.stderr).toBe(
+        "Vector Local is on, so Vector asks before it checks for or installs a new version. Run vector upgrade in a terminal to confirm.",
+      )
+      expect(local.commands.filter((command) => command.includes("install"))).toEqual([])
+      // vector upgrade asked and the person said yes.
+      Egress.grant("updates", { once: false })
+      expect(yield* Installation.use.latest("npm", { manual: true })).toBe("1.99.92")
+      yield* Installation.use.upgrade("npm", "1.99.92")
+      expect(local.commands).toContainEqual(["npm", "install", "-g", "@vectordevai/cli@1.99.92"])
+    }).pipe(
+      // The standing grant was for this test's confirmed check only.
+      Effect.ensuring(
+        Effect.sync(() => {
+          Egress.revoke("updates")
+          Egress.configure(LocalPolicy.OFF)
+        }),
+      ),
+    ),
   )
 
   testEffect(

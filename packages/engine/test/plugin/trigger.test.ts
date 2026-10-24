@@ -18,6 +18,9 @@ import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
 import { Global } from "@vectordevai/core/global"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { rmSync, writeFileSync } from "node:fs"
+import { Config } from "../../src/config/config"
 
 const it = testEffect(
   AppNodeBuilder.build(LayerNode.group([Plugin.node, CrossSpawnSpawner.node]), [
@@ -88,6 +91,42 @@ describe("plugin.trigger", () => {
           expect(yield* Effect.promise(() => Bun.file(marker).exists())).toBe(false)
         }),
         false,
+      )
+    }),
+  )
+
+  it.instance("loads plugins outside any grant to the npm registry with Vector Local on", () =>
+    Effect.gen(function* () {
+      // The user allowed npm plugins. Only an install runs within the grant to the registry (Npm.addAs); loading
+      // plugins, which imports their code, decides and grants nothing, so a plugin's code cannot reach the registry as
+      // Vector's download. Under Node, the desktop engine's runtime, a module's code runs in the scope it was imported in.
+      const file = path.join(Global.Path.config, "vector.json")
+      const apply = () => {
+        Config.refreshLocal()
+        Config.confirmLocal()
+      }
+      writeFileSync(
+        file,
+        JSON.stringify({
+          local: { enabled: true, allow: [{ source: "npm-plugins", reason: "Plugins", added_at: 1, added_by: "app" }] },
+        }),
+      )
+      apply()
+      yield* withProject(
+        `export default async () => ({ ${JSON.stringify(systemHook)}: (_input, output) => output.system.unshift("loaded") })\n`,
+        Effect.gen(function* () {
+          expect(Egress.policy().enabled).toBe(true)
+          expect(yield* triggerSystemTransform()).toEqual(["loaded"])
+          expect(Egress.events().filter((event) => event.source === "npm-plugins")).toEqual([])
+        }),
+      ).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            rmSync(file, { force: true })
+            apply()
+            rmSync(Config.localConfirmedFile(), { force: true })
+          }),
+        ),
       )
     }),
   )

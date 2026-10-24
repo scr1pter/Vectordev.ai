@@ -3,6 +3,7 @@ import { Effect, Schema } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { Ripgrep } from "@vectordevai/core/ripgrep"
+import { WebFence } from "@vectordevai/core/research/fence"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import DESCRIPTION from "./grep.txt"
 import * as Tool from "./tool"
@@ -135,23 +136,25 @@ export const GrepTool = Tool.define(
             return {
               // Relative to the working directory, which read, edit and write resolve against, when it is inside it.
               path: relative.startsWith("..") || path.isAbsolute(relative) ? absolute : relative,
+              absolute,
               line: item.line,
               text: excerpt(text, at),
             }
           })
 
           const total = final.length
-          const output = [`Found ${total} matches${truncated ? " (more matches available)" : ""}`]
-
-          let current = ""
-          for (const match of final) {
-            if (current !== match.path) {
-              if (current !== "") output.push("")
-              current = match.path
-              output.push(`${match.path}:`)
-            }
-            output.push(`  Line ${match.line}: ${match.text}`)
-          }
+          const render = (match: { line: number; text: string }) => `  Line ${match.line}: ${match.text}`
+          // Lines from a page a web tool saved whole are web text, so they come back fenced again.
+          const output = [
+            `Found ${total} matches${truncated ? " (more matches available)" : ""}`,
+            ...[...Map.groupBy(final, (match) => match.path).entries()].flatMap(([file, matches], index) => [
+              ...(index > 0 ? [""] : []),
+              `${file}:`,
+              ...(WebFence.savedFile(matches[0]!.absolute)
+                ? [WebFence.fenceLines({ tool: "grep", file: matches[0]!.absolute }, matches, render)]
+                : matches.map(render)),
+            ]),
+          ]
 
           if (truncated) {
             output.push("")

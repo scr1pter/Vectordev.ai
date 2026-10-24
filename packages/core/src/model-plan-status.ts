@@ -1,5 +1,6 @@
 export * as ModelPlanStatus from "./model-plan-status"
 
+import { CodiumPlan } from "@vectordevai/schema/codium-plan"
 import { Option, Schema } from "effect"
 
 export const SITE = "https://vectordev.ai"
@@ -8,6 +9,12 @@ export const STATUS_URL = `${API_URL}/status`
 export const CONFIG_URL = `${API_URL}/config`
 export const PURCHASE_URL = `${SITE}/codium`
 export const MANAGE_URL = `${SITE}/account`
+
+// The app imports this module in the browser, so it holds only what a browser can run and sends with the transport its
+// caller hands it. Node callers hand it ModelPlans.plansCatalog, which labels each request for Vector Local; that egress
+// layer needs Node (async_hooks), so nothing here may import it, not even lazily: Vite bundles a dynamic import too.
+type Send = (url: string, init: RequestInit) => Promise<Response>
+
 // The stable internal ID stays "vector-plan"; people see the provider as Vector Codium.
 export const PROVIDER_ID = "vector-plan"
 
@@ -84,10 +91,7 @@ const percent = new Intl.NumberFormat("en-US", { style: "percent", maximumFracti
 const PURCHASED = { available: "Available", low: "Running low", used: "Used up" } as const
 
 /** Reads the signed-in account's Codium plan and balances. The token is only ever sent to vectordev.ai. */
-export async function fetchStatus(
-  token: string | undefined,
-  request: (url: string, init: RequestInit) => Promise<Response> = fetch,
-): Promise<Status> {
+export async function fetchStatus(token: string | undefined, request: Send): Promise<Status> {
   if (!token) return EMPTY
   const response = await request(STATUS_URL, {
     headers: { authorization: `Bearer ${token}`, accept: "application/json" },
@@ -107,7 +111,7 @@ export async function fetchStatus(
  * Whether vectordev.ai sells Codium now, from its public configuration, for someone who is not signed in; undefined
  * when it cannot tell. Nothing should point at the purchase page while it only says Codium is coming soon.
  */
-export async function salesOpen(request: (url: string, init: RequestInit) => Promise<Response> = fetch) {
+export async function salesOpen(request: Send) {
   const response = await request(CONFIG_URL, {
     headers: { accept: "application/json" },
     redirect: "error",
@@ -136,9 +140,7 @@ export type Offer = { id: string; name: string; price: number; available: boolea
 export type Offers = { enabled: boolean; plans: Offer[]; topups: Offer[] }
 
 /** The plans and top-ups vectordev.ai lists publicly, for buying inside Vector; undefined when they cannot be read. */
-export async function fetchOffers(
-  request: (url: string, init: RequestInit) => Promise<Response> = fetch,
-): Promise<Offers | undefined> {
+export async function fetchOffers(request: Send): Promise<Offers | undefined> {
   const response = await request(CONFIG_URL, {
     headers: { accept: "application/json" },
     redirect: "error",
@@ -148,10 +150,11 @@ export async function fetchOffers(
     ? Schema.decodeUnknownOption(Config)(await response.json().catch(() => undefined))
     : Option.none()
   if (Option.isNone(decoded)) return undefined
-  // Only these four fields, whatever else the configuration carries.
+  // Only these four fields, whatever else the configuration carries. A plan or top-up Vector knows takes its current
+  // name, so a site still answering an older name shows the same one as everything else.
   const offer = (item: Offer) => ({
     id: item.id,
-    name: item.name,
+    name: CodiumPlan.name(item.id) ?? item.name,
     price: item.price,
     available: decoded.value.enabled && item.available,
   })
@@ -171,7 +174,7 @@ export function fromRemote(remote: typeof Remote.Type): Status {
     ...(remote.customer ? { customer: true } : {}),
     plan: remote.plan && {
       id: remote.plan.id,
-      name: remote.plan.name,
+      name: CodiumPlan.name(remote.plan.id) ?? remote.plan.name,
       ...(remote.plan.left === undefined ? {} : { left: remote.plan.left }),
       renewsAt: remote.plan.renewsAt,
       cancelAtPeriodEnd: remote.plan.cancelAtPeriodEnd,
@@ -212,7 +215,7 @@ export function describe(status: Status) {
   const lines = [
     plan
       ? `Plan: ${plan.name}, ${plan.left === undefined ? "balance unavailable" : `${formatShare(plan.left)} of this month's credits left`}, ${plan.cancelAtPeriodEnd ? "ends" : "renews"} ${formatDate(plan.renewsAt)}`
-      : "Plan: none",
+      : `Plan: ${CodiumPlan.FREE}`,
     `Purchased credits: ${formatPurchased(status.purchased).toLowerCase()}`,
   ]
   const current = notice(status)

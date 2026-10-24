@@ -89,6 +89,26 @@ describe("session reminders", () => {
       expect(texts(applied[4])).toEqual([SessionReminders.PLAN_STILL_ACTIVE])
     }),
   )
+
+  // Settings can turn explore off, and Plan mode cannot launch general, so a plan reminder that still named explore
+  // would send the first task call to an agent that is not there.
+  it.instance("the plan reminder suggests explore only where the plan agent may launch it", () =>
+    Effect.gen(function* () {
+      const apply = (explore?: boolean) =>
+        SessionReminders.apply({
+          messages: fresh([user("plan")]),
+          agent: { name: "plan" } as Agent.Info,
+          session: { id: sessionID } as Session.Info,
+          explore,
+        })
+      expect(texts((yield* apply())[0])).toEqual([PROMPT_PLAN])
+      expect(texts((yield* apply(true))[0])).toEqual([PROMPT_PLAN])
+      const [off] = texts((yield* apply(false))[0])
+      expect(PROMPT_PLAN).toContain("delegate explore agents")
+      expect(off).not.toContain("explore")
+      expect(off).toContain("delegate to specialists from the task tool's list")
+    }),
+  )
 })
 
 describe("session date notes", () => {

@@ -11,11 +11,13 @@ import { ConfigAttachmentV1 } from "./attachment"
 import { ConfigCommandV1 } from "./command"
 import { ConfigFormatterV1 } from "./formatter"
 import { ConfigLayoutV1 } from "./layout"
+import { ConfigLocalV1 } from "./local"
 import { ConfigLSPV1 } from "./lsp"
 import { ConfigMCPV1 } from "./mcp"
 import { ConfigPermissionV1 } from "./permission"
 import { ConfigPluginV1 } from "./plugin"
 import { ConfigProviderV1 } from "./provider"
+import { ConfigResearchV1 } from "./research"
 import { ConfigServerV1 } from "./server"
 import { ConfigSkillsV1 } from "./skills"
 
@@ -196,10 +198,18 @@ export const Info = Schema.Struct({
       }),
       judge: Schema.optional(TaskSize.JudgeMode).annotate({
         description:
-          "When Vector runs LLM-as-a-judge after a run that changed files: off, thorough (large tasks only) or changes (every task that changed files). Default: off. A prompt's own judge setting overrides it.",
+          "When Vector runs LLM-as-a-judge after a run that changed files: off, thorough (large tasks only) or changes (every task that changed files). Default: off for those runs. A prompt's own judge setting overrides it. Deep research's citation judge reads it too, and runs when it is unset: unset or thorough checks Deep reports and Focused ones that cite 8 or more notes, changes checks every report, and off turns it off.",
       }),
     }),
   ).annotate({ description: "Task sizing: how much harness, reasoning and verification each request gets." }),
+  local: Schema.optional(ConfigLocalV1.Info).annotate({
+    description:
+      "Vector Local: run Vector's AI features only on model servers you or your company host. Read from your user config and your company's managed config, never a repository's.",
+  }),
+  research: Schema.optional(ConfigResearchV1.Info).annotate({
+    description:
+      "Deep research (preview): when the build agent may research as a tool, what one run may spend and read, the sites it prefers or avoids, and robots.txt. Research searches the web in each research agent's own browser in the desktop app; there is no search service to set up. depth and retain_days do not apply yet. Read from your user config; a repository's config may only add sites to avoid and turn the research tool down.",
+  }),
   experimental: Schema.optional(
     Schema.Struct({
       disable_paste_summary: Schema.optional(Schema.Boolean),

@@ -9,15 +9,14 @@ import {
   isFreeModelID,
   isFreeRouter,
   offeredFreeModel,
-  personalOnlyFreeModel,
-  reviewedFreeModel,
 } from "../../packages/core/src/free-model-catalog.js"
 import { FREE_MODELS_UNAVAILABLE } from "../../packages/core/src/free-model-choice.js"
 import { ApiError } from "./http.js"
 import { persistentStore } from "./persistent-store.js"
 
 // Never revive a catalog selected under an earlier policy (retired provider-policy endpoint, then ZDR, then the
-// no-training-only allowlist, whose providers carry no data policy).
+// no-training-only allowlist, whose providers carry no data policy). A catalog stored before 23 October 2026 holds
+// reviewed models only, each with the policy today's rules give it, so it stays valid under the same key.
 export const FREE_MODELS_CATALOG_KEY = "vector:free-models:catalog:v4:policy"
 
 const ROOT = "https://openrouter.ai/api/v1"
@@ -66,28 +65,26 @@ export async function refreshFreeModelCatalog(
     true,
   )
   const allowed = new Set(available.data.map((item) => item.id))
-  // The shared allowance serves reviewed models only; unreviewed and personal-only ones are offered through a user's
-  // own account.
-  const candidates = publicModels.data.flatMap((item) => {
+  // Every offered free model is a candidate, reviewed or not: an endpoint Vector has not reviewed is served as one that
+  // may train (owner, 23 October 2026).
+  const offered = publicModels.data.flatMap((item) => {
     const model = Schema.decodeUnknownOption(FreeModelMetadata)(item)
-    return Option.isSome(model) &&
-      reviewedFreeModel(model.value.id) &&
-      !personalOnlyFreeModel(model.value.id) &&
-      offeredFreeModel(model.value, now) &&
-      allowed.has(model.value.id)
-      ? [model.value]
-      : []
+    return Option.isSome(model) && offeredFreeModel(model.value, now) ? [model.value] : []
   })
+  const candidates = offered.filter((model) => allowed.has(model.id))
   const failed: string[] = []
+  const unusable: string[] = []
   const check = async (model: typeof FreeModelMetadata.Type) => {
     // The free router has no endpoint list of its own; its price and parameters come from its listing.
-    if (isFreeRouter(model.id)) return freeModelInfo(model, [], { reviewedOnly: true })
+    if (isFreeRouter(model.id)) return freeModelInfo(model, [])
     // The cron runs once a day, so one unreadable endpoint list drops only its own model, not the whole refresh.
     const endpoints = await read(`${ROOT}/models/${model.id}/endpoints`, EndpointList, request).catch(() => {
       failed.push(model.id)
       return undefined
     })
-    return endpoints && freeModelInfo(model, endpoints.data.endpoints, { reviewedOnly: true })
+    const info = endpoints && freeModelInfo(model, endpoints.data.endpoints)
+    if (endpoints && !info) unusable.push(model.id)
+    return info
   }
   // Five endpoint lists at a time, so a growing catalog does not send OpenRouter every read at once during the cron.
   const checked: (FreeModelInfo | undefined)[] = []
@@ -96,7 +93,12 @@ export async function refreshFreeModelCatalog(
   ))
     checked.push(...(await Promise.all(batch.map(check))))
   const models = checked.filter((model): model is FreeModelInfo => model !== undefined)
-  // Model IDs are public metadata; the headers and the errors behind them are never logged.
+  // Model IDs are public metadata; the headers and the errors behind them are never logged. A model missing from the
+  // account's own list is hidden by that account's settings on openrouter.ai (privacy, or ignored or allowed
+  // providers), which only the account's owner can change.
+  const hidden = offered.filter((model) => !allowed.has(model.id)).map((model) => model.id)
+  if (hidden.length) console.warn("Free models the OpenRouter account's own list leaves out:", hidden.join(", "))
+  if (unusable.length) console.warn("Free models with no usable endpoint:", unusable.join(", "))
   if (failed.length) console.warn("Free model endpoint lists unavailable:", failed.join(", "))
   // With reads failing and nothing of its own left to list, the result says nothing about the models: an OpenRouter
   // outage or rate limit during the cron. Answer 503 and keep the stored catalog instead of publishing OFF.
@@ -149,18 +151,18 @@ export async function currentFreeModelCatalog(
         !Number.isSafeInteger(model.maxOutputTokens) ||
         model.maxOutputTokens < 1 ||
         !model.providers.length ||
-        // Every endpoint must carry the policy the reviewed record gives it, and the record must know it.
+        // Every endpoint must carry the policy today's rules give it: the reviewed one, or may-train for one Vector has
+        // not reviewed. A stored no-training endpoint the record does not know, or an older "unreviewed", fails.
         model.providers.some(
           (provider) =>
-            provider.dataPolicy === undefined ||
-            provider.dataPolicy === "unreviewed" ||
-            provider.dataPolicy !== freeEndpointPolicy(model.id, provider.id),
+            provider.dataPolicy === undefined || provider.dataPolicy !== freeEndpointPolicy(model.id, provider.id),
         ),
     )
   )
     throw unavailable("FREE_MODELS_CATALOG_INVALID")
-  // A catalog stored before a model became personal-only must not keep serving it.
-  const shared = decoded.value.models.filter((model) => !personalOnlyFreeModel(model.id))
+  // A catalog must not keep serving a model whose free endpoints ended since it was stored, which can happen while
+  // refreshes fail.
+  const shared = decoded.value.models.filter((model) => model.expiresAt === undefined || model.expiresAt > now)
   const models = options.disclosure ? shared : shared.filter((model) => freeModelDataPolicy(model) === "no-training")
   // A fresh refresh that found no qualifying model is a deliberate OFF answer, not an outage. The free router alone, as
   // an earlier refresh could have stored it, does not count as a qualifying model either.

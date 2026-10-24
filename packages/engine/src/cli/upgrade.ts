@@ -5,10 +5,13 @@ import { Flag } from "@vectordevai/core/flag/flag"
 import { Installation } from "@/installation"
 import { InstallationVersion } from "@vectordevai/core/installation/version"
 import { GlobalBus } from "@/bus/global"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 
 export async function upgrade() {
   const config = await AppRuntime.runPromise(Config.Service.use((cfg) => cfg.getGlobal()))
   if (config.autoupdate === false || Flag.VECTOR_DISABLE_AUTOUPDATE) return
+  // Vector Local turns automatic update checks off.
+  if (Egress.policy().enabled) return
   const method = await Installation.method()
   const latest = await Installation.latest(method).catch(() => {})
   if (!latest || !semver.valid(InstallationVersion) || !semver.gt(latest, InstallationVersion)) return

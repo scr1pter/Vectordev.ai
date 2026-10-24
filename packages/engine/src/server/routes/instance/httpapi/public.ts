@@ -61,6 +61,10 @@ const QueryParameterSchemas: Record<string, OpenApiSchema> = {
   "GET /experimental/session internal": QueryBooleanOpenApi,
   "GET /experimental/session archived": QueryBooleanOpenApi,
   "GET /find/file limit": { type: "integer", minimum: 1, maximum: 200 },
+  "GET /local/egress since": { type: "integer", minimum: 0 },
+  "GET /local/egress blocked": QueryBooleanOpenApi,
+  "GET /local/egress/export since": { type: "integer", minimum: 0 },
+  "GET /local/egress/export blocked": QueryBooleanOpenApi,
   "GET /experimental/session cursor": { type: "number" },
   "GET /experimental/session limit": { type: "number" },
   "GET /session start": { type: "number" },
@@ -283,6 +287,15 @@ function applyLegacySchemaOverrides(spec: OpenApiSpec) {
   if (variants && typeof variants === "object") variants.additionalProperties = {}
   const syncInfo = schemas.SyncEventSessionUpdated?.properties?.data?.properties?.info
   if (syncInfo?.properties) makePropertiesNullable(syncInfo.properties)
+  // Vector Local's genuinely nullable values: no server answered, a role the memory is too small for, and a pin a
+  // change removes.
+  if (schemas.LocalProbeResult?.properties?.server)
+    schemas.LocalProbeResult.properties.server = nullable(schemas.LocalProbeResult.properties.server)
+  const role = schemas.LocalRecommendation?.properties?.roles
+  if (role && typeof role.additionalProperties === "object")
+    role.additionalProperties = nullable(role.additionalProperties)
+  const pin = schemas.LocalUpdate?.properties?.pins
+  if (pin && typeof pin.additionalProperties === "object") pin.additionalProperties = nullable(pin.additionalProperties)
 }
 
 function normalizeComponentDescriptions(spec: OpenApiSpec) {

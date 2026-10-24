@@ -4,14 +4,26 @@ import { HttpServerRequest, HttpServerResponse, type Multipart } from "effect/un
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainEmbed } from "@vectordevai/core/brain/embed"
+import { BrainExport } from "@vectordevai/core/brain/export"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import type { BrainSchema } from "@vectordevai/core/brain/schema"
 import { Flag } from "@vectordevai/core/flag/flag"
+import { ResearchStore } from "@vectordevai/core/research/store"
+import { Git } from "@/git"
 import { Instruction } from "@/session/instruction"
 import { SessionDistill } from "@/session/distill"
+import { SessionPosting } from "@/session/posting"
 import { SessionID } from "@/session/schema"
+import { Session } from "@/session/session"
 import { InstanceHttpApi } from "../api"
-import { MemoryApiError, MemoryTooLargeError, TEXT_BYTES, UPLOAD_BYTES } from "../groups/memory"
+import {
+  IMPORT_CHARS,
+  MemoryApiError,
+  MemoryTooLargeError,
+  POSTING_CHARS,
+  TEXT_BYTES,
+  UPLOAD_BYTES,
+} from "../groups/memory"
 
 const refused = (message: string, reason?: string, document?: BrainSchema.Document) =>
   new MemoryApiError({
@@ -48,6 +60,9 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
     const knowledge = yield* BrainKnowledge.Service
     const embed = yield* BrainEmbed.Service
     const distiller = yield* SessionDistill.Service
+    const research = yield* ResearchStore.Service
+    const sessions = yield* Session.Service
+    const git = yield* Git.Service
 
     const list = Effect.fn("MemoryHttpApi.list")(function* (ctx: {
       query: { scope?: "repository" | "personal"; filter?: Brain.Filter; query?: string }
@@ -73,7 +88,7 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
     })
 
     const create = Effect.fn("MemoryHttpApi.create")(function* (ctx: {
-      payload: { kind: "preference" | "decision" | "lesson" | "fact"; text: string; scope: "repository" | "personal" }
+      payload: { kind: BrainSchema.LearnedKind; text: string; scope: "repository" | "personal" }
     }) {
       const result = yield* brain.propose(yield* instruction.place(), {
         kind: ctx.payload.kind,
@@ -103,10 +118,41 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
       return true
     })
 
+    // Research runs are the repository's, like its documents: erasing the repository or everything forgets them first.
     const erase = Effect.fn("MemoryHttpApi.erase")(function* (ctx: {
       payload: { scope: "repository" | "personal" | "all" }
     }) {
-      return yield* brain.erase(yield* instruction.place(), ctx.payload.scope)
+      const place = yield* instruction.place()
+      if (ctx.payload.scope !== "personal")
+        yield* research.forgetAll(place, ctx.payload.scope === "all" ? { everywhere: true } : {})
+      return yield* brain.erase(place, ctx.payload.scope)
+    })
+
+    const eraseSession = Effect.fn("MemoryHttpApi.eraseSession")(function* (ctx: { params: { sessionID: string } }) {
+      return yield* brain.eraseSession(yield* instruction.place(), ctx.params.sessionID)
+    })
+
+    // An attachment, never something a browser renders.
+    const exportMemory = Effect.fn("MemoryHttpApi.export")(function* (ctx: {
+      query: { scope?: BrainExport.Scope; format?: BrainExport.Format }
+    }) {
+      const place = yield* instruction.place()
+      const format = ctx.query.format ?? "markdown"
+      const body = yield* BrainExport.render({ brain, knowledge, place, scope: ctx.query.scope ?? "all", format })
+      return HttpServerResponse.text(body, {
+        contentType: `${format === "json" ? "application/json" : "text/markdown"}; charset=utf-8`,
+        headers: {
+          "content-disposition": `attachment; filename="vector-memory.${format === "json" ? "json" : "md"}"`,
+          "x-content-type-options": "nosniff",
+          "content-security-policy": "sandbox",
+          "cache-control": "no-store",
+        },
+      })
+    })
+
+    const importMemory = Effect.fn("MemoryHttpApi.import")(function* (ctx: { payload: { text: string } }) {
+      if (ctx.payload.text.length > IMPORT_CHARS) return yield* refused("Vector imports at most 2 MB at a time.", "limit")
+      return yield* BrainExport.importText({ brain, place: yield* instruction.place(), text: ctx.payload.text })
     })
 
     const tidy = Effect.fn("MemoryHttpApi.tidy")(function* () {
@@ -121,7 +167,8 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
     })
 
     const settingsOf = Effect.fnUntraced(function* (place: Brain.Place) {
-      return { learning: yield* brain.learning(), ...(yield* knowledge.settings(place)) }
+      const learn = yield* brain.learnSettings()
+      return { ...learn, ...(yield* knowledge.settings(place)) }
     })
 
     const settings = Effect.fn("MemoryHttpApi.settings")(function* () {
@@ -129,10 +176,21 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
     })
 
     const configure = Effect.fn("MemoryHttpApi.configure")(function* (ctx: {
-      payload: { learning?: boolean; repositoryDocs?: boolean; keepOriginals?: boolean }
+      payload: {
+        learning?: boolean
+        repositoryDocs?: boolean
+        keepOriginals?: boolean
+        facets?: Partial<Record<BrainSchema.Facet, boolean>>
+        modelLearner?: Brain.ModelLearner
+      }
     }) {
       const place = yield* instruction.place()
-      if (ctx.payload.learning !== undefined) yield* brain.setLearning(ctx.payload.learning)
+      if (ctx.payload.learning !== undefined || ctx.payload.facets || ctx.payload.modelLearner)
+        yield* brain.setLearnSettings({
+          ...(ctx.payload.learning === undefined ? {} : { learning: ctx.payload.learning }),
+          ...(ctx.payload.facets ? { facets: ctx.payload.facets } : {}),
+          ...(ctx.payload.modelLearner ? { modelLearner: ctx.payload.modelLearner } : {}),
+        })
       if (ctx.payload.repositoryDocs !== undefined || ctx.payload.keepOriginals !== undefined)
         yield* knowledge.configure(place, {
           ...(ctx.payload.repositoryDocs === undefined ? {} : { repositoryDocs: ctx.payload.repositoryDocs }),
@@ -507,6 +565,101 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
       return yield* knowledge.cards(yield* instruction.place(), ids, { personal: true })
     })
 
+    // --- Research -------------------------------------------------------------------------------------------------
+
+    const researchList = Effect.fn("MemoryHttpApi.research")(function* () {
+      const runs = yield* research.list(yield* instruction.place())
+      return {
+        runs,
+        bytes: runs.reduce((sum, run) => sum + run.bytes, 0),
+        limit: ResearchStore.LIMIT.repository,
+        retain: ResearchStore.LIMIT.retain,
+      }
+    })
+
+    const noRun = (id: string) => missing(id, `No research run ${id} here.`)
+
+    const researchRun = Effect.fn("MemoryHttpApi.researchRun")(function* (ctx: { params: { runID: string } }) {
+      const detail = yield* research.get(yield* instruction.place(), ctx.params.runID)
+      if (!detail) return yield* noRun(ctx.params.runID)
+      return detail
+    })
+
+    const keepResearch = Effect.fn("MemoryHttpApi.keepResearch")(function* (ctx: { params: { runID: string } }) {
+      const place = yield* instruction.place()
+      const kept = yield* research.keep(place, ctx.params.runID)
+      if (!kept) return yield* noRun(ctx.params.runID)
+      if (kept.type === "refused") return yield* refused(kept.message, "guest")
+      return (yield* research.get(place, ctx.params.runID))!
+    })
+
+    const forgetResearch = Effect.fn("MemoryHttpApi.forgetResearch")(function* (ctx: { params: { runID: string } }) {
+      if (!(yield* research.forget(yield* instruction.place(), ctx.params.runID))) return yield* noRun(ctx.params.runID)
+      return true
+    })
+
+    const forgetAllResearch = Effect.fn("MemoryHttpApi.forgetAllResearch")(function* () {
+      return yield* research.forgetAll(yield* instruction.place())
+    })
+
+    // An attachment, never something a browser renders.
+    const exportResearch = Effect.fn("MemoryHttpApi.exportResearch")(function* (ctx: {
+      params: { runID: string }
+      query: { format?: "markdown" | "json" }
+    }) {
+      const exported = yield* research.export(yield* instruction.place(), ctx.params.runID, ctx.query.format ?? "markdown")
+      if (!exported) return yield* noRun(ctx.params.runID)
+      return HttpServerResponse.text(exported.body, {
+        contentType: `${exported.type}; charset=utf-8`,
+        headers: {
+          "content-disposition": `attachment; filename="${exported.name.replace(/[^A-Za-z0-9._-]/g, "_")}"`,
+          "x-content-type-options": "nosniff",
+          "content-security-policy": "sandbox",
+          "cache-control": "no-store",
+        },
+      })
+    })
+
+    const researchSource = Effect.fn("MemoryHttpApi.researchSource")(function* (ctx: {
+      params: { runID: string; sourceID: string }
+    }) {
+      const saved = yield* research.source(yield* instruction.place(), ctx.params.runID, ctx.params.sourceID)
+      if (!saved) return yield* missing(ctx.params.sourceID, `No source ${ctx.params.sourceID} in run ${ctx.params.runID}.`)
+      return {
+        source: { ...saved.source, ...(saved.forgotten ? { forgotten: true } : {}) },
+        chunks: saved.chunks,
+        private: saved.private,
+      }
+    })
+
+    const forgetResearchSource = Effect.fn("MemoryHttpApi.forgetResearchSource")(function* (ctx: {
+      params: { runID: string; sourceID: string }
+    }) {
+      if (!(yield* research.forgetSource(yield* instruction.place(), ctx.params.runID, ctx.params.sourceID)))
+        return yield* missing(ctx.params.sourceID, `No source ${ctx.params.sourceID} in run ${ctx.params.runID}.`)
+      return true
+    })
+
+    const postingCheck = Effect.fn("MemoryHttpApi.postingCheck")(function* (ctx: {
+      payload: {
+        parts: readonly string[]
+        sessionIDs?: readonly string[]
+        typed: boolean
+        untrusted?: boolean
+        hosts?: readonly string[]
+      }
+    }) {
+      if (ctx.payload.parts.reduce((sum, part) => sum + part.length, 0) > POSTING_CHARS)
+        return yield* refused("Vector checks at most 2,000,000 characters at a time.", "limit")
+      return yield* SessionPosting.check(ctx.payload).pipe(
+        Effect.provideService(Instruction.Service, instruction),
+        Effect.provideService(Session.Service, sessions),
+        Effect.provideService(Git.Service, git),
+        Effect.provideService(Brain.Service, brain),
+        Effect.provideService(BrainKnowledge.Service, knowledge),
+      )
+    })
+
     return handlers
       .handle("list", list)
       .handle("get", get)
@@ -538,5 +691,17 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
       .handle("review", review)
       .handle("resolveReview", resolveReview)
       .handle("knowledge", cited)
+      .handle("research", researchList)
+      .handle("forgetAllResearch", forgetAllResearch)
+      .handle("researchRun", researchRun)
+      .handle("forgetResearch", forgetResearch)
+      .handle("keepResearch", keepResearch)
+      .handle("exportResearch", exportResearch)
+      .handle("researchSource", researchSource)
+      .handle("forgetResearchSource", forgetResearchSource)
+      .handle("postingCheck", postingCheck)
+      .handle("eraseSession", eraseSession)
+      .handle("export", exportMemory)
+      .handle("import", importMemory)
   }),
 )

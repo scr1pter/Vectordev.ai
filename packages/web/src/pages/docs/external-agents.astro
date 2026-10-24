@@ -7,26 +7,39 @@ export const prerender = true
 <DocsPage id="external-agents">
 
           <p>
-            A workspace can run someone else's CLI instead of Vector's own agent: Claude Code, Codex or Cursor, on the
-            CLIs and subscriptions you already have. Vector finds the CLI through your login shell, so a tool installed
-            by nvm, Homebrew or an app bundle is detected even though a desktop app inherits none of that.
+            A workspace can run a coding agent you have installed yourself instead of Vector's own agent. Host locally,
+            in the desktop app's agent launcher, lists fifteen: Claude Code, Codex, Cursor CLI, GitHub Copilot CLI,
+            Gemini CLI, Muse Code, Kilo CLI, Cline, pi, Factory Droid, Amp, Qwen Code, Kimi Code, goose and Junie.
+            Vector finds each command through your login shell, so a tool installed by nvm, Homebrew or an app bundle is
+            detected even though a desktop app inherits none of that.
           </p>
 
           <h2 id="run-one">Run one in a workspace</h2>
           <ol class="steps">
-            <li><span>1</span><div><strong>Pick the runtime</strong><p>Choose Claude Code, Codex or Cursor when you create the workspace. The tile shows the version it found, or that it is signed out.</p></div></li>
-            <li><span>2</span><div><strong>Let it work</strong><p>The run happens in an isolated worktree or copy. Vector streams its output and runs the repository's own checks afterwards.</p></div></li>
-            <li><span>3</span><div><strong>Keep talking</strong><p>The workspace has a message box. A follow-up resumes the CLI's own conversation, so it still remembers the file it just changed.</p></div></li>
+            <li><span>1</span><div><strong>Open Host locally</strong><p>Each agent shows whether it is ready, signed out or not installed on this computer. A missing one shows its vendor's own install command, which runs in Vector's terminal only when you choose Run in terminal.</p></div></li>
+            <li><span>2</span><div><strong>Start it</strong><p>Claude Code, Codex, Cursor CLI, Gemini CLI, pi and Qwen Code can run in Vector's chat; Start in terminal opens any of them in Vector's terminal instead, where you type to it yourself. The others open in the terminal. Either way the agent works in an isolated copy of the repository.</p></div></li>
+            <li><span>3</span><div><strong>Keep talking</strong><p>In the chat, a follow-up resumes the agent's own conversation, so it still remembers the file it just changed. Vector runs the repository's own checks afterwards. If one fails, the conversation shows its output with Try a fix, which sends that output to the agent as your message; Vector doesn't run the agent again on its own.</p></div></li>
           </ol>
 
           <h2 id="how-they-behave">How they behave</h2>
           <ul class="feature-list">
-            <li><strong>Your installs, your sign-in</strong><span>They run only where Vector detects that CLI installed on this computer, and the run is signed in by the subscription already in it. Vector never asks for a second key.</span></li>
-            <li><strong>Signed out is visible</strong><span>Vector asks each CLI whether it is authenticated and shows "Signed out" with the one command that fixes it.</span></li>
-            <li><strong>Resume, or an honest restart</strong><span>If a CLI refuses to resume, Vector re-briefs it with a written summary and labels that turn as restarted rather than pretending it remembers.</span></li>
-            <li><strong>They can receive, not send</strong><span>External CLIs have no teammate-message tool, so they can be told what teammates did but cannot reply. They share the checkout but not the message channel.</span></li>
-            <li><strong>Your repository rules</strong><span>They read their own instruction files, so Vector copies the <a href="/docs/vector-agent#repository-rules">repository rules</a> it saved itself, such as Vectorscope's, into the prompt it hands them.</span></li>
+            <li><strong>Your installs, your sign-in</strong><span>Vector runs the agent's own unchanged command, signed in with the agent's own sign-in, and never reads, copies or passes its credentials. The vendor bills you under its own terms; Vector's plans and Codium credits don't pay for these agents.</span></li>
+            <li><strong>Clearly yours</strong><span>Each conversation from one of these agents says it is your own agent running in Vector, not a Vector agent.</span></li>
+            <li><strong>Notes before you start</strong><span>An agent's page in Host locally carries what its vendor's terms ask you to know first: for example, that Cursor CLI runs with --force and --trust in the isolated copy, that Muse Code's Contributor mode should be off for confidential code, and that Alibaba limits Coding Plan keys to interactive use, so Qwen Code on one should start in the terminal.</span></li>
+            <li><strong>Signed out is visible</strong><span>Where an agent can report it, Vector asks whether it is signed in and shows "Signed out" with the sign-in command that fixes it.</span></li>
+            <li><strong>Resume, or an honest restart</strong><span>If an agent refuses to resume, Vector re-briefs it with a written summary and labels that turn as restarted rather than pretending it remembers.</span></li>
+            <li><strong>Only your words</strong><span>What Vector sends one of these agents is what you typed, then plain facts about the repository: the folder it works in, its <a href="/docs/vector-agent#repository-rules">repository rules</a> (they read their own instruction files, so Vector adds the rules it saved itself, such as Vectorscope's) and the files that look relevant. No role or working style of Vector's, nothing Vector remembers, and no teammates' messages: in a shared checkout they see the other agents' edits, but messages don't reach them.</span></li>
+            <li><strong>Only when you start them</strong><span>An agent runs when you start it or send it a message, and at no other time. Swarms, automations, Vectorscope reviews and Vector's background work never run one. At most four of them run at once, in the chat and the terminal together; a fifth waits for you to start it again once one has finished.</span></li>
+            <li><strong>Only for you</strong><span>They run on this computer, signed in to your own accounts, from this computer's own Vector. An invite guest can't see, start, message or resume them, or open the terminal one runs in, and Host locally is off while Vector is connected to a server elsewhere.</span></li>
+            <li><strong>Their words, unchanged</strong><span>An agent's own messages about its sign-in, its usage limits or extra usage reach you as it wrote them, and Vector never runs it again around a limit.</span></li>
+            <li><strong>No Vector plan needed</strong><span>Host locally and every agent in it work without a Vector plan or credits, and nothing in it is sold as an upgrade.</span></li>
+            <li><strong>Not used for learning</strong><span>Vector keeps these runs out of its model recommendations and its memory of failed checks, and uses none of them to train, evaluate or benchmark anything.</span></li>
           </ul>
+          <p class="note">
+            Vector is independent and is not affiliated with, endorsed by or sponsored by these agents' vendors. Their
+            names are trademarks of their owners; goose is a trademark of LF Projects, LLC, and Junie is a trademark of
+            JetBrains s.r.o. (<a href="https://www.jetbrains.com/">jetbrains.com</a>).
+          </p>
           <p class="note">
             Run them side by side with Vector's own agent and watch them all in the
             <a href="/docs/parallel-agents#agent-dashboard">Agent Dashboard</a>.

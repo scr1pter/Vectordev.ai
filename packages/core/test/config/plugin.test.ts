@@ -343,17 +343,20 @@ describe("ConfigExternalPlugin", () => {
       const location = yield* Location.Service
       const host = yield* PluginHost.make(plugins)
       const installed: string[] = []
+      const add = (spec: string) =>
+        Effect.sync(() => {
+          installed.push(spec)
+          return {
+            directory: import.meta.dir,
+            entrypoint: path.join(import.meta.dir, "../plugin/fixtures/config-promise-plugin.ts"),
+          }
+        })
       const npm = Npm.Service.of({
-        add: (spec) =>
-          Effect.sync(() => {
-            installed.push(spec)
-            return {
-              directory: import.meta.dir,
-              entrypoint: path.join(import.meta.dir, "../plugin/fixtures/config-promise-plugin.ts"),
-            }
-          }),
+        add,
+        addAs: (_source, spec) => add(spec),
         install: () => Effect.void,
         which: () => Effect.succeed(undefined),
+        whichAs: () => Effect.succeed(undefined),
       })
 
       yield* ConfigExternalPlugin.Plugin.effect(host).pipe(
@@ -400,17 +403,20 @@ describe("ConfigExternalPlugin", () => {
       const location = yield* Location.Service
       const host = yield* PluginHost.make(plugins)
       const installed: string[] = []
+      const add = (spec: string) =>
+        Effect.sync(() => {
+          installed.push(spec)
+          return {
+            directory: import.meta.dir,
+            entrypoint: path.join(import.meta.dir, "../plugin/fixtures/config-promise-plugin.ts"),
+          }
+        })
       const npm = Npm.Service.of({
-        add: (spec) =>
-          Effect.sync(() => {
-            installed.push(spec)
-            return {
-              directory: import.meta.dir,
-              entrypoint: path.join(import.meta.dir, "../plugin/fixtures/config-promise-plugin.ts"),
-            }
-          }),
+        add,
+        addAs: (_source, spec) => add(spec),
         install: () => Effect.void,
         which: () => Effect.succeed(undefined),
+        whichAs: () => Effect.succeed(undefined),
       })
 
       yield* ConfigExternalPlugin.Plugin.effect(host).pipe(

@@ -23,8 +23,12 @@ function isSensitiveAction(action: string) {
   return !PermissionPolicy.canAutoApprove(action, ["*"])
 }
 
-export function canAlwaysApprove(action: string, resources: readonly string[] | undefined) {
-  return PermissionPolicy.canAlwaysApprove(action, resources)
+export function canAlwaysApprove(
+  action: string,
+  resources: readonly string[] | undefined,
+  patterns?: readonly string[],
+) {
+  return PermissionPolicy.canAlwaysApprove(action, resources, patterns)
 }
 
 export const Source = Permission.Source
@@ -154,7 +158,7 @@ const layer = Layer.effect(
     ) {
       const session = yield* sessions.get(sessionID)
       if (!session) return yield* new SessionV2.NotFoundError({ sessionID })
-      const agent = yield* agents.resolve(agentID ?? session.agent)
+      const agent = yield* agents.resolve(agentID ?? session.agent, session.internal !== undefined)
       return [agent?.permissions ?? missingAgentPermissions, internalSessionPermissions(session.internal)]
     })
 
@@ -179,7 +183,7 @@ const layer = Layer.effect(
       const effects = input.resources.map((resource) => evaluate(input.action, resource, ...rules, remembered).effect)
       const effect: Permission.Effect = effects.includes("deny")
         ? "deny"
-        : PermissionPolicy.requiresApproval(input.action, input.save) || effects.includes("ask")
+        : PermissionPolicy.requiresApproval(input.action, input.save, input.resources) || effects.includes("ask")
           ? "ask"
           : "allow"
       return { effect, rules: all }
@@ -246,7 +250,8 @@ const layer = Layer.effect(
           const existing = pending.get(input.requestID)
           if (!existing) return yield* new NotFoundError({ requestID: input.requestID })
           const reply =
-            input.reply === "always" && !canAlwaysApprove(existing.request.action, existing.request.save)
+            input.reply === "always" &&
+            !canAlwaysApprove(existing.request.action, existing.request.save, existing.request.resources)
               ? "once"
               : input.reply
           yield* events.publish(Event.Replied, {
@@ -301,7 +306,8 @@ const layer = Layer.effect(
               EffectRuntime.catchTag("Session.NotFoundError", () => EffectRuntime.succeed(undefined)),
             )
             if (!rules) continue
-            if (denied(input, rules) || PermissionPolicy.requiresApproval(input.action, input.save)) continue
+            if (denied(input, rules) || PermissionPolicy.requiresApproval(input.action, input.save, input.resources))
+              continue
             if (
               !item.request.resources.every(
                 (resource) => evaluate(item.request.action, resource, ...rules, rememberedRules).effect === "allow",

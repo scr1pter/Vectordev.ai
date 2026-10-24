@@ -16,6 +16,8 @@ export type ExternalAgentTurn = {
   state: "running" | "done" | "failed" | "stopped"
   resumed?: boolean
   cost?: string
+  /** What the agent printed about its sign-in, plan or usage beside its reply, word for word. */
+  notices?: string[]
   streamTail?: string[]
   messages?: { id: string; text: string }[]
   activity?: ExternalAgentActivity[]

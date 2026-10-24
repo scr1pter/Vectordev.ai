@@ -23,4 +23,8 @@ export const Prompt = Schema.Struct({
   text: Schema.String,
   files: Schema.Array(FileAttachment).pipe(optional),
   agents: Schema.Array(AgentAttachment).pipe(optional),
+  agent: Schema.String.pipe(optional).annotate({
+    description:
+      "The agent that answers this prompt, such as research for Deep research. Omitted, the session's agent answers.",
+  }),
 }).annotate({ identifier: "PromptInput" })

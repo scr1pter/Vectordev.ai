@@ -1,3 +1,4 @@
+import { ExternalAgent } from "@vectordevai/schema/external-agent"
 import { externalRuntimeSetup, type ExternalRuntime } from "./external-runtimes"
 
 export type AgentRuntime = "vector" | ExternalRuntime
@@ -24,5 +25,15 @@ export function agentReviewCopy(runtime: AgentRuntime, state: { running: boolean
     sendFollowUpAriaLabel: `Send follow-up to ${label}`,
     refreshActivityLabel: `Refresh ${label} activity`,
     stopLabel: `Stop ${label}`,
+    ownership: agentOwnership(runtime),
   }
+}
+
+/** The line above an outside agent's conversation: the work is the user's own installed agent, not Vector's, and its
+    vendor is not behind Vector. Undefined for Vector's own agent. */
+export function agentOwnership(runtime: AgentRuntime) {
+  if (runtime === "vector") return undefined
+  const agent = ExternalAgent.find(runtime)
+  if (!agent) return undefined
+  return `This is your own ${agent.name} running in Vector, not a Vector agent. Vector is not affiliated with ${agent.vendor}.`
 }

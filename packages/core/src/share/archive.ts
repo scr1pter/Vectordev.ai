@@ -1,7 +1,7 @@
 export * as SessionArchive from "./archive"
 
 import path from "node:path"
-import { and, asc, eq } from "drizzle-orm"
+import { and, asc, eq, inArray } from "drizzle-orm"
 import { Context, DateTime, Effect, Layer, Option, Schema } from "effect"
 import { PublicSession } from "@vectordevai/schema/public-session"
 import { Database } from "../database/database"
@@ -194,7 +194,7 @@ const layer = Layer.effect(
         .where(
           and(
             eq(EventTable.aggregate_id, input.sessionID),
-            eq(EventTable.type, EventV2.versionedType(SessionEvent.AncillaryUsage.type, 1)),
+            inArray(EventTable.type, SessionEvent.AncillaryUsageStored),
           ),
         )
         .orderBy(asc(EventTable.seq))

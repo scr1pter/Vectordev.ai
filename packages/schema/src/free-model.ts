@@ -1,9 +1,11 @@
 import { Option, Schema } from "effect"
+import { optional } from "./schema.js"
 
 /**
  * What a free endpoint's provider may do with request content, from Vector's reviewed record in
- * packages/core/src/free-model-catalog.ts. "unreviewed" is a free endpoint Vector has not reviewed yet; it is
- * disclosed the same way as "may-train" and never treated as no-training.
+ * packages/core/src/free-model-catalog.ts. An endpoint the record does not know is "may-train", the worst case. Engines
+ * from before 23 October 2026 called such an endpoint "unreviewed" on a user's own OpenRouter account; Vector no longer
+ * produces that value and reads it as "may-train", never as no-training.
  */
 export const FreeDataPolicy = Schema.Literals(["no-training", "may-train", "unreviewed"])
 export type FreeDataPolicy = typeof FreeDataPolicy.Type
@@ -24,6 +26,10 @@ export const FreeModelInfo = Schema.Struct({
       dataPolicy: Schema.optional(FreeDataPolicy),
     }),
   ),
+  // When OpenRouter ends the model's free endpoints (milliseconds since the epoch), from its `expiration_date`. A catalog
+  // stops listing the model then, and a request for it is refused with FREE_MODEL_EXPIRED; clients that predate the
+  // field ignore it.
+  expiresAt: Schema.Finite.pipe(optional),
   // Whether the model reasons, from OpenRouter's supported parameters: "optional" means Vector may switch reasoning off
   // for a greeting; "unsupported" means an endpoint does not take the parameter. Absent when OpenRouter
   // did not say, or on a catalog published before this field existed; Vector then uses the reviewed fallback for that

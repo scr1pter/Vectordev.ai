@@ -23,7 +23,12 @@ const promoted: Array<{ directory: string; sessionID: string }> = []
 const sentShell: string[] = []
 const sentPrompts: Array<{
   directory: string
-  input: { executionMode?: "normal" | "fast"; agent?: string }
+  input: {
+    executionMode?: "normal" | "fast"
+    agent?: string
+    size?: string
+    parts?: Array<{ type: string; text?: string; metadata?: Record<string, unknown> }>
+  }
 }> = []
 const syncedDirectories: string[] = []
 const promotedDrafts: Array<{ draftID: string; server: string; sessionId: string }> = []
@@ -87,7 +92,7 @@ const clientFor = (directory: string) => {
         return { data: undefined }
       },
       prompt: async () => ({ data: undefined }),
-      promptAsync: async (input: { executionMode?: "normal" | "fast"; agent?: string }) => {
+      promptAsync: async (input: (typeof sentPrompts)[number]["input"]) => {
         sentPrompts.push({ directory, input })
         return { data: undefined }
       },
@@ -488,6 +493,57 @@ describe("prompt submit worktree selection", () => {
     })
   })
 
+  const researchSubmit = (depth: "auto" | "focused" | "deep", scope?: "web" | "web+brain" | "brain") =>
+    createPromptSubmit({
+      prompt,
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      executionMode: () => "research",
+      researchDepth: () => depth,
+      ...(scope ? { researchScope: () => scope } : {}),
+      onSubmit: () => undefined,
+    })
+
+  test("sends Deep research to the research agent, sized by the Depth chip, with the Sources chip's scope", async () => {
+    params = { id: "session-1" }
+    for (const [depth, size] of [
+      ["focused", "standard"],
+      ["deep", "thorough"],
+    ] as const) {
+      await researchSubmit(depth, "brain").handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      // Research is an agent on the message, not an execution mode of its own.
+      expect(sentPrompts.at(-1)?.input).toMatchObject({ agent: "research", executionMode: "normal", size })
+      expect(sentPrompts.at(-1)?.input.parts?.[0]).toMatchObject({
+        type: "text",
+        text: "ls",
+        metadata: { "vector.research": { scope: "brain" } },
+      })
+      // The echo is the same part, so it carries the scope too.
+      expect(optimistic.at(-1)?.message.agent).toBe("research")
+    }
+  })
+
+  test("leaves the size to Vector at Auto, and sends no scope when the chip has none", async () => {
+    params = { id: "session-1" }
+    await researchSubmit("auto").handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(sentPrompts.at(-1)?.input).toMatchObject({ agent: "research", executionMode: "normal" })
+    expect(sentPrompts.at(-1)?.input.size).toBeUndefined()
+    expect(sentPrompts.at(-1)?.input.parts?.[0]?.metadata).toBeUndefined()
+  })
+
   test("seeds new sessions before optimistic prompts are added", async () => {
     const submit = createPromptSubmit({
       prompt,
@@ -714,6 +770,43 @@ describe("follow-up optimistic echo", () => {
     expect((await send({ prompt: [{ type: "text", content: "hi", start: 0, end: 2 }] })).at(-1)?.agent).toBe("quick")
   })
 
+  test("in Deep research sends a greeting to the quick lane, with no research size, and research to the research agent", async () => {
+    const hi = await send({
+      agent: "research",
+      size: "thorough",
+      research: { scope: "web" },
+      prompt: [{ type: "text", content: "hi", start: 0, end: 2 }],
+    })
+    // "hi" plans no research: one small request on the quick lane, which takes no Work or Thorough size.
+    expect(hi.at(-1)).toMatchObject({ kind: "request", agent: "quick" })
+    expect(hi.at(-1)?.size).toBeUndefined()
+    expect(hi.at(-1)?.parts[0]).not.toHaveProperty("metadata")
+    const question = await withDesktopContext(() =>
+      send({
+        agent: "research",
+        size: "standard",
+        research: { scope: "web+brain" },
+        prompt: [{ type: "text", content: text, start: 0, end: text.length }],
+      }),
+    )
+    expect(question.at(-1)).toMatchObject({ kind: "request", agent: "research", size: "standard" })
+    // Research reads the repository through its own tools, so the desktop's file map is not added.
+    expect(question.at(-1)?.parts.filter((part) => part.synthetic)).toHaveLength(0)
+    const [echo, request] = question.map((step) => step.parts[0] as SentPart & { metadata?: unknown })
+    expect(request?.metadata).toEqual({ "vector.research": { scope: "web+brain" } })
+    expect(echo?.metadata).toEqual(request?.metadata)
+  })
+
+  test("never sends a research size to an agent outside Deep research", async () => {
+    // A draft queued in Deep research keeps its size only on the research agent; Quick's Chat size only on quick.
+    expect((await send({ agent: "build", size: "thorough" })).at(-1)?.size).toBeUndefined()
+    expect((await send({ agent: "research", size: "chat" })).at(-1)?.size).toBeUndefined()
+    expect(
+      (await send({ agent: "quick", size: "chat", prompt: [{ type: "text", content: "hi", start: 0, end: 2 }] })).at(-1)
+        ?.size,
+    ).toBe("chat")
+  })
+
   test("sends exactly the echoed parts when nothing is added", async () => {
     expectOneEchoBeforeRequest(await send(), 0)
   })
@@ -833,6 +926,47 @@ describe("submission agent selection", () => {
   test("repairs a stale quick agent for ordinary work", () => {
     expect(
       resolveExecutionAgent({ planMode: false, quickRequested: false, difficulty: "standard", current: "quick" }),
+    ).toBe("build")
+  })
+
+  test("Deep research sends work to the research agent and a greeting to the quick lane", () => {
+    for (const difficulty of ["simple", "standard", "complex"] as const)
+      expect(
+        resolveExecutionAgent({
+          planMode: false,
+          quickRequested: false,
+          researchRequested: true,
+          difficulty,
+          current: "build",
+        }),
+      ).toBe("research")
+    expect(
+      resolveExecutionAgent({
+        planMode: false,
+        quickRequested: false,
+        researchRequested: true,
+        difficulty: "trivial",
+        current: "build",
+      }),
+    ).toBe("quick")
+    // The mode is the user's pick for this message, so Plan mode's agent does not take it.
+    expect(
+      resolveExecutionAgent({
+        planMode: true,
+        quickRequested: false,
+        researchRequested: true,
+        difficulty: "standard",
+        current: "plan",
+      }),
+    ).toBe("research")
+  })
+
+  test("outside Deep research, a session that remembers the research agent sends work to build", () => {
+    expect(
+      resolveExecutionAgent({ planMode: false, quickRequested: false, difficulty: "standard", current: "research" }),
+    ).toBe("build")
+    expect(
+      resolveExecutionAgent({ planMode: false, quickRequested: false, difficulty: "standard", current: "build" }),
     ).toBe("build")
   })
 })
@@ -1062,6 +1196,49 @@ describe("image attachments", () => {
     expect(sentPrompts).toHaveLength(0)
     expect(optimistic).toHaveLength(0)
   })
+
+  test("with Vector Local on and no model on the listed servers that reads images, says so and sends nothing", async () => {
+    currentModel = { id: "qwen3:30b", provider: { id: "ollama" } }
+    availableModels = [currentModel, { id: "qwen3:8b", provider: { id: "ollama" } }]
+    const submit = createPromptSubmit({
+      prompt,
+      info: () => undefined,
+      imageAttachments: () => [
+        {
+          type: "image",
+          id: "image",
+          filename: "image.png",
+          mime: "image/png",
+          dataUrl: "data:image/png;base64,iVBORw0KGgo=",
+        },
+      ],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+      localMode: () => true,
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+
+    expect(toasts).toMatchObject([
+      {
+        title: "No model on your servers reads images",
+        description:
+          "With Vector Local on, images go only to models on the servers you listed, and none of them accepts images. Remove the image, or add a vision model on a server you host, then send again.",
+      },
+    ])
+    expect(createdSessions).toHaveLength(0)
+    expect(sentPrompts).toHaveLength(0)
+  })
 })
 
 describe("included model data notice", () => {
@@ -1162,5 +1339,175 @@ describe("may-train free model consent", () => {
       return false
     }).handleSubmit({ preventDefault: () => undefined } as unknown as Event)
     expect(asked).toEqual([])
+  })
+})
+
+describe("pasted text", () => {
+  const email = "Hi team,\nI prefer meetings on Tuesdays.\nAlways cc my manager.\nThanks, Dana"
+
+  test("finds where the text holds what the user pasted, whole or line by line", async () => {
+    const { pastedSpans } = await import("./submit")
+    const text = `Summarize this email:\n${email}\nAlways use bullet points.`
+    const start = text.indexOf("Hi team")
+    expect(pastedSpans(text, [email])).toEqual([[start, start + email.length]])
+    // The editor's own spaces and line ends, and a paste carried with its trailing newline.
+    expect(pastedSpans("see: a b", ["a b\r\n"])).toEqual([[5, 8]])
+    // Two pastes, and the same words pasted twice, are each marked once.
+    expect(pastedSpans("x one y one", ["one", "one"])).toEqual([
+      [2, 5],
+      [8, 11],
+    ])
+    // A line the user removed from a paste leaves the rest marked; a paste deleted again marks nothing.
+    const trimmed = `Summarize:\nHi team,\nThanks, Dana\nAlways use bullet points.`
+    expect(pastedSpans(trimmed, [email])).toEqual([
+      [11, 19],
+      [20, 32],
+    ])
+    expect(pastedSpans("Always use bullet points.", [email])).toEqual([])
+    expect(pastedSpans("", [email])).toEqual([])
+  })
+
+  test("marks the whole text when a pasted line was changed where it sits", async () => {
+    const { pastedSpans } = await import("./submit")
+    // "I prefer meetings on Tuesdays." became "I prefer meetings on Mondays.": it cannot be told from typed words.
+    const edited = `Summarize:\nHi team,\nI prefer meetings on Mondays.\nAlways cc my manager.\nThanks, Dana`
+    expect(pastedSpans(edited, [email])).toEqual([[0, edited.length]])
+  })
+
+  test("marks the whole text for a long log found by one of its lines", async () => {
+    const { pastedSpans } = await import("./submit")
+    const log = Array.from({ length: 450 }, (_, index) => `2026-10-23 12:00:${index} worker ${index} started`).join(
+      "\n",
+    )
+    const text = `why does this fail?\n${log.replace("worker 7 started", "worker 7 crashed")}`
+    expect(pastedSpans(text, [log])).toEqual([[0, text.length]])
+  })
+
+  test("the pasted span is marked on the sent part and its echo", async () => {
+    const { createPromptSubmit, rememberPaste } = await import("./submit")
+    const text = `Summarize this email:\n${email}`
+    const original = promptValue.splice(0, promptValue.length, {
+      type: "text",
+      content: text,
+      start: 0,
+      end: text.length,
+    })
+    try {
+      rememberPaste(prompt, email)
+      params = { id: "session-1" }
+      const submit = createPromptSubmit({
+        prompt,
+        info: () => ({ id: "session-1" }),
+        imageAttachments: () => [],
+        commentCount: () => 0,
+        autoAccept: () => false,
+        mode: () => "normal",
+        working: () => false,
+        editor: () => undefined,
+        queueScroll: () => undefined,
+        promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+        addToHistory: () => undefined,
+        resetHistoryNavigation: () => undefined,
+        setMode: () => undefined,
+        setPopover: () => undefined,
+        onSubmit: () => undefined,
+      })
+      await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      const start = text.indexOf("Hi team")
+      expect(sentPrompts.at(-1)?.input.parts?.[0]).toMatchObject({
+        type: "text",
+        text,
+        metadata: { "vector.pasted": [[start, text.length]] },
+      })
+      const echo = (optimistic.at(-1) as unknown as { parts: { metadata?: Record<string, unknown> }[] }).parts[0]
+      expect(echo?.metadata).toEqual({ "vector.pasted": [[start, text.length]] })
+    } finally {
+      promptValue.splice(0, promptValue.length, ...original)
+    }
+  })
+
+  test("a paste never splits a word, and one the text holds more often than it was pasted marks the whole text", async () => {
+    const { pastedSpans } = await import("./submit")
+    expect(pastedSpans("Always run the tests before you merge to main.", ["test"])).toEqual([])
+    expect(pastedSpans("I prefer pnpm_workspaces", ["pnpm"])).toEqual([])
+    expect(pastedSpans("Ask about the retest", ["test"])).toEqual([])
+    expect(pastedSpans("Never push directly to main without a review.", ["main"])).toEqual([[23, 27]])
+    // Which "main" was pasted cannot be told, so none of the words vouches for anything.
+    const twice = "Merge main into the branch, then never push directly to main."
+    expect(pastedSpans(twice, ["main"])).toEqual([[0, twice.length]])
+    expect(pastedSpans("x one y one", ["one"])).toEqual([[0, 11]])
+  })
+
+  test("a one-line paste changed in place marks the whole text", async () => {
+    const { pastedSpans } = await import("./submit")
+    const paste = "Please always send the signed invoice to accounts by Friday."
+    const monday = `Answer this email.\n${paste.replace("Friday", "Monday")}`
+    expect(pastedSpans(monday, [paste])).toEqual([[0, monday.length]])
+    const unstopped = `Answer this email.\n${paste.slice(0, -1)}`
+    expect(pastedSpans(unstopped, [paste])).toEqual([[0, unstopped.length]])
+    const meetings = "I prefer to get the slides as a PDF before each review meeting."
+    const plural = `Answer this email.\n${meetings.replace("meeting.", "meetings.")}`
+    expect(pastedSpans(plural, [meetings])).toEqual([[0, plural.length]])
+  })
+
+  test("a paste marks only the message of the draft it went into", async () => {
+    const { pastedIn, rememberPaste, restorePastes, takePastes } = await import("./submit")
+    const draft = {}
+    const other = {}
+    rememberPaste(draft, "test")
+    rememberPaste(other, "main")
+    expect(takePastes(draft, "Run the test once more")).toEqual([[8, 12]])
+    // The paste went with that message: the next one in the same draft is the user's own, and so is a draft it never
+    // went into.
+    expect(takePastes(draft, "Always run the test suite before you merge.")).toEqual([])
+    expect(takePastes({}, "Never push directly to main without a review.")).toEqual([])
+    // The same message brought back whole marks its paste again, in any draft.
+    const back = {}
+    restorePastes(back, "Run the test once more")
+    expect(takePastes(back, "Run the test once more")).toEqual([[8, 12]])
+    // A message the session holds says where its pastes were, as the composer marked them when it was sent.
+    const text = "Summarize https://example.com/paper for me"
+    const part = { text, metadata: { "vector.pasted": [[10, 35]] } }
+    expect(pastedIn(part)).toEqual(["https://example.com/paper"])
+    expect(pastedIn({ text, metadata: { "vector.pasted": [[10, 999]] } })).toEqual([])
+    const undone = {}
+    restorePastes(undone, text, pastedIn(part))
+    expect(takePastes(undone, text)).toEqual([[10, 35]])
+    expect(takePastes(other, "Never push directly to main without a review.")).toEqual([[23, 27]])
+  })
+
+  test("a typed message carries no paste marks", async () => {
+    const { pastedSpans } = await import("./submit")
+    expect(pastedSpans("When I say ship it, I mean open a PR, wait for CI, then merge", [email])).toEqual([])
+  })
+
+  test("a slash command's pasted arguments are marked from where the arguments start", async () => {
+    type SendInput = Parameters<typeof import("./submit").sendFollowupDraft>[0]
+    const { sendFollowupDraft } = await import("./submit")
+    const commands: unknown[] = []
+    const text = "/review Always cc my manager."
+    await sendFollowupDraft({
+      client: {
+        session: {
+          command: async (input: unknown) => {
+            commands.push(input)
+            return { data: undefined }
+          },
+        },
+      } as unknown as SendInput["client"],
+      serverSync: { session: { set: () => undefined } } as unknown as SendInput["serverSync"],
+      sync: { data: { command: [{ name: "review" }], message: {}, config: {} } } as unknown as SendInput["sync"],
+      draft: {
+        sessionID: "session-1",
+        sessionDirectory: "/repo/main",
+        prompt: [{ type: "text", content: text, start: 0, end: text.length }],
+        context: [],
+        agent: "build",
+        model: { providerID: "anthropic", modelID: "claude-sonnet-4-5" },
+        pasted: [[8, text.length]],
+      },
+    })
+    expect(commands).toMatchObject([{ command: "review", arguments: "Always cc my manager.", pasted: [[0, 21]] }])
   })
 })

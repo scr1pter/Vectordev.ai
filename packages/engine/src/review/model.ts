@@ -98,6 +98,9 @@ export const resolveReviewModel = Effect.fn("ReviewModel.resolve")(function* (in
   const model = yield* provider.getModel(ref.providerID, ref.modelID).pipe(
     Effect.catch((error) =>
       Effect.gen(function* () {
+        // Vector Local keeps the model off: say why, rather than asking for a key.
+        if (!ci && error.unavailable?.reason === "off-in-local")
+          return yield* new ReviewModelError({ message: `${name} cannot review: ${error.unavailable.message}` })
         if (!ci)
           return yield* new ReviewModelError({ message: `${name} is not available. Check the provider and its key.` })
         const listed = (yield* catalog.get())[ref.providerID]
@@ -119,12 +122,16 @@ export const resolveReviewModel = Effect.fn("ReviewModel.resolve")(function* (in
   if (refusal) return yield* new ReviewModelError({ message: refusal })
 
   const signIn = yield* auth.get(model.providerID).pipe(Effect.catch(() => Effect.succeed(undefined)))
+  // A review on a server on this computer, or on a private one on the model server list in effect (the user's or the
+  // company's, without an edit still held for the owner), has no per-token price.
+  const local = (yield* provider.line(model))?.local ?? false
   const costKind = SpendGuard.costKindOf({
     free: isFreeModel(model),
     oauthPlan:
       signIn?.type === "oauth" &&
       providerCredentialAllowed(model.providerID, signIn, Boolean(model.api.npm || model.api.url)),
     listed: model.cost.input > 0 || model.cost.output > 0,
+    local,
   })
 
   return {

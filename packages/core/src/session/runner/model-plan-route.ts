@@ -14,6 +14,7 @@ import { OpenAICompatibleChat } from "@vectordevai/llm/protocols/openai-compatib
 import { Auth } from "@vectordevai/llm/route"
 import { FreeModels } from "../../free-models"
 import { ModelPlans } from "../../model-plans"
+import { Egress } from "../../local-mode/egress"
 import { ModelPlanStatus } from "../../model-plan-status"
 import { ModelV2 } from "../../model"
 import { SessionMessage } from "../message"
@@ -33,6 +34,10 @@ export function modelPlanRoute(
         ...transport,
         prepare: (input) =>
           Effect.gen(function* () {
+            // Vector Local keeps Vector Codium off. The runner refuses it before a route is built
+            // (SessionRunnerModel.allowedInLocal); this holds for any other caller of the route.
+            const decided = Egress.decide({ source: "vector-codium", url: ModelPlans.CHAT_URL })
+            if (decided.decision !== "allow") return yield* Effect.fail(invalidRequest(new Error(decided.reason)))
             const route = yield* Effect.tryPromise({
               try: () =>
                 ModelPlans.resolveRoute({

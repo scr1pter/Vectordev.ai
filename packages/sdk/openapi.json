@@ -510,7 +510,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Config"
+                  "$ref": "#/components/schemas/ConfigWithLocks"
                 }
               }
             }
@@ -578,17 +578,24 @@
             }
           },
           "403": {
-            "description": "ForbiddenError",
+            "description": "ConfigLocked | ForbiddenError",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ForbiddenError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ConfigLocked"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ForbiddenError"
+                    }
+                  ]
                 }
               }
             }
           }
         },
-        "description": "Update global Vector configuration settings and preferences.",
+        "description": "Update global Vector configuration settings and preferences. Under a company lock, a change to a key the company keeps fails with ConfigLocked; the parts of Vector Local the company leaves to you still change.",
         "summary": "Update global configuration",
         "requestBody": {
           "content": {
@@ -1112,7 +1119,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Config"
+                  "$ref": "#/components/schemas/ConfigWithLocks"
                 }
               }
             }
@@ -1197,17 +1204,24 @@
             }
           },
           "403": {
-            "description": "ForbiddenError",
+            "description": "ConfigLocked | ForbiddenError",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ForbiddenError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ConfigLocked"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ForbiddenError"
+                    }
+                  ]
                 }
               }
             }
           }
         },
-        "description": "Update Vector configuration settings and preferences.",
+        "description": "Update Vector configuration settings and preferences. Under a company lock, a change to a key the company keeps fails with ConfigLocked.",
         "summary": "Update configuration",
         "requestBody": {
           "content": {
@@ -1411,7 +1425,13 @@
                           },
                           "reason": {
                             "type": "string",
-                            "enum": ["sign-in-paused", "provider-not-configured", "disabled", "no-models"]
+                            "enum": [
+                              "sign-in-paused",
+                              "provider-not-configured",
+                              "disabled",
+                              "no-models",
+                              "off-in-local"
+                            ]
                           },
                           "message": {
                             "type": "string"
@@ -5401,6 +5421,1186 @@
         ]
       }
     },
+    "/local": {
+      "get": {
+        "tags": ["local"],
+        "operationId": "local.get",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Vector Local's policy in effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "The Vector Local policy in effect for this Vector: on or off, Web access, the model server list, the services you allowed and what the policy files said. Also a change to your config that would loosen it and waits for you, the keys a company lock keeps, where the network log is kept, and every kind of request Vector makes.",
+        "summary": "Get Vector Local",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.get({\n  ...\n})"
+          }
+        ]
+      },
+      "patch": {
+        "tags": ["local"],
+        "operationId": "local.update",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Vector Local after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "LocalError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LocalError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "LocalConfirmError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalConfirmError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Change Vector Local in your user config. A change is judged by what it changes in the settings in effect, so a change your config holds is never part of it. A change that makes it stricter applies at once. One that would loosen it (turn it off, a looser Web access, a new model server, a new or removed identity pin for a server on the list, a newly allowed service or site) fails with LocalConfirmError and the list of what it loosens, unless the request says `confirm: true`, which an owner's app sends only after asking. Turning Vector Local on applies at once, and holds the services, internet model servers and sites your config lets through until you confirm them. With `held`, it applies the change your config holds instead, and only as `held` lists it. A Vector an agent started cannot loosen it, even while Vector Local is off, and under a company lock only the keys your company left to you change.",
+        "summary": "Change Vector Local",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocalUpdate"
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.update({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/local/egress": {
+      "get": {
+        "tags": ["local"],
+        "operationId": "local.egress.list",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "required": false
+          },
+          {
+            "name": "session",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "blocked",
+            "in": "query",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "enum": ["true", "false"]
+                }
+              ]
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The network log in memory, oldest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EgressEvent"
+                  },
+                  "description": "The network log in memory, oldest first"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "The last 2,000 requests Vector decided while Vector Local was on: when, which kind of request, where it went (origin and class), the session, the size it sent, and whether it was allowed or blocked, with the rule. Never a path, a query, a header or a body.",
+        "summary": "List what Vector sent",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.egress.list({\n  ...\n})"
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["local"],
+        "operationId": "local.egress.clear",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The network log was erased",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "description": "The network log was erased"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "LocalError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LocalError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Erase the network log: the events in memory, the counters and the files on this computer. Under a company lock the company sets how long the log is kept, so it fails with LocalError (locked).",
+        "summary": "Erase what Vector sent",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.egress.clear({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/local/egress/summary": {
+      "get": {
+        "tags": ["local"],
+        "operationId": "local.egress.summary",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "session",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Counters for one session, or for this Vector",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EgressSummary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Model calls by origin, pages read and the other hosts they loaded, searches, the memory requests carried, and blocked requests by source. A session's counters include its subagents and helpers.",
+        "summary": "Summarize what Vector sent",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.egress.summary({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/local/egress/export": {
+      "get": {
+        "tags": ["local"],
+        "operationId": "local.egress.export",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "required": false
+          },
+          {
+            "name": "session",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "blocked",
+            "in": "query",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "enum": ["true", "false"]
+                }
+              ]
+            },
+            "required": false
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["jsonl", "csv"]
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/x-ndjson": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Every event the network log keeps on this computer (30 days unless set otherwise), as JSON lines or CSV.",
+        "summary": "Export what Vector sent",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.egress.export({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/local/egress/report": {
+      "post": {
+        "tags": ["local"],
+        "operationId": "local.egress.report",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "How many events the log took",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "number",
+                  "description": "How many events the log took"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Requests the desktop app's own windows made or blocked, which its main process decides and records while it applies Vector Local, added to this Vector's network log whatever this Vector's own Vector Local setting is.",
+        "summary": "Add events to the network log",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "events": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/EgressEvent"
+                    },
+                    "maxItems": 500
+                  }
+                },
+                "required": ["events"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.egress.report({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/local/detect": {
+      "post": {
+        "tags": ["local"],
+        "operationId": "local.detect",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Model servers answering on this computer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LocalServer"
+                  },
+                  "description": "Model servers answering on this computer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Find the model servers running on this computer: Ollama, LM Studio, vLLM, llama.cpp and SGLang on their usual ports at 127.0.0.1 and ::1. It never scans your network; add a server elsewhere by its address.",
+        "summary": "Find model servers",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ports": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    },
+                    "maxItems": 16
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.detect({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/local/probe": {
+      "post": {
+        "tags": ["local"],
+        "operationId": "local.probe",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The server at the address, or why none was read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalProbeResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Read the server at an address you typed: what kind it is, its version, its models with their context, tools and image support, and the identity Vector pins when you add it. It asks for these only; it sends no prompt. With Vector Local on, only that server is let through while it is read, and Web access None keeps internet servers blocked.",
+        "summary": "Read a model server",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string"
+                  },
+                  "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": ["url"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.probe({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/local/servers": {
+      "post": {
+        "tags": ["local"],
+        "operationId": "local.servers.add",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The server, on the list and added as a provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalAddedServer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "LocalError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LocalError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "LocalConfirmError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalConfirmError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Read the server at an address, put it on the model server list with the identity it answered with, and add it to your user config as a provider with the models it runs, each with its context, reply limit, tool calling and image input. Its cloud models are left out. With Vector Local on, listing a server loosens it, so the request needs `confirm: true`, and fails with LocalConfirmError otherwise; so does adding a server on the list again when it answers as a different server, and `identity` says what changed. Headers are used to read the server and are not saved.",
+        "summary": "Add a model server",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string"
+                  },
+                  "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "confirm": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["url"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.servers.add({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/local/check": {
+      "post": {
+        "tags": ["local"],
+        "operationId": "local.check",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One row per layer, and the model check when a model was named",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalCheckResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "LocalError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LocalError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Read every layer of Vector Local, one row each: the switch, the policy, a held change, the network guard, unlabelled requests, Vector's own services, Web access, each model server on the list (it answers, as the server it was when added) and the network log. With `model`, it also runs that model through 2 or 3 requests with the role's real tools (agent, subagent, review for Vectorscope, judge or research) and records the result in your user config; a model the model catalog lists at a cloud address keeps the catalog's limits. It reads only servers you or your company host: never a cloud AI service, and never a server on the internet that is not on your model server list. It never loads a model too big for free memory without `confirmed`.",
+        "summary": "Check Vector Local",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": ["agent", "subagent", "review", "judge", "research"]
+                  },
+                  "confirmed": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.check({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/local/grant": {
+      "post": {
+        "tags": ["local"],
+        "operationId": "local.grant",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The grant was given",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "description": "The grant was given"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "LocalError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LocalError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Let the next request of a kind Vector Local asks about through, such as a model download or a manual update check. Each grant answers one ask and is never saved. Allow a service for good with PATCH /local instead.",
+        "summary": "Allow a request once",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "source": {
+                    "type": "string"
+                  }
+                },
+                "required": ["source"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.grant({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/local/startup/release": {
+      "post": {
+        "tags": ["local"],
+        "operationId": "local.startup.release",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Whether this Vector was holding them",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "description": "Whether this Vector was holding them"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "On a desktop first run, the app starts its engine with the model catalog's refresh, the free models and Codium plans catalogs and the provider policy held until the person chooses how to run models. This lets them go: each loads now, in this Vector, with no restart. A Vector that holds nothing answers false.",
+        "summary": "Let the startup fetches go",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.startup.release({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/local/recommend": {
+      "get": {
+        "tags": ["local"],
+        "operationId": "local.recommend",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Model suggestions for this computer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalRecommendation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "This computer's memory and GPUs, and the model families that fit them for each role, as dated examples from the publishers' own repositories or the Ollama library. Check each model's licence.",
+        "summary": "Suggest models",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.recommend({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/mcp": {
       "get": {
         "tags": ["mcp"],
@@ -6371,7 +7571,7 @@
                 "properties": {
                   "kind": {
                     "type": "string",
-                    "enum": ["preference", "decision", "lesson", "fact"]
+                    "enum": ["preference", "decision", "lesson", "fact", "term"]
                   },
                   "text": {
                     "type": "string"
@@ -6557,6 +7757,10 @@
                   "pinned": {
                     "type": "boolean"
                   },
+                  "facet": {
+                    "type": "string",
+                    "enum": ["format", "workflow", "vocabulary", "tooling", "sources", "style"]
+                  },
                   "action": {
                     "type": "string",
                     "enum": ["approve", "reject", "archive", "restore", "undo"]
@@ -6736,6 +7940,249 @@
         ]
       }
     },
+    "/memory/sessions/{sessionID}": {
+      "delete": {
+        "tags": ["memory"],
+        "operationId": "memory.eraseSession",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "The session, such as ses_4k2q7m3x"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "How many entries were erased",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "number",
+                  "description": "How many entries were erased"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Forget every entry Vector learned whose only evidence is this session, so it is not learned again. What you wrote and what other sessions also taught stay. The session keeps its messages until you delete them.",
+        "summary": "Erase what Vector learned in a session",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.eraseSession({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/export": {
+      "get": {
+        "tags": ["memory"],
+        "operationId": "memory.export",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["personal", "repository", "all"]
+            },
+            "required": false
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["markdown", "json"]
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "text/markdown": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Everything Vector keeps for this repository, for you, or both, as an attachment: a Markdown page per kind with each entry's evidence and what Vector read from documents, or with `format=json` the same as data. Never the documents' files.",
+        "summary": "Export memory",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.export({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/import": {
+      "post": {
+        "tags": ["memory"],
+        "operationId": "memory.import",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What the import brought in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryImportResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Read an export (Markdown or JSON) back in. Every preference, term, decision, lesson and fact it holds lands waiting for your approval, so a changed file cannot put memory in use; rules stay in their files. What you forgot is not imported again.",
+        "summary": "Import memory",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": ["text"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.import({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/memory/tidy": {
       "post": {
         "tags": ["memory"],
@@ -6854,7 +8301,7 @@
             }
           }
         },
-        "description": "Whether Vector may add to its memory as it works.",
+        "description": "Whether Vector may add to its memory as it works, which facets of how you work it may learn, and when the optional model learner runs.",
         "summary": "Get memory settings",
         "x-codeSamples": [
           {
@@ -6916,7 +8363,7 @@
             }
           }
         },
-        "description": "Turn Vector's learning on or off, reading the repository's own docs, and keeping originals of added documents. Memory already saved stays until you erase it; turning repository docs off forgets what Vector read of them, and turning originals off deletes the kept copies.",
+        "description": "Turn Vector's learning on or off, each facet of how you work it may learn, the optional model learner, reading the repository's own docs, and keeping originals of added documents. Memory already saved stays until you erase it; turning repository docs off forgets what Vector read of them, and turning originals off deletes the kept copies.",
         "summary": "Change memory settings",
         "requestBody": {
           "content": {
@@ -6932,6 +8379,33 @@
                   },
                   "keepOriginals": {
                     "type": "boolean"
+                  },
+                  "facets": {
+                    "type": "object",
+                    "properties": {
+                      "format": {
+                        "type": "boolean"
+                      },
+                      "workflow": {
+                        "type": "boolean"
+                      },
+                      "vocabulary": {
+                        "type": "boolean"
+                      },
+                      "tooling": {
+                        "type": "boolean"
+                      },
+                      "sources": {
+                        "type": "boolean"
+                      },
+                      "style": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "modelLearner": {
+                    "$ref": "#/components/schemas/MemoryModelLearner"
                   }
                 },
                 "additionalProperties": false
@@ -8798,6 +10272,86 @@
         ]
       }
     },
+    "/memory/posting-check": {
+      "post": {
+        "tags": ["memory"],
+        "operationId": "memory.posting.check",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What may be posted, and what overlaps the owner's memory",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryPostingResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Compares text Vector is about to post or commit with the owner's memory: how they work, what they told Vector about themselves, and private documents the given sessions recalled. A sentence that repeats one is taken out of text Vector wrote, and only shown for text the user typed. A fork's links and images may point only at GitHub.",
+        "summary": "Check text before Vector posts it",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryPostingPayload"
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.posting.check({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/memory/knowledge": {
       "get": {
         "tags": ["memory"],
@@ -8877,6 +10431,638 @@
           {
             "lang": "js",
             "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.knowledge({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/research": {
+      "get": {
+        "tags": ["memory"],
+        "operationId": "memory.research.list",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The repository's research runs, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryResearchList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Deep research runs this repository's brain keeps: question, date, sources, notes, size and whether you kept it. Runs nobody keeps are deleted after `retain` days, and past `limit` bytes the oldest of them go first.",
+        "summary": "List research runs",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.research.list({\n  ...\n})"
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["memory"],
+        "operationId": "memory.research.forgetAll",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "How many runs were forgotten",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "number",
+                  "description": "How many runs were forgotten"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Forget every research run of the repository: their pages, notes and reports. Vector does not keep those pages again on its own.",
+        "summary": "Forget all research in this repository",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.research.forgetAll({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/research/{runID}": {
+      "get": {
+        "tags": ["memory"],
+        "operationId": "memory.research.get",
+        "parameters": [
+          {
+            "name": "runID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A research run's id, such as run_4k2q7m3x9abcd"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One run with its sources, notes and report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryResearchDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "One run: its plan, the queries it sent, its sources (skipped ones too), its notes and its latest report.",
+        "summary": "Get a research run",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.research.get({\n  ...\n})"
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["memory"],
+        "operationId": "memory.research.forget",
+        "parameters": [
+          {
+            "name": "runID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A research run's id, such as run_4k2q7m3x9abcd"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The run was forgotten",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "description": "The run was forgotten"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Forget a run and everything it holds: its pages, notes and report. Vector does not keep those pages again on its own. The session keeps its messages.",
+        "summary": "Forget a research run",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.research.forget({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/research/{runID}/keep": {
+      "post": {
+        "tags": ["memory"],
+        "operationId": "memory.research.keep",
+        "parameters": [
+          {
+            "name": "runID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A research run's id, such as run_4k2q7m3x9abcd"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The run after it was kept",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryResearchDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Keep the run past the retention, and its report in the brain, where the owner's requests can recall it like any private document. Sessions with invited guests and models that may train on your prompts never get it. Its pages stay held. A run an invited guest acted in cannot be kept.",
+        "summary": "Keep a research run",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.research.keep({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/research/{runID}/export": {
+      "get": {
+        "tags": ["memory"],
+        "operationId": "memory.research.export",
+        "parameters": [
+          {
+            "name": "runID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A research run's id, such as run_4k2q7m3x9abcd"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["markdown", "json"]
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "text/markdown": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "The run as an attachment: the report with a bibliography as Markdown, or with `format=json` the run, its queries, sources, notes and report.",
+        "summary": "Export a research run",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.research.export({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/research/{runID}/sources/{sourceID}": {
+      "get": {
+        "tags": ["memory"],
+        "operationId": "memory.research.source",
+        "parameters": [
+          {
+            "name": "runID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A research run's id, such as run_4k2q7m3x9abcd"
+            },
+            "required": true
+          },
+          {
+            "name": "sourceID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A source's number in its run, such as S3"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A source with the text Vector saved from it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryResearchSourceText"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "One source of a run and the text Vector saved from its page, chunk by chunk, as citations open it.",
+        "summary": "Read a research source",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.research.source({\n  ...\n})"
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["memory"],
+        "operationId": "memory.research.forgetSource",
+        "parameters": [
+          {
+            "name": "runID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A research run's id, such as run_4k2q7m3x9abcd"
+            },
+            "required": true
+          },
+          {
+            "name": "sourceID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A source's number in its run, such as S3"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The source's page was forgotten",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "description": "The source's page was forgotten"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Forget the text Vector saved from one page of a run. The source stays listed as forgotten, and a report saved after this marks the notes that quoted it. Vector does not keep that page again on its own.",
+        "summary": "Forget a research source",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.research.forgetSource({\n  ...\n})"
           }
         ]
       }
@@ -10484,7 +12670,13 @@
                           },
                           "reason": {
                             "type": "string",
-                            "enum": ["sign-in-paused", "provider-not-configured", "disabled", "no-models"]
+                            "enum": [
+                              "sign-in-paused",
+                              "provider-not-configured",
+                              "disabled",
+                              "no-models",
+                              "off-in-local"
+                            ]
                           },
                           "message": {
                             "type": "string"
@@ -10492,6 +12684,12 @@
                         },
                         "required": ["id", "reason", "message"],
                         "additionalProperties": false
+                      }
+                    },
+                    "hosted": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/HostedModel"
                       }
                     }
                   },
@@ -13636,6 +15834,22 @@
                   },
                   "arguments": {
                     "type": "string"
+                  },
+                  "pasted": {
+                    "type": "array",
+                    "items": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "integer"
+                        }
+                      ],
+                      "maxItems": 2,
+                      "minItems": 2
+                    }
                   },
                   "command": {
                     "type": "string"
@@ -23404,6 +25618,18 @@
             "$ref": "#/components/schemas/EventSessionCompacted"
           },
           {
+            "$ref": "#/components/schemas/EventResearchUpdated"
+          },
+          {
+            "$ref": "#/components/schemas/EventLocalUpdated"
+          },
+          {
+            "$ref": "#/components/schemas/EventLocalBlocked"
+          },
+          {
+            "$ref": "#/components/schemas/EventMemoryLearned"
+          },
+          {
             "$ref": "#/components/schemas/EventVcsBranchUpdated"
           },
           {
@@ -25357,6 +27583,9 @@
             "items": {
               "$ref": "#/components/schemas/PromptAgentAttachment"
             }
+          },
+          "agent": {
+            "type": "string"
           }
         },
         "required": ["text"],
@@ -25494,7 +27723,7 @@
       },
       "CostKind": {
         "type": "string",
-        "enum": ["free", "priced", "plan", "unknown"]
+        "enum": ["free", "priced", "plan", "local", "unknown"]
       },
       "QuestionOption": {
         "type": "object",
@@ -25558,6 +27787,10 @@
         "items": {
           "type": "string"
         }
+      },
+      "LocalWeb": {
+        "type": "string",
+        "enum": ["ask", "network", "none"]
       },
       "GlobalEvent": {
         "type": "object",
@@ -25655,7 +27888,7 @@
                       },
                       "reason": {
                         "type": "string",
-                        "enum": ["sign-in-paused", "provider-not-configured", "disabled", "no-models"]
+                        "enum": ["sign-in-paused", "provider-not-configured", "disabled", "no-models", "off-in-local"]
                       },
                       "message": {
                         "type": "string"
@@ -25926,7 +28159,7 @@
                       },
                       "purpose": {
                         "type": "string",
-                        "enum": ["title"]
+                        "enum": ["title", "memory"]
                       },
                       "model": {
                         "$ref": "#/components/schemas/ModelRef"
@@ -28786,6 +31019,138 @@
                   },
                   "type": {
                     "type": "string",
+                    "enum": ["research.updated"]
+                  },
+                  "properties": {
+                    "type": "object",
+                    "properties": {
+                      "runID": {
+                        "type": "string"
+                      },
+                      "sourceID": {
+                        "type": "string"
+                      },
+                      "noteID": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": ["planned", "running", "done", "stopped", "failed", "forgotten"]
+                      }
+                    },
+                    "required": ["runID", "status"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["id", "type", "properties"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["local.updated"]
+                  },
+                  "properties": {
+                    "type": "object",
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "web": {
+                        "$ref": "#/components/schemas/LocalWeb"
+                      },
+                      "lock": {
+                        "type": "boolean"
+                      },
+                      "held": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": ["enabled", "web", "lock", "held"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["id", "type", "properties"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["local.blocked"]
+                  },
+                  "properties": {
+                    "type": "object",
+                    "properties": {
+                      "source": {
+                        "type": "string"
+                      },
+                      "origin": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["source", "origin"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["id", "type", "properties"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["memory.learned"]
+                  },
+                  "properties": {
+                    "type": "object",
+                    "properties": {
+                      "sessionID": {
+                        "type": "string",
+                        "pattern": "^ses"
+                      },
+                      "entryIDs": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "messageID": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["sessionID", "entryIDs"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["id", "type", "properties"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "type": {
+                    "type": "string",
                     "enum": ["vcs.branch.updated"]
                   },
                   "properties": {
@@ -29356,6 +31721,13 @@
               "chunkTimeout": {
                 "type": "integer",
                 "exclusiveMinimum": 0
+              },
+              "concurrency": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "forwards": {
+                "type": "boolean"
               }
             },
             "additionalProperties": {}
@@ -29685,6 +32057,783 @@
             "exclusiveMinimum": 0
           }
         },
+        "additionalProperties": false
+      },
+      "LocalAllowed": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reason": {
+            "type": "string"
+          },
+          "added_at": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "added_by": {
+            "type": "string",
+            "enum": ["app", "cli", "managed"]
+          }
+        },
+        "required": ["source", "reason", "added_at", "added_by"],
+        "additionalProperties": false
+      },
+      "LocalPinConfig": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "The kind of server Vector found, such as ollama or vllm"
+          },
+          "version": {
+            "type": "string"
+          },
+          "models": {
+            "type": "string"
+          },
+          "spki": {
+            "type": "string"
+          }
+        },
+        "required": ["kind"],
+        "additionalProperties": false
+      },
+      "LocalCheckedConfig": {
+        "type": "object",
+        "properties": {
+          "server_version": {
+            "type": "string"
+          },
+          "checked_at": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "result": {
+            "type": "string",
+            "enum": ["works", "no-tools", "schema-rejected", "context-too-small", "failed"]
+          },
+          "message": {
+            "type": "string"
+          },
+          "ttft_ms": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": ["checked_at", "result"],
+        "additionalProperties": false
+      },
+      "LocalConfig": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "web": {
+            "$ref": "#/components/schemas/LocalWeb"
+          },
+          "endpoints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "web_domains": {
+            "type": "object",
+            "properties": {
+              "allow": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "deny": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "allow": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LocalAllowed"
+            }
+          },
+          "pins": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/LocalPinConfig"
+            }
+          },
+          "checked": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/LocalCheckedConfig"
+            }
+          },
+          "ca": {
+            "type": "object",
+            "properties": {
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "log": {
+            "type": "object",
+            "properties": {
+              "retain_days": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
+          "lock": {
+            "type": "boolean"
+          },
+          "user_may": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["endpoints", "allow", "web_domains", "web"]
+            }
+          },
+          "locked_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "endpoint_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "updates": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": ["url"],
+            "additionalProperties": false
+          },
+          "models_dir": {
+            "type": "string"
+          },
+          "catalog_path": {
+            "type": "string"
+          },
+          "recommend": {}
+        },
+        "additionalProperties": false
+      },
+      "ResearchDepthConfig": {
+        "type": "string",
+        "enum": ["auto", "focused", "deep"]
+      },
+      "ResearchToolConfig": {
+        "type": "string",
+        "enum": ["work", "thorough", "off"]
+      },
+      "ResearchLimitsConfig": {
+        "type": "object",
+        "properties": {
+          "usd": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "steps": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "pages": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "searches": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "researchers": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4
+          }
+        },
+        "additionalProperties": false
+      },
+      "ResearchConfig": {
+        "type": "object",
+        "properties": {
+          "depth": {
+            "$ref": "#/components/schemas/ResearchDepthConfig"
+          },
+          "tool": {
+            "$ref": "#/components/schemas/ResearchToolConfig"
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "focused": {
+                "$ref": "#/components/schemas/ResearchLimitsConfig"
+              },
+              "deep": {
+                "$ref": "#/components/schemas/ResearchLimitsConfig"
+              }
+            },
+            "additionalProperties": false
+          },
+          "domains": {
+            "type": "object",
+            "properties": {
+              "prefer": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "avoid": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "robots": {
+            "type": "boolean"
+          },
+          "retain_days": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "ConfigWithLocks": {
+        "type": "object",
+        "properties": {
+          "$schema": {
+            "type": "string"
+          },
+          "shell": {
+            "type": "string"
+          },
+          "logLevel": {
+            "$ref": "#/components/schemas/LogLevel"
+          },
+          "server": {
+            "$ref": "#/components/schemas/ServerConfig"
+          },
+          "command": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "template": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "agent": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "variant": {
+                  "type": "string"
+                },
+                "subtask": {
+                  "type": "boolean"
+                },
+                "size": {
+                  "$ref": "#/components/schemas/TaskSizeTier"
+                }
+              },
+              "required": ["template"],
+              "additionalProperties": false
+            }
+          },
+          "skills": {
+            "type": "object",
+            "properties": {
+              "paths": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "urls": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "references": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/components/schemas/ConfigV2ReferenceGit"
+                },
+                {
+                  "$ref": "#/components/schemas/ConfigV2ReferenceLocal"
+                }
+              ]
+            }
+          },
+          "reference": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/components/schemas/ConfigV2ReferenceGit"
+                },
+                {
+                  "$ref": "#/components/schemas/ConfigV2ReferenceLocal"
+                }
+              ]
+            }
+          },
+          "watcher": {
+            "type": "object",
+            "properties": {
+              "ignore": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "snapshot": {
+            "type": "boolean"
+          },
+          "plugin": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "object"
+                    }
+                  ],
+                  "maxItems": 2,
+                  "minItems": 2
+                }
+              ]
+            }
+          },
+          "share": {
+            "type": "string",
+            "enum": ["manual", "auto", "disabled"]
+          },
+          "autoshare": {
+            "type": "boolean"
+          },
+          "autoupdate": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string",
+                "enum": ["notify"]
+              }
+            ],
+            "description": "Automatically update to the latest version. Set to true to auto-update, false to disable, or 'notify' to show update notifications"
+          },
+          "disabled_providers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "enabled_providers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "model": {
+            "type": "string"
+          },
+          "small_model": {
+            "type": "string"
+          },
+          "default_agent": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "object",
+            "properties": {
+              "build": {
+                "$ref": "#/components/schemas/AgentConfig"
+              },
+              "plan": {
+                "$ref": "#/components/schemas/AgentConfig"
+              }
+            },
+            "additionalProperties": {
+              "$ref": "#/components/schemas/AgentConfig"
+            }
+          },
+          "agent": {
+            "type": "object",
+            "properties": {
+              "plan": {
+                "$ref": "#/components/schemas/AgentConfig"
+              },
+              "build": {
+                "$ref": "#/components/schemas/AgentConfig"
+              },
+              "general": {
+                "$ref": "#/components/schemas/AgentConfig"
+              },
+              "explore": {
+                "$ref": "#/components/schemas/AgentConfig"
+              },
+              "title": {
+                "$ref": "#/components/schemas/AgentConfig"
+              },
+              "summary": {
+                "$ref": "#/components/schemas/AgentConfig"
+              },
+              "compaction": {
+                "$ref": "#/components/schemas/AgentConfig"
+              }
+            },
+            "additionalProperties": {
+              "$ref": "#/components/schemas/AgentConfig"
+            }
+          },
+          "provider": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ProviderConfig"
+            }
+          },
+          "mcp": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/McpLocalConfig"
+                },
+                {
+                  "$ref": "#/components/schemas/McpRemoteConfig"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["enabled"],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "formatter": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "disabled": {
+                      "type": "boolean"
+                    },
+                    "command": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "cwd": {
+                      "type": "string"
+                    },
+                    "environment": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "extensions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            ],
+            "description": "Enable or configure formatters. Omit or set to false to disable, true to enable built-ins, or an object to enable built-ins with overrides."
+          },
+          "lsp": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "disabled": {
+                          "type": "boolean",
+                          "enum": [true]
+                        }
+                      },
+                      "required": ["disabled"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "command": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "cwd": {
+                          "type": "string"
+                        },
+                        "extensions": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "disabled": {
+                          "type": "boolean"
+                        },
+                        "env": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        },
+                        "initialization": {
+                          "type": "object"
+                        }
+                      },
+                      "required": ["command"],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            ],
+            "description": "Enable or configure LSP servers. Omit or set to false to disable, true to enable built-ins, or an object to enable built-ins with overrides."
+          },
+          "instructions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "layout": {
+            "$ref": "#/components/schemas/LayoutConfig"
+          },
+          "permission": {
+            "$ref": "#/components/schemas/PermissionConfig"
+          },
+          "tools": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          },
+          "attachment": {
+            "$ref": "#/components/schemas/AttachmentConfig"
+          },
+          "enterprise": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "tool_output": {
+            "type": "object",
+            "properties": {
+              "max_lines": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "max_bytes": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
+          "compaction": {
+            "type": "object",
+            "properties": {
+              "auto": {
+                "type": "boolean"
+              },
+              "prune": {
+                "type": "boolean"
+              },
+              "tail_turns": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "preserve_recent_tokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "reserved": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "max_context": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "clear": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          },
+          "budget": {
+            "type": "object",
+            "properties": {
+              "run": {
+                "$ref": "#/components/schemas/RunBudget"
+              },
+              "loop": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          },
+          "sizing": {
+            "type": "object",
+            "properties": {
+              "auto": {
+                "type": "boolean"
+              },
+              "judge": {
+                "$ref": "#/components/schemas/TaskJudgeMode"
+              }
+            },
+            "additionalProperties": false
+          },
+          "local": {
+            "$ref": "#/components/schemas/LocalConfig"
+          },
+          "research": {
+            "$ref": "#/components/schemas/ResearchConfig"
+          },
+          "experimental": {
+            "type": "object",
+            "properties": {
+              "disable_paste_summary": {
+                "type": "boolean"
+              },
+              "batch_tool": {
+                "type": "boolean"
+              },
+              "openTelemetry": {
+                "type": "boolean"
+              },
+              "primary_tools": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "continue_loop_on_deny": {
+                "type": "boolean"
+              },
+              "mcp_timeout": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "policies": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ConfigV2ExperimentalPolicy"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "locked": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The config keys your company's policy sets and locks, such as local, share and autoupdate. A change to one fails with ConfigLocked. Empty without a company lock."
+          }
+        },
+        "required": ["locked"],
         "additionalProperties": false
       },
       "Config": {
@@ -30142,6 +33291,12 @@
             },
             "additionalProperties": false
           },
+          "local": {
+            "$ref": "#/components/schemas/LocalConfig"
+          },
+          "research": {
+            "$ref": "#/components/schemas/ResearchConfig"
+          },
           "experimental": {
             "type": "object",
             "properties": {
@@ -30177,6 +33332,33 @@
             "additionalProperties": false
           }
         },
+        "additionalProperties": false
+      },
+      "ConfigLocked": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": ["ConfigLocked"]
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "keys": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["keys", "message"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["name", "data"],
         "additionalProperties": false
       },
       "ConsoleState": {
@@ -31885,6 +35067,1099 @@
         "required": ["name", "extensions", "enabled"],
         "additionalProperties": false
       },
+      "LocalOrigin": {
+        "type": "string",
+        "enum": ["managed", "user", "environment"]
+      },
+      "LocalEndpoint": {
+        "type": "object",
+        "properties": {
+          "origin": {
+            "type": "string"
+          },
+          "from": {
+            "$ref": "#/components/schemas/LocalOrigin"
+          }
+        },
+        "required": ["origin", "from"],
+        "additionalProperties": false
+      },
+      "LocalPin": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "models": {
+            "type": "string"
+          },
+          "spki": {
+            "type": "string"
+          }
+        },
+        "required": ["kind"],
+        "additionalProperties": false
+      },
+      "LocalPolicy": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "web": {
+            "$ref": "#/components/schemas/LocalWeb"
+          },
+          "lock": {
+            "type": "boolean"
+          },
+          "pending": {
+            "type": "boolean"
+          },
+          "endpoints": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LocalEndpoint"
+            }
+          },
+          "web_domains": {
+            "type": "object",
+            "properties": {
+              "allow": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "deny": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["allow", "deny"],
+            "additionalProperties": false
+          },
+          "allow": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LocalAllowed"
+            }
+          },
+          "updates": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": ["url"],
+            "additionalProperties": false
+          },
+          "user_may": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "locked_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "endpoint_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pins": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/LocalPin"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "enabled",
+          "web",
+          "lock",
+          "endpoints",
+          "web_domains",
+          "allow",
+          "user_may",
+          "locked_keys",
+          "endpoint_domains",
+          "warnings"
+        ],
+        "additionalProperties": false
+      },
+      "LocalHeld": {
+        "type": "object",
+        "properties": {
+          "proposed": {
+            "$ref": "#/components/schemas/LocalPolicy"
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["proposed", "changes"],
+        "additionalProperties": false
+      },
+      "EgressPurpose": {
+        "type": "string",
+        "enum": [
+          "inference",
+          "catalog",
+          "policy",
+          "account",
+          "usage",
+          "crash",
+          "telemetry",
+          "support",
+          "release-notes",
+          "asset",
+          "updates",
+          "help",
+          "share",
+          "model-download",
+          "tool-download",
+          "plugin",
+          "git-remote",
+          "lsp-install",
+          "web-page",
+          "web-search",
+          "browser",
+          "research-reader",
+          "research-browser",
+          "integration",
+          "mcp",
+          "config-remote",
+          "unknown"
+        ]
+      },
+      "EgressSourceLocal": {
+        "type": "string",
+        "enum": ["blocked", "ask-once", "allowed", "allow-with-reason", "not-allowable", "not-covered"]
+      },
+      "EgressWhere": {
+        "type": "string",
+        "enum": ["engine", "desktop", "renderer"]
+      },
+      "LocalSource": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/EgressPurpose"
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sends": {
+            "type": "string"
+          },
+          "why": {
+            "type": "string"
+          },
+          "local": {
+            "$ref": "#/components/schemas/EgressSourceLocal"
+          },
+          "where": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EgressWhere"
+            }
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": ["id", "purpose", "hosts", "sends", "why", "local", "where"],
+        "additionalProperties": false
+      },
+      "LocalStatus": {
+        "type": "object",
+        "properties": {
+          "policy": {
+            "$ref": "#/components/schemas/LocalPolicy"
+          },
+          "held": {
+            "$ref": "#/components/schemas/LocalHeld"
+          },
+          "locked": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "log": {
+            "type": "object",
+            "properties": {
+              "directory": {
+                "type": "string"
+              },
+              "retain_days": {
+                "type": "number"
+              }
+            },
+            "required": ["directory", "retain_days"],
+            "additionalProperties": false
+          },
+          "agent": {
+            "type": "boolean"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LocalSource"
+            }
+          }
+        },
+        "required": ["policy", "locked", "log", "agent", "sources"],
+        "additionalProperties": false
+      },
+      "LocalAllowRequest": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": ["source", "reason"],
+        "additionalProperties": false
+      },
+      "LocalUpdate": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "web": {
+            "$ref": "#/components/schemas/LocalWeb"
+          },
+          "endpoints": {
+            "type": "object",
+            "properties": {
+              "add": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "remove": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "allow": {
+            "type": "object",
+            "properties": {
+              "add": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/LocalAllowRequest"
+                }
+              },
+              "remove": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "web_domains": {
+            "type": "object",
+            "properties": {
+              "allow": {
+                "type": "object",
+                "properties": {
+                  "add": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "remove": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "additionalProperties": false
+              },
+              "deny": {
+                "type": "object",
+                "properties": {
+                  "add": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "remove": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          },
+          "pins": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/LocalPinConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "retain_days": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "confirm": {
+            "type": "boolean"
+          },
+          "held": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "by": {
+            "type": "string",
+            "enum": ["app", "cli"]
+          }
+        },
+        "additionalProperties": false
+      },
+      "LocalError": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": ["LocalError"]
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": ["agent", "locked", "invalid", "changed", "not-found"]
+              },
+              "message": {
+                "type": "string"
+              },
+              "changes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["name", "data"],
+        "additionalProperties": false
+      },
+      "LocalConfirmError": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": ["LocalConfirmError"]
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "changes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "identity": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": ["kind", "version", "models", "spki"]
+                }
+              }
+            },
+            "required": ["message", "changes"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["name", "data"],
+        "additionalProperties": false
+      },
+      "EgressClass": {
+        "type": "string",
+        "enum": ["this-computer", "your-network", "listed", "internet"]
+      },
+      "EgressDecision": {
+        "type": "string",
+        "enum": ["allow", "ask", "block"]
+      },
+      "EgressRule": {
+        "type": "string",
+        "enum": [
+          "local-off",
+          "pending",
+          "listed",
+          "not-listed",
+          "not-allowable",
+          "loopback",
+          "web-none",
+          "web-network",
+          "web-ask",
+          "web-deny",
+          "web-allow",
+          "vector-service",
+          "allowed-source",
+          "automatic-update",
+          "manual-check",
+          "mirror",
+          "download-grant",
+          "private-remote",
+          "unlabelled",
+          "resolved-outside",
+          "private-destination",
+          "web-port",
+          "proxy-environment",
+          "window-rule"
+        ]
+      },
+      "EgressCarried": {
+        "type": "object",
+        "properties": {
+          "personal": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "documents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "repository": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": ["personal", "documents", "repository"],
+        "additionalProperties": false
+      },
+      "EgressEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "time": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "source": {
+            "type": "string"
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/EgressPurpose"
+          },
+          "class": {
+            "$ref": "#/components/schemas/EgressClass"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "bytes_out": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "bytes_in": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "decision": {
+            "$ref": "#/components/schemas/EgressDecision"
+          },
+          "rule": {
+            "$ref": "#/components/schemas/EgressRule"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "root_session_id": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "carried": {
+            "$ref": "#/components/schemas/EgressCarried"
+          },
+          "frame": {
+            "type": "string"
+          },
+          "resource": {
+            "type": "string",
+            "enum": ["page", "subresource"]
+          }
+        },
+        "required": [
+          "id",
+          "time",
+          "source",
+          "purpose",
+          "class",
+          "origin",
+          "method",
+          "decision",
+          "rule",
+          "reason",
+          "carried"
+        ],
+        "additionalProperties": false
+      },
+      "EgressSummary": {
+        "type": "object",
+        "properties": {
+          "requests": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "helper_requests": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "model_calls": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "pages": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "hosts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "searches": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "carried": {
+            "$ref": "#/components/schemas/EgressCarried"
+          },
+          "blocked": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "required": ["requests", "helper_requests", "model_calls", "pages", "hosts", "searches", "carried", "blocked"],
+        "additionalProperties": false
+      },
+      "LocalServerKind": {
+        "type": "string",
+        "enum": ["ollama", "lmstudio", "vllm", "llamacpp", "sglang", "openai"]
+      },
+      "LocalServerForwards": {
+        "type": "string",
+        "enum": ["ollama-cloud", "litellm"]
+      },
+      "LocalServerModel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "context": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": ["NaN"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["-Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity", "-Infinity", "NaN"]
+              }
+            ]
+          },
+          "trained": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": ["NaN"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["-Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity", "-Infinity", "NaN"]
+              }
+            ]
+          },
+          "output": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": ["NaN"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["-Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity", "-Infinity", "NaN"]
+              }
+            ]
+          },
+          "tools": {
+            "type": "boolean"
+          },
+          "vision": {
+            "type": "boolean"
+          },
+          "loaded": {
+            "type": "boolean"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": ["NaN"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["-Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity", "-Infinity", "NaN"]
+              }
+            ]
+          },
+          "parameters": {
+            "type": "string"
+          },
+          "quantization": {
+            "type": "string"
+          },
+          "family": {
+            "type": "string"
+          },
+          "cloud": {
+            "type": "boolean"
+          }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      },
+      "LocalServer": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/LocalServerKind"
+          },
+          "name": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "baseURL": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "class": {
+            "type": "string",
+            "enum": ["this-computer", "your-network", "internet"]
+          },
+          "encrypted": {
+            "type": "boolean"
+          },
+          "concurrency": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": ["NaN"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["-Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity", "-Infinity", "NaN"]
+              }
+            ]
+          },
+          "forwards": {
+            "$ref": "#/components/schemas/LocalServerForwards"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LocalServerModel"
+            }
+          },
+          "pin": {
+            "$ref": "#/components/schemas/LocalPinConfig"
+          }
+        },
+        "required": ["kind", "name", "origin", "baseURL", "class", "encrypted", "models", "pin"],
+        "additionalProperties": false
+      },
+      "LocalProbeResult": {
+        "type": "object",
+        "properties": {
+          "server": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LocalServer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["server"],
+        "additionalProperties": false
+      },
+      "LocalAddedServer": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "server": {
+            "$ref": "#/components/schemas/LocalServer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/LocalStatus"
+          },
+          "identity": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["kind", "version", "models", "spki"]
+            }
+          }
+        },
+        "required": ["provider", "models", "server", "status"],
+        "additionalProperties": false
+      },
+      "LocalCheckRow": {
+        "type": "object",
+        "properties": {
+          "layer": {
+            "type": "string",
+            "enum": ["switch", "policy", "held", "guard", "unlabelled", "services", "web", "server", "models", "log"]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pass", "warn", "fail"]
+          },
+          "title": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          }
+        },
+        "required": ["layer", "status", "title"],
+        "additionalProperties": false
+      },
+      "LocalModelCheck": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "result": {
+            "type": "string",
+            "enum": ["works", "no-tools", "schema-rejected", "context-too-small", "failed", "ask"]
+          },
+          "message": {
+            "type": "string"
+          },
+          "context": {
+            "type": "number"
+          },
+          "ttft_ms": {
+            "type": "number"
+          },
+          "requests": {
+            "type": "number"
+          },
+          "checked_at": {
+            "type": "number"
+          },
+          "server_version": {
+            "type": "string"
+          }
+        },
+        "required": ["model", "result", "requests", "checked_at"],
+        "additionalProperties": false
+      },
+      "LocalCheckResult": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "result": {
+            "type": "string",
+            "enum": ["pass", "fail", "off"]
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LocalCheckRow"
+            }
+          },
+          "model": {
+            "$ref": "#/components/schemas/LocalModelCheck"
+          }
+        },
+        "required": ["enabled", "result", "rows"],
+        "additionalProperties": false
+      },
+      "LocalSuggestion": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "publisher": {
+            "type": "string"
+          },
+          "licence": {
+            "type": "string"
+          },
+          "quantization": {
+            "type": "string"
+          },
+          "memory_gb": {
+            "type": "number"
+          },
+          "context": {
+            "type": "number"
+          },
+          "tools": {
+            "type": "boolean"
+          },
+          "serve": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ollama": {
+            "type": "string"
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "publisher",
+          "licence",
+          "quantization",
+          "memory_gb",
+          "context",
+          "tools",
+          "serve",
+          "links"
+        ],
+        "additionalProperties": false
+      },
+      "LocalRecommendation": {
+        "type": "object",
+        "properties": {
+          "hardware": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": ["unified", "gpu", "cpu"]
+              },
+              "total": {
+                "type": "number"
+              },
+              "usable": {
+                "type": "number"
+              }
+            },
+            "required": ["summary", "kind", "total", "usable"],
+            "additionalProperties": false
+          },
+          "tier": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "roles": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/LocalSuggestion"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "alternatives": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LocalSuggestion"
+            }
+          }
+        },
+        "required": ["hardware", "tier", "summary", "label", "date", "roles", "alternatives"],
+        "additionalProperties": false
+      },
       "MCPStatusConnected": {
         "type": "object",
         "properties": {
@@ -32004,11 +36279,11 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["rule", "preference", "decision", "lesson", "fact", "failure", "review"]
+            "enum": ["rule", "preference", "decision", "lesson", "fact", "failure", "review", "term"]
           },
           "origin": {
             "type": "string",
-            "enum": ["file", "user", "agent", "failure-memory"]
+            "enum": ["file", "user", "agent", "failure-memory", "import"]
           },
           "status": {
             "type": "string",
@@ -32082,6 +36357,23 @@
           },
           "private": {
             "type": "boolean"
+          },
+          "facet": {
+            "type": "string",
+            "enum": ["format", "workflow", "vocabulary", "tooling", "sources", "style"]
+          },
+          "term": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "meaning": {
+                "type": "string"
+              }
+            },
+            "required": ["key", "meaning"],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -32318,7 +36610,7 @@
           },
           "origin": {
             "type": "string",
-            "enum": ["upload", "chat", "agent", "repository", "cli"]
+            "enum": ["upload", "chat", "agent", "repository", "cli", "web", "research"]
           },
           "visibility": {
             "type": "string",
@@ -32459,6 +36751,28 @@
         "required": ["name", "data"],
         "additionalProperties": false
       },
+      "MemoryImportResult": {
+        "type": "object",
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryEntry"
+            }
+          },
+          "known": {
+            "type": "number"
+          },
+          "refused": {
+            "type": "number"
+          },
+          "over": {
+            "type": "number"
+          }
+        },
+        "required": ["entries", "known", "refused", "over"],
+        "additionalProperties": false
+      },
       "MemoryTidy": {
         "type": "object",
         "properties": {
@@ -32481,6 +36795,35 @@
         "required": ["merged", "promoted", "archived", "dropped", "stale"],
         "additionalProperties": false
       },
+      "MemoryFacets": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "boolean"
+          },
+          "workflow": {
+            "type": "boolean"
+          },
+          "vocabulary": {
+            "type": "boolean"
+          },
+          "tooling": {
+            "type": "boolean"
+          },
+          "sources": {
+            "type": "boolean"
+          },
+          "style": {
+            "type": "boolean"
+          }
+        },
+        "required": ["format", "workflow", "vocabulary", "tooling", "sources", "style"],
+        "additionalProperties": false
+      },
+      "MemoryModelLearner": {
+        "type": "string",
+        "enum": ["local-only", "always", "off"]
+      },
       "MemorySettings": {
         "type": "object",
         "properties": {
@@ -32492,9 +36835,15 @@
           },
           "keepOriginals": {
             "type": "boolean"
+          },
+          "facets": {
+            "$ref": "#/components/schemas/MemoryFacets"
+          },
+          "modelLearner": {
+            "$ref": "#/components/schemas/MemoryModelLearner"
           }
         },
-        "required": ["learning", "repositoryDocs", "keepOriginals"],
+        "required": ["learning", "repositoryDocs", "keepOriginals", "facets", "modelLearner"],
         "additionalProperties": false
       },
       "MemoryModelOption": {
@@ -33615,6 +37964,73 @@
         },
         "additionalProperties": false
       },
+      "MemoryPostingPayload": {
+        "type": "object",
+        "properties": {
+          "parts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sessionIDs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "typed": {
+            "type": "boolean"
+          },
+          "untrusted": {
+            "type": "boolean"
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["parts", "typed"],
+        "additionalProperties": false
+      },
+      "MemoryPostingResult": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["clean", "changed", "ask"]
+          },
+          "parts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dropped": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "part": {
+                  "type": "number"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": ["part", "text"],
+              "additionalProperties": false
+            }
+          },
+          "links": {
+            "type": "number"
+          }
+        },
+        "required": ["status", "parts", "dropped", "links"],
+        "additionalProperties": false
+      },
       "MemoryCard": {
         "type": "object",
         "properties": {
@@ -33654,6 +38070,429 @@
           }
         },
         "required": ["id", "kind", "document", "title", "text"],
+        "additionalProperties": false
+      },
+      "ResearchScope": {
+        "type": "string",
+        "enum": ["web", "web+brain", "brain"]
+      },
+      "ResearchDepth": {
+        "type": "string",
+        "enum": ["focused", "deep"]
+      },
+      "ResearchFormat": {
+        "type": "string",
+        "enum": ["brief", "report", "table", "memo"]
+      },
+      "ResearchSubquestionStatus": {
+        "type": "string",
+        "enum": ["open", "answered", "dropped"]
+      },
+      "ResearchPlan": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "subquestions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            },
+            "minItems": 1,
+            "maxItems": 8
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ResearchScope"
+          },
+          "depth": {
+            "$ref": "#/components/schemas/ResearchDepth"
+          },
+          "prefer_domains": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 253
+            },
+            "maxItems": 50
+          },
+          "avoid_domains": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 253
+            },
+            "maxItems": 50
+          },
+          "format": {
+            "$ref": "#/components/schemas/ResearchFormat"
+          },
+          "time_window": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "status": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ResearchSubquestionStatus"
+            },
+            "maxItems": 8
+          }
+        },
+        "required": ["question", "subquestions", "scope", "depth"],
+        "additionalProperties": false
+      },
+      "ResearchRunStatus": {
+        "type": "string",
+        "enum": ["planned", "running", "done", "stopped", "failed"]
+      },
+      "ResearchRun": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "question": {
+            "type": "string"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/ResearchPlan"
+          },
+          "depth": {
+            "$ref": "#/components/schemas/ResearchDepth"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ResearchScope"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ResearchRunStatus"
+          },
+          "report_document_id": {
+            "type": "string"
+          },
+          "pages": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "searches": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "steps": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "cost_usd": {
+            "type": "number"
+          },
+          "kept": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "updated_at": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "id",
+          "session_id",
+          "question",
+          "depth",
+          "scope",
+          "status",
+          "pages",
+          "searches",
+          "steps",
+          "cost_usd",
+          "kept",
+          "created_at",
+          "updated_at"
+        ],
+        "additionalProperties": false
+      },
+      "MemoryResearchRun": {
+        "type": "object",
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/ResearchRun"
+          },
+          "sources": {
+            "type": "number"
+          },
+          "notes": {
+            "type": "number"
+          },
+          "bytes": {
+            "type": "number"
+          }
+        },
+        "required": ["run", "sources", "notes", "bytes"],
+        "additionalProperties": false
+      },
+      "MemoryResearchList": {
+        "type": "object",
+        "properties": {
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryResearchRun"
+            }
+          },
+          "bytes": {
+            "type": "number"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "retain": {
+            "type": "number"
+          }
+        },
+        "required": ["runs", "bytes", "limit", "retain"],
+        "additionalProperties": false
+      },
+      "ResearchSourceStatus": {
+        "type": "string",
+        "enum": ["read", "duplicate", "robots", "paywalled", "needs-render", "failed"]
+      },
+      "ResearchSiteKind": {
+        "type": "string",
+        "enum": ["academic", "government", "standards", "reference", "forum", "other"]
+      },
+      "ResearchSignal": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ResearchSiteKind"
+          },
+          "primary": {
+            "type": "boolean"
+          },
+          "doi": {
+            "type": "string"
+          },
+          "arxiv": {
+            "type": "string"
+          },
+          "pmid": {
+            "type": "string"
+          },
+          "published": {
+            "type": "string"
+          },
+          "updated": {
+            "type": "string"
+          },
+          "age_days": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "author": {
+            "type": "string"
+          },
+          "data": {
+            "type": "boolean"
+          },
+          "references": {
+            "type": "boolean"
+          },
+          "duplicate_of": {
+            "type": "string"
+          },
+          "paywalled": {
+            "type": "boolean"
+          },
+          "addressed_to_ai": {
+            "type": "boolean"
+          },
+          "corroborated": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "preference": {
+            "type": "string",
+            "enum": ["trusted", "avoided"]
+          },
+          "signed_in": {
+            "type": "boolean"
+          }
+        },
+        "required": ["kind", "primary", "data", "references", "paywalled", "addressed_to_ai", "corroborated"],
+        "additionalProperties": false
+      },
+      "MemoryResearchSource": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "canonical_url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "site": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ResearchSourceStatus"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "pages": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "signals": {
+            "$ref": "#/components/schemas/ResearchSignal"
+          },
+          "fetched_at": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "forgotten": {
+            "type": "boolean"
+          }
+        },
+        "required": ["id", "url", "canonical_url", "title", "site", "status"],
+        "additionalProperties": false
+      },
+      "ResearchStance": {
+        "type": "string",
+        "enum": ["supports", "contradicts", "context"]
+      },
+      "ResearchVerdict": {
+        "type": "string",
+        "enum": ["supported", "partial", "unsupported", "contradicted", "not-judged"]
+      },
+      "ResearchNote": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "subquestion": {
+            "type": "string"
+          },
+          "claim": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 400
+          },
+          "source": {
+            "type": "string"
+          },
+          "quote": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 600
+          },
+          "page": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "stance": {
+            "$ref": "#/components/schemas/ResearchStance"
+          },
+          "support": {
+            "type": "boolean"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/ResearchVerdict"
+          },
+          "created_at": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": ["id", "subquestion", "claim", "source", "quote", "stance", "support", "created_at"],
+        "additionalProperties": false
+      },
+      "MemoryResearchDetail": {
+        "type": "object",
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/ResearchRun"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryResearchSource"
+            }
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ResearchNote"
+            }
+          },
+          "queries": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "report": {
+            "type": "string"
+          },
+          "bytes": {
+            "type": "number"
+          },
+          "guest": {
+            "type": "boolean"
+          }
+        },
+        "required": ["run", "sources", "notes", "queries", "bytes", "guest"],
+        "additionalProperties": false
+      },
+      "MemoryResearchSourceText": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "$ref": "#/components/schemas/MemoryResearchSource"
+          },
+          "chunks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "chunk": {
+                  "type": "number"
+                },
+                "page": {
+                  "type": "number"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": ["chunk", "text"],
+              "additionalProperties": false
+            }
+          },
+          "private": {
+            "type": "boolean"
+          }
+        },
+        "required": ["source", "chunks", "private"],
         "additionalProperties": false
       },
       "Project": {
@@ -33841,6 +38680,25 @@
           }
         },
         "required": ["_tag", "requestID", "message"],
+        "additionalProperties": false
+      },
+      "HostedModel": {
+        "type": "object",
+        "properties": {
+          "providerID": {
+            "type": "string"
+          },
+          "modelID": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "local": {
+            "type": "boolean"
+          }
+        },
+        "required": ["providerID", "modelID", "origin", "local"],
         "additionalProperties": false
       },
       "FreeModelConsent": {
@@ -36285,6 +41143,9 @@
             "items": {
               "$ref": "#/components/schemas/PromptAgentAttachment"
             }
+          },
+          "agent": {
+            "type": "string"
           }
         },
         "required": ["text"],
@@ -36991,6 +41852,18 @@
             "$ref": "#/components/schemas/SessionCompacted"
           },
           {
+            "$ref": "#/components/schemas/ResearchUpdated"
+          },
+          {
+            "$ref": "#/components/schemas/LocalUpdated"
+          },
+          {
+            "$ref": "#/components/schemas/LocalBlocked"
+          },
+          {
+            "$ref": "#/components/schemas/MemoryLearned"
+          },
+          {
             "$ref": "#/components/schemas/VcsBranchUpdated"
           },
           {
@@ -37456,6 +42329,9 @@
             "items": {
               "$ref": "#/components/schemas/PromptAgentAttachment"
             }
+          },
+          "agent": {
+            "type": "string"
           },
           "type": {
             "type": "string",
@@ -38723,7 +43599,7 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": ["session.next.ancillary.usage.1"]
+                "enum": ["session.next.ancillary.usage.2"]
               },
               "id": {
                 "type": "string",
@@ -38751,7 +43627,7 @@
                   },
                   "purpose": {
                     "type": "string",
-                    "enum": ["title"]
+                    "enum": ["title", "memory"]
                   },
                   "model": {
                     "$ref": "#/components/schemas/ModelRef"
@@ -41943,7 +46819,7 @@
               },
               "purpose": {
                 "type": "string",
-                "enum": ["title"]
+                "enum": ["title", "memory"]
               },
               "model": {
                 "$ref": "#/components/schemas/ModelRef"
@@ -45196,7 +50072,7 @@
               },
               "reason": {
                 "type": "string",
-                "enum": ["sign-in-paused", "provider-not-configured", "disabled", "no-models"]
+                "enum": ["sign-in-paused", "provider-not-configured", "disabled", "no-models", "off-in-local"]
               },
               "message": {
                 "type": "string"
@@ -47815,6 +52691,226 @@
         "required": ["id", "type", "data"],
         "additionalProperties": false
       },
+      "ResearchUpdated": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["research.updated"]
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateID": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": ["aggregateID", "seq", "version"],
+            "additionalProperties": false
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRef"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "runID": {
+                "type": "string"
+              },
+              "sourceID": {
+                "type": "string"
+              },
+              "noteID": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["planned", "running", "done", "stopped", "failed", "forgotten"]
+              }
+            },
+            "required": ["runID", "status"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "data"],
+        "additionalProperties": false
+      },
+      "LocalUpdated": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["local.updated"]
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateID": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": ["aggregateID", "seq", "version"],
+            "additionalProperties": false
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRef"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "web": {
+                "$ref": "#/components/schemas/LocalWeb"
+              },
+              "lock": {
+                "type": "boolean"
+              },
+              "held": {
+                "type": "boolean"
+              }
+            },
+            "required": ["enabled", "web", "lock", "held"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "data"],
+        "additionalProperties": false
+      },
+      "LocalBlocked": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["local.blocked"]
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateID": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": ["aggregateID", "seq", "version"],
+            "additionalProperties": false
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRef"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "origin": {
+                "type": "string"
+              }
+            },
+            "required": ["source", "origin"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "data"],
+        "additionalProperties": false
+      },
+      "MemoryLearned": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["memory.learned"]
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateID": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": ["aggregateID", "seq", "version"],
+            "additionalProperties": false
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRef"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "entryIDs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "messageID": {
+                "type": "string"
+              }
+            },
+            "required": ["sessionID", "entryIDs"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "data"],
+        "additionalProperties": false
+      },
       "VcsBranchUpdated": {
         "type": "object",
         "properties": {
@@ -48392,7 +53488,7 @@
               },
               "reason": {
                 "type": "string",
-                "enum": ["sign-in-paused", "provider-not-configured", "disabled", "no-models"]
+                "enum": ["sign-in-paused", "provider-not-configured", "disabled", "no-models", "off-in-local"]
               },
               "message": {
                 "type": "string"
@@ -48663,7 +53759,7 @@
               },
               "purpose": {
                 "type": "string",
-                "enum": ["title"]
+                "enum": ["title", "memory"]
               },
               "model": {
                 "$ref": "#/components/schemas/ModelRef"
@@ -51369,6 +56465,138 @@
         "required": ["id", "type", "properties"],
         "additionalProperties": false
       },
+      "EventResearchUpdated": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["research.updated"]
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "runID": {
+                "type": "string"
+              },
+              "sourceID": {
+                "type": "string"
+              },
+              "noteID": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["planned", "running", "done", "stopped", "failed", "forgotten"]
+              }
+            },
+            "required": ["runID", "status"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "properties"],
+        "additionalProperties": false
+      },
+      "EventLocalUpdated": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["local.updated"]
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "web": {
+                "$ref": "#/components/schemas/LocalWeb"
+              },
+              "lock": {
+                "type": "boolean"
+              },
+              "held": {
+                "type": "boolean"
+              }
+            },
+            "required": ["enabled", "web", "lock", "held"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "properties"],
+        "additionalProperties": false
+      },
+      "EventLocalBlocked": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["local.blocked"]
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "origin": {
+                "type": "string"
+              }
+            },
+            "required": ["source", "origin"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "properties"],
+        "additionalProperties": false
+      },
+      "EventMemoryLearned": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["memory.learned"]
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "entryIDs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "messageID": {
+                "type": "string"
+              }
+            },
+            "required": ["sessionID", "entryIDs"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "properties"],
+        "additionalProperties": false
+      },
       "EventVcsBranchUpdated": {
         "type": "object",
         "properties": {
@@ -51711,6 +56939,10 @@
     {
       "name": "instance",
       "description": "Experimental HttpApi instance read routes."
+    },
+    {
+      "name": "local",
+      "description": "Vector Local: run Vector's AI features on model servers you or your company host, with a log of the requests Vector makes."
     },
     {
       "name": "mcp",

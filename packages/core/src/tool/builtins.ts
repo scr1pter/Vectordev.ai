@@ -9,11 +9,15 @@ import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
 import { QuestionTool } from "./question"
 import { ReadTool } from "./read"
+import { ResearchNoteTool } from "./research-note"
+import { ResearchPlanTool } from "./research-plan"
+import { ResearchReadTool } from "./research-read"
+import { ResearchReportTool } from "./research-report"
+import { ResearchSearchTool } from "./research-search"
 import { SkillTool } from "./skill"
 import { TeammateMessageTool } from "./teammate"
 import { TodoWriteTool } from "./todowrite"
 import { WebFetchTool } from "./webfetch"
-import { WebSearchTool } from "./websearch"
 import { WriteTool } from "./write"
 
 /**
@@ -40,11 +44,16 @@ export const node = makeLocationNode({
     GrepTool.node,
     QuestionTool.node,
     ReadTool.node,
+    // Deep research's tools, offered to the research agent alone (AgentV2.reserved).
+    ResearchPlanTool.node,
+    ResearchSearchTool.node,
+    ResearchReadTool.node,
+    ResearchNoteTool.node,
+    ResearchReportTool.node,
     SkillTool.node,
     TeammateMessageTool.node,
     TodoWriteTool.node,
     WebFetchTool.node,
-    WebSearchTool.node,
     WriteTool.node,
   ],
 })

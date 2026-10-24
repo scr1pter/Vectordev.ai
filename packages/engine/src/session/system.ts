@@ -24,20 +24,31 @@ import { Reference } from "@vectordevai/core/reference"
 import { MCP } from "@/mcp"
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
 
-export function provider(model: Provider.Model) {
-  if (model.api.id.includes("gpt-4") || model.api.id.includes("o1") || model.api.id.includes("o3"))
-    return [PROMPT_BEAST]
+/**
+ * The provider's prompt. Some suggest the explore specialist for a search that spans several areas; with `explore`
+ * false (Settings turned explore off, or this agent may not launch it) a task call naming it would fail, so they point
+ * at the task tool's list instead.
+ */
+export function provider(model: Provider.Model, explore = true) {
+  const prompt = providerPrompt(model)
+  return [
+    explore ? prompt : prompt.replaceAll('subagent_type "explore"', "a search specialist from the task tool's list"),
+  ]
+}
+
+function providerPrompt(model: Provider.Model) {
+  if (model.api.id.includes("gpt-4") || model.api.id.includes("o1") || model.api.id.includes("o3")) return PROMPT_BEAST
   if (model.api.id.includes("gpt")) {
     if (model.api.id.includes("codex")) {
-      return [PROMPT_CODEX]
+      return PROMPT_CODEX
     }
-    return [PROMPT_GPT]
+    return PROMPT_GPT
   }
-  if (model.api.id.includes("gemini-")) return [PROMPT_GEMINI]
-  if (model.api.id.includes("claude")) return [PROMPT_ANTHROPIC]
-  if (model.api.id.toLowerCase().includes("trinity")) return [PROMPT_TRINITY]
-  if (model.api.id.toLowerCase().includes("kimi")) return [PROMPT_KIMI]
-  return [PROMPT_DEFAULT]
+  if (model.api.id.includes("gemini-")) return PROMPT_GEMINI
+  if (model.api.id.includes("claude")) return PROMPT_ANTHROPIC
+  if (model.api.id.toLowerCase().includes("trinity")) return PROMPT_TRINITY
+  if (model.api.id.toLowerCase().includes("kimi")) return PROMPT_KIMI
+  return PROMPT_DEFAULT
 }
 
 /** What the current agent may launch through the task tool in this session. */
@@ -218,6 +229,11 @@ export type EnvironmentOptions = {
   /** This is a subagent's own session: it reports to its parent, never to the user. */
   nested?: boolean
   /**
+   * Whether the agent is told where it works: the working tree, its root and the repository's references. A research
+   * worker and the judge are not, since a folder's name can name a client and what they send leaves the machine.
+   */
+  workspace?: boolean
+  /**
    * When the history the model is shown starts (its first user message), in epoch milliseconds. Its day is the date
    * the environment states, so the prompt does not change from step to step or at midnight; a later day reaches the
    * model as a note on the user message that starts it (SessionReminders.dates). Defaults to now.
@@ -253,16 +269,24 @@ const layer = Layer.effect(
         options?: EnvironmentOptions,
       ) {
         const ctx = yield* InstanceState.context
-        const references = yield* Effect.gen(function* () {
-          return (yield* (yield* Reference.Service).list()).filter((reference) => reference.description !== undefined)
-        }).pipe(Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) }))))
+        const workspace = options?.workspace !== false
+        const references = workspace
+          ? yield* Effect.gen(function* () {
+              const service = yield* Reference.Service
+              return (yield* service.list()).filter((reference) => reference.description !== undefined)
+            }).pipe(Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) }))))
+          : []
         const session = [
           [
             `Here is some useful information about the environment you are running in:`,
             `<env>`,
-            `  Working directory: ${ctx.directory}`,
-            `  Workspace root folder: ${ctx.worktree}`,
-            `  Is directory a git repo: ${ctx.project.vcs === "git" ? "yes" : "no"}`,
+            ...(workspace
+              ? [
+                  `  Working directory: ${ctx.directory}`,
+                  `  Workspace root folder: ${ctx.worktree}`,
+                  `  Is directory a git repo: ${ctx.project.vcs === "git" ? "yes" : "no"}`,
+                ]
+              : []),
             `  Platform: ${process.platform}`,
             `  Today's date: ${new Date(options?.date ?? Date.now()).toDateString()}`,
             `</env>`,

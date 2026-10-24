@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { ConfigV1 } from "@vectordevai/core/v1/config/config"
+import { ConfigResearchV1 } from "@vectordevai/core/v1/config/research"
 import { TuiConfig } from "@vectordevai/tui/config"
 import { Schema } from "effect"
 
@@ -53,8 +54,18 @@ function isRecord(value: unknown): value is JsonSchema {
 const configFile = process.argv[2]
 const tuiFile = process.argv[3]
 
+// Keys Vector loads and drops are not in the schema it decodes with, so the published schema adds them, marked
+// deprecated: an earlier version's research block then checks without an error, as Vector loads it.
+function withRetired(schema: JsonSchema) {
+  const defs = schema.$defs
+  const research = isRecord(defs) ? defs.ResearchConfig : undefined
+  if (!isRecord(research) || !isRecord(research.properties)) throw new Error("schema generator lost ResearchConfig")
+  research.properties = { ...research.properties, ...ConfigResearchV1.RETIRED }
+  return schema
+}
+
 console.log(configFile)
-await Bun.write(configFile, JSON.stringify(generateEffect(ConfigV1.Info), null, 2))
+await Bun.write(configFile, JSON.stringify(withRetired(generateEffect(ConfigV1.Info)), null, 2))
 
 if (tuiFile) {
   console.log(tuiFile)

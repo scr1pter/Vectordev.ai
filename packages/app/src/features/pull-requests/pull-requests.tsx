@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, Show, Switch, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { githubApi, GithubDeviceSignIn } from "@/components/github-connect"
+import { OffInLocal } from "@/features/local/off-in-local"
 import {
   afterFixes,
   askAgentPrompt,
@@ -103,6 +104,10 @@ type PullRequestsApi = {
     comments?: LineComment[]
     fallbackBody?: string
     event: "comment" | "approve" | "request-changes"
+    // The review's sessions, whose recalled memory the posting check compares the text with, and whether the pull
+    // request comes from someone Vector cannot trust.
+    sessionIDs?: string[]
+    untrusted?: boolean
   }) => Promise<{ posted: boolean; inline?: number }>
   checks?: (cwd: string, number: number, head: string) => Promise<PullRequestChecks>
   merge: (input: {
@@ -1152,6 +1157,9 @@ export function PullRequests(props: {
               diff,
               ...(checks?.length ? { checks } : {}),
               ...(previous ? { previous } : {}),
+              // Who is signed in tells the owner's own pull requests from other people's, which choose what the
+              // reviewers hear of the owner's memory and where the posted review may link.
+              viewer: status()?.login,
             },
             controller,
             current,
@@ -1274,6 +1282,8 @@ export function PullRequests(props: {
         body: draft.body,
         fallbackBody: draft.fallbackBody,
         comments: draft.comments,
+        sessionIDs: draft.sessionIDs,
+        untrusted: draft.untrusted,
         event,
       })
       .catch((cause: unknown) => {
@@ -2153,6 +2163,10 @@ export function PullRequests(props: {
             <Icon name="close" />
           </button>
         </header>
+
+        <div class="shrink-0 px-5 empty:hidden" data-component="pull-requests-off-in-local">
+          <OffInLocal source="github" named />
+        </div>
 
         <Show when={error()}>
           <div

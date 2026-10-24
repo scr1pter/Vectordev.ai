@@ -73,6 +73,7 @@ import {
   shouldFocusTerminalOnKeyDown,
   shouldShowFileTree,
 } from "@/pages/session/helpers"
+import { checkCommitMessage, commitWarning, type CommitCheck } from "@/pages/session/commit-check"
 import { MessageTimeline } from "@/pages/session/timeline/message-timeline"
 import { createTimelineModel } from "@/pages/session/timeline/model"
 import { type DiffStyle, SessionReviewTab, type SessionReviewTabProps } from "@/pages/session/review-tab"
@@ -87,6 +88,7 @@ import { SessionReviewEmptyNoGitV2 } from "@vectordevai/session-ui/v2/session-re
 import { ReviewPanelV2 } from "@/pages/session/v2/review-panel-v2"
 import { createReviewPanelV2State } from "@/pages/session/v2/review-panel-v2-state"
 import { TerminalPanel } from "@/pages/session/terminal-panel"
+import { useTerminalRequests } from "@/features/agents/terminal-requests"
 import { useComposerCommands } from "@/pages/session/use-composer-commands"
 import { useSessionCommands } from "@/pages/session/use-session-commands"
 import { useSessionHashScroll } from "@/pages/session/use-session-hash-scroll"
@@ -356,14 +358,31 @@ function SessionPanelFrame(props: ParentProps<{ newLayout: boolean; raised?: boo
   )
 }
 
-function CommitToMainDialog(props: { defaultMessage: string; onConfirm: (message: string) => void }) {
+function CommitToMainDialog(props: {
+  defaultMessage: string
+  onConfirm: (message: string) => void
+  check: (message: string) => Promise<CommitCheck>
+}) {
   const dialog = useDialog()
   const [message, setMessage] = createSignal(props.defaultMessage)
-  const valid = () => message().trim().length > 0
+  const [checking, setChecking] = createSignal(false)
+  // What the posting check said about the message as it stands; editing the message checks it again.
+  const [warned, setWarned] = createSignal<{ message: string; warning: ReturnType<typeof commitWarning> }>()
+  const valid = () => message().trim().length > 0 && !checking()
+  const warning = () => (warned()?.message === message().trim() ? warned()?.warning : undefined)
 
-  const submit = () => {
+  const submit = async () => {
     if (!valid()) return
     const value = message().trim()
+    if (!warning()) {
+      setChecking(true)
+      const result = await props.check(value)
+      setChecking(false)
+      if (result.status !== "clean") {
+        setWarned({ message: value, warning: commitWarning(result) })
+        return
+      }
+    }
     dialog.close()
     props.onConfirm(value)
   }
@@ -380,10 +399,24 @@ function CommitToMainDialog(props: { defaultMessage: string; onConfirm: (message
           onKeyDown={(event: KeyboardEvent) => {
             if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
               event.preventDefault()
-              submit()
+              void submit()
             }
           }}
         />
+        <Show when={warning()}>
+          {(shown) => (
+            <div
+              class="text-13-regular text-text-weak flex flex-col gap-1"
+              role="alert"
+              style={{ "line-height": "var(--line-height-normal)" }}
+            >
+              <span class="text-text-strong">{shown().title}</span>
+              {shown().sentences.map((sentence) => (
+                <span>• {sentence}</span>
+              ))}
+            </div>
+          )}
+        </Show>
         <div class="text-13-regular text-text-weak" style={{ "line-height": "var(--line-height-normal)" }}>
           Stages every change and commits it to the current branch. This is reversible with{" "}
           <code>git reset --soft HEAD~1</code>.
@@ -392,8 +425,8 @@ function CommitToMainDialog(props: { defaultMessage: string; onConfirm: (message
           <Button variant="ghost" onClick={() => dialog.close()}>
             Cancel
           </Button>
-          <Button disabled={!valid()} onClick={submit}>
-            Commit to main
+          <Button disabled={!valid()} onClick={() => void submit()}>
+            {checking() ? "Checking…" : (warning()?.button ?? "Commit to main")}
           </Button>
         </div>
       </div>
@@ -423,6 +456,16 @@ export default function Page() {
   const { params, sessionKey, workspaceKey, tabs, view } = useSessionLayout()
   const sessionOwnership = createSessionOwnership(sessionKey)
   const newSessionDesign = createMemo(() => settings.general.newLayoutDesigns())
+  // A command handed over from the app shell, such as a coding agent started from Host locally, runs as a new tab
+  // here. The panel opens only once the tab exists, so it never adds an empty terminal of its own beside it.
+  useTerminalRequests({
+    ready: terminal.ready,
+    run: (request) =>
+      void terminal.run(request.command, request.onExit).then((id) => {
+        if (id) view().terminal.open()
+        request.onStart?.(Boolean(id))
+      }),
+  })
 
   createEffect(() => {
     if (!prompt.ready()) return
@@ -800,6 +843,7 @@ export default function Page() {
       <CommitToMainDialog
         defaultMessage={commitDefaultMessage()}
         onConfirm={(message) => commitMutation.mutate(message)}
+        check={(message) => checkCommitMessage(message, (input) => sdk().client.memory.posting.check(input))}
       />
     ))
   }

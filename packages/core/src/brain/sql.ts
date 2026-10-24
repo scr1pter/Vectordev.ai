@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm"
 import { blob, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
+import type { Research } from "@vectordevai/schema/research"
 import type { BrainCode } from "./code"
 import type { BrainSchema } from "./schema"
 
@@ -44,6 +45,10 @@ export const BrainEntryTable = sqliteTable(
     // Learned after reading a private document, so withheld where that document is: from guests and models that may
     // train on prompts.
     private: integer({ mode: "boolean" }).notNull().default(false),
+    // What a preference or a term is about (migration 20261202000000_facets).
+    facet: text().$type<BrainSchema.Facet>(),
+    // A term's word or phrase, lowercased with its punctuation as spaces, which recall looks for in a request's words.
+    term_key: text(),
   },
   (table) => [
     index("brain_entry_repository_status_idx").on(table.repository_id, table.status),
@@ -141,6 +146,9 @@ export const BrainStateTable = sqliteTable("brain_state", {
   // commit history was last read at, so co-change is read again only after a commit.
   code_revision: integer().notNull().default(0),
   code_head: text(),
+  // The personal row only: the facets Vector may learn (all of them when unset), and when the model learner runs.
+  learn_facets: text({ mode: "json" }).$type<Partial<Record<BrainSchema.Facet, boolean>>>(),
+  model_learner: text().$type<"local-only" | "always" | "off">(),
 })
 
 // Which entries reached which session, and through which tier. Pruned after 30 days.
@@ -201,12 +209,18 @@ export const BrainDocumentTable = sqliteTable(
     created_at: integer().notNull(),
     updated_at: integer().notNull(),
     indexed_at: integer(),
+    // A page Deep research read (origin web) or a run's report (origin research): the address it was read from, when,
+    // and the run it belongs to (migration 20261201000000_research).
+    source_url: text(),
+    fetched_at: integer(),
+    run_id: text(),
   },
   (table) => [
     index("brain_document_repository_idx").on(table.repository_id, table.status),
     index("brain_document_hash_idx").on(table.repository_id, table.content_hash),
     index("brain_document_lineage_idx").on(table.repository_id, table.lineage),
     uniqueIndex("brain_document_ordinal_idx").on(table.repository_id, table.ordinal),
+    index("brain_document_run_idx").on(table.run_id),
   ],
 )
 
@@ -524,5 +538,106 @@ export const BrainCodeLiteralTable = sqliteTable(
   (table) => [
     index("brain_code_literal_value_idx").on(table.repository_id, table.value),
     index("brain_code_literal_path_idx").on(table.repository_id, table.path),
+  ],
+)
+
+// Deep research, one brain per repository (migration 20261201000000_research). A run holds what it planned, the pages
+// it read (each one a held, private brain document of origin web, so nothing recalls it), the notes whose quotes were
+// found in those pages, and its report (a held document of origin research until the user keeps it). A run nobody
+// keeps is deleted after 30 days. Sources and notes go with their run; a source whose page was forgotten keeps its
+// row without a document, so its notes can say their quote is no longer in it.
+
+export const ResearchRunTable = sqliteTable(
+  "research_run",
+  {
+    id: text().primaryKey(),
+    repository_id: text().notNull(),
+    // The root session: researchers write into their parent's run.
+    session_id: text().notNull(),
+    question: text().notNull(),
+    plan: text({ mode: "json" }).$type<Research.Plan>(),
+    depth: text().$type<Research.Depth>().notNull(),
+    scope: text().$type<Research.Scope>().notNull(),
+    status: text().$type<Research.RunStatus>().notNull(),
+    // The report's latest version, and its Markdown as research_report rendered it. A trigger clears both when the
+    // document is forgotten, however that happens.
+    report_document_id: text().references(() => BrainDocumentTable.id, { onDelete: "set null" }),
+    report: text(),
+    // Every query the run sent, as the Sources tab and the report's Method show them.
+    queries: text({ mode: "json" }).$type<string[]>().notNull(),
+    // The page and search budget the run was started with, which the store enforces.
+    limits: text({ mode: "json" }).$type<{ pages?: number; searches?: number }>(),
+    pages: integer().notNull().default(0),
+    searches: integer().notNull().default(0),
+    cost_usd: real().notNull().default(0),
+    steps: integer().notNull().default(0),
+    kept: integer({ mode: "boolean" }).notNull().default(false),
+    created_at: integer().notNull(),
+    updated_at: integer().notNull(),
+  },
+  (table) => [
+    index("research_run_repository_idx").on(table.repository_id, table.created_at),
+    index("research_run_session_idx").on(table.session_id),
+  ],
+)
+
+export const ResearchSourceTable = sqliteTable(
+  "research_source",
+  {
+    id: text().primaryKey(),
+    run_id: text()
+      .notNull()
+      .references(() => ResearchRunTable.id, { onDelete: "cascade" }),
+    // S1, S2, ... within the run.
+    ordinal: integer().notNull(),
+    url: text().notNull(),
+    canonical_url: text().notNull(),
+    title: text().notNull(),
+    site: text().notNull(),
+    author: text(),
+    published_at: text(),
+    kind: text().$type<Research.SiteKind>().notNull(),
+    status: text().$type<Research.SourceStatus>().notNull(),
+    reason: text(),
+    duplicate_of: text(),
+    signals: text({ mode: "json" }).$type<Research.Signal>(),
+    // Read from the user's own computer or network, so its text is private context for the outbound check.
+    private: integer({ mode: "boolean" }).notNull().default(false),
+    pages: integer(),
+    // The held page; none for a page that was skipped, copied or forgotten since.
+    document_id: text().references(() => BrainDocumentTable.id, { onDelete: "set null" }),
+    fetched_at: integer(),
+    created_at: integer().notNull(),
+  },
+  (table) => [uniqueIndex("research_source_ordinal_idx").on(table.run_id, table.ordinal)],
+)
+
+export const ResearchNoteTable = sqliteTable(
+  "research_note",
+  {
+    id: text().primaryKey(),
+    run_id: text()
+      .notNull()
+      .references(() => ResearchRunTable.id, { onDelete: "cascade" }),
+    // N1, N2, ... within the run.
+    ordinal: integer().notNull(),
+    subquestion: text().notNull(),
+    claim: text().notNull(),
+    source_id: text()
+      .notNull()
+      .references(() => ResearchSourceTable.id, { onDelete: "cascade" }),
+    // The passage of the source its quote was found in: the one embedded when the machine is idle.
+    passage_id: text(),
+    quote: text().notNull(),
+    page: integer(),
+    stance: text().$type<Research.Stance>().notNull(),
+    // Whether the quote states the claim (BrainLexical.states); false is a paraphrase.
+    support: integer({ mode: "boolean" }).notNull(),
+    verdict: text().$type<Research.Verdict>(),
+    created_at: integer().notNull(),
+  },
+  (table) => [
+    uniqueIndex("research_note_ordinal_idx").on(table.run_id, table.ordinal),
+    index("research_note_source_idx").on(table.source_id),
   ],
 )

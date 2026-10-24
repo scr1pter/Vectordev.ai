@@ -34,15 +34,15 @@ export function createPromptInputController(input: {
   const agentsQuery = createQuery(() => input.queryOptions.agents(pathKey(sdk().directory)))
   const globalProvidersQuery = createQuery(() => input.queryOptions.providers(null))
   const providersQuery = createQuery(() => input.queryOptions.providers(pathKey(sdk().directory)))
-  const availableAgents = createMemo(() => {
-    const agents = new Map(sync().data.agent.map((agent) => [agent.name, agent] as const))
-    for (const agent of sync().data.agent) agents.set(agent.name, agent)
-    for (const agent of agentsQuery.data ?? []) agents.set(agent.name, agent)
-    return [...agents.values()].sort((a, b) => {
+  // The agents query is the engine's current list, and the directory store's copy only stands in until it loads.
+  // Merging the two kept an agent the engine had since removed, such as a specialist turned off in Settings, in the
+  // @ list.
+  const availableAgents = createMemo(() =>
+    (agentsQuery.data ?? sync().data.agent).toSorted((a, b) => {
       if (a.mode !== b.mode) return a.mode === "subagent" ? -1 : 1
       return a.name.localeCompare(b.name)
-    })
-  })
+    }),
+  )
 
   return createMemo<PromptInputControls>(() => ({
     agents: {

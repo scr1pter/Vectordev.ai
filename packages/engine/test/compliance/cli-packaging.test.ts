@@ -330,8 +330,8 @@ if (process.argv[2] === "pack")
   }
 }, 30_000)
 
-// Every borrowed OAuth registration stops publication except the Codex CLI client for Sign in with
-// ChatGPT, which the owner re-enabled on 10 October 2026 (docs/vector/owner-actions/chatgpt.md).
+// Every borrowed OAuth registration stops publication except the Codex CLI client, which the provider policy
+// still names with Sign in with ChatGPT off by default since 23 October 2026 (docs/vector/owner-actions/chatgpt.md).
 const borrowedRegistrations = [
   "1d89f9fdb23ee96d4e603201f6861dab6e143c5c3c00469a018a2d94bdc03d4e",
   "Ov23li8tweQw6odWQebz",

@@ -11,6 +11,8 @@ import { Context, Effect, Layer, Queue, Schema, Scope, Stream } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { makeGlobalNode } from "../effect/app-node"
 import { httpClient } from "../effect/app-node-platform"
+import { EgressGuard } from "../local-mode/guard"
+import { EgressHttpClient } from "../local-mode/http-client"
 import { Global } from "../global"
 import { BrainEmbedManifest } from "./embed-manifest"
 import golden from "./embed-golden.json"
@@ -269,7 +271,9 @@ function make(
 ): Interface {
   const dir = options.dir
   const worker = deps.worker
-  const http = deps.http
+  // Each download request is labelled, so with Vector Local on it is decided as the search model's download: it needs
+  // the user's one-time grant, an allow entry or a mirror on the list.
+  const http = EgressHttpClient.make(deps.http)
   const sources = options.sources ?? SOURCES
   const attempts = options.attempts ?? 3
   const timeout = options.timeout ?? TIMEOUT
@@ -624,9 +628,15 @@ function make(
         )
         .pipe(
           Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
-          Effect.mapError(
-            () => new EmbedError({ reason: "network", message: `${state.url.host} could not be reached` }),
-          ),
+          EgressHttpClient.labelled("embedding-model"),
+          Effect.mapError((error) => {
+            const cause = error.reason._tag === "TransportError" ? error.reason.cause : undefined
+            return new EmbedError({
+              reason: "network",
+              message:
+                cause instanceof EgressGuard.EgressBlocked ? cause.message : `${state.url.host} could not be reached`,
+            })
+          }),
         )
       const location = response.headers["location"]
       if (response.status < 300 || response.status >= 400 || !location) return response

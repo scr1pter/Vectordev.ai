@@ -5,8 +5,12 @@ import { mkdir, open, rename, rm, writeFile } from "node:fs/promises"
 import { Option, Schema } from "effect"
 import { Teams } from "@vectordevai/schema/teams"
 import { Flock } from "../util/flock"
+import { Egress } from "../local-mode/egress"
+import { LocalPolicy } from "../local-mode/policy"
+import { LocalSources } from "../local-mode/sources"
 
 const origin = "https://vectordev.ai"
+const LOCAL_SOURCE = LocalSources.get("teams")!
 const State = Schema.Struct({
   version: Schema.Literal(1),
   accountId: Teams.ID,
@@ -43,7 +47,7 @@ export function createTeamsClient(input: {
   request?: (url: string, init: RequestInit) => Promise<Response>
   now?: () => number
 }) {
-  const request = input.request ?? fetch
+  const request = input.request ?? ((url, init) => Egress.fetch(LOCAL_SOURCE.id, url, init))
   const now = input.now ?? Date.now
   const keys = new Map<string, { key: ReturnType<typeof createPublicKey>; expiresAt: number }>()
   const lock = { dir: path.join(path.dirname(input.file), "locks"), timeoutMs: 30_000 }
@@ -82,6 +86,12 @@ export function createTeamsClient(input: {
   }
 
   async function get(url: string, token?: string) {
+    // Vector Local blocks Vector Teams unless the user allowed it, so nothing is sent.
+    if (LocalPolicy.blocks(Egress.policy(), LOCAL_SOURCE))
+      throw new TeamsError(
+        "unavailable",
+        "Vector Local blocks Vector Teams, which runs on vectordev.ai. Your selected team configuration has not been removed.",
+      )
     const response = await request(url, {
       headers: { accept: "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
       redirect: "error",

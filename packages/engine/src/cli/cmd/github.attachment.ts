@@ -1,3 +1,5 @@
+import { githubFetch } from "./github.shared"
+
 /** GitHub attachments may redirect to its CDN; credentials never follow that redirect. */
 export async function downloadGithubAttachment(
   input: {
@@ -5,7 +7,7 @@ export async function downloadGithubAttachment(
     token: string
     signal?: AbortSignal
   },
-  request: (url: string, init: RequestInit) => Promise<Response> = fetch,
+  request: (url: string, init: RequestInit) => Promise<Response> = githubFetch,
 ) {
   const initial = new URL(input.url)
   if (!allowed(initial) || initial.hostname !== "github.com") return

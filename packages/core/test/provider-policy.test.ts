@@ -273,8 +273,14 @@ test("unavailable credential reasons preserve ordinary and custom API keys", () 
     expect(providerCredentialUnavailable(id, { type: "oauth" })?.reason).toBe("sign-in-paused")
     expect(providerCredentialUnavailable(id, { type: "api" })).toBeUndefined()
   }
-  // Sign in with ChatGPT is on again (owner decision, 10 October 2026), so a saved sign-in is used.
-  expect(providerCredentialUnavailable("openai", { type: "oauth" })).toBeUndefined()
+  // Sign in with ChatGPT is off (owner decision, 23 October 2026): a saved sign-in is paused, and the notice points
+  // to OpenAI's own routes, an API key or the user's own Codex CLI.
+  const chatgpt = providerCredentialUnavailable("openai", { type: "oauth" })
+  expect(chatgpt?.reason).toBe("sign-in-paused")
+  expect(chatgpt?.message).toContain("Sign in with ChatGPT is off in Vector")
+  expect(chatgpt?.message).toContain("API key")
+  expect(chatgpt?.message).toContain("Codex CLI from Host locally")
+  expect(chatgpt?.message).toContain("vector providers logout openai")
   expect(providerCredentialUnavailable("openai", { type: "api" })).toBeUndefined()
   expect(
     providerCredentialUnavailable("digitalocean", { type: "api", metadata: { oauth_access: "true" } })?.reason,
@@ -323,66 +329,95 @@ it.effect("V2 publishes one actionable notice for a paused credential without ex
 )
 
 const issuer = "https://auth.openai.com"
+const owned = "vector-owned-test-registration"
 
-test("Sign in with ChatGPT uses the Codex CLI client unless an approved registration is configured", () => {
-  expect(CHATGPT_SIGN_IN).toBe(true)
-  expect(CHATGPT_CLIENT_ID).toBe("app_EMoamEEZ73f0CkXaXp7hrann")
-  expect(chatgptOAuthConfiguration({})).toEqual({ clientId: CHATGPT_CLIENT_ID, origin: issuer })
-  expect(chatgptOAuthConfiguration({ VECTOR_OPENAI_OAUTH_CLIENT_ID: "vector-owned-test-registration" })).toEqual({
-    clientId: "vector-owned-test-registration",
+// A registration of Vector's own, as VECTOR_OPENAI_OAUTH_CLIENT_ID supplies one, for a sign-in that is on.
+function ownedRegistration() {
+  const before = process.env.VECTOR_OPENAI_OAUTH_CLIENT_ID
+  process.env.VECTOR_OPENAI_OAUTH_CLIENT_ID = owned
+  return () => {
+    if (before === undefined) delete process.env.VECTOR_OPENAI_OAUTH_CLIENT_ID
+    else process.env.VECTOR_OPENAI_OAUTH_CLIENT_ID = before
+  }
+}
+
+test("Sign in with ChatGPT is off unless a registration of Vector's own is configured", () => {
+  // Off by the owner's decision of 23 October 2026: the Codex CLI's registration is never used for a new sign-in.
+  expect(CHATGPT_SIGN_IN).toBe(false)
+  expect(CODEX_CLI_CLIENT_ID).toBe("app_EMoamEEZ73f0CkXaXp7hrann")
+  expect(chatgptOAuthConfiguration({})).toBeUndefined()
+  expect(chatgptOAuthConfiguration({}, true)).toBeUndefined()
+  expect(providerOAuthAllowed("openai")).toBe(false)
+  // A registration OpenAI issues to Vector still turns it on, and the owner's switch still applies to it.
+  expect(chatgptOAuthConfiguration({ VECTOR_OPENAI_OAUTH_CLIENT_ID: owned })).toEqual({
+    clientId: owned,
     origin: issuer,
   })
+  expect(chatgptOAuthConfiguration({ VECTOR_OPENAI_OAUTH_CLIENT_ID: owned }, false)).toBeUndefined()
   expect(chatgptOAuthConfiguration({ VECTOR_OPENAI_OAUTH_CLIENT_ID: "invalid registration" })).toBeUndefined()
-  expect(chatgptOAuthConfiguration({}, false)).toBeUndefined()
-  expect(providerOAuthAllowed("openai")).toBe(true)
 
-  // Sign-ins saved before 1.99.104 carry no stamp and came from the Codex CLI client.
-  expect(providerCredentialAllowed("openai", { type: "oauth" })).toBe(true)
-  expect(
-    providerCredentialAllowed("openai", { type: "oauth", clientId: CHATGPT_CLIENT_ID, enterpriseUrl: issuer }),
-  ).toBe(true)
-  expect(
-    providerCredentialAllowed("openai", {
-      type: "oauth",
-      metadata: { oauth_client_id: CHATGPT_CLIENT_ID, oauth_instance_url: issuer },
-    }),
-  ).toBe(true)
-  expect(
-    providerCredentialAllowed("openai", { type: "oauth", clientId: "another-registration", enterpriseUrl: issuer }),
-  ).toBe(false)
-  // Once an approved registration replaces it, an unstamped sign-in has to be redone.
-  const owned = chatgptOAuthConfiguration({ VECTOR_OPENAI_OAUTH_CLIENT_ID: "vector-owned-test-registration" })
-  expect(chatgptCredentialMatches({}, owned)).toBe(false)
-  // That holds when the built-in ID itself changes too: unstamped sign-ins match the Codex CLI client only.
-  expect(CODEX_CLI_CLIENT_ID).toBe("app_EMoamEEZ73f0CkXaXp7hrann")
-  expect(chatgptCredentialMatches({}, { clientId: CODEX_CLI_CLIENT_ID, origin: issuer })).toBe(true)
-  expect(chatgptCredentialMatches({}, chatgptOAuthConfiguration({}))).toBe(CHATGPT_CLIENT_ID === CODEX_CLI_CLIENT_ID)
-  expect(chatgptCredentialMatches({ clientId: CHATGPT_CLIENT_ID, enterpriseUrl: issuer }, owned)).toBe(false)
-  expect(chatgptCredentialMatches({ clientId: "vector-owned-test-registration", enterpriseUrl: issuer }, owned)).toBe(
-    true,
-  )
+  // Sign-ins saved before, unstamped or stamped with the Codex CLI client, are neither used nor refreshed.
+  for (const credential of [
+    { type: "oauth" },
+    { type: "oauth", clientId: CODEX_CLI_CLIENT_ID, enterpriseUrl: issuer },
+    { type: "oauth", metadata: { oauth_client_id: CHATGPT_CLIENT_ID, oauth_instance_url: issuer } },
+  ])
+    expect(providerCredentialAllowed("openai", credential)).toBe(false)
+  expect(chatgptCredentialMatches({}, chatgptOAuthConfiguration({}))).toBe(false)
+  // API keys are unaffected.
+  expect(providerCredentialAllowed("openai", { type: "api" })).toBe(true)
+  expect(providerCredentialAllowed("openai", { type: "key" })).toBe(true)
+})
+
+test("with a registration of Vector's own, only its own sign-ins are used", () => {
+  const restore = ownedRegistration()
+  try {
+    expect(providerOAuthAllowed("openai")).toBe(true)
+    const configuration = chatgptOAuthConfiguration()
+    expect(configuration).toEqual({ clientId: owned, origin: issuer })
+    expect(providerCredentialAllowed("openai", { type: "oauth", clientId: owned, enterpriseUrl: issuer })).toBe(true)
+    expect(
+      providerCredentialAllowed("openai", {
+        type: "oauth",
+        metadata: { oauth_client_id: owned, oauth_instance_url: issuer },
+      }),
+    ).toBe(true)
+    // The Codex CLI client's sign-ins, stamped or from before stamps, have to be redone.
+    expect(providerCredentialAllowed("openai", { type: "oauth" })).toBe(false)
+    expect(
+      providerCredentialAllowed("openai", { type: "oauth", clientId: CODEX_CLI_CLIENT_ID, enterpriseUrl: issuer }),
+    ).toBe(false)
+    expect(chatgptCredentialMatches({}, configuration)).toBe(false)
+    // Unstamped sign-ins match the Codex CLI client only, should the built-in sign-in ever be turned on again.
+    expect(chatgptCredentialMatches({}, { clientId: CODEX_CLI_CLIENT_ID, origin: issuer })).toBe(true)
+  } finally {
+    restore()
+  }
 })
 
 test("the owner's remote switch hides ChatGPT sign-in and stops saved sign-ins; API keys stay usable", () => {
+  const restore = ownedRegistration()
+  const stamped = { type: "oauth", clientId: owned, enterpriseUrl: issuer }
   applyRemoteProviderPolicy({ chatgptSignIn: false })
   try {
-    expect(chatgptOAuthConfiguration({})).toBeUndefined()
+    expect(chatgptOAuthConfiguration()).toBeUndefined()
     expect(providerOAuthAllowed("openai")).toBe(false)
-    expect(providerCredentialAllowed("openai", { type: "oauth" })).toBe(false)
-    expect(
-      providerCredentialAllowed("openai", { type: "oauth", clientId: CHATGPT_CLIENT_ID, enterpriseUrl: issuer }),
-    ).toBe(false)
-    expect(providerCredentialUnavailable("openai", { type: "oauth" })?.reason).toBe("sign-in-paused")
+    expect(providerCredentialAllowed("openai", stamped)).toBe(false)
+    expect(providerCredentialUnavailable("openai", stamped)?.reason).toBe("sign-in-paused")
     expect(providerCredentialAllowed("openai", { type: "api" })).toBe(true)
     expect(providerCredentialAllowed("openai", { type: "key" })).toBe(true)
   } finally {
     applyRemoteProviderPolicy({ chatgptSignIn: true })
   }
-  expect(providerOAuthAllowed("openai")).toBe(true)
-  expect(providerCredentialAllowed("openai", { type: "oauth" })).toBe(true)
+  try {
+    expect(providerOAuthAllowed("openai")).toBe(true)
+    expect(providerCredentialAllowed("openai", stamped)).toBe(true)
+  } finally {
+    restore()
+  }
 })
 
-it.effect("V2 connects a saved ChatGPT sign-in only while the owner's switch is on", () =>
+it.effect("V2 connects a saved ChatGPT sign-in only while the sign-in is on", () =>
   Effect.gen(function* () {
     const credentials = yield* Credential.Service
     const integrations = yield* Integration.Service
@@ -396,16 +431,31 @@ it.effect("V2 connects a saved ChatGPT sign-in only while the owner's switch is 
         access: "placeholder",
         refresh: "placeholder",
         expires: Date.now() + 3600_000,
+        metadata: { oauth_client_id: owned, oauth_instance_url: issuer },
       }),
     })
     const connection = { type: "credential" as const, id: saved.id, label: saved.label }
-    expect(yield* integrations.connection.active(integrationID)).toMatchObject({ id: saved.id })
-    expect(yield* integrations.connection.resolve(connection)).toMatchObject({ type: "oauth" })
-    applyRemoteProviderPolicy({ chatgptSignIn: false })
-    const paused = yield* Effect.all([
-      integrations.connection.active(integrationID),
-      integrations.connection.resolve(connection),
-    ]).pipe(Effect.ensuring(Effect.sync(() => applyRemoteProviderPolicy({ chatgptSignIn: true }))))
-    expect(paused).toEqual([undefined, undefined])
+    // Off by default: the saved sign-in is not used.
+    expect(yield* integrations.connection.active(integrationID)).toBeUndefined()
+    const on = yield* Effect.acquireUseRelease(
+      Effect.sync(ownedRegistration),
+      () =>
+        Effect.gen(function* () {
+          const connected = yield* Effect.all([
+            integrations.connection.active(integrationID),
+            integrations.connection.resolve(connection),
+          ])
+          applyRemoteProviderPolicy({ chatgptSignIn: false })
+          const paused = yield* Effect.all([
+            integrations.connection.active(integrationID),
+            integrations.connection.resolve(connection),
+          ]).pipe(Effect.ensuring(Effect.sync(() => applyRemoteProviderPolicy({ chatgptSignIn: true }))))
+          return { connected, paused }
+        }),
+      (restore) => Effect.sync(restore),
+    )
+    expect(on.connected[0]).toMatchObject({ id: saved.id })
+    expect(on.connected[1]).toMatchObject({ type: "oauth" })
+    expect(on.paused).toEqual([undefined, undefined])
   }),
 )

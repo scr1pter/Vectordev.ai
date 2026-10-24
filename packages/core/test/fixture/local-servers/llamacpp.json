@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "metadata": {
+    "server": "llamacpp",
+    "recorded": false,
+    "note": "Written by hand from the server's public API documentation, not recorded from a running server. Replace with a recording (packages/http-recorder) before relying on a field this does not show.",
+    "version": "b6700",
+    "fallback": {
+      "status": 404,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "body": "{\"error\": {\"code\": 404, \"message\": \"File Not Found\", \"type\": \"not_found_error\"}}"
+    }
+  },
+  "interactions": [
+    {
+      "transport": "http",
+      "request": {
+        "method": "GET",
+        "url": "http://127.0.0.1:8080/props",
+        "headers": {},
+        "body": ""
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"default_generation_settings\": {\"id\": 0, \"id_task\": -1, \"n_ctx\": 16384, \"speculative\": false, \"is_processing\": false, \"params\": {\"n_predict\": -1, \"temperature\": 0.8}}, \"total_slots\": 2, \"model_path\": \"/models/qwen3-coder-30b-q4_k_m.gguf\", \"modalities\": {\"vision\": false, \"audio\": false}, \"chat_template\": \"{%- for message in messages %}{{ message.content }}{%- endfor %}\", \"bos_token\": \"\", \"eos_token\": \"<|im_end|>\", \"build_info\": \"b6700-1a2b3c4d\"}"
+      }
+    },
+    {
+      "transport": "http",
+      "request": {
+        "method": "GET",
+        "url": "http://127.0.0.1:8080/v1/models",
+        "headers": {},
+        "body": ""
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"object\": \"list\", \"data\": [{\"id\": \"qwen3-coder-30b-q4_k_m.gguf\", \"object\": \"model\", \"created\": 1760000000, \"owned_by\": \"llamacpp\", \"meta\": {\"vocab_type\": 2, \"n_vocab\": 151936, \"n_ctx_train\": 262144, \"n_embd\": 2048, \"n_params\": 30532122624, \"size\": 18556700761}}]}"
+      }
+    }
+  ]
+}

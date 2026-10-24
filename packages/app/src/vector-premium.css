@@ -2824,6 +2824,16 @@ html[data-vector-navigation-resizing] * {
 [data-component="free-model-training-notice"] {
   color: var(--vx-amber);
 }
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-row-region"] {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--vx-line);
+  border-radius: 4px;
+  color: var(--picker-muted);
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+}
 /* The check slot is always there, so the context column never moves. */
 :is(.vector-model-popover, .vector-select-model-dialog)
   :is([data-slot="model-row-check"], [data-slot="menu-v2-item-indicator"]) {
@@ -4023,7 +4033,7 @@ html[data-vector-reduce-animations="true"] [data-vector-update-spinner] {
   box-shadow: inset 0 1px rgba(235, 222, 245, 0.022);
 }
 
-[data-vector-agent-launcher] .grid.grid-cols-4:has(> .vx-pick) {
+[data-vector-agent-launcher] .grid.grid-cols-2:has(> .vx-pick) {
   gap: 2px !important;
   padding: 3px;
   border-radius: 15px;
@@ -4153,12 +4163,6 @@ html[data-vector-focus-indicators="true"] [data-vector-agent-launcher] textarea.
   [data-vector-agent-launcher] .vx-launcher__body,
   [data-vector-agent-launcher] .vx-launcher__footer {
     padding-inline: 16px;
-  }
-}
-
-@media (max-width: 520px) {
-  [data-vector-agent-launcher] .grid.grid-cols-4:has(> .vx-pick) {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

@@ -2260,27 +2260,6 @@ html[data-vector-reduce-animations="true"] *::after {
   }
 }
 
-/* The subagent list. A fixed minimum column so a name, summary and description
-   stay on their own lines at every dialog width. */
-.settings-v2-pets-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 10px;
-}
-
-.settings-v2-pet {
-  display: flex;
-  gap: 12px;
-  padding: 12px;
-  border: 1px solid var(--vx-line);
-  border-radius: 10px;
-  background: var(--vx-surface);
-}
-
-.settings-v2-pet-copy {
-  min-width: 0;
-}
-
 .settings-v2-pet-name {
   display: flex;
   flex-wrap: wrap;
@@ -2308,18 +2287,33 @@ html[data-vector-reduce-animations="true"] *::after {
   text-transform: uppercase;
 }
 
-.settings-v2-pet-role {
-  margin-top: 4px;
-  color: var(--v2-text-text-muted, rgba(255, 255, 255, 0.55));
-  font-size: 11.5px;
-  line-height: 1.45;
-}
-
 .settings-v2-pet-id {
   margin-top: 6px;
   color: var(--v2-text-text-faint, rgba(255, 255, 255, 0.32));
   font-family: var(--font-family-mono, ui-monospace, monospace);
   font-size: 10.5px;
+}
+
+/* One row per subagent specialist: its mark, what it does and its switch. A
+   specialist that is off dims, so the list reads at a glance without another
+   colour. */
+.settings-v2-specialist {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.settings-v2-specialist .settings-v2-pet-id {
+  margin-top: 0;
+}
+
+.settings-v2-specialist > svg,
+.settings-v2-specialist .settings-v2-row-copy {
+  transition: opacity 120ms ease;
+}
+
+.settings-v2-specialist[data-off] > svg,
+.settings-v2-specialist[data-off] .settings-v2-row-copy {
+  opacity: 0.5;
 }
 
 .settings-v2-textarea {

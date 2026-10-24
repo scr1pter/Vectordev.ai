@@ -73,7 +73,7 @@ const layer = Layer.effect(
     const ask = Effect.fn("Permission.ask")(function* (input: PermissionV1.AskInput) {
       const { approved, pending } = yield* InstanceState.get(state)
       const { ruleset, ...request } = input
-      let needsAsk = PermissionPolicy.requiresApproval(request.permission, request.always)
+      let needsAsk = PermissionPolicy.requiresApproval(request.permission, request.always, request.patterns)
 
       for (const pattern of request.patterns) {
         // Approvals are shared by every session in the instance and come last, so on their own they would override a
@@ -130,7 +130,8 @@ const layer = Layer.effect(
       const existing = pending.get(input.requestID)
       if (!existing) return yield* new PermissionV1.NotFoundError({ requestID: input.requestID })
       const reply =
-        input.reply === "always" && !PermissionV2.canAlwaysApprove(existing.info.permission, existing.info.always)
+        input.reply === "always" &&
+        !PermissionV2.canAlwaysApprove(existing.info.permission, existing.info.always, existing.info.patterns)
           ? "once"
           : input.reply
 
@@ -175,7 +176,7 @@ const layer = Layer.effect(
 
       for (const [id, item] of pending.entries()) {
         if (item.info.sessionID !== existing.info.sessionID) continue
-        if (PermissionPolicy.requiresApproval(item.info.permission, item.info.always)) continue
+        if (PermissionPolicy.requiresApproval(item.info.permission, item.info.always, item.info.patterns)) continue
         const ok = item.info.patterns.every(
           (pattern) => evaluate(item.info.permission, pattern, approved).action === "allow",
         )

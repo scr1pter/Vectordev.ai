@@ -33,7 +33,15 @@ type Dependencies = {
   enabled(): boolean
   engine: { url: string; username: string | null; password: string | null }
   token(): Promise<string | undefined>
+  /** Reads the local engine's sessions and usage. */
   fetch(url: string, init: RequestInit): Promise<Response>
+  /** Sends the check-in itself, through Vector Local's labelled send; `fetch` when omitted. */
+  send?(url: string, init: RequestInit): Promise<Response>
+  /**
+   * Whether the check-in may go now: Vector Local off, or on with the check-in allowed, and no first-run hold. Asked
+   * before anything is counted, so a check-in that may not go reads nothing and sends nothing.
+   */
+  allowed?(): boolean
   now(): number
   version: string
   platform: string
@@ -67,7 +75,7 @@ export function createUsageCheckin(deps: Dependencies) {
   } = { usageReadAt: Number.NEGATIVE_INFINITY, helpersRead: { day: "", helpers: 0 } }
 
   const checkin = async () => {
-    if (!deps.endpoint || !deps.enabled()) return false
+    if (!deps.endpoint || !deps.enabled() || deps.allowed?.() === false) return false
     const now = deps.now()
     const day = new Date(now).toISOString().slice(0, 10)
     const sent = Schema.decodeUnknownOption(Sent)(deps.store.get("sent")).pipe(
@@ -110,26 +118,24 @@ export function createUsageCheckin(deps: Dependencies) {
         (usage.lifetimeTokens <= (sent.value.tokens ?? -1) && usage.modelResponses <= (sent.value.responses ?? -1)))
     )
       return false
-    // Switching sharing off while the sessions were being counted still stops this check-in.
-    if (!deps.enabled()) return false
-    const response = await deps
-      .fetch(deps.endpoint, {
-        method: "POST",
-        headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({
-          installId: installId(deps.store),
-          client: "desktop",
-          version: deps.version,
-          platform: deps.platform,
-          arch: deps.arch,
-          sessions: counts.sessions,
-          subagentSessions: counts.subagentSessions,
-          ...(usage ? { usage } : {}),
-        }),
-        redirect: "error",
-        signal: AbortSignal.timeout(10_000),
-      })
-      .catch(() => undefined)
+    // Switching sharing off, or Vector Local on, while the sessions were being counted still stops this check-in.
+    if (!deps.enabled() || deps.allowed?.() === false) return false
+    const response = await (deps.send ?? deps.fetch)(deps.endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({
+        installId: installId(deps.store),
+        client: "desktop",
+        version: deps.version,
+        platform: deps.platform,
+        arch: deps.arch,
+        sessions: counts.sessions,
+        subagentSessions: counts.subagentSessions,
+        ...(usage ? { usage } : {}),
+      }),
+      redirect: "error",
+      signal: AbortSignal.timeout(10_000),
+    }).catch(() => undefined)
     await response?.body?.cancel().catch(() => undefined)
     if (!response?.ok) return false
     const tokens = usage?.lifetimeTokens ?? Option.getOrUndefined(sent)?.tokens

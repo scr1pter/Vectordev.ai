@@ -11,6 +11,7 @@ import { Slug } from "@vectordevai/core/util/slug"
 import { errorMessage } from "../util/error"
 import { GlobalBus } from "@/bus/global"
 import { Git } from "@/git"
+import { gitEnvironment, refusal } from "@vectordevai/core/git"
 import { Effect, Layer, Path, Schema, Scope, Context } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { FSUtil } from "@vectordevai/core/fs-util"
@@ -151,10 +152,19 @@ const layer: Layer.Layer<
     const project = yield* Project.Service
     const store = yield* InstanceStore.Service
 
+    // With Vector Local on, a git command that connects (a fetch, a submodule update) is decided on each remote it would
+    // reach before git starts, and with Web access None git may use only file remotes.
     const git = Effect.fnUntraced(
       function* (args: string[], opts?: { cwd?: string }) {
+        const query = (more: string[]) =>
+          appProcess.run(ChildProcess.make("git", more, { cwd: opts?.cwd, extendEnv: true, stdin: "ignore" })).pipe(
+            Effect.map((result) => (result.exitCode === 0 ? result.stdout.toString("utf8") : "")),
+            Effect.catch(() => Effect.succeed("")),
+          )
+        const refused = yield* refusal(args, query)
+        if (refused) return { code: 128, text: "", stderr: refused } satisfies GitResult
         const result = yield* appProcess.run(
-          ChildProcess.make("git", args, { cwd: opts?.cwd, extendEnv: true, stdin: "ignore" }),
+          ChildProcess.make("git", args, { cwd: opts?.cwd, extendEnv: true, stdin: "ignore", env: gitEnvironment() }),
         )
         return {
           code: result.exitCode,

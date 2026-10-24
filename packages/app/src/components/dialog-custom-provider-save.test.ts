@@ -60,6 +60,7 @@ function fixture(
         updateConfig: async (config) => {
           updates.push(config)
         },
+        list: async () => true,
       }),
   }
 }

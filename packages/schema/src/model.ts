@@ -65,7 +65,7 @@ export const Info = Schema.Struct({
   name: Schema.String,
   freeModel: Schema.Struct({
     source: Schema.Literals(["shared", "openrouter"]),
-    // "may-train" and "unreviewed" models carry the "May train on your prompts" label and need one-time consent.
+    // A model that is not "no-training" carries the "May train on your prompts" label and needs one-time consent.
     dataPolicy: FreeDataPolicy.pipe(optional),
   }).pipe(optional),
   api: Api,

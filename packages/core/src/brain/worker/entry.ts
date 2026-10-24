@@ -1,5 +1,6 @@
 export * as BrainWorkerEntry from "./entry"
 
+import "../../local-mode/backstop-worker"
 import { isMainThread, parentPort } from "node:worker_threads"
 import { Token } from "../../util/token"
 import { BrainLimits } from "../document/limits"

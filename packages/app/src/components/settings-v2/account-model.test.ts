@@ -33,7 +33,7 @@ describe("Codium on the Account page", () => {
   test("keeps billing reachable for someone with past invoices but no plan or credits", () => {
     expect(codiumSummary(status({ enabled: false, access: false, customer: true }))).toMatchObject({
       kind: "plan",
-      plan: "No plan",
+      plan: "Free",
       billing: true,
     })
   })
@@ -41,13 +41,13 @@ describe("Codium on the Account page", () => {
   test("shows the plan and the share of this month's credits left, never an amount", () => {
     const summary = codiumSummary(
       status({
-        plan: { id: "vector-50", name: "Codium 50", left: 0.4237, renewsAt, cancelAtPeriodEnd: false },
+        plan: { id: "vector-50", name: "Pro", left: 0.4237, renewsAt, cancelAtPeriodEnd: false },
         purchased: { bought: true, state: "low" },
       }),
     )
     expect(summary).toMatchObject({
       kind: "plan",
-      plan: "Codium 50",
+      plan: "Pro",
       left: 0.4237,
       credits: "42% of this month's credits left",
       renewal: { label: "Renews", date: ModelPlanStatus.formatDate(renewsAt) },
@@ -59,12 +59,12 @@ describe("Codium on the Account page", () => {
     expect(`${summary.credits} ${summary.purchased}`).not.toMatch(/\d(?!\d*%)/)
   })
 
-  test("names an ending plan, an unverified balance and an account with no plan", () => {
+  test("names an ending plan, an unverified balance and an account with no plan, which is on Free", () => {
     expect(
-      codiumSummary(status({ plan: { id: "vector-10", name: "Codium 10", renewsAt, cancelAtPeriodEnd: true } })),
+      codiumSummary(status({ plan: { id: "vector-10", name: "Plus", renewsAt, cancelAtPeriodEnd: true } })),
     ).toMatchObject({ credits: "Balance unavailable", renewal: { label: "Ends" } })
     const none = codiumSummary(status())
-    expect(none).toMatchObject({ kind: "plan", plan: "No plan", purchased: "None", billing: false })
+    expect(none).toMatchObject({ kind: "plan", plan: "Free", purchased: "None", billing: false })
     expect(none).not.toHaveProperty("credits")
     expect(none).not.toHaveProperty("renewal")
   })
@@ -73,10 +73,10 @@ describe("Codium on the Account page", () => {
     const summary = codiumSummary(
       status({
         enabled: false,
-        plan: { id: "vector-10", name: "Codium 10", left: 1, renewsAt, cancelAtPeriodEnd: false },
+        plan: { id: "vector-10", name: "Plus", left: 1, renewsAt, cancelAtPeriodEnd: false },
       }),
     )
-    expect(summary).toMatchObject({ kind: "plan", plan: "Codium 10", billing: true })
+    expect(summary).toMatchObject({ kind: "plan", plan: "Plus", billing: true })
     expect(summary).toMatchObject({ notice: { kind: "unavailable" } })
   })
 

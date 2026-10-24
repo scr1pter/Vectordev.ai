@@ -290,7 +290,7 @@ test("Codium balances are read in the main process and only the result reaches t
     enabled: true,
     active: true,
     access: true,
-    plan: { id: "vector-50", name: "Codium 50", left: 0.5, renewsAt: 2_000_000, cancelAtPeriodEnd: false },
+    plan: { id: "vector-50", name: "Pro", left: 0.5, renewsAt: 2_000_000, cancelAtPeriodEnd: false },
     purchased: { bought: true, state: "available" },
     empty: false,
     low: false,
@@ -303,7 +303,7 @@ test("Codium balances are read in the main process and only the result reaches t
     signedIn: true,
     enabled: true,
     access: true,
-    plan: { id: "vector-50", name: "Codium 50", left: 0.5, renewsAt: 2_000_000, cancelAtPeriodEnd: false },
+    plan: { id: "vector-50", name: "Pro", left: 0.5, renewsAt: 2_000_000, cancelAtPeriodEnd: false },
     purchased: { bought: true, state: "available" },
     empty: false,
     low: false,
@@ -651,13 +651,13 @@ test("offers are read from the public configuration without the account token", 
   const app = await signedIn()
   app.state.config = {
     enabled: false,
-    plans: [{ id: "vector-10", name: "Codium 10", price: 10, available: false, tasks: [] }],
-    topups: [{ id: "codium-topup-10", name: "Codium 10 top-up", price: 10, available: false }],
+    plans: [{ id: "vector-10", name: "Plus", price: 10, available: false, tasks: [] }],
+    topups: [{ id: "codium-topup-10", name: "$10 credit top-up", price: 10, available: false }],
   }
   expect(await app.controller.offers()).toEqual({
     enabled: false,
-    plans: [{ id: "vector-10", name: "Codium 10", price: 10, available: false }],
-    topups: [{ id: "codium-topup-10", name: "Codium 10 top-up", price: 10, available: false }],
+    plans: [{ id: "vector-10", name: "Plus", price: 10, available: false }],
+    topups: [{ id: "codium-topup-10", name: "$10 credit top-up", price: 10, available: false }],
   })
   expect(app.fetched).toEqual(["https://vectordev.ai/api/model-plans/config"])
   expect(new Headers(app.requests[0]!.headers).get("authorization")).toBeNull()

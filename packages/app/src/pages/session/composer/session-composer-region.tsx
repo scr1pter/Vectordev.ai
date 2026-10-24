@@ -1,5 +1,9 @@
 import { Show, type JSX } from "solid-js"
+import type { QuestionRequest } from "@vectordevai/sdk/v2"
 import { useLanguage } from "@/context/language"
+import { useSync } from "@/context/sync"
+import { ResearchPlanCard } from "@/features/research/plan-card"
+import { planCard, planPart } from "@/features/research/research-model"
 import { SessionPermissionDock } from "@/pages/session/composer/session-permission-dock"
 import { SessionQuestionDock } from "@/pages/session/composer/session-question-dock"
 import { SessionFollowupDock } from "@/pages/session/composer/session-followup-dock"
@@ -14,7 +18,13 @@ export function SessionComposerRegion(props: {
   promptInput: JSX.Element
 }) {
   const language = useLanguage()
+  const sync = useSync()
   const controller = props.controller
+  // A research_plan question is the plan card: the plan as Vector would run it is on its running part.
+  const plan = (request: QuestionRequest) => {
+    const part = planPart(sync().data.part?.[request.tool?.messageID ?? ""], request.tool)
+    return part && "metadata" in part.state ? planCard(part.state.metadata) : undefined
+  }
   // The same count as the header's Tasks button, so the two never disagree.
   const backgroundTasks = useBackgroundTasks()
   const runningTasks = () => backgroundTasks?.runningCount() ?? controller.runningTasks()
@@ -50,7 +60,12 @@ export function SessionComposerRegion(props: {
         <Show when={controller.state.questionRequest()} keyed>
           {(request) => (
             <div>
-              <SessionQuestionDock request={request} onSubmit={controller.onResponseSubmit} />
+              <Show
+                when={plan(request)}
+                fallback={<SessionQuestionDock request={request} onSubmit={controller.onResponseSubmit} />}
+              >
+                {(data) => <ResearchPlanCard request={request} data={data()} onSubmit={controller.onResponseSubmit} />}
+              </Show>
             </div>
           )}
         </Show>

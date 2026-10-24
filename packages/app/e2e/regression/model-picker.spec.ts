@@ -38,6 +38,9 @@ const catalog = {
         "poolside/laguna-s-2.1:free": free("poolside/laguna-s-2.1:free", "Poolside: Laguna S 2.1", "may-train", {
           limit: { context: 131_072 },
         }),
+        "google/gemma-4-31b-it:free": free("google/gemma-4-31b-it:free", "Gemma 4 31B", "no-training", {
+          limit: { context: 262_144 },
+        }),
       },
     },
     {
@@ -228,7 +231,7 @@ test("the composer's picker over several providers, one open, a search and the f
   const providers = dialog.locator("button[data-model-section-toggle]")
   await expect(providers).toHaveCount(5)
   for (const [label, count] of [
-    ["Free models inside of Vector", "2"],
+    ["Free models inside of Vector", "3"],
     ["Anthropic", "3"],
     ["OpenAI", "3"],
     ["Google", "2"],
@@ -286,6 +289,12 @@ test("the composer's picker over several providers, one open, a search and the f
   await expect(free.locator('[data-slot="model-row-name"]')).toHaveText("Qwen3 Coder")
   await expect(free.locator('[data-slot="model-row-context"]')).toHaveText("262K")
   await expect(free.locator('[data-slot="model-row-training"]')).toHaveCount(0)
+  const gemma = dialog.locator('[data-option-key="vector:google/gemma-4-31b-it:free"]')
+  await expect(gemma.locator('[data-slot="model-row-region"]')).toHaveText("US only")
+  await expect(gemma).toHaveAttribute("aria-label", /US only/)
+  await expect(gemma).toHaveAttribute("title", /US only/)
+  expect(await contrast(gemma.locator('[data-slot="model-row-region"]'))).toBeGreaterThanOrEqual(4.5)
+  await expectEvenRows(dialog)
   await shot(page, container, testInfo.outputPath("dialog-free-models.png"))
 
   // The free copy on the user's own OpenRouter account sits with its paid model, named "(free)" to tell them apart.

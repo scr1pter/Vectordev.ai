@@ -3,12 +3,40 @@ import { providerAllowed, renamedModel } from "./provider-policy"
 
 export const ProviderUnavailable = Schema.Struct({
   id: Schema.String,
-  reason: Schema.Literals(["sign-in-paused", "provider-not-configured", "disabled", "no-models"]),
+  reason: Schema.Literals(["sign-in-paused", "provider-not-configured", "disabled", "no-models", "off-in-local"]),
   message: Schema.String,
 })
 export type ProviderUnavailable = typeof ProviderUnavailable.Type
 
+/**
+ * Why Vector Local keeps a model off, and what makes it usable, after "<provider>: off in Vector Local." The engine's
+ * provider list and the V2 runner both say these.
+ */
+export const OFF_IN_LOCAL = {
+  listed:
+    "Its server is not on your list of model servers. Add the server to the list, or turn Vector Local off to use it.",
+  vector:
+    "Free models provided by Vector and Vector Codium send your prompts through vectordev.ai to the services that run them, outside the servers you listed. Turn Vector Local off to use them.",
+  ollama:
+    "It is an Ollama cloud model: the Ollama app passes its prompts on to ollama.com. Choose a model that runs on your server, or turn Vector Local off to use it.",
+  unknown:
+    "Vector cannot tell which server its requests go to. Set its baseURL to a model server on your list, or turn Vector Local off to use it.",
+  cloud: (origin: string) =>
+    `${origin} is a cloud AI service, not a server you host. Your company's policy can list it, or turn Vector Local off to use it.`,
+}
+
 export function providerUnavailable(id: string, reason: ProviderUnavailable["reason"]): ProviderUnavailable {
+  // A saved ChatGPT sign-in: Vector's built-in one is off, and OpenAI's own routes are an API key or the Codex CLI.
+  if (id === "openai" && reason === "sign-in-paused")
+    return {
+      id,
+      reason,
+      message:
+        "openai: Sign in with ChatGPT is off in Vector. Connect OpenAI with an API key, or run your own Codex CLI from Host locally in the desktop app. Run vector providers logout openai to remove the saved sign-in.",
+    }
+  // Vector Local keeps the credential: removing it would not make the provider usable, so the logout advice that ends
+  // the other messages does not apply.
+  if (reason === "off-in-local") return { id, reason, message: `${id}: off in Vector Local. ${OFF_IN_LOCAL.listed}` }
   const action = {
     "sign-in-paused": "sign-in is paused in Vector; connect a supported provider with an API key",
     "provider-not-configured": "provider is not configured; add its endpoint and models to vector.json",

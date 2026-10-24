@@ -67,8 +67,9 @@ Do all of this in **test mode** first, for the preview test run in [section 4](#
 
 3. To do it by hand instead:
    - **Prices**, all USD:
-     - four monthly recurring prices named `Vector Codium 10`, `50`, `100` and `200`, at $10, $50, $100 and $200 a month;
-     - four one-time prices named `Vector Codium 10 top-up`, `50`, `100` and `200`, at the same amounts.
+     - four monthly recurring prices on products named `Vector Codium Plus`, `Vector Codium Pro`, `Vector Codium Max` and `Vector Codium Ultra`, at $10, $50, $100 and $200 a month;
+     - four one-time prices on products named `Vector Codium $10 credit top-up`, `$50`, `$100` and `$200`, at the same amounts.
+   - Stripe checkout shows each product's own name, so products made before the plans were renamed keep their old names, which carry the price instead of Plus, Pro, Max or Ultra, until you rename them in the Stripe dashboard (Product catalog → the product → Edit). Prices, lookup keys and ids stay as they are.
    - **Webhook** (Developers → Webhooks):
      - URL `https://vectordev.ai/api/model-plans/webhook`;
      - API version `2025-02-24.acacia`;

@@ -195,7 +195,8 @@ describe("release artifact audit", () => {
     expect(wide.violations.map((item) => [item.kind, item.encoding])).toEqual([["credential", "utf-16le"]])
   })
 
-  // The owner re-enabled Sign in with ChatGPT on 10 October 2026 (docs/vector/owner-actions/chatgpt.md).
+  // provider-policy.ts still names the Codex CLI client, with Sign in with ChatGPT off by default since 23 October 2026
+  // (docs/vector/owner-actions/chatgpt.md).
   test("only the owner-approved Codex CLI client for ChatGPT sign-in passes", async () => {
     const chatgpt = 'client_id:"app_EMoamEEZ73f0CkXaXp7hrann"'
     expect((await audit({ "bin/vector": binary(Buffer.from(chatgpt)) })).violations).toEqual([])

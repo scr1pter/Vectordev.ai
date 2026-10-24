@@ -448,7 +448,9 @@ function describe(message: SessionV1.WithParts) {
 
 // The highest size the request was raised to; a raise only ever goes up. The agent raises it with escalate, and a judge
 // FAIL raises it to the size of the work it judged, so the repair runs with that work's tools even when the run that
-// answered was only a "thanks".
+// answered was only a "thanks". A research plan the user started deep on its card raises it to Thorough (section 5.2):
+// only the user's own answer counts, which research_plan records with source "user" on the root plan card alone, so a
+// plan approved on its own (a child's, or a headless run's) never raises anything (RC7). Only root sessions are sized.
 function escalation(messages: readonly SessionV1.WithParts[]) {
   return messages
     .flatMap((message) => (message.info.role === "assistant" ? message.parts : []))
@@ -456,6 +458,8 @@ function escalation(messages: readonly SessionV1.WithParts[]) {
       if (part.type !== "tool") return []
       if (part.tool === "task" && isRecord(part.metadata?.judge) && part.metadata.judge.verdict === "FAIL")
         return isTier(part.metadata.judge.size) ? [part.metadata.judge.size] : []
+      if (part.tool === "research_plan" && part.state.status === "completed")
+        return part.state.metadata?.source === "user" && isTier(part.state.metadata.to) ? [part.state.metadata.to] : []
       if (part.tool !== "escalate" || part.state.status !== "completed") return []
       const to = part.state.metadata?.to
       return isTier(to) ? [to] : []

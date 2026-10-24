@@ -1,5 +1,6 @@
 /** @jsxImportSource react */
 import React from "react"
+import { CodiumPlan } from "@vectordevai/schema/codium-plan"
 import type { CodiumOffer, CodiumPricingView } from "../../../lib/codium-pricing"
 import { modelPlanRedirect } from "../../../lib/model-plans"
 import "./codium-pricing.css"
@@ -16,6 +17,8 @@ const MODES = [
 ] as const
 // The plan marked "Most popular", by position: the second of the four.
 const POPULAR = 1
+// The four plans, cheapest first, as the plan question describes them.
+const [STARTER, REGULAR, DAILY, HEAVY] = CodiumPlan.PLANS
 // Plans differ only in usage. What they share is listed once, on the cards with room for it, under labels that say
 // it applies to every plan; the list lengths follow the reference layout's cards.
 const EVERY_PLAN = [
@@ -310,8 +313,8 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
                     options={topups.map((item, index) => ({
                       value: String(index),
                       label: usd.format(item.price),
-                      // The accessible name starts with the visible amount, then names the top-up as checkout does.
-                      title: `${usd.format(item.price)}, ${item.name}`,
+                      // The top-up's name, as checkout gives it, starts with the visible amount.
+                      title: item.name,
                     }))}
                     value={String(pack)}
                     onChange={(value) => setPack(Number(value))}
@@ -342,7 +345,7 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
                     ],
                   },
                 ],
-                // Names the chosen top-up as checkout and the account page do, such as "Codium 10 top-up".
+                // Names the chosen top-up as checkout and the account page do, such as "$10 credit top-up".
                 footnote: `*${topup.name}: one-time purchase. Typical tasks estimated.`,
               })}
               {plans.length > 0 &&
@@ -516,9 +519,9 @@ export function CodiumQuestions(props: { models: CodiumPricingView["models"] }) 
       question: "What is the right plan for me?",
       answer: (
         <p>
-          Start with Codium 10 to try Codium on everyday coding. Codium 50 suits coding with agents most days, Codium
-          100 daily agent work across repositories, and Codium 200 long sessions with parallel agents. Whichever plan you
-          choose, a top-up covers a busy week without changing plans.
+          Start with {STARTER.name} to try Codium on everyday coding. {REGULAR.name} suits coding with agents most days,{" "}
+          {DAILY.name} daily agent work across repositories, and {HEAVY.name} long sessions with parallel agents.
+          Whichever plan you choose, a top-up covers a busy week without changing plans.
         </p>
       ),
     },
@@ -560,7 +563,11 @@ export function CodiumQuestions(props: { models: CodiumPricingView["models"] }) 
       question: "Which models are included, and where do my requests go?",
       answer: (
         <React.Fragment>
-          <p>Every plan and top-up includes the same coding models, and Vector never switches models for you.</p>
+          <p>
+            Every plan and top-up includes the same {props.models.length} coding models.
+            {props.models[0] && ` ${props.models[0].name} is the recommended default; you choose which model to use.`}
+            {names("advanced") && " The advanced models use credits faster."}
+          </p>
           <ul>
             {props.models.map((model) => (
               <li key={model.id}>
@@ -570,10 +577,9 @@ export function CodiumQuestions(props: { models: CodiumPricingView["models"] }) 
             ))}
           </ul>
           <p>
-            Codium requests, including the code and tool output a task sends, go through Vector and OpenRouter to a
-            provider serving the model you picked. Vector asks OpenRouter to route them only to zero-data-retention
-            endpoints that don't collect data for training. Review the <a href="/legal/privacy#codium">privacy policy</a>{" "}
-            before sending code.
+            Codium requests, including the code and tool output a task sends, go through Vector to a provider serving
+            the model you picked. Vector routes them only to zero-data-retention endpoints that don't collect data for
+            training. Review the <a href="/legal/privacy#codium">privacy policy</a> before sending code.
           </p>
         </React.Fragment>
       ),
@@ -720,7 +726,7 @@ function Segmented<T extends string>(props: {
   )
 }
 
-/** "DeepSeek V4.1 Flash: 250–2,500" for each model with a reviewed range of typical tasks, in catalog order. */
+/** Each model's reviewed range of typical tasks, in catalog order. */
 function taskLines(offer: CodiumOffer, models: CodiumPricingView["models"]) {
   return models.flatMap((model, row) => {
     const tasks = offer.tasks[row]
@@ -738,7 +744,10 @@ function planGroups(index: number, tasks: string[]) {
     index === 1
       ? [usage, { label: "Every plan includes", icon: WorkspaceIcon, items: EVERY_PLAN }]
       : index === 2
-        ? [{ label: "In the free Vector workspace", items: WORKSPACE }, { ...usage, icon: TasksIcon }]
+        ? [
+            { label: "In the free Vector workspace", items: WORKSPACE },
+            { ...usage, icon: TasksIcon },
+          ]
         : [usage]
   return groups.filter((group) => group.items.length > 0)
 }

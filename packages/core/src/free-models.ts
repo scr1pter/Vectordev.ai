@@ -21,6 +21,8 @@ import { Flag } from "./flag/flag"
 import { Global } from "./global"
 import { VectorAccount } from "./vector-account"
 import { makeGlobalNode } from "./effect/app-node"
+import { Egress } from "./local-mode/egress"
+import { StartupHold } from "./startup-hold"
 import {
   FreeModelMetadata,
   freeModelDataPolicy,
@@ -29,12 +31,7 @@ import {
   isFreeRouter,
   offeredFreeModel,
 } from "./free-model-catalog"
-import {
-  FREE_MODEL_TRAINING_BLOCKED,
-  FREE_MODEL_UNLISTED,
-  FREE_MODEL_UNREVIEWED_BLOCKED,
-  FREE_MODELS_SIGN_IN,
-} from "./free-model-choice"
+import { FREE_MODEL_TRAINING_BLOCKED, FREE_MODEL_UNLISTED, FREE_MODELS_SIGN_IN } from "./free-model-choice"
 
 // The disclosure parameter tells vectordev.ai this client labels free models that may train and asks first.
 export const CATALOG_URL = `https://vectordev.ai/api/free-models/models?disclosure=${FREE_MODELS_DISCLOSURE}`
@@ -61,12 +58,24 @@ export function createClient(
     request?: (url: string, init: RequestInit) => Promise<Response>
     now?: () => number
     disabled?: () => boolean
+    /**
+     * A desktop first run's hold (StartupHold): nothing is fetched while it holds, and once it is released the catalog
+     * is read again and every listener hears it, so free models (the user's own OpenRouter key's included) are listed
+     * in the same engine, with no restart.
+     */
+    hold?: Pick<typeof StartupHold, "held" | "onRelease">
+    /**
+     * Whether Vector Local is on: free models send prompts through vectordev.ai and openrouter.ai to the services that
+     * run them, outside the servers the user lists, so the catalog is OFF and nothing is fetched.
+     */
+    local?: () => boolean
     /** How long a non-forced catalog read waits for vectordev.ai before answering without it. */
     wait?: number
   } = {},
 ) {
   const now = input.now ?? Date.now
   const request = input.request ?? fetch
+  const off = () => input.disabled?.() === true || input.hold?.held() === true
   // `stamp` is the cache file's modification time as this client last read or wrote it.
   const state: { value?: FreeModelCatalog; expires: number; pending?: Promise<FreeModelCatalog>; stamp?: number } = {
     expires: 0,
@@ -85,6 +94,7 @@ export function createClient(
     return value
   }
   const catalog = async (force = false): Promise<FreeModelCatalog> => {
+    if (input.local?.()) return serve(OFF)
     // The desktop engine, the terminal and "vector models" share the cache file: when another of them wrote a newer
     // catalog, this client reads that instead of serving its own copy until it expires.
     if (input.file && state.value && !state.pending) {
@@ -121,7 +131,7 @@ export function createClient(
   }
   const load = (saved: FreeModelCatalog | undefined) => {
     const pending = (async () => {
-      const response = input.disabled?.()
+      const response = off()
         ? undefined
         : await request(CATALOG_URL, {
             redirect: "error",
@@ -173,7 +183,7 @@ export function createClient(
     return pending
   }
   const forKey = async (key: string, force = false) => {
-    if (!key || input.disabled?.()) return []
+    if (!key || off() || input.local?.()) return []
     const digest = createHash("sha256").update(key).digest("hex")
     const cached = users.get(digest)
     if (!force && cached && cached.expires > now()) return cached.models
@@ -200,8 +210,8 @@ export function createClient(
       return Option.isSome(model) && offeredFreeModel(model.value, now()) ? [model.value] : []
     })
     // The user's own account lists every free model it can route under its privacy settings, including ones Vector
-    // has not reviewed yet. Each endpoint carries its reviewed policy, or "unreviewed", which is disclosed as one
-    // that may train; the account's own settings decide whether may-train endpoints are listed at all.
+    // has not reviewed yet. Each endpoint carries its reviewed policy, or "may-train" when Vector has not reviewed it;
+    // the account's own settings decide whether may-train endpoints are listed at all.
     // The free router has no endpoint list of its own.
     const endpoints = await Promise.all(
       candidates.map((model) =>
@@ -215,7 +225,7 @@ export function createClient(
     }
     // An unreadable endpoint list leaves that model without endpoints, which drops only that model.
     const models = candidates
-      .map((model, index) => freeModelInfo(model, endpoints[index]?.data.endpoints ?? [], { reviewedOnly: false }))
+      .map((model, index) => freeModelInfo(model, endpoints[index]?.data.endpoints ?? []))
       .filter((model): model is FreeModelInfo => model !== undefined)
       .sort((a, b) => b.contextLength - a.contextLength || a.id.localeCompare(b.id))
     users.set(digest, { expires: now() + TTL, models })
@@ -243,6 +253,15 @@ export function createClient(
     listeners.add(listener)
     return () => void listeners.delete(listener)
   }
+  // Every listener hears the catalog read after the hold, once, even one that did not change: the models built while
+  // it held left out the user's own key's. A catalog that changed is told by load() itself.
+  input.hold?.onRelease(() => {
+    const before = served.value
+    void catalog(true).then((value) => {
+      if (before && signature(before) !== signature(value)) return
+      listeners.forEach((listener) => listener(value))
+    })
+  })
   return { catalog, forKey, trainingConsent, setTrainingConsent, subscribe }
 }
 
@@ -303,6 +322,10 @@ export const node = makeGlobalNode({
         file: path.join(Global.Path.cache, "free-models-v2.json"),
         consentFile: trainingConsentFile(),
         disabled: () => Flag.VECTOR_DISABLE_MODELS_FETCH,
+        hold: StartupHold,
+        local: () => Egress.policy().enabled,
+        // Read only with Vector Local off (local, above), so OpenRouter's lists never need a source of their own.
+        request: (url, init) => Egress.fetch("free-models-catalog", url, init),
       }),
     ),
   ),
@@ -405,8 +428,8 @@ export async function resolveRoute(input: {
 /**
  * OpenRouter answers 404 "No endpoints found matching your data policy" when no endpoint a request may use passes
  * both the user's own privacy settings and the request's data_collection. Replace that with what to do, keeping the
- * status. For a may-train model, which was sent "allow", the user's settings are the cause. An unreviewed model was
- * sent "deny" by Vector itself, so no setting can help. A no-training model keeps OpenRouter's own answer.
+ * status. A may-train model, one Vector has not reviewed included, was sent "allow", so the user's settings are the
+ * cause. A no-training model keeps OpenRouter's own answer.
  */
 export async function explainPolicyRefusal(response: Response, policy: FreeDataPolicy) {
   if (response.status !== 404 || policy === "no-training") return response
@@ -415,8 +438,7 @@ export async function explainPolicyRefusal(response: Response, policy: FreeDataP
     .text()
     .catch(() => "")
   if (!/data policy|privacy|training/i.test(text)) return response
-  const message = policy === "unreviewed" ? FREE_MODEL_UNREVIEWED_BLOCKED : FREE_MODEL_TRAINING_BLOCKED
-  return Response.json({ error: { message, code: 404 } }, { status: 404 })
+  return Response.json({ error: { message: FREE_MODEL_TRAINING_BLOCKED, code: 404 } }, { status: 404 })
 }
 
 /** Preserve quota metadata before compatible SDKs reduce an SSE error to its message string. */

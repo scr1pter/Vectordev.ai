@@ -18,7 +18,7 @@ import type { Argv } from "yargs"
 import path from "path"
 import { pathToFileURL } from "url"
 import { open } from "node:fs/promises"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { PublicSession } from "@vectordevai/schema/public-session"
 import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 import { BrainSchema } from "@vectordevai/core/brain/schema"
@@ -45,8 +45,18 @@ import { freeModelRunNotice } from "./run/free-model-notice"
 type ModelInput = Parameters<VectorClient["session"]["prompt"]>[0]["model"]
 
 /** @internal Exported for focused permission-policy tests. */
-export function runPermissionReply(auto: boolean, permission: string, always?: readonly string[]): "once" | "reject" {
-  return auto && PermissionPolicy.canAutoApprove(permission, always) ? "once" : "reject"
+export function runPermissionReply(
+  auto: boolean,
+  permission: string,
+  always?: readonly string[],
+  patterns?: readonly string[],
+  research = false,
+): "once" | "reject" {
+  // `--research` is the user's consent to read public pages for its run, so the run's one read approval is answered
+  // unless it asks every time. Every other ask, a page on the user's own network included, still needs --auto.
+  if (research && permission === "research_read" && !PermissionPolicy.requiresApproval(permission, always, patterns))
+    return "once"
+  return auto && PermissionPolicy.canAutoApprove(permission, always, patterns) ? "once" : "reject"
 }
 
 function pick(value: string | undefined): ModelInput | undefined {
@@ -99,6 +109,14 @@ type FilePart = {
 }
 
 const ATTACH_FILE_MAX_BYTES = 10 * 1024 * 1024
+
+// The search services an earlier version's --search named. Research searches the web in each research agent's own
+// browser now, so they read as browser (yargs coerces before it checks choices), and the run says they were ignored.
+const RETIRED_SEARCH = ["searxng", "exa", "parallel"]
+export const RETIRED_SEARCH_NOTICE =
+  "research searches the web in each research agent's own browser in the desktop app, with no search service or key."
+// The retired name this process's --search gave, for the notice: yargs parses one command line per process.
+const retired: { search?: string } = {}
 
 type Inline = {
   icon: string
@@ -319,6 +337,38 @@ export const RunCommand = effectCmd({
         describe:
           "run LLM-as-a-judge after large tasks that changed files (thorough) or after every task that changed files (changes)",
       })
+      .option("research", {
+        type: "boolean",
+        describe:
+          "Deep research (preview): plan the question, search and read the web and this repository's brain, and write a report in which each claim cites a quote from its source. Makes no code changes. Reads public pages for the run without asking; any other approval, a page on your own network included, needs --auto",
+      })
+      .option("depth", {
+        type: "string",
+        choices: ["focused", "deep", "auto"],
+        describe:
+          "with --research: focused (one agent, plus up to 2 researchers), deep (up to 4 researchers and a judge that checks the citations) or auto (the default)",
+      })
+      .option("search", {
+        type: "string",
+        choices: ["browser", "none"],
+        // A search service an earlier version took reads as browser, and the run says it was ignored.
+        coerce: (value: string) => {
+          if (!RETIRED_SEARCH.includes(value)) return value
+          retired.search = value
+          return "browser"
+        },
+        describe:
+          "with --research: browser (the default: each research agent searches the web in its own browser in the desktop app) or none (this repository's brain, its files and the addresses in the message)",
+      })
+      .option("scope", {
+        type: "string",
+        choices: ["web", "brain", "all"],
+        describe: "with --research: the web, this repository's brain and files, or both (all)",
+      })
+      .option("report", {
+        type: "string",
+        describe: "with --research: write the report, with its sources, to this Markdown file",
+      })
       .option("auto", {
         type: "boolean",
         describe: "auto-approve permissions that are not explicitly denied (dangerous!)",
@@ -333,6 +383,11 @@ export const RunCommand = effectCmd({
         type: "boolean",
         hidden: true,
         default: false,
+      })
+      .option("local", {
+        type: "boolean",
+        describe:
+          "keep this run on Vector Local: model calls go only to the model servers on your list, and Vector's own requests to vectordev.ai are blocked. It only tightens, and changes no setting",
       })
       .option("demo", {
         type: "boolean",
@@ -410,11 +465,22 @@ export const RunCommand = effectCmd({
         die("--max-steps must be a positive integer")
       }
 
+      if (!args.research && (args.depth || args.search || args.scope || args.report))
+        die("--depth, --search, --scope and --report need --research")
+      if (retired.search) UI.println(`--search ${retired.search} is ignored: ${RETIRED_SEARCH_NOTICE}`)
+      if (args.research && (interactive || args.command)) die("--research cannot be used with --mini or --command")
+      if (args.research && args.agent && args.agent !== "research")
+        die("--research runs the research agent, so it cannot be used with --agent")
+      if (args.research && args.depth && args.size) die("--depth and --size cannot be used together")
+
       const budget = budgetFrom(args)
+      // --depth is the research request's size: Deep is Thorough, Focused is Work, and auto lets Vector size it.
+      const size = args.depth === "deep" ? "thorough" : args.depth === "focused" ? "standard" : args.size
       const sizing = {
-        ...(args.size ? { size: args.size as TaskSize.Choice } : {}),
+        ...(size ? { size: size as TaskSize.Choice } : {}),
         ...(args.judge ? { judge: args.judge as TaskSize.JudgeMode } : {}),
       }
+      const agentName = args.research ? "research" : args.agent
 
       if (interactive && !process.stdout.isTTY) {
         die("--mini requires a TTY stdout")
@@ -455,6 +521,31 @@ export const RunCommand = effectCmd({
           directory: dir,
           headers: attachHeaders,
         })
+      }
+
+      // --local keeps this process on Vector Local, and an attached server runs the session in a process of its own,
+      // so the run goes ahead only where that server has Vector Local on already. This process reaches that server
+      // because runLocal listed it, unless Vector Local here refused to (a company lock, or the agent marker).
+      if (args.local && args.attach) {
+        const remote = await attachSDK(directory)
+          .local.get()
+          .catch((error: unknown) => ({ data: undefined, error }))
+        // The client hands back a request the network guard refused as its error, rather than throwing it.
+        const failure: unknown = remote.error
+        if (failure instanceof Error && failure.name === "EgressBlocked") {
+          const { Config } = await import("@/config/config")
+          die(
+            [
+              `--local keeps this computer's requests on Vector Local, which kept this run from reaching ${args.attach}.`,
+              failure.message,
+              ...Config.local().warnings,
+            ].join(" "),
+          )
+        }
+        if (!remote.data?.policy.enabled)
+          die(
+            `--local keeps the runs this computer starts on Vector Local, and the server at ${args.attach} ${remote.data ? "has it off" : "did not say whether it has it on"}. Turn it on there with vector local on, or run without --attach.`,
+          )
       }
 
       const files: FilePart[] = []
@@ -736,8 +827,8 @@ export const RunCommand = effectCmd({
       }
 
       async function localAgent() {
-        if (!args.agent) return undefined
-        const name = args.agent
+        if (!agentName) return undefined
+        const name = agentName
 
         const entry = await Effect.runPromise(
           agentSvc.get(name).pipe(Effect.provideService(InstanceRef, localInstance)),
@@ -762,8 +853,8 @@ export const RunCommand = effectCmd({
       }
 
       async function attachAgent(sdk: VectorClient) {
-        if (!args.agent) return undefined
-        const name = args.agent
+        if (!agentName) return undefined
+        const name = agentName
 
         const modes = await sdk.app
           .agents(undefined, { throwOnError: true })
@@ -802,7 +893,7 @@ export const RunCommand = effectCmd({
       }
 
       async function pickAgent(sdk: VectorClient) {
-        if (!args.agent) return undefined
+        if (!agentName) return undefined
         if (args.attach) {
           return attachAgent(sdk)
         }
@@ -813,6 +904,14 @@ export const RunCommand = effectCmd({
       async function execute(sdk: VectorClient) {
         const available = await sdk.config.providers({}, { throwOnError: true })
         if (!available.data.providers.some((provider) => Object.keys(provider.models).length > 0)) {
+          // With Vector Local on, models whose servers are not on the list are off; say which, not how to sign in.
+          const off = (available.data.unavailable ?? []).filter((item) => item.reason === "off-in-local")
+          if (off.length > 0) {
+            UI.error(
+              `Vector Local is on, and it keeps every model you have off. ${off.map((item) => item.message).join(" ")} Add a model server with vector local setup.`,
+            )
+            process.exit(1)
+          }
           // Only a local engine can say whether signing in would list free models; an attached server runs elsewhere.
           const signIn =
             !args.attach &&
@@ -1040,11 +1139,25 @@ export const RunCommand = effectCmd({
                   finishedSteps.add(part.id)
                   emit("step_finish", { part, subagent: true })
                 }
+                // A researcher's steps show as they happen, under the lead's.
+                const progress = args.research && args.format !== "json" ? researchProgress(part) : undefined
+                if (progress && toggles.get(part.id) !== true && (await inRun(part.sessionID))) {
+                  toggles.set(part.id, true)
+                  inline({ ...progress, title: `researcher · ${progress.title}` })
+                }
                 continue
               }
 
               if (part.type === "tool" && (part.state.status === "completed" || part.state.status === "error")) {
                 if (emit("tool_use", { part })) continue
+                const progress = researchProgress(part)
+                if (progress) {
+                  if (toggles.get(part.id) === true) continue
+                  toggles.set(part.id, true)
+                  if (progress.body) block(progress, progress.body)
+                  else inline(progress)
+                  continue
+                }
                 if (part.state.status === "completed") {
                   await tool(part)
                   continue
@@ -1131,7 +1244,15 @@ export const RunCommand = effectCmd({
               if (!(await inRun(permission.sessionID))) continue
 
               // Non-interactive auto mode cannot supply the fresh approval required for sensitive actions.
-              if (runPermissionReply(auto, permission.permission, permission.always) === "once") {
+              if (
+                runPermissionReply(
+                  auto,
+                  permission.permission,
+                  permission.always,
+                  permission.patterns,
+                  args.research === true,
+                ) === "once"
+              ) {
                 await client.permission.reply({
                   requestID: permission.id,
                   reply: "once",
@@ -1217,6 +1338,11 @@ export const RunCommand = effectCmd({
           }
 
           const model = pick(args.model)
+          if (args.research && agent !== "research") {
+            UI.error("The research agent is not available in this engine.")
+            process.exitCode = 1
+            return
+          }
           const result = await client.session.prompt({
             sessionID,
             agent,
@@ -1224,7 +1350,11 @@ export const RunCommand = effectCmd({
             variant: args.variant,
             budget,
             ...sizing,
-            parts: [...files, ...promptParts(message, piped)],
+            parts: [
+              ...files,
+              ...promptParts(message, piped),
+              ...(args.research ? await researchParts({ search: args.search, scope: args.scope }) : []),
+            ],
           })
           if (result.error) {
             rejectRequest(result.error)
@@ -1232,6 +1362,7 @@ export const RunCommand = effectCmd({
           }
           await finish()
           conclude(result.data?.info)
+          if (args.report) await writeReport(client, sessionID, args.report)
           return
         }
 
@@ -1326,6 +1457,121 @@ export const RunCommand = effectCmd({
   }),
 })
 
+/**
+ * The settings `vector run --research --search/--scope` sends with its prompt: a note for the research lead, and the
+ * choices themselves in its metadata, which the research tools hold the run to.
+ */
+async function researchParts(input: { search?: string; scope?: string }) {
+  const scope = input.scope === "all" ? "web+brain" : input.scope
+  if (!input.search && !scope) return []
+  const { OPTIONS } = await import("@/tool/research-search")
+  const said = [
+    ...(scope
+      ? [
+          `scope ${scope === "brain" ? "this repository's brain and files only" : scope === "web" ? "the web only" : "the web and this repository's brain"}`,
+        ]
+      : []),
+    ...(input.search ? [input.search === "none" ? "no web search" : "search the web in the research browser"] : []),
+  ]
+  return [
+    {
+      type: "text" as const,
+      text: `Research settings for this run, from the command line: ${said.join("; ")}.`,
+      synthetic: true,
+      metadata: { [OPTIONS]: { ...(input.search ? { search: input.search } : {}), ...(scope ? { scope } : {}) } },
+    },
+  ]
+}
+
+/**
+ * How `vector run --research` shows a research tool's call: the plan in full, then a line for each search, page, note
+ * and report. Undefined for any other tool.
+ */
+export function researchProgress(part: {
+  type: string
+  tool?: string
+  state?: unknown
+}): (Inline & { body?: string }) | undefined {
+  if (part.type !== "tool" || !part.tool?.startsWith("research_") || !isRecord(part.state)) return undefined
+  const state = part.state
+  if (state.status === "error")
+    return {
+      icon: "✗",
+      title: `${part.tool} failed`,
+      description: typeof state.error === "string" ? state.error : undefined,
+    }
+  if (state.status !== "completed") return undefined
+  const title = typeof state.title === "string" ? state.title : part.tool
+  const metadata = isRecord(state.metadata) ? state.metadata : {}
+  if (part.tool === "research_plan") {
+    const plan = isRecord(metadata.plan) ? metadata.plan : undefined
+    if (metadata.answer === "status") return { icon: "◇", title: "Plan updated" }
+    if (metadata.approved !== true || !plan) return { icon: "◇", title, description: "nothing was searched or read" }
+    const subquestions = Array.isArray(plan.subquestions)
+      ? plan.subquestions.filter((item) => typeof item === "string")
+      : []
+    return {
+      icon: "◇",
+      title: "Research plan",
+      description: `${String(plan.depth)} · ${String(plan.scope)}`,
+      body: [
+        String(plan.question),
+        ...subquestions.map((item, index) => `  ${index + 1}. ${item}`),
+        ...(typeof metadata.estimate === "string" ? [metadata.estimate] : []),
+      ].join(EOL),
+    }
+  }
+  if (part.tool === "research_search") {
+    const results = Array.isArray(metadata.results) ? metadata.results.length : undefined
+    return {
+      icon: "✱",
+      title,
+      ...(results === undefined ? {} : { description: `${results} result${results === 1 ? "" : "s"}` }),
+    }
+  }
+  if (part.tool === "research_read") return { icon: "→", title }
+  if (part.tool === "research_note") return { icon: "+", title }
+  if (part.tool === "research_report")
+    return {
+      icon: "■",
+      title: metadata.refused === true ? "Report refused" : `Report: ${title}`,
+      ...(typeof metadata.version === "number" ? { description: `version ${metadata.version}` } : {}),
+    }
+  return { icon: "⚙", title }
+}
+
+// Writes the run's latest report, with its sources, to `file` for `vector run --research --report`.
+async function writeReport(client: VectorClient, sessionID: string, file: string) {
+  const messages = (await client.session.messages({ sessionID }).catch(() => undefined))?.data ?? []
+  const runID = messages
+    .flatMap((message) => message.parts)
+    .flatMap((part) =>
+      part.type === "tool" &&
+      part.tool === "research_report" &&
+      part.state.status === "completed" &&
+      part.state.metadata?.refused !== true &&
+      typeof part.state.metadata?.runID === "string"
+        ? [part.state.metadata.runID]
+        : [],
+    )
+    .at(-1)
+  if (!runID) {
+    UI.error("This research wrote no report, so --report wrote no file.")
+    process.exitCode = 1
+    return
+  }
+  const exported = await client.memory.research
+    .export({ runID, format: "markdown" })
+    .catch((error: unknown) => ({ error, data: undefined }))
+  if (exported.error || typeof exported.data !== "string") {
+    UI.error(`Could not read the report: ${formatRunError(exported.error)}`)
+    process.exitCode = 1
+    return
+  }
+  await Bun.write(path.resolve(file), exported.data)
+  process.stderr.write(`Report written to ${path.resolve(file)}${EOL}`)
+}
+
 // How long a run that is waiting on background subagents goes without any activity before it stops waiting.
 const BACKGROUND_WAIT_MS = 10 * 60 * 1000
 
@@ -1351,6 +1597,40 @@ type MiniCommandInput = {
   replay?: boolean
   replayLimit?: number
   demo?: boolean
+}
+
+/**
+ * `vector run --local`: Vector Local for this run only, as the VECTOR_LOCAL floor in the environment, which can only
+ * tighten the policy the user's config and their company's set. It takes effect before anything connects (the CLI
+ * calls this before its account check), and the programs the run starts inherit it.
+ *
+ * With `--attach`, the Vector server the user typed is on the model server list for this run too, through
+ * VECTOR_LOCAL_POLICY, the user-level policy the environment may add to. This process then reaches that server, on
+ * the user's network as well as on this computer, and nothing else beyond this computer and the list. Vector Local
+ * decides it as it does a server the user lists: a company lock may refuse it, and a Vector the agent started adds
+ * none.
+ *
+ * It writes no file, so the next run is as the user's config says: neither the user's config nor Vector's copy of the
+ * block the owner let apply (Config.localConfirmedFile), which any start of Vector keeps up to date as it reads the
+ * config, and which the floor does not change.
+ */
+export async function runLocal(attach?: string) {
+  process.env.VECTOR_LOCAL = "1"
+  const { LocalPolicy } = await import("@vectordevai/core/local-mode/policy")
+  const target = attach === undefined ? undefined : LocalPolicy.origin(attach)
+  if (target) process.env.VECTOR_LOCAL_POLICY = withEndpoint(process.env.VECTOR_LOCAL_POLICY, target)
+  const { Config } = await import("@/config/config")
+  return Config.refreshLocal()
+}
+
+// VECTOR_LOCAL_POLICY with `origin` among its endpoints. A value that is not a JSON object is left as it is, which the
+// policy ignores with a warning, so the server is not listed either.
+function withEndpoint(text: string | undefined, origin: string) {
+  if (!text?.trim()) return JSON.stringify({ endpoints: [origin] })
+  const value = Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(text))
+  if (!isRecord(value)) return text
+  const endpoints = Array.isArray(value.endpoints) ? value.endpoints : []
+  return JSON.stringify({ ...value, endpoints: [...endpoints, origin] })
 }
 
 export async function runMini(input: MiniCommandInput) {
@@ -1385,11 +1665,17 @@ export async function runMini(input: MiniCommandInput) {
     yolo: false,
     "dangerously-skip-permissions": false,
     dangerouslySkipPermissions: false,
+    local: undefined,
     "max-cost": undefined,
     maxCost: undefined,
     "max-steps": undefined,
     size: undefined,
     judge: undefined,
+    research: undefined,
+    depth: undefined,
+    search: undefined,
+    scope: undefined,
+    report: undefined,
     maxSteps: undefined,
     demo: input.demo ?? false,
   })

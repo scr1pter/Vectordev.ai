@@ -3,6 +3,7 @@ import { stat } from "node:fs/promises"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 
 import { createRepo, getGitlabToken } from "./gitlab-auth"
+import { checkPost } from "./posting-check"
 
 // Push a Vector project straight to GitLab using Vector's built-in device-flow
 // sign-in (gitlab-auth.ts) — pushes over HTTPS with the stored OAuth token, no
@@ -87,7 +88,12 @@ async function prepareCommit(
   const staged = await run("git", ["diff", "--cached", "--quiet"], { cwd: projectPath, timeoutMs: 15_000 })
   const dirty = staged.failed // `--quiet` exits non-zero when there are staged changes
   if (!hasCommits || dirty) {
-    const message = commitMessage?.trim() || (hasCommits ? "Update from Vector" : "Initial commit from Vector")
+    // A commit message is checked when the commit is made, since nothing posts it later. The user typed it, so the
+    // check only asks; Vector's own default needs no check.
+    const typed = commitMessage?.trim()
+    const checked = typed ? await checkPost({ cwd: projectPath, parts: [typed], typed: true }) : undefined
+    if (typed && !checked) return "Nothing was committed."
+    const message = checked?.[0] || (hasCommits ? "Update from Vector" : "Initial commit from Vector")
     const commit = await run("git", await buildCommitArgs(projectPath, message), {
       cwd: projectPath,
       timeoutMs: 30_000,

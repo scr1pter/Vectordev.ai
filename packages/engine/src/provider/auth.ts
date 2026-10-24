@@ -1,5 +1,4 @@
 import {
-  CHATGPT_SIGN_IN,
   CHATGPT_SIGN_IN_UNAVAILABLE,
   chatgptOAuthConfiguration,
   providerEnabled,
@@ -103,10 +102,11 @@ export function visibleMethods(hook: Hook) {
 }
 
 // Clients choose a method by its index in a list they may have read before the owner's remote ChatGPT switch
-// turned off. OpenAI's indexes therefore keep counting the ChatGPT methods while the switch hides them, so a
-// stale choice is refused instead of landing on the method that moved into its place.
+// turned off. While this build offers Sign in with ChatGPT at all, OpenAI's indexes therefore keep counting the
+// ChatGPT methods when the switch hides them, so a stale choice is refused instead of landing on the method that
+// moved into its place.
 function indexedMethods(hook: Hook) {
-  if (hook.provider !== ProviderV2.ID.openai || !chatgptOAuthConfiguration(process.env, CHATGPT_SIGN_IN))
+  if (hook.provider !== ProviderV2.ID.openai || !chatgptOAuthConfiguration(process.env, true))
     return visibleMethods(hook)
   return providerEnabled(hook.provider) ? hook.methods : []
 }
@@ -237,7 +237,10 @@ const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> = Layer.
       if (current ? !pluginOAuthAllowed(current) : !providerOAuthAllowed(input.providerID, true)) {
         return yield* new ValidationFailed({
           field: "providerID",
-          message: `${input.providerID} sign-in is currently paused in Vector. Use an API key or another provider.`,
+          message:
+            input.providerID === ProviderV2.ID.openai
+              ? CHATGPT_SIGN_IN_UNAVAILABLE
+              : `${input.providerID} sign-in is currently paused in Vector. Use an API key or another provider.`,
         })
       }
       const match = snapshot.pending.get(input.providerID)

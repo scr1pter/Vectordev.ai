@@ -1,4 +1,5 @@
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
+import { CodiumPlan } from "@vectordevai/schema/codium-plan"
 import { accountChip, type VectorAccountStatus } from "@/vector-account"
 
 export type CodiumSummary =
@@ -32,7 +33,8 @@ export function codiumSummary(status?: ModelPlanStatus.Status): CodiumSummary {
   if (!status.enabled && !plan && !status.purchased.bought && !status.customer) return { kind: "coming-soon" }
   return {
     kind: "plan",
-    plan: plan?.name ?? "No plan",
+    // Free without a subscription, as the sidebar says, whatever top-up credits the account holds.
+    plan: plan?.name ?? CodiumPlan.FREE,
     ...(plan?.left === undefined ? {} : { left: plan.left }),
     ...(plan
       ? {

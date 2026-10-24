@@ -4,10 +4,15 @@ import { createServer, type IncomingMessage, type Server as HttpServer, type Ser
 import net, { type AddressInfo, type Socket } from "node:net"
 import WebSocket, { WebSocketServer } from "ws"
 import { APICallError } from "ai"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { EgressGuard } from "@vectordevai/core/local-mode/guard"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import { NetworkGuard } from "../../../core/test/lib/network-guard"
 import { ProviderError } from "../../src/provider/error"
 import { OpenAIWebSocket } from "../../src/plugin/openai/ws"
 import { OpenAIWebSocketPool, TITLE_HEADER } from "../../src/plugin/openai/ws-pool"
 import { OpenAITransport } from "../../src/plugin/openai/transport"
+import { ProxyEnv } from "../../src/util/proxy-env"
 import { isRecord } from "../../src/util/record"
 
 describe("plugin.openai.ws", () => {
@@ -28,6 +33,43 @@ describe("plugin.openai.ws", () => {
     expect(headers?.["openai-beta"]).toBe(OpenAIWebSocket.PROTOCOL_HEADER)
     expect(headers?.["content-length"]).toBeUndefined()
     socket.terminate()
+  })
+
+  test("decides the socket under Vector Local before it opens: only a model server on the list gets it", async () => {
+    // Strict for this test, so a socket the gate failed to stop would be refused before it left this computer.
+    const strict = NetworkGuard.strict()
+    await using hanging = await createHangingTcpServer()
+    let opened = 0
+    await using listed = await createWebSocketServer(() => {
+      opened += 1
+    })
+    try {
+      Egress.configure(LocalPolicy.resolve({ global: { enabled: true, endpoints: [new URL(listed.url).origin] } }))
+      // ChatGPT's own transport, as a signed-in model uses it: a cloud AI service, never on the list.
+      const chatgpt = OpenAIWebSocket.connectResponsesWebSocket({
+        url: "wss://chatgpt.com/backend-api/codex/responses",
+        headers: { authorization: "Bearer test" },
+      })
+      await expect(chatgpt).rejects.toBeInstanceOf(EgressGuard.EgressBlocked)
+      // A server on this computer that is not on the list is refused too, before anything connects.
+      await expect(OpenAIWebSocket.connectResponsesWebSocket({ url: hanging.wsUrl, headers: {} })).rejects.toThrow(
+        "Model calls go only to the model servers on your list.",
+      )
+      expect(hanging.connections()).toBe(0)
+      const socket = await OpenAIWebSocket.connectResponsesWebSocket({ url: listed.wsUrl, headers: {} })
+      socket.terminate()
+      expect(opened).toBe(1)
+      expect(Egress.events().map((event) => [event.source, event.decision, event.rule])).toEqual([
+        ["cloud-inference", "block", "not-allowable"],
+        ["local-inference", "block", "not-listed"],
+        ["local-inference", "allow", "listed"],
+      ])
+      expect(strict.attempts().filter((attempt) => attempt.host === "chatgpt.com")).toEqual([])
+    } finally {
+      Egress.configure(LocalPolicy.OFF)
+      await Egress.erase()
+      strict.uninstall()
+    }
   })
 
   test("enforces websocket connect timeout", async () => {
@@ -153,6 +195,101 @@ describe("plugin.openai.ws", () => {
       onConnectionInvalid: () => socket.terminate(),
     })
     expect((await readTextError(response.text())).message).toBe("Invalid WebSocket response event")
+  })
+})
+
+describe("plugin.openai.ws under Vector Local", () => {
+  // Bun serves the ws package itself, past the egress guard; in strict mode a socket the gate let through would go to
+  // the strict guard's own proxy, which refuses anything off this computer, so nothing here leaves it.
+  NetworkGuard.use()
+
+  test("decides a model call over a WebSocket before it connects, and sends one to a listed server direct", async () => {
+    await using server = await createWebSocketServer(() => {})
+    Egress.configure(LocalPolicy.resolve({ global: { enabled: true, endpoints: [new URL(server.url).origin] } }))
+    try {
+      const refused = await OpenAIWebSocket.connectResponsesWebSocket({
+        url: "wss://198.51.100.7/v1/responses",
+        headers: {},
+        timeout: 2_000,
+      }).catch((error: unknown) => error)
+      // A server off the list that is not a cloud AI service is refused as one not on the list.
+      expect(refused).toBeInstanceOf(EgressGuard.EgressBlocked)
+      expect((refused as EgressGuard.EgressBlocked).rule).toBe("not-listed")
+      const socket = await OpenAIWebSocket.connectResponsesWebSocket({ url: server.wsUrl, headers: {} })
+      socket.terminate()
+      expect(Egress.events().map((event) => [event.source, event.decision])).toEqual([
+        ["local-inference", "block"],
+        ["local-inference", "allow"],
+      ])
+    } finally {
+      Egress.configure(LocalPolicy.OFF)
+      await Egress.erase()
+    }
+  })
+
+  test("refuses the next call on a socket the pool opened while Vector Local was off, before sending it", async () => {
+    let connections = 0
+    let messages = 0
+    await using server = await createWebSocketServer((socket) => {
+      connections += 1
+      socket.on("message", () => {
+        messages += 1
+        socket.send(JSON.stringify({ type: "response.completed", response: { id: `resp_${messages}` } }))
+      })
+    })
+    const overHttp: string[] = []
+    const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+      url: server.url,
+      httpFetch: (async (input: RequestInfo | URL) => {
+        overHttp.push(String(input))
+        return new Response("over http")
+      }) as typeof globalThis.fetch,
+    })
+    try {
+      expect(await (await fetch(server.url, streamRequest())).text()).toContain("[DONE]")
+      // Vector Local turns on, and this server is not on the list.
+      Egress.configure(LocalPolicy.resolve({ global: { enabled: true } }))
+      const refused = await fetch(server.url, streamRequest()).catch((error: unknown) => error)
+      expect(refused).toBeInstanceOf(EgressGuard.EgressBlocked)
+      // Nothing reached the server over the open socket, and nothing went over HTTP instead.
+      expect(messages).toBe(1)
+      expect(overHttp).toEqual([])
+      expect(Egress.events().map((event) => [event.source, event.decision])).toEqual([["local-inference", "block"]])
+      // Once it is listed, the next call goes, on a new socket, and is logged once.
+      Egress.configure(LocalPolicy.resolve({ global: { enabled: true, endpoints: [new URL(server.url).origin] } }))
+      expect(await (await fetch(server.url, streamRequest())).text()).toContain("[DONE]")
+      expect({ connections, messages }).toEqual({ connections: 2, messages: 2 })
+      expect(Egress.events().map((event) => [event.source, event.decision])).toEqual([
+        ["local-inference", "block"],
+        ["local-inference", "allow"],
+      ])
+    } finally {
+      fetch.close()
+      Egress.configure(LocalPolicy.OFF)
+      await Egress.erase()
+    }
+  })
+})
+
+describe("plugin.openai.ws route", () => {
+  // The strict guard puts its own proxy in the environment, so the proxy a route takes is that one, and nothing here
+  // connects.
+  NetworkGuard.use()
+
+  test("sends a model call to a listed server with an internet name as a local one, through the environment's proxy", async () => {
+    Egress.configure(LocalPolicy.resolve({ global: { enabled: true, endpoints: ["https://models.example.com"] } }))
+    try {
+      const routed = OpenAIWebSocket.route("wss://models.example.com/v1/responses")
+      const proxy = ProxyEnv.getProxyForUrl("https://models.example.com/v1/responses")
+      expect(proxy).toBeDefined()
+      expect(routed).toEqual({ proxy })
+      expect(Egress.events().map((event) => [event.source, event.decision, event.rule])).toEqual([
+        ["local-inference", "allow", "listed"],
+      ])
+    } finally {
+      Egress.configure(LocalPolicy.OFF)
+      await Egress.erase()
+    }
   })
 })
 

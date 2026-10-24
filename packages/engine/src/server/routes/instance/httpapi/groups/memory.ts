@@ -2,6 +2,7 @@ import { Schema } from "effect"
 import { Multipart } from "effect/unstable/http"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
 import { BrainSchema } from "@vectordevai/core/brain/schema"
+import { Research } from "@vectordevai/schema/research"
 import { RunBudget } from "@vectordevai/schema/run-budget"
 import { Authorization } from "../middleware/authorization"
 import { InstanceContextMiddleware } from "../middleware/instance-context"
@@ -56,11 +57,28 @@ export const MemoryCreatePayload = Schema.Struct({
 export const MemoryUpdatePayload = Schema.Struct({
   text: Schema.optional(Schema.String),
   pinned: Schema.optional(Schema.Boolean),
+  /** Files a preference or a term under another facet. */
+  facet: Schema.optional(BrainSchema.Facet),
   action: Schema.optional(Schema.Literals(["approve", "reject", "archive", "restore", "undo"])),
 })
 
 export const MemoryErasePayload = Schema.Struct({
   scope: Schema.Literals(["repository", "personal", "all"]),
+})
+
+/** The facets of how the user works that Vector may learn: each one on unless turned off ("Don't learn this kind"). */
+export const MemoryFacets = Schema.Struct({
+  format: Schema.Boolean,
+  workflow: Schema.Boolean,
+  vocabulary: Schema.Boolean,
+  tooling: Schema.Boolean,
+  sources: Schema.Boolean,
+  style: Schema.Boolean,
+}).annotate({ identifier: "MemoryFacets" })
+
+/** When the optional model learner runs: with Vector Local on (the default), with any model, or never. */
+export const MemoryModelLearner = Schema.Literals(["local-only", "always", "off"]).annotate({
+  identifier: "MemoryModelLearner",
 })
 
 export const MemorySettings = Schema.Struct({
@@ -69,13 +87,54 @@ export const MemorySettings = Schema.Struct({
   repositoryDocs: Schema.Boolean,
   /** Whether a copy of each added file is kept. The copy is not redacted. */
   keepOriginals: Schema.Boolean,
+  facets: MemoryFacets,
+  modelLearner: MemoryModelLearner,
 }).annotate({ identifier: "MemorySettings" })
 
 export const MemorySettingsPayload = Schema.Struct({
   learning: Schema.optional(Schema.Boolean),
   repositoryDocs: Schema.optional(Schema.Boolean),
   keepOriginals: Schema.optional(Schema.Boolean),
+  /** The facets to change; the others keep their setting. */
+  facets: Schema.optional(
+    Schema.Struct({
+      format: Schema.optional(Schema.Boolean),
+      workflow: Schema.optional(Schema.Boolean),
+      vocabulary: Schema.optional(Schema.Boolean),
+      tooling: Schema.optional(Schema.Boolean),
+      sources: Schema.optional(Schema.Boolean),
+      style: Schema.optional(Schema.Boolean),
+    }),
+  ),
+  modelLearner: Schema.optional(MemoryModelLearner),
 })
+
+export const MemoryExportQuery = Schema.Struct({
+  ...WorkspaceRoutingQueryFields,
+  /** personal: what Vector keeps for you. repository: this repository's memory and documents. all (the default): both. */
+  scope: Schema.optional(Schema.Literals(["personal", "repository", "all"])),
+  /** markdown (the default): a page per kind to read. json: the same, as data an import reads back. */
+  format: Schema.optional(Schema.Literals(["markdown", "json"])),
+})
+
+/** The most an import may be: 2 MB of text. */
+export const IMPORT_CHARS = 2 * 1024 * 1024
+
+export const MemoryImportPayload = Schema.Struct({
+  /** A Markdown or JSON export, or a Markdown list under "## Preferences", "## Terms" and the like. */
+  text: Schema.String,
+})
+
+export const MemoryImportResult = Schema.Struct({
+  /** What the import brought in, every entry waiting for your approval. */
+  entries: Schema.Array(BrainSchema.Entry),
+  /** Entries already in memory, the same words. */
+  known: Schema.Finite,
+  /** Entries refused: forgotten, secret, too long, or past what may wait for review. */
+  refused: Schema.Finite,
+  /** Entries past the 500 one import brings in. */
+  over: Schema.Finite,
+}).annotate({ identifier: "MemoryImportResult" })
 
 export const MemoryTidy = Schema.Struct({
   merged: Schema.Finite,
@@ -438,10 +497,93 @@ const ReviewItemID = Schema.String.annotate({
   description: "A review item's id: v… for a conflict or drift, or the held passage, record or document's own id",
 })
 
+/** Characters one post may send for a check, every part together. */
+export const POSTING_CHARS = 2_000_000
+
+export const MemoryPostingPayload = Schema.Struct({
+  /** Everything one post sends, in order: a title and body, or a review's body, each line comment and its fallback. */
+  parts: Schema.Array(Schema.String),
+  /** Sessions whose recalled memory the text is compared with too, with the sessions they launched. */
+  sessionIDs: Schema.optional(Schema.Array(Schema.String)),
+  /** The user typed or edited the text: it is never changed, only asked about. */
+  typed: Schema.Boolean,
+  /** A pull request from someone Vector cannot trust: its links and images may point only at GitHub and `hosts`. */
+  untrusted: Schema.optional(Schema.Boolean),
+  /** The repository's own hosts, besides GitHub's. */
+  hosts: Schema.optional(Schema.Array(Schema.String)),
+}).annotate({ identifier: "MemoryPostingPayload" })
+
+export const MemoryPostingResult = Schema.Struct({
+  /** clean: nothing overlaps. changed: what overlaps was taken out. ask: the user's own text overlaps, unchanged. */
+  status: Schema.Literals(["clean", "changed", "ask"]),
+  /** The parts to post, in the order they were sent. */
+  parts: Schema.Array(Schema.String),
+  /** The sentences that overlap the owner's memory, by part, to show the owner before posting. */
+  dropped: Schema.Array(Schema.Struct({ part: Schema.Finite, text: Schema.String })),
+  /** Links and images taken out because they point off GitHub. */
+  links: Schema.Finite,
+}).annotate({ identifier: "MemoryPostingResult" })
+
 export const MemoryKnowledgeQuery = Schema.Struct({
   ...WorkspaceRoutingQueryFields,
   /** Record, passage and document ids, comma-separated, at most 50. */
   ids: Schema.String,
+})
+
+// Deep research, kept in the repository's brain: runs, the pages they read and the notes they saved.
+
+const ResearchRunID = Schema.String.annotate({ description: "A research run's id, such as run_4k2q7m3x9abcd" })
+const ResearchSourceID = Schema.String.annotate({ description: "A source's number in its run, such as S3" })
+
+export const MemoryResearchRun = Schema.Struct({
+  run: Research.Run,
+  /** Sources the run read or skipped, and notes it saved. */
+  sources: Schema.Finite,
+  notes: Schema.Finite,
+  /** Bytes of page and report text the run keeps in the brain. */
+  bytes: Schema.Finite,
+}).annotate({ identifier: "MemoryResearchRun" })
+
+export const MemoryResearchList = Schema.Struct({
+  runs: Schema.Array(MemoryResearchRun),
+  /** Bytes all of the repository's research keeps, and the most it keeps before the oldest unkept runs go. */
+  bytes: Schema.Finite,
+  limit: Schema.Finite,
+  /** Days a run nobody kept stays. */
+  retain: Schema.Finite,
+}).annotate({ identifier: "MemoryResearchList" })
+
+export const MemoryResearchSource = Schema.Struct({
+  ...Research.Source.fields,
+  /** The page's text was forgotten since it was read; its notes say their quote is no longer in it. */
+  forgotten: Schema.optional(Schema.Boolean),
+}).annotate({ identifier: "MemoryResearchSource" })
+
+export const MemoryResearchDetail = Schema.Struct({
+  run: Research.Run,
+  sources: Schema.Array(MemoryResearchSource),
+  notes: Schema.Array(Research.Note),
+  /** Every query the run sent. */
+  queries: Schema.Array(Schema.String),
+  /** The latest report as Markdown, with no raw HTML or images in it. */
+  report: Schema.optional(Schema.String),
+  bytes: Schema.Finite,
+  /** An invited guest acted in the run's session, so the run is in this process's memory only and cannot be kept. */
+  guest: Schema.Boolean,
+}).annotate({ identifier: "MemoryResearchDetail" })
+
+export const MemoryResearchSourceText = Schema.Struct({
+  source: MemoryResearchSource,
+  /** The page's saved text, chunk by chunk. Plain text; never render it as markup. */
+  chunks: Schema.Array(Schema.Struct({ chunk: Schema.Finite, page: Schema.optional(Schema.Finite), text: Schema.String })),
+  /** Read from the user's own computer or network. */
+  private: Schema.Boolean,
+}).annotate({ identifier: "MemoryResearchSourceText" })
+
+export const MemoryResearchExportQuery = Schema.Struct({
+  ...WorkspaceRoutingQueryFields,
+  /** markdown (the default): the report with a bibliography. json: the run, its sources, notes and report. */
+  format: Schema.optional(Schema.Literals(["markdown", "json"])),
 })
 
 // Memory is the owner's own: every route is owner-only (ServerAuth), and a guest never reads it.
@@ -523,6 +665,42 @@ export const MemoryApi = HttpApi.make("memory")
               "Erase what Vector learned for this repository, for the user, or everywhere. Files people wrote are left alone.",
           }),
         ),
+        HttpApiEndpoint.delete("eraseSession", `${root}/sessions/:sessionID`, {
+          params: { sessionID: Schema.String.annotate({ description: "The session, such as ses_4k2q7m3x" }) },
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Finite, "How many entries were erased"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.eraseSession",
+            summary: "Erase what Vector learned in a session",
+            description:
+              "Forget every entry Vector learned whose only evidence is this session, so it is not learned again. What you wrote and what other sessions also taught stay. The session keeps its messages until you delete them.",
+          }),
+        ),
+        HttpApiEndpoint.get("export", `${root}/export`, {
+          query: MemoryExportQuery,
+          success: Schema.String.pipe(HttpApiSchema.asText({ contentType: "text/markdown" })),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.export",
+            summary: "Export memory",
+            description:
+              "Everything Vector keeps for this repository, for you, or both, as an attachment: a Markdown page per kind with each entry's evidence and what Vector read from documents, or with `format=json` the same as data. Never the documents' files.",
+          }),
+        ),
+        HttpApiEndpoint.post("import", `${root}/import`, {
+          query: WorkspaceRoutingQuery,
+          payload: MemoryImportPayload,
+          success: described(MemoryImportResult, "What the import brought in"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.import",
+            summary: "Import memory",
+            description:
+              "Read an export (Markdown or JSON) back in. Every preference, term, decision, lesson and fact it holds lands waiting for your approval, so a changed file cannot put memory in use; rules stay in their files. What you forgot is not imported again.",
+          }),
+        ),
         HttpApiEndpoint.post("tidy", `${root}/tidy`, {
           query: WorkspaceRoutingQuery,
           success: described(MemoryTidy, "What tidying changed"),
@@ -540,7 +718,8 @@ export const MemoryApi = HttpApi.make("memory")
           OpenApi.annotations({
             identifier: "memory.settings.get",
             summary: "Get memory settings",
-            description: "Whether Vector may add to its memory as it works.",
+            description:
+              "Whether Vector may add to its memory as it works, which facets of how you work it may learn, and when the optional model learner runs.",
           }),
         ),
         HttpApiEndpoint.patch("configure", `${root}/settings`, {
@@ -552,7 +731,7 @@ export const MemoryApi = HttpApi.make("memory")
             identifier: "memory.settings.update",
             summary: "Change memory settings",
             description:
-              "Turn Vector's learning on or off, reading the repository's own docs, and keeping originals of added documents. Memory already saved stays until you erase it; turning repository docs off forgets what Vector read of them, and turning originals off deletes the kept copies.",
+              "Turn Vector's learning on or off, each facet of how you work it may learn, the optional model learner, reading the repository's own docs, and keeping originals of added documents. Memory already saved stays until you erase it; turning repository docs off forgets what Vector read of them, and turning originals off deletes the kept copies.",
           }),
         ),
         HttpApiEndpoint.get("model", `${root}/model`, {
@@ -805,6 +984,19 @@ export const MemoryApi = HttpApi.make("memory")
               "The user's decision on an item: dismiss it, keep the document or the code for drift (keeping the code saves a decision), keep one side of a conflict, or approve or reject held content. Vector never settles one itself.",
           }),
         ),
+        HttpApiEndpoint.post("postingCheck", `${root}/posting-check`, {
+          query: WorkspaceRoutingQuery,
+          payload: MemoryPostingPayload,
+          success: described(MemoryPostingResult, "What may be posted, and what overlaps the owner's memory"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.posting.check",
+            summary: "Check text before Vector posts it",
+            description:
+              "Compares text Vector is about to post or commit with the owner's memory: how they work, what they told Vector about themselves, and private documents the given sessions recalled. A sentence that repeats one is taken out of text Vector wrote, and only shown for text the user typed. A fork's links and images may point only at GitHub.",
+          }),
+        ),
         HttpApiEndpoint.get("knowledge", `${root}/knowledge`, {
           query: MemoryKnowledgeQuery,
           success: described(Schema.Array(BrainSchema.Card), "Cards for the ids that are still there"),
@@ -815,6 +1007,104 @@ export const MemoryApi = HttpApi.make("memory")
             summary: "Resolve citations",
             description:
               "The cards for record, passage and document ids an answer cited, for citation chips. Ids that are gone or held are left out.",
+          }),
+        ),
+        HttpApiEndpoint.get("research", `${root}/research`, {
+          query: WorkspaceRoutingQuery,
+          success: described(MemoryResearchList, "The repository's research runs, newest first"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.research.list",
+            summary: "List research runs",
+            description:
+              "Deep research runs this repository's brain keeps: question, date, sources, notes, size and whether you kept it. Runs nobody keeps are deleted after `retain` days, and past `limit` bytes the oldest of them go first.",
+          }),
+        ),
+        HttpApiEndpoint.delete("forgetAllResearch", `${root}/research`, {
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Finite, "How many runs were forgotten"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.research.forgetAll",
+            summary: "Forget all research in this repository",
+            description:
+              "Forget every research run of the repository: their pages, notes and reports. Vector does not keep those pages again on its own.",
+          }),
+        ),
+        HttpApiEndpoint.get("researchRun", `${root}/research/:runID`, {
+          params: { runID: ResearchRunID },
+          query: WorkspaceRoutingQuery,
+          success: described(MemoryResearchDetail, "One run with its sources, notes and report"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.research.get",
+            summary: "Get a research run",
+            description: "One run: its plan, the queries it sent, its sources (skipped ones too), its notes and its latest report.",
+          }),
+        ),
+        HttpApiEndpoint.delete("forgetResearch", `${root}/research/:runID`, {
+          params: { runID: ResearchRunID },
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Boolean, "The run was forgotten"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.research.forget",
+            summary: "Forget a research run",
+            description:
+              "Forget a run and everything it holds: its pages, notes and report. Vector does not keep those pages again on its own. The session keeps its messages.",
+          }),
+        ),
+        HttpApiEndpoint.post("keepResearch", `${root}/research/:runID/keep`, {
+          params: { runID: ResearchRunID },
+          query: WorkspaceRoutingQuery,
+          success: described(MemoryResearchDetail, "The run after it was kept"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.research.keep",
+            summary: "Keep a research run",
+            description:
+              "Keep the run past the retention, and its report in the brain, where the owner's requests can recall it like any private document. Sessions with invited guests and models that may train on your prompts never get it. Its pages stay held. A run an invited guest acted in cannot be kept.",
+          }),
+        ),
+        HttpApiEndpoint.get("exportResearch", `${root}/research/:runID/export`, {
+          params: { runID: ResearchRunID },
+          query: MemoryResearchExportQuery,
+          success: Schema.String.pipe(HttpApiSchema.asText({ contentType: "text/markdown" })),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.research.export",
+            summary: "Export a research run",
+            description:
+              "The run as an attachment: the report with a bibliography as Markdown, or with `format=json` the run, its queries, sources, notes and report.",
+          }),
+        ),
+        HttpApiEndpoint.get("researchSource", `${root}/research/:runID/sources/:sourceID`, {
+          params: { runID: ResearchRunID, sourceID: ResearchSourceID },
+          query: WorkspaceRoutingQuery,
+          success: described(MemoryResearchSourceText, "A source with the text Vector saved from it"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.research.source",
+            summary: "Read a research source",
+            description: "One source of a run and the text Vector saved from its page, chunk by chunk, as citations open it.",
+          }),
+        ),
+        HttpApiEndpoint.delete("forgetResearchSource", `${root}/research/:runID/sources/:sourceID`, {
+          params: { runID: ResearchRunID, sourceID: ResearchSourceID },
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Boolean, "The source's page was forgotten"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.research.forgetSource",
+            summary: "Forget a research source",
+            description:
+              "Forget the text Vector saved from one page of a run. The source stays listed as forgotten, and a report saved after this marks the notes that quoted it. Vector does not keep that page again on its own.",
           }),
         ),
       )

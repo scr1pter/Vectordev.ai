@@ -86,7 +86,10 @@ test("Account shows who is signed in and that Codium is coming soon, and nothing
   await settings.getByRole("button", { name: "Buy credits" }).click()
   const offers = settings.locator("[data-component='codium-purchase']")
   await expect(offers.getByText("Nothing can be bought until Vector Codium goes on sale.")).toBeVisible()
-  await expect(offers.getByText("Codium 50", { exact: true })).toBeVisible()
+  // Plans by name and top-ups by their amount, never a plan's price as its name.
+  for (const name of ["Plus", "Pro", "Max", "Ultra", "$10 credit top-up", "$200 credit top-up"])
+    await expect(offers.getByText(name, { exact: true })).toBeVisible()
+  await expect(offers).not.toContainText(/Codium \d/)
   await expect(offers.getByText("$50 a month")).toBeVisible()
   // Every purchase button says Coming soon and none can be pressed.
   const soon = offers.getByRole("button", { name: /^Coming soon, / })
@@ -106,7 +109,7 @@ test("Account shows the plan as a share of this month's credits and manages bill
   await page.goto("/e2e/fixtures/account-settings.html?account=signed-in&codium=plan")
   const settings = page.locator(".settings-v2-workspace")
   await expect(settings.locator(".settings-account-avatar")).toHaveText("A")
-  await expect(settings.getByText("Codium 50", { exact: true })).toBeVisible()
+  await expect(settings.locator(".settings-account-balance > div").first()).toHaveText("PlanPro")
   await expect(settings.getByText("64% of this month's credits left", { exact: true })).toBeVisible()
   await expect(settings.getByRole("meter", { name: "Share of this month's credits left" })).toHaveAttribute(
     "aria-valuenow",
@@ -143,7 +146,7 @@ test("Buy credits lists plans and top-ups by price, and each opens Stripe in Vec
   await expect(offers).not.toContainText(/expire|expiry|expiration/i)
   await capture(page, testInfo, "account-buy-credits.png")
 
-  await offers.getByRole("button", { name: "Buy, Codium 10 top-up" }).click()
+  await offers.getByRole("button", { name: "Buy, $10 credit top-up" }).click()
   await expect(settings.getByText("Your credits are bought. They appear here in a moment.")).toBeVisible()
   // Before Stripe's confirm page, the button says what a change costs: a bigger plan is charged in full today and
   // ends what is left of this month's credits.
@@ -165,12 +168,13 @@ test("Buy credits lists plans and top-ups by price, and each opens Stripe in Vec
 test("someone without a plan subscribes in Vector, and a cancelled or failed checkout says so", async ({ page }) => {
   await page.goto("/e2e/fixtures/account-settings.html?account=signed-in&codium=none&billing=cancelled")
   const settings = page.locator(".settings-v2-workspace")
-  // Nothing bought yet, so there is no billing to manage and no plan to cancel.
+  // Nothing bought yet: the account is on Free, with no billing to manage and no plan to cancel.
+  await expect(settings.locator(".settings-account-balance > div").first()).toHaveText("PlanFree")
   await expect(settings.getByRole("button", { name: "Manage billing and invoices" })).toHaveCount(0)
   await expect(settings.getByRole("button", { name: "Cancel plan" })).toHaveCount(0)
   await settings.getByRole("button", { name: "Buy credits" }).click()
   const offers = settings.locator("[data-component='codium-purchase']")
-  await offers.getByRole("button", { name: "Subscribe, Codium 100" }).click()
+  await offers.getByRole("button", { name: "Subscribe, Max" }).click()
   await expect(settings.getByText("Checkout was cancelled. Nothing was charged.")).toBeVisible()
   expect(await billing(page)).toEqual([{ kind: "checkout", plan: "vector-100" }])
 
@@ -225,7 +229,7 @@ test("Buy credits on a Codium turn that ran out opens the plans in Vector, not t
   await expect(dialog).toBeVisible()
   await expect(dialog.locator("[data-offer='vector-50']")).toContainText("Current plan")
   await capture(page, testInfo, "codium-purchase-dialog.png")
-  await dialog.getByRole("button", { name: "Buy, Codium 50 top-up" }).click()
+  await dialog.getByRole("button", { name: "Buy, $50 credit top-up" }).click()
   await expect(dialog.getByText("Your credits are bought. They appear here in a moment.")).toBeVisible()
   expect(await billing(page)).toEqual([{ kind: "topup", pack: "codium-topup-50" }])
   expect(await opened(page)).toEqual([])
