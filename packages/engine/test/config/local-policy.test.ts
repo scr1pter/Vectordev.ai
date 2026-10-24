@@ -1222,7 +1222,9 @@ describe("sources Vector cannot read", () => {
       const policy = Config.refreshLocal()
       expect(policy).toMatchObject({ enabled: true, web: "none", endpoints: [{ origin: SERVER, from: "user" }] })
       expect(policy.warnings).toHaveLength(2)
-      expect(policy.warnings[0]).toStartWith(`Vector could not check who may change ${file}: `)
+      // Depending on the platform, the metadata check or the subsequent file read reports the denial.
+      expect(policy.warnings[0]).toMatch(/^Vector could not (?:read|check who may change) /)
+      expect(policy.warnings[0]).toContain(file)
       expect(policy.warnings[1]).toBe(
         `Vector Local stays on with Web access None until Vector can read ${file}, which may hold your company's policy.`,
       )

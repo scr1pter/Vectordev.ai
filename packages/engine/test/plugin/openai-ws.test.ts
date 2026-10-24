@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { beforeEach, describe, expect, test } from "bun:test"
 import { EventEmitter } from "node:events"
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http"
 import net, { type AddressInfo, type Socket } from "node:net"
@@ -14,6 +14,12 @@ import { OpenAIWebSocketPool, TITLE_HEADER } from "../../src/plugin/openai/ws-po
 import { OpenAITransport } from "../../src/plugin/openai/transport"
 import { ProxyEnv } from "../../src/util/proxy-env"
 import { isRecord } from "../../src/util/record"
+
+beforeEach(async () => {
+  // Egress history survives across files in the shared engine test process.
+  Egress.configure(LocalPolicy.OFF)
+  await Egress.erase()
+})
 
 describe("plugin.openai.ws", () => {
   test("derives websocket URLs and sends auth plus protocol headers", async () => {
