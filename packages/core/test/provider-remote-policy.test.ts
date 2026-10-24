@@ -119,11 +119,12 @@ test("operators who disable Vector's metadata fetches follow the release default
   expect(policy.seen).toEqual([])
 })
 
-test("the website publishes the switch where installed apps read it, turned on", async () => {
+// Turned off on 23 Oct 2026 after a legal review: the sign-in borrows the Codex CLI's registration.
+test("the website publishes the switch where installed apps read it, turned off", async () => {
   const root = path.resolve(import.meta.dir, "../../..")
   const url = new URL(ProviderRemotePolicy.POLICY_URL)
   expect(url.origin).toBe("https://vectordev.ai")
-  expect(await Bun.file(path.join(root, "packages/web/public", url.pathname)).json()).toEqual({ chatgptSignIn: true })
+  expect(await Bun.file(path.join(root, "packages/web/public", url.pathname)).json()).toEqual({ chatgptSignIn: false })
   // The deploy deletes every top-level folder it does not keep.
   expect(await Bun.file(path.join(root, "script/prune-vector-site.mjs")).text()).toContain(
     `"${url.pathname.split("/")[1]}"`,

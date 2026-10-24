@@ -28,6 +28,8 @@ Before this change was made, the owner was told why `b37300270` turned the sign-
 - Release guards: `script/artifact-audit.ts` (used by the CLI publisher, the desktop package checks and the cloud CLI package) allows this one client ID and still rejects every other borrowed registration, including the GitHub one. `packages/engine/test/compliance/upstream-free.test.ts` allows the ID only in `provider-policy.ts`.
 - The separately installed Codex runtime (`packages/desktop/src/main/external-agents.ts`) is unchanged.
 
+**23 October 2026: turned off.** After a legal review of OpenAI's current terms (the Sign in with ChatGPT Terms of 29 September 2026 and the Codex auth docs found that a commercial app reusing the Codex CLI's registration is not allowed), the owner chose to turn the sign-in off with the remote switch. ChatGPT-plan users can keep using GPT models through their own OpenAI API key or through their own installed Codex CLI in the Host locally launcher. To bring it back properly, Vector needs its own registration through OpenAI's Sign in with ChatGPT program.
+
 ## Remote off-switch
 
 The website serves the switch at <https://vectordev.ai/policy/providers.json> from `packages/web/public/policy/providers.json`:
