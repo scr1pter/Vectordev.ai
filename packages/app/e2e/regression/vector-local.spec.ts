@@ -538,6 +538,8 @@ test("Settings > Vector Local asks before Add server loosens it, and lists every
   await expect(confirm).toContainText("It lists http://gpu-box:8000 as a model server.")
   expect(state.servers).toEqual([{ url: "http://gpu-box:8000" }])
   await confirm.getByRole("button", { name: "Apply" }).click()
+  // Settings stays inert while the confirmation closes, and what is typed into it before then is lost.
+  await expect(confirm).toHaveCount(0)
   await expect(servers.locator('[data-origin="http://gpu-box:8000"]')).toContainText(
     "Not encrypted: prompts to this server travel in plain text on your network.",
   )
