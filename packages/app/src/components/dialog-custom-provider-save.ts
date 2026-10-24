@@ -11,9 +11,9 @@ export async function saveCustomProvider(input: {
   updateConfig: (config: Config) => Promise<unknown>
   /**
    * Puts the server Vector read on the model server list through the Local API, which asks the owner first when that
-   * loosens Vector Local; false when the owner said no. Without it the list is written with the provider, as before.
+   * loosens Vector Local; false when the owner said no. The list is never written with the provider.
    */
-  list?: (server: { readonly origin: string; readonly pin: LocalProbe.Pin }) => Promise<boolean>
+  list: (server: { readonly origin: string; readonly pin: LocalProbe.Pin }) => Promise<boolean>
 }) {
   const providerID = input.result.providerID
   const [providers, config, credential] = await Promise.all([
@@ -32,14 +32,6 @@ export async function saveCustomProvider(input: {
     throw new Error(input.conflictMessage)
   }
 
-  // The server list lives in the user's global config, and a config update replaces a list, so it is read from there
-  // (never from the merged config, which also holds a company's entries) before this server is added to it. With the
-  // Local API the server goes on the list after the provider is saved, and only once the owner agrees.
-  const local =
-    input.result.local && !input.list
-      ? listed((await input.client.global.config.get({ throwOnError: true })).data.local, input.result.local)
-      : undefined
-
   if (input.result.key) {
     // The server checks again while holding the credential-store filesystem lock.
     const saved = await input.client.auth.set(
@@ -50,26 +42,7 @@ export async function saveCustomProvider(input: {
     if (saved.error) throw new Error("message" in saved.error ? saved.error.message : String(saved.error))
   }
 
-  await input.updateConfig({ provider: { [providerID]: input.result.config }, ...(local ? { local } : {}) })
-  return { listed: input.result.local && input.list ? await input.list(input.result.local) : local !== undefined }
-}
-
-/** The global `local` block's list and pins with this server added: on the list once, pinned as it answered now. */
-export function listed(
-  current: Config["local"],
-  server: { readonly origin: string; readonly pin: LocalProbe.Pin },
-): NonNullable<Config["local"]> {
-  const endpoints = current?.endpoints ?? []
-  return {
-    endpoints: endpoints.includes(server.origin) ? endpoints : [...endpoints, server.origin],
-    pins: {
-      ...current?.pins,
-      [server.origin]: {
-        kind: server.pin.kind,
-        ...(server.pin.version === undefined ? {} : { version: server.pin.version }),
-        ...(server.pin.models === undefined ? {} : { models: server.pin.models }),
-        ...(server.pin.spki ? { spki: server.pin.spki } : {}),
-      },
-    },
-  }
+  await input.updateConfig({ provider: { [providerID]: input.result.config } })
+  // The server goes on the list after the provider is saved, and only once the owner agrees.
+  return { listed: input.result.local ? await input.list(input.result.local) : false }
 }

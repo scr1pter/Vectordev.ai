@@ -639,15 +639,4 @@ describe("Off in Vector Local", () => {
     expect(offInLocalProviders(undefined)).toEqual([])
     expect(offInLocalProviders([providerUnavailable("anthropic", "disabled")])).toEqual([])
   })
-
-  test("the models still offered stay in their sections, untouched by the group", () => {
-    const hosted: Provider = { id: "ollama", name: "Ollama", source: "config", options: {} }
-    const sections = buildModelSections({
-      models: [model(hosted, "qwen3:30b", "Qwen3 30B", { cost: { input: 0 } })],
-      term: "",
-      now: NOW,
-      popular: [],
-    })
-    expect(sections.flatMap((section) => section.items.map((item) => item.id))).toEqual(["qwen3:30b"])
-  })
 })

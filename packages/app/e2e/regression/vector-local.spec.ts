@@ -10,8 +10,10 @@ import { expectSessionTitle } from "../utils/waits"
 // Vector Local in the app against a mocked engine standing for the fake model server: the setup wizard from Getting
 // started's "Models you host" to a first session on the model it set up, the composer's pill and popover, the model
 // picker's Off in Vector Local group, Settings > Vector Local's Add server asking before it loosens, the Allow dialog
-// under a company lock, and a guest's view. The engine's side (the Local API, Egress, the checks against the fake LLM
-// server) has its own tests; here its answers are recorded shapes of those routes.
+// under a company lock, the Off in Vector Local labels where the features are, and a guest's view. The engine's side
+// (the Local API, Egress, the checks against the fake LLM server) has its own tests; here its answers are recorded
+// shapes of those routes. The provider list's shape for a server added in Vector is the engine's own:
+// engine/test/server/local-app-models.test.ts adds one through the Local API and feeds GET /provider to the app's code.
 
 const directory = "C:/Vector/VectorLocal"
 const projectID = "proj_vector_local"
@@ -46,11 +48,13 @@ const server = {
   pin: { kind: "ollama", version: "0.12.3", models: "9f2c" },
 }
 
+// A model of a server added in Vector, as GET /provider sends it: the provider holds the base URL and the model's own
+// address is empty, so only the list's `hosted` says that its requests go to a server someone hosts.
 const hosted = (id: string, name: string) => ({
   id,
   name,
   providerID: "ollama",
-  api: { id, url: `${origin}/v1`, npm: "@ai-sdk/openai-compatible" },
+  api: { id, url: "", npm: "@ai-sdk/openai-compatible" },
   limit: { context: 40960, output: 8192 },
   cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
   variants: {},
@@ -84,7 +88,7 @@ async function setup(
     servers: [] as Record<string, unknown>[],
     checks: [] as Record<string, unknown>[],
     configs: [] as Record<string, unknown>[],
-    prompts: [] as Record<string, any>[],
+    prompts: [] as { model?: { providerID: string; modelID: string }; executionMode?: string }[],
   }
   const status = () => ({
     policy: state.policy,
@@ -104,6 +108,7 @@ async function setup(
               id: "ollama",
               name: "Ollama",
               source: "config",
+              options: { baseURL: `${origin}/v1` },
               models: { "qwen3:30b": hosted("qwen3:30b", "Qwen3 30B"), "qwen3:8b": hosted("qwen3:8b", "Qwen3 8B") },
             },
           ]
@@ -111,6 +116,11 @@ async function setup(
     ],
     connected: state.added ? ["ollama"] : [],
     default: state.added ? { ollama: "qwen3:30b" } : {},
+    ...(state.added
+      ? {
+          hosted: ["qwen3:30b", "qwen3:8b"].map((modelID) => ({ providerID: "ollama", modelID, origin, local: true })),
+        }
+      : {}),
     ...(state.policy.enabled
       ? {
           unavailable: [
@@ -346,12 +356,17 @@ test("the setup wizard goes from Models you host to a first Local session on the
     await expect(wizard.getByLabel(role, { exact: true })).toHaveValue("ollama/qwen3:30b")
   await wizard.getByRole("button", { name: "Next" }).click()
 
-  // Check: nothing runs until Check models is pressed, and one model is checked once, for the agent.
+  // Check: nothing runs until Check models is pressed, then the model is checked for every role it fills, since each
+  // role sends its own prompt and tools. Titles and summaries send none, so they are not checked.
   await expect(wizard.getByRole("button", { name: "Skip checks" })).toBeVisible()
   expect(state.checks).toEqual([])
   await wizard.getByRole("button", { name: "Check models" }).click()
-  await expect(wizard.locator('[data-model="ollama/qwen3:30b"]')).toContainText("Works with Vector's tools")
-  expect(state.checks).toEqual([{ model: "ollama/qwen3:30b", role: "agent" }])
+  await expect(wizard.locator('[data-model="ollama/qwen3:30b"] [data-slot="local-check-result"]')).toHaveText(
+    Array.from({ length: 5 }, () => "Works with Vector's tools"),
+  )
+  expect(state.checks).toEqual(
+    ["agent", "subagent", "judge", "review", "research"].map((role) => ({ model: "ollama/qwen3:30b", role })),
+  )
   await page.screenshot({ path: test.info().outputPath("03-wizard-check.png"), animations: "disabled" })
   await wizard.getByRole("button", { name: "Next" }).click()
 
@@ -505,6 +520,13 @@ test("Settings > Vector Local asks before Add server loosens it, and lists every
   await openSession(page)
   const pane = await openSettings(page)
   await expect(pane.getByRole("switch", { name: "Vector Local" })).toBeChecked()
+  // Roles offers the models on the server added in Vector, though their own address is empty.
+  const agent = pane.locator('[data-section="roles"]').getByLabel("Main agent", { exact: true })
+  await expect(agent.locator("option")).toHaveText([
+    "Same as the session's model",
+    "Qwen3 30B (Ollama)",
+    "Qwen3 8B (Ollama)",
+  ])
   const servers = pane.locator('[data-section="servers"]')
   await expect(servers.locator(`[data-origin="${origin}"]`)).toContainText("Answers as Ollama 0.12.3")
   await expect(servers.locator(`[data-origin="${origin}"]`)).toContainText("This computer")
@@ -521,7 +543,8 @@ test("Settings > Vector Local asks before Add server loosens it, and lists every
   )
   expect(state.servers).toEqual([{ url: "http://gpu-box:8000" }, { url: "http://gpu-box:8000", confirm: true }])
 
-  // Cancelling sends nothing more.
+  // Cancelling sends nothing more. The field empties once the server is added, before it is typed in again.
+  await expect(servers.getByLabel("Server address")).toHaveValue("")
   await servers.getByLabel("Server address").fill("http://other-box:8000")
   await servers.getByRole("button", { name: "Add server" }).click()
   await page.locator(".vector-local-confirm-dialog").getByRole("button", { name: "Cancel" }).click()
@@ -604,7 +627,48 @@ test("a guest sees whose Vector Local this is, no network log and no pill", asyn
   await expect(composer(page)).toBeVisible()
   await expect(page.locator('[data-action="prompt-local-pill"]')).toHaveCount(0)
   const pane = await openSettings(page)
-  await expect(pane).toContainText("Vector Local and its network log are visible to the owner of this computer.")
+  await expect(pane).toContainText("Vector Local and its network log are visible to the owner of this Vector.")
   await expect(pane.getByRole("button", { name: "Open" })).toHaveCount(0)
   await expect(pane.locator('[data-section="log"]')).toHaveCount(0)
+})
+
+test("the places Vector Local keeps a feature off say so: outside agents, Providers & keys, and Updates & about", async ({
+  page,
+}) => {
+  await setup(page, {
+    added: true,
+    policy: policy({ enabled: true, web: "ask", endpoints: [{ origin, from: "user" }] }),
+  })
+  await openSession(page)
+
+  // Outside agents keep their tiles, say they do not start, and offer no Allow….
+  await page.getByRole("button", { name: "New workspace", exact: true }).click()
+  const launcher = page.getByRole("dialog", { name: "New isolated agent" })
+  await expect(launcher).toBeVisible()
+  await expect(launcher.getByRole("button", { name: /^Claude Code/ })).toContainText("Off in Vector Local")
+  const external = launcher.locator('[data-component="local-off"][data-source="external-agents"]')
+  await expect(external).toContainText("Off in Vector Local")
+  await expect(external.getByRole("button", { name: "Allow…" })).toHaveCount(0)
+  await external.getByRole("button", { name: "Why" }).click()
+  await expect(external).toContainText("Vector does not start them while Vector Local is on.")
+  await expect(launcher).not.toContainText("Needs setup on this computer")
+  await page.screenshot({ path: test.info().outputPath("10-external-agents-off.png"), animations: "disabled" })
+  await page.keyboard.press("Escape")
+
+  await page.getByRole("button", { name: "Settings", exact: true }).click()
+  const settings = page.locator(".settings-v2-workspace")
+  await settings.getByRole("tab", { name: "Providers & keys", exact: true }).click()
+  const cloud = settings.locator('[data-component="local-off"][data-source="cloud-inference"]')
+  await expect(cloud).toContainText("Off in Vector Local")
+  await expect(cloud).toContainText("Cloud AI services")
+  await expect(settings.locator('[data-component="local-off"][data-source="chatgpt-signin"]')).toContainText(
+    "ChatGPT sign-in",
+  )
+
+  await settings.getByRole("tab", { name: "Updates & about", exact: true }).click()
+  await expect(settings.locator('[data-component="local-off"][data-source="updates"]')).toContainText("Asks first")
+  const notes = settings.locator('[data-component="local-off"][data-source="release-notes"]')
+  await expect(notes).toContainText("Off in Vector Local")
+  await expect(notes.getByRole("button", { name: "Allow…" })).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("11-updates-off.png"), animations: "disabled" })
 })

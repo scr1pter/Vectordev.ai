@@ -20,13 +20,16 @@ import {
   SUBTITLE,
   WEB_ACCESS,
   checksFor,
+  enginePlace,
   modelFacts,
   refusal,
+  roleLocked,
   rolesPatch,
   serverLabels,
   suggestRoles,
   type Role,
 } from "./local-model"
+import { webChoices, webNoteLocked } from "@/components/settings-v2/local-model"
 import { useLocalStatus, type LocalStatusReader } from "./use-local"
 import "./local.css"
 
@@ -71,6 +74,13 @@ export function DialogLocalSetup(props: { reader?: LocalStatusReader; onDone?: (
     recommendation: undefined as LocalRecommendation | undefined,
   })
   const say = (error: string, notice = "") => setState({ error, notice })
+  // A role whose config key a company lock keeps (`locked_keys`) stays as the company set it: never pre-filled or saved.
+  const roleKept = (role: Role) => {
+    const policy = status()?.policy
+    return policy ? roleLocked(role, policy) : false
+  }
+  const unlocked = (roles: Partial<Record<Role, string>>): Partial<Record<Role, string>> =>
+    Object.fromEntries(ROLES.filter((role) => !roleKept(role.id)).map((role) => [role.id, roles[role.id]]))
 
   const find = async () => {
     const current = client()
@@ -132,7 +142,7 @@ export function DialogLocalSetup(props: { reader?: LocalStatusReader; onDone?: (
     const usable = added.every((item) => item.server.class === "this-computer")
       ? state.recommendation?.hardware.usable
       : undefined
-    const roles = suggestRoles(added, usable)
+    const roles = unlocked(suggestRoles(added, usable))
     setState({ added, roles, checks: checksFor(roles), web: status()?.policy.web ?? "ask" })
     setStep(1)
   }
@@ -164,26 +174,34 @@ export function DialogLocalSetup(props: { reader?: LocalStatusReader; onDone?: (
     const current = client()
     if (!current) return
     setState({ finishing: true, error: "", notice: "" })
-    const patch = rolesPatch(state.roles)
+    // Vector Local first, so a change the owner declines or the engine refuses leaves the roles as they were too.
+    const changed = enable ? await local.change(current, { enabled: true, web: state.web }) : undefined
+    if (changed?.type === "cancelled") {
+      setState("finishing", false)
+      return say("", "Nothing changed. Finish without turning it on to save the roles alone.")
+    }
+    if (changed?.type === "failed") {
+      setState("finishing", false)
+      return say(changed.message)
+    }
+    if (changed) reader.set(changed.status)
+    const patch = rolesPatch(unlocked(state.roles))
     if (Object.keys(patch).length > 0) {
       const saved = await current.global.config
         .update({ config: patch }, { throwOnError: false })
         .catch((cause: unknown) => ({ error: cause, data: undefined }))
       if (saved.error) {
         setState("finishing", false)
-        return say(`Vector could not save the roles: ${refusalText(saved.error)}`)
+        return say(
+          `${changed ? "Vector Local is on, but " : ""}Vector could not save the roles: ${refusalText(saved.error)}`,
+        )
       }
     }
-    if (!enable) {
-      setState("finishing", false)
+    setState("finishing", false)
+    if (!changed) {
       props.onDone?.()
       return dialog.close()
     }
-    const changed = await local.change(current, { enabled: true, web: state.web })
-    setState("finishing", false)
-    if (changed.type === "cancelled") return say("", "The roles are saved. Vector Local itself did not change.")
-    if (changed.type === "failed") return say(changed.message)
-    reader.set(changed.status)
     setState("done", changed.status)
     props.onDone?.(changed.status)
   }
@@ -196,6 +214,11 @@ export function DialogLocalSetup(props: { reader?: LocalStatusReader; onDone?: (
     ),
   )
   const locked = () => status()?.locked.includes("enabled") ?? false
+  // Web access as Settings offers it: under a company lock only what the lock leaves to the user, and only stricter.
+  const webOptions = () => {
+    const current = status()
+    return current ? webChoices(current) : WEB_ACCESS.map((option) => ({ ...option, disabled: false }))
+  }
   const next = () => setStep((value) => Math.min(value + 1, STEPS.length - 1))
   const back = () => setStep((value) => Math.max(value - 1, 0))
 
@@ -219,11 +242,11 @@ export function DialogLocalSetup(props: { reader?: LocalStatusReader; onDone?: (
             <Match when={step() === 0}>
               <section data-slot="local-step" aria-label="Find servers">
                 <p data-slot="local-muted">
-                  Vector asks this computer for Ollama, LM Studio, vLLM, llama.cpp and SGLang on their usual ports. It
-                  never scans your network: add a server elsewhere by its address.
+                  Vector asks {reader.remote() ?? "this computer"} for Ollama, LM Studio, vLLM, llama.cpp and SGLang on
+                  their usual ports. It never scans your network: add a server elsewhere by its address.
                 </p>
                 <Show when={state.finding}>
-                  <p data-slot="local-muted">Looking for model servers on this computer…</p>
+                  <p data-slot="local-muted">Looking for model servers {enginePlace(reader.remote())}…</p>
                 </Show>
                 <For each={state.found}>
                   {(server) => (
@@ -252,7 +275,7 @@ export function DialogLocalSetup(props: { reader?: LocalStatusReader; onDone?: (
                   )}
                 </For>
                 <Show when={!state.finding && state.found.length === 0}>
-                  <NoServer recommendation={state.recommendation} />
+                  <NoServer recommendation={state.recommendation} place={enginePlace(reader.remote())} />
                 </Show>
                 <div data-slot="local-inline">
                   <input
@@ -334,10 +357,14 @@ export function DialogLocalSetup(props: { reader?: LocalStatusReader; onDone?: (
                       <span>
                         {role.label}
                         <span data-slot="local-sub">{role.description}</span>
+                        <Show when={roleKept(role.id)}>
+                          <span data-slot="local-sub">{LOCKED}</span>
+                        </Show>
                       </span>
                       <select
                         aria-label={role.label}
                         value={state.roles[role.id] ?? ""}
+                        disabled={roleKept(role.id)}
                         onChange={(event) => setRole(role.id, event.currentTarget.value)}
                       >
                         <option value="">Same as the session's model</option>
@@ -351,12 +378,12 @@ export function DialogLocalSetup(props: { reader?: LocalStatusReader; onDone?: (
             <Match when={step() === 3}>
               <section data-slot="local-step" aria-label="Check">
                 <p data-slot="local-muted">
-                  Check models sends each model two or three requests with its role's real tools. It runs only when you
-                  press it, and only against servers you host.
+                  Check models sends each model two or three requests for every role it fills, with that role's real
+                  tools. It runs only when you press it, and only against servers you host.
                 </p>
                 <For each={state.checks} fallback={<p data-slot="local-muted">No role has a model to check.</p>}>
                   {(item, index) => (
-                    <div data-slot="local-check-row" data-model={item.model}>
+                    <div data-slot="local-check-row" data-model={item.model} data-role={item.role}>
                       <span>
                         <strong>{item.model}</strong>
                         <span data-slot="local-sub">For {ROLES.find((role) => role.check === item.role)?.label}</span>
@@ -392,7 +419,7 @@ export function DialogLocalSetup(props: { reader?: LocalStatusReader; onDone?: (
             <Match when={step() === 4}>
               <section data-slot="local-step" aria-label="Web access">
                 <div role="radiogroup" aria-label="Web access" data-slot="local-radios">
-                  <For each={WEB_ACCESS}>
+                  <For each={webOptions()}>
                     {(option) => (
                       <label data-slot="local-option">
                         <input
@@ -400,6 +427,7 @@ export function DialogLocalSetup(props: { reader?: LocalStatusReader; onDone?: (
                           name="local-web"
                           value={option.id}
                           checked={state.web === option.id}
+                          disabled={option.disabled}
                           onChange={() => setState("web", option.id)}
                         />
                         <span>
@@ -409,6 +437,9 @@ export function DialogLocalSetup(props: { reader?: LocalStatusReader; onDone?: (
                     )}
                   </For>
                 </div>
+                <Show when={status() && webNoteLocked(status()!)}>
+                  {(note) => <p data-slot="local-muted">{note()}</p>}
+                </Show>
               </section>
             </Match>
             <Match when={step() === 5}>
@@ -479,10 +510,10 @@ export function DialogLocalSetup(props: { reader?: LocalStatusReader; onDone?: (
   )
 }
 
-function NoServer(props: { recommendation?: LocalRecommendation }) {
+function NoServer(props: { recommendation?: LocalRecommendation; place: string }) {
   return (
     <div data-slot="local-group" data-component="local-no-server">
-      <p>No model server answered on this computer.</p>
+      <p>No model server answered {props.place}.</p>
       <Show when={props.recommendation}>
         {(recommendation) => {
           const agent = () => recommendation().roles.agent

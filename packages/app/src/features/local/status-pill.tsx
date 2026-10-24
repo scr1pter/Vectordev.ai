@@ -37,13 +37,13 @@ export function LocalStatusPill(props: {
       announced.set(key, Date.now())
       showToast({
         ...blockedNotice(event.properties, props.reader.status()?.sources),
-        actions: [{ label: "What Vector sent", onClick: () => show("log") }],
+        actions: [{ label: "What Vector sent", onClick: () => void show("log") }],
       })
     })
     onCleanup(stop)
   })
   const [open, setOpen] = createSignal(false)
-  const show = (view: "log" | "covers" | "settings") => {
+  const show = async (view: "log" | "covers" | "settings") => {
     setOpen(false)
     const status = props.reader.status()
     const client = props.reader.client()
@@ -58,9 +58,8 @@ export function LocalStatusPill(props: {
         />
       ))
     if (view === "covers") return void dialog.show(() => <DialogLocalCovers reader={props.reader} />)
-    void import("@/components/settings-v2/dialog-settings-v2").then((module) => {
-      dialog.show(() => <module.DialogSettings section="local" />)
-    })
+    const { DialogSettings } = await import("@/components/settings-v2/dialog-settings-v2")
+    void dialog.show(() => <DialogSettings section="local" />)
   }
   return (
     <Show when={props.reader.status()?.policy.enabled ? props.reader.status() : undefined}>
@@ -94,7 +93,7 @@ export function LocalStatusPill(props: {
           </MenuV2.Trigger>
           <MenuV2.Portal>
             <MenuV2.Content>
-              <EgressPopover reader={props.reader} sessionID={props.sessionID} onOpen={show} />
+              <EgressPopover reader={props.reader} sessionID={props.sessionID} onOpen={(view) => void show(view)} />
             </MenuV2.Content>
           </MenuV2.Portal>
         </MenuV2>

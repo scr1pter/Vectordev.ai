@@ -22,6 +22,7 @@ import { LocalRecommend } from "@vectordevai/core/local-mode/recommend"
 type Policy = LocalStatus["policy"]
 type Web = Policy["web"]
 type Unavailable = NonNullable<ProviderListResponse["unavailable"]>[number]
+type Hosted = NonNullable<ProviderListResponse["hosted"]>[number]
 
 export const NAME = "Vector Local"
 export const SUBTITLE = "Run Vector's AI features on model servers you or your company host."
@@ -31,7 +32,7 @@ export const LOCKED = "Set by your company. Ask your administrator to change it.
 export const LOOSENING = "This change would loosen Vector Local. Apply it?"
 export const AGENT =
   "An agent or Vector's own terminal started this Vector, so nothing here can loosen Vector Local. Change it yourself in a terminal, or with /local in the terminal UI."
-export const GUEST = "Vector Local and its network log are visible to the owner of this computer."
+export const GUEST = "Vector Local and its network log are visible to the owner of this Vector."
 export const LOG_TITLE = "What Vector sent"
 export const COVERS_TITLE = "What Vector Local covers"
 export const NOT_ENCRYPTED = "Not encrypted: prompts to this server travel in plain text on your network."
@@ -132,8 +133,14 @@ const NAMES: Record<string, string> = {
   "agent-programs": "Programs the agent runs",
 }
 
-// Sources the app hides while Vector Local is on in this release, rather than offering to allow them.
-const HIDDEN = new Set(["help-assistant", "external-agents"])
+// Sources Vector Local keeps off in this release without offering Allow…, each with why in its own words. External
+// agents are programs that make their own connections, which no allow entry could cover, so Vector does not start them.
+const KEPT_OFF: Record<string, string> = {
+  "external-agents":
+    "Claude Code, Codex and Cursor make their own connections, usually to their makers' cloud models, and Vector Local does not see them. Vector does not start them while Vector Local is on.",
+  "help-assistant":
+    "The help assistant sends your question to vectordev.ai, so it is off while Vector Local is on. The Vector docs answer most questions without it.",
+}
 // What Vector Local restricts; `allowed` follows Web access or the list, and `not-covered` is said plainly instead.
 const RESTRICTED = new Set<LocalSource["local"]>(["blocked", "ask-once", "allow-with-reason", "not-allowable"])
 // Downloads the engine makes itself, which POST /local/grant answers once.
@@ -166,6 +173,14 @@ export function pillTitle(policy: Policy) {
     ...(policy.lock ? [LOCKED] : []),
     "Open it to see what this session sent.",
   ].join(" ")
+}
+
+/**
+ * Where Find servers looks and what the hardware summary describes: the computer Vector's engine runs on, named when it
+ * is not this one ("on build-box").
+ */
+export function enginePlace(remote?: string) {
+  return remote ? `on ${remote}` : "on this computer"
 }
 
 /** host:port of an origin, or the text itself when it is not a URL. */
@@ -257,7 +272,7 @@ export function blockedNotice(
   }
 }
 
-export type OffState = "allowed" | "asks" | "hidden" | "never" | "off"
+export type OffState = "allowed" | "asks" | "never" | "off"
 
 export type OffItem = {
   readonly source: LocalSource
@@ -293,8 +308,7 @@ export function notCovered(status: LocalStatus) {
 
 function offState(source: LocalSource, allowed: boolean): OffState {
   if (allowed) return "allowed"
-  if (HIDDEN.has(source.id)) return "hidden"
-  if (source.local === "not-allowable") return "never"
+  if (source.id in KEPT_OFF || source.local === "not-allowable") return "never"
   if (source.local === "ask-once") return "asks"
   return "off"
 }
@@ -302,13 +316,14 @@ function offState(source: LocalSource, allowed: boolean): OffState {
 export const OFF_STATE: Record<OffState, string> = {
   allowed: "Allowed",
   asks: "Asks first",
-  hidden: "Hidden in Vector Local",
   never: "Off in Vector Local",
   off: "Off in Vector Local",
 }
 
 /** The "Why" of an Off in Vector Local label. */
 export function offWhy(source: LocalSource) {
+  const kept = KEPT_OFF[source.id]
+  if (kept) return kept
   const name = sourceName(source.id)
   const where = source.hosts.length
     ? list(source.hosts.slice(0, 3), source.hosts.length - 3)
@@ -316,14 +331,13 @@ export function offWhy(source: LocalSource) {
   const sends = `${name} sends ${lowerFirst(source.sends)} to ${where}.`
   if (source.local === "ask-once") return `${sends} Vector Local asks before each one.`
   const blocked = `${sends} Vector Local blocks it because it is outside the servers you listed.`
-  if (HIDDEN.has(source.id)) return `${blocked} It is hidden while Vector Local is on.`
   if (source.local === "not-allowable") return `${blocked} It cannot be allowed while Vector Local is on.`
   return blocked
 }
 
 /** Whether the user may allow a source under Vector Local: Allow… is offered only for these. */
 export function allowable(source: LocalSource) {
-  if (HIDDEN.has(source.id) || source.purpose === "unknown") return false
+  if (source.id in KEPT_OFF || source.purpose === "unknown") return false
   return source.local === "blocked" || source.local === "allow-with-reason" || source.local === "ask-once"
 }
 
@@ -401,11 +415,41 @@ export function identityChanged(server: string, identity: readonly string[]) {
   return `${server} now answers as a different server. Check it before sending prompts.${what.length ? ` Changed: ${list(what)}.` : ""}`
 }
 
-/** Whether the selected model runs on a server someone hosts: this computer, the user's network, or on the list. */
-export function onHostedServer(url: string | undefined, policy?: Policy) {
-  if (!url || !URL.canParse(url)) return false
-  if (LocalPolicy.hostClass(new URL(url).hostname) !== "internet") return true
-  return policy ? LocalPolicy.listed(policy, url) : false
+/**
+ * The model server the engine says a model's requests go to, when someone hosts it: this computer, the user's network or
+ * the model server list. The engine reads where it sends them; a server added in Vector sets the provider's base URL
+ * and leaves the model's own address empty, so the app does not work it out again. Undefined for a cloud API, or from
+ * an engine that does not say.
+ */
+export function hostedServer(
+  hosted: readonly Hosted[] | undefined,
+  model: { readonly providerID: string; readonly modelID: string },
+) {
+  return hosted?.find((item) => item.providerID === model.providerID && item.modelID === model.modelID)
+}
+
+/** The models a role may use under Vector Local: each connected model the engine says runs on a server someone hosts. */
+export function roleModels(input: {
+  readonly providers: Iterable<{
+    readonly id: string
+    readonly name: string
+    readonly models: Readonly<Record<string, { readonly id: string; readonly name: string }>>
+  }>
+  readonly connected: readonly string[]
+  readonly hosted?: readonly Hosted[]
+}) {
+  const connected = new Set(input.connected)
+  return [...input.providers]
+    .filter((provider) => connected.has(provider.id))
+    .flatMap((provider) =>
+      Object.values(provider.models)
+        .filter((model) => hostedServer(input.hosted, { providerID: provider.id, modelID: model.id }))
+        .map((model) => ({
+          key: `${provider.id}/${model.id}`,
+          label: `${model.name || model.id} (${provider.name || provider.id})`,
+        })),
+    )
+    .toSorted((a, b) => a.label.localeCompare(b.label))
 }
 
 /** The composer's refusal when an image is attached and no model on the list reads images. */
@@ -463,6 +507,8 @@ export type LogRow = {
   readonly rule: string
   readonly reason: string
   readonly carried?: string
+  /** For a blocked request no part of Vector labelled: the code that made it, as the backstop saw it. */
+  readonly code?: string
 }
 
 /** The network log's rows, newest first, as the table shows them. */
@@ -497,6 +543,7 @@ export function logRows(
         rule: event.rule,
         reason: event.reason,
         ...carriedText(event.carried),
+        ...(event.frame ? { code: `Made by ${event.frame}` } : {}),
       }),
     )
 }
@@ -521,6 +568,15 @@ export function bytes(value: number | undefined) {
   if (value < 1024) return `${value} B`
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
   return `${(value / 1024 / 1024).toFixed(1)} MB`
+}
+
+// How many requests GET /local/egress answers with: the engine's in-memory ring (EgressLogStore.RING_SIZE, which reads
+// files, so the app does not import it). Older requests are only in the files on disk and in an export.
+export const LOG_HELD = 2_000
+
+/** What the network log view shows: the requests the engine holds in memory, which Export goes beyond. */
+export function logDescription(days: number) {
+  return `The latest ${LOG_HELD.toLocaleString("en-US")} requests Vector decided while Vector Local was on: where each went, never what it said. Export includes every request kept on this computer. ${retention(days)}`
 }
 
 /** The file an export of the network log is saved as. */
@@ -573,6 +629,21 @@ const ROLE_AGENTS: Partial<Record<Role, string>> = {
   judge: "judge",
   review: "review",
   research: "research",
+}
+
+// The config key that sets each role's model, as a company's `locked_keys` names it.
+const ROLE_KEYS: Record<Role, string> = {
+  agent: "model",
+  small: "small_model",
+  subagent: "agent",
+  judge: "agent",
+  review: "agent",
+  research: "agent",
+}
+
+/** Whether a company lock keeps a role's model from the user: its config key is in the lock's `locked_keys`. */
+export function roleLocked(role: Role, policy: Pick<Policy, "lock" | "locked_keys">) {
+  return policy.lock && policy.locked_keys.includes(ROLE_KEYS[role])
 }
 
 /** Each role's model in a config, as provider/model, or undefined when the config leaves it to the session's model. */
@@ -674,21 +745,15 @@ export function suggestRoles(added: readonly LocalAddedServer[], usable?: number
   return LocalRecommend.assign({ candidates, usable })
 }
 
-/** The models a role list names, each with the most demanding role it fills, for Check models. */
+/**
+ * Each model a role list names, once for every role it fills, for Check models: the engine measures each role's needs
+ * on its own (its agent's prompt and tools), so a model that works as the agent may still be too small for another.
+ */
 export function checksFor(roles: Partial<Record<Role, string>>) {
-  const order: readonly NonNullable<(typeof ROLES)[number]["check"]>[] = [
-    "agent",
-    "research",
-    "review",
-    "subagent",
-    "judge",
-  ]
-  const picked = new Map<string, (typeof order)[number]>()
-  for (const role of order) {
-    const model = roles[role]
-    if (model && !picked.has(model)) picked.set(model, role)
-  }
-  return [...picked].map(([model, role]) => ({ model, role }))
+  return ROLES.flatMap((role) => {
+    const model = roles[role.id]
+    return model && role.check ? [{ model, role: role.check }] : []
+  })
 }
 
 export const CHECK_RESULT: Record<LocalModelCheck["result"], string> = {

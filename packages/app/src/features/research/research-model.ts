@@ -29,6 +29,43 @@ export const AGENT = "research"
 
 export type Mode = "normal" | "quick" | "fast" | "research"
 
+// The Mode menu: Normal, Quick, Fast, then Deep research directly under Fast (owner, 22 Oct).
+export const MODES: readonly {
+  readonly id: Mode
+  readonly label: string
+  readonly description: string
+  readonly dot: string
+  readonly preview?: boolean
+}[] = [
+  { id: "normal", label: "Normal", description: "Standard execution speed and token use.", dot: "#8a8595" },
+  {
+    id: "quick",
+    label: "Quick",
+    description: "Answers simple questions quickly with minimal context and fewer tokens.",
+    dot: "#70c7b1",
+  },
+  {
+    id: "fast",
+    label: "Fast",
+    description: "Targets 1.5x speed with priority capacity and wider parallel execution. Uses more tokens.",
+    dot: "#9b6cff",
+  },
+  { id: "research", label: LABEL, description: DESCRIPTION, dot: "#6ea8fe", preview: true },
+]
+
+/**
+ * The Mode menu for the selected model. Fast promises priority capacity that a model server someone hosts cannot give,
+ * so a model on one is offered no Fast.
+ */
+export function modesFor(hosted: boolean) {
+  return hosted ? MODES.filter((mode) => mode.id !== "fast") : MODES
+}
+
+/** The mode a request goes in: Fast picked for another model goes as Normal on a server someone hosts. */
+export function sendMode(chosen: Mode, hosted: boolean): Mode {
+  return chosen === "fast" && hosted ? "normal" : chosen
+}
+
 export type Depth = "auto" | "focused" | "deep"
 
 export const DEPTHS: readonly { readonly value: Depth; readonly label: string; readonly description: string }[] = [
@@ -81,8 +118,9 @@ export const LIMITS: Readonly<Record<Research.Depth, { readonly usd: number; rea
 }
 
 /**
- * The Cap chip: the user's own run cap when they set one, else research's default for the depth. A model on a server
- * the user hosts has no per-token price, so its cap is a step count.
+ * The Cap chip: the user's own run cap when they set one, else research's default for the depth. `local` is the
+ * engine's word that the model's steps have no per-token price (a server on this computer or a private one on the list,
+ * with no price set), so its cap is a step count; any other model, hosted or not, keeps its dollar cap.
  */
 export function capLabel(input: {
   readonly depth: Depth

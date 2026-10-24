@@ -1,5 +1,5 @@
 import type { LocalStatus, VectorClient } from "@vectordevai/sdk/v2/client"
-import { Show, createMemo, createSignal } from "solid-js"
+import { For, Show, createMemo, createSignal } from "solid-js"
 import { useDialog } from "@vectordevai/ui/context/dialog"
 import { DialogAllowSource } from "./allow-dialog"
 import { OFF_STATE, offInLocal, type OffItem } from "./local-model"
@@ -7,32 +7,33 @@ import { useLocalStatus } from "./use-local"
 import "./local.css"
 
 // The "Off in Vector Local" label (section 4.11): where Vector Local keeps a feature off, the place says so, with Why
-// and, where it may be allowed, Allow…. Nothing is hidden without a word: a source the app hides in this release says
-// that too. With Vector Local off, or for a source it does not restrict, the label renders nothing.
+// and, where it may be allowed, Allow…. Nothing is hidden without a word. With Vector Local off, or for a source it
+// does not restrict, the label renders nothing.
 
 export function OffInLocal(props: {
-  /** The registry source, such as "github" or "share". */
-  source: string
+  /** The registry source, such as "github" or "share", or several for a place that uses more than one. */
+  source: string | readonly string[]
   /** The status the caller already reads; without it the label reads Vector Local itself. */
   status?: LocalStatus
   client?: VectorClient
-  /** Shows the source's name, for a label that does not sit beside the feature it names. */
+  /** Shows each source's name, for a label that does not sit beside the feature it names. */
   named?: boolean
   onChanged?: (status?: LocalStatus) => void
 }) {
   const reader = props.status ? undefined : useLocalStatus()
   const status = () => props.status ?? reader?.status()
   const client = () => props.client ?? reader?.client()
-  const item = createMemo(() => {
+  const items = createMemo(() => {
     const current = status()
-    if (!current?.policy.enabled) return undefined
-    return offInLocal(current).find((entry) => entry.source.id === props.source)
+    if (!current?.policy.enabled) return []
+    const sources = typeof props.source === "string" ? [props.source] : props.source
+    return offInLocal(current).filter((entry) => sources.includes(entry.source.id))
   })
   return (
-    <Show when={item()}>
+    <For each={items()}>
       {(entry) => (
         <OffInLocalRow
-          item={entry()}
+          item={entry}
           status={status()!}
           client={client()}
           named={props.named}
@@ -42,7 +43,7 @@ export function OffInLocal(props: {
           }}
         />
       )}
-    </Show>
+    </For>
   )
 }
 

@@ -3,6 +3,7 @@ import { TextField } from "@vectordevai/ui/text-field"
 import { createEffect, createResource, createSignal, For, Show } from "solid-js"
 import { useServerSDK } from "@/context/server-sdk"
 import { showToast } from "@/utils/toast"
+import { OffInLocal } from "@/features/local/off-in-local"
 
 export function SettingsSearch() {
   return (
@@ -16,6 +17,7 @@ export function SettingsSearch() {
           selected server. EXA_API_KEY and PARALLEL_API_KEY environment variables take precedence.
         </p>
       </div>
+      <OffInLocal source={["websearch-exa", "websearch-parallel"]} named />
       <For each={["exa", "parallel"] as const}>{(provider) => <SearchKey provider={provider} />}</For>
     </section>
   )

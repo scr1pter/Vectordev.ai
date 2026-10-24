@@ -65,6 +65,8 @@ export function useProviders(directory?: Accessor<string | undefined>) {
   return {
     all: () => new Map([...providers().all].filter(([id, provider]) => !isHiddenProvider(id, provider))),
     default: () => providers().default,
+    /** The connected models the engine says run on a model server someone hosts. */
+    hosted: () => providers().hosted ?? [],
     popular: () =>
       pipe(
         providers().all,

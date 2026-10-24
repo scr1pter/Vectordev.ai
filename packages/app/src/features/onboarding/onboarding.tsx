@@ -247,11 +247,10 @@ export function OnboardingProgress(props: {
   const dialog = useDialog()
   // The third way to connect a model, beside free models and an API key: model servers the person or their company
   // hosts, set up with the Vector Local wizard. The wizard loads only when it is opened.
-  const hostModels = () => {
+  const hostModels = async () => {
     props.onClose()
-    void import("@/features/local/setup-wizard").then((module) => {
-      void dialog.show(() => <module.DialogLocalSetup />)
-    })
+    const { DialogLocalSetup } = await import("@/features/local/setup-wizard")
+    void dialog.show(() => <DialogLocalSetup />)
   }
   const doneCount = createMemo(() => props.steps.filter((step) => step.done).length)
   const allDone = createMemo(() => doneCount() === props.steps.length)
@@ -362,7 +361,7 @@ export function OnboardingProgress(props: {
                           type="button"
                           class="vprogress-alt"
                           data-action="onboarding-models-you-host"
-                          onClick={hostModels}
+                          onClick={() => void hostModels()}
                         >
                           Set up
                         </button>

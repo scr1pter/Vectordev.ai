@@ -20,11 +20,13 @@ import {
   ROLES,
   SUBTITLE,
   configRoles,
-  onHostedServer,
+  enginePlace,
   offInLocal,
   popoverLines,
   refusal,
   retention,
+  roleLocked,
+  roleModels,
   rolesPatch,
   serverLabels,
   type Role,
@@ -313,7 +315,9 @@ function ServersCard(props: {
     if (!result.data) return props.onError(refusalMessage(result.error))
     setFound(result.data)
     if (result.data.length === 0)
-      props.onNotice("No model server answered on this computer. Start one, or add it by its address.")
+      props.onNotice(
+        `No model server answered ${enginePlace(props.reader.remote())}. Start one, or add it by its address.`,
+      )
   }
 
   const add = async (url: string) => {
@@ -352,8 +356,9 @@ function ServersCard(props: {
         <div class="settings-v2-card-copy">
           <h3 class="settings-v2-card-title">{title("servers")}</h3>
           <p class="settings-v2-card-description">
-            With Vector Local on, model calls go only to these servers. Find servers asks this computer only; add a
-            server elsewhere by its address. Each server's identity is pinned when it is added.
+            With Vector Local on, model calls go only to these servers. Find servers asks{" "}
+            {props.reader.remote() ?? "this computer"} only; add a server elsewhere by its address. Each server's
+            identity is pinned when it is added.
           </p>
         </div>
       </div>
@@ -398,7 +403,8 @@ function ServersCard(props: {
                       {server.version ? ` ${server.version}` : ""} at {server.origin}
                     </strong>
                     <span data-slot="local-sub">
-                      Found on this computer · {server.models.length} {server.models.length === 1 ? "model" : "models"}
+                      Found {enginePlace(props.reader.remote())} · {server.models.length}{" "}
+                      {server.models.length === 1 ? "model" : "models"}
                     </span>
                     <div data-slot="local-labels">
                       <For each={serverLabels(server)}>{(label) => <span data-slot="local-tag">{label}</span>}</For>
@@ -486,18 +492,7 @@ function RolesCard(props: { status: LocalStatus; reader: ReturnType<typeof useLo
   // The models on servers someone hosts, which a role may use under Vector Local.
   const models = createMemo(() => {
     const catalog = serverSync().data.provider
-    const connected = new Set(catalog.connected)
-    return [...catalog.all.values()]
-      .filter((provider) => connected.has(provider.id))
-      .flatMap((provider) =>
-        Object.values(provider.models)
-          .filter((model) => onHostedServer(model.api?.url, props.status.policy))
-          .map((model) => ({
-            key: `${provider.id}/${model.id}`,
-            label: `${model.name || model.id} (${provider.name || provider.id})`,
-          })),
-      )
-      .toSorted((a, b) => a.label.localeCompare(b.label))
+    return roleModels({ providers: catalog.all.values(), connected: catalog.connected, hosted: catalog.hosted })
   })
   const [dictation, { refetch: recheckDictation }] = createResource(() =>
     localTranscriptionInstalled().catch(() => false),
@@ -517,13 +512,14 @@ function RolesCard(props: { status: LocalStatus; reader: ReturnType<typeof useLo
     setVersion((value) => value + 1)
   }
 
-  const check = async (role: (typeof ROLES)[number]) => {
+  // `confirmed` answers the engine's question when the model may not fit in free memory, as the wizard's Load it anyway.
+  const check = async (role: (typeof ROLES)[number], confirmed = false) => {
     const client = props.reader.client()
     const model = roles()[role.id]
     if (!client || !model || !role.check) return
     setChecks((current) => ({ ...current, [role.id]: { running: true } }))
     const result = await client.local
-      .check({ model, role: role.check }, { throwOnError: false })
+      .check({ model, role: role.check, ...(confirmed ? { confirmed: true } : {}) }, { throwOnError: false })
       .catch((cause: unknown) => ({ error: cause, data: undefined }))
     setChecks((current) => ({
       ...current,
@@ -578,6 +574,9 @@ function RolesCard(props: { status: LocalStatus; reader: ReturnType<typeof useLo
                 <div data-slot="local-row-copy">
                   <strong>{role.label}</strong>
                   <span data-slot="local-sub">{role.description}</span>
+                  <Show when={roleLocked(role.id, props.status.policy)}>
+                    <span data-slot="local-sub">{LOCKED}</span>
+                  </Show>
                   <Show when={state()}>
                     {(current) => (
                       <span data-slot="local-sub" data-result={current().result?.result}>
@@ -595,6 +594,7 @@ function RolesCard(props: { status: LocalStatus; reader: ReturnType<typeof useLo
                     data-slot="local-input"
                     aria-label={role.label}
                     value={roles()[role.id] ?? ""}
+                    disabled={roleLocked(role.id, props.status.policy)}
                     onChange={(event) => void save(role.id, event.currentTarget.value)}
                   >
                     <option value="" disabled={roles()[role.id] !== undefined}>
@@ -608,6 +608,16 @@ function RolesCard(props: { status: LocalStatus; reader: ReturnType<typeof useLo
                   <Show when={role.check && roles()[role.id]}>
                     <ButtonV2 size="small" variant="ghost" disabled={state()?.running} onClick={() => void check(role)}>
                       Check
+                    </ButtonV2>
+                  </Show>
+                  <Show when={state()?.result?.result === "ask"}>
+                    <ButtonV2
+                      size="small"
+                      variant="outline"
+                      data-action="settings-local-check-anyway"
+                      onClick={() => void check(role, true)}
+                    >
+                      Load it anyway
                     </ButtonV2>
                   </Show>
                 </div>

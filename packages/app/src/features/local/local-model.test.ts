@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import type { EgressEvent, EgressSummary, LocalAddedServer, LocalStatus } from "@vectordevai/sdk/v2/client"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import { LocalSources } from "@vectordevai/core/local-mode/sources"
+import { EgressLogStore } from "@vectordevai/core/local-mode/log-store"
 import { providerUnavailable } from "@vectordevai/schema/provider-unavailable"
 import {
   ADMIN,
@@ -13,6 +14,7 @@ import {
   FORWARDING,
   GUEST,
   LOCKED,
+  LOG_HELD,
   LOG_TITLE,
   LOOSENING,
   NOT_COVERED,
@@ -34,16 +36,19 @@ import {
   configRoles,
   exportName,
   identityChanged,
+  logDescription,
   logRows,
   modelFacts,
   notCovered,
   offInLocal,
   offInLocalProviders,
-  onHostedServer,
+  hostedServer,
   pillText,
   pillTitle,
   popoverLines,
   refusal,
+  roleLocked,
+  roleModels,
   rolesPatch,
   serverLabels,
   sourceName,
@@ -270,9 +275,20 @@ describe("Off in Vector Local", () => {
     expect(lsp.state).toBe("asks")
     expect(lsp.why).toContain("registry.npmjs.org, proxy.golang.org, rubygems.org and 1 more")
     expect(lsp.why.endsWith("Vector Local asks before each one.")).toBe(true)
+    // The help assistant answers that it is off, and external agents are not started: neither is hidden, and neither
+    // offers Allow… in this release.
     const help = offInLocal(status()).find((item) => item.source.id === "help-assistant")!
-    expect(help.state).toBe("hidden")
-    expect(help.why).toContain("It is hidden while Vector Local is on.")
+    expect(help.state).toBe("never")
+    expect(OFF_STATE[help.state]).toBe("Off in Vector Local")
+    expect(help.allowable).toBe(false)
+    expect(help.why).toBe(
+      "The help assistant sends your question to vectordev.ai, so it is off while Vector Local is on. The Vector docs answer most questions without it.",
+    )
+    const external = offInLocal(status()).find((item) => item.source.id === "external-agents")!
+    expect(external.state).toBe("never")
+    expect(external.allowable).toBe(false)
+    expect(external.why).toContain("Vector does not start them while Vector Local is on.")
+    expect(Object.values(OFF_STATE).some((label) => label.includes("Hidden"))).toBe(false)
   })
 
   test("a source the user allowed shows as allowed, with their reason", () => {
@@ -312,14 +328,39 @@ describe("the model picker's Off in Vector Local group", () => {
 })
 
 describe("servers someone hosts", () => {
-  test("this computer, the user's network and a server on the list count; a cloud address does not", () => {
-    const policy = status({ policy: { endpoints: [{ origin: "https://llm.example.com", from: "managed" }] } }).policy
-    expect(onHostedServer("http://127.0.0.1:11434/v1", policy)).toBe(true)
-    expect(onHostedServer("http://192.168.1.20:8000/v1", policy)).toBe(true)
-    expect(onHostedServer("https://llm.example.com/v1", policy)).toBe(true)
-    expect(onHostedServer("https://api.openai.com/v1", policy)).toBe(false)
-    expect(onHostedServer(undefined, policy)).toBe(false)
-    expect(onHostedServer("not a url")).toBe(false)
+  // A server added in Vector, as GET /provider sends it: Add server and the setup wizard write the provider's base URL
+  // and no model address, so the model's own api.url is empty, and the engine says where its requests go in `hosted`.
+  // engine/test/server/local-app-models.test.ts reads this shape from the engine itself.
+  const added = {
+    id: "ollama",
+    name: "Ollama (127.0.0.1:11434)",
+    options: { baseURL: "http://127.0.0.1:11434/v1" },
+    models: {
+      "qwen3:30b": { id: "qwen3:30b", name: "qwen3:30b", api: { id: "qwen3:30b", url: "" } },
+      "qwen3:8b": { id: "qwen3:8b", name: "qwen3:8b", api: { id: "qwen3:8b", url: "" } },
+    },
+  }
+  const cloud = { id: "openai", name: "OpenAI", options: {}, models: { "gpt-5": { id: "gpt-5", name: "GPT-5" } } }
+  const hosted = [
+    { providerID: "ollama", modelID: "qwen3:30b", origin: "http://127.0.0.1:11434", local: true },
+    { providerID: "ollama", modelID: "qwen3:8b", origin: "http://127.0.0.1:11434", local: true },
+  ]
+
+  test("a model counts as on a server someone hosts only where the engine says its requests go there", () => {
+    expect(hostedServer(hosted, { providerID: "ollama", modelID: "qwen3:30b" })).toEqual(hosted[0])
+    expect(hostedServer(hosted, { providerID: "openai", modelID: "gpt-5" })).toBeUndefined()
+    // An engine that does not say leaves every model a cloud one, as before Vector Local.
+    expect(hostedServer(undefined, { providerID: "ollama", modelID: "qwen3:30b" })).toBeUndefined()
+  })
+
+  test("Roles offers the connected models on a server someone hosts, even with an empty model address", () => {
+    expect(roleModels({ providers: [added, cloud], connected: ["ollama", "openai"], hosted })).toEqual([
+      { key: "ollama/qwen3:30b", label: "qwen3:30b (Ollama (127.0.0.1:11434))" },
+      { key: "ollama/qwen3:8b", label: "qwen3:8b (Ollama (127.0.0.1:11434))" },
+    ])
+    // A provider that is not connected, or an engine that does not say, offers none.
+    expect(roleModels({ providers: [added], connected: [], hosted })).toEqual([])
+    expect(roleModels({ providers: [added], connected: ["ollama"] })).toEqual([])
   })
 
   test("labels where a server is, whether its prompts are encrypted and whether it forwards them", () => {
@@ -410,6 +451,32 @@ describe("the network log", () => {
       reason: "Web access is set to Ask; the usual approval still applies.",
     }),
   ]
+
+  test("names the code behind a blocked request no part of Vector labelled, as the toast says it does", () => {
+    const unlabelled = event({
+      id: "e4",
+      time: 4_000,
+      source: "unlabelled",
+      purpose: "unknown",
+      class: "internet",
+      origin: "https://198.51.100.7",
+      method: "GET",
+      decision: "block",
+      rule: "unlabelled",
+      reason: "No part of Vector labelled this request.",
+      frame: "packages/engine/src/plugin/example.ts:42:7",
+    })
+    const [row] = logRows([unlabelled], { filter: { result: "all", text: "" }, sources })
+    expect(row?.code).toBe("Made by packages/engine/src/plugin/example.ts:42:7")
+    expect(logRows(events, { filter: { result: "all", text: "" }, sources }).some((item) => item.code)).toBe(false)
+  })
+
+  test("says the view holds the engine's latest requests, and that Export has everything kept", () => {
+    expect(LOG_HELD).toBe(EgressLogStore.RING_SIZE)
+    expect(logDescription(30)).toBe(
+      "The latest 2,000 requests Vector decided while Vector Local was on: where each went, never what it said. Export includes every request kept on this computer. Kept for 30 days on this computer.",
+    )
+  })
 
   test("lists the newest first, with what, where, the sizes, the result and the rule's reason", () => {
     const rows = logRows(events, { filter: { result: "all", text: "" }, sources })
@@ -505,14 +572,32 @@ describe("roles and the setup wizard", () => {
     expect(configRoles(patch)).toEqual({ ...roles, subagent: undefined, judge: undefined })
   })
 
-  test("Check models checks each model once, for the most demanding role it fills", () => {
+  test("Check models checks each model for every role it fills, since the engine measures each role's needs", () => {
     expect(
       checksFor({ agent: "a/x", subagent: "a/x", judge: "a/y", review: "a/y", research: "a/z", small: "a/w" }),
     ).toEqual([
       { model: "a/x", role: "agent" },
-      { model: "a/z", role: "research" },
+      { model: "a/x", role: "subagent" },
+      { model: "a/y", role: "judge" },
       { model: "a/y", role: "review" },
+      { model: "a/z", role: "research" },
     ])
+    // Titles and summaries send no tools, so there is nothing to check for them.
+    expect(checksFor({ small: "a/w" })).toEqual([])
+  })
+
+  test("a company lock that keeps model or small_model, or agent, keeps the roles they set", () => {
+    const lock = { lock: true, locked_keys: ["model", "agent"] }
+    expect(ROLES.filter((role) => roleLocked(role.id, lock)).map((role) => role.id)).toEqual([
+      "agent",
+      "subagent",
+      "judge",
+      "review",
+      "research",
+    ])
+    expect(roleLocked("small", { lock: true, locked_keys: ["small_model"] })).toBe(true)
+    // Without a lock, locked_keys means nothing.
+    expect(roleLocked("agent", { lock: false, locked_keys: ["model"] })).toBe(false)
   })
 
   test("says each model's context, tools and images, and marks Ollama's cloud models", () => {

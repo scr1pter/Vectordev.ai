@@ -12,6 +12,7 @@ import { type Accessor, batch, createMemo, For, Show } from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { Link } from "@/components/link"
 import { useServerSDK } from "@/context/server-sdk"
+import { useServer } from "@/context/server"
 import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
 import {
@@ -31,7 +32,7 @@ import {
 import { saveCustomProvider } from "./dialog-custom-provider-save"
 import { DialogSelectProvider } from "./dialog-select-provider"
 import { useLocalChange } from "@/features/local/allow-dialog"
-import { listServer, probeServer } from "@/features/local/local-model"
+import { enginePlace, listServer, probeServer } from "@/features/local/local-model"
 
 type Props = {
   back?: "providers" | "close"
@@ -63,6 +64,9 @@ export function DialogCustomProvider(props: Props) {
   const serverSync = useServerSync()
   const serverSDK = useServerSDK()
   const language = useLanguage()
+  const server = useServer()
+  // Find servers asks the engine's computer, which is another one when Vector is connected to a remote server.
+  const place = () => enginePlace(server.isLocal() ? undefined : server.name)
 
   const [form, setForm] = createStore<FormState>({
     providerID: "",
@@ -116,9 +120,7 @@ export function DialogCustomProvider(props: Props) {
     setSearch({
       status: "done",
       servers,
-      message: servers.length
-        ? undefined
-        : "No model server answered on this computer. Start one, or type its address.",
+      message: servers.length ? undefined : `No model server answered ${place()}. Start one, or type its address.`,
     })
     if (servers.length === 1) chooseServer(servers[0])
   }
@@ -318,7 +320,7 @@ export function DialogCustomProvider(props: Props) {
               disabled={search.status === "looking"}
               onClick={find}
             >
-              {search.status === "looking" ? "Looking on this computer…" : "Find servers on this computer"}
+              {search.status === "looking" ? `Looking ${place()}…` : `Find servers ${place()}`}
             </Button>
             <Show when={search.servers.length > 1}>
               <div class="flex flex-col gap-1">

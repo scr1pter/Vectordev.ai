@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, Show, Switch, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { githubApi, GithubDeviceSignIn } from "@/components/github-connect"
+import { OffInLocal } from "@/features/local/off-in-local"
 import {
   afterFixes,
   askAgentPrompt,
@@ -2162,6 +2163,10 @@ export function PullRequests(props: {
             <Icon name="close" />
           </button>
         </header>
+
+        <div class="shrink-0 px-5 empty:hidden" data-component="pull-requests-off-in-local">
+          <OffInLocal source="github" named />
+        </div>
 
         <Show when={error()}>
           <div

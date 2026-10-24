@@ -3,7 +3,7 @@ import { For, Show, createMemo, createResource, createSignal, onCleanup } from "
 import { useDialog } from "@vectordevai/ui/context/dialog"
 import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 import { DialogBody, DialogFooter, DialogHeader, DialogTitleGroup, DialogV2 } from "@vectordevai/ui/v2/dialog-v2"
-import { GUEST, LOG_TITLE, exportName, logRows, refusal, retention, type LogFilter } from "./local-model"
+import { GUEST, LOG_TITLE, exportName, logDescription, logRows, refusal, type LogFilter } from "./local-model"
 import { message } from "./allow-dialog"
 import "./local.css"
 
@@ -23,10 +23,7 @@ export function DialogEgressLog(props: {
   return (
     <DialogV2 size="x-large" class="vector-local-dialog vector-local-log-dialog">
       <DialogHeader>
-        <DialogTitleGroup
-          title={LOG_TITLE}
-          description={`Every request Vector decided while Vector Local was on: where it went, never what it said. ${retention(props.retainDays ?? 30)}`}
-        />
+        <DialogTitleGroup title={LOG_TITLE} description={logDescription(props.retainDays ?? 30)} />
       </DialogHeader>
       <DialogBody class="vector-local-log-dialog__body">
         <EgressLog {...props} />
@@ -215,6 +212,7 @@ export function EgressLog(props: {
                       <td>
                         {row.what}
                         <Show when={row.carried}>{(carried) => <span data-slot="local-sub">{carried()}</span>}</Show>
+                        <Show when={row.code}>{(code) => <code data-slot="local-sub">{code()}</code>}</Show>
                       </td>
                       <td>
                         {row.host}
