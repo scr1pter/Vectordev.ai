@@ -162,10 +162,20 @@ const list = (entries: unknown[]) => ({
   held: false,
 })
 
-async function setup(page: Page, input: { guest?: boolean; entries?: unknown[] } = {}) {
+type SentPrompt = { parts: { type: string; text?: string; metadata?: Record<string, unknown> }[] }
+
+async function setup(
+  page: Page,
+  input: {
+    guest?: boolean
+    entries?: unknown[]
+    /** The engine fails to list what Vector learned, or to change an entry, for another reason than a guest. */
+    failing?: "list" | "update"
+  } = {},
+) {
   const events: unknown[] = []
   const sent = {
-    prompts: [] as Record<string, any>[],
+    prompts: [] as SentPrompt[],
     updates: [] as { id: string; body: Record<string, unknown> }[],
     settings: [] as Record<string, unknown>[],
     imports: [] as string[],
@@ -189,9 +199,10 @@ async function setup(page: Page, input: { guest?: boolean; entries?: unknown[] }
       ? route.fulfill({ status: 403, json: { name: "Forbidden", data: { message: "The repository owner only" } } })
       : route.fulfill({ json: body() })
   // After the mock engine's routes, which answer everything else on its port; the last one registered wins.
-  await page.route(
-    /\/memory(?:\?|$)/,
-    owner(() => list([...entries.values()])),
+  await page.route(/\/memory(?:\?|$)/, (route) =>
+    input.failing === "list"
+      ? route.fulfill({ status: 500, json: { name: "UnknownError", data: { message: "The brain is busy" } } })
+      : owner(() => list([...entries.values()]))(route),
   )
   await page.route(/\/memory\/m\d\w*(?:\?|$)/, (route) => {
     const id = new URL(route.request().url()).pathname.split("/").at(-1)!
@@ -200,6 +211,8 @@ async function setup(page: Page, input: { guest?: boolean; entries?: unknown[] }
     if (route.request().method() === "PATCH") {
       const body = route.request().postDataJSON() as Record<string, unknown>
       sent.updates.push({ id, body })
+      if (input.failing === "update")
+        return route.fulfill({ status: 500, json: { name: "UnknownError", data: { message: "The brain is busy" } } })
       const current = entries.get(id) as Record<string, unknown>
       const next = {
         ...current,
@@ -254,7 +267,7 @@ async function setup(page: Page, input: { guest?: boolean; entries?: unknown[] }
     return route.fulfill({ json: 2 })
   })
   await page.route(/\/session\/[^/]+\/prompt_async(?:\?|$)/, (route) => {
-    sent.prompts.push(route.request().postDataJSON())
+    sent.prompts.push(route.request().postDataJSON() as SentPrompt)
     return route.fulfill({ status: 204, body: "" })
   })
   await page.addInitScript((projectDirectory) => {
@@ -274,10 +287,23 @@ async function setup(page: Page, input: { guest?: boolean; entries?: unknown[] }
   // What Vector learned, sent once the session is on screen, as the engine does at the end of a request.
   const learn = (entryIDs: string[], messageID = "msg_01_user") =>
     events.push({ directory, payload: { type: "memory.learned", properties: { sessionID, entryIDs, messageID } } })
-  return { sent, learn }
+  // The run a sent message started is over.
+  const idle = () =>
+    events.push({ directory, payload: { type: "session.status", properties: { sessionID, status: { type: "idle" } } } })
+  return { sent, learn, idle }
 }
 
 const composer = (page: Page) => page.locator('[data-component="prompt-input"]').filter({ visible: true }).first()
+
+// Pastes `text` into the editor the user is typing in, as the clipboard does.
+const paste = (page: Page, text: string) =>
+  page.evaluate((value) => {
+    const data = new DataTransfer()
+    data.setData("text/plain", value)
+    document.activeElement?.dispatchEvent(
+      new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }),
+    )
+  }, text)
 const chip = (page: Page) => page.locator('[data-component="learned-chip"]')
 
 async function openAboutYou(page: Page) {
@@ -293,22 +319,35 @@ test("a paste in the composer is marked on the sent part, so Vector never learns
   await composer(page).click()
   await page.keyboard.type("Summarize this email: ")
   const email = "Hi team,\nI prefer meetings on Tuesdays.\nThanks, Dana"
-  await page.evaluate((text) => {
-    // The editor the user is typing in.
-    const editor = document.activeElement
-    const data = new DataTransfer()
-    data.setData("text/plain", text)
-    editor?.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }))
-  }, email)
+  await paste(page, email)
   await page.keyboard.press("Enter")
   await expect.poll(() => sent.prompts.length).toBe(1)
-  const part = sent.prompts[0]!.parts[0] as { text: string; metadata?: Record<string, unknown> }
-  const start = part.text.indexOf("Hi team")
+  const part = sent.prompts[0]!.parts[0]!
+  const start = part.text!.indexOf("Hi team")
   expect(start).toBeGreaterThan(0)
   expect(part.metadata?.["vector.pasted"]).toEqual([[start, start + email.length]])
   // What the user typed is outside every span.
   const spans = part.metadata?.["vector.pasted"] as [number, number][]
   expect(spans.every(([from]) => from >= "Summarize this email:".length)).toBe(true)
+})
+
+test("a paste goes with the message it was pasted into, and never marks a later one", async ({ page }) => {
+  const { sent, idle } = await setup(page)
+  await composer(page).click()
+  await page.keyboard.type("Check out ")
+  await paste(page, "main")
+  await page.keyboard.press("Enter")
+  await expect.poll(() => sent.prompts.length).toBe(1)
+  expect(sent.prompts[0]!.parts[0]!.metadata?.["vector.pasted"]).toEqual([[10, 14]])
+  idle()
+  await expect(page.getByText("Agent working")).toHaveCount(0)
+  // Typed whole, the next message is the user's own, though it holds the word pasted before and words that start
+  // with it.
+  await composer(page).click()
+  await page.keyboard.type("Never push directly to main, and keep the maintainers in review.")
+  await page.keyboard.press("Enter")
+  await expect.poll(() => sent.prompts.length).toBe(2)
+  expect(sent.prompts[1]!.parts[0]!.metadata?.["vector.pasted"]).toBeUndefined()
 })
 
 test("the chip under the reply shows what Vector learned from the request, with Undo", async ({ page }) => {
@@ -366,7 +405,12 @@ test("About you groups what Vector learned by facet, with Undo in its first week
   await expect(tooling).toContainText("Vector does not learn this kind.")
 })
 
-test("an import lands waiting, and Approve all approves only what waits for nothing else", async ({ page }) => {
+// The route answers as the engine does, so this checks what the app shows of an import: that its items wait, and that
+// "Approve all" leaves the one held for its own review. The engine landing imports proposed is covered by
+// packages/core/test/brain/export.test.ts.
+test("an import's notice says its items wait, and Approve all approves only what waits for nothing else", async ({
+  page,
+}) => {
   const { sent } = await setup(page)
   const settingsPage = await openAboutYou(page)
   const transfer = settingsPage.locator('[data-component="settings-memory-transfer"]')
@@ -394,4 +438,27 @@ test("a guest sees no chip and none of what Vector learned about the owner", asy
   await expect(settingsPage).toContainText("What Vector learned about you is the repository owner's")
   await expect(settingsPage).not.toContainText("Always use tables for comparisons.")
   await expect(settingsPage.locator('[data-component="settings-memory-facet"]')).toHaveCount(0)
+  // The owner's settings are not the guest's to change.
+  await expect(settingsPage.getByRole("combobox", { name: "When a model may help Vector learn" })).toHaveCount(0)
+  await expect(settingsPage.getByRole("switch")).toHaveCount(0)
+})
+
+test("a list that fails says so, rather than showing every kind as empty", async ({ page }) => {
+  await setup(page, { failing: "list" })
+  const settingsPage = await openAboutYou(page)
+  await expect(settingsPage).toContainText("Vector could not read what it learned about you. Try again in a moment.")
+  await expect(settingsPage).not.toContainText("Nothing of this kind yet.")
+  await expect(settingsPage.locator('[data-component="settings-memory-facet"]')).toHaveCount(0)
+  await expect(settingsPage.getByRole("button", { name: "Try again" })).toBeVisible()
+})
+
+test("the chip says when Approve or Reject did not go through", async ({ page }) => {
+  const { sent, learn } = await setup(page, { failing: "update" })
+  learn([imported.id])
+  await expect(chip(page)).toContainText("Prefer primary sources.", { timeout: 15_000 })
+  await chip(page).getByRole("button", { name: "Approve" }).click()
+  await expect.poll(() => sent.updates).toEqual([{ id: imported.id, body: { action: "approve" } }])
+  await expect(chip(page)).toContainText("Vector could not approve it. Try again in a moment.")
+  await chip(page).getByRole("button", { name: "Reject" }).click()
+  await expect(chip(page)).toContainText("Vector could not reject it. Try again in a moment.")
 })

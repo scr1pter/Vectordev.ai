@@ -77,3 +77,8 @@
 [data-component="learned-chip"] [data-slot="learned-chip-erase"] {
   margin: 8px 0 0 18px;
 }
+
+[data-component="learned-chip"] [data-slot="learned-chip-failed"] {
+  color: var(--v2-state-fg-danger);
+  overflow-wrap: anywhere;
+}

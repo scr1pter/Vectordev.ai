@@ -356,6 +356,7 @@ export const ABOUT = {
   erase:
     "Erase removes it from the brain and stops Vector using it. The sessions it came from keep their messages until you delete them. A model server you host may keep its own logs.",
   guest: "What Vector learned about you is the repository owner's, so it shows only to them.",
+  failed: "Vector could not read what it learned about you. Try again in a moment.",
   off: "Vector does not learn this kind. What it learned of it stays until you forget it.",
 }
 

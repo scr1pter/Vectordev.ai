@@ -14,7 +14,8 @@ export function registerLearnedChip() {
   ReplyFooter.register(LearnedChip)
 }
 
-type Done = "undone" | "approved" | "rejected" | "failed"
+type Action = "undo" | "approve" | "reject"
+type Done = "undone" | "approved" | "rejected" | `failed-${Action}`
 
 /**
  * "Learned 2 things" under a reply: what Vector's learner kept from the request's typed words, or from what the user
@@ -61,12 +62,12 @@ function LearnedChip(props: { message: AssistantMessage }) {
     chipLabel(items().map((entry) => ({ text: entryText(entry), status: entry.status, typed: typed().has(entry.id) }))),
   )
 
-  const act = async (entry: MemoryEntry, action: "undo" | "approve" | "reject") => {
+  const act = async (entry: MemoryEntry, action: Action) => {
     const result = await sdk()
       .client.memory.update({ memoryID: entry.id, action })
       .then(
         (): Done => (action === "undo" ? "undone" : action === "approve" ? "approved" : "rejected"),
-        (): Done => "failed",
+        (): Done => `failed-${action}`,
       )
     setDone((current) => ({ ...current, [entry.id]: result }))
   }
@@ -153,7 +154,7 @@ function LearnedChip(props: { message: AssistantMessage }) {
 function Actions(props: {
   entry: MemoryEntry
   done?: Done
-  act: (entry: MemoryEntry, action: "undo" | "approve" | "reject") => Promise<void>
+  act: (entry: MemoryEntry, action: Action) => Promise<void>
 }) {
   const waiting = () => props.entry.status === "proposed" || props.entry.status === "quarantined"
   const said = () =>
@@ -176,7 +177,7 @@ function Actions(props: {
             fallback={
               <Show when={props.entry.status === "active"}>
                 <ButtonV2 size="small" variant="ghost" icon="reset" onClick={() => void props.act(props.entry, "undo")}>
-                  {props.done === "failed" ? "Try Undo again" : "Undo"}
+                  {props.done === "failed-undo" ? "Try Undo again" : "Undo"}
                 </ButtonV2>
               </Show>
             }
@@ -187,6 +188,12 @@ function Actions(props: {
             <ButtonV2 size="small" variant="ghost" onClick={() => void props.act(props.entry, "reject")}>
               Reject
             </ButtonV2>
+            <Show when={props.done === "failed-approve" || props.done === "failed-reject"}>
+              <span data-slot="learned-chip-failed" role="alert">
+                {props.done === "failed-approve" ? "Vector could not approve it." : "Vector could not reject it."} Try
+                again in a moment.
+              </span>
+            </Show>
           </Show>
         }
       >

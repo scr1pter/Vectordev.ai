@@ -1010,12 +1010,18 @@ function AboutYou(props: {
     (input) =>
       input.client.memory
         .list({ scope: "personal", filter: "all" }, { throwOnError: false })
-        .then((result) => ({ entries: result.data?.entries ?? [], status: result.response?.status ?? 0 }))
-        .catch(() => ({ entries: [], status: 0 })),
+        .then((result) => ({
+          entries: result.data?.entries ?? [],
+          status: result.response?.status ?? 0,
+          failed: result.error !== undefined || !result.data,
+        }))
+        .catch(() => ({ entries: [], status: 0, failed: true })),
   )
   // Read only once resolved, so a first read still loading suspends nothing around the page.
   const loaded = () => (list.state === "ready" || list.state === "refreshing" ? list.latest : undefined)
   const guest = () => loaded()?.status === 401 || loaded()?.status === 403
+  // A read that failed for another reason says so, rather than showing every kind as empty.
+  const failed = () => loaded()?.failed === true && !guest()
   // An entry that did not change keeps its row, so reading the list again neither redraws nor re-reads it.
   const kept = new Map<string, { json: string; entry: MemoryEntryView }>()
   const stable = (entry: MemoryEntryView) => {
@@ -1087,37 +1093,41 @@ function AboutYou(props: {
           </div>
         </div>
         <div class="settings-v2-card-body">
-          <div class="settings-v2-row-modern">
-            <div class="settings-v2-row-copy">
-              <div class="settings-v2-row-title">Let a model help Vector learn</div>
-              <div class="settings-v2-row-description">
-                Vector learns from your own words with plain rules, at no cost and with no model call. When you correct
-                it ("no, I meant…") and the rules find nothing to keep, a small model can suggest what to learn from
-                your typed words. Its tokens count in that session, and what it suggests after a session read outside
-                content waits for your review. With Vector Local only, it runs on the model servers you list.
+          {/* The owner's setting: a guest is told whose this is and can change none of it. */}
+          <Show when={loaded() && !guest()}>
+            <div class="settings-v2-row-modern">
+              <div class="settings-v2-row-copy">
+                <div class="settings-v2-row-title">Let a model help Vector learn</div>
+                <div class="settings-v2-row-description">
+                  Vector learns from your own words with plain rules, at no cost and with no model call. When you
+                  correct it ("no, I meant…") and the rules find nothing to keep, a small model can suggest what to
+                  learn from your typed words. Its tokens count in that session, and what it suggests after a session
+                  read outside content waits for your review. With Vector Local only, it runs on the model servers you
+                  list.
+                </div>
+              </div>
+              <div class="settings-v2-row-control settings-v2-row-control--compact">
+                <select
+                  class="settings-memory-kind"
+                  aria-label="When a model may help Vector learn"
+                  value={props.settings?.modelLearner ?? "local-only"}
+                  onChange={(event) => {
+                    const modelLearner = event.currentTarget.value as MemorySettings["modelLearner"]
+                    void configure(
+                      { modelLearner },
+                      modelLearner === "off"
+                        ? "Vector learns from your words with its rules only."
+                        : modelLearner === "always"
+                          ? "A model may help Vector learn with any model you use."
+                          : "A model helps Vector learn only with Vector Local on.",
+                    )
+                  }}
+                >
+                  <For each={MODEL_LEARNER}>{(item) => <option value={item.value}>{item.label}</option>}</For>
+                </select>
               </div>
             </div>
-            <div class="settings-v2-row-control settings-v2-row-control--compact">
-              <select
-                class="settings-memory-kind"
-                aria-label="When a model may help Vector learn"
-                value={props.settings?.modelLearner ?? "local-only"}
-                onChange={(event) => {
-                  const modelLearner = event.currentTarget.value as MemorySettings["modelLearner"]
-                  void configure(
-                    { modelLearner },
-                    modelLearner === "off"
-                      ? "Vector learns from your words with its rules only."
-                      : modelLearner === "always"
-                        ? "A model may help Vector learn with any model you use."
-                        : "A model helps Vector learn only with Vector Local on.",
-                  )
-                }}
-              >
-                <For each={MODEL_LEARNER}>{(item) => <option value={item.value}>{item.label}</option>}</For>
-              </select>
-            </div>
-          </div>
+          </Show>
           <Show when={notice()}>
             <p class="settings-memory-notice" role="status">
               {notice()}
@@ -1131,11 +1141,21 @@ function AboutYou(props: {
           <Show when={guest()}>
             <p class="settings-memory-empty">{ABOUT.guest}</p>
           </Show>
+          <Show when={failed()}>
+            <p class="settings-memory-error" role="alert">
+              {ABOUT.failed}
+            </p>
+            <div class="settings-v2-action-grid">
+              <ButtonV2 variant="outline" onClick={() => setVersion((value) => value + 1)}>
+                Try again
+              </ButtonV2>
+            </div>
+          </Show>
         </div>
       </div>
 
       <Show when={!guest()}>
-        <Index each={groups()}>
+        <Index each={failed() ? [] : groups()}>
           {(group) => {
             // The groups keep their order, so each place in the list is always the same facet.
             const facet = group().value === "other" ? undefined : (group().value as MemoryFacet)
@@ -1459,6 +1479,7 @@ function AboutRow(props: {
 
 /** The most an import may be (the engine's IMPORT_CHARS). */
 const IMPORT_CHARS = 2 * 1024 * 1024
+const TOO_LONG = "Vector imports at most 2 MB at a time."
 
 // Export and Import (section 6.5): what Vector keeps as Markdown to read or JSON to import elsewhere, and an export read
 // back in, where every item waits for approval, so a changed file cannot put memory in use. "Approve all" is one click
@@ -1500,9 +1521,11 @@ function TransferCard(props: {
   const read = async (file: File | undefined) => {
     const current = props.client()
     if (!file || !current) return
+    // A character takes at most 4 bytes, so a file larger than that is too long before a byte of it is read.
+    if (file.size > IMPORT_CHARS * 4) return setNotice(TOO_LONG)
     const text = await file.text().catch(() => undefined)
     if (text === undefined) return setNotice("Vector could not read that file.")
-    if (text.length > IMPORT_CHARS) return setNotice("Vector imports at most 2 MB at a time.")
+    if (text.length > IMPORT_CHARS) return setNotice(TOO_LONG)
     setBusy(true)
     const result = await current.memory.import({ text }).catch((cause: unknown) => ({ error: cause, data: undefined }))
     setBusy(false)
