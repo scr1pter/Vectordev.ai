@@ -181,7 +181,7 @@ export function DialogLocalSetup(props: { reader?: LocalStatusReader; onDone?: (
     }
     const changed = await local.change(current, { enabled: true, web: state.web })
     setState("finishing", false)
-    if (changed.type === "cancelled") return say("", "Vector Local is still off. Nothing about it changed.")
+    if (changed.type === "cancelled") return say("", "The roles are saved. Vector Local itself did not change.")
     if (changed.type === "failed") return say(changed.message)
     reader.set(changed.status)
     setState("done", changed.status)

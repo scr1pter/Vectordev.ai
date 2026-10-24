@@ -13,6 +13,7 @@ import { useLocalStatus } from "@/features/local/use-local"
 import {
   AGENT,
   CHECK_RESULT,
+  LOCKED,
   DEFINITION,
   GUEST,
   RESTART,
@@ -34,7 +35,6 @@ import {
   CERTIFICATES,
   CHECK_STATUS,
   DICTATION_LOCAL,
-  IGNORED_POLICY,
   SECTIONS,
   allowedRows,
   certificateLines,
@@ -75,6 +75,8 @@ export function SettingsLocalV2() {
     setNotice("")
     const result = await local.change(client, update)
     setPending(false)
+    // A choice the owner took back, or the engine refused, shows what is in effect again.
+    if (result.type !== "applied") reader.refresh()
     if (result.type === "cancelled") return setNotice("Nothing changed.")
     if (result.type === "failed") return setError(result.message)
     reader.set(result.status)
@@ -133,7 +135,7 @@ export function SettingsLocalV2() {
                 status={status()}
                 pending={pending()}
                 restart={desktop.latest?.restartNeeded === true && status().policy.enabled}
-                mismatch={(desktop.latest as { mismatch?: string } | undefined)?.mismatch}
+                mismatch={desktop.latest?.mismatch}
                 onToggle={(enabled) => void run({ enabled }, enabled ? "Vector Local is on." : "Vector Local is off.")}
                 onApplyHeld={(changes) => void run({ held: [...changes] }, "The change in your config applies now.")}
                 onSetup={setup}
@@ -248,11 +250,8 @@ function SwitchCard(props: {
         <Show when={props.status.agent}>
           <p data-slot="local-note">{AGENT}</p>
         </Show>
-        <For each={props.status.policy.warnings}>
-          {(warning) => (
-            <p data-slot="local-note">{warning.startsWith("Ignored a policy file") ? IGNORED_POLICY : warning}</p>
-          )}
-        </For>
+        {/* What the policy's resolver ignored, such as "Ignored a policy file that standard users can change." */}
+        <For each={props.status.policy.warnings}>{(warning) => <p data-slot="local-note">{warning}</p>}</For>
         <Show when={props.mismatch}>{(mismatch) => <p data-slot="local-note">{mismatch()}</p>}</Show>
         <Show when={props.restart}>
           <p data-slot="local-note">{RESTART}</p>
@@ -336,7 +335,9 @@ function ServersCard(props: {
     const client = props.reader.client()
     if (!client) return
     setBusy(true)
-    const result = await local.change(client, { endpoints: { remove: [origin] }, pins: { [origin]: null } })
+    // Removing a server only tightens Vector Local. Its identity pin stays, so the same address answering as another
+    // server later is still noticed when it is added again.
+    const result = await local.change(client, { endpoints: { remove: [origin] } })
     setBusy(false)
     if (result.type === "failed") return props.onError(result.message)
     if (result.type === "applied") {
@@ -431,20 +432,30 @@ function ServersCard(props: {
             placeholder="http://gpu-box:8000"
             aria-label="Server address"
             value={typed()}
-            disabled={locked() && props.status.policy.lock && props.status.policy.endpoint_domains.length === 0}
+            disabled={locked()}
             onInput={(event) => setTyped(event.currentTarget.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") void add(typed())
             }}
           />
-          <ButtonV2 variant="outline" disabled={busy() || !typed().trim()} onClick={() => void add(typed())}>
+          <ButtonV2
+            variant="outline"
+            disabled={busy() || locked() || !typed().trim()}
+            onClick={() => void add(typed())}
+          >
             Add server
           </ButtonV2>
         </div>
-        <Show when={props.status.policy.lock && props.status.policy.endpoint_domains.length > 0}>
+        <Show when={locked()}>
+          <p data-slot="local-muted">{LOCKED}</p>
+        </Show>
+        <Show when={props.status.policy.lock && !locked()}>
           <p data-slot="local-muted">
-            Your company lets you add servers on your network or matching{" "}
-            {props.status.policy.endpoint_domains.join(", ")}.
+            Your company lets you add servers on your network
+            {props.status.policy.endpoint_domains.length
+              ? ` or matching ${props.status.policy.endpoint_domains.join(", ")}`
+              : ""}
+            .
           </p>
         </Show>
       </div>

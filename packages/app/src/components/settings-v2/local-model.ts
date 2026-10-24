@@ -30,8 +30,6 @@ export const SECTIONS = [
   { id: "check", title: "Run a check" },
 ] as const
 
-export const IGNORED_POLICY = "Ignored a policy file that standard users can change."
-
 /** The switch: on or off, and whether the company decides. */
 export function switchView(status: Pick<LocalStatus, "policy" | "locked" | "agent">) {
   const locked = status.locked.includes("enabled")
