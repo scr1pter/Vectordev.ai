@@ -7,12 +7,12 @@ import {
 import { freeModelDataPolicy, freeModelInfo } from "../../core/src/free-model-catalog"
 
 // Runs without Redis or Valkey, unlike free-models-api.test.ts: an in-memory stand-in for the Upstash REST store
-// answers GET and SET, and OpenRouter answers from its public data captured on 17 October 2026.
+// answers GET and SET, and OpenRouter answers from its public data captured on 24 October 2026.
 const fixture: {
   capturedAt: number
   models: { id: string }[]
   endpoints: Record<string, Record<string, unknown>[]>
-} = await Bun.file(new URL("../../core/test/fixture/free-model-public-2026-10-17.json", import.meta.url)).json()
+} = await Bun.file(new URL("../../core/test/fixture/free-model-public-2026-10-24.json", import.meta.url)).json()
 const store = new Map<string, string>()
 // Endpoint lists that answer as OpenRouter does when rate limited, and how many reads run at once.
 const endpointReads = { failing: new Set<string>(), delay: 0, pending: 0, peak: 0 }
@@ -50,7 +50,7 @@ const environment = {
   KV_REST_API_TOKEN: "fixture-kv-token",
   OPENROUTER_FREE_API_KEY: "fixture-openrouter-key",
 }
-// Personal-route only: Gemma, for the EEA, Swiss and UK limit in Google's terms.
+// Gemma is shared too, with a US only tag and no location check.
 const gemma = ["google/gemma-4-26b-a4b-it:free", "google/gemma-4-31b-it:free"]
 
 beforeEach(() => {
@@ -62,16 +62,23 @@ afterAll(() => {
   for (const key of Object.keys(environment)) delete process.env[key]
 })
 
-test("the shared allowance serves every free model whose terms allow it, the free router last, and old clients none that may train", async () => {
-  // The owner's decision of 17 October 2026: every free OpenRouter model, except those whose terms bar this use.
+test("the shared catalog serves every eligible free model, the free router last, and old clients none that may train", async () => {
+  // The owner chose to include all tool-capable free text models, including NVIDIA and Gemma.
   const refreshed = await refreshFreeModelCatalog(fetcher, fixture.capturedAt)
   expect(refreshed.models.map((model) => [model.id, freeModelDataPolicy(model)])).toEqual([
     ["cohere/north-mini-code:free", "no-training"],
     ["dots-studio/dots-3-note-preview:free", "no-training"],
+    ["google/gemma-4-26b-a4b-it:free", "no-training"],
+    ["google/gemma-4-31b-it:free", "no-training"],
     ["xingchen-agi/xing4.0-29b-a4b:free", "no-training"],
     ["liquid/lfm-2.5-2.6b:free", "may-train"],
+    ["nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", "may-train"],
+    ["nvidia/nemotron-3-ultra-550b-a55b:free", "may-train"],
+    ["nvidia/nemotron-3.5-lightning:free", "may-train"],
+    ["nvidia/nemotron-3.5-super-vl:free", "may-train"],
     ["poolside/laguna-s-2.1:free", "may-train"],
     ["poolside/laguna-xs-2.1:free", "may-train"],
+    ["recursive/flint-v1.0:free", "may-train"],
     ["thinkingmachines/inkling-small:free", "may-train"],
     ["thinkingmachines/inkling:free", "may-train"],
     ["openrouter/free", "may-train"],
@@ -86,36 +93,31 @@ test("the shared allowance serves every free model whose terms allow it, the fre
   ).toEqual([
     "cohere/north-mini-code:free",
     "dots-studio/dots-3-note-preview:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "google/gemma-4-31b-it:free",
     "xingchen-agi/xing4.0-29b-a4b:free",
   ])
 })
 
-test("Gemma stays off the shared allowance, so no client of it, old or new, is served it", async () => {
-  // Google's Gemini API terms (28 April 2026) let EEA, Swiss and UK users use it only through Paid Services, and the
-  // shared allowance does not check where its users are.
+test("Gemma is included in both current and legacy no-training catalogs without a location check", async () => {
   const refreshed = await refreshFreeModelCatalog(fetcher, fixture.capturedAt)
-  expect(refreshed.models.filter((model) => gemma.includes(model.id))).toEqual([])
-  const later = fixture.capturedAt + 1000
+  expect(refreshed.models.filter((model) => gemma.includes(model.id)).map((model) => model.id)).toEqual(gemma)
   for (const disclosure of [false, true]) {
-    const served = await currentFreeModelCatalog(fetcher, later, { disclosure })
-    expect(served.models.filter((model) => gemma.includes(model.id))).toEqual([])
+    const served = await currentFreeModelCatalog(fetcher, fixture.capturedAt + 1000, { disclosure })
+    expect(served.models.filter((model) => gemma.includes(model.id)).map((model) => model.id)).toEqual(gemma)
   }
 })
 
-test("a stored catalog that lists Gemma is served without it", async () => {
-  // A catalog stored before the rule, with its correct reviewed policy, must not keep serving it.
+test("a stored no-training Gemma catalog remains usable", async () => {
   const models = gemma.flatMap((id) => {
     const model = fixture.models.find((item) => item.id === id)
-    const info = model && freeModelInfo(model as never, fixture.endpoints[id] ?? [], { reviewedOnly: true })
+    const info = model && freeModelInfo(model as never, fixture.endpoints[id] ?? [])
     return info ? [info] : []
   })
   expect(models.map((model) => model.id)).toEqual(gemma)
-  store.set(FREE_MODELS_CATALOG_KEY, JSON.stringify({ enabled: true, updatedAt: fixture.capturedAt, models }))
-  expect(await currentFreeModelCatalog(fetcher, fixture.capturedAt + 1000, { disclosure: true })).toEqual({
-    enabled: false,
-    updatedAt: fixture.capturedAt,
-    models: [],
-  })
+  const catalog = { enabled: true, updatedAt: fixture.capturedAt, models }
+  store.set(FREE_MODELS_CATALOG_KEY, JSON.stringify(catalog))
+  expect(await currentFreeModelCatalog(fetcher, fixture.capturedAt + 1000, { disclosure: true })).toEqual(catalog)
 })
 
 test("the owner's refresh instructions expect the counts the refresh gives", async () => {

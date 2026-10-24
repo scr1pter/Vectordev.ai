@@ -38,18 +38,21 @@ export const FreeEndpointMetadata = Schema.Struct({
   pricing: Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Number])),
   supported_parameters: Schema.Array(Schema.String),
   status: Schema.Number,
+  uptime_last_1d: Schema.optional(Schema.NullOr(Schema.Number)),
 })
 
-/** The date Vector last reviewed every free OpenRouter endpoint's data policy and terms. */
+/** The date Vector last reviewed the free OpenRouter endpoints recorded in REVIEWED_FREE_ENDPOINTS. */
 export const FREE_MODEL_POLICY_REVIEWED = "2026-10-17"
 
 // OpenRouter's public API has no training flag, and its provider-level records do not describe free endpoints: they
 // record Poolside as not training while its free Laguna endpoints say free use may train. The reliable record is the
 // per-endpoint `data_policy` on each model's page at https://openrouter.ai/<model id>, checked against the terms each
 // endpoint links. This map is that review, by model and the provider slug (the endpoint tag before any "/") that may
-// serve it. A free endpoint missing here is "unreviewed": it is disclosed as one that may train, offered only through
-// the user's own OpenRouter account, and still asks OpenRouter to deny data collection. Evidence, dated per pair, is in
-// docs/vector/owner-actions/free-models-legal.md.
+// serve it. Since the owner's decision of 23 October 2026, a free model need not be here to be offered: an endpoint
+// missing here gets the worst case, "may-train", with UNREVIEWED_RETENTION, so it carries the "May train on your
+// prompts" label and waits for the one-time acceptance like any other may-train endpoint. New free models appear that
+// way on the next refresh. Only a review recorded here can make an endpoint no-training. Evidence, dated per pair, is
+// in docs/vector/owner-actions/free-models-legal.md.
 export const REVIEWED_FREE_ENDPOINTS: ReadonlyMap<
   string,
   Readonly<Record<string, { policy: Exclude<FreeDataPolicy, "unreviewed">; retention: string }>>
@@ -90,22 +93,27 @@ export const REVIEWED_FREE_ENDPOINTS: ReadonlyMap<
     "thinkingmachines/inkling-small:free",
     { thinkingmachines: { policy: "may-train", retention: MAY_TRAIN_RETENTION } },
   ],
+  // NVIDIA's free endpoints train on prompts by OpenRouter's records (17 October 2026). They run under NVIDIA's API
+  // Trial Terms; see BARRED_FREE_AUTHORS for the owner's decision to offer them anyway.
+  ...[
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "nvidia/nemotron-3.5-lightning:free",
+    "nvidia/nemotron-3.5-super-vl:free",
+  ].map((id) => [id, { nvidia: { policy: "may-train" as const, retention: MAY_TRAIN_RETENTION } }] as const),
   // OpenRouter's Free Models Router lists no endpoints of its own: it picks a free model at random for each request,
   // so it is as private as the least private free model, and is labelled as one that may train.
   [FREE_ROUTER_ID, { openrouter: { policy: "may-train", retention: FREE_ROUTER_RETENTION } }],
 ])
 
-// The only free models Vector leaves out are those whose terms bar Vector's use. NVIDIA's free endpoints run under the
-// NVIDIA API Trial Terms of Service (19 September 2025): limited trial and evaluation use only, no production use of the
-// service or its output (sections 1.2 and 1.4), and no making it or its output available to others (section 4.2).
-// Serving them to Vector users is production use that shares the output, so they are never listed.
-const BARRED_FREE_AUTHORS = [
-  {
-    author: /^nvidia\//i,
-    provider: "nvidia",
-    reason: "NVIDIA's API Trial Terms limit its free endpoints to evaluation and bar production use.",
-  },
-]
+// Free models whose terms bar Vector's use, which are never listed, by author. None is barred today. NVIDIA's free
+// endpoints were, from 17 October 2026: they run under the NVIDIA API Trial Terms of Service (19 September 2025), which
+// allow limited trial and evaluation use only, bar production use of the service or its output (sections 1.2 and 1.4),
+// and bar making it or its output available to others (section 4.2). On 23 October 2026 the owner, shown those terms,
+// chose "Include them anyway", so they are offered like any other free model, labelled "May train on your prompts".
+// The risk is recorded in docs/vector/owner-actions/free-models-legal.md.
+const BARRED_FREE_AUTHORS: readonly { author: RegExp; provider: string; reason: string }[] = []
 
 /**
  * The provider slugs of barred free endpoints. A request to the free router asks OpenRouter to skip them, since the
@@ -114,23 +122,8 @@ const BARRED_FREE_AUTHORS = [
  */
 export const BARRED_FREE_PROVIDERS = BARRED_FREE_AUTHORS.map((item) => item.provider)
 
-// Free models offered only through the user's own OpenRouter account, never on Vector's shared allowance, because a
-// term applies that the shared allowance cannot meet. Clients before 1.99.109 see only the shared catalog, so they
-// never receive these either. Serving Gemma there needs the region limit in Google's terms applied, or a finding that
-// it does not apply; see docs/vector/owner-actions/free-models-legal.md.
-const GEMMA_SHARED =
-  "Google's Gemini API terms (28 April 2026) let EEA, Swiss and UK users use it only through Paid Services, and free models provided by Vector do not check where their users are."
-// Xing4.0 was here until 17 October 2026, when the owner decided every free model belongs on the shared allowance
-// unless its terms bar it: RedPill's terms, under which Phala serves it, do not address free use, which is not a bar.
-const PERSONAL_ONLY_FREE_MODELS: ReadonlyMap<string, string> = new Map([
-  ["google/gemma-4-26b-a4b-it:free", GEMMA_SHARED],
-  ["google/gemma-4-31b-it:free", GEMMA_SHARED],
-])
-
-/** Why a free model is kept off Vector's shared allowance, when it is offered through the user's own account only. */
-export function personalOnlyFreeModel(id: string) {
-  return PERSONAL_ONLY_FREE_MODELS.get(id)
-}
+// The owner also chose to include Gemma 4 26B and 31B on Vector's account, with a "US only" tag and no location
+// check. freeModelRegionLabel supplies that tag to the desktop and terminal model lists.
 
 // Router aliases and stacked variants can introduce paid routing or services. The one router allowed is OpenRouter's
 // Free Models Router, which picks only free models and is held to a zero max_price like every other free request.
@@ -148,11 +141,10 @@ export function isFreeRouter(id: string) {
 
 /**
  * Whether a model of OpenRouter's regular catalog runs on free endpoints: a `:free` variant, OpenRouter's free router
- * (which picks any free endpoint, barred and unreviewed ones included), a stealth model, or any model listed at a zero
- * price. Sent with the user's own key as a regular OpenRouter model, it would skip every free-model check: the guest
- * rule, the training notice and data_collection. So such a model is offered only as a reviewed free model, or not at
- * all. `price` is undefined for a model with no listed price, such as OpenRouter's Auto Router, which bills the paid
- * model it picks.
+ * (which picks any free endpoint), a stealth model, or any model listed at a zero price. Sent with the user's own key
+ * as a regular OpenRouter model, it would skip every free-model check: the guest rule, the training notice and
+ * data_collection. So such a model is offered only as one of the Free models inside of Vector, or not at all. `price`
+ * is undefined for a model with no listed price, such as OpenRouter's Auto Router, which bills the paid model it picks.
  */
 export function isOpenRouterFreeModel(
   id: string,
@@ -181,7 +173,7 @@ export function isOpenRouterURL(url: unknown) {
  * name a model one thing and send another (`id` on the legacy engine, `api.id` on V2), and can point a provider of any
  * name at openrouter.ai, so both the catalog name and the ID sent are tested, on the openrouter provider and on any
  * provider whose requests go to OpenRouter. Such a model is removed from the regular lists and, if it reaches the
- * engine anyway, sent only through the free-model route, which refuses a model it has not reviewed.
+ * engine anyway, sent only through the free-model route, which refuses a model its free-model lists do not include.
  */
 export function sendsToOpenRouterFree(model: {
   readonly providerID: string
@@ -289,53 +281,54 @@ export function eligibleFreeModel(model: typeof FreeModelMetadata.Type, now: num
   )
 }
 
-/** Shared and personal catalogs offer every eligible free model except barred ones, with a 7-day expiry buffer. */
+/**
+ * Shared and personal catalogs offer every eligible free model except barred ones, until a day before it expires: the
+ * shared catalog is rebuilt once a day, so a model it lists is still free when the next one replaces it.
+ */
 export function offeredFreeModel(model: typeof FreeModelMetadata.Type, now: number) {
-  return !barredFreeModel(model.id) && eligibleFreeModel(model, now + 7 * 86400000)
-}
-
-export function reviewedFreeModel(id: string) {
-  return REVIEWED_FREE_ENDPOINTS.has(id)
-}
-
-/** The reviewed policy of one endpoint, by its tag. Anything not reviewed is "unreviewed", never no-training. */
-export function freeEndpointPolicy(modelID: string, tag: string): FreeDataPolicy {
-  return REVIEWED_FREE_ENDPOINTS.get(modelID)?.[tag.split("/")[0] ?? ""]?.policy ?? "unreviewed"
+  return !barredFreeModel(model.id) && eligibleFreeModel(model, now + 86400000)
 }
 
 /**
- * A model's policy is its least private endpoint's, since OpenRouter may route to any of them. A provider without a
- * stated policy (a catalog from before 1.99.109) falls back to the reviewed record.
+ * The policy of one endpoint, by its tag: the reviewed one, or "may-train", the worst case, for an endpoint Vector has
+ * not reviewed. Never no-training without a review.
  */
-export function freeModelDataPolicy(model: Pick<FreeModelInfo, "id" | "providers">): FreeDataPolicy {
-  const policies = model.providers.map((provider) => provider.dataPolicy ?? freeEndpointPolicy(model.id, provider.id))
-  if (!policies.length || policies.includes("unreviewed")) return "unreviewed"
-  if (policies.includes("may-train")) return "may-train"
-  return "no-training"
+export function freeEndpointPolicy(modelID: string, tag: string) {
+  return reviewedEndpoint(modelID, tag)?.policy ?? "may-train"
 }
 
-/** Shared and personal catalogs use the same price, capability and endpoint policy checks. */
+/**
+ * A model's policy is its least private endpoint's, since OpenRouter may route to any of them: no-training only when
+ * every endpoint is. A provider without a stated policy (a catalog from before 1.99.109) falls back to the record, and
+ * the "unreviewed" of older engines counts as may-train.
+ */
+export function freeModelDataPolicy(model: Pick<FreeModelInfo, "id" | "providers">) {
+  const policies = model.providers.map((provider) => provider.dataPolicy ?? freeEndpointPolicy(model.id, provider.id))
+  return policies.length && policies.every((policy) => policy === "no-training") ? "no-training" : "may-train"
+}
+
+/** Shared and personal catalogs use the same price, capability, health and endpoint policy checks. */
 export function freeModelInfo(
   model: typeof FreeModelMetadata.Type,
   endpoints: readonly unknown[],
-  selection: { reviewedOnly: boolean },
 ): FreeModelInfo | undefined {
   if (isFreeRouter(model.id)) return freeRouterInfo(model)
   const eligible = endpoints.flatMap((item) => {
     const parsed = Schema.decodeUnknownOption(FreeEndpointMetadata)(item)
     if (Option.isNone(parsed)) return []
     const endpoint = parsed.value
-    const dataPolicy = freeEndpointPolicy(model.id, endpoint.tag)
     if (
       endpoint.model_id !== model.id ||
-      (selection.reviewedOnly && dataPolicy === "unreviewed") ||
       !endpoint.tag.trim() ||
-      endpoint.status !== 0 ||
+      // OpenRouter's `status` is the endpoint's health when it is read (0 is normal), and the shared catalog built
+      // from it lasts a day. An endpoint down at that moment stays if it served requests at some point in the last
+      // day, so a brief outage during the refresh does not hide its model for a day; one down all day is left out.
+      (endpoint.status !== 0 && !((endpoint.uptime_last_1d ?? 0) > 0)) ||
       !zeroFreeModelPricing(endpoint.pricing) ||
       !endpoint.supported_parameters.includes("tools")
     )
       return []
-    return [{ endpoint, dataPolicy }]
+    return [{ endpoint, dataPolicy: freeEndpointPolicy(model.id, endpoint.tag) }]
   })
   if (!eligible.length) return
   const contextLength = Math.min(model.context_length, ...eligible.map((item) => item.endpoint.context_length))
@@ -370,15 +363,24 @@ export function freeModelInfo(
       ? {}
       : { toolChoice: false }),
     ...(reasoning ? { reasoning } : {}),
+    ...freeModelExpiry(model),
     providers: eligible.map(({ endpoint, dataPolicy }) => ({
       // Preserve the endpoint tag when supplied; a bare slug still selects that provider.
       id: endpoint.tag,
       name: endpoint.provider_name,
-      retention:
-        REVIEWED_FREE_ENDPOINTS.get(model.id)?.[endpoint.tag.split("/")[0] ?? ""]?.retention ?? UNREVIEWED_RETENTION,
+      retention: reviewedEndpoint(model.id, endpoint.tag)?.retention ?? UNREVIEWED_RETENTION,
       dataPolicy,
     })),
   }
+}
+
+function reviewedEndpoint(modelID: string, tag: string) {
+  return REVIEWED_FREE_ENDPOINTS.get(modelID)?.[tag.split("/")[0] ?? ""]
+}
+
+function freeModelExpiry(model: typeof FreeModelMetadata.Type) {
+  const expiresAt = model.expiration_date ? Date.parse(model.expiration_date) : Number.NaN
+  return Number.isFinite(expiresAt) ? { expiresAt } : {}
 }
 
 // OpenRouter publishes no output limit for the router. 8,192 tokens is the smallest limit of any tool-capable free
@@ -400,6 +402,7 @@ function freeRouterInfo(model: typeof FreeModelMetadata.Type): FreeModelInfo | u
     contextLength: model.context_length,
     maxOutputTokens: Math.min(model.context_length, FREE_ROUTER_MAX_OUTPUT_TOKENS),
     ...(model.supported_parameters.includes("tool_choice") ? {} : { toolChoice: false }),
+    ...freeModelExpiry(model),
     providers: [
       {
         id: "openrouter",

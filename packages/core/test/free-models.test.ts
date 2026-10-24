@@ -5,12 +5,7 @@ import path from "node:path"
 import { FreeModels } from "../src/free-models"
 import { VectorAccount } from "../src/vector-account"
 import { FREE_MODEL_FALLBACKS, FREE_MODELS_DISCLOSURE } from "@vectordevai/schema/free-model"
-import {
-  FREE_MODEL_TRAINING_BLOCKED,
-  FREE_MODEL_UNLISTED,
-  FREE_MODEL_UNREVIEWED_BLOCKED,
-  FREE_MODELS_SIGN_IN,
-} from "../src/free-model-choice"
+import { FREE_MODEL_TRAINING_BLOCKED, FREE_MODEL_UNLISTED, FREE_MODELS_SIGN_IN } from "../src/free-model-choice"
 import { freeModelRequest } from "../src/free-model-request"
 
 const enabled = { enabled: true, updatedAt: 123, models: [...FREE_MODEL_FALLBACKS.slice(0, 2)] }
@@ -478,16 +473,16 @@ test("a may-train model hidden by the user's OpenRouter privacy settings says wh
   expect(await FreeModels.explainPolicyRefusal(other, "may-train")).toBe(other)
 })
 
-test("a refusal of an unreviewed free model is not blamed on the user's OpenRouter privacy settings", async () => {
-  // Vector itself sends data_collection "deny" for an unreviewed model, so changing the account's setting cannot help.
+test("a refusal of a free model Vector has not reviewed points to the account's privacy settings too", async () => {
+  // Such a model is sent data_collection "allow" once the user accepted, like any may-train model, so the account's
+  // setting is what can refuse it; the "unreviewed" of older engines reads the same way.
   const policyRefusal = () =>
     Response.json({ error: { message: "No endpoints found matching your data policy", code: 404 } }, { status: 404 })
-  const unreviewed = await FreeModels.explainPolicyRefusal(policyRefusal(), "unreviewed")
-  expect(unreviewed.status).toBe(404)
-  const message = (await unreviewed.json()).error.message
-  expect(message).toBe(FREE_MODEL_UNREVIEWED_BLOCKED)
-  expect(message).not.toContain("privacy settings")
-  expect(message).toContain("has not reviewed")
+  for (const policy of ["may-train", "unreviewed"] as const) {
+    const refused = await FreeModels.explainPolicyRefusal(policyRefusal(), policy)
+    expect(refused.status).toBe(404)
+    expect((await refused.json()).error.message).toBe(FREE_MODEL_TRAINING_BLOCKED)
+  }
   // A no-training model was never asked to allow training, so OpenRouter's own answer stands.
   const noTraining = policyRefusal()
   expect(await FreeModels.explainPolicyRefusal(noTraining, "no-training")).toBe(noTraining)

@@ -49,14 +49,16 @@ export const FREE_MODEL_TRAINING_GUEST_SESSION = `An invited guest has worked in
 export const FREE_MODEL_TRAINING_BLOCKED =
   'Your OpenRouter privacy settings block free models whose providers may train on prompts. To use this one, open openrouter.ai/settings/privacy, allow free models from providers that may train on your data, then send again. Or choose a model without the "May train on your prompts" label.'
 /**
- * Sent as the error when a model would reach OpenRouter's free endpoints without being one of the reviewed free models,
+ * Sent as the error when a model would reach OpenRouter's free endpoints without being one of the listed free models,
  * such as a free model configured under another name: it would skip the guest rule, the training notice and
  * data_collection.
  */
 export const FREE_MODEL_UNLISTED = `This model runs on free endpoints but isn't one of the ${FREE_MODELS_TITLE}, so Vector doesn't send it. Nothing was sent. Choose a model from ${FREE_MODELS_TITLE}.`
-/** Vector itself asks for no-training routing for a model it has not reviewed, so no account setting can lift it. */
-export const FREE_MODEL_UNREVIEWED_BLOCKED =
-  "Vector has not reviewed this free model's data policy yet, so it routes it only to providers that don't train on prompts, and none of this model's providers qualifies. Choose another free model."
+/**
+ * Sent as the error when a request names a free model whose free endpoints have ended, from a model list read before
+ * they did. The catalog stops listing such a model, so this reaches only a list that is out of date.
+ */
+export const FREE_MODEL_EXPIRED = `This model is no longer free, so Vector doesn't send it. Nothing was sent. Choose another model from ${FREE_MODELS_TITLE}.`
 /**
  * Free models run on Vector's shared allowance, on Vector's own OpenRouter account, for every signed-in Vector user
  * (owner decision, 17 October 2026). The free-model flow never asks anyone to connect an OpenRouter account of their
@@ -129,6 +131,13 @@ export function freeModelTrainingLabel(model: Pick<FreeModelChoice, "freeModel">
   return freeModelMayTrain(model) ? FREE_MODEL_TRAINING_LABEL : undefined
 }
 
+/** A label only: the owner's Gemma inclusion decision does not add a location check. */
+export function freeModelRegionLabel(model: Pick<FreeModelChoice, "id" | "freeModel">) {
+  return model.freeModel && ["google/gemma-4-26b-a4b-it:free", "google/gemma-4-31b-it:free"].includes(model.id)
+    ? "US only"
+    : undefined
+}
+
 /**
  * Why an acceptance was not recorded. The engine refuses it from an invited guest (403), for whom retrying can never
  * work, so a guest is told that only the owner can use these models.
@@ -157,11 +166,25 @@ export function bestOwnFreeModel<T extends Pick<FreeModelChoice, "id" | "freeMod
 /**
  * Every copy of a free model stays listed, the shared one ahead of the user's own: a shared choice runs on Vector's
  * shared allowance even while an OpenRouter account is connected, so hiding it would leave that allowance out of reach.
- * Any other order is kept.
+ * Models whose providers don't train on prompts come first, then those labelled "May train on your prompts", and the
+ * free router, which picks one of them at random, last (freeModelOrder). Any other order is kept.
  */
 export function freeModelChoices<T extends FreeModelChoice>(models: readonly T[]): T[] {
   return models.toSorted(
-    (a, b) => Number(a.freeModel?.source === "openrouter") - Number(b.freeModel?.source === "openrouter"),
+    (a, b) =>
+      freeModelOrder(a, b) ||
+      Number(a.freeModel?.source === "openrouter") - Number(b.freeModel?.source === "openrouter"),
+  )
+}
+
+/** No-training free models before those labelled "May train on your prompts", and the free router after both. */
+export function freeModelOrder(
+  a: Pick<FreeModelChoice, "id" | "freeModel">,
+  b: Pick<FreeModelChoice, "id" | "freeModel">,
+) {
+  return (
+    Number(freeModelMayTrain(a)) - Number(freeModelMayTrain(b)) ||
+    Number(a.id === FREE_ROUTER_ID) - Number(b.id === FREE_ROUTER_ID)
   )
 }
 

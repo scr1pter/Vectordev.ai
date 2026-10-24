@@ -31,12 +31,7 @@ import {
   isFreeRouter,
   offeredFreeModel,
 } from "./free-model-catalog"
-import {
-  FREE_MODEL_TRAINING_BLOCKED,
-  FREE_MODEL_UNLISTED,
-  FREE_MODEL_UNREVIEWED_BLOCKED,
-  FREE_MODELS_SIGN_IN,
-} from "./free-model-choice"
+import { FREE_MODEL_TRAINING_BLOCKED, FREE_MODEL_UNLISTED, FREE_MODELS_SIGN_IN } from "./free-model-choice"
 
 // The disclosure parameter tells vectordev.ai this client labels free models that may train and asks first.
 export const CATALOG_URL = `https://vectordev.ai/api/free-models/models?disclosure=${FREE_MODELS_DISCLOSURE}`
@@ -215,8 +210,8 @@ export function createClient(
       return Option.isSome(model) && offeredFreeModel(model.value, now()) ? [model.value] : []
     })
     // The user's own account lists every free model it can route under its privacy settings, including ones Vector
-    // has not reviewed yet. Each endpoint carries its reviewed policy, or "unreviewed", which is disclosed as one
-    // that may train; the account's own settings decide whether may-train endpoints are listed at all.
+    // has not reviewed yet. Each endpoint carries its reviewed policy, or "may-train" when Vector has not reviewed it;
+    // the account's own settings decide whether may-train endpoints are listed at all.
     // The free router has no endpoint list of its own.
     const endpoints = await Promise.all(
       candidates.map((model) =>
@@ -230,7 +225,7 @@ export function createClient(
     }
     // An unreadable endpoint list leaves that model without endpoints, which drops only that model.
     const models = candidates
-      .map((model, index) => freeModelInfo(model, endpoints[index]?.data.endpoints ?? [], { reviewedOnly: false }))
+      .map((model, index) => freeModelInfo(model, endpoints[index]?.data.endpoints ?? []))
       .filter((model): model is FreeModelInfo => model !== undefined)
       .sort((a, b) => b.contextLength - a.contextLength || a.id.localeCompare(b.id))
     users.set(digest, { expires: now() + TTL, models })
@@ -433,8 +428,8 @@ export async function resolveRoute(input: {
 /**
  * OpenRouter answers 404 "No endpoints found matching your data policy" when no endpoint a request may use passes
  * both the user's own privacy settings and the request's data_collection. Replace that with what to do, keeping the
- * status. For a may-train model, which was sent "allow", the user's settings are the cause. An unreviewed model was
- * sent "deny" by Vector itself, so no setting can help. A no-training model keeps OpenRouter's own answer.
+ * status. A may-train model, one Vector has not reviewed included, was sent "allow", so the user's settings are the
+ * cause. A no-training model keeps OpenRouter's own answer.
  */
 export async function explainPolicyRefusal(response: Response, policy: FreeDataPolicy) {
   if (response.status !== 404 || policy === "no-training") return response
@@ -443,8 +438,7 @@ export async function explainPolicyRefusal(response: Response, policy: FreeDataP
     .text()
     .catch(() => "")
   if (!/data policy|privacy|training/i.test(text)) return response
-  const message = policy === "unreviewed" ? FREE_MODEL_UNREVIEWED_BLOCKED : FREE_MODEL_TRAINING_BLOCKED
-  return Response.json({ error: { message, code: 404 } }, { status: 404 })
+  return Response.json({ error: { message: FREE_MODEL_TRAINING_BLOCKED, code: 404 } }, { status: 404 })
 }
 
 /** Preserve quota metadata before compatible SDKs reduce an SSE error to its message string. */

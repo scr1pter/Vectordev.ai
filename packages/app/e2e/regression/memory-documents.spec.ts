@@ -146,6 +146,93 @@ test("adds a Markdown document in Settings and shows it searchable once Vector h
   expect(state.uploads[0]).toContain("Clients must retry at most 3 times.")
 })
 
+for (const tab of ["Documents", "Search model"] as const) {
+  for (const outcome of ["ready", "failed"] as const) {
+    test(`${tab} clears the download notice when the model becomes ${outcome}`, async ({ page }) => {
+      const state = {
+        model: "absent" as "absent" | "downloading" | "verifying" | "ready" | "failed",
+        downloads: 0,
+        reads: 0,
+      }
+      const model = () => ({
+        state: state.model,
+        model: "arctic-embed-xs-q8",
+        progress: state.model === "downloading" ? 0.5 : 1,
+        total: 23_686_074,
+        // The model is ready before every document has been embedded. Polling for that work must not keep
+        // a completed download's notice alive.
+        ...(state.model === "ready" ? { embedded: { done: 1, total: 4 } } : {}),
+        ...(state.model === "failed" ? { error: "The model check failed." } : {}),
+        options: [
+          {
+            id: "arctic-embed-xs-q8",
+            label: "Small",
+            description: "Search documents by meaning on this computer.",
+            license: "Apache-2.0",
+            owner: "Snowflake",
+            source: "https://example.test/model",
+            revision: "fixture-revision",
+            bytes: 23_686_074,
+            sha256: "a".repeat(64),
+            installed: state.model === "ready",
+          },
+        ],
+      })
+      await setup(
+        page,
+        () => ({ items: [] }),
+        async () => {
+          await page.route(/\/memory\/documents(?:\?|$)/, (route) => {
+            state.reads++
+            return route.fulfill({
+              json: {
+                documents: [document("searchable")],
+                model: model(),
+                settings: { learning: true, repositoryDocs: true, keepOriginals: false },
+                limits: { upload: 67108864, text: 2097152, documents: 200, repository: 300, perMinute: 20 },
+                indexing: false,
+                worker: { mode: "worker", threads: 0 },
+              },
+            })
+          })
+          await page.route(/\/memory\/model(?:\?|$)/, (route) => {
+            if (route.request().method() === "POST") {
+              expect(route.request().postDataJSON()).toMatchObject({ action: "download" })
+              state.downloads++
+              state.model = "downloading"
+            }
+            state.reads++
+            return route.fulfill({ json: model() })
+          })
+        },
+      )
+      await page.getByRole("button", { name: "Settings", exact: true }).click()
+      const settings = page.locator(".settings-v2-workspace")
+      await settings.getByRole("tab", { name: "Memory", exact: true }).click()
+      await settings.getByRole("tab", { name: tab, exact: true }).click()
+      await settings
+        .getByRole("button", { name: tab === "Documents" ? "Download" : "Download (24 MB)", exact: true })
+        .click()
+      const notice = settings.getByText(
+        "Downloading the search model. You can keep working; documents are searched by meaning once it is ready.",
+        { exact: true },
+      )
+      await expect(notice).toBeVisible()
+      expect(state.downloads).toBe(1)
+      const before = state.reads
+      state.model = "verifying"
+      await expect.poll(() => state.reads).toBeGreaterThan(before)
+      await expect(notice).toBeVisible()
+      state.model = outcome
+      await expect(notice).toHaveCount(0)
+      if (tab === "Search model")
+        await expect(settings.locator('[data-component="settings-memory-model-headline"]')).toContainText(
+          outcome === "ready" ? "Searching documents by meaning" : "The model check failed.",
+        )
+    })
+  }
+}
+
 test("says documents are not available when the engine cannot list them, without breaking Settings", async ({
   page,
 }) => {

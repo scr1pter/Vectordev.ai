@@ -1272,7 +1272,7 @@ export const Model = Schema.Struct({
   freeModel: optional(
     Schema.Struct({
       source: Schema.Literals(["shared", "openrouter"]),
-      // "may-train" and "unreviewed" models carry the "May train on your prompts" label and need one-time consent.
+      // A model that is not "no-training" carries the "May train on your prompts" label and needs one-time consent.
       dataPolicy: optional(FreeDataPolicy),
       // "optional" when Vector may switch the model's reasoning off for a greeting.
       reasoning: optional(Schema.Literals(["optional", "mandatory"])),
@@ -2182,8 +2182,8 @@ const layer = Layer.effect(
         const openRouterKey = yield* freeCredentials.get("openrouter")
         const ownedFree = openRouterKey ? yield* freeModels.forKey(openRouterKey) : []
         // OpenRouter models that run on free endpoints, zero-price ones and its free router included, return below
-        // only as reviewed free models. That holds under any provider pointed at openrouter.ai, and for a model
-        // configured under another name, whose API ID is what is sent.
+        // only as the free models the catalogs list. That holds under any provider pointed at openrouter.ai, and for a
+        // model configured under another name, whose API ID is what is sent.
         delete providers[ProviderV2.ID.vector]
         for (const [providerID, item] of Object.entries(providers)) {
           for (const [modelID, model] of Object.entries(item.models)) {

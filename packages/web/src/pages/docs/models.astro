@@ -36,29 +36,28 @@ export const prerender = true
             while Vector's service has free models switched on and has models to serve.
           </p>
           <p>
-            From desktop 1.99.109 and the next CLI release, Vector offers every free model OpenRouter lists that can
-            use tools, which Vector's agent works through, except those whose terms bar this use: NVIDIA's trial
-            endpoints, whose terms allow evaluation only. Google's Lyria previews are left out because they list no
-            tools. Each one carries the data policy Vector recorded for the provider serving it, reviewed on 17 October
-            2026:
+            From desktop 1.99.111 and the next CLI release, Vector offers every free model OpenRouter lists that can
+            use tools, which Vector's agent works through. Google's Lyria previews and NVIDIA's content-safety
+            classifier are left out because they list no tools, and a model whose free endpoints have been down all
+            day returns once they answer again. A new free model appears on the next daily refresh. NVIDIA's free
+            Nemotron models are included; NVIDIA's terms for them allow trial and evaluation use. Each model carries
+            the data policy Vector recorded for the provider serving it, reviewed on 17 October 2026, and one Vector
+            has not reviewed yet is treated as one that may train:
           </p>
           <ul>
             <li>
               <strong>No training:</strong> Cohere's North Mini Code (Cohere, kept up to 30 days), Dots3-Note
               Preview (AtlasCloud, which does not publish how long it keeps prompts) and XingChen's Xing4.0 (Phala).
               Each request asks OpenRouter to deny data collection. Google's Gemma 4 26B and 31B (Google AI Studio,
-              kept up to 55 days) are listed only for an OpenRouter account of your own, because Google's terms limit
-              users in the EEA, Switzerland and the UK to paid use, and Vector does not check where you are when it
-              provides free models.
+              kept up to 55 days) are also provided by Vector, with a small “US only” tag in model lists. This is a
+              label only; Vector does not check your location.
             </li>
             <li>
               <strong>May train on your prompts:</strong> Poolside's Laguna S 2.1 and XS 2.1 (free until 31 October
-              2026), Liquid's LFM2.5-2.6B, Thinking Machines' Inkling and Inkling Small, and OpenRouter's Free Models
-              Router. Their providers may log your prompts, code and outputs and use them to train their models. The
-              Free Models Router sends each request to a free model OpenRouter picks at random; Vector asks OpenRouter
-              to skip NVIDIA's trial endpoints, but OpenRouter doesn't say whether the router honours that. A free model
-              Vector has not yet reviewed carries the same label, and its requests still ask OpenRouter to deny data
-              collection.
+              2026), Liquid's LFM2.5-2.6B, Thinking Machines' Inkling and Inkling Small, NVIDIA's Nemotron models,
+              OpenRouter's Free Models Router, and every free model Vector has not yet reviewed, such as Recursive's
+              Flint. Their providers may log your prompts, code and outputs and use them to train their models. The
+              Free Models Router sends each request to a free model OpenRouter picks at random.
             </li>
           </ul>
           <p>

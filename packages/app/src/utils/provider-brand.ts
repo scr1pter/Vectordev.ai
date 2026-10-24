@@ -5,7 +5,9 @@ import {
   freeModelName,
   freeModelSource,
   freeModelTrainingLabel,
+  freeModelRegionLabel,
   freeModelChoices,
+  freeModelOrder,
 } from "@vectordevai/core/free-model-choice"
 import type { FreeDataPolicy } from "@vectordevai/schema/free-model"
 import { providerAllowed, providerUsable } from "@vectordevai/schema/provider-policy"
@@ -226,6 +228,7 @@ export function modelAriaLabel(model: PickerModel, now: number) {
     isNewRelease(model, now) ? "new" : "",
     freeModelSource(model) ?? access.spoken,
     freeModelTrainingLabel(model) ?? "",
+    freeModelRegionLabel(model) ?? "",
   ]
     .filter(Boolean)
     .join(", ")
@@ -249,6 +252,7 @@ export function modelTitle(model: PickerModel) {
     releaseTitle(model),
     freeModelSource(model) ?? access.title,
     freeModelTrainingLabel(model) ?? "",
+    freeModelRegionLabel(model) ?? "",
   ]
     .filter(Boolean)
     .join("\n")
@@ -353,8 +357,11 @@ export function buildModelSections<T extends PickerModel>(input: {
         policy: free.some(freeModelMayTrain)
           ? undefined
           : { label: "No-training policy", title: FREE_MODELS_DATA_POLICY },
+        // Models whose providers don't train on prompts first, then those labelled "May train on your prompts", and
+        // the free router last; within each, by release and name, with a model's shared copy ahead of the user's own.
         items: free.sort(
           (a, b) =>
+            freeModelOrder(a, b) ||
             byRelease(a, b) ||
             Number(a.freeModel?.source === "openrouter") - Number(b.freeModel?.source === "openrouter"),
         ),

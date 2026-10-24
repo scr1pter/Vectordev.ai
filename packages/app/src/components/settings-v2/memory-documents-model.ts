@@ -1031,10 +1031,15 @@ export const MODEL_DONE = {
   resume: "Resumed.",
 } as const
 
+/** Whether the model itself is still downloading or being checked, before document embedding can start. */
+export function modelBusy(status: Pick<MemoryModelStatus, "state"> | undefined) {
+  return status?.state === "downloading" || status?.state === "verifying"
+}
+
 /** Whether the page keeps asking about the model: while it downloads or checks, or embeds what is left. */
 export function modelPolling(status: Pick<MemoryModelStatus, "state" | "embedded" | "paused"> | undefined) {
   if (!status) return false
-  if (status.state === "downloading" || status.state === "verifying") return true
+  if (modelBusy(status)) return true
   return status.state === "ready" && !status.paused && !!status.embedded && status.embedded.done < status.embedded.total
 }
 

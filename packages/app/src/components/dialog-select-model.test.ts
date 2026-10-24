@@ -644,6 +644,54 @@ describe("Free models inside of Vector", () => {
     expect(freeModelTrainingLabel(router)).toBe(FREE_MODEL_TRAINING_LABEL)
     expect(modelTitle(router)).not.toContain("at random")
   })
+  test("every served model is listed, no-training ones first and the free router last, NVIDIA's and new ones too", () => {
+    // Owner, 23 October 2026: all of OpenRouter's free models, NVIDIA's included, and new ones as they appear.
+    const vector: Provider = { id: "vector", name: "Vector", source: "custom" }
+    const free = (
+      id: string,
+      name: string,
+      dataPolicy: "may-train" | "no-training",
+      extra: Partial<PickerModel> = {},
+    ) =>
+      model(vector, id, name, {
+        freeModel: { source: "shared", dataPolicy },
+        cost: { input: 0, output: 0 },
+        release_date: "",
+        capabilities: { toolcall: true, output: { text: true } },
+        ...extra,
+      })
+    const served = [
+      free("openrouter/free", "Free Models Router", "may-train"),
+      free("thinkingmachines/inkling:free", "Thinking Machines: Inkling", "may-train"),
+      free("nvidia/nemotron-3.5-lightning:free", "NVIDIA: Nemotron 3.5 Lightning", "may-train"),
+      free("recursive/flint-v1.0:free", "Recursive: Flint", "may-train"),
+      free("xingchen-agi/xing4.0-29b-a4b:free", "XingChen: Xing4.0 29B A4B", "no-training"),
+      free("cohere/north-mini-code:free", "Cohere: North Mini Code", "no-training"),
+    ]
+    const own = {
+      ...served[2],
+      provider: { id: "openrouter", name: "OpenRouter", source: "api" },
+      freeModel: { source: "openrouter" as const, dataPolicy: "may-train" as const },
+    }
+    const sections = buildModelSections({ models: [...served, own], now: NOW })
+    expect(sections.map((section) => section.label)).toEqual(["Free models inside of Vector"])
+    expect(sections[0].items.map(pickerModelKey)).toEqual([
+      "vector:cohere/north-mini-code:free",
+      "vector:xingchen-agi/xing4.0-29b-a4b:free",
+      "vector:nvidia/nemotron-3.5-lightning:free",
+      "openrouter:nvidia/nemotron-3.5-lightning:free",
+      "vector:recursive/flint-v1.0:free",
+      "vector:thinkingmachines/inkling:free",
+      "vector:openrouter/free",
+    ])
+    // Only the label marks the ones that may train; no-training rows carry nothing.
+    expect(sections[0].items.map((item) => freeModelTrainingLabel(item) ?? "")).toEqual([
+      "",
+      "",
+      ...Array(5).fill(FREE_MODEL_TRAINING_LABEL),
+    ])
+    for (const item of sections[0].items) expect(modelTitle(item)).not.toMatch(/NVIDIA's|trial|evaluation|reviewed/i)
+  })
   test("OFF metadata removal hides the section; ordinary zero-price models do not recreate it", () => {
     const sections = buildModelSections({ models: [{ ...own, freeModel: undefined }], now: NOW })
     expect(sections.some((section) => section.kind === "free")).toBe(false)
@@ -902,4 +950,17 @@ describe("Off in Vector Local", () => {
     expect(offInLocalProviders(undefined)).toEqual([])
     expect(offInLocalProviders([providerUnavailable("anthropic", "disabled")])).toEqual([])
   })
+})
+
+test("Gemma free rows announce the US only tag without changing model identity or enabling paid copies", () => {
+  const gemma: PickerModel = {
+    id: "google/gemma-4-31b-it:free",
+    name: "Google: Gemma 4 31B (free)",
+    provider: { id: "vector", name: "Vector" },
+    freeModel: { source: "shared", dataPolicy: "no-training" },
+  }
+  expect(modelAriaLabel(gemma, NOW)).toContain("US only")
+  expect(modelTitle(gemma)).toContain("US only")
+  expect(pickerModelKey(gemma)).toBe("vector:google/gemma-4-31b-it:free")
+  expect(modelTitle({ ...gemma, freeModel: undefined })).not.toContain("US only")
 })

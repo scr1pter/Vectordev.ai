@@ -9,6 +9,7 @@ import {
   checkLabel,
   embeddedLabel,
   megabytes,
+  modelBusy,
   modelHeadline,
   modelLicense,
   modelOffer,
@@ -24,7 +25,7 @@ import {
 // once it is ready it runs on this computer with no network. Until then search uses keywords and code links.
 export function SettingsMemorySearchModel(props: { client: () => VectorClient | undefined }) {
   const [version, setVersion] = createSignal(0)
-  const [note, setNote] = createSignal<{ tone: "ok" | "error"; text: string }>()
+  const [note, setNote] = createSignal<{ tone: "ok" | "error"; text: string; download?: boolean }>()
   const refresh = () => setVersion((value) => value + 1)
 
   const [status, { mutate }] = createResource(
@@ -57,13 +58,13 @@ export function SettingsMemorySearchModel(props: { client: () => VectorClient | 
       return
     }
     mutate(result.data)
-    setNote({ tone: "ok", text: done })
+    setNote({ tone: "ok", text: done, download: payload.action === "download" })
     refresh()
   }
 
   const current = () => status.latest
   const ready = () => current()?.state === "ready"
-  const busy = () => current()?.state === "downloading" || current()?.state === "verifying"
+  const busy = () => modelBusy(current())
 
   return (
     <div class="settings-v2-card settings-v2-card--wide" data-component="settings-memory-search-model">
@@ -96,7 +97,7 @@ export function SettingsMemorySearchModel(props: { client: () => VectorClient | 
         <Show when={current()?.downloads === false && !ready()}>
           <p class="settings-memory-warning">{MODEL_DOWNLOADS_OFF}</p>
         </Show>
-        <Show when={note()}>
+        <Show when={!note()?.download || busy() ? note() : undefined}>
           {(item) => (
             <p class={item().tone === "error" ? "settings-memory-error" : "settings-memory-notice"} role="status">
               {item().text}

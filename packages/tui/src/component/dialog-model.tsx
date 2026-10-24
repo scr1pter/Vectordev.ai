@@ -7,6 +7,7 @@ import {
   FREE_MODEL_TRAINING_DISCLAIMER,
   FREE_MODEL_TRAINING_SCOPE,
   freeModelTrainingLabel,
+  freeModelRegionLabel,
   freeModelTrainingRefusal,
   freeModelChoices,
   type FreeModelChoice,
@@ -99,7 +100,9 @@ export function DialogModel(props: { providerID?: string }) {
               title,
               releaseDate: info.release_date,
               description: info.freeModel
-                ? [freeModelSource(info), freeModelTrainingLabel(info)].filter(Boolean).join(" · ")
+                ? [freeModelSource(info), freeModelTrainingLabel(info), freeModelRegionLabel(info)]
+                    .filter(Boolean)
+                    .join(" · ")
                 : favorites.some((item) => item.providerID === provider.id && item.modelID === model)
                   ? "(Favorite)"
                   : undefined,
