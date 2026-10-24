@@ -147,7 +147,12 @@ export type Card = {
   readonly deep: boolean
   readonly deepEstimate?: string
   readonly search: { readonly provider: string; readonly host?: string; readonly reason?: string }
-  readonly preferences: { readonly prefer: readonly string[]; readonly avoid: readonly string[] }
+  /** The user's own sites and format: from their config, and from what they ticked Always for on an earlier card. */
+  readonly preferences: {
+    readonly prefer: readonly string[]
+    readonly avoid: readonly string[]
+    readonly format?: Research.Format
+  }
   readonly offline: boolean
 }
 

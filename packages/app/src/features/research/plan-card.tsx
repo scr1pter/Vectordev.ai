@@ -52,9 +52,11 @@ export function ResearchPlanCard(props: { request: QuestionRequest; data: PlanCa
   const [steer, setSteer] = createSignal("")
   const [setup, setSetup] = createSignal(false)
   const problem = createMemo(() => planProblem(draft))
-  const learned = createMemo(
-    () => new Set([...(card()?.preferences.prefer ?? []), ...(card()?.preferences.avoid ?? [])]),
-  )
+  // The user's own sites, which the card marks "from your preferences", for each list.
+  const learned = createMemo(() => ({
+    prefer_domains: new Set(card()?.preferences.prefer ?? []),
+    avoid_domains: new Set(card()?.preferences.avoid ?? []),
+  }))
   const edited = (key: Remembered) => {
     if (key === "format") return draft.format !== proposed().format
     const before = proposed()[key] ?? []
@@ -107,11 +109,11 @@ export function ResearchPlanCard(props: { request: QuestionRequest; data: PlanCa
             {(item) => (
               <span
                 data-slot="research-tag"
-                data-learned={learned().has(item) ? "true" : undefined}
-                title={learned().has(item) ? "From your preferences" : undefined}
+                data-learned={learned()[field].has(item) ? "true" : undefined}
+                title={learned()[field].has(item) ? "From your preferences" : undefined}
               >
                 {item}
-                <Show when={learned().has(item)}>
+                <Show when={learned()[field].has(item)}>
                   <span data-slot="research-muted">from your preferences</span>
                 </Show>
                 <button
@@ -339,6 +341,9 @@ export function ResearchPlanCard(props: { request: QuestionRequest; data: PlanCa
                   )}
                 </For>
               </div>
+              <Show when={card()?.preferences.format && draft.format === card()?.preferences.format}>
+                <span data-slot="research-muted">From your preferences</span>
+              </Show>
               <Always field="format" />
             </div>
           </div>
