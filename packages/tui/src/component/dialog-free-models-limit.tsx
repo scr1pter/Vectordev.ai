@@ -4,6 +4,7 @@ import {
   freeModelsLimitNotice,
   freeModelsLimitTitle,
   freeModelsResetSentence,
+  freeModelsTokensRanOut,
   type FreeModelsLimitNotice,
 } from "@vectordevai/core/free-model-choice"
 import { useSDK } from "../context/sdk"
@@ -17,8 +18,8 @@ import { useTheme } from "../context/theme"
 import { DialogProvider } from "./dialog-provider"
 
 /**
- * Shown when the shared allowance stops a turn: when it is expected to reset, and the user's own provider keys in
- * general. It never asks the user to connect an OpenRouter account (owner decision, 17 October 2026); one already
+ * Shown when a free-model limit stops a turn: when to try again or when more free tokens are available, and the
+ * user's own provider keys in general. It never asks the user to connect an OpenRouter account (owner decision, 17 October 2026); one already
  * connected can still continue the same turn.
  */
 export function DialogFreeModelsLimit(props: { sessionID: string; limit: FreeModelsLimitNotice }) {
@@ -85,7 +86,9 @@ export function DialogFreeModelsLimit(props: { sessionID: string; limit: FreeMod
             ]
           : []),
         {
-          title: "Wait until more free tokens are available",
+          title: freeModelsTokensRanOut(props.limit)
+            ? "Wait until more free tokens are available"
+            : "Wait and try again later",
           value: "wait",
           onSelect: () => dialog.clear(),
         },

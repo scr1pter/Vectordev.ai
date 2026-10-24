@@ -17,8 +17,8 @@ import { useLanguage } from "@/context/language"
 import { formatServerError } from "@/utils/server-errors"
 
 /**
- * Shown when the shared allowance stops a turn: when it is expected to reset, and the user's own provider keys in
- * general. It never asks the user to connect an OpenRouter account (owner decision, 17 October 2026); one already
+ * Shown when a free-model limit stops a turn: when to try again or when more free tokens are available, and the
+ * user's own provider keys in general. It never asks the user to connect an OpenRouter account (owner decision, 17 October 2026); one already
  * connected can still continue the same turn.
  */
 export function FreeModelsLimit(props: {
