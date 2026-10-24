@@ -41,6 +41,7 @@ import { freeModelMayTrain, type FreeModelChoice } from "@vectordevai/core/free-
 import { cachedSpendPolicy, promptRunBudget } from "@/features/economics/spend-limits-api"
 import { AGENT as RESEARCH, sizeOf, type Depth } from "@/features/research/research-model"
 import type { Research } from "@vectordevai/schema/research"
+import { BrainSchema } from "@vectordevai/core/brain/schema"
 
 type PendingPrompt = {
   abort: AbortController
@@ -103,6 +104,8 @@ export type FollowupDraft = {
   size?: "chat" | "standard" | "thorough"
   // Deep research's Sources chip: where the run may look, which the plan the model proposes keeps.
   research?: { scope?: Research.Scope }
+  // Where the prompt's text holds what the user pasted, as `[start, end]` offsets, so Vector never learns from it.
+  pasted?: [number, number][]
 }
 
 type FollowupSendInput = {
@@ -188,10 +191,13 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
         configured: input.sync.data.config.budget?.run,
         policy: await cachedSpendPolicy(),
       })
+      const args = tail.join(" ")
+      const pasted = within(input.draft.pasted ?? [], text.length - args.length, args.length)
       await input.client.session.command({
         sessionID: input.draft.sessionID,
         command: cmd,
-        arguments: tail.join(" "),
+        arguments: args,
+        ...(pasted.length ? { pasted } : {}),
         agent: input.draft.agent,
         model: `${input.draft.model.providerID}/${input.draft.model.modelID}`,
         variant: input.draft.variant,
@@ -214,18 +220,21 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
   }
 
   const messageID = input.messageID ?? Identifier.ascending("message")
-  const baseParts = withResearchOptions(
-    buildRequestParts({
-      prompt: input.draft.prompt,
-      context: input.draft.context,
-      images,
-      text,
-      sessionID: input.draft.sessionID,
-      messageID,
-      sessionDirectory: input.draft.sessionDirectory,
-      syntheticSlots: SYNTHETIC_SLOTS,
-    }),
-    agent === RESEARCH ? input.draft.research : undefined,
+  const baseParts = withPasted(
+    withResearchOptions(
+      buildRequestParts({
+        prompt: input.draft.prompt,
+        context: input.draft.context,
+        images,
+        text,
+        sessionID: input.draft.sessionID,
+        messageID,
+        sessionDirectory: input.draft.sessionDirectory,
+        syntheticSlots: SYNTHETIC_SLOTS,
+      }),
+      agent === RESEARCH ? input.draft.research : undefined,
+    ),
+    input.draft.pasted,
   )
 
   const message: Message = {
@@ -333,6 +342,135 @@ function withResearchOptions(built: ReturnType<typeof buildRequestParts>, resear
 
 /** Where the engine reads `vector run --research`'s choices and the composer's (engine `ResearchRun.OPTIONS`). */
 const RESEARCH_OPTIONS = "vector.research"
+
+/**
+ * The typed text carries the spans the user pasted into it as `vector.pasted` (BrainSchema.PASTED), which the engine
+ * leaves out of what Vector learns about the user: an email, a log or someone else's message vouches for nothing. The
+ * composer puts pastes inline, so they stay in the one text part the message shows and restores, and its mentions keep
+ * their offsets. The echo carries them too, so the two stay the same part.
+ */
+function withPasted(built: ReturnType<typeof buildRequestParts>, pasted: FollowupDraft["pasted"]) {
+  if (!pasted?.length) return built
+  const metadata = { [BrainSchema.PASTED]: pasted }
+  const [typed, ...rest] = built.requestParts
+  const [echo, ...echoed] = built.optimisticParts
+  if (typed?.type !== "text" || echo?.type !== "text") return built
+  return {
+    ...built,
+    requestParts: [{ ...typed, metadata: { ...typed.metadata, ...metadata } }, ...rest],
+    optimisticParts: [{ ...echo, metadata: { ...echo.metadata, ...metadata } }, ...echoed],
+  }
+}
+
+// The spans of a text that fall in its last `length` characters, from `start`, made relative to them: a slash
+// command's arguments.
+function within(spans: readonly [number, number][], start: number, length: number) {
+  return spans.flatMap(([from, to]): [number, number][] => {
+    const begin = Math.max(from, start) - start
+    const end = Math.min(to, start + length) - start
+    return begin < end ? [[begin, end]] : []
+  })
+}
+
+// What the user pasted into a composer of this window, newest last, to find in what they send. Kept in memory only, and
+// past sends too, so a message restored after a failed send, taken back from history or brought back by Undo still
+// marks its pastes.
+const pastes: string[] = []
+const PASTES = 64
+const PASTE_CHARS = 4_000_000
+
+/** Notes text the user pasted, so the message that carries it marks it as pasted. */
+export function rememberPaste(text: string) {
+  const clean = cleanPaste(text)
+  if (!clean) return
+  pastes.push(clean)
+  while (pastes.length > PASTES || pastes.reduce((sum, item) => sum + item.length, 0) > PASTE_CHARS) pastes.shift()
+}
+
+function cleanPaste(text: string) {
+  return text
+    .replace(/\r\n?/g, "\n")
+    .replace(/\u200B/g, "")
+    .replaceAll("\u00a0", " ")
+    .trim()
+}
+
+/**
+ * Where a message's text holds what the user pasted, as sorted `[start, end]` spans. A paste is found whole, or, once
+ * edited, line by line. A pasted line the user changed where it sits cannot be told from their own words, so when a
+ * paste is only partly found and a run of three of its words is left among the typed ones, the whole text is marked:
+ * it then vouches for none of its words. Text pasted and deleted again marks nothing.
+ */
+export function pastedSpans(text: string, pasted: readonly string[] = pastes): [number, number][] {
+  const plain = text.replaceAll("\u00a0", " ")
+  const taken: [number, number][] = []
+  const take = (needle: string) => {
+    for (let at = plain.indexOf(needle); at !== -1; at = plain.indexOf(needle, at + 1)) {
+      const end = at + needle.length
+      if (taken.some(([start, stop]) => at < stop && end > start)) continue
+      taken.push([at, end])
+      return true
+    }
+    return false
+  }
+  // Longest first, so a short paste never takes the place of a long one that holds it.
+  const missing = pasted
+    .map(cleanPaste)
+    .filter(Boolean)
+    .toSorted((a, b) => b.length - a.length)
+    .flatMap((paste) => {
+      if (take(paste)) return []
+      const lines = paste
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+      // A long log changed somewhere is still that log: found by one of its first long lines, it marks the whole text.
+      if (lines.length > MANY_LINES)
+        return lines
+          .filter((line) => line.length >= 20)
+          .slice(0, 50)
+          .some((line) => plain.includes(line))
+          ? [WHOLE]
+          : []
+      const found = lines.map(take)
+      if (!found.some(Boolean)) return []
+      return lines.filter((_, index) => !found[index])
+    })
+  if (missing.includes(WHOLE)) return text.length ? [[0, text.length]] : []
+  // What is left between the pastes found, each stretch on its own, so no run of words spans a paste.
+  const left = gaps(plain, merge(taken)).map((gap) => ` ${words(gap).join(" ")} `)
+  const edited = missing.some((line) => {
+    const run = words(line)
+    return run
+      .slice(0, Math.max(0, run.length - 2))
+      .some((_, at) => left.some((gap) => gap.includes(` ${run.slice(at, at + 3).join(" ")} `)))
+  })
+  if (edited) return [[0, text.length]]
+  return merge(taken)
+}
+
+const MANY_LINES = 400
+const WHOLE = "\u0000whole"
+
+function words(text: string) {
+  return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []
+}
+
+// The text outside sorted spans that do not overlap.
+function gaps(text: string, spans: readonly [number, number][]) {
+  const ends = [0, ...spans.flatMap(([start, end]) => [start, end]), text.length]
+  return ends.flatMap((at, index) => (index % 2 === 0 ? [text.slice(at, ends[index + 1])] : []))
+}
+
+function merge(spans: readonly [number, number][]) {
+  return spans
+    .toSorted((a, b) => a[0] - b[0])
+    .reduce<[number, number][]>((out, span) => {
+      const last = out.at(-1)
+      if (last && span[0] <= last[1]) return [...out.slice(0, -1), [last[0], Math.max(last[1], span[1])]]
+      return [...out, [span[0], span[1]]]
+    }, [])
+}
 
 type PromptSubmitInput = {
   prompt: ReturnType<typeof usePrompt>
@@ -714,6 +852,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     }
     if (isFreeModelSelection(routed.model) && firstFreeModelPolicyNotice())
       showToast({ ...FREE_MODEL_POLICY_NOTICE, duration: 15_000 })
+    const pasted = pastedSpans(text)
     const draft: FollowupDraft = {
       sessionID: session.id,
       sessionDirectory,
@@ -724,6 +863,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       variant,
       difficulty,
       executionMode,
+      ...(pasted.length ? { pasted } : {}),
       ...(judge ? { judge } : {}),
       ...(requestedExecutionMode === "quick" && agent === "quick" ? { size: "chat" as const } : {}),
       ...(researchSize ? { size: researchSize } : {}),
@@ -787,11 +927,14 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       const customCommand = sync().data.command.find((c) => c.name === commandName)
       if (customCommand) {
         clearInput()
+        const typed = args.join(" ")
+        const spans = within(pasted, text.length - typed.length, typed.length)
         client.session
           .command({
             sessionID: session.id,
             command: commandName,
-            arguments: args.join(" "),
+            arguments: typed,
+            ...(spans.length ? { pasted: spans } : {}),
             agent,
             model: `${model.providerID}/${model.modelID}`,
             variant,

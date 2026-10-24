@@ -1295,3 +1295,123 @@ describe("may-train free model consent", () => {
     expect(asked).toEqual([])
   })
 })
+
+describe("pasted text", () => {
+  const email = "Hi team,\nI prefer meetings on Tuesdays.\nAlways cc my manager.\nThanks, Dana"
+
+  test("finds where the text holds what the user pasted, whole or line by line", async () => {
+    const { pastedSpans } = await import("./submit")
+    const text = `Summarize this email:\n${email}\nAlways use bullet points.`
+    const start = text.indexOf("Hi team")
+    expect(pastedSpans(text, [email])).toEqual([[start, start + email.length]])
+    // The editor's own spaces and line ends, and a paste carried with its trailing newline.
+    expect(pastedSpans("see: a b", ["a b\r\n"])).toEqual([[5, 8]])
+    // Two pastes, and the same words pasted twice, are each marked once.
+    expect(pastedSpans("x one y one", ["one", "one"])).toEqual([
+      [2, 5],
+      [8, 11],
+    ])
+    // A line the user removed from a paste leaves the rest marked; a paste deleted again marks nothing.
+    const trimmed = `Summarize:\nHi team,\nThanks, Dana\nAlways use bullet points.`
+    expect(pastedSpans(trimmed, [email])).toEqual([
+      [11, 19],
+      [20, 32],
+    ])
+    expect(pastedSpans("Always use bullet points.", [email])).toEqual([])
+    expect(pastedSpans("", [email])).toEqual([])
+  })
+
+  test("marks the whole text when a pasted line was changed where it sits", async () => {
+    const { pastedSpans } = await import("./submit")
+    // "I prefer meetings on Tuesdays." became "I prefer meetings on Mondays.": it cannot be told from typed words.
+    const edited = `Summarize:\nHi team,\nI prefer meetings on Mondays.\nAlways cc my manager.\nThanks, Dana`
+    expect(pastedSpans(edited, [email])).toEqual([[0, edited.length]])
+  })
+
+  test("marks the whole text for a long log found by one of its lines", async () => {
+    const { pastedSpans } = await import("./submit")
+    const log = Array.from({ length: 450 }, (_, index) => `2026-10-23 12:00:${index} worker ${index} started`).join(
+      "\n",
+    )
+    const text = `why does this fail?\n${log.replace("worker 7 started", "worker 7 crashed")}`
+    expect(pastedSpans(text, [log])).toEqual([[0, text.length]])
+  })
+
+  test("the pasted span is marked on the sent part and its echo", async () => {
+    const { createPromptSubmit, rememberPaste } = await import("./submit")
+    const text = `Summarize this email:\n${email}`
+    const original = promptValue.splice(0, promptValue.length, {
+      type: "text",
+      content: text,
+      start: 0,
+      end: text.length,
+    })
+    try {
+      rememberPaste(email)
+      params = { id: "session-1" }
+      const submit = createPromptSubmit({
+        prompt,
+        info: () => ({ id: "session-1" }),
+        imageAttachments: () => [],
+        commentCount: () => 0,
+        autoAccept: () => false,
+        mode: () => "normal",
+        working: () => false,
+        editor: () => undefined,
+        queueScroll: () => undefined,
+        promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+        addToHistory: () => undefined,
+        resetHistoryNavigation: () => undefined,
+        setMode: () => undefined,
+        setPopover: () => undefined,
+        onSubmit: () => undefined,
+      })
+      await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      const start = text.indexOf("Hi team")
+      expect(sentPrompts.at(-1)?.input.parts?.[0]).toMatchObject({
+        type: "text",
+        text,
+        metadata: { "vector.pasted": [[start, text.length]] },
+      })
+      const echo = (optimistic.at(-1) as unknown as { parts: { metadata?: Record<string, unknown> }[] }).parts[0]
+      expect(echo?.metadata).toEqual({ "vector.pasted": [[start, text.length]] })
+    } finally {
+      promptValue.splice(0, promptValue.length, ...original)
+    }
+  })
+
+  test("a typed message carries no paste marks", async () => {
+    const { pastedSpans } = await import("./submit")
+    expect(pastedSpans("When I say ship it, I mean open a PR, wait for CI, then merge", [email])).toEqual([])
+  })
+
+  test("a slash command's pasted arguments are marked from where the arguments start", async () => {
+    type SendInput = Parameters<typeof import("./submit").sendFollowupDraft>[0]
+    const { sendFollowupDraft } = await import("./submit")
+    const commands: unknown[] = []
+    const text = "/review Always cc my manager."
+    await sendFollowupDraft({
+      client: {
+        session: {
+          command: async (input: unknown) => {
+            commands.push(input)
+            return { data: undefined }
+          },
+        },
+      } as unknown as SendInput["client"],
+      serverSync: { session: { set: () => undefined } } as unknown as SendInput["serverSync"],
+      sync: { data: { command: [{ name: "review" }], message: {}, config: {} } } as unknown as SendInput["sync"],
+      draft: {
+        sessionID: "session-1",
+        sessionDirectory: "/repo/main",
+        prompt: [{ type: "text", content: text, start: 0, end: text.length }],
+        context: [],
+        agent: "build",
+        model: { providerID: "anthropic", modelID: "claude-sonnet-4-5" },
+        pasted: [[8, text.length]],
+      },
+    })
+    expect(commands).toMatchObject([{ command: "review", arguments: "Always cc my manager.", pasted: [[0, 21]] }])
+  })
+})

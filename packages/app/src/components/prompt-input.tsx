@@ -63,7 +63,8 @@ import {
   type PromptHistoryStoredEntry,
   promptLength,
 } from "./prompt-input/history"
-import { createPromptSubmit, type FollowupDraft } from "./prompt-input/submit"
+import { createPromptSubmit, rememberPaste, type FollowupDraft } from "./prompt-input/submit"
+import { watchLearned } from "@/features/memory/learned"
 import { DialogFreeModelTraining } from "./dialog-free-model-training"
 import { acceptFreeModelTraining, freeModelTrainingGate } from "@/utils/free-model-policy-notice"
 import { PromptPopover, type AtOption, type SlashCommand } from "./prompt-input/slash-popover"
@@ -1522,6 +1523,14 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   createEffect(() => {
     if (blank()) setPasted(undefined)
   })
+  // What the user pastes is someone else's words (an email, a log), so the message marks where it sits and Vector never
+  // learns from it.
+  const paste = (event: ClipboardEvent) => {
+    rememberPaste(event.clipboardData?.getData("text/plain") ?? "")
+    return handlePaste(event)
+  }
+  // The "Learned 2 things" chip under a reply reads what Vector learned from the events of this composer's sessions.
+  createEffect(() => watchLearned(sdk().event))
 
   // A PDF attached from this computer, to the app's own engine, is counted by the engine (pages and tokens), so the
   // composer can suggest remembering it instead of sending every page. Anything else is judged by its size.
@@ -2118,7 +2127,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     // @ts-expect-error
                     autocomplete="off"
                     onInput={handleInput}
-                    onPaste={handlePaste}
+                    onPaste={paste}
                     onCompositionStart={handleCompositionStart}
                     onCompositionEnd={handleCompositionEnd}
                     onFocus={handleFocus}
@@ -2529,7 +2538,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   // @ts-expect-error
                   autocomplete="off"
                   onInput={handleInput}
-                  onPaste={handlePaste}
+                  onPaste={paste}
                   onCompositionStart={handleCompositionStart}
                   onCompositionEnd={handleCompositionEnd}
                   onFocus={handleFocus}
