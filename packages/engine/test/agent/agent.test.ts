@@ -7,6 +7,7 @@ import path from "path"
 import { disposeAllInstances, TestInstance, trustWorkspace } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { Agent } from "../../src/agent/agent"
+import { GENERAL_SUBAGENT, NATIVE_SPECIALISTS } from "../../src/agent/subagent-kind"
 import { Auth } from "../../src/auth"
 import { Config } from "../../src/config/config"
 import { RuntimeFlags } from "../../src/effect/runtime-flags"
@@ -465,6 +466,45 @@ it.instance(
       expect(names).toContain("build")
     }),
   { trusted: true, config: { agent: { general: { disable: true } } } },
+)
+
+it.instance("NATIVE_SPECIALISTS names every Subagent specialist that ships with Vector", () =>
+  Effect.gen(function* () {
+    const specialists = (yield* load((svc) => svc.list()))
+      .filter((agent) => agent.native === true && agent.mode === "subagent" && agent.name !== GENERAL_SUBAGENT)
+      .map((agent) => agent.name)
+      .toSorted()
+    expect(specialists).toEqual([...NATIVE_SPECIALISTS])
+  }),
+)
+
+it.instance(
+  "turning every specialist off keeps the main agents, general and Vector's helpers",
+  () =>
+    Effect.gen(function* () {
+      const names = (yield* load((svc) => svc.list())).map((agent) => agent.name)
+      for (const name of NATIVE_SPECIALISTS) {
+        expect(names).not.toContain(name)
+        expect(yield* load((svc) => svc.get(name))).toBeUndefined()
+      }
+      for (const name of [
+        "build",
+        "plan",
+        "general",
+        "quick",
+        "autocomplete",
+        "compaction",
+        "title",
+        "summary",
+        "distill",
+      ]) {
+        expect(names).toContain(name)
+      }
+    }),
+  {
+    trusted: true,
+    config: { agent: Object.fromEntries(NATIVE_SPECIALISTS.map((name) => [name, { disable: true }])) },
+  },
 )
 
 it.instance(

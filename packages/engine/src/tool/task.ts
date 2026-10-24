@@ -12,6 +12,7 @@ import { deriveSubagentSessionPermission } from "../agent/subagent-permissions"
 import { Permission } from "@/permission"
 import {
   GENERAL_SUBAGENT,
+  NATIVE_SPECIALISTS,
   resolveSubagentType,
   subagentKind,
   subagentTitle,
@@ -738,18 +739,32 @@ export const TaskTool = Tool.define(
       // A disabled general (agent.general.disable) is missing from the agent list altogether, so
       // fail before any permission prompt whether it was omitted, named, aliased or resumed.
       const generalOff = subagentType === GENERAL_SUBAGENT && !known.has(GENERAL_SUBAGENT)
+      // So is a Subagent specialist turned off there (agent.<name>.disable), and an agent that never existed.
+      const missing = !generalOff && !known.has(subagentType)
       // Naming one agent lets the user launch that agent without a prompt, not every subagent this turn.
       const invoked = Array.isArray(ctx.extra?.invokedAgents) && ctx.extra.invokedAgents.includes(subagentType)
-      if (generalOff || (!requested && !invoked)) {
+      if (generalOff || missing || (!requested && !invoked)) {
         // An omitted type means the general Subagent only where the caller may launch it.
         const caller = yield* agent.get(ctx.agent)
         const denied = (name: string) =>
           Permission.evaluate(id, name, caller?.permission ?? [], parent.permission ?? []).action === "deny"
+        const permitted = agents
+          .filter((item) => item.mode !== "primary" && !denied(item.name))
+          .map((item) => item.name)
+          .toSorted()
+        if (missing) {
+          const reason = (NATIVE_SPECIALISTS as readonly string[]).includes(subagentType)
+            ? `The ${subagentType} Subagent specialist is turned off in Vector settings (agent.${subagentType}.disable).`
+            : `Unknown agent type: ${subagentType} is not a valid agent type.`
+          return yield* Effect.fail(
+            new Error(
+              permitted.length > 0
+                ? `${reason} Set subagent_type to one of: ${permitted.join(", ")}.`
+                : `${reason} No other subagent is available to the ${ctx.agent} agent, so do this work yourself.`,
+            ),
+          )
+        }
         if (generalOff || denied(GENERAL_SUBAGENT)) {
-          const permitted = agents
-            .filter((item) => item.mode !== "primary" && !denied(item.name))
-            .map((item) => item.name)
-            .toSorted()
           const reason = generalOff
             ? "The general Subagent is turned off in Vector settings (agent.general.disable)."
             : `The general Subagent is not available to the ${ctx.agent} agent.`
