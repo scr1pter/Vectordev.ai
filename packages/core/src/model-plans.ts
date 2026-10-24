@@ -18,6 +18,10 @@ export const CATALOG_URL = `${API_URL}/models`
 export const CHAT_URL = `${API_URL}/chat`
 export const PURCHASE_URL = ModelPlanStatus.PURCHASE_URL
 
+// Codium's catalog, status and offers come from vectordev.ai, labelled so Vector Local decides them (blocked unless
+// allowed). Node callers hand it to ModelPlanStatus's requests, which the app also runs in the browser with its own fetch.
+export const plansCatalog = (url: string, init: RequestInit) => Egress.fetch("plans-catalog", url, init)
+
 // No prices: a Codium step spends credits, which Vector counts by tokens and never in dollars that could be added up.
 export const Model = Schema.Struct({
   id: Schema.String,
@@ -171,7 +175,7 @@ export const node = makeGlobalNode({
       // (StartupHold) keeps them back until the person has chosen how to run models; nothing is kept while it holds,
       // so the next read after it reaches vectordev.ai.
       disabled: () => Flag.VECTOR_DISABLE_MODELS_FETCH || Egress.policy().enabled || StartupHold.held(),
-      request: (url, init) => Egress.fetch("plans-catalog", url, init),
+      request: plansCatalog,
     })
     return Service.of({
       catalog: (token, options) => Effect.promise(() => client.catalog(token, options)),
