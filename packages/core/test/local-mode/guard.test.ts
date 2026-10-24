@@ -700,8 +700,9 @@ describe("EgressGuard.install with Vector Local on", () => {
     const saved = ["HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "no_proxy"].map((key) => [key, process.env[key]] as const)
     process.env.HTTPS_PROXY = `http://127.0.0.1:${proxy.port}`
     process.env.HTTP_PROXY = `http://127.0.0.1:${proxy.port}`
-    process.env.NO_PROXY = "intranet.example"
+    // Windows aliases these names, so clear the lowercase spelling before setting the user's list.
     process.env.no_proxy = ""
+    process.env.NO_PROXY = "intranet.example"
     const body = (request: http.ClientRequest) =>
       new Promise<string>((resolve, reject) => {
         request.on("response", (response: http.IncomingMessage) => {
@@ -766,8 +767,8 @@ describe("EgressGuard.install with Vector Local on", () => {
       }
       // A listed server on the company's network, by a name only a wildcard covered.
       current.policy = LocalPolicy.resolve({ global: { enabled: true, endpoints: ["http://gpu.internal:8000"] } })
-      process.env.NO_PROXY = "*.internal"
       process.env.no_proxy = ""
+      process.env.NO_PROXY = "*.internal"
       const gpu = new URL("http://gpu.internal:8000/v1/chat/completions")
       expect(EgressGuard.carried(gpu)).toBe(true)
       EgressGuard.direct(gpu.hostname)

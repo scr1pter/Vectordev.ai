@@ -718,7 +718,7 @@ describe("the network log on disk", () => {
     const exported = await Egress.exported()
     expect(exported.map((event) => event.source)).toEqual(["local-inference"])
     const [file] = fs.readdirSync(directory)
-    expect(fs.statSync(path.join(directory, file!)).mode & 0o777).toBe(0o600)
+    if (process.platform !== "win32") expect(fs.statSync(path.join(directory, file!)).mode & 0o777).toBe(0o600)
     await Egress.erase()
     expect(fs.readdirSync(directory)).toEqual([])
     expect(Egress.events()).toEqual([])
