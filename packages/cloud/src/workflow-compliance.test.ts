@@ -126,3 +126,16 @@ describe("release workflow supply-chain policy", () => {
     expect(await Bun.file(`${root}/script/deploy-cloud.sh`).exists()).toBe(false)
   })
 })
+
+// GitHub moves ubuntu-latest to new Ubuntu releases before tools such as Playwright support them, so a check that
+// passed yesterday fails while installing. Vector's own workflows name the Ubuntu they were checked on.
+test("Vector's workflows pin their Ubuntu runner", async () => {
+  const files = [...new Bun.Glob("*.yml").scanSync(`${root}/.github/workflows`)]
+  expect(files.length).toBeGreaterThan(0)
+  const floating = (
+    await Promise.all(
+      files.map(async (file) => ((await read(`.github/workflows/${file}`)).includes("ubuntu-latest") ? [file] : [])),
+    )
+  ).flat()
+  expect(floating).toEqual([])
+})

@@ -30,7 +30,7 @@ jobs:
       matrix:
         settings:
           - name: linux
-            host: ubuntu-latest
+            host: ubuntu-24.04
           - name: windows
             host: windows-latest
     runs-on: ${{ matrix.settings.host }}
@@ -112,7 +112,7 @@ jobs:
   # the bundle under Node and sends one prompt through a Read tool call against a fake model.
   desktop-engine-node:
     name: desktop engine bundle (node)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
       run:
@@ -210,7 +210,7 @@ jobs:
       matrix:
         settings:
           - name: linux
-            host: ubuntu-latest
+            host: ubuntu-24.04
           - name: windows
             host: windows-latest
     runs-on: ${{ matrix.settings.host }}
