@@ -1,7 +1,7 @@
 export * as ConfigManaged from "./managed"
 
 import { spawnSync } from "child_process"
-import { existsSync, realpathSync, statSync } from "fs"
+import { existsSync, realpathSync, statSync, type Stats } from "fs"
 import os from "os"
 import path from "path"
 
@@ -112,10 +112,20 @@ export type AclReader = (paths: readonly string[]) => {
   readonly entries: Readonly<Record<string, Acl | undefined>>
 }
 
+/** Lists the macOS access control lists of `paths`, as `ls -lde` prints them. */
+export type MacAclReader = (paths: readonly string[]) => {
+  readonly status: number | null
+  readonly stdout: string
+  readonly stderr: string
+  readonly error?: Error
+}
+
 export type TrustOptions = {
   readonly platform?: NodeJS.Platform
   /** Reads Windows access rules. The default asks PowerShell. */
   readonly acl?: AclReader
+  /** Reads macOS access control lists. The default runs /bin/ls. */
+  readonly macAcl?: MacAclReader
   /**
    * Whether the user running Vector may own the file too. Only the test managed folder allows it, since a test cannot
    * create files owned by root or Administrators. The rest of the check (no one else may write) still applies.
@@ -357,7 +367,7 @@ export function check(file: string, options: TrustOptions = {}): Verdict | undef
   try {
     if ((options.platform ?? process.platform) === "win32")
       return windowsCheck(file, options.acl ?? powershellAcl, options.user === true)
-    return posixCheck(file, options.user === true)
+    return posixCheck(file, options)
   } catch (cause) {
     return {
       reason: `Vector could not check who may change ${file}: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -366,20 +376,18 @@ export function check(file: string, options: TrustOptions = {}): Verdict | undef
   }
 }
 
-function posixCheck(file: string, user: boolean): Verdict | undefined {
-  const owners = user && process.getuid ? [0, process.getuid()] : [0]
+function posixCheck(file: string, options: TrustOptions): Verdict | undefined {
+  const owners = options.user === true && process.getuid ? [0, process.getuid()] : [0]
   // The folder that holds the file and the file it resolves to, each with every folder above it: a link in the
   // managed folder could point anywhere, and a folder someone else can write lets them swap the file.
   const chain = [...new Set([...ancestors(realpathSync(file)), ...ancestors(realpathSync(path.dirname(file)))])]
-  const reason = chain
-    .map((target) => {
-      const stat = statSync(target)
-      return posixReason({ path: target, uid: stat.uid, mode: stat.mode }, owners)
-    })
+  const entries = chain.map((target) => ({ target, stat: statSync(target) }))
+  const reason = entries
+    .map((entry) => posixReason({ path: entry.target, uid: entry.stat.uid, mode: entry.stat.mode }, owners))
     .find((item) => item !== undefined)
   if (reason) return { reason, kind: "untrusted" }
-  if (process.platform !== "darwin") return undefined
-  const listed = spawnSync(LS, ["-lde", ...chain], { encoding: "utf8", timeout: 10_000, env: { LC_ALL: "C" } })
+  if ((options.platform ?? process.platform) !== "darwin") return undefined
+  const listed = cachedListing(options.macAcl ?? lsAcl, entries)
   if (listed.status !== 0)
     return {
       reason: `Vector could not read who may change ${chain[0]}: ${listed.error?.message ?? (listed.stderr.trim() || `ls exited with ${listed.status}`)}`,
@@ -387,6 +395,30 @@ function posixCheck(file: string, user: boolean): Verdict | undefined {
     }
   const acl = macAclReason(listed.stdout, chain)
   return acl === undefined ? undefined : { reason: acl, kind: "untrusted" }
+}
+
+const lsAcl: MacAclReader = (paths) =>
+  spawnSync(LS, ["-lde", ...paths], { encoding: "utf8", timeout: 10_000, env: { LC_ALL: "C" } })
+
+// ls takes a moment and blocks the thread that runs it, and the desktop's main process reads company policy every half
+// minute, so a listing is kept until a path in the chain changes: changing an access control list updates a file's
+// change time, as changing its owner or mode does. A listing that failed is never kept.
+const listingCache = new WeakMap<MacAclReader, Map<string, ReturnType<MacAclReader>>>()
+
+function cachedListing(reader: MacAclReader, entries: readonly { readonly target: string; readonly stat: Stats }[]) {
+  const known = listingCache.get(reader) ?? new Map<string, ReturnType<MacAclReader>>()
+  listingCache.set(reader, known)
+  const key = entries
+    .map(
+      (entry) =>
+        `${entry.target}:${entry.stat.ino}:${entry.stat.uid}:${entry.stat.mode}:${entry.stat.size}:${entry.stat.mtimeMs}:${entry.stat.ctimeMs}`,
+    )
+    .join("|")
+  const cached = known.get(key)
+  if (cached) return cached
+  const listed = reader(entries.map((entry) => entry.target))
+  if (listed.status === 0) known.set(key, listed)
+  return listed
 }
 
 function ancestors(target: string): string[] {
