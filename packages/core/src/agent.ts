@@ -71,11 +71,18 @@ const researchDenied = [
 ]
 
 /**
- * The rules no configuration lifts for an agent, applied as their own ruleset beside its permissions: the research
- * tools belong to the research agent alone, whatever another agent's rules allow (a user's `"*": "allow"` included).
+ * The rules no configuration lifts for an agent, applied as their own ruleset beside its permissions. The research
+ * tools belong to the research agent alone, whatever another agent's rules allow (a user's `"*": "allow"` included),
+ * and the research agent is offered its own tools and no other: each ruleset decides on its own, so a user's or
+ * repository's deny for one resource, which its permissions keep as written, cannot shadow this one and offer a
+ * teammate, application or plugin tool. A research agent this location does not have (config disabled it) gets none.
  */
-export function reserved(id: ID | string): Permission.Ruleset {
-  return id === researchID ? [] : [{ action: "research_*", resource: "*", effect: "deny" }]
+export function reserved(agent: Selection): Permission.Ruleset {
+  if (agent.id !== researchID || !agent.info) return [{ action: "research_*", resource: "*", effect: "deny" }]
+  return [
+    { action: "*", resource: "*", effect: "deny" },
+    ...researchTools.map((action): Permission.Rule => ({ action, resource: "*", effect: "allow" })),
+  ]
 }
 
 /**

@@ -777,6 +777,65 @@ describe("SpendGuard service", () => {
     }),
   )
 
+  it.effect("carries a stopped run's budget on, the owner's staying the owner's and a fallback staying movable", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      const focused = { usd: 1, steps: 80 }
+      const deep = { usd: 3, steps: 240 }
+      const priced = (costUsd: number): SpendGuard.Step => ({
+        costUsd,
+        costKind: "priced",
+        contextTokens: 1_000,
+        cachedTokens: 0,
+        continues: false,
+        tools: [],
+        patched: false,
+      })
+      // Stops the run at its cap and returns it, as a successor drain reads it before it begins.
+      const stopped = (id: SessionID, costUsd: number) =>
+        Effect.gen(function* () {
+          expect((yield* guard.record(id, priced(costUsd))).state).toBe("stopped")
+          yield* guard.end(id)
+          return (yield* guard.snapshot(id))!
+        })
+
+      // The owner's cap: no fallback replaces it in the run that carries on.
+      const owned = SessionID.make("ses_carry_owned")
+      yield* guard.arm(owned, { usd: 0.25 })
+      yield* guard.begin(owned)
+      yield* guard.begin(owned, undefined, yield* stopped(owned, 0.3))
+      yield* guard.replaceFallback(owned, focused)
+      expect((yield* guard.snapshot(owned))?.budget).toEqual({ usd: 0.25 })
+      // A guest's tighter limit given for the successor joins the owner's cap, and still no fallback moves it.
+      yield* guard.end(owned)
+      yield* guard.tighten(owned, { steps: 10 })
+      yield* guard.begin(owned, undefined, (yield* guard.snapshot(owned))!)
+      yield* guard.replaceFallback(owned, deep)
+      expect((yield* guard.snapshot(owned))?.budget).toEqual({ usd: 0.25, steps: 10 })
+      yield* guard.end(owned)
+
+      // A fallback stays one, held to what a guest gave the run it carries on from.
+      const fallback = SessionID.make("ses_carry_fallback")
+      yield* guard.begin(fallback, focused)
+      yield* guard.tighten(fallback, { usd: 2 })
+      yield* guard.begin(fallback, undefined, yield* stopped(fallback, 1.2))
+      expect((yield* guard.snapshot(fallback))?.budget).toEqual(focused)
+      yield* guard.replaceFallback(fallback, deep)
+      expect((yield* guard.snapshot(fallback))?.budget).toEqual({ usd: 2, steps: 240 })
+      yield* guard.end(fallback)
+
+      // A budget the owner arms before the successor begins replaces the carried one.
+      const rearmed = SessionID.make("ses_carry_rearmed")
+      yield* guard.begin(rearmed, focused)
+      const before = yield* stopped(rearmed, 1.5)
+      yield* guard.arm(rearmed, { usd: 5 })
+      yield* guard.begin(rearmed, undefined, before)
+      yield* guard.replaceFallback(rearmed, deep)
+      expect((yield* guard.snapshot(rearmed))?.budget).toEqual({ usd: 5 })
+      yield* guard.end(rearmed)
+    }),
+  )
+
   it.effect("drops a budget armed for a run that never began", () =>
     Effect.gen(function* () {
       const guard = yield* SpendGuard.Service

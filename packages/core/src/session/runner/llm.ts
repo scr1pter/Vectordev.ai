@@ -1,3 +1,5 @@
+export * as SessionRunnerLLM from "./llm"
+
 import {
   LLM,
   LLMClient,
@@ -150,6 +152,15 @@ const layer = Layer.effect(
         ? latest.data.agent
         : session.agent
     })
+    // A prompt's agent is the caller's word, and config may disable or remove an agent after a prompt named it, so an
+    // agent this location does not have answers nothing: the session's own agent answers instead.
+    const selectAgent = Effect.fn("SessionRunner.selectAgent")(function* (
+      session: SessionSchema.Info,
+      named: string | undefined,
+    ) {
+      const selected = yield* agents.select(named)
+      return selected.info || named === session.agent ? selected : yield* agents.select(session.agent)
+    })
     const failInterruptedTools = Effect.fn("SessionRunner.failInterruptedTools")(function* (
       sessionID: SessionSchema.ID,
     ) {
@@ -215,7 +226,10 @@ const layer = Layer.effect(
       const cutoff = yield* EventV2.latestSequence(db, session.id)
       const promoting = promotion ? yield* SessionInput.promotable(db, session.id, promotion, cutoff) : []
       const newest = promoting.at(-1)
-      const agent = yield* agents.select(newest ? (newest.prompt.agent ?? session.agent) : yield* latestAgent(session))
+      const agent = yield* selectAgent(
+        session,
+        newest ? (newest.prompt.agent ?? session.agent) : yield* latestAgent(session),
+      )
       // Deep research's default caps hold a root run that has no cap of the owner's own (section 11.2), as on the V1
       // runner. This runner researches Focused only. A budget the owner armed keeps its place.
       if (agent.id === AgentV2.researchID && (yield* guard.rootOf(session.id)) === session.id)
@@ -249,7 +263,7 @@ const layer = Layer.effect(
         : yield* tools.materialize(
             agent.info?.permissions ?? [],
             internalSessionPermissions(session.internal),
-            AgentV2.reserved(agent.id),
+            AgentV2.reserved(agent),
             ResearchPlan.withheld(),
           )
       // Each turn sizes the request it answers from the projected history, as the V1 runner does: a greeting is offered
@@ -497,9 +511,10 @@ const layer = Layer.effect(
       const owner = (yield* guard.rootOf(input.sessionID)) === input.sessionID
       // Inputs left pending by a stop stay durable and drain under a fresh run, which keeps the stopped run's cap
       // unless a new budget was armed. That drain often starts at once: a prompt admitted during the stopped turn
-      // wakes a successor drain, and a budget armed then landed on the stopped run.
+      // wakes a successor drain, and a budget armed then landed on the stopped run. A cap the owner armed stays the
+      // owner's in the successor, so research's default caps do not replace it.
       const previous = owner ? yield* guard.snapshot(input.sessionID) : undefined
-      if (owner) yield* guard.begin(input.sessionID, previous?.stopped ? previous.budget : undefined)
+      if (owner) yield* guard.begin(input.sessionID, undefined, previous?.stopped ? previous : undefined)
       yield* Effect.gen(function* () {
         let promotion: SessionInput.Delivery | undefined = hasSteer ? "steer" : hasQueue ? "queue" : undefined
         let shouldRun = input.force || hasSteer || hasQueue

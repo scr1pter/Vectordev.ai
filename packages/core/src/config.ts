@@ -113,7 +113,7 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   providers: Schema.Record(Schema.String, ConfigProvider.Info).pipe(Schema.optional),
   research: ConfigResearchV1.Info.pipe(Schema.optional).annotate({
     description:
-      "Deep research's settings. Where it searches, its caps and robots.txt are read from your own config only; a repository's may only add sites to avoid.",
+      "Deep research's settings. Where it searches, its caps and robots.txt are read from your own config only; a repository's may only add sites to avoid. Not on the V2 session runner yet: the build agent's research tool (tool), Deep's researchers and judge, and pages on your own computer or network. There research runs Focused with its lead alone.",
   }),
 }) {}
 
@@ -411,12 +411,8 @@ function bindTrustedProjectExecutables(
       : info.formatter
   const lsp =
     info.lsp && typeof info.lsp === "object"
-      ? rewriteCommandEntries(
-          info.lsp,
-          workspace,
-          trusted,
-          (entry, command) =>
-            command ? new ConfigLSP.Server({ ...entry, command: command.command, cwd: command.cwd }) : entry,
+      ? rewriteCommandEntries(info.lsp, workspace, trusted, (entry, command) =>
+          command ? new ConfigLSP.Server({ ...entry, command: command.command, cwd: command.cwd }) : entry,
         )
       : info.lsp
   const mcp = info.mcp

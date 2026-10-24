@@ -210,7 +210,10 @@ const layer = Layer.effectDiscard(
                   place: found.place,
                   runID,
                   domains: yield* research.domains(found),
-                  page,
+                  // No address is typed on this runner yet, so the reader's word for a private one research found holds
+                  // for every address here.
+                  page:
+                    page.reason === ResearchReader.PRIVATE_FOUND ? { ...page, reason: ResearchRunV2.PRIVATE } : page,
                   view: input,
                   lead,
                 }),

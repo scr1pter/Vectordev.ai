@@ -9,6 +9,7 @@ import { Research } from "@vectordevai/schema/research"
 import type { Brain } from "../brain/brain"
 import { BrainPaths } from "../brain/paths"
 import { Config } from "../config"
+import { ConfigAgentFiles } from "../config/agent-files"
 import { Database } from "../database/database"
 import { makeLocationNode } from "../effect/app-node"
 import { LayerNodePlatform } from "../effect/app-node-platform"
@@ -38,11 +39,17 @@ import type { Tool } from "./tool"
 // stores the same on either runner. What the run may read and what it may send are worked out from the lead's whole
 // durable conversation (compactions included), so they hold across restarts and are the same in every research tool:
 // - the run is the newest plan the lead's session approved (research_plan's completed call records its id);
-// - provenance is the run's search results, the links research_read offered, and addresses the user typed;
+// - provenance is the run's search results, the links research_read offered, and the addresses in the root session's
+//   prompts, which count as links (below);
 // - the outbound check's private context is everything the session took in that is not known to be public: every
 //   tool's output but the web's (files read, commands run, other tools' answers), files attached to a prompt, the
-//   ambient instructions in its system prompt, and pages read from the user's own network. The user's own global
-//   instructions are private facts; the repository's are the work. Only the root user's typed words are exempt.
+//   ambient instructions in its system prompt, the prompts config sets for agents, and pages read or fetched from the
+//   user's own network, with their saved copies read back. The user's own global instructions and agent prompts are
+//   private facts; the repository's are the work.
+// - A V2 prompt does not yet say where its text came from: the person typing, a paste, or another agent (a teammate's
+//   message, an automation). So no prompt's words are exempt from the outbound check, as the root user's typed words
+//   are on the V1 runner, and an address in a prompt is read as a link research found: robots.txt applies to it, and
+//   one on the user's own computer or network is refused. Typed provenance returns once prompts carry their origin.
 // This runner has no task tool, so a run has its lead alone: no researchers and no judge.
 
 /** The run a research tool call works in. */
@@ -65,12 +72,13 @@ export type Current = Found | { readonly refused: string }
 /** The sites the user chose for research: what may become a site: filter, and what reads as "You trust this site". */
 export type Domains = { readonly prefer: readonly string[]; readonly avoid: readonly string[] }
 
-/** A completed tool call, with what it recorded and the text the model read. */
+/** A completed tool call, with what it recorded, the text the model read and where its whole output was saved. */
 export type Call = {
   readonly name: string
   readonly input: Readonly<Record<string, unknown>>
   readonly structured: Readonly<Record<string, unknown>>
   readonly text: string
+  readonly outputPaths: readonly string[]
 }
 
 /** A search result research_search recorded for a run. */
@@ -104,6 +112,9 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@vector/v2/ResearchRun") {}
 
 export const DECLINED = "The user did not approve reading pages for this research, so nothing was read."
+/** Why a page on the user's own computer or network is not read here: no address in a prompt counts as typed yet. */
+export const PRIVATE =
+  "Pages on your own computer or network are not read on this runner yet, not even from an address you typed."
 
 // How many runs keep a rate limiter and their pages' text in memory, and how deep a session tree is walked to the
 // session the user types in.
@@ -121,6 +132,7 @@ const layer = Layer.effect(
     const permission = yield* PermissionV2.Service
     const global = yield* Global.Service
     const network = yield* ResearchNetwork.Service
+    const fs = yield* FSUtil.Service
     const db = (yield* Database.Service).db
     // robots.txt is read for research, so its requests are research-reader's wherever the check runs.
     const http = HttpClient.transform(
@@ -161,9 +173,9 @@ const layer = Layer.effect(
           ),
         )
 
-    // What the user typed: the root session's prompts. Vector writes a helper session's, and a launching agent a
-    // child's, so neither is typed.
-    const typedOf = Effect.fn("ResearchRunV2.typed")(function* (sessionID: SessionSchema.ID) {
+    // The root session's prompts. Vector writes a helper session's, and a launching agent a child's, so neither counts.
+    // Whether a person typed them is not known yet (see the top of this file).
+    const promptsOf = Effect.fn("ResearchRunV2.prompts")(function* (sessionID: SessionSchema.ID) {
       const root = yield* top(sessionID)
       if (!root || root.internal) return []
       return (yield* history(root.id)).flatMap((message) =>
@@ -266,17 +278,49 @@ const layer = Layer.effect(
       }
     })
 
+    // The prompts config sets for agents, which their system prompts carry: the user's own are private facts, a
+    // repository's the work. A repository's config that is not trusted to run sets none.
+    const agentPrompts = Effect.fn("ResearchRunV2.agentPrompts")(function* () {
+      const sources = yield* Effect.forEach(yield* config.entries(), (entry) => {
+        if (config.executable?.(entry) === false) return Effect.succeed([])
+        const scope = config.scope?.(entry) ?? "global"
+        return (entry.type === "document" ? Effect.succeed([entry]) : ConfigAgentFiles.documents(fs, entry.path)).pipe(
+          Effect.map((documents) =>
+            documents.flatMap((document) =>
+              Object.values(document.info.agents ?? {}).flatMap((agent) =>
+                agent.system ? [{ scope, text: agent.system }] : [],
+              ),
+            ),
+          ),
+        )
+      })
+      return {
+        private: sources.flat().flatMap((item) => (item.scope === "global" ? [item.text] : [])),
+        work: sources.flat().flatMap((item) => (item.scope === "global" ? [] : [item.text])),
+      }
+    })
+
     const context = Effect.fn("ResearchRunV2.context")(function* (context: Tool.Context, found?: Found) {
       const messages = found?.messages ?? (yield* history(context.sessionID))
-      const taken = messages.map(intake)
+      // Where webfetch saved a page from the user's own network that was too long to show.
+      const saved = new Set(
+        calls(messages, "webfetch").flatMap((call) => (call.structured.private === true ? call.outputPaths : [])),
+      )
+      const taken = messages.map((message) => intake(message, saved))
       const ambient = yield* instructions(context.sessionID)
+      const prompts = yield* agentPrompts()
       const sources = found ? yield* sourceText(found) : { open: [], closed: [] }
       const results = resultsOf(messages, found?.run.id)
       const chosen = yield* domains(found)
       return {
-        private: [...taken.flatMap((item) => item.private), ...sources.closed, ...ambient.private].filter(Boolean),
-        work: [place().root, ...ambient.work, ...taken.flatMap((item) => item.work)].filter(Boolean),
-        typed: yield* typedOf(context.sessionID),
+        private: [
+          ...taken.flatMap((item) => item.private),
+          ...sources.closed,
+          ...ambient.private,
+          ...prompts.private,
+        ].filter(Boolean),
+        work: [place().root, ...ambient.work, ...prompts.work, ...taken.flatMap((item) => item.work)].filter(Boolean),
+        typed: [],
         public: [...results.flatMap((result) => [result.title, result.snippet]), ...sources.open],
         // The user's own sites become site: filters.
         domains: [...chosen.prefer, ...chosen.avoid],
@@ -284,19 +328,17 @@ const layer = Layer.effect(
     })
 
     const provenance = Effect.fn("ResearchRunV2.provenance")(function* (context: Tool.Context, found: Found) {
-      const typed = (yield* typedOf(context.sessionID)).flatMap(ResearchProvenance.typed)
       return ResearchProvenance.add(
         ResearchProvenance.add(
-          ResearchProvenance.add(
-            ResearchProvenance.empty(),
-            resultsOf(found.messages, found.run.id).map((result) => result.url),
-            "search",
-          ),
-          linksOf(found.messages, found.run.id),
-          "link",
+          ResearchProvenance.empty(),
+          resultsOf(found.messages, found.run.id).map((result) => result.url),
+          "search",
         ),
-        typed,
-        "typed",
+        [
+          ...linksOf(found.messages, found.run.id),
+          ...(yield* promptsOf(context.sessionID)).flatMap(ResearchProvenance.typed),
+        ],
+        "link",
       )
     })
 
@@ -376,6 +418,7 @@ export const node = makeLocationNode({
     PermissionV2.node,
     Global.node,
     ResearchNetwork.node,
+    FSUtil.node,
     Database.node,
     LayerNodePlatform.httpClient,
   ],
@@ -393,6 +436,7 @@ export function calls(messages: readonly SessionMessage.Message[], tool?: string
                   input: part.state.input,
                   structured: part.state.structured,
                   text: part.state.content.flatMap((item) => (item.type === "text" ? [item.text] : [])).join("\n"),
+                  outputPaths: part.state.outputPaths ?? [],
                 },
               ]
             : [],
@@ -436,7 +480,7 @@ export function linksOf(messages: readonly SessionMessage.Message[], runID: stri
 type Text = { readonly open: readonly string[]; readonly closed: readonly string[] }
 
 // Tools whose output is the web's. A public page and a search result are the run's public text, from the store and
-// the search calls; a page read on the user's own network is private. research_plan, research_note and
+// the search calls; a page read or fetched on the user's own network is private. research_plan, research_note and
 // research_report hold what the run already read.
 const WEB_TOOLS = new Set([
   "webfetch",
@@ -464,19 +508,33 @@ const WORK_TOOLS = new Set([
 /**
  * What a message took in, by kind: everything but what is known to be public. A tool's output is private unless the
  * repository or Vector wrote it (the work) or the web did, so another tool's (an application or plugin tool, a
- * teammate's message) is private. A prompt's attached text files and Vector's own notes are the work. The user's typed
- * words are exempt anyway.
+ * teammate's message) is private, and so is a read of a private page webfetch `saved` whole. A prompt's attached text
+ * files and Vector's own notes are the work. A prompt's own words are neither, and are not exempt either.
  */
-function intake(message: SessionMessage.Message): { readonly private: string[]; readonly work: string[] } {
+function intake(
+  message: SessionMessage.Message,
+  saved: ReadonlySet<string>,
+): { readonly private: string[]; readonly work: string[] } {
   if (message.type === "user") return { private: [], work: (message.files ?? []).flatMap(attached) }
   if (message.type === "synthetic" || message.type === "system") return { private: [], work: [message.text] }
   if (message.type === "shell") return { private: [], work: [message.command, message.output] }
   if (message.type === "compaction") return { private: [], work: [message.summary, message.recent] }
   if (message.type !== "assistant") return { private: [], work: [] }
   const found = calls([message]).flatMap((call): { readonly kind: "private" | "work"; readonly text: string }[] => {
-    // A page read from the user's own computer or network is theirs.
+    // A page read or fetched from the user's own computer or network is theirs. webfetch records the whole page, which
+    // the model may have been shown only the start of.
     if (call.name === "research_read" && call.structured.private === true) return [{ kind: "private", text: call.text }]
+    if (call.name === "webfetch" && call.structured.private === true)
+      return [call.text, call.structured.output].flatMap((text) =>
+        typeof text === "string" ? [{ kind: "private" as const, text }] : [],
+      )
     if (WEB_TOOLS.has(call.name)) return []
+    // Such a page saved whole when it was too long to show, read back.
+    if (
+      (call.name === "read" || call.name === "grep") &&
+      [...saved].some((file) => call.input.path === file || call.text.includes(file))
+    )
+      return [{ kind: "private", text: call.text }]
     return [{ kind: WORK_TOOLS.has(call.name) ? "work" : "private", text: call.text }]
   })
   return {

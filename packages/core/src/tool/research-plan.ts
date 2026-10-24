@@ -323,6 +323,7 @@ function card(plan: Research.Plan, estimate: string, provider: ResearchSearchToo
     ...plan.subquestions.map((item, index) => `${index + 1}. ${item}`),
     `Scope: ${ResearchPlan.scopeLabel(plan.scope)}`,
     "Depth: Focused: one agent. Deep's researchers and judge are not on this runner yet.",
+    ...(plan.scope === "brain" || offline ? [] : [ResearchRunV2.PRIVATE]),
     ...(plan.prefer_domains?.length ? [`Prefer: ${plan.prefer_domains.join(", ")}`] : []),
     ...(plan.avoid_domains?.length ? [`Avoid: ${plan.avoid_domains.join(", ")}`] : []),
     ...(plan.time_window ? [`Time window: ${plan.time_window}`] : []),

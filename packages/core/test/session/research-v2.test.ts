@@ -1,9 +1,9 @@
 import { afterAll, describe, expect } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { LLMClient, LLMEvent, Model, type LLMClientShape, type LLMRequest } from "@vectordevai/llm"
-import * as OpenAIChat from "@vectordevai/llm/protocols/openai-chat"
+import { OpenAIChat } from "@vectordevai/llm/protocols/openai-chat"
 import type { Permission } from "@vectordevai/schema/permission"
 import { asc, eq } from "drizzle-orm"
 import { Deferred, Effect, Fiber, Layer, Schema, Stream } from "effect"
@@ -11,6 +11,7 @@ import { AgentV2 } from "@vectordevai/core/agent"
 import { BrainEmbed } from "@vectordevai/core/brain/embed"
 import { BrainWorker } from "@vectordevai/core/brain/worker/host"
 import { Config } from "@vectordevai/core/config"
+import { ConfigAgent } from "@vectordevai/core/config/agent"
 import { ConfigAgentPlugin } from "@vectordevai/core/config/plugin/agent"
 import { Database } from "@vectordevai/core/database/database"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
@@ -34,6 +35,7 @@ import { ResearchNetwork } from "@vectordevai/core/research/network"
 import { ResearchOutbound } from "@vectordevai/core/research/outbound"
 import { ResearchPlan } from "@vectordevai/core/research/plan"
 import { ResearchProvenance } from "@vectordevai/core/research/provenance"
+import { ResearchReader } from "@vectordevai/core/research/reader"
 import { ResearchStore } from "@vectordevai/core/research/store"
 import { AbsolutePath } from "@vectordevai/core/schema"
 import { SessionV2 } from "@vectordevai/core/session"
@@ -44,7 +46,7 @@ import { SessionProjector } from "@vectordevai/core/session/projector"
 import { Prompt } from "@vectordevai/core/session/prompt"
 import { SessionRunCoordinator } from "@vectordevai/core/session/run-coordinator"
 import { SessionRunner } from "@vectordevai/core/session/runner"
-import * as SessionRunnerLLM from "@vectordevai/core/session/runner/llm"
+import { SessionRunnerLLM } from "@vectordevai/core/session/runner/llm"
 import { SessionRunnerModel } from "@vectordevai/core/session/runner/model"
 import { SessionInputTable, SessionMessageTable, SessionTable } from "@vectordevai/core/session/sql"
 import { SessionStore } from "@vectordevai/core/session/store"
@@ -63,6 +65,7 @@ import { ResearchRunV2 } from "@vectordevai/core/tool/research-run"
 import { ResearchSearchTool } from "@vectordevai/core/tool/research-search"
 import { ToolRegistry } from "@vectordevai/core/tool/registry"
 import { Tool } from "@vectordevai/core/tool/tool"
+import { WebFetchTool } from "@vectordevai/core/tool/webfetch"
 import type { ConfigResearchV1 } from "@vectordevai/core/v1/config/research"
 import { FakeWeb } from "../lib/fake-web"
 import { NetworkGuard } from "../lib/network-guard"
@@ -75,8 +78,38 @@ import { agentHost, host } from "../plugin/host"
 // promoted at a later boundary runs under research, and an exact retry must name the same agent. The research agent's
 // rules only narrow, its tools are its own, and the scripted research run stores the rows the V1 runner stores.
 
+// A page of the user's intranet, too long to show whole, and a public page that links into the user's network and to a
+// cloud metadata address.
+const INTRANET = "Internal plan: the Quillfeather rollout keeps budget code 7730192 until spring."
+const METADATA = "http://169.254.169.254/latest/meta-data/"
 const guard = NetworkGuard.use()
-const web = FakeWeb.start({ sites: FakeWeb.sites() })
+const web = FakeWeb.start({
+  sites: {
+    ...FakeWeb.sites(),
+    intranet: {
+      "/plan": {
+        headers: { "content-type": "text/plain" },
+        body: [INTRANET, ...Array.from({ length: 3_000 }, () => "Heat pump rollout notes.")].join("\n"),
+      },
+    },
+    portal: {
+      "/": (_request, context) => ({
+        headers: { "content-type": "text/html; charset=utf-8" },
+        body: [
+          "<html><head><title>Heat pump field notes</title></head><body><main><article>",
+          "<h1>Heat pump field notes</h1>",
+          ...Array.from(
+            { length: 6 },
+            () =>
+              "<p>Air-source heat pumps in cold climates were measured over two winters, and delivered heating energy fell in most homes that were studied.</p>",
+          ),
+          `<p>See the <a href="${context.direct("docs", "/private/notes")}">team notes</a> and the <a href="${METADATA}">instance details</a>.</p>`,
+          "</article></main></body></html>",
+        ].join("\n"),
+      }),
+    },
+  },
+})
 const root = mkdtempSync(path.join(os.tmpdir(), "vector-research-v2-"))
 afterAll(async () => {
   await web.close()
@@ -133,32 +166,44 @@ function say(text: string): LLMEvent[] {
   ]
 }
 
-// The user's own config, and a repository's, which a test may set.
+// The user's own config (a document and a folder of agent files), and a repository's, which a test may set.
 const settings: {
   rules: Permission.Ruleset
   research: ConfigResearchV1.Info
+  agents?: Record<string, ConfigAgent.Info>
+  folder?: Config.Directory
   repository?: Config.Document
 } = { rules: [], research: {} }
 const own = () =>
   new Config.Document({
     type: "document",
-    info: new Config.Info({ permissions: settings.rules, research: settings.research }),
+    info: new Config.Info({
+      permissions: settings.rules,
+      research: settings.research,
+      ...(settings.agents ? { agents: settings.agents } : {}),
+    }),
   })
 const config = Layer.succeed(
   Config.Service,
   Config.Service.of({
-    entries: () => Effect.sync(() => [own(), ...(settings.repository ? [settings.repository] : [])]),
+    entries: () =>
+      Effect.sync(() => [
+        own(),
+        ...(settings.folder ? [settings.folder] : []),
+        ...(settings.repository ? [settings.repository] : []),
+      ]),
     scope: (entry) => (entry === settings.repository ? "project" : "global"),
   }),
 )
 
-// Coding tools a research agent must never be offered, and a file read whose text is the repository's.
+// Coding and outside tools a research agent must never be offered (a teammate message, an application's tool), and a
+// file read whose text is the repository's. webfetch is the real one.
 const NOTES = "The Falcon migration moves the ledger to the reconcileLedgerEntries service before release 4417203."
 const coding = Layer.effectDiscard(
   ToolRegistry.Service.use((registry) =>
     registry.register(
       Object.fromEntries(
-        ["bash", "edit", "webfetch", "read"].map((name) => [
+        ["bash", "edit", "read", "send_teammate_message", "mcp_github_create_issue"].map((name) => [
           name,
           Tool.make({
             description: `Fake ${name}`,
@@ -175,9 +220,15 @@ const coding = Layer.effectDiscard(
 const codingNode = makeLocationNode({ name: "test/research-v2-tools", layer: coding, deps: [ToolRegistry.node] })
 
 const model = Model.make({ id: "fake-model", provider: "fake", route: OpenAIChat.route })
+// $2 per million input tokens and $10 per million output tokens, for a test whose steps must cost something.
+const priced = SessionRunnerModel.withPricing(
+  Model.make({ id: "priced-model", provider: "fake", route: OpenAIChat.route }),
+  [{ input: 2, output: 10, cache: { read: 0, write: 0 } }],
+)
+const chosen = { model }
 const replacements: LayerNode.Replacements = [
   [LayerNodePlatform.llmClient, client],
-  [SessionRunnerModel.node, SessionRunnerModel.layerWith(() => Effect.succeed(model))],
+  [SessionRunnerModel.node, SessionRunnerModel.layerWith(() => Effect.sync(() => chosen.model))],
   [Location.node, Location.boundNode({ directory: AbsolutePath.make("/project") })],
   [SkillGuidance.node, Layer.mock(SkillGuidance.Service, { load: () => Effect.succeed(SystemContext.empty) })],
   [ReferenceGuidance.node, Layer.mock(ReferenceGuidance.Service, { load: () => Effect.succeed(SystemContext.empty) })],
@@ -233,6 +284,7 @@ const it = testEffect(
       ToolRegistry.node,
       ToolRegistry.toolsNode,
       codingNode,
+      WebFetchTool.node,
       QuestionTool.node,
       ResearchPlanTool.node,
       ResearchSearchTool.node,
@@ -267,6 +319,8 @@ const setup = (input: { readonly rules?: Permission.Ruleset; readonly research?:
   Effect.gen(function* () {
     settings.rules = input.rules ?? []
     settings.research = input.research ?? {}
+    settings.agents = undefined
+    settings.folder = undefined
     settings.repository = undefined
     requests.length = 0
     turns.length = 0
@@ -341,6 +395,9 @@ const recorded = (name: string) =>
     const store = yield* SessionStore.Service
     return ResearchRunV2.calls(yield* store.all(sessionID), name)
   })
+const searxng = { search: { provider: "searxng" as const, url: web.url("searxng", "/") } }
+const plan = (question: string) =>
+  call("research_plan", { question, subquestions: ["Which steps keep it online?"], scope: "web", depth: "focused" })
 
 const RESEARCH_TOOLS = [...AgentV2.researchTools].filter((tool) => tool !== "grep" && tool !== "glob").toSorted()
 
@@ -504,6 +561,46 @@ describe("Deep research on the V2 runner", () => {
       }),
   )
 
+  it.live("a cap the owner armed stays theirs in the drain after it stops, whatever research's default caps are", () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const session = yield* SessionV2.Service
+      const spend = yield* SpendGuard.Service
+      const gate = yield* Deferred.make<void>()
+      const started = yield* Deferred.make<void>()
+      // The build step costs $0.502, more than the owner's $0.25 cap, so the run stops after it.
+      const costly = [
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.textStart({ id: "costly" }),
+        LLMEvent.textDelta({ id: "costly", text: "Fixing it." }),
+        LLMEvent.textEnd({ id: "costly" }),
+        LLMEvent.stepFinish({
+          index: 0,
+          reason: "stop",
+          usage: { inputTokens: 1_000, nonCachedInputTokens: 1_000, outputTokens: 50_000 },
+        }),
+        LLMEvent.finish({ reason: "stop" }),
+      ]
+      turns.push({ events: costly, gate, started }, { events: say("Researching.") })
+      chosen.model = priced
+
+      yield* spend.arm(sessionID, { usd: 0.25 })
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Fix the failing build" }), resume: false })
+      const running = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* Deferred.await(started)
+      // A research steer admitted during the stopped turn drains under a fresh run that keeps the stopped run's cap.
+      yield* session.prompt({ sessionID, prompt: research("Research heat pump savings."), resume: false })
+      yield* Deferred.succeed(gate, undefined)
+      yield* Fiber.join(running)
+      expect((yield* spend.snapshot(sessionID))?.stopped?.reason).toBe("cap")
+
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(2)
+      expect(tools(requests[1])).toEqual(RESEARCH_TOOLS)
+      expect((yield* spend.snapshot(sessionID))?.budget).toEqual({ usd: 0.25 })
+    }).pipe(Effect.ensuring(Effect.sync(() => (chosen.model = model)))),
+  )
+
   it.live("a retry of one prompt ID reconciles only with the same agent", () =>
     Effect.gen(function* () {
       yield* setup()
@@ -556,8 +653,12 @@ describe("Deep research on the V2 runner", () => {
         // A user's allow does reach build, but never the research tools: those are research's alone.
         expect(PermissionV2.evaluate("bash", "*", build?.permissions ?? []).effect).toBe("allow")
         expect(
-          PermissionV2.evaluate("research_plan", "*", build?.permissions ?? [], AgentV2.reserved(AgentV2.defaultID))
-            .effect,
+          PermissionV2.evaluate(
+            "research_plan",
+            "*",
+            build?.permissions ?? [],
+            AgentV2.reserved({ id: AgentV2.defaultID, info: build }),
+          ).effect,
         ).toBe("deny")
 
         const session = yield* SessionV2.Service
@@ -572,6 +673,65 @@ describe("Deep research on the V2 runner", () => {
         yield* session.resume(sessionID)
         expect(tools(requests[0])).toEqual(RESEARCH_TOOLS)
         expect(tools(requests[1]).filter((name) => name.startsWith("research_"))).toEqual([])
+      }),
+  )
+
+  it.live("a deny for one resource offers research no tool but its own: no teammate message, no application tool", () =>
+    Effect.gen(function* () {
+      // The user's deny is kept as written, so it is the last rule matching every tool; research's own allow-list,
+      // a ruleset of its own, still decides what research is offered.
+      yield* setup({ rules: [{ action: "*", resource: "*.pem", effect: "deny" }] })
+      const session = yield* SessionV2.Service
+      turns.push({ events: say("Researching.") }, { events: say("Building.") })
+      yield* session.prompt({ sessionID, prompt: research("Research heat pumps."), resume: false })
+      yield* session.resume(sessionID)
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Fix the build" }), resume: false })
+      yield* session.resume(sessionID)
+
+      expect(tools(requests[0])).toEqual(RESEARCH_TOOLS)
+      // Build keeps both.
+      expect(tools(requests[1])).toEqual(expect.arrayContaining(["send_teammate_message", "mcp_github_create_issue"]))
+    }),
+  )
+
+  it.live(
+    "an agent this location lacks answers no prompt, and a research agent config removed is offered no research tool",
+    () =>
+      Effect.gen(function* () {
+        yield* setup()
+        const session = yield* SessionV2.Service
+        const agents = yield* AgentV2.Service
+        turns.push({ events: say("Building.") }, { events: say("Still building.") }, { events: say("No plan.") })
+        const research_ = (name: string) => name.startsWith("research_")
+
+        // A prompt that names an agent there is no such agent for is the session's agent's.
+        yield* session.prompt({
+          sessionID,
+          prompt: Prompt.make({ text: "Research heat pumps.", agent: "researcher-typo" }),
+          resume: false,
+        })
+        yield* session.resume(sessionID)
+        expect(tools(requests[0])).toContain("bash")
+        expect(tools(requests[0]).filter(research_)).toEqual([])
+
+        // Config disabled the research agent: a research prompt is the session's agent's too.
+        yield* agents.transform((draft) => draft.remove(RESEARCH))
+        yield* session.prompt({ sessionID, prompt: research("Research heat pumps."), resume: false })
+        yield* session.resume(sessionID)
+        expect(tools(requests[1])).toContain("bash")
+        expect(tools(requests[1]).filter(research_)).toEqual([])
+
+        // A session whose own agent is the missing research agent is offered no research tool, so no plan card goes
+        // unanswered and approves itself.
+        yield* session.switchAgent({ sessionID, agent: RESEARCH })
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Research heat pumps." }), resume: false })
+        yield* session.resume(sessionID)
+        expect(requests).toHaveLength(3)
+        expect(tools(requests[2]).filter(research_)).toEqual([])
+        const assistants = (yield* session.messages({ sessionID, order: "asc" })).flatMap((message) =>
+          message.type === "assistant" ? [message.agent] : [],
+        )
+        expect(assistants).toEqual(["build", "build", RESEARCH])
       }),
   )
 
@@ -603,6 +763,7 @@ describe("Deep research on the V2 runner", () => {
       expect(asked.cards[0]).toContain(`Research: ${ResearchScript.QUESTION}`)
       // What this runner does not run yet is said on the card.
       expect(asked.cards[0]).toContain("Deep's researchers and judge are not on this runner yet.")
+      expect(asked.cards[0]).toContain(ResearchRunV2.PRIVATE)
       const approvals = asked.permissions.filter((request) => request.action === "research_read")
       expect(approvals).toHaveLength(1)
       expect(approvals[0]).toMatchObject({ resources: [runID], save: [] })
@@ -756,6 +917,213 @@ describe("Deep research on the V2 runner", () => {
       const [searched] = yield* recorded("research_search")
       expect(searched?.structured.refused).toBe("none")
       expect(web.count("searxng") - before).toBe(0)
+    }),
+  )
+
+  it.live("pages webfetch read on the user's own network, and their saved copies read back, stay out of searches", () =>
+    Effect.gen(function* () {
+      yield* setup({ research: searxng })
+      const asked = yield* answering()
+      const session = yield* SessionV2.Service
+      const before = web.count("searxng")
+
+      // Build fetches an intranet page after the private network ask, too long to show whole, then reads it back.
+      turns.push({ events: call("webfetch", { url: web.direct("intranet", "/plan"), format: "text" }) })
+      turns.push({ events: say("Fetched.") })
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Fetch our plan page" }), resume: false })
+      yield* session.resume(sessionID)
+      const [fetched] = yield* recorded("webfetch")
+      expect(fetched?.structured.private).toBe(true)
+      expect(fetched?.outputPaths).toHaveLength(1)
+      turns.push({ events: call("read", { path: fetched?.outputPaths[0] }) }, { events: say("Read it.") })
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Read the saved copy" }), resume: false })
+      yield* session.resume(sessionID)
+
+      // Then the user switches to Deep research.
+      turns.push(
+        { events: plan("How are heat pump rollouts budgeted?") },
+        { events: call("research_search", { query: "Quillfeather heat pump rollout" }) },
+        { events: call("research_search", { query: "heat pump budget code 7730192" }) },
+        // The read-back's text (the fake read's) names Falcon, which as the work alone would go out.
+        { events: call("research_search", { query: "Falcon heat pump rollout" }) },
+        { events: call("research_search", { query: "heat pump rollout budgets" }) },
+      )
+      yield* session.prompt({
+        sessionID,
+        prompt: research("Research how heat pump rollouts are budgeted."),
+        resume: false,
+      })
+      yield* session.resume(sessionID)
+
+      const searches = yield* recorded("research_search")
+      expect(searches.map((search) => search.structured.refused)).toEqual([
+        "outbound",
+        "outbound",
+        "outbound",
+        undefined,
+      ])
+      expect(web.count("searxng") - before).toBe(1)
+      expect(
+        asked.permissions.filter(
+          (request) => request.action === "private_network" && request.resources[0] === web.origin,
+        ),
+      ).toHaveLength(1)
+      expect(guard.outside()).toEqual([])
+    }),
+  )
+
+  it.live("the user's own agent prompts are private facts, and a repository's are the work", () =>
+    Effect.gen(function* () {
+      yield* setup({ research: searxng })
+      const folder = path.join(root, "own-config")
+      mkdirSync(path.join(folder, "agents"), { recursive: true })
+      writeFileSync(
+        path.join(folder, "agents", "helper.md"),
+        "---\ndescription: Drafts replies\n---\nYou draft customer replies for Marigold Logistics in a calm voice.\n",
+      )
+      settings.folder = new Config.Directory({ type: "directory", path: AbsolutePath.make(folder) })
+      settings.agents = {
+        reviewer: new ConfigAgent.Info({
+          system: "You review pull requests for Brightwater Analytics before release.",
+        }),
+      }
+      settings.repository = new Config.Document({
+        type: "document",
+        info: new Config.Info({
+          agents: { triage: new ConfigAgent.Info({ system: "Label issues for the Corvid team." }) },
+        }),
+      })
+      yield* answering()
+      const session = yield* SessionV2.Service
+      const before = web.count("searxng")
+      turns.push(
+        { events: plan("How do heat pumps perform in cold climates?") },
+        { events: call("research_search", { query: "Brightwater heat pump study" }) },
+        { events: call("research_search", { query: "Marigold heat pump study" }) },
+        { events: call("research_search", { query: "Corvid heat pump study" }) },
+      )
+      yield* session.prompt({ sessionID, prompt: research("Research heat pumps in cold climates."), resume: false })
+      yield* session.resume(sessionID)
+
+      const searches = yield* recorded("research_search")
+      expect(searches.map((search) => search.structured.refused)).toEqual(["outbound", "outbound", undefined])
+      expect(web.count("searxng") - before).toBe(1)
+    }),
+  )
+
+  it.live(
+    "a prompt's words clear nothing for searches, and its addresses are read as links: the user's own network is refused",
+    () =>
+      Effect.gen(function* () {
+        yield* setup({ research: searxng })
+        const asked = yield* answering()
+        const session = yield* SessionV2.Service
+        const before = { searxng: web.count("searxng"), notes: web.count("docs", "/private/notes") }
+        const intranet = web.direct("docs", "/private/notes")
+        turns.push(
+          { events: call("read", {}) },
+          { events: plan("How do teams migrate a ledger service?") },
+          // The prompt names release 4417203 too, but a V2 prompt may be another agent's, so it clears nothing.
+          { events: call("research_search", { query: "ledger migration release 4417203" }) },
+          { events: call("research_read", { url: web.url("article", "/") }) },
+          { events: call("research_read", { url: intranet }) },
+        )
+        yield* session.prompt({
+          sessionID,
+          prompt: research(
+            `Research ledger migrations like our release 4417203. Start from ${web.url("article", "/")} and ${intranet}`,
+          ),
+          resume: false,
+        })
+        yield* session.resume(sessionID)
+
+        const [searched] = yield* recorded("research_search")
+        expect(searched?.structured.refused).toBe("outbound")
+        expect(web.count("searxng") - before.searxng).toBe(0)
+        // The public address in the prompt is read; the one on the user's own network is refused without asking.
+        const reads = yield* recorded("research_read")
+        expect(reads.map((read) => [read.input.url, read.structured.status])).toEqual([
+          [web.url("article", "/"), "read"],
+          [intranet, "failed"],
+        ])
+        expect(reads[1]?.text).toContain(ResearchRunV2.PRIVATE)
+        expect(web.count("docs", "/private/notes") - before.notes).toBe(0)
+        expect(asked.permissions.filter((request) => request.action === "private_network")).toEqual([])
+        expect(guard.outside()).toEqual([])
+      }),
+  )
+
+  it.live("a public page's links into the user's network or to a cloud metadata address are refused", () =>
+    Effect.gen(function* () {
+      yield* setup({ research: searxng })
+      const asked = yield* answering()
+      const session = yield* SessionV2.Service
+      const before = web.count("docs", "/private/notes")
+      const portal = web.url("portal", "/")
+      const intranet = web.direct("docs", "/private/notes")
+      turns.push(
+        { events: plan("How do heat pumps perform in cold climates?") },
+        { events: call("research_read", { url: portal, links: true }) },
+        { events: call("research_read", { url: intranet }) },
+        { events: call("research_read", { url: METADATA }) },
+      )
+      yield* session.prompt({ sessionID, prompt: research(`Research the field notes at ${portal}`), resume: false })
+      yield* session.resume(sessionID)
+
+      const reads = yield* recorded("research_read")
+      expect(reads[0]?.structured.links).toEqual(expect.arrayContaining([intranet, METADATA]))
+      expect(reads.slice(1).map((read) => [read.input.url, read.structured.status])).toEqual([
+        [intranet, "failed"],
+        [METADATA, "failed"],
+      ])
+      expect(reads[1]?.text).toContain(ResearchRunV2.PRIVATE)
+      expect(reads[2]?.text).toContain(ResearchReader.METADATA)
+      expect(web.count("docs", "/private/notes") - before).toBe(0)
+      expect(asked.permissions.filter((request) => request.action === "private_network")).toEqual([])
+      expect(guard.outside()).toEqual([])
+    }),
+  )
+
+  it.live("a private source the run saved stays private context when it is read again", () =>
+    Effect.gen(function* () {
+      yield* setup({ research: searxng })
+      yield* answering()
+      const session = yield* SessionV2.Service
+      const before = web.count("searxng")
+      const gate = yield* Deferred.make<void>()
+      const started = yield* Deferred.make<void>()
+      turns.push(
+        { events: plan("How are heat pump pilots budgeted?") },
+        { events: call("research_read", { source: "S1" }), gate, started },
+        { events: call("research_search", { query: "Kestrelmoor pilot budget" }) },
+        { events: call("research_search", { query: "heat pump pilot budget" }) },
+      )
+      yield* session.prompt({ sessionID, prompt: research("Research heat pump pilot budgets."), resume: false })
+      const running = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      // Once the plan is approved, the run holds a page read on the user's own network, as a typed address on the V1
+      // runner saves one.
+      yield* Deferred.await(started)
+      const runID = (yield* recorded("research_plan"))[0]?.structured.runID as string
+      const run = yield* ResearchRunV2.Service
+      const store = yield* ResearchStore.Service
+      const url = "http://wiki.corp.internal/pilot"
+      yield* store.addSource(run.place(), runID, {
+        url,
+        canonical: url,
+        site: "wiki.corp.internal",
+        title: "Pilot plan",
+        status: "read",
+        chunks: [{ text: "The Kestrelmoor pilot keeps its budget until the spring review.", chunk: 0 }],
+        private: true,
+      })
+      yield* Deferred.succeed(gate, undefined)
+      yield* Fiber.join(running)
+
+      const [again] = yield* recorded("research_read")
+      expect(again?.structured).toMatchObject({ source: "S1", private: true })
+      const searches = yield* recorded("research_search")
+      expect(searches.map((search) => search.structured.refused)).toEqual(["outbound", undefined])
+      expect(web.count("searxng") - before).toBe(1)
     }),
   )
 })
