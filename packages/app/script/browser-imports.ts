@@ -17,6 +17,11 @@ const ROOT = path.resolve(import.meta.dir, "../../..")
 const RUNTIME = new Set([...builtinModules, "bun"].flatMap((name) => [name, `node:${name}`]))
 // What Vite turns into a URL or a stylesheet rather than code it bundles.
 const ASSET = /\.(css|svg|png|jpe?g|gif|webp|ico|woff2?|ttf|otf|wasm|aac|mp3|wav|onnx)$/
+// Bun 1.3.14's async plugin resolver crashes on Windows workspace symlinks before it normalizes their paths.
+// Leave ordinary imports to its browser resolver; intercept only imports this guard actually handles.
+const HANDLED = new RegExp(
+  `^(?:${[...RUNTIME].map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})$|^bun:|\\?|${ASSET.source}|/jsx(?:-dev)?-runtime$`,
+)
 // A worker started from a file next to the code, which Vite also bundles as an entry of its own.
 const WORKER = /new\s+(?:Shared)?Worker\(\s*new\s+URL\(\s*["'`]([^"'`]+)["'`]\s*,\s*import\.meta\.url/g
 // The pages the web app and the desktop renderer load.
@@ -59,7 +64,7 @@ async function walk(start: string[]) {
         {
           name: "node-imports",
           setup(build) {
-            build.onResolve({ filter: /.*/ }, (args) => {
+            build.onResolve({ filter: HANDLED }, (args) => {
               const [specifier, query] = args.path.split("?")
               if (RUNTIME.has(specifier) || specifier.startsWith("bun:")) {
                 runtime.add(`${relative(args.importer)} imports ${specifier}`)

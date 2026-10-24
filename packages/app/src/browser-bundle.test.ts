@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtemp, realpath, rm } from "node:fs/promises"
+import os from "node:os"
 import path from "node:path"
 
 // Nothing the browser bundles may import a Node or Bun module (script/browser-imports.ts says why). The walk runs in
@@ -30,6 +32,26 @@ describe("the app's browser bundle", () => {
     const result = await walk(path.join(ROOT, "packages/core/src/local-mode/egress.ts"))
     expect(result.runtime).toContain("packages/core/src/local-mode/attribution.ts imports node:async_hooks")
     expect(result.code).toBe(1)
+  })
+
+  test("still refuses bare Node, node-prefixed and Bun imports in a worker", async () => {
+    const directory = await realpath(await mkdtemp(path.join(os.tmpdir(), "vector-browser-guard-")))
+    try {
+      const entry = path.join(directory, "entry.ts")
+      const worker = path.join(directory, "worker.ts")
+      await Bun.write(entry, 'new Worker(new URL("./worker.ts", import.meta.url))\n')
+      await Bun.write(
+        worker,
+        'import fs from "fs"; import promises from "node:fs/promises"; import { serve } from "bun"; console.log(fs, promises, serve)\n',
+      )
+      const result = await walk(entry)
+      const name = path.relative(ROOT, worker).replaceAll(path.sep, "/")
+      expect(result.modules).toContain(name)
+      expect(result.runtime).toEqual([`${name} imports bun`, `${name} imports fs`, `${name} imports node:fs/promises`])
+      expect(result.code).toBe(1)
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 })
 
