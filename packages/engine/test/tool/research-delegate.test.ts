@@ -1,5 +1,6 @@
 import { afterAll, expect } from "bun:test"
 import { rmSync } from "node:fs"
+import { mkdir } from "node:fs/promises"
 import path from "path"
 import { Effect } from "effect"
 import { Brain } from "@vectordevai/core/brain/brain"
@@ -16,6 +17,7 @@ import { ResearchOutbound } from "@vectordevai/core/research/outbound"
 import { calls, output, plan, runtime, send, setup } from "../lib/research"
 import { FakeWeb } from "../../../core/test/lib/fake-web"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
+import { provideInstanceEffect, TestInstance } from "../fixture/fixture"
 
 // The research lead hands sub-questions to researchers (sections 5.3, 5.6a and 6.4a). A researcher's request carries
 // its sub-question, the run's public preferences, and of the owner's memory only screened preferences and the rules
@@ -371,39 +373,45 @@ it.instance(
   "a researcher's request carries no instruction file of the repository, and its searches cannot name the working tree",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup()
-      const fs = yield* FSUtil.Service
-      yield* fs.writeWithDirs(
-        path.join(test.dir, "AGENTS.md"),
-        "# Rules\n\nDeploy to build07.acme-internal.corp with the zephyrDeploy script.\n",
-      )
-      const sessions = yield* Session.Service
-      const lead = yield* sessions.create({ title: "Research", permission: allow })
-      yield* test.llm.tool("research_plan", plan({ depth: "deep" }))
-      yield* test.llm.tool("task", {
-        description: "CI",
-        prompt: SUBQUESTION,
-        subagent_type: "researcher",
-        background: false,
-      })
-      yield* test.llm.toolMatch(researcher, "research_search", { query: `payments tests ${test.dir}` })
-      yield* test.llm.textMatch(researcher, "Found it.")
-      yield* test.llm.text("Done.")
-      const bodies = yield* send({ sessionID: lead.id, agent: "research", text: "Research how teams test payments." })
-      const server = yield* TestLLMServer
-      const asked = (yield* server.hits)
-        .map((hit) => JSON.stringify(hit.body))
-        .filter((body) => body.includes("research_assignment"))
-      expect(asked.length).toBeGreaterThan(0)
-      for (const body of asked) {
-        expect(body).not.toContain("zephyrDeploy")
-        expect(body).not.toContain("acme-internal")
-      }
-      // The lead, which reads the repository, keeps its instructions.
-      expect(bodies[0]).toContain("zephyrDeploy")
-      const [child] = yield* sessions.children(lead.id)
-      const [search] = yield* calls(child!.id, "research_search")
-      expect(output(search)).toBe(ResearchOutbound.REFUSAL)
+      // Whole-tree protection applies to paths with four components; Linux's /tmp fixture has only two.
+      const directory = path.join((yield* TestInstance).directory, "private", "research")
+      yield* Effect.promise(() => mkdir(directory, { recursive: true }))
+      yield* Effect.promise(() => Bun.$`git init ${directory}`.quiet())
+      return yield* Effect.gen(function* () {
+        const test = yield* setup()
+        const fs = yield* FSUtil.Service
+        yield* fs.writeWithDirs(
+          path.join(test.dir, "AGENTS.md"),
+          "# Rules\n\nDeploy to build07.acme-internal.corp with the zephyrDeploy script.\n",
+        )
+        const sessions = yield* Session.Service
+        const lead = yield* sessions.create({ title: "Research", permission: allow })
+        yield* test.llm.tool("research_plan", plan({ depth: "deep" }))
+        yield* test.llm.tool("task", {
+          description: "CI",
+          prompt: SUBQUESTION,
+          subagent_type: "researcher",
+          background: false,
+        })
+        yield* test.llm.toolMatch(researcher, "research_search", { query: `payments tests ${test.dir}` })
+        yield* test.llm.textMatch(researcher, "Found it.")
+        yield* test.llm.text("Done.")
+        const bodies = yield* send({ sessionID: lead.id, agent: "research", text: "Research how teams test payments." })
+        const server = yield* TestLLMServer
+        const asked = (yield* server.hits)
+          .map((hit) => JSON.stringify(hit.body))
+          .filter((body) => body.includes("research_assignment"))
+        expect(asked.length).toBeGreaterThan(0)
+        for (const body of asked) {
+          expect(body).not.toContain("zephyrDeploy")
+          expect(body).not.toContain("acme-internal")
+        }
+        // The lead, which reads the repository, keeps its instructions.
+        expect(bodies[0]).toContain("zephyrDeploy")
+        const [child] = yield* sessions.children(lead.id)
+        const [search] = yield* calls(child!.id, "research_search")
+        expect(output(search)).toBe(ResearchOutbound.REFUSAL)
+      }).pipe(Effect.provideService(TestInstance, { directory }), provideInstanceEffect(directory))
     }),
   { git: true },
   90_000,
