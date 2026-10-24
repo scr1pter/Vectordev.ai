@@ -28,6 +28,7 @@ import {
   WEB_ACCESS,
   allowChoices,
   allowUpdate,
+  blockedNotice,
   offWhy,
   checksFor,
   configRoles,
@@ -166,6 +167,25 @@ describe("the session popover", () => {
     expect(lines[2]).toBe("Memory sent: 1 personal card and 2 repository excerpts, to 2 model servers")
     expect(lines[3]).toBe("Blocked: 1 (GitHub pull requests 1)")
     expect(lines[4]).toBe("Including 1 helper request")
+  })
+})
+
+describe("a block worth telling", () => {
+  test("says what tried to reach where, and whether it can be allowed", () => {
+    expect(blockedNotice({ source: "github", origin: "https://api.github.com" }, sources)).toEqual({
+      title: "Vector Local blocked a request",
+      description:
+        "GitHub pull requests tried to reach api.github.com. It is outside the servers you listed. You can allow it in Settings > Vector Local.",
+    })
+    expect(blockedNotice({ source: "vector-free-models", origin: "https://vectordev.ai" }, sources).description).toBe(
+      "Free models provided by Vector tried to reach vectordev.ai. It is outside the servers you listed, and Vector Local keeps it off.",
+    )
+  })
+
+  test("a request no part of Vector labelled points at the network log", () => {
+    expect(blockedNotice({ source: "unlabelled", origin: "https://198.51.100.7" }, sources).description).toBe(
+      "A request no part of Vector labelled tried to reach 198.51.100.7, so Vector Local blocked it. The network log names the code that made it.",
+    )
   })
 })
 

@@ -1,16 +1,21 @@
-import { Show, createSignal } from "solid-js"
+import { Show, createEffect, createSignal, onCleanup } from "solid-js"
 import { useDialog } from "@vectordevai/ui/context/dialog"
 import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 import { MenuV2 } from "@vectordevai/ui/v2/menu-v2"
 import { DialogEgressLog } from "./egress-log"
 import { DialogLocalCovers, EgressPopover } from "./egress-popover"
-import { pillText, pillTitle } from "./local-model"
+import { blockedNotice, pillText, pillTitle } from "./local-model"
+import { showToast } from "@/utils/toast"
 import type { LocalStatusReader } from "./use-local"
 import "./local.css"
 
 // The composer's Vector Local pill (section 8.1): "Local", "Local · your network" or "Local · no web", with a lock
 // mark when the company set it, and "Local on build-box" when the engine runs on another computer. It shows only
 // while Vector Local is on and opens the session popover. A guest cannot read the owner's policy, so it shows nothing.
+
+// Blocks already told about, by source and origin, so several open composers show one toast.
+const announced = new Map<string, number>()
+const ANNOUNCED_FOR = 10_000
 
 export function LocalStatusPill(props: {
   reader: LocalStatusReader
@@ -20,6 +25,23 @@ export function LocalStatusPill(props: {
 }) {
   // Dialogs open from here, not from the popover, whose content is gone once it closes.
   const dialog = useDialog()
+  // The engine tells every client about a block worth telling (at most once per source in ten minutes); each open
+  // composer hears it, and the app shows it once.
+  createEffect(() => {
+    const events = props.reader.events()
+    if (!events) return
+    const stop = events.on("global", (event) => {
+      if (event.type !== "local.blocked" || !props.reader.status()?.policy.enabled) return
+      const key = `${event.properties.source} ${event.properties.origin}`
+      if (Date.now() - (announced.get(key) ?? 0) < ANNOUNCED_FOR) return
+      announced.set(key, Date.now())
+      showToast({
+        ...blockedNotice(event.properties, props.reader.status()?.sources),
+        actions: [{ label: "What Vector sent", onClick: () => show("log") }],
+      })
+    })
+    onCleanup(stop)
+  })
   const [open, setOpen] = createSignal(false)
   const show = (view: "log" | "covers" | "settings") => {
     setOpen(false)

@@ -233,6 +233,30 @@ export function popoverLines(
   ] satisfies PopoverLine[]
 }
 
+/**
+ * The toast for a block the engine says is worth telling (local.blocked: a request no part of Vector labelled, or a
+ * block the user caused), at most once per source in ten minutes. Expected blocks are listed, not toasted.
+ */
+export function blockedNotice(
+  event: { readonly source: string; readonly origin: string },
+  sources: readonly LocalSource[] = [],
+) {
+  const source = sources.find((item) => item.id === event.source)
+  const tried = `${sourceName(event.source, sources)} tried to reach ${hostOf(event.origin)}.`
+  if (event.source === "unlabelled")
+    return {
+      title: "Vector Local blocked a request",
+      description: `A request no part of Vector labelled tried to reach ${hostOf(event.origin)}, so Vector Local blocked it. The network log names the code that made it.`,
+    }
+  return {
+    title: "Vector Local blocked a request",
+    description:
+      source && allowable(source)
+        ? `${tried} It is outside the servers you listed. You can allow it in Settings > Vector Local.`
+        : `${tried} It is outside the servers you listed, and Vector Local keeps it off.`,
+  }
+}
+
 export type OffState = "allowed" | "asks" | "hidden" | "never" | "off"
 
 export type OffItem = {

@@ -71,6 +71,8 @@ async function setup(
     added?: boolean
     guest?: boolean
     onboarding?: boolean
+    /** Envelopes on the global event stream, such as local.blocked. */
+    events?: unknown[]
   } = {},
 ) {
   const state = {
@@ -130,6 +132,7 @@ async function setup(
     provider: catalog(),
     sessions: [{ id: sessionID, slug: "local", projectID, directory, title, time: { created: 1, updated: 1 } }],
     pageMessages: () => ({ items: [] }),
+    events: () => input.events ?? [],
   })
   const owner =
     (body: () => unknown, status = 200) =>
@@ -448,6 +451,32 @@ test("the model picker keeps what Vector Local turned off in a collapsed group t
   await expect(group).toContainText("OpenAI")
   await expect(group).toContainText(OFF_IN_LOCAL.listed)
   await page.screenshot({ path: test.info().outputPath("07-picker-off-in-local.png"), animations: "disabled" })
+})
+
+test("a block the engine says is worth telling shows once and opens the network log", async ({ page }) => {
+  await setup(page, {
+    added: true,
+    policy: policy({ enabled: true, web: "ask", endpoints: [{ origin, from: "user" }] }),
+    events: [
+      {
+        directory: "global",
+        payload: { type: "local.blocked", properties: { source: "github", origin: "https://api.github.com" } },
+      },
+    ],
+  })
+  await openSession(page)
+  const toast = page.getByText("Vector Local blocked a request")
+  await expect(toast).toHaveCount(1)
+  await expect(
+    page.getByText(
+      "GitHub pull requests tried to reach api.github.com. It is outside the servers you listed. You can allow it in Settings > Vector Local.",
+    ),
+  ).toBeVisible()
+  // The stream delivers it again on every reconnect; the app still shows it once.
+  await page.waitForTimeout(1_500)
+  await expect(toast).toHaveCount(1)
+  await page.getByRole("button", { name: "What Vector sent" }).click()
+  await expect(page.locator(".vector-local-log-dialog")).toBeVisible()
 })
 
 test("Settings > Vector Local asks before Add server loosens it, and lists every server's labels", async ({ page }) => {
