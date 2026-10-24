@@ -100,6 +100,7 @@ import {
   browserStorage,
   capLabel,
   modesFor,
+  hasResearch,
   rememberMode,
   rememberedMode,
   scopeLabel,
@@ -635,7 +636,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   // or the Vector Local list) Fast is hidden, and a research cap is a step count only when the engine counts the
   // model's steps as having no per-token price.
   const hosted = createMemo(() => props.controls.model.selection.hosted())
-  const modes = createMemo(() => modesFor(hosted() !== undefined))
+  const modes = createMemo(() => modesFor(hosted() !== undefined, hasResearch(sync().data.agent)))
   const sessionTitle = (id: string) => sync().data.session.find((item) => item.id === id)?.title
   const executionMode = createMemo<Mode>(() => {
     const chosen = (() => {

@@ -21,6 +21,7 @@ const optimisticSeeded: boolean[] = []
 const storedSessions: Record<string, Array<{ id: string; title?: string }>> = {}
 const promoted: Array<{ directory: string; sessionID: string }> = []
 const sentShell: string[] = []
+const sentShellAgents: string[] = []
 const sentPrompts: Array<{
   directory: string
   input: {
@@ -42,6 +43,7 @@ let promptResetCount = 0
 let currentModel: { id: string; provider: { id: string } } | undefined
 let availableModels: Array<{ id: string; provider: { id: string } }> = []
 let providerReady = true
+let engineAgents = [{ name: "build" }, { name: "research" }]
 let providerLoaded = true
 // The desktop app's Vector account bridge; the web build has none.
 let vectorAccount: object | undefined = {}
@@ -71,6 +73,7 @@ const prompt = {
 const clientFor = (directory: string) => {
   createdClients.push(directory)
   return {
+    local: { get: async () => ({ data: undefined }) },
     file: {
       list: async () => {
         if (workspaceError) throw workspaceError
@@ -87,7 +90,8 @@ const clientFor = (directory: string) => {
           },
         }
       },
-      shell: async () => {
+      shell: async (input: { agent: string }) => {
+        sentShellAgents.push(input.agent)
         sentShell.push(directory)
         return { data: undefined }
       },
@@ -202,6 +206,9 @@ beforeAll(async () => {
   mock.module("@/context/sync", () => ({
     useSync: () => () => ({
       data: {
+        get agent() {
+          return engineAgents
+        },
         command: [],
         config: {},
         get provider_ready() {
@@ -289,6 +296,7 @@ beforeEach(() => {
   params = {}
   search = {}
   sentShell.length = 0
+  sentShellAgents.length = 0
   sentPrompts.length = 0
   syncedDirectories.length = 0
   selected = "/repo/worktree-a"
@@ -298,6 +306,7 @@ beforeEach(() => {
   currentModel = { id: "model", provider: { id: "provider" } }
   availableModels = [currentModel]
   providerReady = true
+  engineAgents = [{ name: "build" }, { name: "research" }]
   providerLoaded = true
   vectorAccount = {}
   toasts.length = 0
@@ -424,6 +433,7 @@ describe("prompt submit worktree selection", () => {
 
     await submit.handleSubmit(event)
 
+    await new Promise((resolve) => setTimeout(resolve, 0))
     expect(optimistic).toHaveLength(1)
     expect(optimistic[0]).toMatchObject({
       message: {
@@ -493,14 +503,18 @@ describe("prompt submit worktree selection", () => {
     })
   })
 
-  const researchSubmit = (depth: "auto" | "focused" | "deep", scope?: "web" | "web+brain" | "brain") =>
+  const researchSubmit = (
+    depth: "auto" | "focused" | "deep",
+    scope?: "web" | "web+brain" | "brain",
+    mode: "normal" | "shell" = "normal",
+  ) =>
     createPromptSubmit({
       prompt,
       info: () => ({ id: "session-1" }),
       imageAttachments: () => [],
       commentCount: () => 0,
       autoAccept: () => false,
-      mode: () => "normal",
+      mode: () => mode,
       working: () => false,
       editor: () => undefined,
       queueScroll: () => undefined,
@@ -533,6 +547,41 @@ describe("prompt submit worktree selection", () => {
       // The echo is the same part, so it carries the scope too.
       expect(optimistic.at(-1)?.message.agent).toBe("research")
     }
+  })
+
+  test("refuses a remembered research mode on an older engine without clearing or admitting the draft", async () => {
+    params = { id: "session-1" }
+    engineAgents = [{ name: "build" }]
+    await researchSubmit("auto").handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+    expect(sentPrompts).toEqual([])
+    expect(createdSessions).toEqual([])
+    expect(optimistic).toEqual([])
+    expect(promptResetCount).toBe(0)
+    expect(toasts.at(-1)?.description).toContain("not available on this engine")
+  })
+
+  test("desktop Local refuses an older destination engine before admitting or clearing the request", async () => {
+    window.api = { vectorLocal: { status: async () => ({ enabled: true, held: false, sources: {} }) } }
+    try {
+      await researchSubmit("auto").handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+      expect(createdSessions).toEqual([])
+      expect(sentPrompts).toEqual([])
+      expect(optimistic).toEqual([])
+      expect(promptResetCount).toBe(0)
+      expect(toasts.at(-1)?.description).toContain("could not confirm protection")
+    } finally {
+      delete window.api
+    }
+  })
+
+  test("a shell command does not inherit an unavailable research agent from the hidden mode chip", async () => {
+    engineAgents = [{ name: "build" }]
+    await researchSubmit("auto", undefined, "shell").handleSubmit({
+      preventDefault: () => undefined,
+    } as unknown as Event)
+    expect(sentShell).toHaveLength(1)
+    expect(sentShellAgents).toEqual(["agent"])
+    expect(sentPrompts).toEqual([])
   })
 
   test("leaves the size to Vector at Auto, and sends no scope when the chip has none", async () => {
@@ -570,6 +619,7 @@ describe("prompt submit worktree selection", () => {
     await submit.handleSubmit(event)
 
     expect(storedSessions["/repo/worktree-a"]).toEqual([{ id: "session-1", title: "New session 1" }])
+    await new Promise((resolve) => setTimeout(resolve, 0))
     expect(optimisticSeeded).toEqual([true])
   })
 })
@@ -640,7 +690,7 @@ describe("follow-up optimistic echo", () => {
       } as unknown as SendInput["client"],
       serverSync: { session: { set: () => undefined } } as unknown as SendInput["serverSync"],
       sync: {
-        data: { command: [], message: { "session-1": history }, part: parts, config },
+        data: { command: [], agent: engineAgents, message: { "session-1": history }, part: parts, config },
         session: {
           optimistic: {
             add: (value: { parts: SentPart[] }) => void steps.push({ kind: "echo", parts: value.parts }),
@@ -660,6 +710,119 @@ describe("follow-up optimistic echo", () => {
     })
     return steps
   }
+
+  test("refuses queued research after switching to an engine without research", async () => {
+    engineAgents = [{ name: "build" }]
+    await expect(send({ agent: "research" })).rejects.toThrow("not available on this engine")
+  })
+
+  test("rechecks research after waiting for a worktree, before dispatch", async () => {
+    const { sendFollowupDraft } = await import("./submit")
+    const agents = [{ name: "research" }]
+    let sent = false
+    let removed = false
+    await expect(
+      sendFollowupDraft({
+        client: {
+          session: {
+            promptAsync: async () => {
+              sent = true
+            },
+          },
+        } as unknown as SendInput["client"],
+        sync: {
+          data: { agent: agents, command: [], message: {}, config: {} },
+          session: {
+            optimistic: {
+              add: () => undefined,
+              remove: () => {
+                removed = true
+              },
+            },
+          },
+        } as unknown as SendInput["sync"],
+        serverSync: { session: { set: () => undefined } } as unknown as SendInput["serverSync"],
+        before: () => {
+          agents.length = 0
+          return true
+        },
+        draft: {
+          sessionID: "session-1",
+          sessionDirectory: "/repo/main",
+          prompt: [{ type: "text", content: text, start: 0, end: text.length }],
+          context: [],
+          agent: "research",
+          model: { providerID: "p", modelID: "m" },
+        },
+      }),
+    ).rejects.toThrow("not available on this engine")
+    expect(sent).toBe(false)
+    expect(removed).toBe(true)
+  })
+
+  test("queued sends recheck Local on their destination after waiting, even if another engine is protected", async () => {
+    const { sendFollowupDraft } = await import("./submit")
+    const policy = {
+      enabled: true,
+      web: "none",
+      lock: false,
+      endpoints: [],
+      web_domains: { allow: [], deny: [] },
+      allow: [],
+      user_may: [],
+      locked_keys: [],
+      endpoint_domains: [],
+      warnings: [],
+    }
+    const state = { enabled: true, sent: false, removed: false, checked: 0 }
+    window.api = { vectorLocal: { status: async () => ({ enabled: true, held: false, sources: {} }) } }
+    try {
+      await expect(
+        sendFollowupDraft({
+          client: {
+            local: {
+              get: async () => {
+                state.checked++
+                return { data: { policy: { ...policy, enabled: state.enabled } } }
+              },
+            },
+            session: {
+              promptAsync: async () => {
+                state.sent = true
+              },
+            },
+          } as unknown as SendInput["client"],
+          sync: {
+            data: { agent: [{ name: "build" }], command: [], message: {}, config: {} },
+            session: {
+              optimistic: {
+                add: () => undefined,
+                remove: () => {
+                  state.removed = true
+                },
+              },
+            },
+          } as unknown as SendInput["sync"],
+          serverSync: { session: { set: () => undefined } } as unknown as SendInput["serverSync"],
+          before: () => {
+            state.enabled = false
+            return true
+          },
+          draft: {
+            sessionID: "session-1",
+            sessionDirectory: "/repo/main",
+            prompt: [{ type: "text", content: text, start: 0, end: text.length }],
+            context: [],
+            agent: "build",
+            model: { providerID: "p", modelID: "m" },
+          },
+        }),
+      ).rejects.toThrow("could not confirm protection")
+      expect(state).toEqual({ enabled: false, sent: false, removed: true, checked: 2 })
+    } finally {
+      delete window.api
+    }
+  })
 
   const ids = (parts: SentPart[]) => parts.map((part) => part.id)
   const files = (parts: SentPart[]) => parts.filter((part) => part.type === "file")
@@ -706,9 +869,9 @@ describe("follow-up optimistic echo", () => {
 
   test("adds no file map for a greeting, and adds it for any work, small actions included", async () => {
     const map = async (content: string) =>
-      (
-        await withDesktopContext(() => send({ prompt: [{ type: "text", content, start: 0, end: content.length }] }))
-      ).at(-1)?.parts.filter((part) => part.synthetic).length
+      (await withDesktopContext(() => send({ prompt: [{ type: "text", content, start: 0, end: content.length }] })))
+        .at(-1)
+        ?.parts.filter((part) => part.synthetic).length
     expect(await map("hi")).toBe(0)
     for (const content of ["ship to vercel", "fix the typo in README.md", "what does this function do?"])
       expect(await map(content), content).toBe(1)
@@ -1273,6 +1436,7 @@ describe("included model data notice", () => {
     await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
     // The prompt went on past where the toast used to show: its optimistic message is in the new session.
     expect(createdSessions).toHaveLength(1)
+    await new Promise((resolve) => setTimeout(resolve, 0))
     expect(optimistic).toHaveLength(1)
     expect(
       toasts.filter((toast) =>

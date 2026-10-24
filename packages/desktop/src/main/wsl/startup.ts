@@ -50,3 +50,16 @@ export async function requireWslAuthentication(url: string, distro: string, stop
 }
 
 export const wslSignInMessage = "Sign in to your Vector account in the desktop app before starting a WSL server."
+
+/** The pinned pre-Local CLI ignores VECTOR_LOCAL_POLICY; never start it under a Local promise. */
+export function wslLocalRefusal(version: string, enabled: boolean, distro: string) {
+  if (!enabled) return
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version)
+  if (
+    match &&
+    (Number(match[1]) > 1 ||
+      (Number(match[1]) === 1 && (Number(match[2]) > 99 || (Number(match[2]) === 99 && Number(match[3]) >= 111))))
+  )
+    return
+  return `Vector ${version} in ${distro} does not support Vector Local. Use this computer's native engine while Vector Local is on.`
+}

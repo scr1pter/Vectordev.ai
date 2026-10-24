@@ -1,3 +1,5 @@
+import { LocalMode } from "@vectordevai/schema/local-mode"
+import { Schema } from "effect"
 import type { LocalStatus, VectorClient } from "@vectordevai/sdk/v2/client"
 import { createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js"
 import { useGlobal } from "@/context/global"
@@ -25,7 +27,7 @@ export function useLocalStatus() {
         // An engine from before the Local API answers 404, and a server that is not Vector's may answer anything:
         // only a status with a policy is Vector Local's.
         .then((result) => ({
-          data: result.data?.policy ? result.data : undefined,
+          data: Schema.is(LocalMode.Policy)(result.data?.policy) ? result.data : undefined,
           status: result.response?.status,
         }))
         .catch(() => ({ data: undefined, status: undefined })),
@@ -44,6 +46,7 @@ export function useLocalStatus() {
     status: () => read.latest?.data,
     loading: () => read.loading,
     guest: () => read.latest?.status === 401 || read.latest?.status === 403,
+    unsupported: () => read.latest?.status === 404 || (read.latest?.status === 200 && !read.latest.data),
     refresh,
     /** Shows a status the engine answered a change with, without reading it again. */
     set: (status: LocalStatus) => mutate({ data: status, status: 200 }),

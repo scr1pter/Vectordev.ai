@@ -63,8 +63,21 @@ export const MODES: readonly {
  * The Mode menu for the selected model. Fast promises priority capacity that a model server someone hosts cannot give,
  * so a model on one is offered no Fast.
  */
-export function modesFor(hosted: boolean) {
-  return hosted ? MODES.filter((mode) => mode.id !== "fast") : MODES
+export function modesFor(hosted: boolean, research: boolean) {
+  return MODES.filter((mode) => !(hosted && mode.id === "fast") && (research || mode.id !== "research"))
+}
+
+export const RESEARCH_UNAVAILABLE =
+  "Deep research is not available on this engine. Open this repository with the current desktop engine, or choose another mode."
+
+/** The raw engine agent list, before the ordinary agent picker removes the research agent. */
+export function hasResearch(agents: readonly { name: string }[] | undefined) {
+  return agents?.some((agent) => agent.name === AGENT) === true
+}
+
+/** Preserve remembered research intent: an older engine must never silently turn it into a coding request. */
+export function requireResearch(requested: boolean, agents: readonly { name: string }[] | undefined) {
+  if (requested && !hasResearch(agents)) throw new Error(RESEARCH_UNAVAILABLE)
 }
 
 /** The mode a request goes in: Fast picked for another model goes as Normal on a server someone hosts. */

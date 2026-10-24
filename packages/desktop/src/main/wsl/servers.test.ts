@@ -8,6 +8,7 @@ import {
 } from "./policy"
 import {
   expectVectorVersion,
+  wslLocalRefusal,
   pendingRestartAfterWslInstall,
   pollWslHealth,
   wslServerIdsToStartOnInitialize,
@@ -534,4 +535,163 @@ test("an unhealthy process remains owned until confirmed stopped, including star
   })
   expect(synchronized).toBe(true)
   expect(controller.getState().servers[0]?.runtime.kind).not.toBe("ready")
+})
+
+test("the pinned WSL engine fails closed before probing or spawning while Local is on", async () => {
+  let probed = false
+  let spawned = false
+  const controller = createWslServersController(
+    "1.99.99",
+    async () => {
+      spawned = true
+      throw new Error("must not spawn")
+    },
+    {
+      localEnabled: () => true,
+      readServers: () => [{ id: "wsl:Debian", distro: "Debian" }],
+      writeServers: () => {},
+      resolveVector: async () => {
+        probed = true
+        return "/fixture/vector"
+      },
+      readCommandVersion: async () => "1.99.99",
+    },
+  )
+  await controller.replaceAccount("vct_fixture")
+  await controller.initialize()
+  await waitFor(() => controller.getState().servers[0]?.runtime.kind === "failed")
+  expect(controller.getState().servers[0]?.runtime).toMatchObject({
+    kind: "failed",
+    message: expect.stringContaining("does not support Vector Local"),
+  })
+  expect(probed).toBe(false)
+  expect(spawned).toBe(false)
+})
+
+test("turning Local on stops a running legacy WSL engine; turning it off requires an explicit start", async () => {
+  let local = false
+  let started = 0
+  let stopped = 0
+  const controller = createWslServersController(
+    "1.99.99",
+    async () => {
+      started++
+      return {
+        listener: {
+          stop: async () => {
+            stopped++
+          },
+          onExit: () => {},
+        },
+        url: "http://127.0.0.1:4096",
+        username: "vector",
+        password: "fixture",
+      }
+    },
+    {
+      localEnabled: () => local,
+      readServers: () => [{ id: "wsl:Debian", distro: "Debian" }],
+      writeServers: () => {},
+      resolveVector: async () => "/fixture/vector",
+      readCommandVersion: async () => "1.99.99",
+    },
+  )
+  await controller.replaceAccount("vct_fixture")
+  await controller.initialize()
+  await waitFor(() => controller.getState().servers[0]?.runtime.kind === "ready")
+  local = true
+  await controller.applyLocalPolicy()
+  expect(stopped).toBe(1)
+  expect(controller.getState().servers[0]?.runtime.kind).toBe("failed")
+  local = false
+  await controller.applyLocalPolicy()
+  expect(started).toBe(1)
+  await controller.startServer("wsl:Debian")
+  expect(started).toBe(2)
+  expect(controller.getState().servers[0]?.runtime.kind).toBe("ready")
+  await controller.stopAll()
+})
+
+test("Local toggled during a WSL version check prevents the subsequent spawn", async () => {
+  let local = false
+  let spawned = false
+  const checking = Promise.withResolvers<void>()
+  const finish = Promise.withResolvers<void>()
+  const controller = createWslServersController(
+    "1.99.99",
+    async () => {
+      spawned = true
+      throw new Error("must not spawn")
+    },
+    {
+      localEnabled: () => local,
+      readServers: () => [{ id: "wsl:Debian", distro: "Debian" }],
+      writeServers: () => {},
+      resolveVector: async () => "/fixture/vector",
+      readCommandVersion: async () => {
+        checking.resolve()
+        await finish.promise
+        return "1.99.99"
+      },
+    },
+  )
+  await controller.replaceAccount("vct_fixture")
+  await controller.initialize()
+  await checking.promise
+  local = true
+  const stopped = controller.applyLocalPolicy()
+  finish.resolve()
+  await stopped
+  expect(spawned).toBe(false)
+  expect(controller.getState().servers[0]?.runtime.kind).toBe("failed")
+})
+
+test("WSL Local support is explicit and unknown or legacy versions fail closed", () => {
+  for (const version of ["1.99.99", "1.99.110", "1.16.2", "unknown", "1.99.111-preview"])
+    expect(wslLocalRefusal(version, true, "Debian")).toContain("does not support")
+  for (const version of ["1.99.111", "1.100.0", "2.0.0"])
+    expect(wslLocalRefusal(version, true, "Debian")).toBeUndefined()
+  expect(wslLocalRefusal("1.99.99", false, "Debian")).toBeUndefined()
+})
+
+test("a failed Local shutdown stays owned and reports that it could not stop, so the owner can retry", async () => {
+  const state = { local: false, allowStop: false, stopped: 0 }
+  const controller = createWslServersController(
+    "1.99.99",
+    async () => ({
+      listener: {
+        stop: async () => {
+          if (!state.allowStop) throw new Error("still alive")
+          state.stopped++
+        },
+        onExit: () => {},
+      },
+      url: "http://127.0.0.1:4096",
+      username: "vector",
+      password: "fixture",
+    }),
+    {
+      localEnabled: () => state.local,
+      readServers: () => [{ id: "wsl:Debian", distro: "Debian" }],
+      writeServers: () => {},
+      resolveVector: async () => "/fixture/vector",
+      readCommandVersion: async () => "1.99.99",
+    },
+  )
+  await controller.replaceAccount("vct_fixture")
+  await controller.initialize()
+  await waitFor(() => controller.getState().servers[0]?.runtime.kind === "ready")
+  state.local = true
+  await expect(controller.applyLocalPolicy()).rejects.toThrow("could not confirm")
+  expect(controller.getState().servers[0]?.runtime).toMatchObject({
+    kind: "failed",
+    message: expect.stringContaining("could not confirm"),
+  })
+  state.allowStop = true
+  await controller.applyLocalPolicy()
+  expect(state.stopped).toBe(1)
+  expect(controller.getState().servers[0]?.runtime).toMatchObject({
+    kind: "failed",
+    message: expect.stringContaining("does not support"),
+  })
 })
