@@ -38,8 +38,11 @@ jobs:
           bun --no-env-file packages/desktop/node_modules/electron/install.js
       - name: Build this commit's desktop engine
         working-directory: packages/engine
+        env:
+          VECTOR_CHANNEL: prod
         run: |
           set -euo pipefail
+          export VECTOR_VERSION="$(node -p 'require("../desktop/package.json").version')"
           export VECTOR_RELEASE_CATALOG_PATH="$PWD/../web/public/models/api.json"
           export VECTOR_RELEASE_CATALOG_SHA256="$(sha256sum "$VECTOR_RELEASE_CATALOG_PATH" | cut -d ' ' -f 1)"
           bun --no-env-file script/build-node.ts
