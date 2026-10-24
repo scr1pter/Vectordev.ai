@@ -19,7 +19,7 @@ import {
 } from "../../packages/core/src/free-model-choice.js"
 import { freeModelRequest } from "../../packages/core/src/free-model-request.js"
 import { enforceRateLimit, requireTrustedJsonRequest } from "./abuse.js"
-import { verifyCliToken } from "./cli-token.js"
+import { verifyCliToken, type CliTokenUser } from "./cli-token.js"
 import { requireUnrevokedAccount } from "./revocation.js"
 import { currentFreeModelCatalog, freeModelsEnabled, openRouterHeaders } from "./free-models-catalog.js"
 import { persistentStore } from "./persistent-store.js"
@@ -59,6 +59,18 @@ function setting(name: string, fallback: number, maximum: number) {
   if (!Number.isSafeInteger(value) || value < 1 || value > maximum)
     throw new ApiError(503, "FREE_MODELS_CONFIGURATION", `${FREE_MODELS_TITLE} are temporarily unavailable.`)
   return value
+}
+
+/**
+ * Operator accounts listed in FREE_MODELS_UNMETERED_ACCOUNTS, which is set only in the server environment, skip the
+ * per-account minute and daily caps. Everything shared still applies to them and counts their requests: the shared
+ * per-minute cap, the upstream daily quota and the pending-pool reservation. Entries are account ids or email
+ * addresses separated by commas or whitespace, matched only against the verified token's account.
+ */
+function unmeteredAccount(account: CliTokenUser) {
+  const listed = (process.env.FREE_MODELS_UNMETERED_ACCOUNTS ?? "").split(/[\s,]+/).filter(Boolean)
+  const email = account.email.trim().toLowerCase()
+  return listed.includes(account.id) || listed.some((entry) => entry.toLowerCase() === email)
 }
 
 function upstreamLimit(response: Response, status: number, now: number) {
@@ -182,6 +194,7 @@ export async function handleFreeModelsChat(
     const token = /^Bearer (vct_[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+)$/.exec(String(request.headers.authorization ?? ""))?.[1]
     const account = verifyCliToken(token ?? "", now)
     await requireUnrevokedAccount(account.id, fetcher)
+    const unmetered = unmeteredAccount(account)
     const disclosure = request.headers[FREE_MODELS_DISCLOSURE_HEADER] === FREE_MODELS_DISCLOSURE
     const consent = disclosure && request.headers[FREE_MODELS_CONSENT_HEADER] === FREE_MODELS_CONSENT_ACCEPTED
     const all = await currentFreeModelCatalog(fetcher, now, { disclosure: true })
@@ -232,6 +245,8 @@ export async function handleFreeModelsChat(
         reason: "upstream" as const,
       },
     ]) {
+      // An unmetered account skips only its own cap; the shared one still counts and stops its requests.
+      if (unmetered && cap.identifier === account.id) continue
       await enforceFreeLimit(request, response, cap)
     }
     const keyResponse = await fetcher(`${ROOT}/key`, {
@@ -259,13 +274,15 @@ export async function handleFreeModelsChat(
         "Limits for free models provided by Vector could not be checked. Try again later.",
       )
     if (!quota.remaining) throw new Limit(freeModelLimit("shared_daily", nextDay(now)))
-    await enforceFreeLimit(request, response, {
+    // Built for every account, so a bad setting fails the same way for an unmetered one.
+    const daily = {
       scope: `free-models-daily:${Math.floor(now / 86400000)}`,
       limit: setting("FREE_MODELS_DAILY_PER_USER", Math.max(1, Math.min(20, Math.floor(quota.limit / 10))), 1000),
       windowSeconds: Math.ceil((nextDay(now) - now) / 1000),
       identifier: account.id,
       reason: "user_daily" as const,
-    })
+    }
+    if (!unmetered) await enforceFreeLimit(request, response, daily)
     const reserve =
       "redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1]); if redis.call('ZCARD', KEYS[1]) >= tonumber(ARGV[2]) then return 0 end; redis.call('ZADD', KEYS[1], ARGV[3], ARGV[4]); redis.call('EXPIRE', KEYS[1], 86400); return 1"
     reserved =

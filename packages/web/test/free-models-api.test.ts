@@ -250,6 +250,7 @@ beforeEach(async () => {
     OPENROUTER_FREE_API_KEY: "fixture-openrouter-key",
   })
   delete process.env.VERCEL_ENV
+  delete process.env.FREE_MODELS_UNMETERED_ACCOUNTS
   delete process.env.UPSTASH_REDIS_REST_URL
   delete process.env.UPSTASH_REDIS_REST_TOKEN
   Object.assign(state, initial())
@@ -275,6 +276,7 @@ afterAll(async () => {
     "FREE_MODELS_ENABLED",
     "FREE_MODELS_DAILY_PER_USER",
     "FREE_MODELS_MINUTE_PER_USER",
+    "FREE_MODELS_UNMETERED_ACCOUNTS",
     "VECTOR_CLI_TOKEN_SECRET",
     "VECTOR_ABUSE_SECRET",
     "KV_REST_API_URL",
@@ -285,8 +287,8 @@ afterAll(async () => {
     delete process.env[key]
 })
 
-function account(id = "11111111-1111-4111-8111-111111111111") {
-  return mintCliToken({ id, email: "fixture@example.test" }).token
+function account(id = "11111111-1111-4111-8111-111111111111", email = "fixture@example.test") {
+  return mintCliToken({ id, email }).token
 }
 async function chat(
   body: unknown = { model: catalogModels[0].id, messages: [{ role: "user", content: "fixture prompt" }] },
@@ -725,6 +727,127 @@ describe("shared free inference", () => {
   test("treats a truncated stream as a recoverable failure", async () => {
     state.truncated = true
     expect(await (await chat()).text()).toContain("FREE_MODELS_STREAM_INVALID")
+  })
+})
+
+describe("unmetered operator accounts", () => {
+  const owner = "22222222-2222-4222-8222-222222222222"
+  const hashed = (id: string) => createHash("sha256").update(id).digest("hex")
+  const limited = async (response: Response) => {
+    expect(response.status).toBe(429)
+    return (await response.json()).error.reason
+  }
+
+  test("an account listed by id passes the per-account minute and daily caps and looks like anyone else", async () => {
+    process.env.FREE_MODELS_UNMETERED_ACCOUNTS = owner
+    process.env.FREE_MODELS_MINUTE_PER_USER = "2"
+    process.env.FREE_MODELS_DAILY_PER_USER = "3"
+    const passed = await Promise.all(Array.from({ length: 6 }, () => chat(undefined, account(owner))))
+    expect(passed.map((response) => response.status)).toEqual(Array(6).fill(200))
+    expect(chats.map((item) => item.body.user)).toEqual(Array(6).fill(hashed(owner)))
+    // Anyone else is still stopped by both caps.
+    const minute = await Promise.all(Array.from({ length: 3 }, () => chat()))
+    expect(minute.filter((response) => response.status === 200)).toHaveLength(2)
+    expect(await limited(minute.find((response) => response.status === 429)!)).toBe("user_minute")
+    process.env.FREE_MODELS_MINUTE_PER_USER = "20"
+    const other = account("11111111-1111-4111-8111-000000000002")
+    for (const _ of Array.from({ length: 3 })) expect((await chat(undefined, other)).status).toBe(200)
+    expect(await limited(await chat(undefined, other))).toBe("user_daily")
+    // The listed account's answer, and what goes upstream for it, differ from anyone else's only in the account hash.
+    const names = (response: Response) => [...response.headers.keys()].sort()
+    expect(names(passed[0])).toEqual(names(minute.find((response) => response.status === 200)!))
+    expect(await passed[0].text()).toBe(await minute.find((response) => response.status === 200)!.text())
+    expect({ ...chats[0].body, user: undefined }).toEqual({ ...chats[6].body, user: undefined })
+    expect(chats[6].body.user).toBe(hashed("11111111-1111-4111-8111-111111111111"))
+  })
+
+  test("an account listed by email matches in any case, trimmed, among comma or whitespace separated entries", async () => {
+    process.env.FREE_MODELS_UNMETERED_ACCOUNTS =
+      " first@example.com,\n\tOWNER@Example.COM ,, 33333333-3333-4333-8333-333333333333 "
+    process.env.FREE_MODELS_MINUTE_PER_USER = "1"
+    process.env.FREE_MODELS_DAILY_PER_USER = "1"
+    for (const [index, email] of ["owner@example.com", "Owner@Example.com", " owner@example.com "].entries()) {
+      const token = account(`22222222-2222-4222-8222-00000000000${index}`, email)
+      for (const _ of Array.from({ length: 3 })) expect((await chat(undefined, token)).status).toBe(200)
+    }
+    const byID = account("33333333-3333-4333-8333-333333333333", "someone@example.com")
+    for (const _ of Array.from({ length: 2 })) expect((await chat(undefined, byID)).status).toBe(200)
+    // A lookalike address is not on the list.
+    const lookalike = account("22222222-2222-4222-8222-000000000009", "owner@example.com.test")
+    expect((await chat(undefined, lookalike)).status).toBe(200)
+    expect(await limited(await chat(undefined, lookalike))).toBe("user_minute")
+  })
+
+  test("a listed account still stops at the shared per-minute cap, and leaves less of it for everyone else", async () => {
+    process.env.FREE_MODELS_UNMETERED_ACCOUNTS = owner
+    const results = await Promise.all(Array.from({ length: 21 }, () => chat(undefined, account(owner))))
+    expect(results.filter((response) => response.status === 200)).toHaveLength(20)
+    expect(await limited(results.find((response) => response.status === 429)!)).toBe("upstream")
+    expect(await limited(await chat())).toBe("upstream")
+    expect(chats).toHaveLength(20)
+  })
+
+  test("a listed account still stops at the upstream daily quota and the pending-pool reservation", async () => {
+    process.env.FREE_MODELS_UNMETERED_ACCOUNTS = owner
+    state.remaining = 0
+    expect(await limited(await chat(undefined, account(owner)))).toBe("shared_daily")
+    expect(chats).toHaveLength(0)
+    state.remaining = 1
+    state.delayed = true
+    const results = await Promise.all(Array.from({ length: 4 }, () => chat(undefined, account(owner))))
+    expect(results.filter((response) => response.status === 200)).toHaveLength(1)
+    expect(await limited(results.find((response) => response.status === 429)!)).toBe("upstream")
+    expect(chats).toHaveLength(1)
+  })
+
+  test("a header, body field or query naming a listed account does not lift another account's caps", async () => {
+    process.env.FREE_MODELS_UNMETERED_ACCOUNTS = `${owner} owner@example.com`
+    process.env.FREE_MODELS_MINUTE_PER_USER = "1"
+    const claims = {
+      "x-vector-account": owner,
+      "x-vector-account-id": owner,
+      "x-vector-account-email": "owner@example.com",
+      "x-forwarded-user": owner,
+      "x-forwarded-email": "owner@example.com",
+    }
+    const body = {
+      model: catalogModels[0].id,
+      messages: [{ role: "user", content: "fixture prompt" }],
+      user: owner,
+      account: owner,
+      accountID: owner,
+      email: "owner@example.com",
+    }
+    expect((await chat(body, account(), claims)).status).toBe(200)
+    expect(await limited(await chat(body, account(), claims))).toBe("user_minute")
+    const queried = await fetch(`${state.origin}/chat?account=${owner}&email=owner%40example.com`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${account()}`, ...claims },
+      body: JSON.stringify(body),
+    })
+    expect(await limited(queried)).toBe("user_minute")
+    expect(chats).toHaveLength(1)
+    expect(chats[0].body.user).toBe(hashed("11111111-1111-4111-8111-111111111111"))
+  })
+
+  test("an empty or malformed setting exempts nobody", async () => {
+    process.env.FREE_MODELS_MINUTE_PER_USER = "1"
+    for (const [index, [setting, email]] of [
+      ["", "owner@example.com"],
+      ["   ", "owner@example.com"],
+      [" , ,", ""],
+      ["*", "owner@example.com"],
+      ['["owner@example.com"]', "owner@example.com"],
+      ["owner@example.com;", "owner@example.com"],
+      ["<owner@example.com>", "owner@example.com"],
+      ["owner", "owner@example.com"],
+      ["@example.com", "owner@example.com"],
+    ].entries()) {
+      process.env.FREE_MODELS_UNMETERED_ACCOUNTS = setting
+      const token = account(`22222222-2222-4222-8222-00000000001${index}`, email)
+      expect((await chat(undefined, token)).status).toBe(200)
+      expect(await limited(await chat(undefined, token))).toBe("user_minute")
+    }
   })
 })
 
