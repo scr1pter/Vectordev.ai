@@ -40,10 +40,10 @@ const logged = (home: string): LocalMode.Event[] => {
 }
 
 cliIt.live(
-  "a run with Web access None reaches only the model server on its list, and its commands run in the sandbox",
+  "a run with Web access None uses its listed model server and reports the platform's shell policy",
   ({ llm, home, vector }) =>
     Effect.gen(function* () {
-      yield* llm.tool("bash", { command: "echo inside the sandbox" })
+      yield* llm.tool("bash", { command: 'echo "inside the sandbox"' })
       yield* llm.text("all done")
       const result = yield* (yield* vector.startRun("say what the command printed", {
         env: offline(llm.url),
@@ -52,16 +52,15 @@ cliIt.live(
       vector.expectExit(result, 0)
       expect(result.stdout).toContain("all done")
 
-      // What the command's result told the model: the sandbox's notice, or, with no sandbox here (Linux without
-      // bwrap), that Vector did not run it.
+      // The model sees the sandbox notice, Windows' unfiltered notice, or a refusal on another unsupported platform.
       const hits = yield* llm.hits
       expect(hits.length).toBe(2)
       const told = JSON.stringify(hits[1]!.body)
-      if (sandbox.supported) {
+      if (sandbox.supported)
         expect(told).toContain(Sandbox.OFFLINE_NOTICE[sandbox.mechanism as "seatbelt" | "bubblewrap"])
-        expect(told).toContain("inside the sandbox")
-      }
-      if (!sandbox.supported) expect(told).toContain("Vector did not run this command")
+      if (process.platform === "win32") expect(told).toContain(Sandbox.WINDOWS_UNFILTERED)
+      if (sandbox.supported || process.platform === "win32") expect(told).toContain("inside the sandbox")
+      if (!sandbox.supported && process.platform !== "win32") expect(told).toContain("Vector did not run this command")
 
       // Everything the run let through went to this computer or to the listed model server.
       const events = logged(home)
