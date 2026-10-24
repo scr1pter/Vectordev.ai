@@ -1,8 +1,15 @@
-import { expect, test } from "bun:test"
+import { afterEach, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
+import { applyRemoteProviderPolicy, chatgptOAuthConfiguration } from "../src/provider-policy"
 import { ProviderRemotePolicy } from "../src/provider-remote-policy"
+import { StartupHold } from "../src/startup-hold"
+
+afterEach(() => {
+  StartupHold.useTestHold(false)
+  applyRemoteProviderPolicy({ chatgptSignIn: true })
+})
 
 async function scratch() {
   const root = await mkdtemp(path.join(os.tmpdir(), "vector-provider-policy-"))
@@ -15,7 +22,7 @@ async function scratch() {
 function client(
   file: string,
   reply: () => Promise<Response>,
-  extra: { disabled?: () => boolean; now?: () => number } = {},
+  extra: { disabled?: () => boolean; held?: () => boolean; now?: () => number } = {},
 ) {
   const seen: boolean[] = []
   const urls: string[] = []
@@ -117,6 +124,41 @@ test("operators who disable Vector's metadata fetches follow the release default
   await policy.check(true)
   expect(policy.urls).toEqual([])
   expect(policy.seen).toEqual([])
+})
+
+test("a ChatGPT sign-in during a desktop first run's hold reads the owner's switch, and startup checks wait", async () => {
+  await using dir = await scratch()
+  StartupHold.useTestHold(true)
+  const urls: string[] = []
+  // The module's own client is built the same way: the real switch, and the first run's hold.
+  const policy = ProviderRemotePolicy.createClient({
+    file: dir.file,
+    apply: applyRemoteProviderPolicy,
+    held: StartupHold.held,
+    request: async (url) => {
+      urls.push(url)
+      return Response.json({ chatgptSignIn: false })
+    },
+  })
+  // The engine's own startup check waits for the person's answer.
+  await policy.check()
+  expect(urls).toEqual([])
+  expect(chatgptOAuthConfiguration({})).toBeDefined()
+  // Starting a sign-in is that answer: the switch is read, and the owner's off-switch holds for a new install.
+  await policy.check(true)
+  expect(urls).toEqual([ProviderRemotePolicy.POLICY_URL])
+  expect(StartupHold.held()).toBe(true)
+  expect(chatgptOAuthConfiguration({})).toBeUndefined()
+})
+
+test("a desktop first run's hold still restores the owner's last switch from this computer", async () => {
+  await using dir = await scratch()
+  await client(dir.file, async () => Response.json({ chatgptSignIn: false })).check()
+  StartupHold.useTestHold(true)
+  const restarted = client(dir.file, async () => Response.json({ chatgptSignIn: true }), { held: StartupHold.held })
+  await restarted.check()
+  expect(restarted.urls).toEqual([])
+  expect(restarted.seen).toEqual([false])
 })
 
 test("the website publishes the switch where installed apps read it, turned on", async () => {

@@ -30,6 +30,11 @@ export function createClient(input: {
   apply: (policy: Policy) => void
   request?: (url: string, init: RequestInit) => Promise<Response>
   disabled?: () => boolean
+  /**
+   * Whether a desktop first run still holds Vector's startup fetches (StartupHold): a startup check then keeps the last
+   * switch read, and a sign-in reads the switch anyway, since starting one is the person choosing how to run models.
+   */
+  held?: () => boolean
   /** Whether Vector Local blocks the read; the last switch read stays in effect. */
   offline?: () => boolean
   now?: () => number
@@ -59,7 +64,7 @@ export function createClient(input: {
     const pending = (async () => {
       if (input.disabled?.()) return
       await restore()
-      if (input.offline?.()) return
+      if (input.offline?.() || (!force && input.held?.())) return
       const response = await request(POLICY_URL, {
         redirect: "error",
         signal: AbortSignal.timeout(input.wait ?? 3_000),
@@ -91,9 +96,11 @@ export function createClient(input: {
 const client = createClient({
   file: path.join(Global.Path.cache, "provider-policy.json"),
   apply: applyRemoteProviderPolicy,
-  // Operators who turn off Vector's metadata fetches follow the release default, and so does a desktop first run
-  // until the person has chosen how to run models (StartupHold), when the switch is read.
-  disabled: () => Flag.VECTOR_DISABLE_MODELS_FETCH || StartupHold.held(),
+  // Operators who turn off Vector's metadata fetches follow the release default.
+  disabled: () => Flag.VECTOR_DISABLE_MODELS_FETCH,
+  // A desktop first run reads the switch at startup once the person has chosen how to run models; a ChatGPT sign-in
+  // reads it before then too, so the owner's off-switch holds for a new install.
+  held: StartupHold.held,
   offline: () => LocalPolicy.blocks(Egress.policy(), LOCAL_SOURCE),
   request: (url, init) => Egress.fetch(LOCAL_SOURCE.id, url, init),
 })

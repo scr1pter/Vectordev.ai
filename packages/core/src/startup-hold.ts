@@ -2,7 +2,8 @@ export * as StartupHold from "./startup-hold"
 
 // A desktop first run's hold on what Vector fetches for itself at start (plan section 4.7). Until the person has
 // chosen how to run models, the desktop starts its engine with VECTOR_STARTUP_HOLD=1, and the model catalog's refresh,
-// the free models and Codium plans catalogs and the provider policy wait; nothing else does, and it has no timeout.
+// the free models and Codium plans catalogs and the provider policy's startup read wait; nothing else does, and it has
+// no timeout. A ChatGPT sign-in reads the provider policy anyway: starting one is the person choosing how to run models.
 // Once the person has chosen, desktop main lets them go (POST /local/startup/release), and each loads then, in the same
 // engine: free models appear as soon as the person signs in, with no restart.
 //
