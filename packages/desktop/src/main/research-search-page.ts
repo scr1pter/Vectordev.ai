@@ -89,8 +89,10 @@ export function readSearchPage(win: Window, engine: "google" | "duckduckgo"): Se
   }
 
   // Google: each organic result is a link holding its title in an h3, inside the results column. Ads, "People also
-  // ask", the side panel and the page's navigation are left out by their containers, and so is any block of the
-  // column whose own heading says it is sponsored or a set of questions.
+  // ask", the side panel and the page's navigation are left out by their containers, and so is any part of the column
+  // whose own heading says it is sponsored or a set of questions: the heading's own block (Google's module, .MjjYud,
+  // else its .g or sokoban container), or, when it has none, the column's child that holds it. Google may wrap several
+  // organic results and such a module in one child of the column, so a heading never speaks for its siblings' blocks.
   const column = first(doc, "#rso") ?? first(doc, "#search") ?? first(doc, "#main") ?? body
   const SKIP = [
     "#tads",
@@ -117,18 +119,27 @@ export function readSearchPage(win: Window, engine: "google" | "duckduckgo"): Se
     "nav",
   ].join(", ")
   const LABELLED = /^(?:people also ask|people also search for|related searches|sponsored|ads?)\b/i
-  // The block of the column a result is in: the column's child that holds it.
+  const contains = (outer: Element, inner: Element) => invoke(outer, "contains", inner) as boolean
+  // The block of the column an element is in: the column's child that holds it.
   const block = (element: Element): Element => {
     const above = parent(element)
     return !above || above === column ? element : block(above)
   }
-  const labelled = (element: Element) =>
-    all(element, "h2, [role='heading']").some((heading) => LABELLED.test(line(heading)))
+  // What a heading names: its own result block inside the column (Google's module first, then the result), else the
+  // column's child that holds it.
+  const section = (heading: Element) =>
+    [".MjjYud", ".g", "[data-sokoban-container]"]
+      .map((selector) => closest(heading, selector))
+      .find((own): own is Element => !!own && own !== column && contains(column, own)) ?? block(heading)
+  const sections = all(column, "h2, [role='heading']")
+    .filter((heading) => LABELLED.test(line(heading)))
+    .map(section)
+  const labelled = (anchor: Element) => sections.some((named) => contains(named, anchor))
   const SNIPPET = ".VwiC3b, [data-sncf], .IsZvec, .lEBKkf, [style*='-webkit-line-clamp']"
   const items = all(column, "a[href] h3, h3 a[href]").flatMap((found) => {
     const heading = matches(found, "h3") ? found : closest(found, "h3")!
     const anchor = matches(found, "a") ? found : closest(found, "a[href]")!
-    if (closest(anchor, SKIP) || labelled(block(anchor))) return []
+    if (closest(anchor, SKIP) || labelled(anchor)) return []
     const container =
       closest(anchor, ".g") ??
       closest(anchor, ".MjjYud") ??

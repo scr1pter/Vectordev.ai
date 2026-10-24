@@ -103,6 +103,28 @@ describe("Google's results page", () => {
     })
   })
 
+  test("results wrapped in one block of the column with a People also ask module are kept; the module's are not", () => {
+    // Google may put several modules in one child of #rso: two organic results, a "People also ask" module (one with
+    // the class Vector knows it by, one with only its heading) and a sponsored block, all in one wrapper.
+    const wrapped = `<html><body><div id="search"><div id="rso"><div class="dURPMd">
+  <div class="MjjYud"><div class="g"><a href="https://www.energy.gov/a"><h3>Energy A</h3></a><div class="VwiC3b">Snippet A.</div></div></div>
+  <div class="MjjYud"><div jscontroller="x"><div role="heading" aria-level="2">People also ask</div>
+    <div class="related-question-pair"><a href="https://q.example.com/x"><h3>A question</h3></a></div></div></div>
+  <div class="MjjYud"><div jscontroller="y"><h2>People also ask</h2>
+    <div><a href="https://q.example.com/y"><h3>Another question</h3></a></div>
+    <div><a href="https://q.example.com/z"><h3>A third question</h3></a></div></div></div>
+  <div class="MjjYud"><div class="g"><a href="https://www.nature.com/b"><h3>Nature B</h3></a><div class="VwiC3b">Snippet B.</div></div></div>
+  <div class="MjjYud"><h2 role="heading">Sponsored</h2><div class="g"><a href="https://shop.example.com/c"><h3>Buy C</h3></a></div></div>
+</div></div></div></body></html>`
+    expect(searchOutcome("google", read(page(GOOGLE, wrapped), "google"))).toEqual({
+      kind: "results",
+      results: [
+        { url: "https://www.energy.gov/a", title: "Energy A", snippet: "Snippet A." },
+        { url: "https://www.nature.com/b", title: "Nature B", snippet: "Snippet B." },
+      ],
+    })
+  })
+
   test("keeps to the limit", () => {
     const outcome = searchOutcome("google", read(page(GOOGLE, GOOGLE_RESULTS), "google"), 1)
     expect(outcome.kind === "results" ? outcome.results.map((item) => item.url) : []).toEqual([
