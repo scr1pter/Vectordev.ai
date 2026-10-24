@@ -87,6 +87,9 @@ afterEach(async () => {
   rmSync(Config.localConfirmedFile(), { force: true })
   await Egress.erase()
   await disposeAllInstances()
+  // Add server reloads the listener's own instances, which then hold the provider it wrote; they read the config again
+  // here, as after any settings change, so no test starts with another test's provider.
+  expect((await send("POST", "/global/dispose")).status).toBe(200)
 })
 
 const at = (route: string) => {

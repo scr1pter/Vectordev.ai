@@ -12671,6 +12671,12 @@
                         "required": ["id", "reason", "message"],
                         "additionalProperties": false
                       }
+                    },
+                    "hosted": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/HostedModel"
+                      }
                     }
                   },
                   "required": ["all", "default", "connected"],
@@ -38146,6 +38152,25 @@
           }
         },
         "required": ["_tag", "requestID", "message"],
+        "additionalProperties": false
+      },
+      "HostedModel": {
+        "type": "object",
+        "properties": {
+          "providerID": {
+            "type": "string"
+          },
+          "modelID": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "local": {
+            "type": "boolean"
+          }
+        },
+        "required": ["providerID", "modelID", "origin", "local"],
         "additionalProperties": false
       },
       "FreeModelConsent": {

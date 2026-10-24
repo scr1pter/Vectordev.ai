@@ -18,6 +18,7 @@ export type NormalizedProviderListResponse = {
   }
   connected: Array<string>
   unavailable?: ProviderListResponse["unavailable"]
+  hosted?: ProviderListResponse["hosted"]
 }
 
 type Data = {

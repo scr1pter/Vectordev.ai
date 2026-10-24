@@ -13,6 +13,8 @@ import { StartupHold } from "@vectordevai/core/startup-hold"
 import { GlobalBus } from "@/bus/global"
 import { Config } from "@/config/config"
 import { LocalSettings } from "@/config/local-settings"
+import { EffectBridge } from "@/effect/bridge"
+import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
 import { InstanceHttpApi } from "../api"
 import { LocalApiError, LocalConfirmError } from "../groups/local"
 
@@ -26,6 +28,11 @@ export const localHandlers = HttpApiBuilder.group(InstanceHttpApi, "local", (han
   Effect.gen(function* () {
     const holds = yield* LocalProbe.HoldsService
     const config = yield* Config.Service
+    const bridge = yield* EffectBridge.make()
+    // Add server and Check models write a provider to the user's global config. As after PATCH /global/config, the
+    // idle instances load it again, so a provider list and the models a session picks include it, and clients hear
+    // global.disposed and read their provider lists again.
+    const reload = () => bridge.fork(disposeAllInstancesAndEmitGlobalDisposed({ swallowErrors: true }))
     // The app and the terminal UI reload GET /local on local.updated, and tell the user about a block on
     // local.blocked. Both go to every client of this server, like the policy they describe.
     yield* Effect.acquireRelease(Effect.sync(announce), (stop) => Effect.sync(stop))
@@ -124,7 +131,8 @@ export const localHandlers = HttpApiBuilder.group(InstanceHttpApi, "local", (han
       // A server already on the list that answers differently says what changed, for the identity-changed copy.
       const identity = (changed: readonly LocalProbe.Change[] | undefined) =>
         changed && changed.length > 0 ? { identity: [...changed] } : {}
-      if (outcome.type === "added")
+      if (outcome.type === "added") {
+        reload()
         return {
           provider: outcome.provider,
           models: outcome.models,
@@ -132,6 +140,7 @@ export const localHandlers = HttpApiBuilder.group(InstanceHttpApi, "local", (han
           status: outcome.status,
           ...identity(outcome.identity),
         }
+      }
       if (outcome.type === "confirm")
         return yield* new LocalConfirmError({
           name: "LocalConfirmError",
@@ -154,6 +163,8 @@ export const localHandlers = HttpApiBuilder.group(InstanceHttpApi, "local", (han
       })
       if (checked.type === "refused") return yield* failure(checked.reason, checked.message, checked.changes)
       const result = checked.checked
+      // A check that asks first writes nothing.
+      if (result.result !== "ask") reload()
       return {
         ...report,
         model: {
