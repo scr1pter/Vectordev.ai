@@ -1,4 +1,4 @@
-import { upcomingRelease } from "./vector-releases"
+import { release199, upcomingRelease } from "./vector-releases"
 
 // The tables and lists the documentation pages interpolate.
 export const spendRows = [
@@ -283,6 +283,12 @@ export const subagentKinds = [
 ]
 export const changelog = [
   [upcomingRelease.label, upcomingRelease.title, `${upcomingRelease.summary} ${upcomingRelease.status}`],
+  // The notes the desktop app shows as What's new for these releases, word for word.
+  ...["1.99.110", "1.99.109"].flatMap((version) =>
+    release199
+      .filter((release) => release.version === version)
+      .map((release) => [`October 2026 · ${version}`, release.title, release.summary]),
+  ),
   [
     "October 2026 · 1.99.108",
     "Background subagents you can steer, Vercel and Supabase controls, project trust and per-run spend caps",

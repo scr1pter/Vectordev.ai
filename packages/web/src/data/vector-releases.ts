@@ -21,7 +21,7 @@ export const upcomingRelease = {
 // The desktop release the download page offers today. Not every entry in release199 was published as a
 // desktop or npm release (1.99.9 has notes but no installers), so the releases page marks this one Latest.
 // Update it in the same change that publishes the next desktop installers.
-export const publishedDesktopVersion = "1.99.109"
+export const publishedDesktopVersion = "1.99.110"
 
 // Vector Brain arrives in desktop 1.99.110. The site deploys from main, so until the download page offers that release
 // the landing page and the investor page say it is coming in it, and from then on that it is new in it. README.md

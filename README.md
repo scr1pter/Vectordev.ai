@@ -4,7 +4,7 @@
 
 **The low-cost AI agentic harness for planning, building, reviewing and shipping software.**
 
-Self-evolving with Vector Brain, coming in desktop 1.99.110.
+Self-evolving with Vector Brain, from desktop 1.99.110.
 
 [vectordev.ai](https://vectordev.ai) · [Docs](https://vectordev.ai/docs) · [Changelog](https://vectordev.ai/docs/changelog)
 
@@ -14,7 +14,7 @@ Vector is an AI agentic harness. It puts an editor, a terminal, a controlled bro
 
 **Low cost, measured.** In Vector's [offline efficiency benchmark](docs/benchmarks/vector-efficiency-2026-10/README.md), Vector's runtime at an 11 October 2026 revision (commit 6f7f3c2ea) and Claude Code 2.1.215 performed identical scripted tool steps against a local fake model server, with the same number of model requests, in three fix tasks. Vector's modelled spend was 67–75% lower in a first session and 75% lower in a second, run as a new process: medians of three repetitions at the same list rates, with caching modelled and tokens estimated as characters ÷ 4. The benchmark measures what each agent sends, not the quality of answers or a provider's real bill, and it does not show that Vector is cheaper than other agents in general.
 
-Coming in desktop 1.99.110: Vector becomes a self-evolving agentic harness. **Vector Brain**, Vector's own retrieval built on a code graph, works offline on your computer. Give it your specs, PDFs and docs once. It reads them, links requirements, endpoints and decisions to the code that implements them, warns you when the two drift apart, keeps what proved useful in runs that passed, and recalls only what each request needs, within a budget set by the request's size. "hi" costs nothing extra. Your prompts, your data, your Vector: the brain lives on your computer, you choose who runs the model for each request, and you can see, undo or erase what it learned in Settings → Memory. Free models labelled "May train on your prompts" are the exception.
+From desktop 1.99.110, Vector is a self-evolving agentic harness. **Vector Brain**, Vector's own retrieval built on a code graph, works offline on your computer. Give it your specs, PDFs and docs once. It reads them, links requirements, endpoints and decisions to the code that implements them, warns you when the two drift apart, keeps what proved useful in runs that passed, and recalls only what each request needs, within a budget set by the request's size. "hi" costs nothing extra. Your prompts, your data, your Vector: the brain lives on your computer, you choose who runs the model for each request, and you can see, undo or erase what it learned in Settings → Memory. Free models labelled "May train on your prompts" are the exception.
 
 Vector is free. Create a free Vector account at [vectordev.ai](https://vectordev.ai) to download the desktop app; the same account signs in the terminal agent.
 
@@ -35,11 +35,11 @@ vector
 
 Installers are at [vectordev.ai/download](https://vectordev.ai/download), and release notes at [vectordev.ai/docs/changelog](https://vectordev.ai/docs/changelog).
 
-**Release status.** Desktop **1.99.109** and the npm CLI **1.99.99** (`@vectordevai/cli`) are published, including the guarded personal OpenRouter free-model setup described below; desktop 1.99.107 was skipped, so installed copies went from 1.99.106 to 1.99.108. The standalone installer at `vectordev.ai/install` currently installs a CLI build numbered **1.99.107** from 11 October, which predates the changes in desktop 1.99.108 and 1.99.109 and has no `vector trust`, `vector codium`, `vector tasks`, the TUI's `/trust` and `/tasks`, or `vector run --max-cost` and `--max-steps`; those arrive with the next CLI release, and Windows WSL servers keep the 1.99.99 engine that desktop 1.99.109 requires until a later desktop release requires the new CLI. Installed copies update with Check now in Settings → Updates & about, or Check for Updates in the Vector menu on macOS. Vector is free; model access follows the provider you connect. Version 2 is reserved. See the [release notes](https://vectordev.ai/docs/changelog#release-1-99-109) for what changed and what remains unavailable.
+**Release status.** Desktop **1.99.110** and the npm CLI **1.99.99** (`@vectordevai/cli`) are published, including the guarded personal OpenRouter free-model setup described below; desktop 1.99.107 was skipped, so installed copies went from 1.99.106 to 1.99.108. The standalone installer at `vectordev.ai/install` currently installs a CLI build numbered **1.99.107** from 11 October, which predates the changes in desktop 1.99.108, 1.99.109 and 1.99.110 and has no `vector trust`, `vector codium`, `vector tasks`, `vector memory`, the TUI's `/trust` and `/tasks`, or `vector run --max-cost` and `--max-steps`; those arrive with the next CLI release, and Windows WSL servers keep the 1.99.99 engine that desktop 1.99.110 requires until a later desktop release requires the new CLI. Installed copies update with Check now in Settings → Updates & about, or Check for Updates in the Vector menu on macOS. Vector is free; model access follows the provider you connect. Version 2 is reserved. See the [release notes](https://vectordev.ai/docs/changelog#release-1-99-110) for what changed and what remains unavailable.
 
 ## Features
 
-### Vector Brain (coming in desktop 1.99.110)
+### Vector Brain (from desktop 1.99.110)
 
 **One brain for each repository.** The rules you write (`.vector/RULES.md`, and your own `RULES.md` and `MEMORY.md` in Vector's config folder), what Vector learns while it works and the documents you give it, kept in `brain.db` on your computer. Stored and searched on this computer. Every request but a greeting carries a fixed part: your rules, about 800 tokens of `MEMORY.md`, the entries you pinned (about 300 tokens) and one line saying what else the brain holds, the same through a session so the provider's prompt cache can reuse it. On top of that, Vector recalls only the few lines that bear on the request, within a budget set by its size, at most 900 tokens for a Thorough request in a repository with documents. A greeting such as "hi" carries none of it. Private documents never go to a free model labelled "May train on your prompts", or to a session a guest is in.
 
