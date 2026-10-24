@@ -1,10 +1,9 @@
 import { ExternalAgent } from "@vectordevai/schema/external-agent"
 
-// Setup details for the third-party coding agents Vector can run as a workspace
-// engine, derived from the one catalog in @vectordevai/schema/external-agent that
-// desktop detection reads too. Vector shells out to the user's own CLI, so these
-// are the commands that make each runtime available — a picker that only says
-// "Setup needed" leaves the user with nowhere to go.
+// The third-party coding agents Vector can run as a workspace engine in its own
+// chat, derived from the one catalog in @vectordevai/schema/external-agent that
+// desktop detection reads too. Installing and signing in to them, and every
+// terminal-only agent, is Host locally's (dialog-host-locally.tsx).
 
 /** A runtime Vector can run in its own chat view: the catalog's "chat" tier. */
 export type ExternalRuntime = ExternalAgent.ChatId
@@ -17,15 +16,7 @@ export type ExternalRuntimeStatus = {
   signedIn?: boolean
 }
 
-export type ExternalRuntimeSetup = {
-  id: ExternalRuntime
-  label: string
-  cli: string
-  installCommand: string
-  signInCommand?: string
-  note: string
-  docsUrl: string
-}
+export type ExternalRuntimeSetup = { id: ExternalRuntime; label: string }
 
 // The platform the app runs on, for picking that platform's official install command.
 export function browserPlatform(agent = globalThis.navigator?.userAgent ?? ""): ExternalAgent.Platform {
@@ -35,19 +26,7 @@ export function browserPlatform(agent = globalThis.navigator?.userAgent ?? ""): 
 }
 
 export const EXTERNAL_RUNTIMES = Object.fromEntries(
-  ExternalAgent.chatIds.map((id) => {
-    const agent = ExternalAgent.find(id)!
-    const setup: ExternalRuntimeSetup = {
-      id,
-      label: agent.name,
-      cli: agent.binaries[0]!.name,
-      installCommand: ExternalAgent.installFor(agent, browserPlatform())[0]?.command ?? "",
-      signInCommand: ExternalAgent.signInCommand(agent),
-      note: `Runs your installed ${agent.name} in an isolated copy of the repository. Vector never reads its sign-in.`,
-      docsUrl: agent.docsUrl,
-    }
-    return [id, setup]
-  }),
+  ExternalAgent.chatIds.map((id) => [id, { id, label: ExternalAgent.find(id)!.name }]),
 ) as Record<ExternalRuntime, ExternalRuntimeSetup>
 
 /** The runtimes in the catalog's order, which is the order every picker lists them in. */
@@ -63,14 +42,4 @@ export function externalRuntimeSetup(runtime: string): ExternalRuntimeSetup | un
 
 export function externalRuntimeReady(status: ExternalRuntimeStatus | undefined) {
   return Boolean(status?.installed && status.signedIn !== false)
-}
-
-// Every step a user must complete before the runtime can be selected, in order.
-export function setupSteps(runtime: ExternalRuntime, mode: "install" | "sign-in" = "install") {
-  const setup = EXTERNAL_RUNTIMES[runtime]
-  const signIn = setup.signInCommand ? [{ label: "Sign in", command: setup.signInCommand }] : []
-  // An installed CLI that is merely signed out needs one step, not two: showing
-  // the install command again reads as "reinstall it", which is the wrong fix.
-  if (mode === "sign-in") return signIn
-  return [{ label: "Install", command: setup.installCommand }, ...signIn]
 }

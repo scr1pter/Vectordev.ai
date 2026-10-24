@@ -1,7 +1,7 @@
 import type { ModelSelectorModelState } from "@/components/dialog-select-model"
 import type { PickerModel } from "@/utils/provider-brand"
 import { ExternalAgent } from "@vectordevai/schema/external-agent"
-import { EXTERNAL_RUNTIMES, type ExternalRuntime } from "./external-runtimes"
+import type { ExternalRuntime } from "./external-runtimes"
 
 /* The models each external agent's CLI accepts for its model flag, in the order the picker lists them after the CLI's
    default. They come from the catalog in @vectordevai/schema/external-agent, which is the one place to update when a
@@ -11,9 +11,7 @@ import { EXTERNAL_RUNTIMES, type ExternalRuntime } from "./external-runtimes"
 export const EXTERNAL_RUNTIME_MODELS = Object.fromEntries(
   ExternalAgent.chatIds.map((id) => {
     const agent = ExternalAgent.find(id)!
-    const models =
-      agent.models.kind === "live" ? agent.models.fallback : agent.models.kind === "fixed" ? agent.models.models : []
-    return [id, { mark: agent.modelMark ?? agent.id, models }]
+    return [id, { mark: agent.modelMark ?? agent.id, models: catalogModels(agent) }]
   }),
 ) as Record<ExternalRuntime, { mark: string; models: readonly CliModel[] }>
 
@@ -24,16 +22,42 @@ export const RUNTIME_DEFAULT_MODEL = "runtime-default"
 
 const RECENT_LIMIT = 5
 
-/** The runtime's picker rows: its default first, then its curated models. A value chosen before the list changed
-    stays listed, last, so the picker can still show what the workspace runs. */
-export function externalRuntimeModels(runtime: ExternalRuntime, current?: string): PickerModel[] {
-  const catalog = EXTERNAL_RUNTIME_MODELS[runtime]
-  const listed = [{ id: RUNTIME_DEFAULT_MODEL, name: "Default model" }, ...catalog.models]
-  const kept = current && !listed.some((model) => model.id === current) ? [{ id: current, name: current }] : []
-  // A provider-shaped row, so the picker draws the runtime as its one section with the vendor's mark. "custom"
-  // marks a list the host supplies, which the picker never hides as an unsupported provider.
-  const provider = { id: catalog.mark, name: EXTERNAL_RUNTIMES[runtime].label, source: "custom" }
+/** The models an agent's catalog entry lists for its model flag: its fixed list, or the stand-in for a live list. */
+export function catalogModels(agent: ExternalAgent.Agent): readonly CliModel[] {
+  if (agent.models.kind === "live") return agent.models.fallback
+  if (agent.models.kind === "fixed") return agent.models.models
+  return []
+}
+
+/** Any catalog agent's picker rows: its own default first, then what its CLI just listed (`live`) or the catalog's
+    list. A value chosen before the list changed, or typed as a custom model id, stays listed, last, so the picker can
+    still show what runs. */
+export function agentModels(
+  id: ExternalAgent.Id,
+  options: { current?: string; live?: readonly CliModel[] } = {},
+): PickerModel[] {
+  const agent = ExternalAgent.find(id)!
+  const models = options.live?.length ? options.live : catalogModels(agent)
+  const listed = [
+    { id: RUNTIME_DEFAULT_MODEL, name: "Agent default" },
+    ...models.filter(
+      (model, index) =>
+        model.id !== RUNTIME_DEFAULT_MODEL && models.findIndex((item) => item.id === model.id) === index,
+    ),
+  ]
+  const kept =
+    options.current && !listed.some((model) => model.id === options.current)
+      ? [{ id: options.current, name: options.current }]
+      : []
+  // A provider-shaped row, so the picker draws the agent as its one section with its catalog mark. "custom" marks a
+  // list the host supplies, which the picker never hides as an unsupported provider.
+  const provider = { id: agent.modelMark ?? agent.id, name: agent.name, source: "custom" }
   return [...listed, ...kept].map((model) => ({ ...model, provider }))
+}
+
+/** The runtime's picker rows: its default first, then its curated models. */
+export function externalRuntimeModels(runtime: ExternalRuntime, current?: string): PickerModel[] {
+  return agentModels(runtime, { current })
 }
 
 /** What the composer's model control reads for a workspace's chosen value; undefined is the CLI's default. */
@@ -76,12 +100,14 @@ export function launchRuntimeModel(picks: readonly RuntimeModelPick[] | undefine
 /** Vector's model picker over one runtime's CLI models. `current` and `set` speak the CLI's value, undefined for its
     default, so the default row never reaches desktop as a model name. */
 export function externalRuntimeModelState(input: {
-  runtime: () => ExternalRuntime
+  runtime: () => ExternalAgent.Id
   current: () => string | undefined
   recent: () => readonly RuntimeModelPick[] | undefined
   set: (value: string | undefined) => void
+  /** What the agent's CLI listed just now; without it, the catalog's list. */
+  live?: () => readonly CliModel[] | undefined
 }): ModelSelectorModelState {
-  const list = () => externalRuntimeModels(input.runtime(), input.current())
+  const list = () => agentModels(input.runtime(), { current: input.current(), live: input.live?.() })
   const row = (id: string) => list().find((model) => model.id === id)
   return {
     list,

@@ -87,6 +87,7 @@ import { SessionReviewEmptyNoGitV2 } from "@vectordevai/session-ui/v2/session-re
 import { ReviewPanelV2 } from "@/pages/session/v2/review-panel-v2"
 import { createReviewPanelV2State } from "@/pages/session/v2/review-panel-v2-state"
 import { TerminalPanel } from "@/pages/session/terminal-panel"
+import { useTerminalRequests } from "@/features/agents/terminal-requests"
 import { useComposerCommands } from "@/pages/session/use-composer-commands"
 import { useSessionCommands } from "@/pages/session/use-session-commands"
 import { useSessionHashScroll } from "@/pages/session/use-session-hash-scroll"
@@ -423,6 +424,16 @@ export default function Page() {
   const { params, sessionKey, workspaceKey, tabs, view } = useSessionLayout()
   const sessionOwnership = createSessionOwnership(sessionKey)
   const newSessionDesign = createMemo(() => settings.general.newLayoutDesigns())
+  // A command handed over from the app shell, such as a coding agent started from Host locally, runs as a new tab
+  // here. The panel opens only once the tab exists, so it never adds an empty terminal of its own beside it.
+  useTerminalRequests({
+    ready: terminal.ready,
+    run: (request) =>
+      void terminal.run(request.command, request.onExit).then((id) => {
+        if (id) view().terminal.open()
+        request.onStart?.(Boolean(id))
+      }),
+  })
 
   createEffect(() => {
     if (!prompt.ready()) return

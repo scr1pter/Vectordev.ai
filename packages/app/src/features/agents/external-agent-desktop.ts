@@ -20,17 +20,16 @@ export function externalAgentsApi() {
 }
 
 /** Runs an install or sign-in visibly in the built-in terminal and, once it exits, detects every agent again past the
-    cache, since an installer may have changed PATH. Nothing runs until the user asked for this command. */
+    cache, since an installer may have changed PATH. Nothing runs until the user asked for this command. `detect` is
+    the caller's own detection, so its checking state and results stay in one place. */
 export function runThenDetect(input: {
   terminal: { run: (command: TerminalCommand, onExit?: (exitCode: number) => void) => Promise<string | undefined> }
   launch: ExternalAgent.TerminalLaunch
-  api: ExternalAgentsApi | undefined
-  onDetected: (agents: ExternalAgent.Detection[]) => void
+  detect: (options: { refresh: true }) => Promise<unknown>
+  onExit?: (exitCode: number) => void
 }) {
-  return input.terminal.run(input.launch, () => {
-    void input.api
-      ?.detect?.({ refresh: true })
-      .then(input.onDetected)
-      .catch(() => undefined)
+  return input.terminal.run(input.launch, (exitCode) => {
+    input.onExit?.(exitCode)
+    void input.detect({ refresh: true }).catch(() => undefined)
   })
 }

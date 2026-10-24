@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { buildModelSections, pickerModelKey } from "@/utils/provider-brand"
 import {
+  agentModels,
   EXTERNAL_RUNTIME_MODELS,
   externalRuntimeModelName,
   externalRuntimeModels,
@@ -102,7 +103,7 @@ describe("external runtime models", () => {
   })
 
   test("the composer's control names the default until a model is chosen", () => {
-    for (const runtime of runtimes) expect(externalRuntimeModelName(runtime, undefined)).toBe("Default model")
+    for (const runtime of runtimes) expect(externalRuntimeModelName(runtime, undefined)).toBe("Agent default")
     expect(externalRuntimeModelName("claude-code", "opus")).toBe("Opus (latest)")
     expect(externalRuntimeModelName("codex", "gpt-5.5")).toBe("GPT-5.5")
     expect(externalRuntimeModelName("cursor", "composer-2.5")).toBe("Composer 2.5")
@@ -159,5 +160,46 @@ describe("external runtime models", () => {
       launchRuntimeModel(forgetRefusedRuntimeModel(rememberRuntimeModel(undefined, "claude-nope", 1), refusal)),
     ).toBe(undefined)
     expect(forgetRefusedRuntimeModel(undefined, refusal)).toEqual([])
+  })
+
+  test("any catalog agent gets its own default, then what its CLI listed, else the catalog's list", () => {
+    // Gemini CLI has a model flag and a fixed list in the catalog.
+    expect(agentModels("gemini").map((model) => model.id)).toEqual([
+      RUNTIME_DEFAULT_MODEL,
+      "auto",
+      "pro",
+      "flash",
+      "flash-lite",
+    ])
+    expect(agentModels("gemini")[0]).toMatchObject({ name: "Agent default", provider: { name: "Gemini CLI" } })
+    // An agent whose list is empty in the catalog still offers its default, and a custom model id stays listed.
+    expect(agentModels("copilot", { current: "gpt-6-sol" }).map((model) => model.id)).toEqual([
+      RUNTIME_DEFAULT_MODEL,
+      "gpt-6-sol",
+    ])
+    // A live list replaces the catalog's, once, without repeating a model or the default row.
+    const live = [
+      { id: "gpt-6.1-sol", name: "GPT-6.1 Sol" },
+      { id: "gpt-6.1-sol", name: "GPT-6.1 Sol" },
+      { id: RUNTIME_DEFAULT_MODEL, name: "Default" },
+      { id: "o-live", name: "Only from the CLI" },
+    ]
+    expect(agentModels("codex", { live }).map((model) => model.id)).toEqual([
+      RUNTIME_DEFAULT_MODEL,
+      "gpt-6.1-sol",
+      "o-live",
+    ])
+    // An empty live answer falls back to the catalog's list.
+    expect(agentModels("codex", { live: [] }).map((model) => model.id)).toEqual(
+      externalRuntimeModels("codex").map((model) => model.id),
+    )
+    const state = externalRuntimeModelState({
+      runtime: () => "kilo",
+      current: () => "anthropic/claude-sonnet-5-5",
+      recent: () => [],
+      set: () => {},
+      live: () => [{ id: "anthropic/claude-sonnet-5-5", name: "Claude Sonnet 5.5" }],
+    })
+    expect(state.current()?.name).toBe("Claude Sonnet 5.5")
   })
 })

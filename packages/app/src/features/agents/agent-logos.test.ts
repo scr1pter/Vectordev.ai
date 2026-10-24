@@ -52,24 +52,21 @@ describe("running a setup command", () => {
         return "pty_1"
       },
     }
-    const api = {
-      detect: async (options?: { refresh?: boolean }) => {
-        calls.push(`detect ${JSON.stringify(options)}`)
-        return []
-      },
-    }
     const detected = new Promise<void>((resolve) =>
       runThenDetect({
         terminal,
-        api,
         launch: { title: "Install Gemini CLI", display: "x", command: "/bin/sh", args: [], cwd: "/tmp", env: {} },
-        onDetected: () => resolve(),
+        onExit: (code) => calls.push(`exit ${code}`),
+        detect: async (options) => {
+          calls.push(`detect ${JSON.stringify(options)}`)
+          resolve()
+        },
       }),
     )
     await Promise.resolve()
     expect(calls).toEqual(["run Install Gemini CLI"])
     exit?.(0)
     await detected
-    expect(calls).toEqual(["run Install Gemini CLI", 'detect {"refresh":true}'])
+    expect(calls).toEqual(["run Install Gemini CLI", "exit 0", 'detect {"refresh":true}'])
   })
 })
