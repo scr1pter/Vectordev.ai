@@ -7,7 +7,7 @@ import type { AgentChat } from "./parallel-workspace-turns"
  * How a chat agent's headless output becomes Vector's chat: its messages and activity, its session id, the end of its
  * turn, the error it reported and what it cost. Each event family has one reader, chosen by the catalog's parser id:
  *
- * - claude, cursor: Claude Code's stream-json, and Cursor Agent's close copy of it.
+ * - claude, cursor: Claude Code's stream-json, and Cursor CLI's close copy of it.
  * - codex: `codex exec --json`, thread, turn and item events.
  * - qwen, amp: Claude Code's stream-json again, from Qwen Code (docs/users/features/headless.md) and Amp
  *   (ampcode.com/docs/cli/streaming-json), with differences per field noted on their reader.

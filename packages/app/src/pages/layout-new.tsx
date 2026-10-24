@@ -3688,6 +3688,7 @@ export default function NewLayout(props: ParentProps) {
                       ]
                 }
                 runtimeLabel={copy().label}
+                ownership={copy().ownership}
               />
             </Show>
           </div>
@@ -4933,7 +4934,11 @@ export default function NewLayout(props: ParentProps) {
                   </Show>
 
                   <Show when={record().runtime !== "vector" && (record().turns?.length ?? 0) > 0}>
-                    <ExternalAgentTranscript turns={record().turns ?? []} runtimeLabel={reviewCopy().label} />
+                    <ExternalAgentTranscript
+                      turns={record().turns ?? []}
+                      runtimeLabel={reviewCopy().label}
+                      ownership={reviewCopy().ownership}
+                    />
                   </Show>
 
                   <Show when={record().logs.length || record().terminalOutput.length}>

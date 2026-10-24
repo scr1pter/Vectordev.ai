@@ -783,6 +783,14 @@ const STDIN_AGENTS = ExternalAgent.chatIds
 
 // The catalog entry for a runtime Vector runs in its own chat. A terminal-only
 // agent never reaches a headless spawn, whatever the renderer sent.
+// The variables an agent's headless run must start without, such as pi's ANTHROPIC_OAUTH_TOKEN. Matched by name only,
+// case-insensitively as Windows names are, so no value is ever read.
+function withoutVariables(env: AgentEnvironment, names: readonly string[] | undefined) {
+  if (!names?.length) return env
+  const unset = new Set(names.map((name) => name.toUpperCase()))
+  return Object.fromEntries(Object.entries(env).filter(([key]) => !unset.has(key.toUpperCase())))
+}
+
 export function chatAgent(runtime: string) {
   const agent = ExternalAgent.find(runtime)
   if (!agent) throw new Error(`"${runtime.slice(0, 40)}" is not an agent Vector can run.`)
@@ -995,7 +1003,10 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
     const child = spawn(launch.command, launch.args, {
       cwd: input.cwd,
       detached: process.platform !== "win32",
-      env: untrustedChildEnvironment(env, { NO_COLOR: "1", FORCE_COLOR: "0" }),
+      env: untrustedChildEnvironment(withoutVariables(env, agent.headless?.unsetEnv), {
+        NO_COLOR: "1",
+        FORCE_COLOR: "0",
+      }),
       stdio: ["pipe", "pipe", "pipe"],
       windowsVerbatimArguments: launch.windowsVerbatimArguments,
     })

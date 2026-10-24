@@ -66,7 +66,7 @@ async function setup(page: Page, options: { detectDelay?: number } = {}) {
         }),
       )
       const recorded: Recorded = { calls: [] }
-      const installed = new Set(["claude-code", "cursor", "antigravity"])
+      const installed = new Set(["claude-code", "cursor", "kimi"])
       const detect = async (options?: { refresh?: boolean }) => {
         recorded.calls.push({ method: "detect", input: options })
         if (detectDelay) await new Promise((resolve) => setTimeout(resolve, detectDelay))
@@ -85,7 +85,7 @@ async function setup(page: Page, options: { detectDelay?: number } = {}) {
             version: "2.1.215",
           }),
           row("codex", "Codex", "codex", "chat", { state: "not-installed", installed: false }),
-          row("cursor", "Cursor Agent", "agent", "chat", { state: "signed-out", installed: true, signedIn: false }),
+          row("cursor", "Cursor CLI", "agent", "chat", { state: "signed-out", installed: true, signedIn: false }),
           row(
             "gemini",
             "Gemini CLI",
@@ -95,12 +95,8 @@ async function setup(page: Page, options: { detectDelay?: number } = {}) {
               ? { state: "unknown", installed: true }
               : { state: "not-installed", installed: false },
           ),
-          row("antigravity", "Antigravity CLI", "agy", "terminal", {
-            state: "unknown",
-            installed: true,
-            version: "1.0.6",
-          }),
-          row("kilo", "Kilo Code", "kilo", "terminal", { state: "not-installed", installed: false }),
+          row("kilo", "Kilo CLI", "kilo", "terminal", { state: "not-installed", installed: false }),
+          row("kimi", "Kimi Code", "kimi", "terminal", { state: "unknown", installed: true, version: "1.0.6" }),
         ]
       }
       const launch = (title: string, display: string) => ({
@@ -156,7 +152,7 @@ async function setup(page: Page, options: { detectDelay?: number } = {}) {
                 signIn: {
                   display: "agent login",
                   interactive: false,
-                  launch: launch("Sign in to Cursor Agent", "agent login"),
+                  launch: launch("Sign in to Cursor CLI", "agent login"),
                 },
               }
             return { id, platform: "darwin", docsUrl: "https://example.invalid", install: [] }
@@ -168,8 +164,11 @@ async function setup(page: Page, options: { detectDelay?: number } = {}) {
           launchTerminal: async (input: { id: string; projectPath: string; model?: string }) => {
             recorded.calls.push({ method: "launchTerminal", input })
             return {
-              workspace: { path: `${input.projectPath}-agy`, isolation: "git-worktree" },
-              launch: { ...launch("Antigravity CLI", "agy"), cwd: `${input.projectPath}-agy` },
+              workspace: { path: `${input.projectPath}-isolated`, isolation: "git-worktree" },
+              launch: {
+                ...launch(input.id === "kimi" ? "Kimi Code" : "Claude Code", input.id === "kimi" ? "kimi" : "claude"),
+                cwd: `${input.projectPath}-isolated`,
+              },
             }
           },
         },
@@ -201,53 +200,59 @@ test("Host locally lists every coding agent with its badge and its status on thi
   const fixture = await setup(page)
   // The agent launcher has one tile for every coding agent, which counts the ones that can start.
   await expect(fixture.launcher.locator("[data-vector-host-locally-tile]")).toHaveAccessibleName(
-    "Host locally: 2 of 16 ready to start",
+    "Host locally: 2 of 15 ready to start",
   )
   if (shots) await fixture.launcher.screenshot({ path: `${shots}/launcher-tiles.png` })
   const host = await openHost(page)
   const rows = host.locator('[data-slot="host-row"]')
-  await expect(rows).toHaveCount(16)
+  await expect(rows).toHaveCount(15)
   await expect(host.locator('[data-slot="host-section"]')).toContainText("Host locally")
+  await expect(host.locator('[data-slot="host-row"][data-agent-id="antigravity"]')).toHaveCount(0)
 
-  // Neutral letters for the agents whose vendors have not allowed their logo; Cursor's and Kilo's own files.
+  // Neutral letters for every agent: no vendor's logo or icon is drawn, Cursor's and Kilo's included.
   const row = (id: string) => host.locator(`[data-slot="host-row"][data-agent-id="${id}"]`)
   await expect(row("claude-code").locator('[data-component="agent-badge"]')).toHaveText("CC")
   await expect(row("codex").locator('[data-component="agent-badge"]')).toHaveText("CX")
   await expect(row("muse-code").locator('[data-component="agent-badge"]')).toHaveText("MC")
-  await expect(row("cursor").locator('[data-component="agent-badge"] img')).toHaveAttribute(
-    "src",
-    "/agent-logos/cursor-dark.svg",
-  )
-  await expect(row("kilo").locator('[data-component="agent-badge"] img')).toHaveAttribute(
-    "src",
-    "/agent-logos/kilo.svg",
-  )
-  expect(await host.locator('[data-component="agent-badge"] img').count()).toBe(2)
+  await expect(row("cursor").locator('[data-component="agent-badge"]')).toHaveText("CU")
+  await expect(row("kilo").locator('[data-component="agent-badge"]')).toHaveText("KI")
+  expect(await host.locator('[data-component="agent-badge"] img, [data-component="agent-badge"] svg').count()).toBe(0)
+  // Names as their vendors write them.
+  await expect(row("cursor").locator('[data-slot="host-row-name"]')).toHaveText("Cursor CLI")
+  await expect(row("kilo").locator('[data-slot="host-row-name"]')).toHaveText("Kilo CLI")
+  await expect(row("junie").locator('[data-slot="host-row-name"]')).toHaveText("Junie")
+  await expect(row("goose").locator('[data-slot="host-row-name"]')).toHaveText("goose")
+  // The fine print: independent, not affiliated, and the names are their owners' trademarks.
+  const footnote = host.locator('[data-slot="host-footnote"]')
+  await expect(footnote).toContainText("Vector is independent and is not affiliated with, endorsed by or sponsored by")
+  await expect(footnote).toContainText("Their names are trademarks of their owners.")
+  await expect(footnote).not.toContainText("logos")
 
   const status = (id: string) => row(id).locator('[data-component="agent-status"]')
   await expect(status("claude-code")).toHaveText("Ready")
   await expect(status("cursor")).toHaveText("Signed out")
   await expect(status("codex")).toHaveText("Not installed")
-  await expect(status("antigravity")).toHaveText("Unknown")
+  await expect(status("kimi")).toHaveText("Unknown")
   // Detected by no fake: never shown as missing.
   await expect(status("junie")).toHaveText("Unknown")
   await expect(row("gemini")).toContainText("Work or API accounts")
-  await expect(row("antigravity").locator('[data-slot="host-tag"]', { hasText: "Terminal" })).toBeVisible()
+  await expect(row("kimi").locator('[data-slot="host-tag"]', { hasText: "Terminal" })).toBeVisible()
   if (shots) await host.screenshot({ path: `${shots}/launcher-list.png` })
 
   // Search filters by name, vendor and command.
   const search = host.getByRole("searchbox", { name: "Search coding agents" })
   await search.fill("google")
-  await expect(rows).toHaveCount(2)
+  await expect(rows).toHaveCount(1)
   await expect(rows.nth(0)).toContainText("Gemini CLI")
-  await expect(rows.nth(1)).toContainText("Antigravity CLI")
+  await search.fill("agy")
+  await expect(rows).toHaveCount(0)
   await search.fill("cursor-agent")
   await expect(rows).toHaveCount(1)
   await search.fill("no agent is called this")
   await expect(rows).toHaveCount(0)
   await expect(host).toContainText('No coding agents match "no agent is called this".')
   await search.fill("")
-  await expect(rows).toHaveCount(16)
+  await expect(rows).toHaveCount(15)
 
   // Refresh detects past desktop's cache.
   await host.getByRole("button", { name: "Check this computer again" }).click()
@@ -276,7 +281,9 @@ test("a missing agent shows its official install command and runs nothing until 
     "href",
     "https://github.com/google-gemini/gemini-cli",
   )
-  await expect(host.getByRole("list", { name: "Billing and terms" })).toContainText("work accounts and API keys")
+  await expect(host.getByRole("list", { name: "Billing and terms" })).toContainText(
+    "Gemini Code Assist Standard or Enterprise licence. Otherwise it needs a Gemini API key.",
+  )
   await install.getByRole("button", { name: "Homebrew" }).click()
   await expect(install.locator('[data-slot="host-command"]')).toHaveText("brew install gemini-cli")
   await install.getByRole("button", { name: "npm" }).click()
@@ -360,31 +367,95 @@ test("a ready agent starts with the model chosen in Host locally", async ({ page
 test("a signed-out agent signs in with its own command in Vector's terminal", async ({ page }) => {
   const fixture = await setup(page)
   const host = await openHost(page)
-  await host.getByRole("button", { name: /^Cursor Agent,/ }).click()
+  await host.getByRole("button", { name: /^Cursor CLI,/ }).click()
   const signIn = host.getByRole("region", { name: "Sign in" })
   await expect(signIn.locator('[data-slot="host-command"]')).toHaveText("agent login")
   expect(fixture.ptys.filter((call) => call.method === "POST /pty")).toEqual([])
   await host.getByRole("button", { name: "Sign in", exact: true }).click()
   await expect.poll(() => fixture.ptys.filter((call) => call.method === "POST /pty").length).toBe(1)
   expect(fixture.ptys.find((call) => call.method === "POST /pty")!.body).toMatchObject({
-    title: "Sign in to Cursor Agent",
+    title: "Sign in to Cursor CLI",
   })
+  // Before the first run: what --force and --trust allow, and where.
+  await expect(host.getByRole("list", { name: "Billing and terms" })).toContainText(
+    "In Vector's chat, Cursor CLI runs with --force and --trust, which let it change files and run commands without asking.",
+  )
+})
+
+test("an agent's notes carry its vendor's trademark notice and the terms the user needs before the first run", async ({
+  page,
+}) => {
+  await setup(page)
+  const host = await openHost(page)
+  const notes = host.getByRole("list", { name: "Billing and terms" })
+
+  await host.getByRole("button", { name: /^Junie,/ }).click()
+  await expect(notes).toContainText("Junie is a trademark of JetBrains s.r.o.")
+  await expect(notes.getByRole("link", { name: "www.jetbrains.com" })).toHaveAttribute(
+    "href",
+    "https://www.jetbrains.com/",
+  )
+  if (shots) await host.screenshot({ path: `${shots}/launcher-trademark.png` })
+  await host.getByRole("button", { name: "Back to coding agents" }).click()
+
+  await host.getByRole("button", { name: /^goose,/ }).click()
+  await expect(notes).toContainText("goose is a trademark of LF Projects, LLC.")
+  await host.getByRole("button", { name: "Back to coding agents" }).click()
+
+  await host.getByRole("button", { name: /^Muse Code,/ }).click()
+  await expect(notes).toContainText("turn Contributor mode off before the first run")
+  await host.getByRole("button", { name: "Back to coding agents" }).click()
+
+  await host.getByRole("button", { name: /^pi,/ }).click()
+  await expect(notes).toContainText("Anthropic's terms restrict Claude Pro/Max sign-in in third-party tools")
+  await host.getByRole("button", { name: "Back to coding agents" }).click()
+
+  await host.getByRole("button", { name: /^Qwen Code,/ }).click()
+  await expect(notes).toContainText("Qwen Code isn't free")
+  await expect(notes).toContainText("Alibaba limits Coding Plan and Token Plan keys to interactive use.")
+  if (shots) await host.screenshot({ path: `${shots}/launcher-notes.png` })
+})
+
+test("a chat agent can start in the terminal instead, with the model chosen for it", async ({ page }) => {
+  const fixture = await setup(page)
+  const host = await openHost(page)
+  await host.getByRole("button", { name: /^Claude Code,/ }).click()
+  await expect(host.getByRole("list", { name: "Billing and terms" })).toContainText(
+    "an ANTHROPIC_API_KEY set in your environment is used before your subscription",
+  )
+  if (shots) await host.screenshot({ path: `${shots}/launcher-detail.png` })
+  await host.getByRole("button", { name: "Claude Code model: Agent default", exact: true }).click()
+  await host
+    .getByRole("radiogroup", { name: "Claude Code models" })
+    .getByRole("radio", { name: /^Sonnet \(latest\)/ })
+    .click()
+  await host.getByRole("button", { name: "Start in terminal", exact: true }).click()
+  await expect
+    .poll(async () => (await calls(page)).filter((call) => call.method === "launchTerminal").map((call) => call.input))
+    .toEqual([{ id: "claude-code", projectPath: directory, model: "sonnet" }])
+  await expect.poll(() => fixture.ptys.filter((call) => call.method === "POST /pty").length).toBe(1)
+  expect(fixture.ptys.find((call) => call.method === "POST /pty")!.body).toMatchObject({ title: "Claude Code" })
+  await expect(host).toHaveCount(0)
+  // Nothing was set to run in Vector's chat.
+  expect((await calls(page)).filter((call) => call.method === "create")).toEqual([])
 })
 
 test("a terminal agent starts in the session's terminal, in its isolated copy", async ({ page }) => {
   const fixture = await setup(page)
   const host = await openHost(page)
-  await host.getByRole("button", { name: /^Antigravity CLI,/ }).click()
-  await expect(host).toContainText("Runs your installed Antigravity CLI in Vector's terminal")
-  await expect(host).toContainText("Choose the model inside Antigravity CLI.")
-  await host.getByRole("button", { name: "Start Antigravity CLI", exact: true }).click()
+  await host.getByRole("button", { name: /^Kimi Code,/ }).click()
+  await expect(host).toContainText("Runs your installed Kimi Code in Vector's terminal")
+  await expect(host).toContainText("Choose the model inside Kimi Code.")
+  // A terminal agent has one way to start.
+  await expect(host.getByRole("button", { name: "Start in terminal", exact: true })).toHaveCount(0)
+  await host.getByRole("button", { name: "Start Kimi Code", exact: true }).click()
   await expect
     .poll(async () => (await calls(page)).filter((call) => call.method === "launchTerminal").map((call) => call.input))
-    .toEqual([{ id: "antigravity", projectPath: directory, model: undefined }])
+    .toEqual([{ id: "kimi", projectPath: directory, model: undefined }])
   await expect.poll(() => fixture.ptys.filter((call) => call.method === "POST /pty").length).toBe(1)
   expect(fixture.ptys.find((call) => call.method === "POST /pty")!.body).toMatchObject({
-    title: "Antigravity CLI",
-    cwd: `${directory}-agy`,
+    title: "Kimi Code",
+    cwd: `${directory}-isolated`,
   })
   await expect(host).toHaveCount(0)
   await expect(page.locator("#terminal-panel")).toHaveAttribute("aria-hidden", "false")

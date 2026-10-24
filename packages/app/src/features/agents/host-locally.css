@@ -2,10 +2,10 @@
    The coding-agent launcher shares the model picker's anatomy: a search field,
    a quiet section label, then 40px rows with a mark gutter, the name, and a
    status pill on the right edge. One neutral fill marks the keyboard/pointer
-   row. Vendors' marks are their own files or neutral letters; no brand colour
-   is ever drawn around them. Theme tokens and hairlines only. */
+   row. Every agent's mark is two neutral letters, never a vendor's logo or
+   brand colour. Theme tokens and hairlines only. */
 
-/* Badge: neutral letters, or the vendor's own file on a quiet tile. */
+/* Badge: neutral letters on a quiet tile. */
 [data-component="agent-badge"] {
   --agent-tone: #9a96a6;
   display: inline-grid;
@@ -31,24 +31,8 @@
   border-radius: 11px;
   font-size: 13px;
 }
-[data-component="agent-badge"][data-kind="official"] {
-  background: color-mix(in srgb, var(--vx-text) 7%, var(--vx-surface-raised));
-  box-shadow: inset 0 0 0 1px var(--vx-line);
-}
-[data-component="agent-badge"] img {
-  width: 14px;
-  height: 14px;
-  object-fit: contain;
-}
-[data-component="agent-badge"][data-size="large"] img {
-  width: 24px;
-  height: 24px;
-}
 [data-component="agent-badge"][data-tone="slate"] {
   --agent-tone: #9a96a6;
-}
-[data-component="agent-badge"][data-tone="sand"] {
-  --agent-tone: #c4ad86;
 }
 [data-component="agent-badge"][data-tone="teal"] {
   --agent-tone: #6fb2aa;

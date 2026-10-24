@@ -161,6 +161,14 @@
   flex-direction: column;
   gap: 26px;
 }
+/* Whose agent this is: one quiet line above the conversation, never a banner. */
+.vector-agent-ownership {
+  margin: 0 0 -12px;
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--vx-workspace-text-tertiary, #878787);
+}
 .vector-agent-turn {
   min-width: 0;
   user-select: text;

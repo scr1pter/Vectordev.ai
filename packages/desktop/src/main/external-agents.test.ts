@@ -639,6 +639,43 @@ describe("finishing a turn on the protocol's final event", () => {
     expect(() => process.kill(pid, 0)).toThrow()
   }, 20_000)
 
+  test("pi's chat run starts without ANTHROPIC_OAUTH_TOKEN, by any spelling, and keeps the rest of the environment", async () => {
+    // The fake records only whether each variable is set, never its value.
+    const { directory, env } = await fakeCli(
+      "pi-env",
+      "pi",
+      [
+        `case "$1" in --version) echo "0.74.1"; exit 0;; esac`,
+        `for name in ANTHROPIC_OAUTH_TOKEN anthropic_oauth_token ANTHROPIC_API_KEY FIXTURE_KEEP; do`,
+        `  printenv "$name" > /dev/null && echo "$name" >> seen`,
+        `done`,
+        printLines([
+          { type: "session", id: "pi-session" },
+          { type: "agent_settled", aborted: false },
+        ]),
+      ].join("\n"),
+    )
+    const result = await runExternalCodingAgent({
+      runtime: "pi",
+      cwd: directory,
+      prompt: "fixture only",
+      env: {
+        ...env,
+        ANTHROPIC_OAUTH_TOKEN: "sk-ant-oat-fixture",
+        anthropic_oauth_token: "sk-ant-oat-fixture",
+        ANTHROPIC_API_KEY: "fixture-api-key",
+        FIXTURE_KEEP: "1",
+      },
+      finishGraceMs: 50,
+      killGraceMs: 50,
+    })
+    expect(result.exitCode).toBe(0)
+    expect((await Bun.file(join(directory, "seen")).text()).trim().split("\n")).toEqual([
+      "ANTHROPIC_API_KEY",
+      "FIXTURE_KEEP",
+    ])
+  }, 20_000)
+
   test("a codex turn.failed ends the run as a failure with codex's own message", async () => {
     const { env } = await fakeCli(
       "codex-failed",
@@ -1377,7 +1414,7 @@ printf 'Tip: use --model <id> to switch.\\n'`,
       source: "catalog",
       models: [{ id: "auto" }, { id: "pro" }, { id: "flash" }, { id: "flash-lite" }],
     })
-    expect(await listAgentModels("antigravity", { env })).toEqual({ id: "antigravity", source: "none", models: [] })
+    expect(await listAgentModels("kimi", { env })).toEqual({ id: "kimi", source: "none", models: [] })
     await expect(listAgentModels("../../etc", { env })).rejects.toThrow("Choose an agent from the list.")
   })
 
@@ -1444,7 +1481,7 @@ describe("commands for the built-in terminal", () => {
     expect(interactive).toMatchObject({
       display: "copilot",
       interactive: true,
-      hint: "Type /login inside Copilot CLI, then follow its steps.",
+      hint: "Type /login inside GitHub Copilot CLI, then follow its steps.",
     })
   })
 
@@ -1493,9 +1530,9 @@ describe("commands for the built-in terminal", () => {
     expect(result.launch.args[1]!.split("\n")[0]).toBe(`'${join(gemini.directory, "gemini")}' '-m' 'pro'`)
 
     // Nothing is prepared for a launch that cannot start.
-    const agy = await fakeCli("agy", "agy")
+    const kimi = await fakeCli("kimi", "kimi")
     await expect(
-      launchAgentTerminal({ id: "antigravity", projectPath: "/repo", model: "x" }, { env: agy.env, prepare }),
+      launchAgentTerminal({ id: "kimi", projectPath: "/repo", model: "x" }, { env: kimi.env, prepare }),
     ).rejects.toThrow("has no model setting")
     await expect(
       launchAgentTerminal({ id: "gemini", projectPath: "/repo", model: "a b" }, { env: gemini.env, prepare }),
@@ -1602,7 +1639,7 @@ describe("choosing the model an external CLI runs", () => {
       ["[stderr] Cannot use this model: nope. Available models: auto, composer-2.5"],
       "nope",
     )
-    expect(cursor.error).toBe("Cursor Agent: Cannot use this model: nope. Available models: auto, composer-2.5")
+    expect(cursor.error).toBe("Cursor CLI: Cannot use this model: nope. Available models: auto, composer-2.5")
     expect(modelRejected("nope", cursor)).toBe(true)
 
     const claude = agentOutcome(
@@ -1678,7 +1715,7 @@ describe("choosing the model an external CLI runs", () => {
     })
     expect(result.exitCode).toBe(1)
     expect(result.error).toBe(
-      "Cursor Agent: Cannot use this model: fixture-nope. Run cursor-agent models to see what you can use.",
+      "Cursor CLI: Cannot use this model: fixture-nope. Run cursor-agent models to see what you can use.",
     )
     expect(result.modelRejected).toBe(true)
   }, 20_000)
