@@ -422,7 +422,7 @@ export const SOURCES: readonly Source[] = [
     local: "blocked",
     where: ["desktop"],
     callSites: ["packages/desktop/src/main/help-assistant.ts"],
-    note: "Hidden with Vector Local on",
+    note: "Off with Vector Local on; a question to it says so",
   },
   {
     id: "share",
@@ -682,7 +682,7 @@ export const SOURCES: readonly Source[] = [
     local: "blocked",
     where: ["desktop"],
     callSites: ["packages/desktop/src/main/external-agents.ts"],
-    note: "Hidden with Vector Local on",
+    note: "Not started with Vector Local on: they make their own connections, which Vector Local does not see",
   },
   {
     id: "unlabelled",
