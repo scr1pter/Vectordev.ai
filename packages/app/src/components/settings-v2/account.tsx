@@ -3,7 +3,7 @@ import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 import { Match, Show, Switch, createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import { CodiumBillingStatus, CodiumPurchase, createCodiumBilling } from "@/components/codium-purchase"
 import { usePlatform } from "@/context/platform"
-import { accountChip, type VectorAccountStatus } from "@/vector-account"
+import { accountChip, codiumChanged, type VectorAccountStatus } from "@/vector-account"
 import { accountIdentity, codiumSummary, deletionStep, sameEmail } from "./account-model"
 import "./settings-v2.css"
 import "./settings-account.css"
@@ -380,7 +380,7 @@ export function SettingsAccountV2(props: { onUsage: () => void }) {
               </ButtonV2>
             </Show>
             <Show when={summary().kind !== "coming-soon"}>
-              <ButtonV2 variant="ghost" icon="reset" onClick={() => void refreshCodium()}>
+              <ButtonV2 variant="ghost" icon="reset" onClick={() => void refreshCodium().then(codiumChanged)}>
                 Refresh
               </ButtonV2>
             </Show>
