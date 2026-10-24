@@ -38,11 +38,12 @@ export type MemoryFiles = { memory: string; rules: string; repository: readonly 
 export type MemoryFilter = "active" | "review" | "archived" | "all"
 
 /** Settings > Memory's sections: memory, documents, and the local model documents are searched by meaning with. */
-export type MemoryTab = "memory" | "documents" | "model"
+export type MemoryTab = "memory" | "documents" | "research" | "model"
 
 export const MEMORY_TABS: readonly { value: MemoryTab; label: string }[] = [
   { value: "memory", label: "Memory" },
   { value: "documents", label: "Documents" },
+  { value: "research", label: "Research" },
   { value: "model", label: "Search model" },
 ]
 

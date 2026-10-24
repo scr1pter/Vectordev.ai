@@ -385,6 +385,13 @@ declare global {
         }) => Promise<import("@vectordevai/schema/task").StopResult>
         onChange: (callback: () => void) => () => void
       }
+      // Research browsers' chips, snapshots and Stop, for the Sources tab (desktop only).
+      researchWatch?: {
+        list: () => Promise<import("@/features/research/research-model").BrowserChip[]>
+        snapshot: (id: string) => Promise<string | undefined>
+        stop: (id: string) => Promise<boolean>
+        onChange: (callback: () => void) => () => void
+      }
       setTitlebar?: (theme: { mode: "light" | "dark" }) => Promise<void>
       openLink?: (url: string) => void
       exportDebugLogs?: () => Promise<string>

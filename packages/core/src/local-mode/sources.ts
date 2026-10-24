@@ -1,6 +1,5 @@
 export * as LocalSources from "./sources"
 
-import { createHash } from "node:crypto"
 import type { LocalMode } from "@vectordevai/schema/local-mode"
 import { LocalPolicy } from "./policy"
 
@@ -129,13 +128,17 @@ const CLOUD_INFERENCE_DIGESTS = new Set(["15f3d522b114416a3a7cacfa7426bb80a64c3d
 // What a `${VARIABLE}` in a catalog address is read as while the address is parsed.
 const PLACEHOLDER = "vector-variable"
 
+// Node's crypto where there is one. The app reads this module's pure parts in the browser, which has no synchronous
+// SHA-256 and decides no requests, so there a host is never listed by its digest.
+const crypto = globalThis.process?.getBuiltinModule?.("node:crypto")
+
 /** Whether a host is, or is under, a cloud AI service listed by its digest. */
 export function digestListed(input: string, digests: ReadonlySet<string> = CLOUD_INFERENCE_DIGESTS) {
   const name = LocalPolicy.host(input)
-  if (!name) return false
+  if (!name || !crypto) return false
   const labels = name.split(".")
   return labels.some((_, index) =>
-    digests.has(createHash("sha256").update(labels.slice(index).join(".")).digest("hex")),
+    digests.has(crypto.createHash("sha256").update(labels.slice(index).join(".")).digest("hex")),
   )
 }
 

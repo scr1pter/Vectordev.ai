@@ -68,6 +68,7 @@ import { inspectAgentTask, listAgentTasks, messageAgentTask, stopAgentTask, type
 import { onTaskBoardChange } from "./task-board-events"
 import { initTaskRelay } from "./task-relay"
 import { runBrowserAgent } from "./browser-agent"
+import { ResearchWatch } from "./research-browser"
 import { prepareAgentTask } from "./context-budget"
 import { speakVoiceText, stopVoiceSynthesis } from "./voice-synthesis"
 import { cancelBackgroundTask, clearCompletedBackgroundTasks, listBackgroundTasks } from "./background-tasks"
@@ -224,6 +225,11 @@ type Deps = {
   setUsageSharing: (enabled: boolean) => void
 }
 
+// A research browser's key: its run and its agent's session, as the bridge validated them.
+function watchID(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,64}:[A-Za-z0-9_-]{1,64}$/.test(value)
+}
+
 function handle<T extends unknown[], R>(channel: string, listener: (event: IpcMainInvokeEvent, ...args: T) => R) {
   ipcMain.handle(channel, (event, ...args) => {
     assertTrustedRenderer(event)
@@ -285,6 +291,34 @@ export function registerIpcHandlers(deps: Deps) {
   handle("agent-tasks-unsubscribe", (event) => {
     taskSubscriptions.get(event.sender.id)?.()
     taskSubscriptions.delete(event.sender.id)
+  })
+
+  // The Sources tab watches research browsers: their chips, snapshots and Stop. Nothing here sends input to a page.
+  const researchSubscriptions = new Map<number, () => void>()
+  app.once("will-quit", () => {
+    researchSubscriptions.forEach((stop) => stop())
+    researchSubscriptions.clear()
+  })
+  handle("research-watch-list", () => ResearchWatch.list())
+  handle("research-watch-snapshot", (_event, id: unknown) => (watchID(id) ? ResearchWatch.snapshot(id) : undefined))
+  handle("research-watch-stop", (_event, id: unknown) => (watchID(id) ? ResearchWatch.stop(id) : false))
+  handle("research-watch-subscribe", (event) => {
+    const id = event.sender.id
+    researchSubscriptions.get(id)?.()
+    researchSubscriptions.set(
+      id,
+      ResearchWatch.subscribe(() => {
+        if (!event.sender.isDestroyed()) event.sender.send("research-watch-changed")
+      }),
+    )
+    event.sender.once("destroyed", () => {
+      researchSubscriptions.get(id)?.()
+      researchSubscriptions.delete(id)
+    })
+  })
+  handle("research-watch-unsubscribe", (event) => {
+    researchSubscriptions.get(event.sender.id)?.()
+    researchSubscriptions.delete(event.sender.id)
   })
 
   handle("kill-sidecar", () => deps.killSidecar())

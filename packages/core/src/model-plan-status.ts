@@ -1,7 +1,6 @@
 export * as ModelPlanStatus from "./model-plan-status"
 
 import { Option, Schema } from "effect"
-import { Egress } from "./local-mode/egress"
 
 export const SITE = "https://vectordev.ai"
 export const API_URL = `${SITE}/api/model-plans`
@@ -11,7 +10,12 @@ export const PURCHASE_URL = `${SITE}/codium`
 export const MANAGE_URL = `${SITE}/account`
 
 // Codium's status and offers come from vectordev.ai, labelled so Vector Local decides them (blocked unless allowed).
-const send = (url: string, init: RequestInit) => Egress.fetch("plans-catalog", url, init)
+// The egress layer loads only when a request is made: the app imports this module in the browser for its pure parts,
+// and the egress layer needs Node (async_hooks), which a browser cannot load.
+const send = async (url: string, init: RequestInit) => {
+  const { Egress } = await import("./local-mode/egress")
+  return Egress.fetch("plans-catalog", url, init)
+}
 
 // The stable internal ID stays "vector-plan"; people see the provider as Vector Codium.
 export const PROVIDER_ID = "vector-plan"

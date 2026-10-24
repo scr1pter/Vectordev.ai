@@ -90,12 +90,37 @@ import { holdsHandoff } from "@/utils/composer-handoff"
 import { createOutcomes } from "@/features/economics/economics-repository"
 import { recommendationAvailable, recommendModel } from "@/features/economics/economics-recommender"
 import { categorizeTask } from "@/features/economics/task-categorizer"
+import {
+  DEPTHS,
+  DESCRIPTION as RESEARCH_DESCRIPTION,
+  LABEL as RESEARCH_LABEL,
+  PLACEHOLDER as RESEARCH_PLACEHOLDER,
+  PREVIEW,
+  SCOPES,
+  browserStorage,
+  capLabel,
+  rememberMode,
+  rememberedMode,
+  scopeLabel,
+  stickyMode,
+  type Depth,
+} from "@/features/research/research-model"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import type { Research } from "@vectordevai/schema/research"
+import "@/features/research/research.css"
 
 export type PromptInputState = ReturnType<typeof usePrompt>
 
-type ExecutionMode = "normal" | "quick" | "fast"
+type ExecutionMode = "normal" | "quick" | "fast" | "research"
 
-const EXECUTION_MODES = [
+// The Mode menu: Normal, Quick, Fast, then Deep research directly under Fast (owner, 22 Oct).
+const EXECUTION_MODES: readonly {
+  id: ExecutionMode
+  label: string
+  description: string
+  dot: string
+  preview?: boolean
+}[] = [
   {
     id: "normal" as const,
     label: "Normal",
@@ -113,6 +138,13 @@ const EXECUTION_MODES = [
     label: "Fast",
     description: "Targets 1.5x speed with priority capacity and wider parallel execution. Uses more tokens.",
     dot: "#9b6cff",
+  },
+  {
+    id: "research" as const,
+    label: RESEARCH_LABEL,
+    description: RESEARCH_DESCRIPTION,
+    dot: "#6ea8fe",
+    preview: true,
   },
 ]
 
@@ -625,14 +657,61 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
   const suggest = createMemo(() => !hasUserPrompt())
 
-  const placeholder = createMemo(() =>
-    promptPlaceholder({
-      mode: store.mode,
-      commentCount: commentCount(),
-      example: suggest() ? (store.mode === "shell" ? "git status" : language.t(EXAMPLES[store.placeholder])) : "",
-      suggest: suggest(),
-      t: (key, params) => language.t(key as Parameters<typeof language.t>[0], params as never),
+  // The mode is per session. Deep research is sticky: a session whose latest request went to the research agent stays
+  // in it, and a new session starts in it when it was the last mode picked in this repository. Normal, Quick and Fast
+  // last until the composer changes session, as before.
+  const [pickedModes, setPickedModes] = createStore<Record<string, ExecutionMode>>({})
+  const modeKey = () => props.controls.session.id ?? `new:${sdk().directory}`
+  const executionMode = createMemo<ExecutionMode>(() => {
+    const picked = pickedModes[modeKey()]
+    if (picked) return picked
+    const id = props.controls.session.id
+    if (id) return stickyMode(sync().data.message?.[id] ?? []) ?? "normal"
+    return rememberedMode(browserStorage(), sdk().directory) ?? "normal"
+  })
+  const setExecutionMode = (mode: ExecutionMode) => {
+    setPickedModes(modeKey(), mode)
+    rememberMode(browserStorage(), sdk().directory, mode)
+  }
+  // The first message of a new session gives this composer its session: the mode picked for it stays.
+  createEffect(
+    on(
+      () => props.controls.session.id,
+      (id, previous) => {
+        if (!id || previous !== undefined) return
+        const picked = pickedModes[`new:${sdk().directory}`]
+        if (picked && !pickedModes[id]) setPickedModes(id, picked)
+      },
+      { defer: true },
+    ),
+  )
+  const researching = createMemo(() => executionMode() === "research" && store.mode !== "shell")
+  const [researchDepth, setResearchDepth] = createSignal<Depth>("auto")
+  const [researchScope, setResearchScope] = createSignal<Research.Scope>("web+brain")
+  // A model on a server the user hosts has no per-token price, so its research cap is a step count.
+  const hostedModel = createMemo(() => {
+    const url = props.controls.model.selection.current()?.api?.url
+    if (!url || !URL.canParse(url)) return false
+    return LocalPolicy.hostClass(new URL(url).hostname) !== "internet"
+  })
+  const researchCap = createMemo(() =>
+    capLabel({
+      depth: researchDepth(),
+      local: hostedModel(),
+      own: sync().data.config.budget?.run,
+      limits: sync().data.config.research?.limits,
     }),
+  )
+  const placeholder = createMemo(() =>
+    store.mode !== "shell" && executionMode() === "research" && !commentCount()
+      ? RESEARCH_PLACEHOLDER
+      : promptPlaceholder({
+          mode: store.mode,
+          commentCount: commentCount(),
+          example: suggest() ? (store.mode === "shell" ? "git status" : language.t(EXAMPLES[store.placeholder])) : "",
+          suggest: suggest(),
+          t: (key, params) => language.t(key as Parameters<typeof language.t>[0], params as never),
+        }),
   )
 
   const historyComments = () => {
@@ -1529,7 +1608,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const isMaxEffort = createMemo(() => modelVariantLabel(props.controls.model.selection.variant.current()) === "Max")
   // Check provider variants directly: `variants` also includes the UI-only default option.
   const showVariantControl = createMemo(() => props.controls.model.selection.variant.list().length > 0)
-  const [executionMode, setExecutionMode] = createSignal<ExecutionMode>("normal")
   const [executionModeMenuOpen, setExecutionModeMenuOpen] = createSignal(false)
   const executionModeMeta = createMemo(
     () => EXECUTION_MODES.find((mode) => mode.id === executionMode()) ?? EXECUTION_MODES[0],
@@ -1612,6 +1690,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       onAbort: props.onAbort,
       onSubmit: props.onSubmit,
       executionMode,
+      researchDepth,
+      researchScope,
       llmJudge: settings.general.llmJudge,
       judgeScope: settings.general.judgeScope,
       autoModelRouting: settings.general.autoModelRouting,
@@ -1842,6 +1922,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
   const designPlaceholder = () => {
     if (store.mode === "shell") return placeholder()
+    if (executionMode() === "research") return RESEARCH_PLACEHOLDER
     return "Ask anything, / for commands, @ for context..."
   }
 
@@ -2060,6 +2141,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   </div>
                 </div>
               </div>
+              <Show when={researching()}>
+                <ResearchChips
+                  depth={researchDepth()}
+                  scope={researchScope()}
+                  cap={researchCap()}
+                  onDepth={setResearchDepth}
+                  onScope={setResearchScope}
+                />
+              </Show>
               {/* pr-2 and pb-2 must match, and the send button is self-end, so its gap to the box's right and bottom edges stays equal even when a neighbour is taller. */}
               <div class="mt-auto flex min-w-0 items-center gap-1 pr-2 pb-2 pl-3">
                 <div
@@ -2237,10 +2327,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                         data-action="prompt-execution-mode"
                         variant="ghost-muted"
                         size="normal"
-                        class="max-w-[116px] justify-start"
+                        class="justify-start"
                         classList={{
+                          "max-w-[116px]": executionMode() !== "research",
+                          "max-w-[148px]": executionMode() === "research",
                           "!text-[#c9b2ff] [text-shadow:0_0_14px_rgba(155,108,255,0.45)]": executionMode() === "fast",
                           "!text-[#9ce0cf]": executionMode() === "quick",
+                          "!text-[#a9c8ff]": executionMode() === "research",
                         }}
                       >
                         <span class="size-1.5 shrink-0 rounded-full" style={{ background: executionModeMeta().dot }} />
@@ -2251,10 +2344,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                       </MenuV2.Trigger>
                       <MenuV2.Portal>
                         <MenuV2.Content>
-                          <div class="w-[286px] p-1" role="group" aria-label="Execution speed">
-                            <div class="px-2 pb-1 pt-1 text-[11px] font-medium text-v2-text-text-faint">
-                              Execution speed
-                            </div>
+                          <div class="w-[286px] p-1" role="group" aria-label="Mode" data-component="prompt-mode-menu">
+                            <div class="px-2 pb-1 pt-1 text-[11px] font-medium text-v2-text-text-faint">Mode</div>
                             {EXECUTION_MODES.map((mode) => (
                               <button
                                 type="button"
@@ -2266,7 +2357,12 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                               >
                                 <span class="mt-1 size-2 shrink-0 rounded-full" style={{ background: mode.dot }} />
                                 <span class="min-w-0 flex-1">
-                                  <span class="block text-[13px] font-medium text-v2-text-text-base">{mode.label}</span>
+                                  <span class="flex items-center gap-1.5 text-[13px] font-medium text-v2-text-text-base">
+                                    {mode.label}
+                                    <Show when={mode.preview}>
+                                      <span data-component="research-preview-label">{PREVIEW}</span>
+                                    </Show>
+                                  </span>
                                   <span class="block text-[11px] leading-4 text-v2-text-text-muted">
                                     {mode.description}
                                   </span>
@@ -2390,6 +2486,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               removeLabel={language.t("prompt.attachment.remove")}
             />
             {rememberChips()}
+            <Show when={researching()}>
+              <ResearchChips
+                depth={researchDepth()}
+                scope={researchScope()}
+                cap={researchCap()}
+                onDepth={setResearchDepth}
+                onScope={setResearchScope}
+              />
+            </Show>
             <div
               class="relative"
               onMouseDown={(e) => {
@@ -2667,7 +2772,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                               setExecutionMode(value as ExecutionMode)
                               restoreFocus()
                             }}
-                            class="capitalize max-w-[120px] text-text-base"
+                            class="max-w-[140px] text-text-base"
                             valueClass="truncate text-13-regular text-text-base"
                             triggerStyle={control()}
                             triggerProps={{ "data-action": "prompt-execution-mode" }}
@@ -2692,6 +2797,95 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         )}
       </Show>
     </div>
+  )
+}
+
+// Deep research's chip row: Depth (Auto, Focused, Deep) and Sources pick what the message asks for, and Cap says what
+// stops the run.
+function ResearchChips(props: {
+  depth: Depth
+  scope: Research.Scope
+  cap: string
+  onDepth: (depth: Depth) => void
+  onScope: (scope: Research.Scope) => void
+}) {
+  return (
+    <div data-component="research-chips" role="group" aria-label="Deep research options">
+      <ResearchChip
+        name="Depth"
+        value={props.depth}
+        options={DEPTHS}
+        current={DEPTHS.find((item) => item.value === props.depth)?.label ?? "Auto"}
+        onSelect={props.onDepth}
+      />
+      <ResearchChip
+        name="Sources"
+        value={props.scope}
+        options={SCOPES.map((item) => ({ ...item, description: undefined }))}
+        current={scopeLabel(props.scope)}
+        onSelect={props.onScope}
+      />
+      <TooltipV2
+        placement="top"
+        gutter={4}
+        value="What stops this research: your own run cap when you set one, otherwise Deep research's default for the depth."
+      >
+        <span data-slot="research-chip" data-static="true">
+          {props.cap}
+        </span>
+      </TooltipV2>
+    </div>
+  )
+}
+
+function ResearchChip<T extends string>(props: {
+  name: string
+  value: T
+  options: readonly { value: T; label: string; description?: string }[]
+  current: string
+  onSelect: (value: T) => void
+}) {
+  const [open, setOpen] = createSignal(false)
+  return (
+    <MenuV2 open={open()} onOpenChange={setOpen} gutter={6} modal={false} placement="top-start">
+      <MenuV2.Trigger
+        as="button"
+        type="button"
+        data-slot="research-chip"
+        aria-label={`${props.name}: ${props.current}`}
+      >
+        <span data-slot="research-chip-name">{props.name}</span>
+        <span>{props.current}</span>
+        <Icon name="chevron-down" size="small" />
+      </MenuV2.Trigger>
+      <MenuV2.Portal>
+        <MenuV2.Content>
+          <div class="w-[286px] p-1" role="group" aria-label={props.name}>
+            <div class="px-2 pb-1 pt-1 text-[11px] font-medium text-v2-text-text-faint">{props.name}</div>
+            {props.options.map((option) => (
+              <button
+                type="button"
+                class="flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-white/[0.06]"
+                onClick={() => {
+                  props.onSelect(option.value)
+                  setOpen(false)
+                }}
+              >
+                <span class="min-w-0 flex-1">
+                  <span class="block text-[13px] font-medium text-v2-text-text-base">{option.label}</span>
+                  <Show when={option.description}>
+                    <span class="block text-[11px] leading-4 text-v2-text-text-muted">{option.description}</span>
+                  </Show>
+                </span>
+                <Show when={props.value === option.value}>
+                  <Icon name="check" size="small" class="mt-0.5 shrink-0 text-v2-text-text-accent" />
+                </Show>
+              </button>
+            ))}
+          </div>
+        </MenuV2.Content>
+      </MenuV2.Portal>
+    </MenuV2>
   )
 }
 

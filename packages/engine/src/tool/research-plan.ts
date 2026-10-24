@@ -82,6 +82,32 @@ type Metadata = {
   from?: TaskSize.Tier
   to?: TaskSize.Tier
   source?: "user"
+  /** While the plan card is open: what the app's card shows beside the plan, so each field can be edited. */
+  card?: Card
+}
+
+/** What the plan card shows besides the proposed plan, on the running part while the user decides. */
+export type Card = {
+  /** Start deep is offered, with its own estimate. */
+  readonly deep: boolean
+  readonly deepEstimate?: string
+  /** What research searches with: SearXNG at a host, Exa or Parallel, or nothing yet, with why. */
+  readonly search: {
+    readonly provider: "searxng" | "exa" | "parallel" | "none"
+    readonly host?: string
+    readonly reason?: string
+  }
+  /**
+   * The user's own sites, from their config and from what they ticked Always for on an earlier card, and the format
+   * they keep: the card marks them "from your preferences".
+   */
+  readonly preferences: {
+    readonly prefer: readonly string[]
+    readonly avoid: readonly string[]
+    readonly format?: Research.Format
+  }
+  /** Vector Local's Web access is None: the scope stays the brain and the repository's files. */
+  readonly offline: boolean
 }
 
 const FROM_PREFERENCES = "from your preferences"
@@ -254,6 +280,38 @@ export const ResearchPlanTool = Tool.define<
             }
           }
 
+          // The app's plan card reads the plan as Vector will run it from the running part, rather than from the card's
+          // text, so the user edits the real fields; the text stays for every other client.
+          const offered = ceiling === "deep" && proposed.depth !== "deep"
+          yield* ctx.metadata({
+            title: "Research plan",
+            metadata: {
+              plan: proposed,
+              estimate,
+              ...(learned ? { learned } : {}),
+              card: {
+                deep: offered,
+                ...(offered
+                  ? { deepEstimate: yield* estimateLine({ ...proposed, depth: "deep" }, ctx, provider.provider) }
+                  : {}),
+                search:
+                  provider.provider === "searxng"
+                    ? {
+                        provider: "searxng",
+                        ...(URL.canParse(provider.url) ? { host: new URL(provider.url).host } : {}),
+                      }
+                    : provider.provider === "none"
+                      ? { provider: "none", ...(provider.reason ? { reason: provider.reason } : {}) }
+                      : { provider: provider.provider },
+                preferences: {
+                  prefer: sites(cfg.research?.domains?.prefer, kept.prefer_domains),
+                  avoid: sites(cfg.research?.domains?.avoid, kept.avoid_domains),
+                  ...(kept.format ? { format: kept.format } : {}),
+                },
+                offline,
+              },
+            },
+          })
           const answers = yield* question
             .ask({
               sessionID: SessionID.make(ctx.sessionID),
@@ -263,7 +321,7 @@ export const ResearchPlanTool = Tool.define<
                   header: "Research plan",
                   options: [
                     { label: START, description: `Research at this depth (${proposed.depth})` },
-                    ...(ceiling === "deep" && proposed.depth !== "deep"
+                    ...(offered
                       ? [
                           {
                             label: START_DEEP,
@@ -535,10 +593,20 @@ function measured(ctx: Tool.Context) {
 
 // The plan's sites with the user's own, each once.
 function domains(key: "prefer_domains" | "avoid_domains", proposed?: readonly string[], own?: readonly string[]) {
-  const all = [
-    ...new Set([...(proposed ?? []), ...(own ?? [])].map((item) => item.trim().toLowerCase()).filter(Boolean)),
-  ]
-  return all.length ? { [key]: all.slice(0, 50) } : {}
+  const all = sites(proposed, own)
+  return all.length ? { [key]: all } : {}
+}
+
+// Sites as a plan keeps them: trimmed, lowercased, each once, at most 50.
+function sites(...lists: (readonly string[] | undefined)[]) {
+  return [
+    ...new Set(
+      lists
+        .flatMap((list) => list ?? [])
+        .map((item) => item.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  ].slice(0, 50)
 }
 
 // What of the plan its card marks "from your preferences": the sites and the format the user's preferences gave it,

@@ -197,6 +197,70 @@ it.instance(
 )
 
 it.instance(
+  "while the plan card is open, its running part carries the plan as Vector would run it, both estimates, the search set up and the user's own sites",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web, { research: { domains: { prefer: [" Nature.com "], avoid: ["example.com"] } } })
+      const question = yield* Question.Service
+      const sessions = yield* Session.Service
+      // What the app's plan card reads: the research_plan part while its question waits for the user. The first card
+      // ticks Always for a site and a format, so the second card carries them as the user's preferences.
+      const seen: Record<string, unknown>[] = []
+      const replies = [
+        `vector-plan:${JSON.stringify({ action: "start", plan: { prefer_domains: ["nature.com", "arxiv.org"], format: "table" }, always: ["prefer_domains", "format"] })}`,
+        "Start",
+      ]
+      const first = yield* sessions.create({ title: "Research" })
+      const second = yield* sessions.create({ title: "Research" })
+      yield* Effect.gen(function* () {
+        while (true) {
+          for (const request of yield* question.list()) {
+            // The fake model numbers its calls per response, so a call is found in the session that asked.
+            const session = request.sessionID === first.id ? first.id : second.id
+            const part = (yield* calls(session, "research_plan")).find((item) => item.callID === request.tool?.callID)
+            // The card's data is on the part before the question is asked; read it as the app would.
+            if (part?.state.status !== "running" || !part.state.metadata?.card) continue
+            seen.push(part.state.metadata)
+            yield* question
+              .reply({ requestID: request.id, answers: [[replies.shift() ?? "Cancel"]] })
+              .pipe(Effect.ignore)
+          }
+          yield* Effect.sleep(10)
+        }
+      }).pipe(Effect.forkScoped)
+      for (const session of [first, second]) {
+        yield* test.llm.tool("research_plan", plan())
+        yield* test.llm.text("Done.")
+        yield* send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." })
+      }
+
+      expect(seen).toHaveLength(2)
+      expect(seen[0]).toMatchObject({
+        plan: { depth: "focused", prefer_domains: ["nature.com"], avoid_domains: ["example.com"] },
+        estimate: expect.stringContaining("About 15 pages and 8 searches"),
+        card: {
+          deep: true,
+          deepEstimate: expect.stringContaining("About 40 pages and 24 searches"),
+          search: { provider: "searxng", host: new URL(web.url("searxng", "/")).host },
+          preferences: { prefer: ["nature.com"], avoid: ["example.com"] },
+          offline: false,
+        },
+      })
+      // The second card marks what the first card's Always kept, with the config's own sites.
+      expect(seen[1]).toMatchObject({
+        plan: { prefer_domains: ["nature.com", "arxiv.org"], format: "table" },
+        learned: { prefer_domains: ["nature.com", "arxiv.org"], format: "table" },
+        card: { preferences: { prefer: ["nature.com", "arxiv.org"], avoid: ["example.com"], format: "table" } },
+      })
+      // Once answered, the part keeps what the run started with, not the card.
+      const [planned] = yield* calls(second.id, "research_plan")
+      expect(metadataOf(planned)).toMatchObject({ approved: true, answer: "start" })
+      expect(metadataOf(planned).card).toBeUndefined()
+    }),
+  90_000,
+)
+
+it.instance(
   "what the user ticks Always for on the plan card is kept as their preference in use, carried by the next plan, and a later choice adds to it",
   () =>
     Effect.gen(function* () {
