@@ -217,7 +217,7 @@ test("the markets the brain serves are labelled as not yet products, and say wha
 
 test("the investor page names the outside agents Vector runs and the business it plans", () => {
   expect(markup).not.toMatch(/every (lab's|vendor's) agent|any vendor's agents/i)
-  expect(markup).toContain("its own lean agent beside Claude Code, Codex and Cursor Agent")
+  expect(markup).toContain("its own lean agent beside Claude Code, Codex and Cursor CLI")
   ;["$10", "$50", "$100", "$200"].forEach((price) => expect(markup).toContain(`<b>${price}</b>`))
   expect(markup).not.toMatch(/markup/i)
 })

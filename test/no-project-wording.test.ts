@@ -105,13 +105,20 @@ test("no user-facing English text calls Vector's own concept a project", async (
 })
 
 test("the wording check tells Vector's concept from other products' projects and from code", () => {
-  for (const text of ["Open a project first", "Recent projects", "Project tools", "this project's .env"])
+  for (const text of [
+    "Open a project first",
+    "Recent projects",
+    "Project tools",
+    "this project's .env",
+    "LF Projects, LLC owns this project",
+  ])
     expect(offending(text)).toBe(true)
   for (const text of [
     "Link a Vercel project",
     "the linked Vercel project's variables",
     "Vercel or Supabase projects",
     "Create a new GitLab project",
+    "goose is a trademark of LF Projects, LLC",
     "project.id",
     "vector-home-project-card",
     "#project-rules",
@@ -121,7 +128,9 @@ test("the wording check tells Vector's concept from other products' projects and
 })
 
 function offending(text: string) {
-  return [...text.matchAll(word)].some((match) => !thirdParty.test(text.slice(0, match.index)))
+  // The trademark owner's registered name is not Vector's repository terminology.
+  const prose = text.replaceAll("LF Projects, LLC", "LF trademark holder")
+  return [...prose.matchAll(word)].some((match) => !thirdParty.test(prose.slice(0, match.index)))
 }
 
 // A release note for a version after the last shipped one. Entries with no version, such as "August 2026", are history.
