@@ -94,7 +94,7 @@ import { LocalPolicy } from "./policy"
 //   does, is guarded however it was started. Under Node, named imports loaded after install see the wrapped class;
 // - under Node, a Worker whose entry does not import `backstop-worker.ts` first, with Vector Local on: Node has no
 //   preload, and the desktop's engine starts no worker but the brain's reader. Under Bun, a Worker in a build whose
-//   worker preload is missing (the CLI's build carries it);
+//   worker preload is missing while Vector Local is on (the CLI's build carries it; strict mode refuses the worker);
 // - under Bun, the lookup of a name a node:http client request uses: that request is decided by its name only;
 // - under Bun, the lookup fetch makes itself after the guard checked a name allowed by its name: Bun's fetch cannot be
 //   told to connect to the address the guard checked without changing the URL the caller sees, so a resolver that
@@ -215,10 +215,6 @@ const MAX_ATTEMPTS = 2_000
 const BODY_HEADERS = ["content-type", "content-length", "content-encoding", "content-language", "content-location"]
 // What a redirect to another origin drops, as Bun's and Node's fetch do.
 const CREDENTIAL_HEADERS = ["authorization", "proxy-authorization", "cookie", "cookie2", "host"]
-const WORKER_PRELOAD =
-  typeof VECTOR_GUARD_WORKER_PATH === "string"
-    ? VECTOR_GUARD_WORKER_PATH
-    : fileURLToPath(new URL("./guard-worker.ts", import.meta.url))
 const RESOLVED_OUTSIDE = "Its name says it is on this computer or your network, but it resolved to an address outside."
 const PROXY_HOP =
   "It is a proxy, which can pass a request anywhere; only a request for the internet that a part of Vector labelled may use it. A request for this computer or your network goes direct: add its host to NO_PROXY."
@@ -935,13 +931,16 @@ function wrap(input: Wrap): Handle {
   // These same wraps are preloaded in every Worker the guard sees started (Bun's `preload`; Node ignores it, and its
   // workers get the environment): strict mode's with the names and the proxy it reads from its environment, Vector
   // Local's with the policy in effect. Node has no global Worker, only node:worker_threads' one, so only the classes
-  // this runtime has are wrapped. A release build that did not bundle the preload starts its Workers without it.
+  // this runtime has are wrapped. Local mode can start Workers without a bundled preload; strict mode must refuse.
   const threads = workerThreads as unknown as { Worker?: typeof workerThreads.Worker }
   const OriginalWorker = globalThis.Worker as typeof globalThis.Worker | undefined
   const OriginalThreadWorker = threads.Worker
   const worker = input.worker
   if (worker) {
     const guarded = (options: WorkerOptions | undefined) => {
+      const preload = workerPreload()
+      if (input.mode === "strict" && !preloadable(preload))
+        throw new Error("Vector did not start this worker because its network guard preload is unavailable.")
       const added = worker.env()
       const given = options?.env
       const env =
@@ -952,7 +951,7 @@ function wrap(input: Wrap): Handle {
             : undefined
       return {
         ...options,
-        ...(worker.always && !preloadable() ? {} : { preload: [WORKER_PRELOAD, ...[options?.preload ?? []].flat()] }),
+        ...(worker.always && !preloadable(preload) ? {} : { preload: [preload, ...[options?.preload ?? []].flat()] }),
         ...(env ? { env } : {}),
       }
     }
@@ -1052,9 +1051,17 @@ function socketVerdict(policy: LocalMode.Policy, attempt: Omit<Attempt, "allowed
   )
 }
 
+// Eval/blob workers can have no filesystem base, and Windows requires a drive in a file URL. Only resolve a preload
+// when starting a child, so the bundled reader can install its own guard; an invalid child preload still fails closed.
+function workerPreload() {
+  return typeof VECTOR_GUARD_WORKER_PATH === "string"
+    ? VECTOR_GUARD_WORKER_PATH
+    : fileURLToPath(new URL("./guard-worker.ts", import.meta.url))
+}
+
 // Whether the build carried guard-worker.ts, looked at once: a Worker whose preload is missing would not start.
-function preloadable() {
-  state.preload ??= fs.existsSync(WORKER_PRELOAD)
+function preloadable(preload: string) {
+  state.preload ??= fs.existsSync(preload)
   return state.preload
 }
 

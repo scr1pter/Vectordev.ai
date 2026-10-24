@@ -105,8 +105,14 @@ describe("BrainWorker", () => {
     })
     expect(bomb.length).toBeLessThan(1024 * 1024)
     const started = performance.now()
-    const result = await run(source, {}, (worker) => worker.extract({ ...input, name: "bomb.pdf", bytes: bomb }))
-    expect(result).toMatchObject({ type: "refused", reason: "too-large" })
+    const result = await run(source, {}, (worker) =>
+      Effect.gen(function* () {
+        const read = yield* worker.extract({ ...input, name: "bomb.pdf", bytes: bomb })
+        return { read, status: yield* worker.status() }
+      }),
+    )
+    expect(result.status).toEqual({ mode: "worker", threads: 1 })
+    expect(result.read).toMatchObject({ type: "refused", reason: "too-large" })
     expect(performance.now() - started).toBeLessThan(15_000)
   }, 60_000)
 
@@ -206,7 +212,11 @@ describe("BrainWorker", () => {
     expect(idle.status.mode).toBe("in-process")
     expect(idle.status.reason).toContain("stopped twice in 10 minutes")
     expect(idle.third.type).toBe("extracted")
-    const other = { ...input, name: "other.pdf", bytes: pdf({ pages: [{ runs: lines(["Tokens expire after 30 days."]) }] }) }
+    const other = {
+      ...input,
+      name: "other.pdf",
+      bytes: pdf({ pages: [{ runs: lines(["Tokens expire after 30 days."]) }] }),
+    }
     const two = await run(EXIT, {}, (worker) =>
       Effect.gen(function* () {
         yield* Effect.exit(worker.extract(input))
@@ -220,7 +230,9 @@ describe("BrainWorker", () => {
   test("a read on the main thread stops at its time limit too", async () => {
     const long = pdf({
       pages: Array.from({ length: 40 }, (_, page) => ({
-        runs: lines(Array.from({ length: 30 }, (_, line) => `Page ${page} line ${line}: clients MUST retry at most 3 times.`)),
+        runs: lines(
+          Array.from({ length: 30 }, (_, line) => `Page ${page} line ${line}: clients MUST retry at most 3 times.`),
+        ),
       })),
     })
     const started = performance.now()
