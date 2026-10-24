@@ -93,6 +93,7 @@ import type { Message, Part, SnapshotFileDiff, VcsFileDiff } from "@vectordevai/
 import { Message as SessionMessage } from "@vectordevai/session-ui/message-part"
 import { ResearchSourcesTab } from "@/features/research/sources-tab"
 import { registerResearchReportCard } from "@/features/research/report-card"
+import { registerLearnedChip } from "@/features/memory/learned-chip"
 import { OPEN_SOURCES, sessionRuns, type OpenSources } from "@/features/research/research-model"
 import { ConstrainDragYAxis, getDraggableId } from "@/utils/solid-dnd"
 import { sameWorkspaceRevisions } from "@/utils/workspace-revisions"
@@ -3809,6 +3810,8 @@ function StableCodespaceWorkbench(props: {
 
 // The session timeline draws a research report as the app's report card, with its chips and actions.
 registerResearchReportCard()
+// Under a reply, what Vector learned from the request it answers, with Undo.
+registerLearnedChip()
 
 // A page the Sources tab asked Preview to open, for the browser context it names.
 const [previewRequest, setPreviewRequest] = createSignal<{ contextId: string; url: string }>()

@@ -1,0 +1,79 @@
+/* "Learned 2 things": one quiet line under a reply, opened to list each item with Undo. */
+[data-component="learned-chip"] {
+  width: 100%;
+  min-width: 0;
+  margin-top: 4px;
+  color: var(--v2-text-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+[data-component="learned-chip"] [data-slot="learned-chip-row"] {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+[data-component="learned-chip"] [data-slot="learned-chip-trigger"] {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 8px 2px 6px;
+  border: 1px solid var(--vx-line);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+[data-component="learned-chip"] [data-slot="learned-chip-trigger"]:hover,
+[data-component="learned-chip"][data-open] [data-slot="learned-chip-trigger"] {
+  color: var(--v2-text-text-base);
+  border-color: var(--vx-line-strong, var(--vx-line));
+}
+
+[data-component="learned-chip"] [data-slot="learned-chip-label"] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-component="learned-chip"] [data-slot="learned-chip-items"] {
+  display: grid;
+  gap: 8px;
+  margin: 6px 0 0 18px;
+  padding: 0;
+  list-style: none;
+}
+
+[data-component="learned-chip"] [data-slot="learned-chip-text"] {
+  margin: 0;
+  color: var(--v2-text-text-base);
+  overflow-wrap: anywhere;
+}
+
+[data-component="learned-chip"] [data-slot="learned-chip-meta"],
+[data-component="learned-chip"] [data-slot="learned-chip-notice"],
+[data-component="learned-chip"] [data-slot="learned-chip-done"] {
+  margin: 2px 0 0;
+  color: var(--v2-text-text-faint);
+  overflow-wrap: anywhere;
+}
+
+[data-component="learned-chip"] [data-slot="learned-chip-actions"],
+[data-component="learned-chip"] [data-slot="learned-chip-erase"] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+[data-component="learned-chip"] [data-slot="learned-chip-erase"] {
+  margin: 8px 0 0 18px;
+}
