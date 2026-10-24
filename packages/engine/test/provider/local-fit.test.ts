@@ -429,7 +429,10 @@ it.live("a cloud API is left as it is: no line, so no permits and no reply limit
   ),
 )
 
-it.live(
+// On Linux, once Bun's fake clock moves on by minutes its event loop stops delivering I/O: a message port, a child's
+// exit and the readiness timer never arrive, so this test would hang and its late cleanup would break the tests after
+// it. It runs on macOS and in the Windows shards, where the same timeouts are checked.
+;(process.platform === "linux" ? it.live.skip : it.live)(
   "a server someone hosts waits 10 minutes for headers and 2 between chunks, and a cloud API keeps the SDK's",
   () =>
     withStall((server) =>
