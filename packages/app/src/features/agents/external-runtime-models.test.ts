@@ -5,6 +5,7 @@ import {
   externalRuntimeModelName,
   externalRuntimeModels,
   externalRuntimeModelState,
+  forgetRefusedRuntimeModel,
   launchRuntimeModel,
   rememberRuntimeModel,
   RUNTIME_DEFAULT_MODEL,
@@ -75,7 +76,10 @@ describe("external runtime models", () => {
       externalRuntimeModelState({
         runtime: () => "claude-code",
         current: () => current,
-        recent: () => ["sonnet", "gone-model"],
+        recent: () => [
+          { id: "sonnet", at: 2 },
+          { id: "gone-model", at: 1 },
+        ],
         set: (value) => sent.push(value),
       })
     expect(state().current()?.id).toBe(RUNTIME_DEFAULT_MODEL)
@@ -105,18 +109,55 @@ describe("external runtime models", () => {
   })
 
   test("each runtime remembers its picks, newest first, and a new agent starts on the last one", () => {
-    const first = rememberRuntimeModel(undefined, "opus")
-    expect(first).toEqual(["opus"])
-    const second = rememberRuntimeModel(first, "sonnet")
-    expect(second).toEqual(["sonnet", "opus"])
-    expect(rememberRuntimeModel(second, "opus")).toEqual(["opus", "sonnet"])
+    const ids = (picks: { id: string }[]) => picks.map((pick) => pick.id)
+    const first = rememberRuntimeModel(undefined, "opus", 1)
+    expect(first).toEqual([{ id: "opus", at: 1 }])
+    const second = rememberRuntimeModel(first, "sonnet", 2)
+    expect(ids(second)).toEqual(["sonnet", "opus"])
+    // Picking a model again moves it to the front with the new time.
+    expect(rememberRuntimeModel(second, "opus", 3)).toEqual([
+      { id: "opus", at: 3 },
+      { id: "sonnet", at: 2 },
+    ])
     // Going back to the default is a pick too, so the next agent starts on the default.
-    const reset = rememberRuntimeModel(second, undefined)
-    expect(reset).toEqual([RUNTIME_DEFAULT_MODEL, "sonnet", "opus"])
+    const reset = rememberRuntimeModel(second, undefined, 3)
+    expect(ids(reset)).toEqual([RUNTIME_DEFAULT_MODEL, "sonnet", "opus"])
     expect(launchRuntimeModel(reset)).toBeUndefined()
     expect(launchRuntimeModel(second)).toBe("sonnet")
     expect(launchRuntimeModel(undefined)).toBeUndefined()
-    const many = ["a", "b", "c", "d", "e", "f"].reduce<string[]>((recent, id) => rememberRuntimeModel(recent, id), [])
-    expect(many).toEqual(["f", "e", "d", "c", "b"])
+    const many = ["a", "b", "c", "d", "e", "f"].reduce<ReturnType<typeof rememberRuntimeModel>>(
+      (picks, id, index) => rememberRuntimeModel(picks, id, index),
+      [],
+    )
+    expect(ids(many)).toEqual(["f", "e", "d", "c", "b"])
+  })
+
+  test("a model the CLI refused leaves Recently used, and no new agent starts on it until it is picked again", () => {
+    const pickedAt = Date.parse("2026-10-23T10:00:00.000Z")
+    const refusal = { model: "claude-nope", at: "2026-10-23T10:05:00.000Z" }
+    const picks = rememberRuntimeModel(rememberRuntimeModel(undefined, "sonnet", pickedAt - 1), "claude-nope", pickedAt)
+    expect(launchRuntimeModel(picks)).toBe("claude-nope")
+
+    const kept = forgetRefusedRuntimeModel(picks, refusal)
+    expect(kept.map((pick) => pick.id)).toEqual(["sonnet"])
+    // The launcher starts on the pick before the refused one, and the picker no longer lists it as recently used.
+    expect(launchRuntimeModel(kept)).toBe("sonnet")
+    const state = externalRuntimeModelState({
+      runtime: () => "claude-code",
+      current: () => launchRuntimeModel(kept),
+      recent: () => kept,
+      set: () => {},
+    })
+    expect(state.recent!().map((model) => model?.id)).toEqual(["sonnet"])
+
+    // The same refusal, read again on the next poll, leaves a pick made after it alone.
+    const repicked = rememberRuntimeModel(kept, "claude-nope", Date.parse(refusal.at) + 1)
+    expect(forgetRefusedRuntimeModel(repicked, refusal)).toEqual(repicked)
+    expect(launchRuntimeModel(forgetRefusedRuntimeModel(repicked, refusal))).toBe("claude-nope")
+    // With nothing else picked, the next agent starts on the CLI's default.
+    expect(
+      launchRuntimeModel(forgetRefusedRuntimeModel(rememberRuntimeModel(undefined, "claude-nope", 1), refusal)),
+    ).toBe(undefined)
+    expect(forgetRefusedRuntimeModel(undefined, refusal)).toEqual([])
   })
 })

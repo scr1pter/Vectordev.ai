@@ -224,3 +224,139 @@ test("the agent launcher picks the model a new Claude Code agent starts on", asy
     )
     .toEqual([["claude-code", "sonnet"]])
 })
+
+test("a model Claude Code refused is not a new agent's start model until it is picked again", async ({ page }) => {
+  const directory = "/tmp/vector-external-model-refused"
+  const sessionID = "ses_external_model_refused"
+  await mockVectorServer(page, {
+    directory,
+    project: { id: "project-external-model-refused", worktree: directory, vcs: "git", name: "Model Refused" },
+    provider: { all: [], connected: [], default: {} },
+    sessions: [
+      {
+        id: sessionID,
+        title: "Model refused",
+        directory,
+        projectID: "project-external-model-refused",
+        time: { created: 1, updated: 1 },
+      },
+    ],
+    pageMessages: () => ({ items: [] }),
+  })
+  await page.addInitScript(
+    ({ directory, sessionID }) => {
+      localStorage.setItem("vector.onboarding.v1", JSON.stringify({ tour: true, dismissed: true }))
+      localStorage.setItem(
+        "vector.global.dat:server",
+        JSON.stringify({
+          projects: { local: [{ worktree: directory, expanded: true }] },
+          lastProject: { local: directory },
+        }),
+      )
+      // Claude Fable 5.1 was the last pick, and the agent launched on it came back refused a minute later.
+      const now = Date.now()
+      localStorage.setItem(
+        "vector.global.dat:external-agent-models",
+        JSON.stringify({
+          picks: {
+            "claude-code": [
+              { id: "claude-fable-5-1", at: now - 120_000 },
+              { id: "sonnet", at: now - 180_000 },
+            ],
+          },
+        }),
+      )
+      const refused = {
+        id: "workspace-model-refused",
+        revision: 2,
+        name: "Tidy the search module",
+        taskPrompt: "Tidy the search module.",
+        runtime: "claude-code",
+        provider: "Claude Code",
+        model: "Runtime default",
+        refusedRuntimeModel: { model: "claude-fable-5-1", at: new Date(now - 60_000).toISOString() },
+        sourcePath: directory,
+        parentSessionId: sessionID,
+        isolatedPath: `${directory}/claude-code`,
+        isolation: "git-worktree",
+        gitBranch: "test-claude-code",
+        status: "failed",
+        progress: 100,
+        lastAction: "Failed",
+        createdAt: new Date(now - 90_000).toISOString(),
+        lastActivityAt: new Date(now - 60_000).toISOString(),
+        changedFilesCount: 0,
+        riskLevel: "low",
+        estimatedCost: "",
+        finalSummary: "",
+        mergeState: "none",
+        logs: [],
+        terminalOutput: [],
+        browserResults: [],
+        changedFiles: [],
+        diff: "",
+        error: "There's an issue with the selected model (claude-fable-5-1).",
+      }
+      const created: Record<string, unknown>[] = []
+      const api = {
+        parallelWorkspaces: {
+          list: async () => [structuredClone(refused)],
+          refresh: async () => structuredClone(refused),
+          create: async (input: Record<string, unknown>) => {
+            created.push(input)
+            throw new Error("fixture stops before provisioning")
+          },
+          recordedCreates: () => created,
+        },
+        externalAgents: {
+          detect: async () => [
+            {
+              id: "claude-code",
+              name: "Claude Code",
+              cli: "claude",
+              installed: true,
+              signedIn: true,
+              version: "2.1.215",
+            },
+          ],
+        },
+      }
+      Object.defineProperty(window, "api", { configurable: true, value: api })
+    },
+    { directory, sessionID },
+  )
+
+  await page.goto(`/${base64Encode(directory)}/session/${sessionID}`)
+  await page.getByRole("button", { name: "New workspace", exact: true }).click()
+  const launcher = page.getByRole("dialog", { name: "New isolated agent" })
+  await expect(launcher).toBeVisible()
+  await launcher.getByRole("button", { name: /^Claude Code/ }).click()
+
+  // The refused model left Recently used, so the launcher starts on the pick before it.
+  const control = launcher.getByRole("button", { name: "Claude Code model: Sonnet (latest)", exact: true })
+  await expect(control).toBeVisible()
+  await control.click()
+  const picker = page.locator(".vector-model-popover")
+  const recent = picker.locator('[data-model-section="recent"]')
+  await expect(recent).toContainText("Recently used")
+  await expect(recent).toContainText("Sonnet (latest)")
+  await expect(recent).not.toContainText("Claude Fable 5.1")
+
+  // Picking it again is the way back to it, and the refusal the next poll still lists does not undo that pick.
+  await picker.getByRole("menuitemradio", { name: "Claude Fable 5.1, Claude Code", exact: true }).click()
+  const repicked = launcher.getByRole("button", { name: "Claude Code model: Claude Fable 5.1", exact: true })
+  await expect(repicked).toBeVisible()
+
+  await launcher.getByLabel("Agent instructions").fill("Tidy the search module.")
+  await launcher.getByRole("button", { name: "Launch agent", exact: true }).click()
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const boundary = window as unknown as {
+          api: { parallelWorkspaces: { recordedCreates: () => { runtime?: string; runtimeModel?: string }[] } }
+        }
+        return boundary.api.parallelWorkspaces.recordedCreates().map((input) => [input.runtime, input.runtimeModel])
+      }),
+    )
+    .toEqual([["claude-code", "claude-fable-5-1"]])
+})

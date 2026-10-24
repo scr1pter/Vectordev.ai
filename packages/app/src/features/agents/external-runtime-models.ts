@@ -92,15 +92,35 @@ export function externalRuntimeModelName(runtime: ExternalRuntime, value: string
   return externalRuntimeModels(runtime, value).find((model) => model.id === (value ?? RUNTIME_DEFAULT_MODEL))!.name
 }
 
-/** A runtime's recently used values, newest first, with the default kept as its own entry. */
-export function rememberRuntimeModel(recent: readonly string[] | undefined, value: string | undefined) {
+/** One pick of a runtime's model. `at` (epoch ms) lets a pick made after a refusal outrank it. */
+export type RuntimeModelPick = { id: string; at: number }
+
+/** A model a runtime's CLI refused, as desktop records it on the workspace; `at` is ISO. */
+export type RuntimeModelRefusal = { model: string; at: string }
+
+/** A runtime's picks, newest first, with the default kept as its own entry. */
+export function rememberRuntimeModel(
+  picks: readonly RuntimeModelPick[] | undefined,
+  value: string | undefined,
+  at = Date.now(),
+) {
   const id = value ?? RUNTIME_DEFAULT_MODEL
-  return [id, ...(recent ?? []).filter((item) => item !== id)].slice(0, RECENT_LIMIT)
+  return [{ id, at }, ...(picks ?? []).filter((pick) => pick.id !== id)].slice(0, RECENT_LIMIT)
+}
+
+/** A runtime's picks without a model its CLI refused, so Recently used stops offering it and no new agent starts on
+    it. Only a pick made after the refusal survives it: picking the model again is the way back to it. */
+export function forgetRefusedRuntimeModel(
+  picks: readonly RuntimeModelPick[] | undefined,
+  refusal: RuntimeModelRefusal,
+) {
+  const refusedAt = Date.parse(refusal.at)
+  return (picks ?? []).filter((pick) => pick.id !== refusal.model || pick.at >= refusedAt)
 }
 
 /** The value a new workspace for `runtime` starts on: the one last picked for it, else the CLI's default. */
-export function launchRuntimeModel(recent: readonly string[] | undefined) {
-  const last = recent?.[0]
+export function launchRuntimeModel(picks: readonly RuntimeModelPick[] | undefined) {
+  const last = picks?.[0]?.id
   return last && last !== RUNTIME_DEFAULT_MODEL ? last : undefined
 }
 
@@ -109,7 +129,7 @@ export function launchRuntimeModel(recent: readonly string[] | undefined) {
 export function externalRuntimeModelState(input: {
   runtime: () => ExternalRuntime
   current: () => string | undefined
-  recent: () => readonly string[] | undefined
+  recent: () => readonly RuntimeModelPick[] | undefined
   set: (value: string | undefined) => void
 }): ModelSelectorModelState {
   const list = () => externalRuntimeModels(input.runtime(), input.current())
@@ -118,7 +138,7 @@ export function externalRuntimeModelState(input: {
     list,
     visible: () => true,
     current: () => row(input.current() ?? RUNTIME_DEFAULT_MODEL),
-    recent: () => (input.recent() ?? []).map(row),
+    recent: () => (input.recent() ?? []).map((pick) => row(pick.id)),
     set: (key) => input.set(!key || key.modelID === RUNTIME_DEFAULT_MODEL ? undefined : key.modelID),
   }
 }

@@ -75,8 +75,11 @@ import {
 import {
   externalRuntimeModelName,
   externalRuntimeModelState,
+  forgetRefusedRuntimeModel,
   launchRuntimeModel,
   rememberRuntimeModel,
+  type RuntimeModelPick,
+  type RuntimeModelRefusal,
 } from "@/features/agents/external-runtime-models"
 import { PullRequests } from "@/features/pull-requests/pull-requests"
 import {
@@ -230,6 +233,8 @@ type ParallelWorkspaceRecord = {
   externalSessionId?: string
   /** The external CLI's model flag value for its next turn. Unset runs the CLI's own default. */
   runtimeModel?: string
+  /** The last model this workspace's CLI refused, and when. */
+  refusedRuntimeModel?: RuntimeModelRefusal
   turns?: ExternalAgentTurn[]
   agent?: string
   swarmRunId?: string
@@ -684,10 +689,21 @@ export default function NewLayout(props: ParentProps) {
   // agent of that runtime starts on the first. The model one workspace runs lives on its own record.
   const [runtimeModels, setRuntimeModels] = persisted(
     Persist.global("external-agent-models"),
-    createStore<{ recent: Partial<Record<ExternalRuntime, string[]>> }>({ recent: {} }),
+    createStore<{ picks: Partial<Record<ExternalRuntime, RuntimeModelPick[]>> }>({ picks: {} }),
   )
   const rememberRuntimeChoice = (runtime: ExternalRuntime, value: string | undefined) =>
-    setRuntimeModels("recent", runtime, (recent) => rememberRuntimeModel(recent, value))
+    setRuntimeModels("picks", runtime, (picks) => rememberRuntimeModel(picks, value))
+  // A model a CLI refused leaves its runtime's Recently used, so no new agent of that runtime starts on it again until
+  // someone picks it. Desktop keeps the refusal on the workspace, so it is caught whenever that workspace is listed,
+  // and a pick made after the refusal is never undone.
+  createEffect(() =>
+    parallelRecords().forEach((record) => {
+      if (!record.refusedRuntimeModel || !isExternalRuntime(record.runtime)) return
+      const picks = runtimeModels.picks[record.runtime]
+      const kept = forgetRefusedRuntimeModel(picks, record.refusedRuntimeModel)
+      if (kept.length !== (picks?.length ?? 0)) setRuntimeModels("picks", record.runtime, kept)
+    }),
+  )
   const launchExternalRuntime = () => {
     const runtime = parallelRuntime()
     return isExternalRuntime(runtime) ? runtime : undefined
@@ -695,8 +711,8 @@ export default function NewLayout(props: ParentProps) {
   // Read only while an external runtime is selected, which is the only time the launcher shows it.
   const launchModelState = externalRuntimeModelState({
     runtime: () => launchExternalRuntime() ?? "claude-code",
-    current: () => launchRuntimeModel(runtimeModels.recent[launchExternalRuntime() ?? "claude-code"]),
-    recent: () => runtimeModels.recent[launchExternalRuntime() ?? "claude-code"],
+    current: () => launchRuntimeModel(runtimeModels.picks[launchExternalRuntime() ?? "claude-code"]),
+    recent: () => runtimeModels.picks[launchExternalRuntime() ?? "claude-code"],
     set: (value) => {
       const runtime = launchExternalRuntime()
       if (runtime) rememberRuntimeChoice(runtime, value)
@@ -2007,7 +2023,7 @@ export default function NewLayout(props: ParentProps) {
           model: runtime === "vector" ? parallelModel() : undefined,
           // Each runtime starts on the model last picked for it (the launcher's Model control shows it for one
           // runtime), and on its CLI's default until one is.
-          runtimeModel: isExternalRuntime(runtime) ? launchRuntimeModel(runtimeModels.recent[runtime]) : undefined,
+          runtimeModel: isExternalRuntime(runtime) ? launchRuntimeModel(runtimeModels.picks[runtime]) : undefined,
           teamId: team?.id,
           // The verified-completion setting is global, so an isolated agent runs
           // under the same policy as a prompt typed into the composer.
@@ -3515,7 +3531,7 @@ export default function NewLayout(props: ParentProps) {
     const modelState = externalRuntimeModelState({
       runtime,
       current: () => record().runtimeModel,
-      recent: () => runtimeModels.recent[runtime()],
+      recent: () => runtimeModels.picks[runtime()],
       set: (value) => void setWorkspaceRuntimeModel(record().id, value),
     })
     const stats = () => parallelDiffStats(record())
@@ -4430,7 +4446,7 @@ export default function NewLayout(props: ParentProps) {
                   >
                     {(runtime) => {
                       const name = () =>
-                        externalRuntimeModelName(runtime(), launchRuntimeModel(runtimeModels.recent[runtime()]))
+                        externalRuntimeModelName(runtime(), launchRuntimeModel(runtimeModels.picks[runtime()]))
                       return (
                         <ModelSelectorPopoverV2
                           model={launchModelState}
