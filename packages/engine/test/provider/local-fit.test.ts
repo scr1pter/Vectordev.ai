@@ -1,7 +1,7 @@
 import { afterEach, expect, jest } from "bun:test"
 import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
-import type { LanguageModelV3CallOptions } from "@ai-sdk/provider"
+import type { LanguageModelV3CallOptions, LanguageModelV3StreamPart } from "@ai-sdk/provider"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import { streamText, tool } from "ai"
 import z from "zod"
@@ -29,6 +29,7 @@ import { NetworkGuard } from "../../../core/test/lib/network-guard"
 const guard = NetworkGuard.use()
 
 afterEach(async () => {
+  jest.useRealTimers()
   await disposeAllInstances()
 })
 
@@ -442,40 +443,56 @@ it.live(
               try {
                 // No headers: a server someone hosts is given up on after ten minutes, and not before.
                 const first = watch(hosted.doStream(call("first")))
-                await server.arrived(1)
+                await ready(server.arrived(1), "first request arrival")
                 jest.advanceTimersByTime(Provider.LOCAL_HEADER_TIMEOUT - 1)
                 expect(await first.state()).toBe("pending")
                 jest.advanceTimersByTime(1)
+                await ready(
+                  first.done().catch(() => undefined),
+                  "header timeout propagation",
+                )
                 expect(await first.state()).toBe("failed")
                 expect(ProviderError.unwrapTypedError(first.error())).toMatchObject({
                   ms: Provider.LOCAL_HEADER_TIMEOUT,
                 })
 
-                // Headers and then nothing: it is given up on after two minutes without a chunk.
-                const second = hosted.doStream(call("second"))
-                await server.arrived(2)
+                // Headers and the first chunk, then nothing: it is given up on after two minutes without a chunk.
+                const second = watch(hosted.doStream(call("second")))
+                await ready(server.arrived(2), "second request arrival")
                 server.headers(1)
-                const quiet = watch(drain((await second).stream))
-                // The comment that came with the headers is read first, so the wait for the next chunk has begun.
+                const streaming = Promise.withResolvers<void>()
+                const quiet = watch(
+                  drain((await ready(second.done(), "second response headers")).stream, streaming.resolve),
+                )
+                // The decoder consumed the first text chunk and drain requested the next before time moves.
+                await ready(streaming.promise, "first hosted text chunk")
                 expect(await quiet.state()).toBe("pending")
                 jest.advanceTimersByTime(Provider.LOCAL_CHUNK_TIMEOUT - 1)
                 expect(await quiet.state()).toBe("pending")
                 jest.advanceTimersByTime(1)
+                await ready(
+                  quiet.done().catch(() => undefined),
+                  "chunk timeout propagation",
+                )
                 expect(await quiet.state()).toBe("failed")
                 expect(ProviderError.unwrapTypedError(quiet.error())).toMatchObject({ message: "SSE read timed out" })
 
                 // The cloud API has neither: it waits as long as the reply takes.
                 const third = watch(cloud.doStream(call("third")))
-                await server.arrived(3)
+                await ready(server.arrived(3), "cloud request arrival")
                 jest.advanceTimersByTime(Provider.LOCAL_HEADER_TIMEOUT * 2)
                 expect(await third.state()).toBe("pending")
                 server.headers(2)
-                const waited = watch(drain((await third.done()).stream))
+                const cloudStreaming = Promise.withResolvers<void>()
+                const waited = watch(
+                  drain((await ready(third.done(), "cloud response headers")).stream, cloudStreaming.resolve),
+                )
+                await ready(cloudStreaming.promise, "first cloud text chunk")
                 expect(await waited.state()).toBe("pending")
                 jest.advanceTimersByTime(Provider.LOCAL_CHUNK_TIMEOUT * 2)
                 expect(await waited.state()).toBe("pending")
                 server.end(2)
-                expect(await waited.done()).toBe("done")
+                expect(await ready(waited.done(), "cloud response completion")).toBe("done")
               } finally {
                 jest.useRealTimers()
               }
@@ -830,10 +847,13 @@ function call(text: string): LanguageModelV3CallOptions {
 }
 
 // Reads a reply to its end.
-async function drain(stream: ReadableStream<unknown>) {
+async function drain(stream: ReadableStream<LanguageModelV3StreamPart>, streaming: () => void) {
   const reader = stream.getReader()
-  while (!(await reader.read()).done) continue
-  return "done"
+  while (true) {
+    const part = await reader.read()
+    if (part.done) return "done"
+    if (part.value.type === "text-delta" && part.value.delta === "waiting") streaming()
+  }
 }
 
 // Follows a promise while the timers run on a fake clock: `state` gives real I/O a few turns of the event loop to land,
@@ -857,13 +877,36 @@ function watch<T>(promise: PromiseLike<T>) {
   }
 }
 
+// Bun also freezes hrtime and worker-thread clocks. A timer-only Node process bounds real readiness so a failed
+// phase reaches finally and restores timers; Bun's test watchdog cannot cancel the promise that owns that finally.
+async function ready<T>(promise: PromiseLike<T>, phase: string): Promise<T> {
+  const timer = Bun.spawn(["node", "--eval", "setTimeout(() => {}, 5000)"], {
+    env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot },
+    stdin: "ignore",
+    stdout: "ignore",
+    stderr: "ignore",
+  })
+  try {
+    return await Promise.race([
+      promise,
+      timer.exited.then((code) => {
+        if (code !== 0) throw new Error(`Readiness timer exited with ${code} while waiting for ${phase}`)
+        throw new Error(`Timed out waiting for ${phase} on the real clock`)
+      }),
+    ])
+  } finally {
+    timer.kill()
+    await timer.exited
+  }
+}
+
 type Stall = {
   readonly url: string
   /** The last message of each request, in the order they arrived. */
   readonly seen: string[]
   /** Resolves once `count` requests have arrived. */
   readonly arrived: (count: number) => Promise<void>
-  /** Sends the headers of the request at `index`, with an SSE comment, which carries no reply. */
+  /** Sends the headers and an initial text chunk of the request at `index`, leaving the rest pending. */
   readonly headers: (index: number) => void
   /** Sends the rest of the reply of the request at `index`. */
   readonly end: (index: number) => void
@@ -906,9 +949,13 @@ function withStall<A, E, R>(body: (server: Stall) => Effect.Effect<A, E, R>) {
           request.respond(
             new Response(
               new ReadableStream({
-                async start(controller) {
+                start(controller) {
                   // Bun sends a streamed reply's headers with its first chunk.
-                  controller.enqueue(encoder.encode(": waiting\n\n"))
+                  controller.enqueue(
+                    encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: "waiting" } }] })}\n\n`),
+                  )
+                },
+                async pull(controller) {
                   await request.finish
                   controller.enqueue(
                     encoder.encode(
