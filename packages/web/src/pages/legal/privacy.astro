@@ -75,7 +75,7 @@ export const prerender = true
     </p>
     <p>
       Model requests use the provider you connect and its service and account, except for Vector Codium and
-      Vector's shared allowance for Free models inside of Vector, described below. Vector no longer uses
+      the Free models inside of Vector that Vector provides, described below. Vector no longer uses
       the former third-party model gateway. Requests can pass through a configured gateway
       or proxy. Each recipient's retention, abuse-review, and model-training rules depend on the service and
       your agreement or settings with it. Vector does not promise that every provider offers zero retention
@@ -83,9 +83,9 @@ export const prerender = true
     </p>
     <p id="included-models">
       <strong>Free models inside of Vector and OpenRouter.</strong> When you choose one of the Free models inside
-      of Vector, through Vector's shared allowance or your own OpenRouter account, your request content goes to
-      OpenRouter and to the model provider serving that model. The shared allowance passes through Vector's
-      server to check your account and limits, and sends OpenRouter a one-way hash of your Vector account
+      of Vector, whether provided by Vector or through your own OpenRouter account, your request content goes to
+      OpenRouter and to the model provider serving that model. Free models provided by Vector pass through
+      Vector's server to check your account and limits, and sends OpenRouter a one-way hash of your Vector account
       identifier with each request. Vector does not request zero data retention for these models. Most of their
       providers keep prompts and outputs under their own policies; OpenRouter records Phala, which serves Xing4.0,
       as keeping none. The models fall into two groups:
