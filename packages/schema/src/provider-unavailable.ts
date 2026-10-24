@@ -9,6 +9,14 @@ export const ProviderUnavailable = Schema.Struct({
 export type ProviderUnavailable = typeof ProviderUnavailable.Type
 
 export function providerUnavailable(id: string, reason: ProviderUnavailable["reason"]): ProviderUnavailable {
+  // A saved ChatGPT sign-in: Vector's built-in one is off, and OpenAI's own routes are an API key or the Codex CLI.
+  if (id === "openai" && reason === "sign-in-paused")
+    return {
+      id,
+      reason,
+      message:
+        "openai: Sign in with ChatGPT is off in Vector. Connect OpenAI with an API key, or run your own Codex CLI from Host locally in the desktop app. Run vector providers logout openai to remove the saved sign-in.",
+    }
   const action = {
     "sign-in-paused": "sign-in is paused in Vector; connect a supported provider with an API key",
     "provider-not-configured": "provider is not configured; add its endpoint and models to vector.json",

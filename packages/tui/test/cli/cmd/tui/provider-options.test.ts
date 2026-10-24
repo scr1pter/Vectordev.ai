@@ -10,8 +10,8 @@ describe("providerOptions", () => {
     })
   })
 
-  test("offers Sign in with ChatGPT next to an API key for OpenAI", () => {
-    expect(providerOptions([{ id: "openai", name: "OpenAI" }])[0]?.description).toBe("(ChatGPT Plus/Pro or API key)")
+  test("offers OpenAI by API key: Vector's own Sign in with ChatGPT is off", () => {
+    expect(providerOptions([{ id: "openai", name: "OpenAI" }])[0]?.description).toBe("(API key)")
   })
 
   test("does not use Other as the generic provider category", () => {

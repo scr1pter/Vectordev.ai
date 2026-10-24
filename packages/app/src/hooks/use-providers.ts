@@ -54,7 +54,11 @@ export function useProviders(directory?: Accessor<string | undefined>) {
       if (!takeProviderNotice(serverSDK().scope, `credential:${item.id}:${item.reason}`)) continue
       showToast({
         title: language.t("provider.unavailable.title", { provider: providers().all.get(item.id)?.name ?? item.id }),
-        description: language.t(`provider.unavailable.${item.reason}`, { provider: item.id }),
+        // A saved ChatGPT sign-in points at OpenAI's own routes: an API key, or the user's Codex CLI in Host locally.
+        description:
+          item.id === "openai" && item.reason === "sign-in-paused"
+            ? language.t("provider.unavailable.openai.sign-in-paused")
+            : language.t(`provider.unavailable.${item.reason}`, { provider: item.id }),
         duration: 10000,
       })
     }

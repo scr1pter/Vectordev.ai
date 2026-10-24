@@ -1,11 +1,7 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import os from "os"
 import { OpenAITransport } from "../../src/plugin/openai/transport"
-import {
-  CHATGPT_CLIENT_ID,
-  CHATGPT_SIGN_IN_UNAVAILABLE,
-  applyRemoteProviderPolicy,
-} from "@vectordevai/core/provider-policy"
+import { CHATGPT_SIGN_IN_UNAVAILABLE, applyRemoteProviderPolicy } from "@vectordevai/core/provider-policy"
 import {
   CodexAuthPlugin,
   parseJwtClaims,
@@ -24,7 +20,33 @@ function createTestJwt(payload: object): string {
   return `${header}.${body}.sig`
 }
 
+// Vector's built-in Sign in with ChatGPT is off (owner decision, 23 October 2026). These tests run the flow with a
+// registration of Vector's own, as VECTOR_OPENAI_OAUTH_CLIENT_ID supplies one; its sign-ins carry its stamp.
+const owned = "vector-owned-test-registration"
+const stamp = { clientId: owned, enterpriseUrl: "https://auth.openai.com" }
+
+test("without a registration of Vector's own, OpenAI offers only an API key and a saved ChatGPT sign-in is unused", async () => {
+  const hooks = await CodexAuthPlugin({} as never)
+  expect(ProviderAuth.visibleMethods(hooks.auth!).map((method) => method.label)).toEqual(["Manually enter API Key"])
+  const browser = hooks.auth!.methods[0]
+  if (browser.type !== "oauth") throw new Error("expected the browser OAuth method")
+  await expect(browser.authorize()).rejects.toThrow(CHATGPT_SIGN_IN_UNAVAILABLE)
+  const oauth = { type: "oauth" as const, refresh: "placeholder", access: "placeholder", expires: 0 }
+  // Neither a Codex CLI-era sign-in nor one stamped with any registration is used.
+  expect(await hooks.auth!.loader!(async () => oauth, { models: {} } as never)).toEqual({})
+  expect(await hooks.auth!.loader!(async () => ({ ...oauth, ...stamp }), { models: {} } as never)).toEqual({})
+})
+
 describe("plugin.codex", () => {
+  const before = process.env.VECTOR_OPENAI_OAUTH_CLIENT_ID
+  beforeAll(() => {
+    process.env.VECTOR_OPENAI_OAUTH_CLIENT_ID = owned
+  })
+  afterAll(() => {
+    if (before === undefined) delete process.env.VECTOR_OPENAI_OAUTH_CLIENT_ID
+    else process.env.VECTOR_OPENAI_OAUTH_CLIENT_ID = before
+  })
+
   test("a ChatGPT sign-in keeps every GPT-5 and GPT-6 model at no cost and drops older OpenAI models", async () => {
     const hooks = await CodexAuthPlugin({} as never)
     const ids = [
@@ -50,7 +72,7 @@ describe("plugin.codex", () => {
         ]),
       ),
     }
-    const models = await hooks.provider!.models!(provider as never, { auth: { type: "oauth" } } as never)
+    const models = await hooks.provider!.models!(provider as never, { auth: { type: "oauth", ...stamp } } as never)
     expect(Object.keys(models).sort()).toEqual(
       ["codex-mini-latest", "gpt-5.5", "gpt-5.6-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol"].sort(),
     )
@@ -243,7 +265,8 @@ describe("plugin.codex", () => {
   })
 
   test("a ChatGPT sign-in names the Codex endpoint as the connection to open early, unless a WebSocket carries it", async () => {
-    const oauth = async () => ({ type: "oauth", refresh: "placeholder", access: "placeholder", expires: 0 }) as never
+    const oauth = async () =>
+      ({ type: "oauth", refresh: "placeholder", access: "placeholder", expires: 0, ...stamp }) as never
     const http = await CodexAuthPlugin({} as never, { codexApiEndpoint: "https://codex.example/backend/responses" })
     const websocket = await CodexAuthPlugin({} as never, {
       codexApiEndpoint: "https://codex.example/backend/responses",
@@ -272,6 +295,7 @@ describe("plugin.codex", () => {
         refresh: "placeholder",
         access: "placeholder",
         expires: 0,
+        ...stamp,
       }),
       { models: {} } as never,
     )
@@ -300,9 +324,15 @@ describe("plugin.codex", () => {
       { client: { auth: { set: async (input: unknown) => saved.push(input) } } } as never,
       { issuer: server.url.toString(), codexApiEndpoint: new URL("/responses", server.url).href },
     )
-    // Saved before 1.99.104, so it carries no registration stamp.
+    // A Codex CLI-era sign-in, saved before 1.99.104 with no registration stamp, is not used with Vector's own.
+    expect(
+      await hooks.auth!.loader!(
+        async () => ({ type: "oauth", refresh: "placeholder", access: "placeholder", expires: 0 }),
+        { models: {} } as never,
+      ),
+    ).toEqual({})
     const options = await hooks.auth!.loader!(
-      async () => ({ type: "oauth", refresh: "placeholder", access: "placeholder", expires: 0 }),
+      async () => ({ type: "oauth", refresh: "placeholder", access: "placeholder", expires: 0, ...stamp }),
       { models: {} } as never,
     )
     const response = await (options.fetch as typeof fetch)("https://api.openai.com/v1/responses", {
@@ -312,7 +342,7 @@ describe("plugin.codex", () => {
     })
     expect(response.ok).toBe(true)
     expect(requests.map((request) => request.path)).toEqual(["/oauth/token", "/responses"])
-    expect(new URLSearchParams(requests[0].body).get("client_id")).toBe(CHATGPT_CLIENT_ID)
+    expect(new URLSearchParams(requests[0].body).get("client_id")).toBe(owned)
     expect(requests[0].agent).toStartWith("vector/")
     expect(requests[1].authorization).toBe("Bearer test-access")
     expect(saved).toEqual([
@@ -322,7 +352,7 @@ describe("plugin.codex", () => {
           type: "oauth",
           access: "test-access",
           refresh: "test-refresh",
-          clientId: CHATGPT_CLIENT_ID,
+          clientId: owned,
           enterpriseUrl: "https://auth.openai.com",
         }),
       },
@@ -397,7 +427,7 @@ describe("plugin.codex", () => {
       type: "success",
       access: "test-access",
       refresh: "test-refresh",
-      clientId: CHATGPT_CLIENT_ID,
+      clientId: owned,
       enterpriseUrl: "https://auth.openai.com",
     })
     expect(requests.map((request) => request.path)).toEqual([
@@ -405,7 +435,7 @@ describe("plugin.codex", () => {
       "/api/accounts/deviceauth/token",
       "/oauth/token",
     ])
-    expect(new URLSearchParams(requests[2].body).get("client_id")).toBe(CHATGPT_CLIENT_ID)
+    expect(new URLSearchParams(requests[2].body).get("client_id")).toBe(owned)
     expect(requests.every((request) => request.agent?.startsWith("vector/"))).toBe(true)
   })
 
@@ -422,7 +452,7 @@ describe("plugin.codex", () => {
     // Picked from a list read before the owner switched sign-in off.
     const browser = hooks.auth!.methods[0]
     const provider = { models: { "gpt-5.5": { id: "gpt-5.5", api: { id: "gpt-5.5" } } } }
-    const oauth = { type: "oauth" as const, refresh: "placeholder", access: "placeholder", expires: 0 }
+    const oauth = { type: "oauth" as const, refresh: "placeholder", access: "placeholder", expires: 0, ...stamp }
     applyRemoteProviderPolicy({ chatgptSignIn: false })
     try {
       expect(ProviderAuth.visibleMethods(hooks.auth!).map((method) => method.label)).toEqual(["Manually enter API Key"])
@@ -524,7 +554,13 @@ function signInBackend() {
   const frames: Array<Record<string, unknown>> = []
   const http: string[] = []
   // The saved credential: expired at first, then whatever the refresh stored.
-  let auth: Record<string, unknown> = { type: "oauth", refresh: "placeholder", access: "placeholder", expires: 0 }
+  let auth: Record<string, unknown> = {
+    type: "oauth",
+    refresh: "placeholder",
+    access: "placeholder",
+    expires: 0,
+    ...stamp,
+  }
   const server = Bun.serve({
     port: 0,
     fetch(request, server) {

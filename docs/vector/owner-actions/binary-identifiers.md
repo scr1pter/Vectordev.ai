@@ -34,7 +34,7 @@ The standalone archives that `packages/engine/script/build.ts` uploads to GitHub
 
 Not covered: `packages/sdk/js/script/publish.ts` and `packages/ui/script/publish.ts` do not run the audit. No release workflow and no CLI publish calls either of them; before publishing either package by hand, run the audit on its staged output (`dist-publish` for the SDK, the packed `.tgz` for the UI package).
 
-The artifact audit allows exactly one borrowed registration, the Codex CLI's public client that Sign in with ChatGPT uses, by the owner's decision of 10 October 2026, and rejects every other. See [the decision record](chatgpt.md).
+The artifact audit allows one borrowed registration and rejects every other: the Codex CLI's public client, which Sign in with ChatGPT used from the owner's decision of 10 October 2026. The owner turned the sign-in off on 23 October 2026; `provider-policy.ts` still names the client, unused by default, until a release removes it. See [the decision record](chatgpt.md).
 
 ## Decision: both desktop identifier classes are allowed (1 October 2026)
 

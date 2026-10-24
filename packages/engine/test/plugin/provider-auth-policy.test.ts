@@ -5,9 +5,10 @@ import { DigitalOceanAuthPlugin } from "../../src/plugin/digitalocean"
 import { GitlabAuthPlugin } from "../../src/plugin/gitlab"
 import { PoeAuthPlugin } from "../../src/plugin/poe"
 import { XaiAuthPlugin } from "../../src/plugin/xai"
+import { ProviderAuth } from "../../src/provider/auth"
 
 describe("Vector provider authentication", () => {
-  test("ChatGPT sign-in is offered; other borrowed sign-ins stay paused while API keys remain", async () => {
+  test("borrowed sign-ins, ChatGPT's included, stay paused while API keys remain", async () => {
     const hooks = await Promise.all([
       CodexAuthPlugin({} as never),
       CopilotAuthPlugin({} as never),
@@ -22,6 +23,9 @@ describe("Vector provider authentication", () => {
       ["api"],
       ["api"],
     ])
+    // ChatGPT's methods keep their indexes for clients that read an older list, but none is offered: Vector's
+    // built-in Sign in with ChatGPT is off (owner decision, 23 October 2026).
+    expect(ProviderAuth.visibleMethods(hooks[0]!.auth!).map((method) => method.type)).toEqual(["api"])
   })
 
   test("GitLab retains PAT authentication without an app registration", async () => {

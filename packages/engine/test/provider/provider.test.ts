@@ -2346,7 +2346,7 @@ it.instance(
 )
 
 it.instance(
-  "Vector auth content admits API keys and ChatGPT sign-in, and rejects unsupported providers and paused OAuth",
+  "Vector auth content admits API keys, and rejects unsupported providers and paused OAuth, ChatGPT's included",
   () =>
     Effect.gen(function* () {
       yield* set(
@@ -2361,7 +2361,8 @@ it.instance(
       const providers = yield* Provider.use.list()
       expect(providers[ProviderV2.ID.anthropic].key).toBe("placeholder-current")
       expect(providers[ProviderV2.ID.make("unsupported-fixture")]).toBeUndefined()
-      expect(providers[ProviderV2.ID.openai]).toBeDefined()
+      // Vector's built-in Sign in with ChatGPT is off (owner decision, 23 October 2026).
+      expect(providers[ProviderV2.ID.openai]).toBeUndefined()
       expect(providers[ProviderV2.ID.make("xai")]).toBeUndefined()
     }),
 )

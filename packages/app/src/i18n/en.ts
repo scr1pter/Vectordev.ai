@@ -113,6 +113,8 @@ export const dict = {
   "provider.unavailable.title": "{{provider}} credential ignored",
   "provider.unavailable.sign-in-paused":
     "Sign-in is paused. Connect a supported provider with an API key, or run vector providers logout {{provider}} to remove the saved credential.",
+  "provider.unavailable.openai.sign-in-paused":
+    "Sign in with ChatGPT is off in Vector. Connect OpenAI with an API key, or run your own Codex CLI from Host locally. Run vector providers logout openai to remove the saved sign-in.",
   "provider.unavailable.provider-not-configured":
     "This provider is not configured. Add its endpoint and models to vector.json, or run vector providers logout {{provider}}.",
   "provider.unavailable.disabled":
@@ -126,7 +128,7 @@ export const dict = {
 
   "provider.connect.unavailable":
     "{{provider}} sign-in is currently paused in Vector. Choose another provider to continue.",
-  "dialog.provider.openai.note": "GPT models with your ChatGPT Plus/Pro plan or an API key",
+  "dialog.provider.openai.note": "GPT models with your OpenAI API key",
   "dialog.provider.google.note": "Gemini models for fast, structured responses",
   "dialog.provider.openrouter.note": "Access all supported models from one provider",
   "dialog.provider.vercel.note": "Unified access to AI models with smart routing",
