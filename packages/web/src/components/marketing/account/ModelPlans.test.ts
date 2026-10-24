@@ -1,18 +1,20 @@
 import { describe, expect, test } from "bun:test"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
+import { publicModelPlans } from "../../../../../../api/_lib/model-plan-config"
+import { readModelPlanConfig } from "../../../lib/model-plans"
 import { ModelPlans, type ModelPlansPreview } from "./ModelPlans"
 
 const config: ModelPlansPreview["config"] = {
   enabled: true,
   currency: "usd",
   interval: "month",
-  plans: [{ id: "vector-10", name: "Vector 10", price: 10, available: true }],
+  plans: [{ id: "vector-10", name: "Plus", price: 10, available: true }],
 }
 const status: ModelPlansPreview["status"] = {
   active: true,
   access: true,
-  plan: { id: "vector-10", name: "Codium 10", left: 0.25, renewsAt: Date.UTC(2026, 10, 1), cancelAtPeriodEnd: false },
+  plan: { id: "vector-10", name: "Plus", left: 0.25, renewsAt: Date.UTC(2026, 10, 1), cancelAtPeriodEnd: false },
   purchased: { bought: false },
 }
 
@@ -40,11 +42,12 @@ describe("account model plans", () => {
     expect(html).toContain("$10")
     expect(html).toContain("Purchasing is not available yet")
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Coming soon<\/button>/)
-    expect(html).not.toContain("Choose Vector 10")
+    expect(html).not.toContain("Choose Plus")
   })
 
   test("active subscriptions show the share of credits remaining, renewal and management", () => {
     const html = renderToStaticMarkup(createElement(ModelPlans, { accessToken: "", preview: { config, status } }))
+    expect(html).toContain("<h3>Monthly allowance · Plus</h3>")
     expect(html).toContain("<strong>25%</strong> of this month&#x27;s Codium credits")
     expect(html).toContain('value="25" max="100"')
     expect(html).not.toContain("Purchased credits")
@@ -87,7 +90,7 @@ describe("account model plans", () => {
       )
       expect(html).toContain("Purchasing is not available yet")
       expect(html).toContain("Manage subscription")
-      expect(html).not.toContain("Choose Vector 10")
+      expect(html).not.toContain("Choose Plus")
     }
   })
 
@@ -102,11 +105,9 @@ describe("account model plans", () => {
             ...config,
             enabled: false,
             product: "Vector Codium",
-            plans: [
-              { ...config.plans[0]!, ...allowance, name: "Codium 10", available: false, tasks: [[60, 550], null] },
-            ],
+            plans: [{ ...config.plans[0]!, ...allowance, name: "Plus", available: false, tasks: [[60, 550], null] }],
             topups: [
-              { id: "codium-topup-10", name: "Codium 10 top-up", price: 10, available: false, tasks: [[60, 550]] },
+              { id: "codium-topup-10", name: "$10 credit top-up", price: 10, available: false, tasks: [[60, 550]] },
             ],
             models: [
               { id: "vendor/coder", name: "Coding Model", category: "everyday", description: "Routine coding tasks." },
@@ -131,6 +132,21 @@ describe("account model plans", () => {
     expect(html).toContain('href="/legal/terms#codium"')
     expect(html).toContain("Cancel any time")
     for (const leak of ["Codium credits /", "4321", "tokens", "80% input", "markup"]) expect(html).not.toContain(leak)
+  })
+
+  test("plans are offered as Plus, Pro, Max and Ultra and top-ups by their amount, as the server names them", () => {
+    const html = renderToStaticMarkup(
+      createElement(ModelPlans, {
+        accessToken: "",
+        preview: {
+          config: readModelPlanConfig(publicModelPlans()),
+          status: { active: false, access: false, purchased: { bought: false } },
+        },
+      }),
+    )
+    for (const name of ["Plus", "Pro", "Max", "Ultra"]) expect(html).toContain(`<h4>${name}</h4>`)
+    for (const price of [10, 50, 100, 200]) expect(html).toContain(`<h4>$${price} credit top-up</h4>`)
+    expect(html).not.toMatch(/Codium \d/)
   })
 
   test("monthly and purchased balances remain distinct, including unknown purchased usage", () => {

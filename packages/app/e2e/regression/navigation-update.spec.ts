@@ -58,6 +58,63 @@ test("Update restarts into the update, shows that it is updating, and gives the 
   expect(await calls(page)).toEqual(["install", "failed: Vector could not install the update."])
 })
 
+test("the chip shows the first name and the plan: Free without a Codium plan, else Plus, Pro, Max or Ultra", async ({
+  page,
+}, testInfo) => {
+  for (const [plan, name] of [
+    ["free", "Free"],
+    ["vector-10", "Plus"],
+    ["vector-50", "Pro"],
+    ["vector-100", "Max"],
+    ["vector-200", "Ultra"],
+  ] as const) {
+    const footer = await open(page, `updater=idle&account=signed-in&plan=${plan}`)
+    const chip = footer.getByRole("button", {
+      name: `Account: Ana Diaz, ${name} plan. Open account settings`,
+      exact: true,
+    })
+    await expect(chip).toBeVisible()
+    await expect(chip).toContainText(`Ana · ${name}`)
+    await expect(chip).not.toContainText("Diaz")
+    // The separator is muted, and the plan sits apart from the name so a long name truncates before it.
+    const separator = chip.locator("[data-vector-account-plan] > [aria-hidden='true']")
+    await expect(separator).toHaveText(" · ")
+    const [nameColor, separatorColor] = await Promise.all([
+      chip.locator(".truncate").evaluate((element) => getComputedStyle(element).color),
+      separator.evaluate((element) => getComputedStyle(element).color),
+    ])
+    expect(separatorColor).not.toBe(nameColor)
+    if (plan === "free" || plan === "vector-50") {
+      await expect(page.locator("#vector-launch")).toHaveCount(0)
+      await footer.screenshot({ path: testInfo.outputPath(`sidebar-account-${name.toLowerCase()}.png`) })
+    }
+  }
+  expect(await calls(page)).toEqual([])
+})
+
+test("the chip reads the plan again after a billing window, and leaves it out until it is known", async ({ page }) => {
+  const footer = await open(page, "updater=idle&account=signed-in&plan=free")
+  const chip = footer.locator("[data-vector-account-chip]")
+  await expect(chip).toContainText("Ana · Free")
+  await page.evaluate(() => {
+    const fixture = (window as unknown as { navigationFixture: { setPlan: (id: string) => void; changed: () => void } })
+      .navigationFixture
+    fixture.setPlan("vector-200")
+    fixture.changed()
+  })
+  await expect(chip).toContainText("Ana · Ultra")
+  await expect(chip).toHaveAccessibleName("Account: Ana Diaz, Ultra plan. Open account settings")
+
+  // A desktop without the Codium status shows the name alone.
+  const plain = await open(page, "updater=idle&account=signed-in")
+  await expect(plain.locator("[data-vector-account-chip]")).toHaveText("AAna")
+  await expect(plain.locator("[data-vector-account-plan]")).toHaveCount(0)
+  // Signed out, the chip still offers Sign in, with no plan.
+  const out = await open(page, "updater=idle&account=signed-out&plan=vector-50")
+  await expect(out.locator("[data-vector-account-chip]")).toHaveText("Sign in to Vector")
+  await expect(out.locator("[data-vector-account-plan]")).toHaveCount(0)
+})
+
 test("signed out, the chip opens Account, which offers Sign in, and Update still replaces the gear", async ({
   page,
 }) => {

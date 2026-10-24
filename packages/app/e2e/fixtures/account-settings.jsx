@@ -1,4 +1,5 @@
 import { render } from "solid-js/web"
+import { CodiumPlan } from "@vectordevai/schema/codium-plan"
 import { DialogProvider } from "@vectordevai/ui/context/dialog"
 import { PlatformProvider } from "../../src/context/platform"
 import { SettingsWorkspace } from "../../src/components/settings-v2"
@@ -31,7 +32,7 @@ const codium = {
     signedIn: true,
     enabled: true,
     access: true,
-    plan: { id: "vector-50", name: "Codium 50", left: 0.64, renewsAt, cancelAtPeriodEnd: false },
+    plan: { id: "vector-50", name: "Pro", left: 0.64, renewsAt, cancelAtPeriodEnd: false },
     purchased: { bought: true, state: "available" },
     empty: false,
     low: false,
@@ -40,7 +41,7 @@ const codium = {
     signedIn: true,
     enabled: true,
     access: true,
-    plan: { id: "vector-10", name: "Codium 10", left: 0.06, renewsAt, cancelAtPeriodEnd: false },
+    plan: { id: "vector-10", name: "Plus", left: 0.06, renewsAt, cancelAtPeriodEnd: false },
     purchased: { bought: false },
     empty: false,
     low: true,
@@ -49,7 +50,7 @@ const codium = {
     signedIn: true,
     enabled: true,
     access: true,
-    plan: { id: "vector-100", name: "Codium 100", renewsAt, cancelAtPeriodEnd: true },
+    plan: { id: "vector-100", name: "Max", renewsAt, cancelAtPeriodEnd: true },
     purchased: { bought: false },
     empty: false,
     low: false,
@@ -95,18 +96,8 @@ const initial =
 const sale = codium.enabled
 const offers = {
   enabled: sale,
-  plans: [10, 50, 100, 200].map((price) => ({
-    id: `vector-${price}`,
-    name: `Codium ${price}`,
-    price,
-    available: sale,
-  })),
-  topups: [10, 50, 100, 200].map((price) => ({
-    id: `codium-topup-${price}`,
-    name: `Codium ${price} top-up`,
-    price,
-    available: sale,
-  })),
+  plans: CodiumPlan.PLANS.map((plan) => ({ id: plan.id, name: plan.name, price: plan.price, available: sale })),
+  topups: CodiumPlan.TOPUPS.map((pack) => ({ id: pack.id, name: pack.name, price: pack.price, available: sale })),
 }
 const outcome = query.get("billing") ?? "completed"
 

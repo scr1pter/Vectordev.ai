@@ -432,13 +432,13 @@ test("status reads the plan and the share of each balance left, never an amount,
     enabled: true,
     access: true,
     customer: true,
-    plan: { id: "vector-50", name: "Codium 50", left: 0.06, renewsAt: 1_790_000_000_000, cancelAtPeriodEnd: false },
+    plan: { id: "vector-50", name: "Pro", left: 0.06, renewsAt: 1_790_000_000_000, cancelAtPeriodEnd: false },
     purchased: { bought: true, state: "low" },
     empty: false,
     low: true,
   })
   expect(ModelPlanStatus.describe(status)).toEqual([
-    `Plan: Codium 50, 6% of this month's credits left, renews ${ModelPlanStatus.formatDate(1_790_000_000_000)}`,
+    `Plan: Pro, 6% of this month's credits left, renews ${ModelPlanStatus.formatDate(1_790_000_000_000)}`,
     "Purchased credits: running low",
     "You are running low on Codium credits.",
   ])
@@ -473,7 +473,7 @@ test("status without credits, signed out, expired or unreachable says what to do
     low: false,
   })
   expect(ModelPlanStatus.describe(empty)).toEqual([
-    "Plan: none",
+    "Plan: Free",
     "Purchased credits: none",
     "You have no Codium credits available. Buy credits to use Codium models.",
   ])
@@ -508,7 +508,7 @@ test("a subscriber whose monthly credits are spent is told so, even though the p
   const spent = {
     enabled: true,
     access: true,
-    plan: { id: "vector-10", name: "Codium 10", left: 0, renewsAt: 1_790_000_000_000, cancelAtPeriodEnd: false },
+    plan: { id: "vector-10", name: "Plus", left: 0, renewsAt: 1_790_000_000_000, cancelAtPeriodEnd: false },
     purchased: { bought: false },
     empty: true,
     low: false,
@@ -569,28 +569,36 @@ test("the offers Vector shows carry names and prices only, and nothing is availa
       seen.push({ url, authorization: new Headers(init.headers).get("authorization") })
       return Response.json(body, { status })
     }
-  // What /api/model-plans/config answers, with each purchase's multiple and typical tasks beside its price.
+  // What /api/model-plans/config answers, with each purchase's multiple and typical tasks beside its price. This one
+  // still answers names from before the plans were renamed, as a site that has not redeployed would.
   const config = (enabled: boolean) => ({
     product: "Vector Codium",
     enabled,
     plans: [10, 50].map((price, index) => ({
       id: `vector-${price}`,
-      name: `Codium ${price}`,
+      name: `Retired plan ${price}`,
       price,
       available: enabled,
       ...(index ? { multiple: 5.2 } : {}),
       tasks: [[50, 500]],
     })),
-    topups: [{ id: "codium-topup-10", name: "Codium 10 top-up", price: 10, available: true, tasks: [] }],
+    topups: [
+      { id: "codium-topup-10", name: "Retired top-up 10", price: 10, available: true, tasks: [] },
+      { id: "vector-team", name: "Team", price: 30, available: true },
+    ],
   })
   const offers = await ModelPlanStatus.fetchOffers(answer(config(true)))
+  // A plan or top-up Vector knows shows its current name; one it does not know keeps the name the site gave it.
   expect(offers).toEqual({
     enabled: true,
     plans: [
-      { id: "vector-10", name: "Codium 10", price: 10, available: true },
-      { id: "vector-50", name: "Codium 50", price: 50, available: true },
+      { id: "vector-10", name: "Plus", price: 10, available: true },
+      { id: "vector-50", name: "Pro", price: 50, available: true },
     ],
-    topups: [{ id: "codium-topup-10", name: "Codium 10 top-up", price: 10, available: true }],
+    topups: [
+      { id: "codium-topup-10", name: "$10 credit top-up", price: 10, available: true },
+      { id: "vector-team", name: "Team", price: 30, available: true },
+    ],
   })
   expect(JSON.stringify(offers)).not.toMatch(/multiple|tasks|5\.2|credits/)
   // While Codium is off, an item the server marks available still cannot be bought.
@@ -603,6 +611,18 @@ test("the offers Vector shows carry names and prices only, and nothing is availa
   expect(seen.every((item) => item.url === "https://vectordev.ai/api/model-plans/config" && !item.authorization)).toBe(
     true,
   )
+})
+
+test("a plan shows its current name whatever name the site answers, and Free when there is none", () => {
+  const remote = { enabled: true, access: true, purchased: { bought: false }, empty: false, low: false }
+  const plan = (id: string) =>
+    ModelPlanStatus.fromRemote({
+      ...remote,
+      plan: { id, name: "Retired plan name", renewsAt: 1_790_000_000_000, cancelAtPeriodEnd: false },
+    }).plan?.name
+  expect(["vector-10", "vector-50", "vector-100", "vector-200"].map(plan)).toEqual(["Plus", "Pro", "Max", "Ultra"])
+  expect(plan("vector-team")).toBe("Retired plan name")
+  expect(ModelPlanStatus.describe(ModelPlanStatus.fromRemote({ ...remote, plan: undefined }))[0]).toBe("Plan: Free")
 })
 
 test("status says when vectordev.ai keeps a billing account, so invoices stay reachable without a plan", () => {

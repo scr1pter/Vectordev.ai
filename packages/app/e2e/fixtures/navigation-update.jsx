@@ -1,6 +1,8 @@
 import { createSignal } from "solid-js"
 import { render } from "solid-js/web"
+import { CodiumPlan } from "@vectordevai/schema/codium-plan"
 import { PlatformProvider } from "../../src/context/platform"
+import { codiumChanged } from "../../src/vector-account"
 import { WorkspaceNavigation } from "../../src/components/workspace-navigation"
 import { installUpdate, navigationUpdate, runningAgentCount } from "../../src/components/updater-action"
 import { yieldLaunchScreen } from "../../src/features/launch/launch-bridge"
@@ -9,7 +11,9 @@ import "../../src/vector-premium.css"
 
 // The sidebar against stand-ins for the desktop's updater and account bridges. The query picks ?updater= ready,
 // installing, downloading, checking, error, disabled, idle, up-to-date, or none (the web build, with no updater);
-// ?account= signed-in, signed-out, pending or none (no account bridge); ?agents= how many parallel agents are running
+// ?account= signed-in, signed-out, pending or none (no account bridge); ?plan= free or a plan id such as vector-50 gives
+// the bridge the Codium status the desktop reads, and without it the bridge has none (window.navigationFixture.setPlan
+// then changed() stand in for a billing window changing the plan); ?agents= how many parallel agents are running
 // and ?busy= how many sessions are busy, counted the way the app counts them when Update is clicked (both can change
 // through window.navigationFixture.setRunning); and ?fail=1 makes the install fail. What the sidebar asks for is kept
 // on window.navigationFixture.calls.
@@ -28,10 +32,13 @@ const states = {
 const kind = query.get("updater") ?? "ready"
 const [updaterState, setUpdaterState] = createSignal(states[kind] ?? states.idle)
 const running = { agents: Number(query.get("agents") ?? 0), busy: Number(query.get("busy") ?? 0) }
+const plan = { id: query.get("plan") }
 const fixture = {
   calls: [],
   set: (name) => setUpdaterState(states[name]),
   setRunning: (next) => Object.assign(running, next),
+  setPlan: (id) => (plan.id = id),
+  changed: () => codiumChanged(),
 }
 window.navigationFixture = fixture
 // Busy sessions as the engine reports them, with an idle one that must not count.
@@ -47,6 +54,25 @@ const accounts = {
   pending: { authenticated: false, pending: true },
 }
 const account = accounts[query.get("account") ?? "signed-in"]
+// The Codium status as the desktop answers it, for an account on Free or on a plan.
+const codium = async () => ({
+  signedIn: account.authenticated,
+  enabled: true,
+  access: plan.id !== "free",
+  purchased: { bought: false },
+  empty: false,
+  low: false,
+  ...(plan.id === "free"
+    ? {}
+    : {
+        plan: {
+          id: plan.id,
+          name: CodiumPlan.name(plan.id),
+          renewsAt: Date.UTC(2026, 10, 1),
+          cancelAtPeriodEnd: false,
+        },
+      }),
+})
 
 const updater =
   kind === "none"
@@ -82,6 +108,7 @@ const platform = {
     cancel: async () => account,
     logout: async () => account,
     onChange: () => () => undefined,
+    ...(plan.id ? { codium } : {}),
   },
 }
 

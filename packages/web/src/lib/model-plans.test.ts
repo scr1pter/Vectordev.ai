@@ -7,12 +7,12 @@ import {
   readModelPlanStatus,
 } from "./model-plans"
 
-const plan = { id: "vector-10", name: "Vector 10", price: 10, available: true }
+const plan = { id: "vector-10", name: "Plus", price: 10, available: true }
 const config = { enabled: true, currency: "usd" as const, interval: "month" as const, plans: [plan] }
 const status = {
   active: true,
   access: true,
-  plan: { id: plan.id, name: "Codium 10", left: 0.25, renewsAt: 2_000, cancelAtPeriodEnd: false },
+  plan: { id: plan.id, name: "Plus", left: 0.25, renewsAt: 2_000, cancelAtPeriodEnd: false },
   purchased: { bought: false },
   empty: false,
   low: false,
@@ -84,7 +84,7 @@ describe("model plan API boundaries", () => {
     expect(readModelPlanStatus({ active: false, customer: true })).toEqual({ active: false, customer: true })
     expect(readModelPlanStatus(status)).toEqual(status)
     const unknown = readModelPlanStatus({ ...status, plan: { ...status.plan, left: undefined } }).plan
-    expect(unknown).toEqual({ id: plan.id, name: "Codium 10", renewsAt: 2_000, cancelAtPeriodEnd: false })
+    expect(unknown).toEqual({ id: plan.id, name: "Plus", renewsAt: 2_000, cancelAtPeriodEnd: false })
     expect(unknown).not.toHaveProperty("left")
   })
 

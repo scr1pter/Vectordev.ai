@@ -1,8 +1,9 @@
 import { Option, Schema } from "effect"
+import { CodiumPlan } from "../../packages/schema/src/codium-plan.js"
 import { ApiError } from "./http.js"
 import { CODIUM_CATALOG_UPDATED, CODIUM_MODELS } from "./codium-catalog.js"
 
-export const MODEL_PLAN_PRICES = [10, 50, 100, 200] as const
+export const MODEL_PLAN_PRICES = CodiumPlan.PLANS.map((plan) => plan.price)
 export const MODEL_PLAN_ROOT = "https://openrouter.ai/api/v1"
 // Generation options a client may set on a Codium request; the gateway owns every other field.
 export const MODEL_PLAN_OPTIONS = [
@@ -43,15 +44,16 @@ export function modelPlanRequestCredits(model: ModelPlanModel) {
   return (model.contextLength * model.inputPrice + model.maxOutputTokens * model.outputPrice) / 1_000_000
 }
 
+// Names come from CodiumPlan, shared with the app and the website; ids and environment names stay keyed by price.
 export function modelPlans() {
-  return MODEL_PLAN_PRICES.map((price) => {
-    const credits = creditAllowance(price, process.env[`MODEL_PLAN_${price}_CREDITS_USD`])
-    const priceID = process.env[`STRIPE_MODEL_PLAN_${price}_PRICE_ID`]?.trim()
+  return CodiumPlan.PLANS.map((plan) => {
+    const credits = creditAllowance(plan.price, process.env[`MODEL_PLAN_${plan.price}_CREDITS_USD`])
+    const priceID = process.env[`STRIPE_MODEL_PLAN_${plan.price}_PRICE_ID`]?.trim()
     return {
-      id: `vector-${price}`,
-      name: `Codium ${price}`,
-      price,
-      credits: Number.isFinite(credits) && credits > 0 && credits <= price ? credits : 0,
+      id: plan.id,
+      name: plan.name,
+      price: plan.price,
+      credits: Number.isFinite(credits) && credits > 0 && credits <= plan.price ? credits : 0,
       priceID: priceID && /^price_[a-zA-Z0-9]+$/.test(priceID) ? priceID : undefined,
     }
   })
@@ -75,13 +77,13 @@ export function subscriptionPlanCredits(
 }
 
 export function modelTopups() {
-  return MODEL_PLAN_PRICES.map((price) => {
-    const priceID = process.env[`STRIPE_MODEL_TOPUP_${price}_PRICE_ID`]?.trim()
+  return CodiumPlan.TOPUPS.map((pack) => {
+    const priceID = process.env[`STRIPE_MODEL_TOPUP_${pack.price}_PRICE_ID`]?.trim()
     return {
-      id: `codium-topup-${price}`,
-      name: `Codium ${price} top-up`,
-      price,
-      credits: creditAllowance(price, process.env[`MODEL_TOPUP_${price}_CREDITS_USD`]),
+      id: pack.id,
+      name: pack.name,
+      price: pack.price,
+      credits: creditAllowance(pack.price, process.env[`MODEL_TOPUP_${pack.price}_CREDITS_USD`]),
       priceID: priceID && /^price_[a-zA-Z0-9]+$/.test(priceID) ? priceID : undefined,
     }
   })
