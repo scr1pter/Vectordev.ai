@@ -7,7 +7,8 @@ import net from "node:net"
 // kept-alive connection included: CONNECT tunnels (https, wss) and absolute-form http requests. A refused request is
 // answered with its status and a plain-text reason. An allowed one is connected where the decision says, and its
 // request and body are passed on and the response relayed; the connection then waits for the client's next request
-// when the response's end can be told, and closes otherwise (`responseHead`). It never keeps a process alive. The strict test guard and the research browsers' egress proxy are both built on it.
+// when the response's end can be told and the client did not ask to close (`closing`), and closes otherwise
+// (`responseHead`). It never keeps a process alive. The strict test guard and the research browsers' egress proxy are both built on it.
 // A request that upgrades (a WebSocket over plain http) becomes a tunnel once its server answers 101, and a client
 // must send its first request within HEAD_TIMEOUT.
 //
@@ -137,6 +138,7 @@ function create(decide: Decide, options: Options) {
           headers: [AUTHENTICATE],
         })
       const [method = "", target = "", version = "HTTP/1.1"] = line.split(" ")
+      const close = closing(version, fields)
       const tunnel = method.toUpperCase() === "CONNECT"
       const parsed = tunnel ? authority(target) : absolute(target)
       const destination = parsed && { ...parsed, method: method.toUpperCase() }
@@ -161,10 +163,11 @@ function create(decide: Decide, options: Options) {
           upstream.write(originForm(method, destination, version, fields))
           const response = { framed: false }
           // The upstream closes after one response. A response without a length or chunks ends only with the
-          // connection, so the client's is closed too; otherwise it waits for the client's next request.
+          // connection, so the client's is closed too, as it is when the client asked to close; otherwise it waits for
+          // the client's next request.
           upstream.on("end", () => {
             if (current.upstream !== upstream) return
-            if (!response.framed) return client.end()
+            if (!response.framed || close) return client.end()
             idle()
           })
           // A request that asks to upgrade (a WebSocket over plain http) becomes a tunnel to this destination once it
@@ -182,6 +185,7 @@ function create(decide: Decide, options: Options) {
           responseHead(
             upstream,
             destination.method,
+            close,
             (interim) => client.write(interim),
             (status, read, framed) => {
               response.framed = framed
@@ -203,9 +207,10 @@ function create(decide: Decide, options: Options) {
               settle()
             },
           )
-          // Only this request's body goes on to this destination; the bytes after it are the client's next request.
+          // Only this request's body goes on to this destination; the bytes after it are the client's next request,
+          // which a client that asked to close sends on a connection of its own.
           forwardBody(client, upstream, fields, rest, (next) => {
-            if (!upgrade.asked) return readHead(client, serve, next)
+            if (!upgrade.asked) return close ? undefined : readHead(client, serve, next)
             upgrade.next = next
             settle()
           })
@@ -285,11 +290,13 @@ function authorized(fields: readonly string[], secret: string) {
 // paused. The bytes are the head, then whatever of the body came with it. The upstream's own connection fields are
 // about its hop, which closes after this response, so they are dropped: a framed response keeps the client's connection
 // open for its next request, and any other says `Connection: close`, since the client's connection then closes with the
-// upstream's. An interim head (100 Continue) goes to the client at once, since a client may wait for it before it sends
-// its body. A head longer than MAX_HEAD_BYTES, and a 101 that switches protocols, are passed on as they are.
+// upstream's, as does any response to a client that asked to close (`close`). An interim head (100 Continue) goes to
+// the client at once, since a client may wait for it before it sends its body. A head longer than MAX_HEAD_BYTES, and a
+// 101 that switches protocols, are passed on as they are.
 function responseHead(
   upstream: net.Socket,
   method: string,
+  close: boolean,
   interim: (head: Buffer) => void,
   done: (status: string | undefined, read: Buffer, framed: boolean) => void,
 ) {
@@ -313,10 +320,22 @@ function responseHead(
     const [line = "", ...fields] = all.subarray(0, end).toString("latin1").split("\r\n")
     const ends = framed(status, method, fields)
     const kept = fields.filter((field) => !/^(?:connection|keep-alive|proxy-connection)\s*:/i.test(field))
-    const head = [line, ...kept, ...(ends ? [] : ["Connection: close"])].join("\r\n")
+    const head = [line, ...kept, ...(ends && !close ? [] : ["Connection: close"])].join("\r\n")
     done(status, Buffer.concat([Buffer.from(head, "latin1"), all.subarray(end)]), ends)
   }
   upstream.on("data", take)
+}
+
+// Whether the client asked for its connection to close after this response (RFC 9112, sections 9.3 and 9.6): `close`
+// in its Connection field, or the older Proxy-Connection one, or HTTP/1.0 without keep-alive. Chromium and Bun's
+// fetch ask to keep it.
+function closing(version: string, fields: readonly string[]) {
+  const options = fields
+    .filter((field) => /^(?:proxy-)?connection\s*:/i.test(field))
+    .flatMap((field) => field.replace(/^[^:]*:/, "").split(","))
+    .map((option) => option.trim().toLowerCase())
+  if (options.includes("close")) return true
+  return version.toUpperCase() === "HTTP/1.0" && !options.includes("keep-alive")
 }
 
 // Whether a response's end is known without its connection closing: it has no body (HEAD, 204, 304), or a length or

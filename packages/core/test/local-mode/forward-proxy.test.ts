@@ -61,6 +61,21 @@ const send = (port: number, text: string) =>
     }, 1_500)
   })
 const get = (port: number, url: string) => send(port, `GET ${url} HTTP/1.1\r\nHost: ${new URL(url).host}\r\n\r\n`)
+// What comes back for one request, and whether the proxy closed the connection after it before `wait` passed.
+const once = (port: number, text: string, wait = 500) =>
+  new Promise<{ readonly answer: string; readonly closed: boolean }>((resolve, reject) => {
+    const chunks: Buffer[] = []
+    const socket = net.connect(port, "127.0.0.1", () => socket.write(text))
+    const done = (closed: boolean) => {
+      clearTimeout(timer)
+      socket.destroy()
+      resolve({ answer: Buffer.concat(chunks).toString(), closed })
+    }
+    const timer = setTimeout(() => done(false), wait)
+    socket.on("data", (chunk: Buffer) => chunks.push(chunk))
+    socket.on("end", () => done(true))
+    socket.on("error", reject)
+  })
 
 describe("ForwardProxy", () => {
   test("answers a client when the guard refuses the connection as it is made", async () => {
@@ -114,6 +129,44 @@ describe("ForwardProxy", () => {
       const refused = await get(refusing.port, "http://journal.example/")
       expect(refusing.received()).toBe(Buffer.byteLength(refused))
       await refusing.stop()
+    } finally {
+      await proxy.stop()
+    }
+    expect(guard.outside()).toEqual([])
+  })
+
+  test("closes the connection after the answer when the client asks to, and keeps it for a client that does not", async () => {
+    const target = new URL(web.url("article", "/"))
+    const proxy = await ForwardProxy.start(() => ({
+      connect: (connected) => net.connect(Number(target.port), "127.0.0.1", connected),
+    }))
+    const request = (version: string, field = "") =>
+      `GET ${target} ${version}\r\nHost: ${target.host}\r\n${field ? `${field}\r\n` : ""}\r\n`
+    try {
+      // A client that writes `Connection: close` and waits for the close, as Node's raw clients and HTTP/1.0 ones do.
+      for (const sent of [
+        request("HTTP/1.1", "Connection: close"),
+        request("HTTP/1.1", "Proxy-Connection: close"),
+        request("HTTP/1.1", "Connection: TE, close"),
+        request("HTTP/1.0"),
+      ]) {
+        const result = await once(proxy.port, sent)
+        expect(result.closed, sent).toBe(true)
+        expect(result.answer, sent).toStartWith("HTTP/1.1 200 OK")
+        expect(result.answer, sent).toContain("Connection: close")
+        expect(result.answer, sent).toEndWith("article")
+      }
+      // Chromium and Bun's fetch ask to keep it, and so may an HTTP/1.0 client.
+      for (const sent of [
+        request("HTTP/1.1"),
+        request("HTTP/1.1", "Proxy-Connection: keep-alive"),
+        request("HTTP/1.0", "Connection: keep-alive"),
+      ]) {
+        const result = await once(proxy.port, sent)
+        expect(result.closed, sent).toBe(false)
+        expect(result.answer, sent).not.toContain("Connection: close")
+        expect(result.answer, sent).toEndWith("article")
+      }
     } finally {
       await proxy.stop()
     }
