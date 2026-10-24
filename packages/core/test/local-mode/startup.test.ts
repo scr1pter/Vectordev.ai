@@ -286,6 +286,18 @@ describe("LocalStartup.ca", () => {
     ])
   })
 
+  test("says which files the company named and which the user's own config did", async () => {
+    await using dir = await tmpdir()
+    const input = { ...folders(dir.path), ...trusted, env: {} }
+    const corp = path.join(dir.path, "corp.pem")
+    const lab = path.join(dir.path, "lab.pem")
+    write(path.join(input.managed[0]!, "vector.json"), JSON.stringify({ local: { ca: { files: [corp] } } }))
+    write(path.join(input.config, "vector.json"), JSON.stringify({ local: { ca: { files: [lab, corp] } } }))
+    // A file both name is the company's, which needs no one's answer.
+    expect(LocalStartup.authorities(input)).toEqual({ company: [corp], user: [lab] })
+    expect(LocalStartup.ca(input)).toEqual([corp, lab])
+  })
+
   test("reads only the company's files under a lock, and none from the environment or a block it cannot decode", async () => {
     await using dir = await tmpdir()
     const input = { ...folders(dir.path), ...trusted }

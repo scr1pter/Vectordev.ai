@@ -51,10 +51,13 @@ import {
   releaseStartupHold,
   startDesktopLocal,
   startFirstRun,
+  trustAuthorities,
+  trustedAuthorities,
   usageCheckinAllowed,
   watchCompanyCertificates,
   watchFirstRun,
 } from "./local-mode"
+import type { WaitingAuthority } from "./local-certificates"
 import { readDesktopLocal } from "./local-policy"
 import { Egress } from "@vectordevai/core/local-mode/egress"
 import { cleanupStoreFiles, removeLegacyAccessFiles } from "./store-cleanup"
@@ -270,6 +273,7 @@ const main = Effect.gen(function* () {
     userData: app.getPath("userData"),
     commandLine: app.commandLine,
     log: (message, data) => logger.log(message, data),
+    confirmed: trustedAuthorities(getStore(LOCAL_STORE)),
   })
   // On a first run, the requests Vector makes for itself at start wait until the person chooses how to run models. The
   // engine's database, in <XDG_DATA_HOME>/vector, which preferAppEnv set, tells an upgraded install from a new one.
@@ -503,6 +507,8 @@ const main = Effect.gen(function* () {
         userDataPath: app.getPath("userData"),
         // During the first run's hold the engine holds the fetches it makes for itself at start, until the answer.
         startupHold: firstRun.held(),
+        // The engine trusts the certificate authorities from the user's own config that desktop main does.
+        authorities: trustedAuthorities(getStore(LOCAL_STORE)),
         onStdout: (message) => writeLog("server", "stdout", { message }),
         onStderr: (message) => writeLog("server", "stderr", { message }, "warn"),
         onExit: (code) => writeLog("utility", "sidecar exited", { code }, "warn"),
@@ -542,10 +548,14 @@ const main = Effect.gen(function* () {
       // policy) load as soon as the person has answered, in this engine.
       void firstRun.answered().then(() => releaseStartupHold({ url, password }))
     }
-    // The engine trusts the certificate authorities Vector Local names from its start, so a change takes a restart.
+    // The engine trusts the certificate authorities Vector Local names from its start, so a change takes a restart. One
+    // the user's own config names waits until its owner trusts it here.
     const stopCertificates = watchCompanyCertificates({
       userData: app.getPath("userData"),
       changed: () => void askToRestartForCertificates(relaunch),
+      confirmed: () => trustedAuthorities(getStore(LOCAL_STORE)),
+      ask: askToTrustCertificates,
+      trust: (fingerprints) => trustAuthorities(getStore(LOCAL_STORE), fingerprints),
     })
     app.once("will-quit", stopCertificates)
 
@@ -661,6 +671,23 @@ const main = Effect.gen(function* () {
 
 // The certificate authorities company policy or the user's config names changed while Vector runs: its engine trusts
 // them once it restarts, which stops what agents are running, so the person chooses when.
+async function askToTrustCertificates(waiting: readonly WaitingAuthority[]) {
+  const named = waiting.map((item) => `${item.subject} (${item.file})`).join("; ")
+  const one = waiting.length === 1
+  const answer = await dialog.showMessageBox({
+    type: "warning",
+    title: "Vector Local",
+    message: one
+      ? "Trust a certificate authority from your config?"
+      : `Trust ${waiting.length} certificate authorities from your config?`,
+    detail: `Your Vector config names ${one ? "a certificate authority" : "certificate authorities"} in local.ca.files: ${named}. Vector and its engine would accept the secure connections ${one ? "it vouches" : "they vouch"} for, so whoever holds ${one ? "its key" : "their keys"} could read and change what Vector sends over them. Trust ${one ? "it" : "them"} only if you or your company added ${one ? "it" : "them"}. Until then, Vector does not use ${one ? "it" : "them"}.`,
+    buttons: ["Trust", "Not now"],
+    defaultId: 1,
+    cancelId: 1,
+  })
+  return answer.response === 0
+}
+
 async function askToRestartForCertificates(relaunch: () => void) {
   const answer = await dialog.showMessageBox({
     type: "question",

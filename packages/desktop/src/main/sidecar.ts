@@ -17,6 +17,8 @@ type StartCommand = {
   userDataPath: string
   /** Vector's own secrets, kept out of this process's launch environment (see sidecar-environment.ts). */
   environment: Record<string, string>
+  /** The fingerprints of the certificate authorities from the user's own config that its owner trusted. */
+  authorities: string[]
 }
 
 type StopCommand = { type: "stop" }
@@ -53,7 +55,7 @@ async function start(command: StartCommand) {
   try {
     prepareSidecarEnv(command)
     ensureLoopbackNoProxy()
-    useSystemCertificates(command.userDataPath)
+    useSystemCertificates(command.userDataPath, command.authorities)
     useEnvProxy()
     const { Server } = await import("virtual:vector-server")
 
@@ -126,11 +128,11 @@ function ensureLoopbackNoProxy() {
 }
 
 // Node's and the system's certificates, with the certificate authorities Vector Local names (ca.files) after them,
-// as desktop main trusts them (trustCompanyCertificates). They are read once, here: desktop main asks to restart
-// Vector when they change.
-function useSystemCertificates(userDataPath: string) {
+// as desktop main trusts them (trustCompanyCertificates): the user's own config's only where its owner trusted them in
+// desktop main, which says which. They are read once, here: desktop main asks to restart Vector when they change.
+function useSystemCertificates(userDataPath: string, authorities: readonly string[]) {
   try {
-    const trusted = trustCompanyCertificates(userDataPath)
+    const trusted = trustCompanyCertificates({ userData: userDataPath, confirmed: authorities })
     trusted.problems.forEach((problem) => console.warn("company certificate skipped", problem))
   } catch (error) {
     console.warn("failed to load system certificates", error)
@@ -157,6 +159,10 @@ function parseCommand(value: unknown): SidecarCommand | undefined {
   const environment = command.environment
   if (!environment || typeof environment !== "object") return
   if (Object.values(environment).some((value) => typeof value !== "string")) return
+  // A command without the list trusts none of the user's own certificate authorities.
+  const authorities = Array.isArray(command.authorities)
+    ? command.authorities.filter((item): item is string => typeof item === "string")
+    : []
   return {
     type: "start",
     hostname: command.hostname,
@@ -164,6 +170,7 @@ function parseCommand(value: unknown): SidecarCommand | undefined {
     password: command.password,
     userDataPath: command.userDataPath,
     environment,
+    authorities,
   }
 }
 

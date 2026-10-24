@@ -9,7 +9,7 @@ import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import { LocalStartup } from "@vectordevai/core/local-mode/startup"
 import { decideChromium, egressFilter, type EgressFilter, type Target } from "./egress-filter"
 import { engineEventSource } from "./keep-awake"
-import { companyCertificates, trustCompanyCertificates } from "./local-certificates"
+import { companyAuthorities, trustCompanyCertificates, type WaitingAuthority } from "./local-certificates"
 import { desktopLocalFolders, resolveDesktopLocal } from "./local-policy"
 
 // Vector Local in the desktop app (plan sections 4.2, 4.3.6, 4.7 and 4.9). Desktop main resolves the policy before
@@ -51,8 +51,12 @@ const LOCAL_SWITCHES = ["dns-prefetch-disable", "disable-quic"]
 const ANSWERED = "firstRunAnswered"
 // A start held for the first run's question, which a start that left state behind (ranBefore) still holds for.
 const HELD = "firstRunHeld"
-/** Desktop main's own store for Vector Local: whether the first run's question was answered. */
+/**
+ * Desktop main's own store for Vector Local: whether the first run's question was answered, and the certificate
+ * authorities from the user's own config its owner trusted.
+ */
 export const LOCAL_STORE = "local"
+const TRUSTED_AUTHORITIES = "trustedAuthorities"
 // What the app's windows fetch from the internet, by registry source, as the dispatcher decides it.
 const RENDERER = {
   "release-notes": "https://vectordev.ai/changelog.json",
@@ -90,12 +94,15 @@ const state: { mismatch?: string; hold: FirstRunHold; switchesSet: boolean } = {
 
 /**
  * Before app.whenReady, once preferAppEnv has set the desktop's folders: resolves Vector Local's policy, trusts the
- * company's certificate authorities, and keeps Chromium from resolving names a page links to before anyone opens them.
+ * company's certificate authorities and those of the user's own config its owner trusted (`confirmed`), and sets
+ * Chromium's switches.
  */
 export function startDesktopLocal(input: {
   readonly userData: string
   readonly commandLine: Pick<CommandLine, "appendSwitch">
   readonly log: (message: string, data?: unknown) => void
+  /** The fingerprints of the user's own certificate authorities its owner trusted. */
+  readonly confirmed?: readonly string[]
 }) {
   const policy = resolveDesktopLocal(input.userData)
   // Only a start sets these, so turning Vector Local on later says a restart is needed
@@ -107,7 +114,7 @@ export function startDesktopLocal(input: {
   // broken installation; Vector then keeps the certificates Node starts with.
   const trusted = (() => {
     try {
-      return trustCompanyCertificates(input.userData)
+      return trustCompanyCertificates({ userData: input.userData, confirmed: input.confirmed ?? [] })
     } catch (error) {
       input.log("failed to load system certificates", { error: String(error) })
       return undefined
@@ -115,32 +122,69 @@ export function startDesktopLocal(input: {
   })()
   trusted?.problems.forEach((problem) => input.log("company certificate skipped", { problem }))
   if (trusted?.added.length) input.log("company certificates trusted", { count: trusted.added.length })
+  if (trusted?.waiting.length) input.log("certificates wait for the owner", { count: trusted.waiting.length })
   return policy
 }
 
 /**
- * Checks the company's certificate files every minute, and when the authorities they hold change, trusts the new set
- * here and calls `changed` (the engine restarts to trust them too). Returns the function that stops checking.
+ * Checks the certificate files Vector Local names now and every minute. A certificate authority the user's own config
+ * names that its owner has not trusted is asked about (`ask`, once per set of them while the app runs, so "Not now"
+ * asks again at the next start) and kept with `trust` when they say yes. When the authorities in effect change, it
+ * trusts the new set here and calls `changed` (the engine restarts to trust them too, as desktop main starts it with
+ * `confirmed`). Company policy's apply without a question. Returns the function that stops checking.
  */
 export function watchCompanyCertificates(input: {
   readonly userData: string
   readonly changed: () => void
+  /** The fingerprints of the user's own certificate authorities its owner trusted. */
+  readonly confirmed: () => readonly string[]
+  /** Asks the owner whether to trust these; true to trust them. */
+  readonly ask: (waiting: readonly WaitingAuthority[]) => Promise<boolean>
+  readonly trust: (fingerprints: readonly string[]) => void
   readonly interval?: number
   readonly apply?: (certificates: string[]) => void
   readonly folders?: LocalStartup.Input
 }) {
   const folders = input.folders ?? desktopLocalFolders(input.userData)
-  const fingerprint = () => companyCertificates([], LocalStartup.ca(folders)).added.join()
-  const last = { value: fingerprint() }
-  const timer = setInterval(() => {
-    const next = fingerprint()
-    if (next === last.value) return
-    last.value = next
-    trustCompanyCertificates(input.userData, input.apply, folders)
+  const read = () => companyAuthorities({ folders, confirmed: input.confirmed() })
+  const state = { last: read().added.join(), asked: "", busy: false }
+  const check = async () => {
+    if (state.busy) return
+    state.busy = true
+    const waiting = read().waiting
+    const key = waiting.map((item) => item.fingerprint).join()
+    if (waiting.length > 0 && key !== state.asked) {
+      state.asked = key
+      if (await input.ask(waiting).catch(() => false)) input.trust(waiting.map((item) => item.fingerprint))
+    }
+    state.busy = false
+    const next = read().added.join()
+    if (next === state.last) return
+    state.last = next
+    trustCompanyCertificates({ userData: input.userData, confirmed: input.confirmed(), apply: input.apply, folders })
     input.changed()
-  }, input.interval ?? CERTIFICATES_CHECK)
+  }
+  void check()
+  const timer = setInterval(() => void check(), input.interval ?? CERTIFICATES_CHECK)
   timer.unref?.()
   return () => clearInterval(timer)
+}
+
+type Store = { get(key: string): unknown; set(key: string, value: unknown): void }
+
+/**
+ * The fingerprints of the certificate authorities from the user's own config that its owner trusted, as LOCAL_STORE
+ * keeps them. The store is the user's to change, like the config, so it is the owner's record and not a boundary:
+ * what keeps the agent from writing either is the ask on its own edits.
+ */
+export function trustedAuthorities(store: Pick<Store, "get">) {
+  const value = store.get(TRUSTED_AUTHORITIES)
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []
+}
+
+/** Keeps `fingerprints` among the certificate authorities the owner trusted. */
+export function trustAuthorities(store: Store, fingerprints: readonly string[]) {
+  store.set(TRUSTED_AUTHORITIES, [...new Set([...trustedAuthorities(store), ...fingerprints])])
 }
 
 /**
@@ -636,7 +680,7 @@ export function firstRunHeld(input: {
 /** Decides this start's first-run hold, from the desktop's own records and its folders. */
 export function startFirstRun(input: {
   readonly userData: string
-  readonly store: { get(key: string): unknown; set(key: string, value: unknown): void }
+  readonly store: Store
   /** Whether the usage check-in has reported this install. */
   readonly reported: boolean
   /** The engine's data folder (<XDG_DATA_HOME>/vector), which holds its database. */

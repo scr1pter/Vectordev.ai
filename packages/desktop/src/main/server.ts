@@ -30,6 +30,8 @@ type SpawnLocalServerOptions = {
    * desktop main lets them go once the person has chosen how to run models.
    */
   startupHold?: boolean
+  /** The fingerprints of the certificate authorities from the user's own config that its owner trusted. */
+  authorities?: readonly string[]
   onStdout?: (message: string) => void
   onStderr?: (message: string) => void
   onExit?: (code: number) => void
@@ -171,6 +173,7 @@ export async function spawnLocalServer(
       password,
       userDataPath: options.userDataPath,
       environment: environment.secrets,
+      authorities: [...(options.authorities ?? [])],
     })
   }).catch((error) => {
     if (!exited) child.kill()

@@ -120,14 +120,25 @@ export function managed(input: Input = {}) {
 }
 
 /**
- * The certificate files `local.ca.files` names, for the desktop's main process and its engine to add to the system and
- * default certificates: company policy's, then the user's own config's unless the company locks Vector Local. Company
- * policy counts only where an administrator alone could have written it, as the engine's config reads it, so a file a
- * standard user planted in a managed folder neither adds a certificate nor drops the user's own. A relative path is
- * read from the folder of the file that names it (the managed folder for the macOS profile and the Windows policy
- * key). The overrides and the environment name none, since a certificate trusts more rather than less.
+ * The certificate files `local.ca.files` names, company policy's then the user's own config's: `authorities` split by
+ * who named them.
  */
 export function ca(input: Input = {}) {
+  const named = authorities(input)
+  return [...new Set([...named.company, ...named.user])]
+}
+
+/**
+ * The certificate files `local.ca.files` names, for the desktop's main process and its engine to add to the system and
+ * default certificates: company policy's (`company`), and the user's own config's (`user`) unless the company locks
+ * Vector Local. Company policy counts only where an administrator alone could have written it, as the engine's config
+ * reads it, so a file a standard user planted in a managed folder neither adds a certificate nor drops the user's own.
+ * The user's own are a change anything that can write the user's config could make, an agent's shell command included,
+ * so the desktop trusts each only once its owner has (local-certificates.ts). A relative path is read from the folder
+ * of the file that names it (the managed folder for the macOS profile and the Windows policy key). The overrides and
+ * the environment name none, since a certificate trusts more rather than less.
+ */
+export function authorities(input: Input = {}) {
   const files = locations(input)
   const named = (folder: string | undefined, found: ConfigLocalV1.Info | "undecodable" | undefined) =>
     decoded(found)
@@ -135,10 +146,11 @@ export function ca(input: Input = {}) {
           path.isAbsolute(item) ? [item] : folder ? [path.resolve(folder, item)] : [],
         )
       : []
-  const company = companyPolicy(input).blocks
-  const lock = company.some((item) => decoded(item.found) && item.found.lock === true)
-  const user = lock ? [] : files.user.map((file) => ({ folder: path.dirname(file), found: block(text(file)) }))
-  return [...new Set([...company, ...user].flatMap((item) => named(item.folder, item.found)))]
+  const blocks = companyPolicy(input).blocks
+  const lock = blocks.some((item) => decoded(item.found) && item.found.lock === true)
+  const company = [...new Set(blocks.flatMap((item) => named(item.folder, item.found)))]
+  const user = lock ? [] : files.user.flatMap((file) => named(path.dirname(file), block(text(file))))
+  return { company, user: [...new Set(user)].filter((file) => !company.includes(file)) }
 }
 
 // Company policy as the engine's config reads it (ConfigManaged.read): the managed files only an administrator could

@@ -29,6 +29,8 @@ import {
   startDesktopLocal,
   startFirstRun,
   stricterPolicy,
+  trustAuthorities,
+  trustedAuthorities,
   usageCheckinAllowed,
   watchCompanyCertificates,
   watchFirstRun,
@@ -692,26 +694,38 @@ describe("company certificate authorities", () => {
   test("are trusted in desktop main and its engine with every default certificate kept, and a change is noticed", async () => {
     // The engine sidecar trusts them through the same function (sidecar.ts, useSystemCertificates).
     const dir = folder()
-    const config = path.join(dir, "config")
+    const managed = path.join(dir, "managed")
     const corp = path.join(dir, "corp.pem")
     writeFileSync(corp, pem("company-root"))
-    mkdirSync(config, { recursive: true })
-    writeFileSync(path.join(config, "vector.json"), JSON.stringify({ local: { ca: { files: [corp] } } }))
-    const folders = { config, managed: [path.join(dir, "managed")], env: {} }
+    mkdirSync(managed, { recursive: true })
+    writeFileSync(path.join(managed, "vector.json"), JSON.stringify({ local: { ca: { files: [corp] } } }))
+    const folders = { config: path.join(dir, "config"), managed: [managed], ...trusted, env: {} }
     const applied: string[][] = []
-    const trusted = trustCompanyCertificates(dir, (certificates) => void applied.push(certificates), folders)
+    const trustedNow = trustCompanyCertificates({
+      userData: dir,
+      confirmed: [],
+      apply: (certificates) => void applied.push(certificates),
+      folders,
+    })
     const defaults = getCACertificates("default")
     expect(applied[0]!.length).toBeGreaterThan(defaults.length)
     expect(defaults.every((certificate) => applied[0]!.includes(certificate))).toBe(true)
     expect(applied[0]!.at(-1)).toBe(pem("company-root").trim())
-    expect(trusted.added).toHaveLength(1)
+    expect(trustedNow.added).toHaveLength(1)
     const changed: string[] = []
+    const asked: string[] = []
     const stop = watchCompanyCertificates({
       userData: dir,
       folders,
       interval: 1,
       apply: (certificates) => void applied.push(certificates),
       changed: () => void changed.push("changed"),
+      confirmed: () => [],
+      ask: async (waiting) => {
+        asked.push(...waiting.map((item) => item.subject))
+        return false
+      },
+      trust: () => undefined,
     })
     await settle()
     expect(changed).toEqual([])
@@ -719,6 +733,70 @@ describe("company certificate authorities", () => {
     while (changed.length === 0) await settle()
     stop()
     expect(applied.at(-1)!.slice(-2)).toEqual([pem("company-root").trim(), pem("public-root").trim()])
+    // The company's policy needs no one's answer.
+    expect(asked).toEqual([])
+  })
+
+  test("from the user's own config wait for the owner in desktop main and its engine, and apply once trusted", async () => {
+    const dir = folder()
+    const config = path.join(dir, "config")
+    const lab = path.join(dir, "lab.pem")
+    writeFileSync(lab, pem("company-root"))
+    mkdirSync(config, { recursive: true })
+    // What a shell command could write to the user's config, with nothing asked.
+    writeFileSync(path.join(config, "vector.json"), JSON.stringify({ local: { ca: { files: [lab] } } }))
+    const folders = { config, managed: [path.join(dir, "managed")], env: {} }
+    const values = new Map<string, unknown>()
+    const store = {
+      get: (key: string) => values.get(key),
+      set: (key: string, value: unknown) => values.set(key, value),
+    }
+    const company = (confirmed: readonly string[]) =>
+      trustCompanyCertificates({ userData: dir, confirmed, apply: () => undefined, folders })
+    // Desktop main at its start, and the engine as desktop main starts it: neither trusts it yet.
+    const before = company(trustedAuthorities(store))
+    expect(before.added).toEqual([])
+    expect(before.waiting).toEqual([
+      {
+        fingerprint: new X509Certificate(pem("company-root")).fingerprint256,
+        subject: new X509Certificate(pem("company-root")).subject.replaceAll("\n", ", "),
+        file: lab,
+      },
+    ])
+    const answers = [false, true]
+    const asked: string[][] = []
+    const changed: string[] = []
+    const applied: string[][] = []
+    const watch = (answer: boolean[]) =>
+      watchCompanyCertificates({
+        userData: dir,
+        folders,
+        interval: 1,
+        apply: (certificates) => void applied.push(certificates),
+        changed: () => void changed.push("changed"),
+        confirmed: () => trustedAuthorities(store),
+        ask: async (waiting) => {
+          asked.push(waiting.map((item) => item.file))
+          return answer.shift() ?? false
+        },
+        trust: (fingerprints) => trustAuthorities(store, fingerprints),
+      })
+    // "Not now": asked once while the app runs, and nothing applies.
+    const first = watch(answers)
+    for (const _ of Array(5)) await settle()
+    first()
+    expect(asked).toEqual([[lab]])
+    expect([changed, applied]).toEqual([[], []])
+    // The next start asks again; "Trust" applies it here, and the engine's next start trusts it too.
+    const second = watch(answers)
+    while (changed.length === 0) await settle()
+    second()
+    expect(asked).toEqual([[lab], [lab]])
+    expect(applied.at(-1)!.at(-1)).toBe(pem("company-root").trim())
+    expect(company(trustedAuthorities(store)).added).toEqual([pem("company-root").trim()])
+    // Another authority written into the same file waits again: the owner trusted a certificate, not a file name.
+    writeFileSync(lab, pem("public-root"))
+    expect(company(trustedAuthorities(store))).toMatchObject({ added: [], waiting: [{ file: lab }] })
   })
 })
 
