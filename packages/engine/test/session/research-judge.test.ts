@@ -450,13 +450,13 @@ it.instance(
         ...note("Delivered heating energy fell by 61 percent.", "Delivered heating energy fell by 61 percent"),
         source: "S2",
       })
-      // The lead's claim carries a name from the owner's MEMORY.md.
+      // The lead's claim copies a line of the owner's MEMORY.md.
       yield* test.llm.toolMatch(
         leading,
         "research_note",
         note(
           "Readings came from smart meters every fifteen minutes.",
-          "Hooli read the smart meters every quarter hour",
+          "I work at Hooli on the payments team in Lisbon and read the smart meters every quarter hour",
         ),
       )
       yield* test.llm.toolMatch(leading, "research_report", {
@@ -490,7 +490,7 @@ it.instance(
       expect(asked).toContain("Field results. The heat pumps used 61 percent less delivered energy for heating than")
       expect(asked).toContain("Readings came from smart meters")
       expect(asked).not.toContain("no longer kept")
-      // Nothing of the private page, and not the claim that names the owner's employer.
+      // Nothing of the private page, and not the claim that copies the owner's MEMORY.md.
       expect(asked).not.toContain("Delivered heating energy fell")
       expect(asked).not.toContain("Hooli")
       expect(Object.fromEntries((detail?.notes ?? []).map((item) => [item.id, item.verdict]))).toEqual({

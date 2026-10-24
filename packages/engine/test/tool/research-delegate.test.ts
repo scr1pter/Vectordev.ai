@@ -410,11 +410,11 @@ it.instance(
         agent: { research: { prompt: "Research for the team that ships the zephyrDeploy pipeline." } },
       })
       const fs = yield* FSUtil.Service
-      // The repository's file is the work: its identifiers and host names stay out. The user's own file is private:
-      // its names stay out too.
+      // The repository's file is the work and the user's own file is private: what they hold reaches the lead, and
+      // their sentences and private host stay out of its searches and its researchers' briefs.
       yield* fs.writeWithDirs(
         path.join(test.dir, "AGENTS.md"),
-        "# Rules\n\nDeploy through ci07.quarry-ops.internal with the reconcileLedgerEntries job.\n",
+        "# Rules\n\nDeploy through ci07.quarry-ops.internal with the reconcileLedgerEntries job.\nThe ledger job runs every night before the payroll export and the audit.\n",
       )
       const personal = path.join((yield* Global.Service).config, "AGENTS.md")
       yield* fs.writeWithDirs(personal, "# Mine\n\nMy manager Dana Whitfield signs off every Falcon release.\n")
@@ -427,15 +427,15 @@ it.instance(
       })
       yield* test.llm.tool("research_plan", plan({ depth: "deep" }))
       for (const query of [
-        "reconcileLedgerEntries heat pumps",
+        "ledger job runs every night before the payroll export heat pumps",
         "ci07.quarry-ops.internal heat pumps",
-        "Dana Whitfield heat pumps",
-        "zephyrDeploy heat pumps",
+        "my manager Dana Whitfield signs off every Falcon release",
+        "research for the team that ships the zephyrDeploy pipeline",
       ])
         yield* test.llm.tool("research_search", { query })
       for (const prompt of [
-        "How does the reconcileLedgerEntries job store heat pump readings?",
-        "What does Dana Whitfield say about heat pumps in cold climates?",
+        "Find out why the ledger job runs every night before the payroll export.",
+        "Explain why my manager Dana Whitfield signs off every Falcon release.",
       ])
         yield* test.llm.tool("task", {
           description: "Heat pumps",

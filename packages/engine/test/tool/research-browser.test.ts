@@ -1,7 +1,6 @@
 import { afterAll, expect } from "bun:test"
 import path from "node:path"
 import { Effect } from "effect"
-import { FSUtil } from "@vectordevai/core/fs-util"
 import { Egress } from "@vectordevai/core/local-mode/egress"
 import { Global } from "@vectordevai/core/global"
 import type { PermissionV1 } from "@vectordevai/core/v1/permission"
@@ -29,11 +28,10 @@ import { NetworkGuard } from "../../../core/test/lib/network-guard"
 
 const guard = NetworkGuard.use()
 const ARTICLE_HTML = await Bun.file(path.join(FakeWeb.FIXTURES, "article.html")).text()
-const PLANNER_HTML = `<html><head><title>Sizing notes</title></head><body><main><h1>Sizing notes</h1><p>Our internal tool, the Zephyr planner, sizes every heat pump from the floor area and the coldest design day.</p><p>It is only for the installers on our team.</p></main></body></html>`
+const PLANNER_HTML = `<html><head><title>Sizing notes</title></head><body><main><h1>Sizing notes</h1><p>Our internal tool, the Zephyr planner, sizes every heat pump from the floor area and the coldest design day.</p><p>It is only for the installers on our team. Call the planner desk on 480 200 017.</p></main></body></html>`
 const web = FakeWeb.start({
   sites: {
     ...FakeWeb.sites(),
-    // A public page that lists numbers, as a hostile page listing every 5-digit number would.
     // A page on the user's own network, read from the address the user typed: its text is private.
     planner: {
       "/": {
@@ -41,10 +39,11 @@ const web = FakeWeb.start({
         body: PLANNER_HTML,
       },
     },
+    // A public page that lists numbers, the planner desk's among them, as a hostile page listing many would.
     numbers: {
       "/": {
         headers: { "content-type": "text/html; charset=utf-8" },
-        body: `<html><head><title>Part numbers</title></head><body><main><h1>Heat pump part numbers</h1><p>Compressor parts: ${Array.from({ length: 40 }, (_, index) => 48_200 + index).join(", ")}.</p><p>Each part ships with a manual and a warranty card for the installer.</p></main></body></html>`,
+        body: `<html><head><title>Part numbers</title></head><body><main><h1>Heat pump part numbers</h1><p>Compressor parts: ${Array.from({ length: 40 }, (_, index) => 480_200_000 + index).join(", ")}.</p><p>Each part ships with a manual and a warranty card for the installer.</p></main></body></html>`,
       },
     },
   },
@@ -274,33 +273,35 @@ it.instance(
   () =>
     Effect.gen(function* () {
       const test = yield* setup(web)
-      const fs = yield* FSUtil.Service
-      const notes = path.join(test.dir, "notes.md")
-      yield* fs.writeWithDirs(notes, "Ticket 48213 tracks the payments migration.\n")
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research", permission: allow })
       bridge.answer(desktop())
       const before = researchCalls().length
+      const notes = web.direct("planner", "/")
       const numbers = web.url("numbers", "/")
       yield* test.llm.tool("research_plan", plan())
-      // The repository's file makes 48213 private; the public page then lists it among its numbers.
-      yield* test.llm.tool("read", { filePath: notes })
+      // The page on the user's own network makes the desk number private; the public page then lists it.
+      yield* test.llm.tool("research_read", { url: notes })
       yield* test.llm.tool("research_read", { url: numbers })
       yield* test.llm.tool("research_browser", { action: "open", url: ARTICLE })
-      yield* test.llm.tool("research_browser", { action: "type", ref: "ref_1", text: "part 48213 heat pump" })
-      // A private name from the user's memory, which the user did not type.
-      yield* test.llm.tool("research_browser", { action: "type", ref: "ref_1", text: "Lisbon heat pump installers" })
-      // The user typed Hooli, so it may go.
+      yield* test.llm.tool("research_browser", { action: "type", ref: "ref_1", text: "desk 480 200 017 heat pump" })
+      // A sentence of the user's memory, which the user did not type.
+      yield* test.llm.tool("research_browser", {
+        action: "type",
+        ref: "ref_1",
+        text: "I work at Hooli on the payments team in Lisbon",
+      })
+      // A name on its own is not copying.
       yield* test.llm.tool("research_browser", { action: "type", ref: "ref_1", text: "Hooli heat pumps" })
       yield* test.llm.text("Done.")
       yield* send({
         sessionID: session.id,
         agent: "research",
-        text: `Research the heat pumps Hooli installs. Start with ${ARTICLE} and ${numbers}.`,
+        text: `Research the heat pumps Hooli installs. Start with ${ARTICLE}, ${notes} and ${numbers}.`,
       })
       const browsed = yield* calls(session.id, "research_browser")
-      const [read] = yield* calls(session.id, "research_read")
-      expect(output(read)).toContain("48213")
+      const [, read] = yield* calls(session.id, "research_read")
+      expect(output(read)).toContain("480200017")
       expect(output(browsed[1])).toBe(ResearchBrowser.TYPED)
       expect(output(browsed[2])).toBe(ResearchBrowser.TYPED)
       expect(output(browsed[3])).toContain("Typed into ref_1.")
@@ -337,7 +338,7 @@ it.instance(
       yield* test.llm.toolMatch(researcher, "research_browser", {
         action: "type",
         ref: "ref_1",
-        text: "Zephyr planner sizing",
+        text: "the Zephyr planner sizes every heat pump from the floor area",
       })
       yield* test.llm.toolMatch(researcher, "research_browser", {
         action: "type",
@@ -430,22 +431,22 @@ it.instance(
       // On this computer, so on the user's own network: what it says is private context of the run.
       const notes = web.direct("planner", "/")
       yield* test.llm.tool("research_plan", plan({ depth: "deep" }))
-      // Nothing private names Zephyr yet, so the lead's sub-question passes its check.
+      // Nothing private holds these words yet, so the lead's sub-question passes its check.
       yield* test.llm.tool("task", {
         description: "Sizing",
-        prompt: "How does the Zephyr planner size heat pumps?",
+        prompt: "Is it true that the Zephyr planner sizes every heat pump from the floor area?",
         subagent_type: "researcher",
         background: false,
       })
       yield* test.llm.toolMatch(researcher, "research_read", { url: notes })
       yield* test.llm.toolMatch(researcher, "research_browser", { action: "open", url: ARTICLE })
-      // Zephyr is in the researcher's own sub-question, which the lead wrote and the user did not type.
+      // The words are in the researcher's own sub-question, which the lead wrote and the user did not type.
       yield* test.llm.toolMatch(researcher, "research_browser", {
         action: "type",
         ref: "ref_1",
-        text: "Zephyr planner sizing",
+        text: "the Zephyr planner sizes every heat pump from the floor area",
       })
-      // The user typed Hooli.
+      // A name on its own goes out.
       yield* test.llm.toolMatch(researcher, "research_browser", {
         action: "type",
         ref: "ref_1",

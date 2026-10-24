@@ -1,13 +1,12 @@
 export * as ResearchWords from "./words"
 
-// Common English words, for telling a name from a word that is capitalised only because it starts a sentence or
-// stands in a heading: "Heat pumps are loud" starts with a word, "Falcon is the codename" with a name. A word counts
-// with its usual endings ("customers", "deployed", "planning", "quickly").
+// Common English words, for the outbound check (section 5.4): a run of words copied from private text is refused only
+// when one of its words is not a common word, so "one of the best ways to cut the energy use" says nothing about anyone.
+// A word counts with its usual endings ("customers", "deployed", "planning", "quickly").
 //
-// Words that are often the names of people, companies or code names are left out on purpose, since a name read as a
-// word could go into a query: colours, animals, fruit, gems, planets and gods, and words such as "mark", "bill",
-// "grace", "shell", "oracle" and "summit". The cost of leaving a word out is small: a private line that starts with it
-// keeps it out of queries until the user types it.
+// Words that are often the names of people, companies or code names are left out on purpose, so a copied run that
+// holds one still counts: colours, animals, fruit, gems, planets and gods, and words such as "mark", "bill", "grace",
+// "shell", "oracle" and "summit".
 
 const WORDS = new Set(
   `

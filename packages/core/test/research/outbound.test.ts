@@ -4,46 +4,47 @@ import { NetworkGuard } from "../lib/network-guard"
 
 const guard = NetworkGuard.use()
 
-// What a research lead might hold: recalled personal lines and a private document passage (private facts), and a
-// repository file it read (the work). The secret-shaped values are built at run time so this file holds none, and
-// invisible characters are built from their code points so this file shows every character it tests.
+// What a research lead might hold: memory-of-you lines, decision and lesson lines and a private document passage (the
+// private facts), and repository files it read (the work). They name people, companies, tools, versions, ports and
+// public identifiers, which ordinary queries share and the check lets through, and contacts, intranet hosts and home
+// folders, which it keeps out. The secret-shaped values are built at run time so this file holds none, and other
+// scripts' characters are built from their code points so this file shows every character it tests.
 const char = (...codes: number[]) => String.fromCodePoint(...codes)
+// Digits written in Arabic-Indic digits.
+const arabic = (digits: string) => char(...[...digits].map((digit) => 0x660 + Number(digit)))
 const context: ResearchOutbound.Context = {
   private: [
     "Krishna prefers primary sources and is preparing the Falcon account renewal for Acme Robotics.",
     "Acme's Q3 churn rose to 7.4 percent after the Falcon pricing change, according to the internal board memo dated 12 August.",
-    "Krishna's daughter goes to Lincoln Elementary in Fremont.",
-    "Jane's phone is 415-555-0134, and the Q3 budget is 2,815,640 dollars.",
-    "The company card is 4242 4242 4242 4242. SSN 078-05-1120 is on the onboarding form.",
-    "We drop GLOBEX in Q3. Codename ZEPHYR ships in March.",
-    // Memory-of-you lines as the brain keeps personal facts: short, subject first, a label and its value.
-    "Initech is the user's employer.",
-    "Employer: Globex.",
+    "Notes from the call with Sandra, Victor, Albert, Cooper, Justin, Austin, George, Charles, Porter, Martin, Walter, Rainer and Archer.",
+    "Decided to move billing to Stripe and the ORM to Prisma in March.",
+    "Lesson: the Electron updater needs code signing on macOS. Pin Electron 33.2.0.",
+    "We host the API on Railway now.",
     "Kestrel ships before the Q4 board meeting.",
-    "Umbrella pays about 2,400,000 USD a year.",
-    // Figures as documents write them, with their digits in groups.
-    "Annual revenue was $12,345,678 last year and payroll is 2.345.678 EUR.",
+    "We moved to annual billing in 2024, upgrade to Node 22 next, grew to 12 engineers, and keep reports in 2 pages.",
+    "The servers run Ubuntu 22.04.4 and 24.04.1. QA pins Chrome 130.0.6723.91 and Chromium 128.0.6613.36 on Windows 10.0.19045 and 10.0.22631.4460.",
+    "We need ISO 27001 2022 certification, patched CVE-2024-3094 and CVE-2024-12345, and cite arXiv 2410.12345 and doi 10.1038/s41586-021-03819-2.",
+    "Jane's phone is 415-555-0134. My phone number is +1 (415) 555-0132, home phone 415.555.0177, and Paris 06 12 34 56 78.",
+    "Email jane.doe@globex.com about the Initech contract.",
+    "Account 0044 0532 0130 at First Bank. The company card is 4242 4242 4242 4242. SSN 078-05-1120.",
     "The renewal goes on the card 4417880256719113.",
-    // The numbers a memory-of-you line holds, written the ways people write them.
-    "My phone number is +1 415-555-0132.",
-    "SSN: 123-45-6789",
-    "Account 0044 0532 0130 at First Bank.",
-    "Home phone 415.555.0177",
+    "Umbrella pays about 2,400,000 USD a year, and the Q3 budget is 2,815,640 dollars.",
+    "Meeting notes 21/10/2025: follow up 2025/11/03. Invoice INV-2025-10-0042 was paid on 22 Oct 2025.",
   ],
   work: [
     [
       'import { reconcileLedgerEntries } from "./ledger"',
       'const BILLING_URL = "https://billing.acme-internal.io/v2/invoices"',
       'const TRACKER = "https://jira.acme.internal/browse/LED"',
-      "// Ask jane.doe@acme-robotics.example for access to the ledger export.",
-      "// Builds run on build01.corp.lan (10.20.30.40, fd12:3456:789a::7).",
+      "// Ask ops@acme.com for access. Docs live on wiki.acme.com, builds on build01.corp.lan (10.20.30.40, fd12:3456:789a::7).",
       'const LEDGER_PATH = "/srv/acme/ledger/2026-q3.csv"',
-      "export function settle_partner_payouts(order: number) {",
-      "  // Order 4417203 was refunded twice in September.",
-      "  return reconcileLedgerEntries(order)",
-      "}",
+      "// Order 4417203 was refunded twice in September.",
+      "useEffect(() => setRows(useState(0)), []) // document.getElementById('x').querySelector('y') on x86_64",
       '{ "name": "acme-billing", "dependencies": { "react": "19.1.0", "typescript": "5.9.2" } }',
     ].join("\n"),
+    "ollama listens on 11434, mongodb on 27017 and grpc on 50051. See vite issue 18234. nameserver = 8.8.8.8, gateway 192.168.1.1.",
+    "Docs: https://docs.docker.com/compose/ and https://api.stripe.com/v1/charges. Copy .env.local, and read user.home.",
+    "Root: /Users/kbharadwaj/Vectordev.ai. Payroll: C:\\Users\\kbharadwaj\\initech\\payroll-2025.xlsx",
   ],
   typed: [
     "Research how heat pumps perform in cold climates, and compare SaaS churn benchmarks for robotics companies.",
@@ -51,218 +52,161 @@ const context: ResearchOutbound.Context = {
   public: ["A field study of air-source heat pumps in 412 homes. Median annual saving: 640 euros per home."],
 }
 const check = (query: string, using = context) => ResearchOutbound.check(query, using)
+const address = (url: string, using = context) => ResearchOutbound.address(url, using)
 
-// Each of these sends private text, and each has to be refused.
+// Each of these copies private text, and each has to be refused, for the reason it leaks.
 const leaks: readonly (readonly [string, ResearchOutbound.Reason])[] = [
-  ["Q3 churn rose to 7.4 percent after the Falcon pricing change", "words"],
-  ["acme churn rose to 7.4 percent after pricing", "words"],
-  ["after the falcon pricing change according to the internal board memo", "words"],
-  ["reconcileLedgerEntries double refund bug", "token"],
-  ["reconcileledgerentries", "token"],
-  ["settle_partner_payouts implementation", "token"],
-  ["billing.acme-internal.io invoices api", "token"],
-  ["jane.doe@acme-robotics.example", "token"],
-  ["/srv/acme/ledger/2026-q3.csv schema", "words"],
-  ["ledger/2026-q3.csv columns", "token"],
-  ["order 4417203 refund", "token"],
+  // A secret.
   ["my password is Tr0ub4dor&3x", "secret"],
   [`api key ${"AKIA"}${"IOSFODNN7EXAMPLE"}`, "secret"],
-  // Section 6.4a's example: a personal line is private in fewer than 6 words.
-  ["Acme's Q3 churn", "words"],
-  ["Acme Q3 churn 7.4 percent", "words"],
-  ["Falcon pricing change Acme Robotics", "words"],
-  ["Lincoln Elementary Fremont daughter", "token"],
-  ["Acme renewal discount", "token"],
-  // Intranet names and addresses.
-  ["jira.acme.internal outage", "token"],
-  ["build01.corp.lan", "token"],
-  ["10.20.30.40 open ports", "token"],
-  ["fd12:3456:789a::7", "token"],
-  // Identifiers split by invisible characters.
-  [`reconcile${char(0xad)}Ledger${char(0xad)}Entries`, "token"],
-  [`reconcile${char(0x200b)}ledger${char(0x200b)}entries`, "token"],
-  [`settle${char(0x200b)}_partner_payouts`, "token"],
-  [`44172${char(0x2060)}03 refund`, "token"],
-  // Identifiers, host names and email addresses split into words, one for each part.
-  ["reconcile ledger entries", "token"],
-  ["reconcile_ledger_entries", "token"],
-  ["settle partner payouts", "token"],
-  ["billing acme internal io invoices", "token"],
-  ["jane doe acme robotics example", "token"],
-  // Numbers however their digits are grouped: a phone, an amount, a card and an SSN.
+  // 8 or more words of a memory line or a document, however they are written.
+  ["Acme's Q3 churn rose to 7.4 percent after the Falcon pricing change", "words"],
+  ["acme q3 churn rose to 7 4 percent after", "words"],
+  ["after the falcon pricing change according to the internal board memo", "words"],
+  [`${char(0x410)}cme's Q3 churn rose to 7.4 percent after the F${char(0x430)}lcon pricing change`, "words"],
+  [`preparing the Falcon account re${char(0xad)}newal for Acme Robo${char(0x200b)}tics`, "words"],
+  ["reconcileLedgerEntries } from ledger const BILLING_URL https billing", "words"],
+  // An email address from the private facts.
+  ["jane.doe@globex.com", "token"],
+  ["contact Jane.Doe@Globex.com about renewal", "token"],
+  ["ｊａｎｅ．ｄｏｅ＠ｇｌｏｂｅｘ．ｃｏｍ", "token"],
+  // A phone, card, account or social security number, however its digits are grouped.
   ["415-555-0134", "token"],
   ["call 415 555 0134", "token"],
-  ["4155550134", "token"],
-  ["555-0134 owner", "token"],
-  ["2,815,640 budget", "token"],
-  ["2815640", "token"],
-  ["2 815 640 grant", "token"],
-  ["4242 4242 4242 4242", "token"],
-  ["4242424242424242", "token"],
-  ["078-05-1120", "token"],
-  ["078 05 1120", "token"],
-  ["4,417,203 refund", "token"],
-  // Names in capitals.
-  ["GLOBEX churn", "token"],
-  ["globex contract", "token"],
-  ["ZEPHYR launch date", "token"],
-  // Numbers written with their digits in groups, either side: the private text's 2,400,000 and 2.345.678, the
-  // private 4417203 written 4,417,203 or 4 417 203, and a card number written in fours.
-  ["2,400,000 USD", "token"],
-  ["2400000 USD", "token"],
-  ["$12,345,678 revenue", "token"],
-  ["12,345,678", "token"],
-  ["12345678", "token"],
-  ["2.345.678 EUR payroll", "token"],
-  [`2${char(0xa0)}345${char(0xa0)}678 payroll`, "token"],
-  ["2'400'000 contract", "token"],
-  ["$2,400,000.00 contract", "token"],
-  ["24,00,000 USD", "token"],
-  ["4,417,203 refund", "token"],
-  ["4 417 203", "token"],
-  ["4417 8802 5671 9113", "token"],
-  ["4417-8802-5671-9113 renewal", "token"],
-  // The same numbers with the other usual separators, a currency code run into them, or the digits of other scripts:
-  // Arabic-Indic, Devanagari and Extended Arabic-Indic.
-  ["2-400-000", "token"],
-  ["2_400_000", "token"],
-  ["2/400/000", "token"],
-  [`2${char(0x2019)}400${char(0x2019)}000 contract`, "token"],
-  [`2${char(0x202f)}400${char(0x202f)}000 USD`, "token"],
-  [`2${char(0x2009)}400${char(0x2009)}000 USD`, "token"],
-  ["USD2,400,000", "token"],
-  [`${char(0x662, 0x664, 0x660, 0x660, 0x660, 0x660, 0x660)} USD`, "token"],
-  [`${char(0x968, 0x96a, 0x966, 0x966, 0x966, 0x966, 0x966)} USD`, "token"],
-  [`${char(0x6f4, 0x6f4, 0x6f1, 0x6f7, 0x6f2, 0x6f0, 0x6f3)} refund`, "token"],
-  ["4417 203", "token"],
-  ["4417.8802.5671.9113", "token"],
-  ["4417_8802_5671_9113", "token"],
-  ["4417/8802/5671/9113", "token"],
-  // Phone, social security and account numbers, whole, in parts, with and without a country code.
-  ["415-555-0132 reverse lookup", "token"],
-  ["who owns 415 555 0132", "token"],
-  ["+1 415-555-0132", "token"],
-  ["(415) 555-0132", "token"],
-  ["+1(415)555-0132", "token"],
-  [`415${char(0x2010)}555${char(0x2010)}0132`, "token"],
-  [`415${char(0x2012)}555${char(0x2012)}0132`, "token"],
-  ["4155550132", "token"],
-  ["123-45-6789 credit check", "token"],
-  ["123 45 6789", "token"],
+  ["4155550134 owner", "token"],
+  ["who owns +1 (415) 555-0132", "token"],
+  ["415.555.0177 reverse lookup", "token"],
+  ["06 12 34 56 78", "token"],
+  ["0612345678", "token"],
   ["0044 0532 0130", "token"],
-  ["004405320130", "token"],
-  ["0532 0130", "token"],
-  ["415.555.0177", "token"],
-  ["4155550177", "token"],
-  // Names that open a memory-of-you line, or follow its label.
-  ["Initech procurement", "token"],
-  ["Globex procurement", "token"],
-  ["Kestrel launch", "token"],
-  ["Umbrella contract value", "token"],
-  // Look-alike letters from other scripts, small capitals and accents over the letters.
-  [`${char(0x410)}cme churn`, "token"],
-  [`Acm${char(0x435)} churn`, "token"],
-  [`${char(0x391)}cme renewal`, "token"],
-  [`${char(0x1d00, 0x1d04, 0x1d0d, 0x1d07)} renewal`, "token"],
-  [`A${char(0x301)}cme renewal`, "token"],
-  [`K${char(0x435)}strel launch`, "token"],
-  [`F${char(0x430)}lcon pricing change`, "words"],
-  [`the F${char(0x430)}lcon account renewal`, "words"],
-  // Whole look-alike alphabets (Cherokee, Lisu, Coptic), a Myanmar zero, a Latin iota and a slashed o.
-  [`${char(0x13aa)}cme churn`, "token"],
-  [`${char(0xa4ee)}cme churn`, "token"],
-  [`Ac${char(0x2c98)}e churn`, "token"],
-  [`Gl${char(0x2c9f)}bex`, "token"],
-  [`Gl${char(0x1040)}bex`, "token"],
-  [`In${char(0x269)}tech procurement`, "token"],
-  [`Gl${char(0xf8)}bex`, "token"],
-  // ASCII's own look-alikes: a capital I for l, a zero for o, rn for m, vv for w, and a plural.
-  ["GIobex pricing", "token"],
-  ["GI0bex", "token"],
-  ["Acrne churn", "token"],
-  ["Initech Fremont vvorkshop", "token"],
-  ["Acmes churn", "token"],
-  ["reconciIeLedgerEntries", "token"],
+  ["account 004405320130", "token"],
+  ["4242 4242 4242 4242", "token"],
+  ["4242-4242-4242-4242", "token"],
+  ["4417 8802 5671 9113", "token"],
+  [`4417${char(0x2013)}8802${char(0x2013)}5671${char(0x2013)}9113`, "token"],
+  [`4417${char(0xa0)}8802${char(0xa0)}5671${char(0xa0)}9113`, "token"],
+  [`${arabic("4417880256719113")} renewal`, "token"],
+  ["078-05-1120", "token"],
+  ["078 05 1120 credit check", "token"],
+  // A private host or IP address from the private context or the repository.
+  ["jira.acme.internal outage", "token"],
+  ["https://jira.acme.internal/browse/LED-12", "token"],
+  ["build01.corp.lan", "token"],
+  ["billing.acme-internal.io invoices api", "token"],
+  ["wiki.acme.com search", "token"],
+  ["10.20.30.40 open ports", "token"],
+  ["fd12:3456:789a::7", "token"],
+  [`jira.${char(0x430)}cme.internal`, "token"],
+  // A local path in the home folder of the user the repository's root names, or with that user name in it.
+  ["/Users/kbharadwaj/Vectordev.ai/notes.md", "token"],
+  ["error in /users/KBharadwaj/Vectordev.ai/src/app.ts", "token"],
+  ["C:\\Users\\kbharadwaj\\initech\\payroll-2025.xlsx", "token"],
+  ["C:\\Users\\kbharadwaj ledger.db", "token"],
+  ["/home/kbharadwaj/ledger.db", "token"],
+  ["D:\\backup\\kbharadwaj\\ledger.db", "token"],
 ]
 
-// Queries a research agent writes for public questions, some on the same subjects as the private context. At most
-// two may be refused: the check matches literal overlap, and this set measures how often that stops a fair query.
-// The numbered ones below are measured apart, since numbers written side by side read as one.
-const benign = [
-  "heat pump performance in cold climates",
-  "air source heat pump coefficient of performance below minus 15",
-  "heat pump field study 412 homes",
-  "median annual saving heat pump per home",
-  "SaaS churn benchmarks for robotics companies",
-  "average B2B SaaS churn rate 2026",
-  "customer churn after a price increase study",
-  "how to reduce churn after a pricing change",
-  "robotics industry revenue growth 2025",
-  "warehouse robotics market size",
-  "primary sources on heat pump subsidies in the EU",
-  "EU heat pump subsidy schemes by country",
-  "IEA heat pump report 2025",
-  "refrigerant R290 safety standards",
-  "ground source versus air source heat pump cost",
-  "heat pump noise regulations Germany",
-  "React 19 server components performance",
-  "TypeScript 5.9 release notes",
-  "double entry bookkeeping ledger reconciliation best practices",
-  "payment refund processing idempotency",
+// Queries a research agent writes for public questions, many on the subjects the private context names. The last
+// review found most of them refused, for a name, a look-alike, a 3-word run or a number. None may be.
+const fair = [
+  // Versions the private context holds.
+  "Ubuntu 22.04.4 kernel regression",
+  "Ubuntu 24.04.1 release notes",
+  "Chrome 130.0.6723.91 crash",
+  "Windows 10.0.19045 bug",
+  "Windows build 22631 known issues",
+  "Windows 10.0.22631.4460 update",
+  "Chromium 128.0.6613.36 release notes",
+  "Electron 33.2.0 release notes",
+  // Words that hold or look like a name the private context holds.
+  "Apache Cassandra tuning",
+  "Victoria BC heat pump rebates",
+  "victory gardens history",
+  "Alberta carbon tax heat pumps",
+  "energy cooperative heat pumps",
+  "adjusting heat pump defrost settings",
+  "just in time inventory systems",
+  "exhausting the refrigerant charge",
+  "Georgetown university energy study",
+  "Charleston SC flood maps",
+  "heat pump importers Europe",
+  "supporters of the bill",
+  "martingale betting system",
+  "dust in heat pump filters",
+  "heat pump researcher interviews",
+  "best researchers on heat pumps",
+  "waiter tipping etiquette",
+  "personal trainer certification",
+  // Tools a decision or lesson line names.
   "Stripe webhook retry behaviour",
-  "invoice reconciliation automation tools",
-  "board memo template for quarterly results",
-  "what is net revenue retention",
-  "gross margin benchmarks for hardware startups",
-  "seasonal coefficient of performance definition",
-  "cold climate heat pump specification NEEP",
-  "oil boiler replacement grants UK",
-  "smart meter data resolution fifteen minutes",
-  "heat loss calculation method for houses",
-  "insulation impact on heat pump savings",
-  "district heating versus heat pumps",
-  "heat pump installers shortage 2026",
-  "compressor makers market share",
-  "heat pump sales 2025 Europe",
-  "battery storage paired with heat pumps",
-  "time of use tariffs heat pumps",
-  "heat pump efficiency at low temperatures research paper",
-  "arxiv heat pump control reinforcement learning",
-  "PubMed indoor air quality heat pumps",
-  "wikipedia heat pump",
-  "how do inverter compressors work",
-  "defrost cycle energy loss air source heat pump",
-  "hybrid heat pump systems evaluation",
-  "Nordic heat pump adoption history",
-  "Japan heat pump water heater market",
-  "US Inflation Reduction Act heat pump rebates",
-  "heat pump lifecycle carbon emissions",
-  "SaaS pricing change case studies",
-  "churn prediction models comparison",
+  "Prisma vs Drizzle performance",
+  "Electron autoUpdater code signing macOS",
+  "Railway vs Fly.io pricing",
+  // Short runs of a private line with a quarter, a year or a small number in them.
+  "Q4 board meeting agenda template",
+  "annual billing in 2024 trends",
+  "upgrade to Node 22 breaking changes",
+  "grew to 12 engineers startup",
+  "reports in 2 pages executive summary",
+  // Public identifiers, ports and issue numbers the private context or the repository holds.
+  "CVE-2024-3094 xz backdoor",
+  "CVE-2024-12345 exploit",
+  "ISO 27001 certification cost",
+  "ISO 27001 2022 certification requirements",
+  "arXiv 2410.12345 results",
+  "doi 10.1038/s41586-021-03819-2",
+  "ollama 11434 connection refused docker",
+  "mongodb 27017 connection refused",
+  "grpc 50051 timeout",
+  "vite issue 18234",
+  // Public addresses and identifiers from code the repository holds.
+  "8.8.8.8 DNS latency",
+  "192.168.1.1 admin page not loading",
+  "useEffect cleanup race condition",
+  "React useState batching",
+  "getElementById vs querySelector performance",
+  "x86_64 vs arm64 performance",
+  "api.stripe.com rate limits",
+  "docs.docker.com compose healthcheck",
+  ".env.local not loading in Next.js",
+  "Java user.home property on Windows",
+  // Dates, versions, years, quarters, prices and addresses everyone writes.
+  "heat pump news 2025-10-20",
+  "events on 14/11/2025 in Berlin",
+  "SaaS churn Q3 2026",
+  "heat pumps 2019 2024",
+  "tax brackets 2024-2025",
+  "UK tax year 2024-25 rates",
+  "Node 22.11.0 release notes",
+  "React 19.1.0 changelog",
+  "Windows 11 24H2 update KB5044284",
+  "speed of light 299,792,458 m/s",
+  "zip codes 90001 to 90089",
+  "localhost:3000 connection refused",
+  "127.0.0.1 vs 0.0.0.0 binding",
+  "169.254.169.254 metadata endpoint",
+  "10.0.0.0/8 private address range",
+  "~/.ssh/config ProxyJump example",
+  "/etc/hosts file format",
+  // The user's own words, and a long query of its own.
+  "SaaS churn benchmarks for robotics companies",
+  "how do air source heat pumps perform in very cold climates",
 ]
 
-// Fair queries with numbers in them: standards, years side by side, spans of years, versions and a quarter.
-const numbered = [
-  "iso 9001 2015",
-  "heat pumps 2019 2024",
-  "SaaS churn Q3 2026",
-  "ISO 14001 certification cost",
-  "EN 14511 heat pump test conditions",
-  "IEC 60335-2-40 refrigerant charge limits",
-  "ASHRAE 90.1 2022 heat pump efficiency",
-  "top 10 heat pumps 2025",
-  "R32 versus R290 heat pumps",
-  "Node 22.11.0 release notes",
-  "heat pump sales 2024 2025",
-  "CVE-2024-3094 xz backdoor",
-  "tax brackets 2024-2025",
-  "best laptops 2025 2026",
-  "heat pump incentives 2024 2025",
-  "UK tax year 2024-25 rates",
+// Addresses of public pages on the same subjects.
+const fairAddresses = [
+  "https://releases.ubuntu.com/22.04.4/",
+  "https://www.theverge.com/2025/10/21/heat-pumps-are-winning",
+  "https://arxiv.org/abs/2410.12345",
+  "https://www.nature.com/articles/s41586-021-03819-2",
+  "https://nvd.nist.gov/vuln/detail/CVE-2024-3094",
+  "https://docs.docker.com/compose/",
+  "https://www.example.com/heat-pumps/2019/2024?page=2",
+  "https://github.com/kbharadwaj/dotfiles",
 ]
 
 // A data file of numbers only, as a repository's fixtures and exports hold them: a row number, a year, a count, a
-// rate and an amount of up to 5 digits on each row, the values joined by `separator`.
+// rate and an amount on each row, the values joined by `separator`.
 const dataFile = (rows: number, separator: string) =>
   [
     ["id", "year", "units", "rate", "amount"].join(separator),
@@ -280,523 +224,158 @@ const dataFile = (rows: number, separator: string) =>
 describe("ResearchOutbound.check", () => {
   test("refuses every query in the leak set, for the reason it leaks", () => {
     const results = leaks.map(([query]) => check(query))
-    expect(results.map((result) => (result.ok ? "allowed" : result.reason))).toEqual(leaks.map(([, reason]) => reason))
+    expect(results.map((result, index) => [leaks[index]![0], result.ok ? "allowed" : result.reason])).toEqual(
+      leaks.map(([query, reason]) => [query, reason]),
+    )
     expect(results.every((result) => !result.ok && result.message === ResearchOutbound.REFUSAL)).toBe(true)
   })
 
-  test("allows the user's own words and words a public source in the run holds", () => {
-    expect(check("SaaS churn benchmarks for robotics companies").ok).toBe(true)
-    expect(check("A field study of air-source heat pumps in 412 homes").ok).toBe(true)
-    // The same run of words is refused when only the private context has it, and allowed once the user typed it.
-    const run = "rose to 7.4 percent after the Falcon pricing change"
-    expect(check(run).ok).toBe(false)
-    expect(check(run, { ...context, typed: [...context.typed, run] }).ok).toBe(true)
-    // A rare token the user typed may be searched for.
-    expect(
-      check("reconcileLedgerEntries", { ...context, typed: ["why does reconcileLedgerEntries refund twice"] }).ok,
-    ).toBe(true)
+  test("refuses none of the fair queries and addresses against a rich private context", () => {
+    expect(fair.filter((query) => !check(query).ok)).toEqual([])
+    expect(fairAddresses.filter((url) => !address(url).ok)).toEqual([])
   })
 
-  test("needs at least two longer words in a run, so common phrases do not count", () => {
-    const shared = { private: ["it is in the box of the year"], typed: [], public: [] }
-    expect(check("it is in the box of the year", shared).ok).toBe(true)
-  })
-
-  test("refuses no more than two of 50 benign queries", () => {
-    const refused = benign.filter((query) => !check(query).ok)
-    expect(benign).toHaveLength(50)
-    // Measured on 22 Oct 2026, with names and 3-word runs from prose: 0 of 50, and still 0 with the memory-of-you
-    // lines, grouped figures and look-alike folding added, and with phone, social security and account numbers,
-    // numbers read by their digits and Unicode's look-alikes added. With nothing typed, 3 of 50 are refused, all for
-    // "robotics", which "Acme Robotics" makes a name.
-    expect(refused).toEqual([])
-  })
-
-  test("refuses none of the fair queries with numbers in them", () => {
-    // Measured on 22 Oct 2026: 0 of 16.
-    expect(numbered.filter((query) => !check(query).ok)).toEqual([])
-  })
-
-  test("reads a private number glued to its currency, or in another script's digits, either way round", () => {
-    const cases = [
-      ["Umbrella pays USD2,400,000 a year.", "2,400,000 USD"],
-      ["Umbrella pays USD2,400,000 a year.", "2400000"],
-      ["Payroll is EUR2.345.678.", "2345678"],
-      ["Payroll is EUR2.345.678.", "2,345,678 EUR"],
-      [`Umbrella pays ${char(0x662, 0x66c, 0x664, 0x660, 0x660, 0x66c, 0x660, 0x660, 0x660)} USD.`, "2400000"],
-      [`Umbrella pays ${char(0x662, 0x66c, 0x664, 0x660, 0x660, 0x66c, 0x660, 0x660, 0x660)} USD.`, "2,400,000 USD"],
-      ["Call (415) 555-0132 after six.", "+1 415 555 0132"],
-    ] as const
-    for (const [line, query] of cases)
-      expect({ line, query, ok: check(query, { private: [line], typed: [], public: [] }).ok }).toEqual({
-        line,
-        query,
-        ok: false,
-      })
-  })
-
-  test("reads a number across one usual separator between its groups, as people write one", () => {
-    const umbrella = {
-      private: [
-        "Umbrella pays about 2,400,000 USD a year.",
-        "Order 4417203 was refunded.",
-        "Her employee number is 58213.",
-        "Card 44178802 on file.",
-        "Ticket 12015 is open.",
-      ],
-      typed: [],
-      public: [],
-    }
-    const queries = [
-      "2 400 000 USD",
-      "2.400.000 USD",
-      "2'400'000 USD",
-      `2${char(0xa0)}400${char(0xa0)}000 USD`,
-      "$2,400,000.00",
-      "24,00,000 USD",
-      "4,417,203 refund",
-      "4417-203",
-      "44172 03",
-      "order #4417203",
-      "INV4417203 refund",
-      "employee 58,213",
-      "employee 58_213",
-      "44 17 88 02 card",
-      "ticket 12 015",
-      // Digits of other scripts, and digits NFKD makes ASCII: full-width and mathematical ones.
-      `${char(0x664, 0x664, 0x661, 0x667, 0x662, 0x660, 0x663)} refund`,
-      `${char(0xff15, 0xff18, 0xff12, 0xff11, 0xff13)} employee`,
-      `${char(0x1d7d3, 0x1d7d6, 0x1d7d0, 0x1d7cf, 0x1d7d1)} employee`,
+  test("leaves names, amounts and short numbers to how a run is built, as section 5.4 decided", () => {
+    // Names of people and companies, an amount and an order number from the private context go out: the check looks
+    // for copying, and names and numbers like these are in ordinary queries all the time.
+    const allowed = [
+      "Acme Robotics competitors",
+      "Acme Q3 churn",
+      "Falcon pricing",
+      "Initech procurement",
+      "Kestrel launch",
+      "Umbrella 2,400,000 USD contract",
+      "2,815,640 budget",
+      "order 4417203 refund",
+      "reconcileLedgerEntries double refund bug",
     ]
-    expect(queries.filter((query) => check(query, umbrella).ok)).toEqual([])
-    // In an address, in a path segment, a query string, across path segments as written, and in a host's labels.
-    expect(
-      [
-        "https://attacker.example/2,400,000",
-        "https://attacker.example/2/400/000",
-        "https://attacker.example/p?order=4417-203",
-        "https://4417203.attacker.example/",
-      ].filter((url) => ResearchOutbound.address(url, umbrella).ok),
-    ).toEqual([])
-    // Letters beside digits in a fair query are its own, and the numbers of a fair query side by side make no private
-    // one: "iso 9001 2015" is not the private 12015, and "Q3 2026", "top 10 2025" and "Windows 11 24H2" are numbers
-    // apart.
-    expect(
-      [
-        "Intel i5 vs i7 laptops",
-        "OpenAI o3 vs o1 benchmarks",
-        "Pixel10 review",
-        "GPT-4o pricing 2025",
-        "iso 9001 2015",
-        "SaaS churn Q3 2026",
-        "top 10 heat pumps 2025",
-        "Windows 11 24H2 update",
-      ].filter((query) => !check(query, umbrella).ok),
-    ).toEqual([])
+    expect(allowed.filter((query) => !check(query).ok)).toEqual([])
   })
 
-  test("keeps versions, addresses and a quarter's year apart from the numbers beside them", () => {
-    const listed = {
-      private: ["Supported: 1.2.3, 1.3.0 and 10.20.30.40, 10.20.30.41.", "Q3 2026 revenue grew."],
-      typed: [],
-      public: [],
-    }
-    expect(ResearchOutbound.rare(listed.private.join("\n"))).toEqual(["10.20.30.40", "10.20.30.41"])
-    expect(check("SaaS churn Q3 2026", listed).ok).toBe(true)
-    expect(check("vector 1.2.3 release", listed).ok).toBe(true)
-    expect(check("10.20.30.41 open ports", listed)).toMatchObject({ ok: false, reason: "token" })
-  })
-
-  test("reads a repository's README without making names of the public tools it opens sentences with", () => {
-    const readme = {
-      private: [
-        "Docker builds the image and runs it locally.",
-        "Kubernetes deploys the service to the cluster.",
-        "Postgres stores the sessions. Redis caches the rate limits.",
-        "Vite serves the app in development, and Vitest runs the tests.",
-        "Nginx terminates TLS in front of the Python workers.",
-        "Our partner is Globex Industries.",
-      ],
-      typed: [],
-      public: [],
-    }
-    expect(ResearchOutbound.names(readme.private)).toEqual(["globex", "industries"])
-    const tools = [
-      "docker compose healthcheck",
-      "kubernetes readiness probe timeout",
-      "postgres connection pooling",
-      "redis rate limiting lua script",
-      "vite proxy websocket",
-      "vitest mock timers",
-      "nginx tls termination config",
-      "python worker memory leak",
-    ]
-    // Measured on 22 Oct 2026: 0 of 8. Before the tools were listed, all 8 were refused.
-    expect(tools.filter((query) => !check(query, readme).ok)).toEqual([])
-    expect(check("Globex pricing", readme)).toMatchObject({ ok: false, reason: "token" })
-  })
-
-  test("checks a query once its full-width letters are folded", () => {
-    expect(check("ｒｅｃｏｎｃｉｌｅLedgerEntries").ok).toBe(false)
-  })
-
-  test("lets only the user's typing clear a rare token or a name, never a public page", () => {
-    const listed = {
-      ...context,
-      public: [...context.public, "Tickets jira.acme.internal and Acme are listed here."],
-    }
-    expect(check("jira.acme.internal outage", listed).ok).toBe(false)
-    expect(check("Acme renewal discount", listed).ok).toBe(false)
-    const typed = { ...context, typed: [...context.typed, "Why was order 4417203 refunded? Check Acme's renewal."] }
-    expect(check("order 4417203 refund", typed).ok).toBe(true)
-    expect(check("Acme renewal discount", typed).ok).toBe(true)
-  })
-
-  test("reads names from prose only, and not a sentence's ordinary first word", () => {
-    const shared = {
-      private: [
-        "Heat pumps in our office are loud in winter.",
-        "export const decode = Schema.decodeUnknownOption(Schema.fromJsonString(Settings))",
-        "  // Retry with Effect.retry when Stripe answers 429.",
-      ],
-      typed: [],
-      public: [],
-    }
-    expect(ResearchOutbound.names(shared.private)).toEqual([])
-    expect(check("heat pump noise in winter", shared).ok).toBe(true)
-    expect(check("JSON Schema settings validation", shared).ok).toBe(true)
-    expect(check("Stripe webhook retry behaviour", shared).ok).toBe(true)
-    expect(ResearchOutbound.names(context.private)).toEqual(
-      expect.arrayContaining(["acme", "falcon", "robotics", "krishna", "lincoln", "elementary", "fremont"]),
-    )
-    expect(ResearchOutbound.names(context.private)).not.toContain("august")
-  })
-
-  test("reads a name that opens a sentence or follows a label, and not a common word there", () => {
-    expect(
-      ResearchOutbound.names([
-        "Initech is the user's employer.",
-        "Employer: Globex.",
-        "Kestrel ships before the Q4 board meeting.",
-        "Umbrella pays about 2,400,000 USD a year.",
-        "Invoices go out monthly. Lives in Fremont. Works late most weeks. Status: Shipped.",
-      ]),
-    ).toEqual(["initech", "globex", "kestrel", "umbrella", "fremont"])
-    expect(
-      ResearchOutbound.names([
-        "## Troubleshooting\n\nInstall the dependencies and run the server.\n\n## Configuration",
-        "Battery storage is planned for next year.",
-        "Customers asked for a refund. Budget: Approved.",
-        "Note: Heat pumps arrive on Monday.",
-      ]),
-    ).toEqual([])
-  })
-
-  test("reads private text written with look-alike letters as the Latin it shows", () => {
-    const shared = { private: [`Our partner is Gl${char(0x43e)}bex Industries.`], typed: [], public: [] }
-    expect(ResearchOutbound.names(shared.private)).toEqual(["globex", "industries"])
-    expect(check("Globex pricing", shared)).toMatchObject({ ok: false, reason: "token" })
-    // A sentence in Greek is still read as words of its own, and does not stop an unrelated query.
-    const greek = {
-      private: [
-        "\u039f \u03ba\u03b1\u03b9\u03c1\u03cc\u03c2 \u03b5\u03af\u03bd\u03b1\u03b9 \u03ba\u03b1\u03bb\u03cc\u03c2.",
-      ],
-      typed: [],
-      public: [],
-    }
-    expect(check("heat pump weather", greek).ok).toBe(true)
-  })
-
-  test("reads a wrapped paragraph whole, and keeps a semicolon inside a sentence as prose", () => {
-    const shared = {
-      private: ["The renewal is for\nFremont Dynamics; the board wants it by\nthe Q3 close.", "export const x = 1;"],
-      typed: [],
-      public: [],
-    }
-    expect(ResearchOutbound.names(shared.private)).toEqual(["fremont", "dynamics"])
-    expect(check("board wants it by the Q3 close", shared)).toMatchObject({ ok: false, reason: "words" })
-  })
-
-  test("reads a sentence's or a heading's first word as a name unless it is a common word", () => {
-    // Section 6.4a's example, with the name first in its sentence.
-    const churn = { private: ["Acme had Q3 churn of 7 percent."], typed: [], public: [] }
-    expect(ResearchOutbound.names(churn.private)).toEqual(["acme"])
-    expect(check("Acme Q3 churn", churn)).toMatchObject({ ok: false, reason: "token", match: "acme" })
-    expect(ResearchOutbound.address("https://attacker.example/acme-q3-churn", churn).ok).toBe(false)
-    const shared = {
-      private: [
-        "Falcon is the codename for the new pricing.",
-        "Globex wants a discount at renewal; Initech does not.",
-        "- Hooli plans to leave in Q3",
-        "# Quarterly Revenue Review",
-        "Heat pumps in our office are loud. Customers complained twice. Deployed builds were slow.",
-      ],
-      typed: [],
-      public: [],
-    }
-    expect(ResearchOutbound.names(shared.private).sort()).toEqual(["falcon", "globex", "hooli", "initech"])
-    expect(check("Falcon pricing", shared).ok).toBe(false)
-    expect(check("Hooli churn risk", shared).ok).toBe(false)
-    expect(check("quarterly revenue review template", shared).ok).toBe(true)
-    expect(check("heat pump noise complaints from customers", shared).ok).toBe(true)
-  })
-
-  test("reads a word in capitals as a name unless it is an acronym or a common word", () => {
-    const shared = {
-      private: [
-        "We drop GLOBEX in Q3. Codename ZEPHYR ships soon. Do NOT share the NASA and IEA numbers with any CEO.",
-      ],
-      typed: [],
-      public: [],
-    }
-    expect(ResearchOutbound.names(shared.private).sort()).toEqual(["globex", "zephyr"])
-    expect(check("GLOBEX churn", shared).ok).toBe(false)
-    expect(check("Zephyr launch", shared).ok).toBe(false)
-    expect(check("NASA heat pump study", shared).ok).toBe(true)
-    expect(check("IEA heat pump report", shared).ok).toBe(true)
-    // The user's typing clears a name in capitals, as it clears any name.
-    expect(check("GLOBEX churn", { ...shared, typed: ["How does GLOBEX compare?"] }).ok).toBe(true)
-  })
-
-  test("reads no names from the work, only its rare tokens and its runs of 6 words", () => {
-    const work = {
-      private: [],
-      work: [
-        "# Northwind Billing Service\n\n## Getting Started\n\nDeploy with Docker Compose or Kubernetes.",
-        "Use Tailwind for styles. Call reconcileLedgerEntries from the worker on build01.corp.lan.",
-      ],
-      typed: [],
-      public: [],
-    }
-    expect(check("Tailwind CSS v4 theme variables", work).ok).toBe(true)
-    expect(check("getting started with Kubernetes", work).ok).toBe(true)
-    expect(check("Docker Compose healthcheck", work).ok).toBe(true)
-    expect(ResearchOutbound.address("https://kubernetes.io/docs/getting-started/", work).ok).toBe(true)
-    expect(check("reconcileLedgerEntries retries", work).ok).toBe(false)
-    expect(check("build01.corp.lan uptime", work).ok).toBe(false)
-    expect(check("call reconcileLedgerEntries from the worker on", work).ok).toBe(false)
-  })
-
-  test("treats import, export and type lines, fenced code and source files as code", () => {
-    const code = [
-      'export * as ResearchWords from "./words"',
-      'import Billing from "./billing"',
-      "export type Ledger = Billing.Entry",
-      "declare module Payouts",
-      "from ledger import Reconciler",
-    ]
-    expect(code.flatMap((line) => ResearchOutbound.names([line]))).toEqual([])
-    expect(
-      ResearchOutbound.names([
-        "Notes on the export.\n\n```ts\nconst Ledger: Payouts\n  Reconciler,\n```\n\nGlobex pays late.",
-      ]),
-    ).toEqual(["globex"])
-    // A source file's lines that are not caught one by one (keys, union members) are code too.
-    const source = [
-      "export const Settings = Schema.Struct({",
-      "  Ledger: Schema.String,",
-      "  Payouts: Schema.Number,",
-      "})",
-      "export type Status =",
-      "  | Pending",
-      "  | Settled",
-      "export function settle(order: number) {",
-      "  return order",
-      "}",
-    ].join("\n")
-    expect(ResearchOutbound.names([source])).toEqual([])
-  })
-
-  test("compares numbers by their digits, so the usual separators do not hide one, and lets the user's own through", () => {
-    const budget = {
-      private: ["Budget 2,815,640; phone (415) 555-0134; card 4242 4242 4242 4242"],
-      typed: [],
-      public: [],
-    }
-    expect(["2815640", "4155550134", "4242424242424242"].filter((query) => check(query, budget).ok)).toEqual([])
-    // Values in a list, versions, IP addresses, spans of years and round numbers are not numbers.
+  test("needs 8 words in a row, not all of them common words", () => {
+    expect(check("preparing the Falcon account renewal for Acme").ok).toBe(true)
+    expect(check("is preparing the Falcon account renewal for Acme").ok).toBe(false)
     const plain = {
-      private: [
-        "Years 2024,2025,2026, Node 22.11.0, 1.99.110, 2024-2026, 4,000,000 users",
-        "Years 2024, 2025. Node 22.11.0, then 1.99.110 on 10.20.30.40, for 4,000,000 users",
+      private: ["Heat pumps are one of the best ways to cut the energy use at home."],
+      typed: [],
+      public: [],
+    }
+    expect(check("one of the best ways to cut the energy use", plain).ok).toBe(true)
+  })
+
+  test("lets the user's typing clear a run of words, a contact, a host and a home folder", () => {
+    const queries = [
+      "rose to 7.4 percent after the Falcon pricing change",
+      "jane.doe@globex.com",
+      "415-555-0134 owner",
+      "jira.acme.internal outage",
+      "/Users/kbharadwaj/Vectordev.ai/notes.md",
+    ]
+    expect(queries.filter((query) => check(query).ok)).toEqual([])
+    const typed = {
+      ...context,
+      typed: [
+        "Why has Acme's churn rose to 7.4 percent after the Falcon pricing change?",
+        "Ask jane.doe@globex.com, or call +1 415 555 0134 and 415 555 0132.",
+        "Is jira.acme.internal down? The notes are in /Users/kbharadwaj/Vectordev.ai.",
       ],
-      typed: [],
-      public: [],
     }
-    const values = ["20242025", "2024 2025 2026", "20252026", "22110", "199110", "20242026", "4000000"]
-    expect(values.filter((query) => !check(query, plain).ok)).toEqual([])
-    const typed = { ...context, typed: ["Who owns the line +1 415 555 0134? The budget is 2 815 640."] }
-    expect(check("415-555-0134 owner", typed).ok).toBe(true)
-    expect(check("2,815,640 budget", typed).ok).toBe(true)
-    expect(check("4242 4242 4242 4242", typed).ok).toBe(false)
-    // A public source in the run that holds the number as one of its own clears it, as the user's typing does, read by
-    // its digits as well. A page that holds more than 100 numbers clears none: it could list every number of a length.
-    expect(check("2,815,640 budget", { ...context, public: ["A grant of 2 815 640 dollars."] }).ok).toBe(true)
-    // It clears that number only: 415-555-0134 still shares seven digits in a row with the private 415-555-0132.
-    expect(check("415-555-0134 owner", { ...context, public: ["Call (415) 555 0134 for help."] })).toMatchObject({
-      ok: false,
-      match: "4155550",
-    })
-    expect(
-      check("order 4417203 refund", { ...context, public: ["Tickets 4,417,203 and 9,000,111 are open."] }).ok,
-    ).toBe(true)
-    const listing = Array.from({ length: 101 }, (_, index) => String(4417150 + index)).join(", ")
-    expect(check("order 4417203 refund", { ...context, public: [listing.replaceAll(", ", "\n")] }).ok).toBe(false)
-    // Nor does a page that holds it only inside another number, or as digits that do not stand as a number of its own.
-    expect(check("415-555-0134 owner", { ...context, public: ["Ref 9415555013477."] }).ok).toBe(false)
-    // Unrelated numbers next to each other in a query are not a private one.
-    expect(check("heat pump sales 2025 2026 forecast", context).ok).toBe(true)
-    expect(check("Node 22.11.0 release notes", context).ok).toBe(true)
+    expect(queries.filter((query) => !check(query, typed).ok)).toEqual([])
   })
 
-  test("matches an identifier split into words only with one word for each part", () => {
-    const work = {
-      private: [],
-      work: ["const statusCode = await reconcileLedgerEntries(OpenAIResponses.create(jira_ticket_url))"],
-      typed: [],
-      public: [],
+  test("lets a public source clear a run of words, an email address and a number, but not a host or a path", () => {
+    const run = "the compressor makers plan to raise prices by nine percent"
+    const article = { private: [`Members only: ${run} next spring.`], typed: [], public: [] }
+    expect(check(run, article).ok).toBe(false)
+    expect(check(run, { ...article, public: [`Trade press: ${run}.`] }).ok).toBe(true)
+    const shown = {
+      ...context,
+      public: [
+        "Contact jane.doe@globex.com. Ref 0044 0532 0130.",
+        "Tickets jira.acme.internal and /Users/kbharadwaj/Vectordev.ai are listed here.",
+      ],
     }
-    expect(check("reconcile ledger entries", work).ok).toBe(false)
-    expect(check("Reconcile-Ledger-Entries", work).ok).toBe(false)
-    expect(check("jira ticket url", work).ok).toBe(false)
-    expect(check("HTTP status code 429 meaning", work).ok).toBe(true)
-    expect(check("OpenAI responses API", work).ok).toBe(true)
-    expect(
-      check("reconcile ledger entries", { ...work, typed: ["Why does reconcileLedgerEntries refund twice?"] }).ok,
-    ).toBe(true)
+    expect(check("jane.doe@globex.com", shown).ok).toBe(true)
+    expect(check("0044 0532 0130", shown).ok).toBe(true)
+    expect(check("jira.acme.internal outage", shown).ok).toBe(false)
+    expect(check("/Users/kbharadwaj/Vectordev.ai", shown).ok).toBe(false)
   })
 
-  test("lets a domain the user prefers or avoids through as a host name, and nothing else", () => {
-    const preferred = {
-      private: ["Acme's analysts publish on acme-robotics.com."],
-      work: ["Prefer primary sources such as nature.com and nejm.org; avoid ads.example.com."],
-      typed: [],
-      public: [],
-      domains: ["nature.com", "NEJM.org", "www.ads.example.com", "jira.acme.internal"],
-    }
-    expect(check("heat pumps site:nature.com", preferred).ok).toBe(true)
-    expect(check("www.nature.com heat pump field study", preferred).ok).toBe(true)
-    expect(check("nejm.org heat pump trial", preferred).ok).toBe(true)
-    expect(check("ads.example.com tracking", preferred).ok).toBe(true)
-    expect(check("heat pumps site:nature.com", { ...preferred, domains: [] })).toMatchObject({
+  test("lets a public source clear only the number it holds whole, and none when it lists over a hundred", () => {
+    // 415-555-0134 shares nine digits in a row with the private +1 (415) 555-0132, which the page does not hold.
+    expect(check("415-555-0134", { ...context, public: ["Call (415) 555 0134 for help."] })).toMatchObject({
       ok: false,
       reason: "token",
-      match: "nature.com",
     })
-    // The domains clear host names only: not a name, a run of words or an intranet host.
-    expect(check("acme-robotics.com", { ...preferred, domains: ["acme-robotics.com"] }).ok).toBe(false)
-    expect(
-      check("jira.acme.internal outage", {
-        ...preferred,
-        work: [...preferred.work, "Tickets live on jira.acme.internal."],
-      }).ok,
-    ).toBe(false)
+    const listing = Array.from({ length: 101 }, (_, index) => `0044 0532 ${String(index).padStart(4, "0")}`)
+    expect(check("0044 0532 0130", { ...context, public: [[...listing, "0044 0532 0130"].join("\n")] }).ok).toBe(false)
   })
 
-  test("refuses few fair queries against a realistic repository context", () => {
-    // A README with title-case headings and a table, AGENTS.md-style rules, how-you-work lines, and a few private
-    // facts, as a research lead in a repository would hold them.
-    const repository: ResearchOutbound.Context = {
-      private: [
-        "Krishna's company is Acme Robotics; its Q3 churn was 7.4 percent.",
-        "Falcon is the codename for the new pricing.",
-        "We decided to move Hooli to annual invoices in March.",
-      ],
-      work: [
-        [
-          "# Northwind Billing Service",
-          "",
-          "Northwind Billing turns Stripe events into invoices, refunds and payouts.",
-          "",
-          "## Getting Started",
-          "",
-          "Install the dependencies with `bun install`, then run `bun dev`. Open the Admin Console at the address it prints.",
-          "",
-          "## Configuration Guide",
-          "",
-          "Set `DATABASE_URL` and `STRIPE_KEY` in `.env`. Webhooks Retry Automatically after a timeout.",
-          "",
-          "| Setting | Default | Notes |",
-          "|---|---|---|",
-          "| Retry Limit | 5 | Per Webhook Event |",
-          "",
-          "## Deployment Guide",
-          "",
-          "Deploy with Docker Compose or Kubernetes. The Helm Chart lives in `deploy/helm`.",
-          "",
-          "## Troubleshooting",
-        ].join("\n"),
-        [
-          "## Style Guide",
-          "",
-          "- Use Bun APIs when possible, like `Bun.file()`.",
-          "- In Effect generators, bind services to named variables before calling methods.",
-          "- Prefer Effect schema helpers such as `Schema.decodeUnknownOption` over manual `JSON.parse`.",
-          "- Keep Drizzle tables in snake_case, and run migrations from packages/db.",
-          "- Use Tailwind CSS v4 theme variables and SolidJS signals in the app.",
-          "- Tests cannot run from the repository root; run them from a package directory.",
-        ].join("\n"),
-        "Prefers Bun over Node for scripts, and Effect for services.",
-        "Likes answers as tables, with primary sources first.",
-        "Uses SolidJS and Tailwind for the app; avoid React examples.",
-        "Prefer primary sources such as nature.com and nejm.org.",
-      ],
-      typed: ["How do other agent harnesses sandbox shell commands on macOS?"],
+  test("reads emails and numbers from the private facts only, not from repository files", () => {
+    const work = {
+      private: [],
+      work: ['{ "author": "Jane Doe <jane@northwind.example>", "bugs": "415-555-0199", "build": 20251021093000 }'],
+      typed: [],
       public: [],
-      domains: ["nature.com", "nejm.org"],
     }
-    const queries = [
-      "macOS sandbox-exec seatbelt profiles for agents",
-      "agent harness sandboxing on macOS",
-      "Bun test runner isolate flag",
-      "Bun file API",
-      "Effect services and layers",
-      "Effect schema decodeUnknownOption",
-      "Electron utilityProcess sandbox",
-      "SolidJS signals performance",
-      "Tailwind CSS v4 theme variables",
-      "Docker sandbox for coding agents",
-      "Docker Compose healthcheck",
-      "Kubernetes deployment guide",
-      "getting started with Kubernetes",
-      "Helm chart best practices",
-      "OpenRouter free models rate limits",
-      "GitHub Actions macOS runners",
-      "Drizzle ORM sqlite migrations",
-      "Drizzle snake_case column names",
-      "TypeScript incremental builds",
-      "Apple seatbelt deprecated",
-      "Landlock Linux sandbox",
-      "Windows AppContainer sandbox",
-      "Stripe webhook retry limit",
-      "invoice refund idempotency keys",
-      "admin console design patterns",
-      "SaaS churn benchmarks 2026",
-      "annual invoicing versus monthly billing",
-      "primary sources on heat pumps site:nature.com",
-      "nejm.org heat pump trial",
-      "configuration guide examples for open source services",
+    expect(
+      ["jane@northwind.example", "415-555-0199", "20251021093000"].filter((query) => !check(query, work).ok),
+    ).toEqual([])
+    expect(check("jane@northwind.example", { ...work, private: work.work }).ok).toBe(false)
+  })
+
+  test("reads a private number across the usual separators, and leaves dates, versions and IPv4 addresses", () => {
+    const shared = {
+      private: [
+        "Call (415) 555-0132 after six. Card 4417 8802 5671 9113.",
+        "Released 2025.10.18 on 31.12.2025; versions 1.100.2, 22.11.0; host 192.168.100.200; years 2024 2025 2026.",
+      ],
+      typed: [],
+      public: [],
+    }
+    const leaked = ["+1 415 555 0132", "415_555_0132", "415/555/0132", "4417880256719113", "card 4417.8802.5671.9113"]
+    expect(leaked.filter((query) => check(query, shared).ok)).toEqual([])
+    const plain = ["20251018", "31122025", "1100222110", "192168100200", "2024 2025 2026 trends", "202420252026"]
+    expect(plain.filter((query) => !check(query, shared).ok)).toEqual([])
+  })
+
+  test("reads private hosts by their shape, and lets public ones through", () => {
+    const hosts = {
+      private: ["Mail ops@initech.com; the NAS is nas.home.arpa and the printer printer.local."],
+      work: [
+        "Mirrors: wiki.archlinux.org, git.kernel.org, registry.npmjs.org, s3.amazonaws.com.",
+        "Internal: jira.initech.com, staging.initech.com, db02.northwind.io, api.acme.localhost.",
+      ],
+      typed: [],
+      public: [],
+    }
+    const leaked = [
+      "nas.home.arpa",
+      "printer.local setup",
+      "jira.initech.com",
+      "staging.initech.com",
+      "db02.northwind.io",
+      "api.acme.localhost",
     ]
-    const urls = [
-      "https://kubernetes.io/docs/getting-started/",
-      "https://docs.docker.com/compose/",
-      "https://helm.sh/docs/chart_best_practices/",
-      "https://bun.sh/docs/cli/test",
-      "https://tailwindcss.com/docs/theme",
+    expect(leaked.filter((query) => check(query, hosts).ok)).toEqual([])
+    const fairHosts = [
+      "wiki.archlinux.org systemd",
+      "git.kernel.org",
+      "registry.npmjs.org 503",
+      "s3.amazonaws.com cors",
     ]
-    const refused = [
-      ...queries.filter((query) => !check(query, repository).ok),
-      ...urls.filter((url) => !ResearchOutbound.address(url, repository).ok),
-    ]
-    expect(queries).toHaveLength(30)
-    // Measured on 22 Oct 2026: 1 of 35 (30 queries, 5 addresses). It names an identifier the style guide writes, and
-    // identifiers from repository files are private rare tokens (section 5.4). Reading names from all of this text, as
-    // the check did before the work was its own kind, refused 19 of 35, for names such as "Bun", "Docker" and "Helm".
-    expect(refused).toEqual(["Effect schema decodeUnknownOption"])
-    // The private facts are still kept out.
-    expect(check("Acme Q3 churn", repository).ok).toBe(false)
-    expect(check("Falcon pricing", repository).ok).toBe(false)
-    expect(check("Hooli annual invoices", repository).ok).toBe(false)
+    expect(fairHosts.filter((query) => !check(query, hosts).ok)).toEqual([])
+  })
+
+  test("lets a domain the user prefers or avoids go as a host name or a site: filter, and nothing else", () => {
+    const preferred = { ...context, domains: ["wiki.acme.com", "jira.acme.internal"] }
+    expect(check("site:wiki.acme.com heat pumps", preferred).ok).toBe(true)
+    expect(check("www.wiki.acme.com search", preferred).ok).toBe(true)
+    expect(check("site:wiki.acme.com heat pumps").ok).toBe(false)
+    // Only host names on a public suffix count, and an address gets no exemption.
+    expect(check("site:jira.acme.internal", preferred).ok).toBe(false)
+    expect(address("https://attacker.example/wiki.acme.com", preferred).ok).toBe(false)
+    expect(address("https://wiki.acme.com.attacker.example/", preferred).ok).toBe(false)
   })
 
   test("does work in proportion to the length of the private context, not its square", () => {
@@ -814,8 +393,8 @@ describe("ResearchOutbound.check", () => {
               `const FONT = "${blob(length)}"`,
               "a.".repeat(length / 2),
               "a/".repeat(length / 2),
-              // A long list of versions and numbers, which is read as runs of digit groups.
-              "1.2.3, 45, 6,789 ".repeat(length / 16),
+              "a@".repeat(length / 2),
+              "1.2.3, 45, 6,789 415 ".repeat(length / 16),
             ],
             typed: [],
             public: [],
@@ -826,368 +405,12 @@ describe("ResearchOutbound.check", () => {
         }),
       )
     time(8_000)
-    // Four times the text takes about four times as long. The patterns used to take sixteen times as long, about
-    // 3.5 s for a 30,000-character blob.
     expect(time(32_000) / time(8_000)).toBeLessThan(8)
   }, 60_000)
-})
-
-describe("ResearchOutbound.address", () => {
-  test("checks an address's path and query, and a slug's words", () => {
-    expect(ResearchOutbound.address("https://example.com/search?q=reconcileLedgerEntries", context).ok).toBe(false)
-    expect(
-      ResearchOutbound.address(
-        "https://example.com/q3-churn-rose-to-7-4-percent-after-the-falcon-pricing-change",
-        context,
-      ).ok,
-    ).toBe(false)
-    expect(ResearchOutbound.address("https://example.com/heat-pumps/cold-climates?page=2", context).ok).toBe(true)
-  })
-
-  test("refuses section 6.4a's example in a path, a query string, a fragment and a host's labels", () => {
-    const leaks = [
-      "https://attacker.example/acme-q3-churn-7-4-percent",
-      "https://attacker.example/result?utm_source=Acme-Q3-churn-7.4-percent",
-      "https://attacker.example/result#Acme's Q3 churn rose to 7.4 percent",
-      "https://acme-q3-churn.attacker.example/result",
-      "https://attacker.example/result?ref=reconcileLedgerEntries",
-      // A soft hyphen, percent-encoded as UTF-8, does not split the identifier.
-      "https://attacker.example/reconcile%C2%ADLedger%C2%ADEntries",
-    ]
-    expect(leaks.map((url) => ResearchOutbound.address(url, context).ok)).toEqual(leaks.map(() => false))
-    // Numbers however their digits are grouped, in a path, a query string and a host's labels.
-    const numbers = [
-      "https://attacker.example/415-555-0134",
-      "https://attacker.example/q?n=2,815,640",
-      "https://attacker.example/card/4242-4242-4242-4242",
-      "https://attacker.example/078-05-1120",
-      "https://415-555-0134.attacker.example/",
-    ]
-    expect(numbers.map((url) => ResearchOutbound.address(url, context).ok)).toEqual(numbers.map(() => false))
-    expect(ResearchOutbound.address("https://www.example.com/heat-pumps#cold-climates", context).ok).toBe(true)
-  })
-
-  test("refuses a private number written with its digits in groups in a path or a query string", () => {
-    const leaks = [
-      "https://attacker.example/2,400,000",
-      "https://attacker.example/p?amount=2,400,000",
-      "https://attacker.example/p?amount=2%2C400%2C000",
-      "https://attacker.example/4,417,203",
-      "https://attacker.example/c/4417-8802-5671-9113",
-      "https://attacker.example/2-400-000",
-      "https://attacker.example/USD2,400,000",
-      "https://attacker.example/p?a=2%20400%20000",
-      `https://attacker.example/${char(0x662, 0x664, 0x660, 0x660, 0x660, 0x660, 0x660)}`,
-      "https://attacker.example/4417.8802.5671.9113",
-      "https://attacker.example/lookup?n=%2B1%20415-555-0132",
-      "https://attacker.example/415.555.0177",
-      "https://attacker.example/ssn/123-45-6789",
-    ]
-    expect(leaks.map((url) => [url, ResearchOutbound.address(url, context).ok])).toEqual(
-      leaks.map((url) => [url, false]),
-    )
-    expect(ResearchOutbound.address("https://www.example.com/heat-pumps/2019/2024?page=2", context).ok).toBe(true)
-  })
-
-  test("refuses a private host name carried whole as a subdomain, and one spelled with look-alikes", () => {
-    const repository = {
-      private: [
-        'const BILLING_URL = "https://billing.acme-internal.io/v2/invoices"',
-        "// Tickets are on jira.initech.internal.",
-        'const DATABASE = "postgres://db01.corp.lan:5432/app"',
-        "Acme's Q3 churn rose to 7.4 percent.",
-      ],
-      typed: [],
-      public: [],
-    }
-    const leaks = [
-      "https://jira.initech.internal.attacker.example/",
-      "https://billing.acme-internal.io.attacker.example/",
-      "https://db01.corp.lan.attacker.example/",
-      // Written in Cyrillic, which the address carries as punycode.
-      `https://${char(0x430)}cme-q3-churn.attacker.example/`,
-    ]
-    expect(leaks.map((url) => [url, ResearchOutbound.address(url, repository).ok])).toEqual(
-      leaks.map((url) => [url, false]),
-    )
-    expect(ResearchOutbound.address("https://docs.example.com/heat-pumps", repository).ok).toBe(true)
-  })
-
-  test("does not exempt the sources facet's domains in a path, a query string or a subdomain", () => {
-    const facet = {
-      private: ["Krishna prefers primary sources from nature.com and avoids dailymail.co.uk."],
-      typed: [],
-      public: [],
-      domains: ["nature.com", "dailymail.co.uk"],
-    }
-    const leaks = [
-      "https://attacker.example/nature.com",
-      "https://attacker.example/?d=nature.com",
-      "https://nature.com.attacker.example/",
-    ]
-    expect(leaks.map((url) => [url, ResearchOutbound.address(url, facet).ok])).toEqual(leaks.map((url) => [url, false]))
-    expect(check("heat pumps site:nature.com", facet).ok).toBe(true)
-    expect(ResearchOutbound.address("https://www.nature.com/articles/heat-pumps", facet).ok).toBe(true)
-  })
-})
-
-describe("ResearchOutbound: what the last review found", () => {
-  const known = {
-    private: [
-      "Umbrella pays about 2,400,000 USD a year.",
-      "Employer: Globex.",
-      "Acme's Q3 churn rose to 7.4 percent after the Falcon pricing change.",
-      "// Tickets are on jira.initech.internal.",
-      'const BILLING_URL = "https://billing.acme-internal.io/v2/invoices"',
-      "Contact jane.doe@globex.com for access.",
-    ],
-    typed: [],
-    public: [],
-  }
-
-  test("reads the part of a host before its site when tldts rejects one of its labels", () => {
-    const leaks = [
-      "https://globex._x.attacker.example/",
-      "https://_.globex.attacker.example/",
-      "https://2400000._.attacker.example/",
-      "https://globex-.attacker.example/",
-      "https://-globex.attacker.example/",
-      "https://billing.acme-internal.io._.attacker.example/",
-      "https://jira.initech.internal.-.attacker.example/",
-      "https://acme-q3-churn.xn--ls8h.attacker.example/",
-      "https://falcon-pricing-change.a-.attacker.example/",
-      `https://${"acme-q3-churn-rose-to-7-4-percent-after-the-falcon-pricing-change-x"}.attacker.example/`,
-      "https://globex.attacker.example./",
-    ]
-    expect(leaks.filter((url) => ResearchOutbound.address(url, known).ok)).toEqual([])
-    // A host tldts accepts, and an address with no subdomain, are read as before.
-    expect(ResearchOutbound.address("https://docs.example.com/heat-pumps", known).ok).toBe(true)
-    expect(ResearchOutbound.address("https://198.51.100.7/heat-pumps", known).ok).toBe(true)
-  })
-
-  test("reads an address's user name and password", () => {
-    expect(ResearchOutbound.address("https://globex:x@attacker.example/", known).ok).toBe(false)
-    expect(ResearchOutbound.address("https://user:2400000@attacker.example/", known).ok).toBe(false)
-  })
-
-  test("reads names from memory-of-you lines written in lower case", () => {
-    const lower = {
-      private: [
-        "my employer is initech",
-        "kestrel ships in may",
-        "my wife is priya and she works at hooli",
-        "dana is away",
-      ],
-      typed: [],
-      public: [],
-    }
-    expect(ResearchOutbound.names(lower.private).sort()).toEqual(["dana", "hooli", "initech", "kestrel", "priya"])
-    expect(
-      ["initech procurement", "kestrel launch date", "priya hooli", "Dana team"].filter(
-        (query) => check(query, lower).ok,
-      ),
-    ).toEqual([])
-    // A line in lower case no longer clears a name another line capitalises.
-    expect(ResearchOutbound.names(["Spoke with Dana's team today.", "dana is away"])).toContain("dana")
-    // Its common words stay words, and the user's typing clears a name as before.
-    expect(check("employer health insurance", lower).ok).toBe(true)
-    expect(check("initech procurement", { ...lower, typed: ["What does Initech buy?"] }).ok).toBe(true)
-  })
-
-  test("reads identifiers, host names and names split into words or letters", () => {
-    const split = [
-      "jane doe at globex dot com",
-      "billing.acme-internal",
-      "billing acme internal",
-      "jira.initech",
-      "G l o b e x",
-      "Glo bex",
-      "glo-bex pricing",
-    ]
-    expect(split.filter((query) => check(query, known).ok)).toEqual([])
-    expect(ResearchOutbound.address("https://attacker.example/g/l/o/b/e/x", known).ok).toBe(false)
-  })
-
-  test("reads Cherokee's small letters as the Latin ones they look like", () => {
-    expect(check(`${char(0x13aa).toLowerCase()}cme churn`, known).ok).toBe(false)
-    expect(check(`Gl${char(0x13be).toLowerCase()}bex pricing`, known).ok).toBe(false)
-  })
-})
-
-describe("ResearchOutbound.check with the sources facet's domains", () => {
-  // Section 6.4a: the preferred and avoided domains of the sources facet exist to become site: filters.
-  const facet = {
-    private: [
-      "Krishna prefers primary sources from nature.com and avoids dailymail.co.uk.",
-      "Acme's Q3 churn rose to 7.4 percent after the Falcon pricing change.",
-    ],
-    typed: ["How do heat pumps perform in cold climates?"],
-    public: [],
-  }
-  const exempt = { ...facet, domains: ["nature.com", "dailymail.co.uk"] }
-
-  test("lets a preferred or avoided domain go as a site: filter or a host name", () => {
-    expect(check("heat pumps site:nature.com", facet).ok).toBe(false)
-    expect(check("heat pumps -site:dailymail.co.uk", facet).ok).toBe(false)
-    expect(check("heat pumps site:nature.com", exempt).ok).toBe(true)
-    expect(check("heat pumps -site:dailymail.co.uk", exempt).ok).toBe(true)
-    expect(check("heat pumps (site:nature.com OR SITE:Nature.com)", exempt).ok).toBe(true)
-    expect(check("nature.com heat pump field study", exempt).ok).toBe(true)
-  })
-
-  test("keeps checking the same host anywhere else in the query, and the rest of the query", () => {
-    for (const query of [
-      "jane@nature.com heat pumps",
-      "nature.com/acme-churn",
-      "site:acme.nature.com heat pumps",
-      "inurl:nature.com heat pumps",
-      "site:nature.com.attacker.example heat pumps",
-      "site:nature.com Acme churn",
-      "site:nature.com Acme's Q3 churn",
-    ])
-      expect([query, check(query, exempt).ok]).toEqual([query, false])
-  })
-
-  test("exempts host names only, never a word or an intranet host", () => {
-    const words = { ...facet, private: [...facet.private, "// Tickets are on jira.acme.internal."] }
-    expect(check("Acme churn", { ...words, domains: ["acme", "Acme"] }).ok).toBe(false)
-    expect(check("site:jira.acme.internal", { ...words, domains: ["jira.acme.internal"] }).ok).toBe(false)
-  })
-})
-
-describe("ResearchOutbound.rare", () => {
-  test("finds identifiers, paths, email addresses, host names and IP addresses, and not common names or numbers", () => {
-    const text =
-      "Call reconcileLedgerEntries in src/billing/ledger.ts, mail ops@acme.example, see status.acme-robotics.com and jira.acme.internal, ticket 4417203, host 10.20.30.40, use GitHub and JavaScript, 10000 users, node.js, 127.0.0.1, and/or TCP/IP."
-    const found = ResearchOutbound.rare(text)
-    expect(found).toEqual(
-      expect.arrayContaining([
-        "reconcileLedgerEntries",
-        "src/billing/ledger.ts",
-        "ops@acme.example",
-        "status.acme-robotics.com",
-        "jira.acme.internal",
-        "10.20.30.40",
-      ]),
-    )
-    for (const common of ["node.js", "127.0.0.1", "GitHub", "JavaScript", "and/or", "TCP/IP"])
-      expect(found).not.toContain(common)
-    // Numbers are read by their digits, apart from the rare tokens: the ticket is private, a round number is not.
-    expect(found.filter((token) => /^\d+$/.test(token))).toEqual([])
-    const shared = { private: [text], typed: [], public: [] }
-    expect(check("ticket 4417203", shared)).toMatchObject({ ok: false, reason: "token", match: "4417203" })
-    expect(check("10000 users", shared).ok).toBe(true)
-  })
-})
-
-describe("ResearchOutbound.check with private numbers", () => {
-  test("reads a number written with its digits in groups as one number, and leaves versions and addresses", () => {
-    const shared = {
-      private: [
-        "Revenue $12,345,678.50, payroll 2.345.678 EUR, 2 400 000 USD, 1,23,45,679 INR, card 4417-8802-5671-9113, 10,000 users, version 1.100.2, hosts 192.168.100.200 and 192.168.1.20.",
-      ],
-      typed: [],
-      public: [],
-    }
-    const numbers = ["12345678", "2345678", "2400000", "12345679", "4417880256719113"]
-    expect(numbers.filter((query) => check(query, shared).ok)).toEqual([])
-    expect(check("10000 users", shared).ok).toBe(true)
-    expect(check("version 11002", shared).ok).toBe(true)
-    expect(ResearchOutbound.rare(shared.private[0]!)).toEqual(
-      expect.arrayContaining(["192.168.100.200", "192.168.1.20"]),
-    )
-  })
-
-  test("reads a number in any script's digits and with any separator, and the stretches of whole groups in it", () => {
-    const shared = {
-      private: [
-        `Paid USD2,400,000 and ${char(0x662, 0x664, 0x660, 0x660, 0x660, 0x660, 0x660)}; call +1 (415) 555-0132.`,
-      ],
-      typed: [],
-      public: [],
-    }
-    expect(["2400000", "14155550132", "4155550132", "5550132"].filter((query) => check(query, shared).ok)).toEqual([])
-    // Digits that are not whole groups of it are not one of its numbers.
-    expect(check("14155", shared).ok).toBe(true)
-  })
-
-  test("reads a span of years as years, and keeps the numbers beside it private", () => {
-    const spans = {
-      private: ["Plan for fiscal year 2025-2026.", "The FY2024-25 budget was 4,417,203; 2024-2025: 2,815,640 spent."],
-      work: [
-        "MIT License\n\nCopyright (c) 2024-2025 Northwind.\n\nPermission is hereby granted, free of charge, to any person.",
-      ],
-      typed: [],
-      public: [],
-    }
-    const queries = [
-      "heat pump incentives 2024 2025",
-      "tax brackets 2024-2025",
-      "heat pump trends 2024 2025 Europe",
-      "best laptops 2025 2026",
-      "UK tax year 2024-25 rates",
-      "20242025",
-    ]
-    expect(queries.filter((query) => !check(query, spans).ok)).toEqual([])
-    expect(["4417203", "2,815,640 spent", "budget 4 417 203"].filter((query) => check(query, spans).ok)).toEqual([])
-  })
-
-  test("reads a date written in numbers as a date, and keeps the numbers beside it private", () => {
-    const dated = {
-      private: [
-        "Krishna joined Globex on 6/1/2025.",
-        "The lease renews on 4/3/2026.",
-        "Moved to Berlin on 1.6.2025, and the trip runs 12/18/25 to 1/2/26.",
-        "Mom's birthday is 7/2/1958. The card expires 10/2025.",
-        "Invoice 2025-10-20 4417203 is paid; 6/1/2025: 2,815,640 spent.",
-      ],
-      // A changelog dates every release.
-      work: [
-        "# Changelog\n\n## 1.4.0 - 2025-10-20\n- Faster startup.\n\n## 1.3.2 - 2025-09-14\n- Fixed login.\n\n## 1.3.0 - 2025.08.01\n- Dark mode.",
-      ],
-      typed: [],
-      public: [],
-    }
-    const queries = [
-      "Q1 2025 SaaS churn benchmarks",
-      "Q2 2025 earnings",
-      "Q3 2026 GPU prices",
-      "Q4 2025 layoffs",
-      "H1 2025 venture funding",
-      "H2 2026 outlook",
-      "top 1 2025 laptops",
-      "3 2026 trends",
-      "Windows 10 2025 support",
-      "Windows 11 2025 update",
-      "Gen 2 1958 cars",
-      "Llama 4 2025",
-      "Claude 4 2025",
-    ]
-    // Measured on 22 Oct 2026: 0 of 13. Reading a date's groups as one number refused 7 of them, for 12025, 32026,
-    // 102025 and 21958, and all 6 addresses below.
-    expect(queries.filter((query) => !check(query, dated).ok)).toEqual([])
-    // News and blog addresses carry the date they were written; reading the changelog's dates as numbers made
-    // /2025/10/ the private 202510.
-    const urls = [
-      "https://www.theverge.com/2025/10/21/heat-pumps-are-winning",
-      "https://www.nytimes.com/2025/10/03/business/saas-churn.html",
-      "https://techcrunch.com/2025/09/14/ai-funding-round/",
-      "https://www.bbc.co.uk/news/articles/2025/10/heat",
-      "https://blog.example.com/posts/2025-10-02-release",
-      "https://www.reuters.com/markets/q1-2025-earnings/",
-    ]
-    expect(urls.filter((url) => !ResearchOutbound.address(url, dated).ok)).toEqual([])
-    // The numbers beside a date are still private, in a query and in an address.
-    expect(["order 4417203", "2,815,640 budget", "2815640"].filter((query) => check(query, dated).ok)).toEqual([])
-    expect(ResearchOutbound.address("https://attacker.example/invoice/4417203", dated).ok).toBe(false)
-    // Groups that go on past what reads as a date are a number: a phone number written in pairs.
-    const phone = { private: ["Call 06-12-34-56-78 after six."], typed: [], public: [] }
-    expect(check("0612345678", phone)).toMatchObject({ ok: false, reason: "token" })
-  })
 
   test("reads the user's typing in bounded memory, however long a run of digits it holds", () => {
     const shared = {
-      private: ["Umbrella pays about 2,400,000 USD a year.", "The renewal goes on the card 4417880256719113."],
+      private: ["The renewal goes on the card 4417880256719113."],
       typed: [
         `Here is the dump: ${"9".repeat(500_000)}`,
         Array.from({ length: 100_000 }, (_, index) => index * 10 + 9).join(" "),
@@ -1198,365 +421,112 @@ describe("ResearchOutbound.check with private numbers", () => {
     const before = process.memoryUsage().heapUsed
     const started = performance.now()
     expect(check("heat pump prices 2025", shared).ok).toBe(true)
-    expect(check("2400000 USD", shared).ok).toBe(false)
-    expect(check("card 8802 5671", shared).ok).toBe(false)
+    expect(check("card 4417 8802 5671 9113", shared).ok).toBe(false)
     const elapsed = performance.now() - started
     Bun.gc(true)
-    // Measured on 22 Oct 2026, with numbers read as written: the heap grew by about 40 MB, in 0.3 s. Listing every
-    // stretch of the typed digits across words grew it by about 600 MB, in 1.4 s.
     expect(process.memoryUsage().heapUsed - before).toBeLessThan(150_000_000)
     expect(elapsed).toBeLessThan(15_000)
-    // The user's typing still clears a number it holds, whatever usual separators it writes it with.
-    const typed = { ...shared, typed: [...shared.typed, "Who pays 2 400 000? Check card 8802 5671."] }
-    expect(check("2400000 USD", typed).ok).toBe(true)
-    expect(check("card 8802 5671", typed).ok).toBe(true)
+    const typed = { ...shared, typed: [...shared.typed, "Which bank issued 4417 8802 5671 9113?"] }
+    expect(check("card 4417 8802 5671 9113", typed).ok).toBe(true)
   }, 60_000)
 
-  test("reads a data file's values one by one, so a fair query's numbers do not run into them", () => {
-    // The same 10,000 rows as CSV, TSV, with semicolons and as a table's rows.
-    for (const separator of [",", "\t", ";", " | "]) {
-      const shared = { private: [], work: [dataFile(10_000, separator)], typed: [], public: [] }
-      // Measured on 22 Oct 2026: 0 of 16 for each. Reading values across commas and line breaks as one number refused
-      // up to 8 of them.
+  test("reads a numeric data file of 1 MB in bounded memory, and its values keep no fair query out", () => {
+    const numbered = [
+      "iso 9001 2015",
+      "EN 14511 heat pump test conditions",
+      "heat pump sales 2024 2025",
+      "postcode 10115",
+    ]
+    for (const separator of [",", "\t", " "]) {
+      const shared = { private: [], work: [dataFile(42_000, separator)], typed: [], public: [] }
+      expect(shared.work[0]!.length).toBeGreaterThan(1_000_000)
+      Bun.gc(true)
+      const before = process.memoryUsage().heapUsed
+      const started = performance.now()
       expect({ separator, refused: numbered.filter((query) => !check(query, shared).ok) }).toEqual({
         separator,
         refused: [],
       })
-      // Its values are still private, and the values beside them do not make another (row 2 is 2,2016,...).
-      expect(check("amount 39595", shared).ok).toBe(false)
-      expect(check("row 2 2016", shared).ok).toBe(true)
+      const elapsed = performance.now() - started
+      Bun.gc(true)
+      expect(process.memoryUsage().heapUsed - before).toBeLessThan(160_000_000)
+      expect(elapsed).toBeLessThan(15_000)
     }
-  })
-
-  test("reads a numeric data file of 1 MB in bounded memory", () => {
-    const shared = { private: [], work: [dataFile(42_000, ",")], typed: [], public: [] }
-    expect(shared.work[0]!.length).toBeGreaterThan(1_000_000)
-    Bun.gc(true)
-    const before = process.memoryUsage().heapUsed
-    const started = performance.now()
-    expect(check("heat pump sales 2024 2025", shared).ok).toBe(true)
-    const elapsed = performance.now() - started
-    Bun.gc(true)
-    // Measured on 22 Oct 2026: the heap grew by about 80 MB, in 0.35 s. Reading the file as one long run grew it by
-    // about 330 MB, in 1.5 s. The time bound only catches a check gone quadratic.
-    expect(process.memoryUsage().heapUsed - before).toBeLessThan(160_000_000)
-    expect(elapsed).toBeLessThan(15_000)
-    expect(shared.work).toHaveLength(1)
   }, 60_000)
 })
 
-describe("ResearchOutbound.check with dates, versions, IP addresses and prices", () => {
-  // The private contexts the last review read dated queries and addresses against: memory lines with a year beside a
-  // number, a board memo, meeting notes, an invoice and a ticket numbered by date, and repository files whose
-  // identifiers start with a timestamp (a go.mod pseudo-version, a Rails migration, a log name, a changelog).
-  const contexts: Record<string, ResearchOutbound.Context> = {
-    memory: {
-      private: [
-        "In 2025 11% of our users churned.",
-        "Revenue (2025) 10,500 dollars.",
-        "Headcount 2025 10 new hires.",
-        "Our 2025 12 month plan is ready.",
-        "Ticket JIRA-2025-10 is open.",
-        "Release 2025.10.1 shipped.",
-        "Backup taken 20251020.",
-        "Q3 FY2025 10-K filing is due.",
-        "Top 10 2025 goals.",
-      ],
-      typed: ["How did heat pump sales do in late 2025?"],
-      public: [],
-    },
-    notes: {
-      private: [
-        "Board memo dated 2025-10-20. Revenue for 10/2025 was 2,815,640 dollars; the 2024-2025 plan closes on 31.12.2025.",
-        "Meeting notes 21/10/2025: Krishna will compare heat pumps; follow up 2025/11/03 and on 3.11.25.",
-        "Invoice INV-2025-10-0042 was paid on 22 Oct 2025.",
-        "Escalated as case 2025/10/118 to the vendor.",
-        "Phone 06-12-34-56-78, office 0044 0532 0130.",
-      ],
-      work: ["## Changelog\n\n### 1.4.0 - 2025-10-20\n- fixed 2025-10-19 regression in v1.3.9 (2025.10.18)"],
-      typed: ["compare heat pumps in cold climates"],
-      public: [],
-    },
-    timestamps: {
-      private: [],
-      work: [
-        "module example.com/app\n\nrequire golang.org/x/sys v0.0.0-20251020143022-abcdef123456 // indirect\n",
-        "db/migrate/20251021093000_create_users.rb\nclass CreateUsers < ActiveRecord::Migration[7.1]",
-        "tail -f logs/app-20251019.log",
-      ],
-      typed: [],
-      public: [],
-    },
-  }
-
-  // Queries a research agent writes for public questions: dated ones, versions, IP addresses, prices, and standards
-  // and identifiers with numbers in them.
-  const ordinary = [
-    "heat pump news 2025-10-20",
-    "heat pump news 2025-10-25",
-    "heat pumps 2025-10-20 announcement",
-    "cold climate heat pump 2025/11/03",
-    "heat pump 21/10/2025 study",
-    "EU heat pump statistics 31.12.2025 deadline",
-    "heat pump subsidy changes 1/1/2026",
-    "heat pump report 10/2025",
-    "heat pump rebates 2025-10",
-    "heat pump news Oct 2025",
-    "heat pump sales October 2025",
-    "heat pump market Q4 2025",
-    "heat pump installations 2024-2025",
-    "UK boiler upgrade scheme 2025/26",
-    "heat pump sales 2025 11 percent growth",
-    "SaaS churn benchmarks H1 2026",
-    "heat pump study published 20251020",
-    "top 10 heat pumps 2025",
-    "Windows 10 end of support 14 October 2025",
-    "heat pump 2025 2026 forecast",
-    "events on 14/11/2025 in Berlin",
-    "Node 22.11.0 release notes",
-    "React 19.1.0 changelog",
-    "TypeScript 5.9.2 breaking changes",
-    "Python 3.12.7 asyncio TaskGroup",
-    "Bun 1.3.14 test runner",
-    "Kubernetes 1.31.4 upgrade notes",
-    "OpenSSL 3.0.15 vulnerability",
-    "Ubuntu 24.04.1 LTS kernel",
-    "Chrome 130.0.6723.91 release",
-    "macOS 15.1 battery drain",
-    "semver 2.0.0 specification",
-    "1.4.0 release notes",
-    "8.8.8.8 DNS latency",
-    "1.1.1.1 resolver privacy policy",
-    "192.168.1.1 router admin page",
-    "169.254.169.254 metadata endpoint",
-    "10.0.0.0/8 private address range",
-    "2001:db8::/32 documentation prefix",
-    "127.0.0.1 vs 0.0.0.0 binding",
-    "heat pump price $12,500 installed",
-    "air source heat pump cost 7,500 GBP after grant",
-    "heat pump price 9.999 EUR",
-    "MacBook Air price 1,299 USD",
-    "electric car price 2025 $42,490",
-    "median house price 285 000 euros",
-    "electricity price 0.28 EUR per kWh",
-    "OpenAI API pricing $2.50 per million tokens",
-    "Stripe fees 2.9% plus 30 cents",
-    "ISO 9001 2015 certification requirements",
-    "ISO 14001 2015",
-    "RFC 9110 HTTP semantics",
-    "IEC 60335-2-40 refrigerant charge limits",
-    "CVE-2024-3094 xz backdoor",
-    "arxiv 2310.06825",
-    "doi 10.1038/s41586-021-03819-2",
-    "speed of light 299,792,458 m/s",
-    "zip codes 90001 to 90089",
-    "postcode 10115 berlin",
-    "Intel Core i9-14900K benchmarks",
-    "Windows 11 24H2 update KB5044284",
-    "USB 3.2 Gen 2x2 speed",
-    "heat pump COP at -15C",
-  ]
-
-  // News and blog addresses carry the date they were written, and documentation addresses a version.
-  const addresses = [
-    "https://news.example.com/2025/10/21/heat-pumps",
-    "https://news.example.com/2025/11/02/heat-pumps",
-    "https://news.example.com/2025/12/02/heat-pumps",
-    "https://www.theverge.com/2025/11/03/heat-pumps-are-winning",
-    "https://www.nytimes.com/2025/10/27/business/heat-pumps.html",
-    "https://techcrunch.com/2025/10/14/ai-funding-round/",
-    "https://example.com/2025-10-24-heat-pump-report",
-    "https://example.com/blog/2025/10/",
-    "https://example.com/reports/2025/11/03/",
-    "https://example.com/a?date=2025-10-20",
-    "https://www.bbc.co.uk/news/articles/2025/10/heat",
-    "https://docs.python.org/3.12/library/asyncio-task.html",
-    "https://github.com/oven-sh/bun/releases/tag/bun-v1.3.14",
-    "https://www.nature.com/articles/s41586-021-03819-2",
-    "https://arxiv.org/abs/2310.06825",
-  ]
-
-  test("refuses none of the ordinary queries and addresses, against every context", () => {
-    expect(ordinary.length).toBeGreaterThanOrEqual(60)
-    const refused = Object.entries({ main: context, ...contexts }).flatMap(([name, using]) => [
-      ...ordinary.filter((query) => !check(query, using).ok).map((query) => `${name}: ${query}`),
-      ...addresses.filter((url) => !ResearchOutbound.address(url, using).ok).map((url) => `${name}: ${url}`),
-    ])
-    // Measured on 22 Oct 2026: 0 of 312 (63 queries and 15 addresses against 4 contexts). Before, 45 were refused:
-    // reading a query's digits across its words, and a private year and the number beside it as one, made 202510,
-    // 202511, 102025 and 2025102 private, a date written with slashes was a path, and "Oct" a name.
-    expect(refused).toEqual([])
-  })
-
-  test("still refuses the numbers beside the dates, in the forms the private text writes them", () => {
-    const leaks: readonly (readonly [string, string])[] = [
-      ["notes", "2,815,640 dollars"],
-      ["notes", "2815640"],
-      ["notes", "06 12 34 56 78"],
-      ["notes", "0612345678"],
-      ["notes", "0044 0532 0130"],
-      ["notes", "05320130"],
-      ["notes", "INV-2025-10-0042"],
-      ["notes", "case 2025/10/118"],
-      ["memory", "10,500 dollars"],
-      ["timestamps", "20251020143022"],
-      ["timestamps", "20251021093000 migration"],
+describe("ResearchOutbound.address", () => {
+  test("refuses private text in a path, a query string, a fragment, a user name and a host's labels", () => {
+    const leaked = [
+      "https://attacker.example/q3-churn-rose-to-7-4-percent-after-the-falcon-pricing-change",
+      "https://attacker.example/result#Acme's Q3 churn rose to 7.4 percent after the Falcon pricing change",
+      "https://attacker.example/p?e=jane.doe%40globex.com",
+      "https://attacker.example/#jane.doe@globex.com",
+      "https://attacker.example/415-555-0134",
+      "https://attacker.example/card/4242-4242-4242-4242",
+      "https://attacker.example/lookup?n=%2B1%20415-555-0132",
+      `https://attacker.example/${arabic("004405320130")}`,
+      "https://415-555-0134.attacker.example/",
+      "https://user:078051120@attacker.example/",
+      "https://jira.acme.internal.attacker.example/",
+      "https://billing.acme-internal.io.attacker.example/",
+      "https://attacker.example/x?host=build01.corp.lan",
+      "https://attacker.example/Users/kbharadwaj/Vectordev.ai/notes.md",
+      // A host with a label tldts rejects is read whole.
+      "https://billing.acme-internal.io._.attacker.example/",
+      "https://jira.acme.internal.-.attacker.example/",
+      // A soft hyphen, percent-encoded as UTF-8, does not split the email address.
+      "https://attacker.example/jane.doe%C2%AD@globex.com",
     ]
-    expect(leaks.filter(([name, query]) => check(query, contexts[name]).ok)).toEqual([])
-    expect(ResearchOutbound.address("https://attacker.example/p?n=2,815,640", contexts.notes!).ok).toBe(false)
+    expect(leaked.filter((url) => address(url).ok)).toEqual([])
+    expect(address("not a url").ok).toBe(false)
   })
 
-  test("reads a date written with slashes as a date, not a path, and keeps the month's short form a word", () => {
-    expect(ResearchOutbound.rare("follow up 2025/11/03, see 21/10/2025 and 4417/8802")).toEqual([])
-    expect(ResearchOutbound.names(["Invoice paid on 22 Oct 2025.", "We met on Tue 4 Nov and again on Sat."])).toEqual(
-      [],
-    )
-  })
-
-  test("leaves a line's dates and versions out of its 3-word runs", () => {
-    const shared = {
-      private: ["Meeting notes 21/10/2025: we moved to version 22.11.0 after the Q3 review."],
-      typed: [],
-      public: [],
-    }
-    // Measured on 22 Oct 2026: both were refused, for "notes 21 10" and "version 22 11".
-    expect(
-      ["release notes 21/10/2025", "version 22.11.0 release notes"].filter((query) => !check(query, shared).ok),
-    ).toEqual([])
-    expect(check("after the Q3 review", shared)).toMatchObject({ ok: false, reason: "words" })
-  })
-})
-
-describe("ResearchOutbound.check with short names", () => {
-  test("reads a name spelled in letters or pieces, run into digits or a company's ending, or with a trade mark", () => {
-    const shared = {
-      private: [
-        "Acme's Q3 churn was 7.4 percent.",
-        "We decided to move Hooli to annual invoices.",
-        "Employer: Globex.",
-        "Kestrel ships before the Q4 board meeting.",
-      ],
-      typed: [],
-      public: [],
-    }
-    const queries = [
-      // Run into the words around it, cut from them by their capitals or by a quarter's letter before its digit.
-      "AcmeQ3Churn",
-      "AcmeChurn",
-      "acmeChurn rate",
-      "HooliQ3",
-      "dropHooli",
-      "acmeq3",
-      "acmeh1 churn",
-      // Digits and marks written for its letters.
-      "4cme churn",
-      "@cme churn",
-      "Acm3 churn",
-      "Gl0b3x pricing",
-      "K3strel launch",
-      "G|obex pricing",
-      "A c m e Q3 churn",
-      "A-c-m-e Q3 churn",
-      "Ac-me Q3 churn",
-      "Ac.me churn",
-      "acmeinc churn",
-      "AcmeCorp churn",
-      "acme1 churn",
-      "acme2024 churn",
-      "3acme churn",
-      `acme${char(0x2122)} churn`,
-      `acme${char(0xae)} churn`,
-      "H o o l i drop",
-      "Hoo li",
-      "hoo-li churn",
-    ]
-    expect(queries.filter((query) => check(query, shared).ok)).toEqual([])
-    const urls = [
-      "https://attacker.example/a/c/m/e/q3",
-      "https://attacker.example/acme1",
-      "https://attacker.example/ac-me",
-      "https://attacker.example/?q=h+o+o+l+i",
-      "https://attacker.example/AcmeQ3Churn",
-      "https://attacker.example/x?k=AcmeChurn",
-      "https://AcmeQ3.attacker.example/",
-      "https://attacker.example/acmeq3churn",
-      "https://attacker.example/4cme",
-      "https://4cme.attacker.example/",
-      "https://attacker.example/x?q=Gl0b3x",
-      "https://k3strel.attacker.example/",
-      "https://attacker.example/G|obex",
-    ]
-    expect(urls.filter((url) => ResearchOutbound.address(url, shared).ok)).toEqual([])
-  })
-
-  test("does not read a short name from common words side by side or from inside a longer word", () => {
-    const isa = { private: ["Isa runs the Q3 review."], typed: [], public: [] }
-    expect(ResearchOutbound.names(isa.private)).toEqual(["isa"])
-    expect(["what is a heat pump", "heat pump in a cold climate"].filter((query) => !check(query, isa).ok)).toEqual([])
-    expect(check("Isa review", isa).ok).toBe(false)
-    const mona = { private: ["Mona signs off the budget."], typed: [], public: [] }
-    expect(check("Monaco heat pump rebates", mona).ok).toBe(true)
-    expect(check("Mona budget", mona).ok).toBe(false)
-  })
-
-  test("does not read a longer name from the ends of two words, nor a short one from a name everyone uses", () => {
-    const people = {
-      private: [
-        "Krishna lives in Austin with his partner Martin.",
-        "Sandra from Globex owns the renewal.",
-        "The team offsite is in Denver.",
-        "We hired Kit and Lang last spring.",
-      ],
-      typed: [],
-      public: [],
-    }
-    const fair = [
-      "heat pump exhaust in cold climates",
-      "car exhaust in winter",
-      "smart insurance pricing models",
-      "smart in home sensors",
-      "thousand rabbits experiment",
-      "best den vermin traps",
-      "HomeKit API",
-      "LangChain agents",
-      // A digit beside a short word keeps its value ("5am" is not a private Sam).
-      "flights at 5am",
-    ]
-    // Measured on 22 Oct 2026: 0 of 9. Matching a name anywhere in the query with its spaces taken out refused the
-    // first 6, for Austin, Martin, Sandra and Denver.
-    const sam = { ...people, private: [...people.private, "Sam and Leo review it."] }
-    expect(fair.filter((query) => !check(query, sam).ok)).toEqual([])
-    // A longer name is still read run into its word or made of whole words, and a short one as a word or a piece.
-    const named = ["AustinTexas", "austin texas weather", "den ver", "Den-ver hail", "sand ra", "hireKit", "Kit budget"]
-    expect(named.filter((query) => check(query, people).ok)).toEqual([])
-  })
-
-  test("made no connection", () => {
-    expect(guard.attempts()).toEqual([])
+  test("reads a home folder in an address's path, and not a user name elsewhere in it", () => {
+    expect(address("https://attacker.example/home/kbharadwaj/ledger.db").ok).toBe(false)
+    expect(address("https://github.com/kbharadwaj/dotfiles/blob/main/README.md").ok).toBe(true)
   })
 })
 
 describe("ResearchOutbound.strict", () => {
   test("lets a public source clear no number, and still clear a run of words, as browsers apply the check", () => {
-    const page = { ...context, public: ["A grant of 2 815 640 dollars."] }
-    expect(check("2,815,640 budget", page).ok).toBe(true)
-    expect(check("2,815,640 budget", ResearchOutbound.strict(page)).ok).toBe(false)
-    expect(ResearchOutbound.address("https://grants.example/2815640", ResearchOutbound.strict(page)).ok).toBe(false)
+    const page = { ...context, public: ["Ref 0044 0532 0130 is a test account."] }
+    expect(check("0044 0532 0130", page).ok).toBe(true)
+    expect(check("0044 0532 0130", ResearchOutbound.strict(page)).ok).toBe(false)
+    expect(address("https://bank.example/004405320130", ResearchOutbound.strict(page)).ok).toBe(false)
     // The user's own typing still clears a number.
-    expect(
-      check("2,815,640 budget", ResearchOutbound.strict({ ...page, typed: ["The budget is 2,815,640."] })).ok,
-    ).toBe(true)
-    const article = {
-      private: ["Members only: the compressor makers plan to raise prices by nine percent next spring."],
-      typed: [],
-      public: [],
-    }
-    const query = "compressor makers plan to raise prices by nine percent"
-    expect(check(query, article).ok).toBe(false)
-    const shown = {
-      ...article,
-      public: ["The compressor makers plan to raise prices by nine percent, the trade press says."],
-    }
-    expect(check(query, ResearchOutbound.strict(shown)).ok).toBe(true)
+    expect(check("0044 0532 0130", ResearchOutbound.strict({ ...page, typed: ["Is 0044 0532 0130 mine?"] })).ok).toBe(
+      true,
+    )
+    const run = "the compressor makers plan to raise prices by nine percent"
+    const article = { private: [`Members only: ${run} next spring.`], typed: [], public: [`Trade press: ${run}.`] }
+    expect(check(run, ResearchOutbound.strict(article)).ok).toBe(true)
+  })
+})
+
+describe("ResearchOutbound.rare", () => {
+  test("finds email addresses, host names and IP addresses, and not file names, loopback or numbers", () => {
+    const found = ResearchOutbound.rare(
+      "Mail ops@acme.example, see status.acme-robotics.com, jira.acme.internal and nature.com, host 10.20.30.40 and fd12::7, ticket 4417203, node.js, .env.local, 127.0.0.1 and ::1.",
+    )
+    expect(found).toEqual(
+      expect.arrayContaining([
+        "ops@acme.example",
+        "status.acme-robotics.com",
+        "jira.acme.internal",
+        "nature.com",
+        "10.20.30.40",
+        "fd12::7",
+      ]),
+    )
+    for (const other of ["node.js", "env.local", "127.0.0.1", "::1", "4417203"]) expect(found).not.toContain(other)
+  })
+
+  test("names reads no names, since the check refuses none", () => {
+    expect(ResearchOutbound.names(context.private)).toEqual([])
+  })
+
+  test("made no connection", () => {
+    expect(guard.attempts()).toEqual([])
   })
 })

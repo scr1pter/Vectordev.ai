@@ -288,8 +288,8 @@ it.instance(
       })
       const sent = asked.length
       yield* test.llm.tool("research_plan", plan())
-      // The owner's MEMORY.md names their employer: a query with it is refused before it leaves.
-      yield* test.llm.tool("research_search", { query: "Hooli payments team heat pump savings" })
+      // A query that copies a line of the owner's MEMORY.md is refused before it leaves.
+      yield* test.llm.tool("research_search", { query: "I work at Hooli on the payments team in Lisbon" })
       yield* test.llm.tool("research_search", { query: "heat pump field study savings", recency: "year" })
       // A result's address, which the user never typed, is the run's to read.
       yield* test.llm.tool("research_read", { url: web.url("article", "/") })

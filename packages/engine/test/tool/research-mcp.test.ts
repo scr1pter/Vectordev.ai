@@ -109,7 +109,10 @@ it.instance(
       const build = yield* sessions.create({ title: "Build" })
       yield* test.llm.tool("notes_search", { query: "renewals" })
       yield* test.llm.tool("research", { question: `How do others handle this? ${PRIVATE}`, background: false })
-      yield* test.llm.tool("research", { question: "Who renews with zephyrRenewals?", background: false })
+      yield* test.llm.tool("research", {
+        question: "When Globex renews its contract with us on 14 March, what changes?",
+        background: false,
+      })
       yield* test.llm.text("Done.")
       yield* send({ sessionID: build.id, agent: "build", text: "Look into our renewals.", size: "standard" })
       const [searched] = yield* calls(build.id, "notes_search")

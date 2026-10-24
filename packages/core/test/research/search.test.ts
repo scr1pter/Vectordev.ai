@@ -260,7 +260,13 @@ describe("ResearchSearch.searxng", () => {
 
   test("checks the words it sends, the site filter included, and sends nothing private", async () => {
     const before = web.count("searxng")
-    const leaked = failure(await search("searxng", { query: "Acme's Q3 churn" }, () => Effect.void))
+    const leaked = failure(
+      await search(
+        "searxng",
+        { query: "Acme's Q3 churn rose to 7.4 percent after the Falcon pricing change" },
+        () => Effect.void,
+      ),
+    )
     expect(leaked).toMatchObject({
       _tag: "ResearchSearchRefused",
       reason: "words",
@@ -273,18 +279,19 @@ describe("ResearchSearch.searxng", () => {
     expect(web.count("searxng")).toBe(before)
   })
 
-  test("sends a site filter on a domain the user prefers, though a private line names it, and checks every other host", async () => {
-    // A learned preference names its domains, and they exist to become site: filters (section 6.4a).
+  test("sends a site filter on a domain the user prefers, though it looks internal, and checks every other host", async () => {
+    // A learned preference names its domains, and they exist to become site: filters (section 6.4a). The work names
+    // wiki.acme.com beside an address at acme.com, so without the preference it reads as an internal host.
     const preferring = {
       ...context,
-      work: ["Prefer primary sources such as nature.com and nejm.org, and avoid dailymail.co.uk."],
-      domains: ["nature.com", "nejm.org", "dailymail.co.uk"],
+      work: ["Prefer primary sources such as wiki.acme.com and nejm.org, and avoid dailymail.co.uk. Ask ops@acme.com."],
+      domains: ["wiki.acme.com", "nejm.org", "dailymail.co.uk"],
     }
     const before = web.count("searxng")
     const authorized: string[] = []
     const sent = await search(
       "searxng",
-      { query: "heat pumps", site: "nature.com" },
+      { query: "heat pumps", site: "wiki.acme.com" },
       (url) =>
         Effect.sync(() => {
           authorized.push(url)
@@ -292,19 +299,26 @@ describe("ResearchSearch.searxng", () => {
       preferring,
     )
     expect(Exit.isSuccess(sent)).toBe(true)
-    expect(authorized).toEqual([web.url("searxng", "/search?q=heat+pumps+site%3Anature.com&format=json")])
+    expect(authorized).toEqual([web.url("searxng", "/search?q=heat+pumps+site%3Awiki.acme.com&format=json")])
     expect(web.count("searxng")).toBe(before + 1)
-    // Without the preference the private line keeps the domain out, and the preference clears no name.
+    // Without the preference the work keeps the host out, and the preference clears no copied private text.
     expect(
       failure(
-        await search("searxng", { query: "heat pumps", site: "nature.com" }, () => Effect.void, {
+        await search("searxng", { query: "heat pumps", site: "wiki.acme.com" }, () => Effect.void, {
           ...preferring,
           domains: [],
         }),
       ),
     ).toMatchObject({ _tag: "ResearchSearchRefused", reason: "token" })
     expect(
-      failure(await search("searxng", { query: "Acme churn", site: "nejm.org" }, () => Effect.void, preferring)),
+      failure(
+        await search(
+          "searxng",
+          { query: "churn rose to 7.4 percent after the Falcon pricing change", site: "nejm.org" },
+          () => Effect.void,
+          preferring,
+        ),
+      ),
     ).toMatchObject({ _tag: "ResearchSearchRefused" })
     // A preferred domain clears itself as a host name or a site: filter only: not an intranet name, nor an email
     // address on it.
@@ -315,9 +329,9 @@ describe("ResearchSearch.searxng", () => {
     ).toMatchObject({ _tag: "ResearchSearchRefused", reason: "token" })
     expect(
       failure(
-        await search("searxng", { query: "jane@nature.com heat pumps" }, () => Effect.void, {
+        await search("searxng", { query: "jane@nejm.org heat pumps" }, () => Effect.void, {
           ...preferring,
-          work: [...preferring.work, "Ask jane@nature.com for the data."],
+          private: [...preferring.private, "Ask jane@nejm.org for the data."],
         }),
       ),
     ).toMatchObject({ _tag: "ResearchSearchRefused", reason: "token" })
