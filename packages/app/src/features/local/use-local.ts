@@ -1,0 +1,52 @@
+import type { LocalStatus, VectorClient } from "@vectordevai/sdk/v2/client"
+import { createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js"
+import { useGlobal } from "@/context/global"
+import { useServer } from "@/context/server"
+
+// Vector Local as the app reads it: GET /local, read again whenever the engine says the policy changed or a change waits
+// for the owner (local.updated). The routes are the owner's, so an invited guest gets 401 or 403 and is told whose they
+// are instead of seeing nothing. The policy is the engine process's, so the server's own client reads it.
+
+export function useLocalStatus() {
+  const global = useGlobal()
+  const server = useServer()
+  const sdk = createMemo(() => (server.current ? global.ensureServerCtx(server.current).sdk : undefined))
+  const [version, setVersion] = createSignal(0)
+  const refresh = () => setVersion((value) => value + 1)
+
+  const [read, { mutate }] = createResource(
+    () => {
+      const current = sdk()
+      return current ? { client: current.client, version: version() } : false
+    },
+    (input) =>
+      input.client.local
+        .get({}, { throwOnError: false })
+        .then((result) => ({ data: result.data, status: result.response?.status }))
+        .catch(() => ({ data: undefined, status: undefined })),
+  )
+
+  createEffect(() => {
+    const current = sdk()
+    if (!current) return
+    const stop = current.event.on("global", (event) => {
+      if (event.type === "local.updated") refresh()
+    })
+    onCleanup(stop)
+  })
+
+  return {
+    status: () => read.latest?.data,
+    loading: () => read.loading,
+    guest: () => read.latest?.status === 401 || read.latest?.status === 403,
+    refresh,
+    /** Shows a status the engine answered a change with, without reading it again. */
+    set: (status: LocalStatus) => mutate({ data: status, status: 200 }),
+    client: (): VectorClient | undefined => sdk()?.client,
+    events: () => sdk()?.event,
+    /** The name of the computer the engine runs on, when it is not this one: "Local on build-box". */
+    remote: () => (server.isLocal() ? undefined : server.name),
+  }
+}
+
+export type LocalStatusReader = ReturnType<typeof useLocalStatus>
