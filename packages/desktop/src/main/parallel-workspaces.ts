@@ -153,6 +153,10 @@ export type ParallelWorkspaceRecord = {
   // The value an external CLI gets for its model flag on its next turn. Unset
   // (every record from before the picker) runs the CLI's own default model.
   runtimeModel?: string
+  // The last model this workspace's CLI refused, and when (ISO). The app drops
+  // it from that runtime's Recently used unless it was picked again after, so a
+  // new agent never starts on a model the CLI will not run.
+  refusedRuntimeModel?: { model: string; at: string }
   backgroundTaskId?: string
   agent?: string
   swarmRunId?: string
@@ -1887,17 +1891,24 @@ async function runExternalWorkspacePass(input: {
   input.controller.signal.throwIfAborted()
   // A refused model fails the turn with the CLI's own error, and the picker
   // goes back to the CLI's default, unless the user already chose another.
-  // Retrying on another model would spend on one nobody picked.
-  if (result.modelRejected && getParallelWorkspace(input.id)?.runtimeModel === input.model) {
-    updateRecord(input.id, (current) => ({
-      ...current,
-      runtimeModel: undefined,
-      model: RUNTIME_DEFAULT_MODEL,
-      logs: [
-        `${runtimeLabel(current.runtime)} would not run the model "${input.model}", so the next turn uses its default model.`,
-        ...current.logs,
-      ].slice(0, 120),
-    }))
+  // Retrying on another model would spend on one nobody picked. The refusal is
+  // kept either way, so the app stops starting new agents on that model.
+  const refused = result.modelRejected ? input.model : undefined
+  if (refused && getParallelWorkspace(input.id)) {
+    updateRecord(input.id, (current) => {
+      const refusedRuntimeModel = { model: refused, at: now() }
+      if (current.runtimeModel !== refused) return { ...current, refusedRuntimeModel }
+      return {
+        ...current,
+        refusedRuntimeModel,
+        runtimeModel: undefined,
+        model: RUNTIME_DEFAULT_MODEL,
+        logs: [
+          `${runtimeLabel(current.runtime)} would not run the model "${refused}", so the next turn uses its default model.`,
+          ...current.logs,
+        ].slice(0, 120),
+      }
+    })
   }
   // A CLI that refused the resume FLAGS is not a failed task — the caller
   // retries without resume rather than reporting a broken agent.

@@ -527,6 +527,8 @@ export type ParallelWorkspaceRecord = {
   externalSessionId?: string
   /** The external CLI's model flag value for its next turn. Unset runs the CLI's own default. */
   runtimeModel?: string
+  /** The last model this workspace's CLI refused, and when (ISO). */
+  refusedRuntimeModel?: { model: string; at: string }
   turns?: ParallelWorkspaceTurn[]
   backgroundTaskId?: string
   agent?: string

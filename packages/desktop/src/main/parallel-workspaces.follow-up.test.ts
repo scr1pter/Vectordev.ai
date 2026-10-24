@@ -752,8 +752,36 @@ describe("sending a follow-up to an external workspace", () => {
     expect(settled.turns?.findLast((turn) => turn.role === "agent")?.text).toBe(refusal)
     expect(settled.runtimeModel).toBeUndefined()
     expect(settled.model).toBe("Runtime default")
+    // The app reads the refusal to drop the model from Recently used, so no new agent starts on it.
+    expect(settled.refusedRuntimeModel?.model).toBe("gpt-nope")
+    expect(Date.parse(settled.refusedRuntimeModel?.at ?? "")).toBeGreaterThan(Date.parse(seeded.createdAt))
     // No quiet retry on a model nobody picked.
     expect(runCalls).toHaveLength(1)
+  })
+
+  test("a refusal after the user picked another model keeps the new pick and still reports the refused one", async () => {
+    const seeded = await seed({ runtime: "claude-code", runtimeModel: "claude-nope", model: "claude-nope" })
+    started.push(seeded.id)
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    const refusal =
+      "There's an issue with the selected model (claude-nope). It may not exist or you may not have access."
+    runHandler = async () => {
+      await gate
+      return { exitCode: 1, summary: refusal, error: refusal, output: [], modelRejected: true }
+    }
+
+    await followUpParallelWorkspace(seeded.id, engine, "now add a test", dependencies)
+    for (let attempt = 0; attempt < 100 && runCalls.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    setParallelWorkspaceRuntimeModel(seeded.id, "sonnet")
+    release()
+    const settled = await settle(seeded.id)
+
+    expect(runCalls.map((call) => call.model)).toEqual(["claude-nope"])
+    expect(settled.runtimeModel).toBe("sonnet")
+    expect(settled.refusedRuntimeModel?.model).toBe("claude-nope")
   })
 
   test("a new external workspace starts on the model chosen at launch", async () => {
