@@ -1347,7 +1347,7 @@ describe("pasted text", () => {
       end: text.length,
     })
     try {
-      rememberPaste(email)
+      rememberPaste(prompt, email)
       params = { id: "session-1" }
       const submit = createPromptSubmit({
         prompt,
@@ -1379,6 +1379,56 @@ describe("pasted text", () => {
     } finally {
       promptValue.splice(0, promptValue.length, ...original)
     }
+  })
+
+  test("a paste never splits a word, and one the text holds more often than it was pasted marks the whole text", async () => {
+    const { pastedSpans } = await import("./submit")
+    expect(pastedSpans("Always run the tests before you merge to main.", ["test"])).toEqual([])
+    expect(pastedSpans("I prefer pnpm_workspaces", ["pnpm"])).toEqual([])
+    expect(pastedSpans("Ask about the retest", ["test"])).toEqual([])
+    expect(pastedSpans("Never push directly to main without a review.", ["main"])).toEqual([[23, 27]])
+    // Which "main" was pasted cannot be told, so none of the words vouches for anything.
+    const twice = "Merge main into the branch, then never push directly to main."
+    expect(pastedSpans(twice, ["main"])).toEqual([[0, twice.length]])
+    expect(pastedSpans("x one y one", ["one"])).toEqual([[0, 11]])
+  })
+
+  test("a one-line paste changed in place marks the whole text", async () => {
+    const { pastedSpans } = await import("./submit")
+    const paste = "Please always send the signed invoice to accounts by Friday."
+    const monday = `Answer this email.\n${paste.replace("Friday", "Monday")}`
+    expect(pastedSpans(monday, [paste])).toEqual([[0, monday.length]])
+    const unstopped = `Answer this email.\n${paste.slice(0, -1)}`
+    expect(pastedSpans(unstopped, [paste])).toEqual([[0, unstopped.length]])
+    const meetings = "I prefer to get the slides as a PDF before each review meeting."
+    const plural = `Answer this email.\n${meetings.replace("meeting.", "meetings.")}`
+    expect(pastedSpans(plural, [meetings])).toEqual([[0, plural.length]])
+  })
+
+  test("a paste marks only the message of the draft it went into", async () => {
+    const { pastedIn, rememberPaste, restorePastes, takePastes } = await import("./submit")
+    const draft = {}
+    const other = {}
+    rememberPaste(draft, "test")
+    rememberPaste(other, "main")
+    expect(takePastes(draft, "Run the test once more")).toEqual([[8, 12]])
+    // The paste went with that message: the next one in the same draft is the user's own, and so is a draft it never
+    // went into.
+    expect(takePastes(draft, "Always run the test suite before you merge.")).toEqual([])
+    expect(takePastes({}, "Never push directly to main without a review.")).toEqual([])
+    // The same message brought back whole marks its paste again, in any draft.
+    const back = {}
+    restorePastes(back, "Run the test once more")
+    expect(takePastes(back, "Run the test once more")).toEqual([[8, 12]])
+    // A message the session holds says where its pastes were, as the composer marked them when it was sent.
+    const text = "Summarize https://example.com/paper for me"
+    const part = { text, metadata: { "vector.pasted": [[10, 35]] } }
+    expect(pastedIn(part)).toEqual(["https://example.com/paper"])
+    expect(pastedIn({ text, metadata: { "vector.pasted": [[10, 999]] } })).toEqual([])
+    const undone = {}
+    restorePastes(undone, text, pastedIn(part))
+    expect(takePastes(undone, text)).toEqual([[10, 35]])
+    expect(takePastes(other, "Never push directly to main without a review.")).toEqual([[23, 27]])
   })
 
   test("a typed message carries no paste marks", async () => {

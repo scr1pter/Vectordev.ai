@@ -63,7 +63,7 @@ import {
   type PromptHistoryStoredEntry,
   promptLength,
 } from "./prompt-input/history"
-import { createPromptSubmit, rememberPaste, type FollowupDraft } from "./prompt-input/submit"
+import { createPromptSubmit, pastedIn, rememberPaste, restorePastes, type FollowupDraft } from "./prompt-input/submit"
 import { watchLearned } from "@/features/memory/learned"
 import { DialogFreeModelTraining } from "./dialog-free-model-training"
 import { acceptFreeModelTraining, freeModelTrainingGate } from "@/utils/free-model-policy-notice"
@@ -1526,9 +1526,34 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   // What the user pastes is someone else's words (an email, a log), so the message marks where it sits and Vector never
   // learns from it.
   const paste = (event: ClipboardEvent) => {
-    rememberPaste(event.clipboardData?.getData("text/plain") ?? "")
+    rememberPaste(prompt.capture(), event.clipboardData?.getData("text/plain") ?? "")
     return handlePaste(event)
   }
+  // A message brought back whole (from history, by Undo, by a fork or from the queue) marks what was pasted into it
+  // again, as this window sent it or as the session's copy of it says. Typing changes the text a character at a time
+  // and brings back nothing.
+  createEffect(
+    on(
+      () =>
+        prompt
+          .current()
+          .map((part) => ("content" in part ? part.content : ""))
+          .join(""),
+      (text, previous) => {
+        if (!text || (previous !== undefined && Math.abs(text.length - previous.length) <= 1)) return
+        const sessionID = props.controls.session.id
+        const data = sync().data
+        const marked = (sessionID ? (data.message[sessionID] ?? []) : []).flatMap((message) =>
+          message.role !== "user"
+            ? []
+            : (data.part[message.id] ?? []).flatMap((part) =>
+                part.type === "text" && part.text === text ? pastedIn(part) : [],
+              ),
+        )
+        restorePastes(prompt.capture(), text, marked)
+      },
+    ),
+  )
   // The "Learned 2 things" chip under a reply reads what Vector learned from the events of this composer's sessions.
   createEffect(() => watchLearned(sdk().event))
 

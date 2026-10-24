@@ -372,19 +372,81 @@ function within(spans: readonly [number, number][], start: number, length: numbe
   })
 }
 
-// What the user pasted into a composer of this window, newest last, to find in what they send. Kept in memory only, and
-// past sends too, so a message restored after a failed send, taken back from history or brought back by Undo still
-// marks its pastes.
-const pastes: string[] = []
+// What the user pasted into each draft (the composer's prompt state it went into), newest last, to find in the message
+// it goes out with. Kept in memory only, and each draft's own, so a paste never marks a message it did not go into.
+const drafts = new WeakMap<object, readonly string[]>()
+// What was pasted into the messages this window sent, by their text, so the same message brought back into a composer
+// (after a failed send, from history, by Undo or by a fork) marks it again.
+const sent = new Map<string, readonly string[]>()
+const SENT = 64
 const PASTES = 64
 const PASTE_CHARS = 4_000_000
 
-/** Notes text the user pasted, so the message that carries it marks it as pasted. */
-export function rememberPaste(text: string) {
+/** Notes text the user pasted into a draft, so the message that carries it marks it as pasted. */
+export function rememberPaste(draft: object, text: string) {
   const clean = cleanPaste(text)
   if (!clean) return
-  pastes.push(clean)
-  while (pastes.length > PASTES || pastes.reduce((sum, item) => sum + item.length, 0) > PASTE_CHARS) pastes.shift()
+  drafts.set(draft, newest([...(drafts.get(draft) ?? []), clean]))
+}
+
+/**
+ * The draft holds a whole message again: what was pasted into it, by this window's record of what it sent or by the
+ * session's own copy of the message (`marked`), is marked again when it is sent.
+ */
+export function restorePastes(draft: object, text: string, marked: readonly string[] = []) {
+  const found = [...(sent.get(text) ?? []), ...marked].map(cleanPaste).filter(Boolean)
+  if (found.length === 0) return
+  const known = drafts.get(draft) ?? []
+  drafts.set(draft, newest([...known, ...found.filter((item) => !known.includes(item))]))
+}
+
+/** What a sent text part says the user pasted into it (BrainSchema.PASTED), as text. */
+export function pastedIn(part: { text: string; metadata?: Record<string, unknown> }) {
+  const spans = part.metadata?.[BrainSchema.PASTED]
+  if (!Array.isArray(spans)) return []
+  return spans.flatMap((span: unknown) =>
+    Array.isArray(span) &&
+    Number.isInteger(span[0]) &&
+    Number.isInteger(span[1]) &&
+    span[0] >= 0 &&
+    span[0] < span[1] &&
+    span[1] <= part.text.length
+      ? [part.text.slice(span[0], span[1])]
+      : [],
+  )
+}
+
+/**
+ * Where the draft's text holds what the user pasted into it. The draft's pastes go with the message: the next message
+ * starts with none, and this one, brought back whole, marks them again (`restorePastes`).
+ */
+export function takePastes(draft: object, text: string) {
+  const spans = pastedSpans(text, drafts.get(draft) ?? [])
+  drafts.delete(draft)
+  if (spans.length === 0) return spans
+  sent.delete(text)
+  sent.set(
+    text,
+    spans.map(([start, end]) => text.slice(start, end)),
+  )
+  fit(sent)
+  return spans
+}
+
+// The newest pastes that fit what one draft keeps.
+function newest(list: readonly string[]) {
+  return list.filter(
+    (_, index) =>
+      list.length - index <= PASTES && list.slice(index).reduce((sum, item) => sum + item.length, 0) <= PASTE_CHARS,
+  )
+}
+
+// Forgets the oldest sends until what is left fits.
+function fit(record: Map<string, readonly string[]>) {
+  const size = [...record.keys()].reduce((sum, text) => sum + text.length, 0)
+  if (record.size <= SENT && size <= PASTE_CHARS) return
+  record.delete(record.keys().next().value!)
+  fit(record)
 }
 
 function cleanPaste(text: string) {
@@ -396,30 +458,32 @@ function cleanPaste(text: string) {
 }
 
 /**
- * Where a message's text holds what the user pasted, as sorted `[start, end]` spans. A paste is found whole, or, once
- * edited, line by line. A pasted line the user changed where it sits cannot be told from their own words, so when a
- * paste is only partly found and a run of three of its words is left among the typed ones, the whole text is marked:
- * it then vouches for none of its words. Text pasted and deleted again marks nothing.
+ * Where a message's text holds what the user pasted, as sorted `[start, end]` spans. A paste is found where it stands
+ * as words of its own, never inside a word, whole or, once edited, line by line. Where it cannot be placed (the text
+ * holds it more often than it was pasted), or where a pasted line was changed in place and a run of three of its words
+ * is left among the typed ones, the whole text is marked: it then vouches for none of its words. Text pasted and
+ * deleted again marks nothing.
  */
-export function pastedSpans(text: string, pasted: readonly string[] = pastes): [number, number][] {
+export function pastedSpans(text: string, pasted: readonly string[]): [number, number][] {
   const plain = text.replaceAll("\u00a0", " ")
   const taken: [number, number][] = []
-  const take = (needle: string) => {
-    for (let at = plain.indexOf(needle); at !== -1; at = plain.indexOf(needle, at + 1)) {
-      const end = at + needle.length
-      if (taken.some(([start, stop]) => at < stop && end > start)) continue
-      taken.push([at, end])
-      return true
-    }
-    return false
+  // The places `needle` stands as words of its own, outside those taken: taken when there are no more of them than the
+  // times it was pasted, and otherwise none of them can be told from the user's own words.
+  const place = (needle: string, count: number) => {
+    const free = occurrences(plain, needle)
+      .map((at): [number, number] => [at, at + needle.length])
+      .filter(([start, end]) => bounded(plain, start, end) && !taken.some(([from, to]) => start < to && end > from))
+    if (free.length > count) return "unclear"
+    taken.push(...free)
+    return free.length > 0 ? "found" : "none"
   }
   // Longest first, so a short paste never takes the place of a long one that holds it.
-  const missing = pasted
-    .map(cleanPaste)
-    .filter(Boolean)
-    .toSorted((a, b) => b.length - a.length)
-    .flatMap((paste) => {
-      if (take(paste)) return []
+  const missing = tally(pasted.map(cleanPaste).filter(Boolean))
+    .toSorted((a, b) => b[0].length - a[0].length)
+    .flatMap(([paste, count]) => {
+      const whole = place(paste, count)
+      if (whole === "unclear") return [WHOLE]
+      if (whole === "found") return []
       const lines = paste
         .split("\n")
         .map((line) => line.trim())
@@ -432,9 +496,9 @@ export function pastedSpans(text: string, pasted: readonly string[] = pastes): [
           .some((line) => plain.includes(line))
           ? [WHOLE]
           : []
-      const found = lines.map(take)
-      if (!found.some(Boolean)) return []
-      return lines.filter((_, index) => !found[index])
+      const placed = tally(lines).map(([line, times]) => ({ line, found: place(line, times * count) }))
+      if (placed.some((item) => item.found === "unclear")) return [WHOLE]
+      return placed.flatMap((item) => (item.found === "none" ? [item.line] : []))
     })
   if (missing.includes(WHOLE)) return text.length ? [[0, text.length]] : []
   // What is left between the pastes found, each stretch on its own, so no run of words spans a paste.
@@ -451,6 +515,29 @@ export function pastedSpans(text: string, pasted: readonly string[] = pastes): [
 
 const MANY_LINES = 400
 const WHOLE = "\u0000whole"
+const WORD = /[\p{L}\p{N}_]/u
+
+// Where `needle` starts in `text`, without overlaps.
+function occurrences(text: string, needle: string) {
+  return text
+    .split(needle)
+    .slice(0, -1)
+    .reduce<number[]>((found, piece) => {
+      found.push((found.length ? found.at(-1)! + needle.length : 0) + piece.length)
+      return found
+    }, [])
+}
+
+// Whether `[start, end]` neither starts nor ends inside a word: "test" pasted is not the start of "tests".
+function bounded(text: string, start: number, end: number) {
+  const inside = (at: number) => WORD.test(text[at - 1] ?? "") && WORD.test(text[at] ?? "")
+  return !inside(start) && !inside(end)
+}
+
+// Each distinct item with the times it appears.
+function tally(items: readonly string[]) {
+  return [...items.reduce((count, item) => count.set(item, (count.get(item) ?? 0) + 1), new Map<string, number>())]
+}
 
 function words(text: string) {
   return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []
@@ -852,7 +939,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     }
     if (isFreeModelSelection(routed.model) && firstFreeModelPolicyNotice())
       showToast({ ...FREE_MODEL_POLICY_NOTICE, duration: 15_000 })
-    const pasted = pastedSpans(text)
+    const pasted = takePastes(target, text)
     const draft: FollowupDraft = {
       sessionID: session.id,
       sessionDirectory,
@@ -880,6 +967,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       const restored = submission.restore()
       if (!restored) return false
       restored.target.set(restored.prompt, input.promptLength(restored.prompt))
+      restorePastes(restored.target, text)
       if (!submission.current(prompt.capture())) return true
       input.setMode(mode)
       input.setPopover(null)
@@ -894,7 +982,10 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     }
 
     if (!isPlanMode && !isNewSession && mode === "normal" && input.shouldQueue?.()) {
-      if (input.onQueue?.(draft) === false) return
+      if (input.onQueue?.(draft) === false) {
+        restorePastes(target, text)
+        return
+      }
       clearContext(submission.target())
       clearInput()
       return
