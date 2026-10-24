@@ -1,5 +1,6 @@
 ---
 import DocsPage from "../../layouts/DocsPage.astro"
+import { release111 } from "../../data/vector-releases"
 import policyJson from "../../data/local/vector.json?raw"
 import policyProfile from "../../data/local/ai.vector.managed.mobileconfig?raw"
 
@@ -17,15 +18,21 @@ Set-ItemProperty -Path $key -Name Config -Value $json -Type String`
 
 <DocsPage id="local">
 
-          <p class="note is-caution">
-            In development: Vector Local is not in the current download. This page describes how it works in the
-            release that brings it, so you, or your company's administrators, can prepare.
+          <p class="note">
+            {release111.since} Vector Local is in the desktop app and the engine it starts. The terminal's
+            <code>vector local</code> commands and <code>vector run --local</code> come with the next CLI release, and
+            Windows WSL servers get Vector Local once a later desktop release requires that CLI.
           </p>
           <p>
             <strong>Vector Local</strong> runs Vector's AI features on model servers you or your company host. With it
             on, model calls go only to the servers on your list, Vector blocks its own requests to vectordev.ai and to
             AI services that are not on the list unless you allow one, and a network log, <strong>What Vector
             sent</strong>, shows what Vector's engine and windows sent or blocked.
+          </p>
+          <p>
+            The agent, subagents, the judge, Vectorscope, Deep research, memory search and the helpers that write titles
+            and summaries all use the servers on your list. Web pages and searches you approve still reach those sites
+            unless you set Web access to None.
           </p>
           <p class="note">
             Vector Local is a policy inside Vector, not a firewall. A person with administrator rights on the computer
@@ -34,12 +41,19 @@ Set-ItemProperty -Path $key -Name Config -Value $json -Type String`
 
           <h2 id="turn-on">Turning it on</h2>
           <p>
+            In the desktop app, open <strong>Settings → Vector Local</strong>, or choose <strong>Models you
+            host</strong> in Getting started for a setup that finds your servers, picks a model for each role, checks
+            them and turns Vector Local on. While it is on, the composer shows <strong>Local</strong>, <strong>Local ·
+            your network</strong> or <strong>Local · no web</strong>; opening it shows what the session sent: its model
+            calls by server, the pages and searches it read, the memory its requests carried and what was blocked.
+          </p>
+          <p>
             In a terminal, <code>vector local on</code> turns it on and <code>vector local status</code> shows what is in
             effect. <code>vector run --local</code> keeps one run on Vector Local without changing your settings.
-            <code>vector local detect</code> finds the model servers running on this computer (it never scans your
-            network), and <code>vector local setup &lt;address&gt;</code> reads a server you name, such as
-            <code>http://10.0.0.5:8000</code>, and puts it on the list with its identity, so a different server answering
-            at that address later is held until you confirm it. <code>vector local check</code> checks every layer.
+            <code>vector local detect</code> finds the model servers running on this computer, and <code>vector local
+            setup &lt;address&gt;</code> reads a server you name, such as <code>http://10.0.0.5:8000</code>, and puts it
+            on the list. <code>vector local check</code> checks every layer, as <strong>Run a check</strong> does in the
+            app. In the terminal UI, <code>/local</code> opens the same settings.
           </p>
           <dl class="doc-rows">
             <div><dt>Ask</dt><dd>Research and the browser can read the sites you approve.</dd></div>
@@ -48,23 +62,84 @@ Set-ItemProperty -Path $key -Name Config -Value $json -Type String`
           </dl>
           <p>
             A change that would loosen Vector Local (turning it off, a looser Web access, a new model server or a newly
-            allowed service) waits for you to confirm it, so an agent cannot loosen it for you. Commands the agent runs
-            make their own connections. With Web access None, the shell sandbox blocks them on macOS and Linux. Windows
-            has no such block.
+            allowed service) waits for you to confirm it, so an agent cannot loosen it for you: <em>This change would
+            loosen Vector Local. Apply it?</em> A Vector that an agent or Vector's own terminal started cannot loosen it
+            at all.
+          </p>
+
+          <h2 id="servers">Model servers</h2>
+          <p>
+            <strong>Find servers</strong> asks this computer for Ollama, LM Studio, vLLM, llama.cpp and SGLang on their
+            usual ports. It never scans your network: add a server elsewhere by typing its address in <strong>Add
+            server</strong>. Vector reads the server and keeps its identity: the kind of server, its version, the
+            models it serves and, over https, its key. It reads the server again before its first model call, and a
+            server that answers as a different one is held until you confirm it: <em>gpu-box:8000 now answers as a
+            different server. Check it before sending prompts.</em> Updating the server or changing its models counts
+            as a change too, so confirm it after an update or an <code>ollama pull</code>. Each server on the list says
+            where it is and what Vector can tell about it:
+          </p>
+          <ul class="feature-list">
+            <li><strong>Not encrypted</strong><span>Prompts to this server travel in plain text on your network.</span></li>
+            <li><strong>Forwarding</strong><span>This server may pass your prompts or queries on to services it is set up to use, as a LiteLLM proxy or Ollama's cloud models do. Vector can't see past it.</span></li>
+            <li><strong>This computer</strong><span>Another user on this computer could run a server on this port.</span></li>
+          </ul>
+          <p>
+            <strong>Check models</strong> sends each model two or three requests for every role it fills, with that
+            role's real tools, and only when you press it. It finds whether the model calls tools and how much context
+            it was loaded with, and sets the reply limit and how many requests the server takes at once. A server whose
+            count nobody set takes one request at a time, and the titles and summaries Vector writes wait behind your
+            own requests. A role whose model has too small a context is refused with the fix:
+            <em>qwen3-coder:30b has an 8,192-token context. Vector's agent needs about 19,000. Raise the context size or
+            pick another model.</em>
           </p>
           <p>
+            Models on this computer, or on a server on your network that is on your list, have no per-token price in
+            Vector. Your hardware and power costs are not counted. Step and loop limits still apply. A server on the
+            internet, a server that passes requests on and Ollama's cloud models stay unpriced, so a dollar cap still
+            stops them. Fast is not offered for a model on a server someone hosts.
+          </p>
+
+          <h2 id="off">Off in Vector Local</h2>
+          <p>
             Free models provided by Vector and Vector Codium send prompts through vectordev.ai to the services that run
-            them, so they are off in Vector Local, along with cloud providers, share links, automatic update checks,
-            usage counts and crash reports. Each shows <strong>Off in Vector Local</strong> with why, and where a service
-            can be allowed, <code>vector local allow &lt;source&gt; --reason "…"</code> allows it.
+            them, so they are off in Vector Local, along with cloud providers, Ollama's cloud models, ChatGPT sign-in,
+            share links, automatic update checks, usage counts, crash reports, release notes and the help assistant.
+            Vector does not start Claude Code, Codex or Cursor as outside agents while it is on, because they make their
+            own connections. Each shows <strong>Off in Vector Local</strong> with why, and <strong>Settings → Vector
+            Local</strong> lists them all. Where a service can be allowed, such as GitHub pull requests or a remote MCP
+            server, <strong>Allow</strong> there or <code>vector local allow &lt;source&gt; --reason "…"</code> allows
+            it. A download Vector needs once, such as the memory-search model or a language server, asks first, and
+            <strong>Check for updates</strong> asks each time.
+          </p>
+          <p>
+            On a desktop's first run, Vector holds its own startup requests until you sign in, connect a provider or
+            turn Vector Local on: the model catalog's refresh, the lists of free models and plans, the sign-in options,
+            release notes, the dictation model's preparation, the usage count and the update check.
+          </p>
+
+          <h2 id="not-covered">What Vector Local does not cover</h2>
+          <ul class="feature-list">
+            <li><strong>Sites you approve</strong><span>They receive the requests you approved. That is the point of research.</span></li>
+            <li><strong>Programs the agent starts</strong><span>Shell commands, stdio MCP servers and language servers make their own connections. With Web access None, the shell sandbox blocks the agent's shell commands on macOS and Linux; MCP servers and language servers run outside it, and Windows has no such block.</span></li>
+            <li><strong>Model and search servers that forward requests</strong><span>A LiteLLM proxy, Ollama's cloud models and SearXNG can pass your prompts or queries on to a cloud service. Vector labels the ones it can recognise.</span></li>
+            <li><strong>Everything outside Vector</strong><span>The operating system, other apps, and the DNS resolver for names Vector is allowed to look up.</span></li>
+            <li><strong>It is a policy inside Vector, not a firewall</strong><span>A person with administrator rights on this computer can change it. Companies should pair it with network controls.</span></li>
+          </ul>
+          <p>
+            With Web access None, the agent's shell commands run in Vector's sandbox. On macOS they can reach servers on
+            this computer only; on Linux, where the sandbox needs bubblewrap (the <code>bwrap</code> command), they reach
+            no network at all, and without bubblewrap Vector does not run them. Either way they can write only in this
+            repository, the working folder, temporary folders and package caches.
           </p>
 
           <h2 id="log">What Vector sent</h2>
           <p>
             While Vector Local is on, every request Vector decides is logged by origin, never with a path, a query, a
-            header or a body. <code>vector local log</code> lists it (<code>--blocked</code>, <code>--since 2h</code>,
+            header or a body. In the app it is the <strong>Network log</strong> in Settings → Vector Local, and
+            <code>vector local log</code> lists it in a terminal (<code>--blocked</code>, <code>--since 2h</code>,
             <code>--session</code>). The log is kept for 30 days on this computer unless you or your company set another
-            length.
+            length. Chromium makes some connections itself, below the layer where Vector decides each request, such as
+            name lookups for the hosts a page names; those are not in the log.
           </p>
 
           <h2 id="companies">For companies</h2>

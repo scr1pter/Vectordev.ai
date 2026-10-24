@@ -338,8 +338,10 @@ describe("About you", () => {
     )
     expect(ABOUT.agents).toContain("Sessions with invited guests, and free models that may train on your prompts")
     expect(ABOUT.agents).toContain("Reviews and research see how you work, not facts about you.")
-    // Vector Local is in the CLI before the app, and the copy says so.
-    expect(ABOUT.storage).toContain("which the CLI offers today")
+    // Vector Local is in the app as well as the CLI now (Settings > Vector Local), so the copy no longer limits it.
+    expect(ABOUT.storage).toBe(
+      "Your brain is a file on this computer (brain.db). You can see, change, export or erase everything in it. With Vector Local on, its contents go only to the model servers you list, and the network log shows which requests carried them.",
+    )
     const strings = [
       ...Object.values(ABOUT),
       ERASE_SESSION.action,

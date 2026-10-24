@@ -1,5 +1,7 @@
 // The documentation's shape: groups in order, each leaf a page under /docs.
 // Edit here and the sidebar, the pager and the search index all follow.
+import { release111 } from "./vector-releases"
+
 export type DocLink = { id: string; title: string; blurb: string }
 export type DocGroup = { label: string; links: DocLink[] }
 
@@ -57,6 +59,11 @@ export const docsNav: DocGroup[] = [
         id: "browser-agent",
         title: "Browser agent",
         blurb: "A real Chromium view inside Vector that the agent drives against your running product.",
+      },
+      {
+        id: "research",
+        title: "Deep research",
+        blurb: `${release111.since} a preview that researches a question across the web and this repository's brain, then writes a report in which each claim cites a quote.`,
       },
       {
         id: "vectorscope",
@@ -121,8 +128,7 @@ export const docsNav: DocGroup[] = [
       {
         id: "local",
         title: "Vector Local",
-        blurb:
-          "In development: run Vector's AI features on model servers you or your company host, with a log of what Vector sent.",
+        blurb: `${release111.since} run Vector's AI features on model servers you or your company host, with a log of what Vector sent.`,
       },
       {
         id: "cloud-services",

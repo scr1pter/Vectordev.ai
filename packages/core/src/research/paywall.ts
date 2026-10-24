@@ -6,7 +6,7 @@ export * as ResearchPaywall from "./paywall"
 // user can open the page themselves with their own sign-in.
 
 export const MESSAGE =
-  "Paywalled: Vector kept the public excerpt only. Use 'Open it yourself' to read the rest with your own sign-in."
+  "Paywalled: Vector kept the public excerpt only. Open the page yourself to read the rest with your own sign-in."
 
 // The public excerpt kept from a paywalled page, in characters.
 export const EXCERPT_CHARS = 2_000

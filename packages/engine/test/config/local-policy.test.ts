@@ -1069,11 +1069,9 @@ describe("loosening edits wait for the owner", () => {
     expect(Config.localHeldAdvice()).toBe(
       "To apply it now, confirm it with /local in the terminal UI. vector local confirm in a terminal applies it when this Vector next starts.",
     )
-    // The desktop app keeps a copy of its own, which vector local confirm never writes.
+    // The desktop app applies a held change itself, from Settings > Vector Local.
     process.env.VECTOR_CLIENT = "desktop"
-    expect(Config.localHeldAdvice()).toBe(
-      `To apply it, quit Vector, delete ${Config.localConfirmedFile()} and start Vector again.`,
-    )
+    expect(Config.localHeldAdvice()).toBe("To apply it, open Settings → Vector Local and choose Review and apply.")
     process.env.VECTOR_AGENT_SESSION = "1"
     expect(Config.localHeldAdvice()).toBe(
       "An agent or Vector's own terminal started this Vector, so it cannot apply a change like this.",

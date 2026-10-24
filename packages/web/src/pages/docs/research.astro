@@ -1,0 +1,203 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+import { researchCapRows } from "../../data/docs-content"
+import { release111 } from "../../data/vector-releases"
+
+export const prerender = true
+---
+
+<DocsPage id="research">
+
+          <p class="note">
+            {release111.since} Deep research is a preview. It is labelled <strong>Preview</strong> in the composer, and
+            how it plans, searches and reports may still change.
+          </p>
+          <p>
+            <strong>Deep research</strong> researches a question across the web and this repository's brain, then
+            writes a report where each claim links to the quote it rests on. It makes no code changes: the research
+            agents have no edit, write or shell tools, and no rule you write gives them back. Focused uses one agent,
+            plus up to 2 researchers when the question has independent parts. Deep adds up to 4 researchers and a judge
+            that checks the citations. Reports and their sources stay private in this repository's brain until you keep
+            or forget them.
+          </p>
+
+          <h2 id="start">Starting a run</h2>
+          <p>
+            Pick <strong>Deep research</strong> in the composer's <strong>Mode</strong> menu, under Normal, Quick and
+            Fast. The session stays in Deep research while you keep sending to it, and a new session in the same
+            repository starts in it if it was the mode you picked last. Three chips sit under the message:
+          </p>
+          <dl class="doc-rows">
+            <div><dt>Depth</dt><dd><strong>Auto</strong> lets Vector size the question: Focused, or Deep when you ask it to be thorough. <strong>Focused</strong> and <strong>Deep</strong> choose for it.</dd></div>
+            <div><dt>Sources</dt><dd><strong>Web and brain</strong>, <strong>Web only</strong>, or <strong>Brain and files only</strong>: this repository's brain, its files and the links you paste.</dd></div>
+            <div><dt>Cap</dt><dd>What stops the run: your own run cap when you set one, otherwise Deep research's default for the depth.</dd></div>
+          </dl>
+          <p>
+            A greeting such as "hi" is still answered directly: it plans nothing and recalls nothing. The build agent
+            can also research as part of its work, on Work and Thorough requests, when the work needs facts from outside
+            the repository. Its question passes the same check on outgoing text as a search does, the research lead gets
+            nothing else from that session, and only a Thorough request may run deep. <code>"research": {"{"} "tool":
+            "thorough" {"}"}</code> in your user config keeps it to Thorough requests, and <code>"off"</code> turns it
+            off.
+          </p>
+
+          <h2 id="plan">The plan card</h2>
+          <p>
+            Before anything is searched or read, the research agent proposes a plan and Vector shows it as a card: the
+            question, its sub-questions, the depth, the sites to prefer and avoid, the format (Brief, Report, Table or
+            Memo) and a time window, with an estimate of what the run will read and cost. Edit any of it, then press
+            <strong>Start</strong>, <strong>Start deep</strong> or <strong>Cancel</strong>, or type a reply to change
+            the plan. Ticking <strong>Always</strong> beside the sites or the format keeps that choice for later runs.
+          </p>
+          <p>
+            The first page a run reads asks once: <em>Read public pages for this research? Vector reads only pages from
+            search results, links on pages it read, and addresses you typed. This approval lasts for this research
+            only.</em> It is never saved as an Always rule. A page on your own computer or network asks for its own
+            address.
+          </p>
+          <dl class="doc-rows">
+            <div><dt>A model with a price</dt><dd>The pages and searches the run expects, its estimated cost at list prices, and the cap.</dd></div>
+            <div><dt>A model you host</dt><dd>About how many calls the run makes to your model, with no per-token charge, and the step cap.</dd></div>
+            <div><dt>A free model</dt><dd>No per-token charge within the model's daily limits, and the step cap.</dd></div>
+            <div><dt>No listed price</dt><dd>Vector says it cannot estimate the cost, and gives the step cap.</dd></div>
+          </dl>
+
+          <h2 id="search">Search</h2>
+          <p>
+            Research searches through a search service you set up in your user config under <code>research.search</code>:
+            a SearXNG server with its JSON format turned on, or Exa or Parallel on your own key, billed by them. With none
+            set up, the plan card says so and the run uses this repository's brain, its files and the links you paste.
+            A repository's own config cannot choose where your searches go.
+          </p>
+          <p>
+            Vector checks outgoing searches for text from your private files. It refuses a query that copies, for
+            example, a secret, a run of words, an email address, a phone or account number, a private host name or a path
+            in your home folder from the private context the run loaded, unless you typed it yourself: <em>That search
+            would send text from your private files. Rephrase it with public terms.</em> It checks for copied text, so a
+            paraphrase, or a spelling an agent changes on purpose, gets past it.
+          </p>
+
+          <h2 id="reading">Reading pages</h2>
+          <p>
+            Research reads only addresses that came from a search result, a link on a page it read, or your own message:
+            <em>That address did not come from a search result, a page link or your message.</em> Links with a long or
+            encoded-looking query are not offered. For links Vector finds itself it follows the site's
+            <code>robots.txt</code>, and an address you paste is read without it. It reads one page a second from a site,
+            at most two at a time from one site and four in all.
+          </p>
+          <ul class="feature-list">
+            <li><strong>Paywalls</strong><span>Vector keeps the public excerpt only and gets around nothing. Open the page yourself to read the rest with your own sign-in.</span></li>
+            <li><strong>Checks for a person</strong><span>A CAPTCHA or a similar check marks the page blocked by the site. Vector does not solve or get around one.</span></li>
+            <li><strong>Untrusted text</strong><span>Every page reaches the model fenced as untrusted, with hidden text removed and lines addressed to AI assistants flagged.</span></li>
+            <li><strong>Signed-in pages</strong><span>In the desktop app the research agent can hand a page to you in Preview: sign in or get past the paywall yourself, then press Continue, and it reads the page you reached. What it reads there counts as private.</span></li>
+          </ul>
+
+          <h2 id="research-browsers">Research browsers</h2>
+          <p>
+            In the desktop app, every research agent, the lead and each researcher, drives a browser of its own. It
+            shares no cookies, sign-ins, saved passwords, cache or history with your browser or with another research
+            browser, and Vector clears it when it closes: when its agent finishes, when the run stops, or after 10 idle
+            minutes. Research browsers run hidden and only read:
+          </p>
+          <ul class="feature-list">
+            <li><strong>Where they go</strong><span>A page loads only an address the run may read, or a link or a search form on the page its agent is reading, and each redirect is decided again. A page cannot send the browser to another site by itself, and a form that would send data is refused: <em>Research browsers only read; that form would send data.</em></span></li>
+            <li><strong>What they refuse</strong><span>Downloads (a PDF is read into memory as a source instead), every site permission, pop-up windows, service workers, file pickers, sign-ins with your own Windows or Kerberos account, and client certificates.</span></li>
+            <li><strong>Their network</strong><span>Every request goes through Vector's research proxy, which refuses this computer, your network and cloud metadata addresses. If the proxy cannot start, research browsers do not open.</span></li>
+            <li><strong>What the agent may type</strong><span>Only into text fields, search fields and text areas, never into a sign-in, contact or payment field or a form with a password field, and what it types passes the same check as a search.</span></li>
+          </ul>
+          <p>
+            The <strong>Sources</strong> tab shows one chip for each research browser, such as "Researcher 2 · nature.com ·
+            reading". Opening one shows snapshots of the page, about two a second: <em>View only: Vector shows snapshots of
+            this research browser. Nothing you do here reaches the page, so nothing signs it in.</em> Stop ends that
+            researcher's browsing. Your own agent browser stays separate: in a research session the lead uses it only to
+            hand you a page.
+          </p>
+          <p class="note">
+            The terminal, WSL, remote servers and headless runs have no research browsers. There research reads pages
+            directly and lists a page that needs a browser to show its text as skipped.
+          </p>
+
+          <h2 id="report">Notes, citations and the report</h2>
+          <p>
+            Each finding is saved as a note with a quote, and Vector keeps a note only when its quote, at least 12
+            characters, is in the text it saved from that source. A quote that is there but does not state the claim is
+            kept as a paraphrase, which never makes a claim High on its own. The report cites its notes as chips such as
+            <code>[S3 p.12]</code>, lists its sources and its method (the searches, the pages, what was skipped and why,
+            the spend and the time), and gives each section a confidence:
+          </p>
+          <dl class="doc-rows">
+            <div><dt>High</dt><dd>Quotes that support the claim from at least two independent sites, one of them a primary source, and nothing contradicting it.</dd></div>
+            <div><dt>Medium</dt><dd>One supporting primary source, or two independent sites, with nothing contradicting it.</dd></div>
+            <div><dt>Low</dt><dd>Everything else. A section whose sources contradict each other shows <em>Sources disagree</em> with both quotes.</dd></div>
+          </dl>
+          <p>
+            Confidence is Vector's estimate, worked out from the notes, not a verdict on the facts. The judge reads each
+            cited note's claim and quote, and the report then shows what it found unsupported as removed after checking.
+            It runs on Deep reports and on Focused reports that cite 8 or more notes; the <code>sizing.judge</code>
+            setting changes that, and <code>"off"</code> turns it off. The judge and the researchers can run on a model
+            of their own, set as <code>agent.research-judge.model</code> and <code>agent.researcher.model</code>.
+          </p>
+          <p>
+            The report card offers <strong>Keep in brain</strong>, <strong>Export</strong> (Markdown with its sources),
+            <strong>Export JSON</strong>, <strong>Save to repository</strong>, which writes
+            <code>.vector/research/&lt;date&gt;-&lt;question&gt;.md</code>, <strong>Keep this format</strong> and
+            <strong>Forget this research</strong>.
+          </p>
+
+          <h2 id="sources">The Sources tab</h2>
+          <p>
+            Next to Preview in the session's side panel, the Sources tab lists the run's searches and one row per
+            source, with its status (read, a copy of another source, refused by <code>robots.txt</code>, paywalled,
+            needing a browser, or failed), its signals, such as a DOI, its dates or a named author, and the notes taken
+            from it. A source opens at its saved text with the quoted words highlighted. <strong>Wrap up</strong> asks
+            the agent to write the report now from what it has.
+          </p>
+
+          <h2 id="caps">Caps and cost</h2>
+          <p>
+            Each run has caps. These defaults apply only when you have no spend cap of your own, and
+            <code>research.limits</code> in your user config changes them:
+          </p>
+          <dl class="doc-rows">
+            {researchCapRows.map(([term, detail]) => (<div><dt>{term}</dt><dd>{detail}</dd></div>))}
+          </dl>
+          <p>
+            A researcher's steps count toward the run's caps too. On a model you host the cap is a number of steps. When
+            a run nears its cap, Vector recalls half as much and starts no new researchers. Reading a saved source again
+            makes no new request.
+          </p>
+
+          <h2 id="privacy">What research keeps, and who sees it</h2>
+          <ul class="feature-list">
+            <li><strong>Private until you keep it</strong><span><em>This report and its sources stay private and out of later sessions until you keep them.</em> A kept report is used like your other private documents; its sources open from its citations and are never recalled on their own.</span></li>
+            <li><strong>Memory</strong><span>A research session reads the web, so what the agent saves to memory in it waits for your review.</span></li>
+            <li><strong>Researchers</strong><span>They see the sub-question and how you work, such as the formats and sources you prefer, never facts about you or your private documents. The judge sees only the passages it checks and the sources you prefer.</span></li>
+            <li><strong>Guests</strong><span>In a session an invited guest acted in, research keeps nothing in the brain: its report stays in the session until Vector quits.</span></li>
+            <li><strong>How long</strong><span>Runs you do not keep are deleted after 30 days. One run keeps at most 80 sources and 40 MB of page text, and one repository's research at most 1 GB, after which the oldest runs you did not keep go first.</span></li>
+          </ul>
+          <p>
+            <strong>Settings → Memory → Research</strong> lists this repository's runs: open the report, keep, export or
+            forget a run. <strong>Erase all research in this repository</strong> removes every run's pages, notes and
+            reports, and so does erasing this repository's memory in <strong>Tidy and erase</strong>. In the terminal,
+            <code>vector memory erase</code> does not remove research runs yet.
+          </p>
+
+          <h2 id="local">With Vector Local</h2>
+          <p>
+            Under <a href="/docs/local">Vector Local</a>, research runs on the model servers on your list and follows Web
+            access: <strong>Ask</strong> reads the sites you approve, <strong>Your network only</strong> reads your network
+            and the sites your company lists, and with <strong>None</strong> research uses your brain and files only and
+            is offered no web tools at all. The network log lists the sites research reached or was refused, by origin.
+          </p>
+
+          <h2 id="terminal">In the terminal</h2>
+          <p>
+            <code>vector run --research "…"</code> runs Deep research without the app: <code>--depth</code>
+            (<code>focused</code>, <code>deep</code> or <code>auto</code>), <code>--search</code>, <code>--scope</code>
+            (<code>web</code>, <code>brain</code> or <code>all</code>) and <code>--report out.md</code>, which writes the
+            report and its sources to a file. It reads public pages for the run without asking; any other approval, a page
+            on your own network included, needs <code>--auto</code>. In the terminal UI, Research is one of the agents
+            you switch between. The npm CLI 1.99.99 has none of this; it comes with the next CLI release.
+          </p>
+          <p class="doc-cmd"><code>vector run --research --depth deep --report heat-pumps.md "How do EU heat pump subsidies compare by country?"</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+</DocsPage>
