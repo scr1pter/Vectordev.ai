@@ -124,15 +124,21 @@ export function modelPlanRequest(body: unknown, models: readonly ModelPlanModel[
         }
       : {}),
     model: model.id,
-    messages: model.explicitCache ? cacheBreakpoints(messages) : messages,
-    // Forcing a tool call, or one named tool, skips the model's reasoning on these endpoints, which refuse it while
-    // reasoning is pinned on, so the model decides between tools itself.
-    ...(model.explicitCache && (body.tool_choice === "required" || stripeRecord(body.tool_choice))
+    messages: model.explicitCache ? cacheBreakpoints(messages, model.cacheStyle) : messages,
+    ...(model.explicitCache && model.cacheStyle === "openai"
+      ? { prompt_cache_options: { mode: "explicit", ttl: "30m" } }
+      : {}),
+    // Some endpoints refuse forced tools with reasoning, or cannot select one named tool. Normalize only those
+    // unsupported choices; models that accept them retain the client's choice.
+    ...((model.autoToolChoice === "forced" && body.tool_choice === "required") ||
+    (model.autoToolChoice && stripeRecord(body.tool_choice))
       ? { tool_choice: "auto" }
       : {}),
     // Catalog policy owns effort; client overrides cannot silently increase spend or change reviewed quality.
     reasoning: model.reasoningEffort ? { effort: model.reasoningEffort } : undefined,
-    max_tokens: Math.min(maximum, model.maxOutputTokens),
+    ...(model.outputTokenParameter === "max_completion_tokens"
+      ? { max_completion_tokens: Math.min(maximum, model.maxOutputTokens) }
+      : { max_tokens: Math.min(maximum, model.maxOutputTokens) }),
     stream: true,
     stream_options: { include_usage: true },
     plugins: ["web", "file-parser", "response-healing", "context-compression", "auto-router", "pareto-router"].map(
@@ -143,19 +149,20 @@ export function modelPlanRequest(body: unknown, models: readonly ModelPlanModel[
       zdr: true,
       require_parameters: true,
       ...(model.quantizations ? { quantizations: model.quantizations } : {}),
-      max_price: { prompt: model.inputPrice, completion: model.outputPrice, request: 0, image: 0 },
+      // Media and native add-ons are rejected above. An image-price filter would also remove Gemini's text route.
+      max_price: { prompt: model.inputPrice, completion: model.outputPrice, request: 0 },
     },
   }
 }
 
 /**
- * Explicit five-minute breakpoints for endpoints without implicit caching: the end of the system prompt, which tools
+ * Explicit breakpoints (five minutes for cache_control, 30 minutes for OpenAI): the end of the system prompt, which tools
  * and instructions share across a session, the latest user message, and the end of the conversation, which moves
  * with every tool result. When the system prompt comes as several messages, Vector's stable block of tools and
  * instructions first, the end of that first message is marked too, so a new session reads it from the cache. Four
  * is the most a request may mark, and the gateway drops every client marker, including any on tools.
  */
-function cacheBreakpoints(messages: Record<string, unknown>[]) {
+function cacheBreakpoints(messages: Record<string, unknown>[], style?: "openai") {
   const text = (message: Record<string, unknown>) =>
     typeof message.content === "string"
       ? message.content.length > 0
@@ -175,7 +182,14 @@ function cacheBreakpoints(messages: Record<string, unknown>[]) {
     return {
       ...message,
       content: content.map((part, partIndex) =>
-        partIndex === last ? { ...part, cache_control: { type: "ephemeral" } } : part,
+        partIndex === last
+          ? {
+              ...part,
+              ...(style === "openai"
+                ? { prompt_cache_breakpoint: { mode: "explicit" } }
+                : { cache_control: { type: "ephemeral" } }),
+            }
+          : part,
       ),
     }
   })
@@ -189,12 +203,16 @@ function cacheBreakpoints(messages: Record<string, unknown>[]) {
  * one for \n, \" or \\, five for \u0001. Counting each byte as a token rejected conversations at about a quarter of
  * the window the catalog lists.
  */
-export function requireModelPlanContext<T extends { max_tokens: number }>(body: T, model: ModelPlanModel) {
+export function requireModelPlanContext<T extends { max_tokens?: number; max_completion_tokens?: number }>(
+  body: T,
+  model: ModelPlanModel,
+) {
   const text = JSON.stringify(body)
   const bytes = Buffer.byteLength(text)
   const escapes = (text.match(/\\(?:u[0-9a-fA-F]{4}|.)/g) ?? []).reduce((total, escape) => total + escape.length - 1, 0)
   const inputTokens = Math.ceil((bytes - escapes) / 4)
-  if (inputTokens + body.max_tokens > model.contextLength) throw contextError()
+  const output = body.max_tokens ?? body.max_completion_tokens
+  if (output === undefined || inputTokens + output > model.contextLength) throw contextError()
   if (model.promptTokenLimit !== undefined && promptBound(text, bytes, escapes) >= model.promptTokenLimit)
     throw contextError()
   return inputTokens
@@ -405,8 +423,6 @@ export async function handleModelPlanChat(request: ApiRequest, response: ApiResp
     // or its largest cost when the provider named none, until the key's usage shows it. An answer that broke off or
     // that Vector cancelled may still be billed when the provider finishes, so its hold stays until it lapses.
     if (!hold.streamed || hold.finished)
-      await hold
-        .release(hold.finished ? (hold.finished.charge ?? hold.required) : undefined)
-        .catch(() => undefined)
+      await hold.release(hold.finished ? (hold.finished.charge ?? hold.required) : undefined).catch(() => undefined)
   }
 }

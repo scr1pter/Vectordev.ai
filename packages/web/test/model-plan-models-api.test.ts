@@ -63,9 +63,11 @@ test("a signed-in account without credits sees the catalog, and only its revocat
   const body = await response.json()
   // Vector offers the first model as Codium's default.
   expect(body.models.map((model: { name: string }) => model.name)).toEqual([
-    "DeepSeek V4.1 Flash",
-    "Xiaomi MiMo V2.6 Flash",
+    "DeepSeek V4.1 Flash 1017",
     "Claude Haiku 5.5",
+    "GPT-6 Luna",
+    "Kimi K3.1 Pro",
+    "Gemini 4 Argon",
   ])
   // Only what Vector reads; the server's routing policy and price ceilings stay on the server.
   expect(body).toEqual({

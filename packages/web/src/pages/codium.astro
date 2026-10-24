@@ -18,13 +18,13 @@ const prices = pricing.monthly.map((plan) => plan.price)
 
 <MarketingLayout
   title="Pricing · Vector Codium"
-  description={`Vector is free. Vector Codium adds low-cost coding models with credits: monthly plans or one-time top-ups${prices.length ? ` from $${Math.min(...prices)} to $${Math.max(...prices)}` : ""}, with no automatic overages.`}
+  description={`Vector is free. Codium offers DeepSeek, Claude Haiku, GPT-6 Luna, Kimi and Gemini with credits: plans and top-ups${prices.length ? ` from $${Math.min(...prices)} to $${Math.max(...prices)}` : ""}, with no automatic overages.`}
 >
 <script is:inline>
   document.documentElement.dataset.codiumMode = new URLSearchParams(location.search).get("type") === "topups" ? "topup" : "monthly";
 </script>
   <div class="cx-page">
-    {/* The landing page's own top bar, lit by LanderMaterials exactly as on the landing page, and its footer box. */}
+    {/* The landing page's top bar and footer retain the same materials. */}
     <div class="vector-marketing cx-bar">
       <MarketingNav active="codium" />
     </div>

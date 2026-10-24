@@ -31,7 +31,12 @@ const config: ModelPlanConfig = {
     },
   ],
   models: [
-    { id: "deepseek/deepseek-v4.1-flash", name: "Everyday Coder", category: "everyday", description: "Routine edits." },
+    {
+      id: "deepseek/deepseek-v4.1-flash-1017",
+      name: "Everyday Coder",
+      category: "everyday",
+      description: "Routine edits.",
+    },
     { id: "vendor/unreviewed", name: "Hard Coder", category: "advanced" },
   ],
 }
@@ -80,7 +85,9 @@ describe("Codium pricing page", () => {
     expect(cards(part(html, "monthly"))).toHaveLength(4)
     expect(cards(part(html, "topup"))).toHaveLength(2)
     const source = await page()
-    expect(source.indexOf("document.documentElement.dataset.codiumMode")).toBeLessThan(source.indexOf('<div class="cx-page">'))
+    expect(source.indexOf("document.documentElement.dataset.codiumMode")).toBeLessThan(
+      source.indexOf('<div class="cx-page">'),
+    )
     expect(source).toContain("<CodiumPricing client:load")
     expect(source).toContain("<CodiumQuestions client:load")
   })
@@ -119,7 +126,7 @@ describe("Codium pricing page", () => {
     const plans = cards(part(render(live), "monthly")).map(text)
     expect(plans[0]).toContain(
       "Get started with: Codium credits for every Codium model, every month Typical tasks a month " +
-        "DeepSeek V4.1 Flash: 50–500 Xiaomi MiMo V2.6 Flash: 80–800 Claude Haiku 5.5: 30–300",
+        "DeepSeek V4.1 Flash 1017: 50–500 Claude Haiku 5.5: 30–300 GPT-6 Luna: 60–600 Kimi K3.1 Pro: 5–50 Gemini 4 Argon: 5–50",
     )
     // On phones the comparison table is hidden, so each card carries its own ranges.
     for (const [index, offer] of pricing.monthly.entries())
@@ -134,7 +141,7 @@ describe("Codium pricing page", () => {
         `Everything in ${["Plus", "Pro", "Max"][index]}, and: ${multiple}x more usage than Plus`,
       )
     expect(plans[3]).toContain(
-      "DeepSeek V4.1 Flash: 1,000–10,000 Xiaomi MiMo V2.6 Flash: 1,600–16,000 Claude Haiku 5.5: 600–6,000",
+      "DeepSeek V4.1 Flash 1017: 1,000–10,000 Claude Haiku 5.5: 600–6,000 GPT-6 Luna: 1,200–12,000 Kimi K3.1 Pro: 100–1,000 Gemini 4 Argon: 100–1,000",
     )
     // What all plans share is labelled as shared, so it never reads as something only that plan adds.
     expect(plans[1]).toContain(
@@ -165,7 +172,7 @@ describe("Codium pricing page", () => {
     expect(pack).toContain('<span class="cx-amount cx-type-lg">$10</span><span class="cx-per">one-time</span>')
     expect(pack).toContain('<button class="cx-btn" type="button">Buy $10 credit top-up</button>')
     expect(text(pack)).toContain("Codium credits that carry forward, with no subscription")
-    expect(text(pack)).toContain("DeepSeek V4.1 Flash: 50–500 tasks")
+    expect(text(pack)).toContain("DeepSeek V4.1 Flash 1017: 50–500 tasks")
     expect(text(pack)).toContain("Unused credits carry forward")
     // The chosen top-up is named visibly, as checkout and the account page name it.
     expect(text(pack)).toContain("*$10 credit top-up: one-time purchase.")
@@ -245,7 +252,7 @@ describe("Codium pricing page", () => {
       ]),
     )
     expect(rows.get("Usage")).toEqual(["Base", "5x Plus", "10x Plus", "20x Plus"])
-    expect(rows.get("DeepSeek V4.1 Flash (default)")).toEqual(Array(4).fill("Included"))
+    expect(rows.get("DeepSeek V4.1 Flash 1017 (default)")).toEqual(Array(4).fill("Included"))
     expect(rows.get("Claude Haiku 5.5")).toEqual(["30–300", "150–1,500", "300–3,000", "600–6,000"])
     for (const feature of [
       "Parallel agents",
@@ -263,12 +270,14 @@ describe("Codium pricing page", () => {
   test("the launch catalog publishes coarse estimates without private assumptions", () => {
     expect(codiumPricing(live).monthly.every((offer) => offer.tasks.every((tasks) => tasks !== null))).toBe(true)
     expect(codiumPricing(live).models.map((model) => model.name)).toEqual([
-      "DeepSeek V4.1 Flash",
-      "Xiaomi MiMo V2.6 Flash",
+      "DeepSeek V4.1 Flash 1017",
       "Claude Haiku 5.5",
+      "GPT-6 Luna",
+      "Kimi K3.1 Pro",
+      "Gemini 4 Argon",
     ])
     expect(codiumPricing(live).models.find((model) => model.category === "advanced")?.description).toContain(
-      "Uses credits faster than the other models",
+      "Uses credits faster than the everyday models",
     )
   })
 
@@ -286,7 +295,8 @@ describe("Codium pricing page", () => {
         const html = render(value, mode) + questions(value)
         for (const word of ["markup", "margin", "per million", "M tokens", "%"]) expect(html).not.toContain(word)
         // Only purchase prices appear in dollars: no dollar value of credits and no model prices.
-        for (const amount of html.match(/\$\d+(?:,\d{3})*(?:\.\d+)?/g) ?? []) expect(["$10", "$50", "$100", "$200"]).toContain(amount)
+        for (const amount of html.match(/\$\d+(?:,\d{3})*(?:\.\d+)?/g) ?? [])
+          expect(["$10", "$50", "$100", "$200"]).toContain(amount)
         expect(html).not.toMatch(/\d[\d,]* (Codium )?credits/)
       }
     }
@@ -317,7 +327,7 @@ describe("Codium pricing page", () => {
     ])
     const answers = text(html)
     expect(answers).toContain(
-      "Use DeepSeek V4.1 Flash or Xiaomi MiMo V2.6 Flash for routine work and save Claude Haiku 5.5",
+      "Use DeepSeek V4.1 Flash 1017, Claude Haiku 5.5, or GPT-6 Luna for routine work and save Kimi K3.1 Pro or Gemini 4 Argon",
     )
     expect(answers).toContain(
       "Start with Plus to try Codium on everyday coding. Pro suits coding with agents most days, Max daily agent " +
@@ -325,7 +335,7 @@ describe("Codium pricing page", () => {
     )
     expect(answers).not.toMatch(/Codium \d/)
     expect(answers).toContain("no overage charges and no automatic top-ups")
-    expect(answers).toContain("route them only to zero-data-retention endpoints")
+    expect(answers).toContain("routes them only to zero-data-retention endpoints")
     for (const model of live.models ?? []) expect(html).toContain(`<strong>${model.name}</strong>`)
     expect(html).toContain('<a href="/account">account page</a>')
     expect(html).toContain('<a href="/legal/privacy#codium">privacy policy</a>')
