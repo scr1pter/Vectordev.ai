@@ -45,6 +45,8 @@ export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
   messages: SessionV1.WithParts[]
   agent: Agent.Info
   session: Session.Info
+  /** False when the agent may not launch the explore specialist, so the plan reminder does not suggest it. */
+  explore?: boolean
 }) {
   const flags = yield* RuntimeFlags.Service
   const fsys = yield* FSUtil.Service
@@ -65,7 +67,9 @@ export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
         agent === "plan"
           ? afterPlan
             ? PLAN_STILL_ACTIVE
-            : PROMPT_PLAN
+            : input.explore === false
+              ? PROMPT_PLAN.replace("delegate explore agents", "delegate to specialists from the task tool's list")
+              : PROMPT_PLAN
           : agent === "build" && afterPlan
             ? BUILD_SWITCH
             : undefined

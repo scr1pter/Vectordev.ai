@@ -485,7 +485,6 @@ it.instance(
   () =>
     Effect.gen(function* () {
       const names = (yield* load((svc) => svc.list())).map((agent) => agent.name)
-      expect(names.filter((name) => name.startsWith("helper:"))).toEqual([])
       for (const name of NATIVE_SPECIALISTS) {
         expect(names).not.toContain(name)
         expect(yield* load((svc) => svc.get(name))).toBeUndefined()
@@ -517,14 +516,15 @@ it.instance(
   () =>
     Effect.gen(function* () {
       const review = yield* load((svc) => svc.helper("review"))
-      expect(review?.name).toBe("helper:review")
+      expect(review?.name).toBe("review")
       expect(review?.hidden).toBe(true)
       expect(review?.prompt).toBe(PROMPT_REVIEW)
       expect(evalPerm(review, "edit")).toBe("deny")
       expect(evalPerm(review, "grep")).toBe("allow")
-      // The helper's later turns name the copy, and get finds it, but never under the specialist's own name.
-      expect((yield* load((svc) => svc.get("helper:review")))?.prompt).toBe(review?.prompt)
+      // Only helper finds the copy: get, which every other session uses, finds it under no name.
       expect(yield* load((svc) => svc.get("review"))).toBeUndefined()
+      expect(yield* load((svc) => svc.get("helper:review"))).toBeUndefined()
+      expect(yield* load((svc) => svc.helper("helper:review"))).toBeUndefined()
       // A specialist that is on is itself, for a helper too.
       expect((yield* load((svc) => svc.helper("explore")))?.name).toBe("explore")
       // A user-defined agent turned off is gone for helpers as well.

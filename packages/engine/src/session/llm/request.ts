@@ -25,6 +25,8 @@ type PrepareInput = {
   readonly model: Provider.Model
   readonly agent: Agent.Info
   readonly permission?: PermissionV1.Ruleset
+  // False when the agent may not launch the explore specialist, so the provider prompt does not suggest it.
+  readonly explore?: boolean
   readonly stableSystem?: string[]
   readonly system: string[]
   readonly messages: ModelMessage[]
@@ -61,7 +63,7 @@ const mergeOptions = (target: Record<string, any>, source: Record<string, any> |
 export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: PrepareInput) {
   const isOpenaiOauth = input.provider.id === "openai" && input.auth?.type === "oauth"
   const prompt = [
-    ...(input.agent.prompt ? [input.agent.prompt] : SystemPrompt.provider(input.model)),
+    ...(input.agent.prompt ? [input.agent.prompt] : SystemPrompt.provider(input.model, input.explore)),
     ...(input.stableSystem ?? []),
   ]
   const rest = [...input.system, ...(input.user.system ? [input.user.system] : [])]

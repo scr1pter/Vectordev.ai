@@ -1351,6 +1351,41 @@ it.instance(
 )
 
 it.instance(
+  "loop suggests explore for a search that spans several areas while explore is on",
+  () =>
+    Effect.gen(function* () {
+      const body = yield* firstRequestBody({})
+      expect(body).toContain('prefer it with subagent_type \\"explore\\"')
+    }),
+  15_000,
+)
+
+// With explore turned off a prompt that still suggested it would send the model's first task call to a missing agent.
+it.instance(
+  "loop points a search at the task tool's list when config turns explore off",
+  () =>
+    Effect.gen(function* () {
+      const body = yield* firstRequestBody({ config: { agent: { explore: { disable: true } } } })
+      expect(body).not.toContain('subagent_type \\"explore\\"')
+      expect(body).toContain("prefer it with a search specialist from the task tool's list")
+      expect(body).not.toContain("explore for read-only discovery")
+    }),
+  15_000,
+)
+
+it.instance(
+  "loop's plan reminder names no explore agents when config turns explore off",
+  () =>
+    Effect.gen(function* () {
+      const body = yield* firstRequestBody({ agent: "plan", config: { agent: { explore: { disable: true } } } })
+      expect(body).not.toContain("delegate explore agents")
+      expect(body).toContain("delegate to specialists from the task tool's list")
+      expect(body).not.toContain('subagent_type \\"explore\\"')
+    }),
+  15_000,
+)
+
+it.instance(
   "loop tells Plan mode that its agent cannot launch general Subagents, and names only its specialists",
   () =>
     Effect.gen(function* () {
@@ -4047,16 +4082,37 @@ it.instance(
       // It ran as review: the specialist's own prompt went out with the request.
       expect(JSON.stringify((yield* llm.inputs)[0])).toContain("You are a senior code review specialist.")
 
-      // A session of the user's own still cannot reach a specialist that is turned off.
+      // A later turn of the helper still runs as review.
+      yield* prompt.prompt({
+        sessionID: helper.id,
+        agent: "review",
+        noReply: true,
+        parts: [{ type: "text", text: "and this one" }],
+      })
+      yield* llm.text("reviewed again")
+      const again = yield* prompt.loop({ sessionID: helper.id })
+      expect(again.parts.some((part) => part.type === "text" && part.text === "reviewed again")).toBe(true)
+      expect(JSON.stringify((yield* llm.inputs)[1])).toContain("You are a senior code review specialist.")
+
+      // A session of the user's own still cannot reach a specialist that is turned off, by its own name or any other.
       const chat = yield* sessions.create({})
-      const exit = yield* prompt
-        .prompt({ sessionID: chat.id, agent: "review", noReply: true, parts: [{ type: "text", text: "review" }] })
-        .pipe(Effect.exit)
-      expect(Exit.isFailure(exit)).toBe(true)
-      if (Exit.isFailure(exit)) {
-        const err = Cause.squash(exit.cause)
-        expect(NamedError.Unknown.isInstance(err) && err.data.message).toContain('Agent not found: "review"')
+      for (const agent of ["review", "helper:review"]) {
+        const exit = yield* prompt
+          .prompt({ sessionID: chat.id, agent, noReply: true, parts: [{ type: "text", text: "review" }] })
+          .pipe(Effect.exit)
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (Exit.isFailure(exit)) {
+          const err = Cause.squash(exit.cause)
+          expect(NamedError.Unknown.isInstance(err) && err.data.message).toContain(`Agent not found: "${agent}"`)
+        }
+        const shell = yield* prompt.shell({ sessionID: chat.id, agent, command: "echo hi" }).pipe(Effect.exit)
+        expect(Exit.isFailure(shell)).toBe(true)
+        if (Exit.isFailure(shell)) {
+          const err = Cause.squash(shell.cause)
+          expect(NamedError.Unknown.isInstance(err) && err.data.message).toContain(`Agent not found: "${agent}"`)
+        }
       }
+      expect(yield* llm.hits).toHaveLength(2)
     }),
   60_000,
 )

@@ -88,7 +88,8 @@ export interface Interface {
   /**
    * The agent one of Vector's helper sessions (`internal` set, such as a Vectorscope reviewer) runs as. A Subagent
    * specialist turned off in Settings leaves `get` and `list`, so the user, the task tool and the @ list no longer
-   * reach it, but the helpers that run as one keep it: this gives them a copy, under a name of its own.
+   * reach it, but the helpers that run as one keep it: only this finds it, so every lookup of a helper session's agent
+   * goes through here.
    */
   readonly helper: (agent: string) => Effect.Effect<Info>
   readonly list: () => Effect.Effect<Info[]>
@@ -629,19 +630,18 @@ const layer = Layer.effect(
         }
 
         // Vector's own helpers run as Subagent specialists: a Vectorscope review prompts review and security. One
-        // turned off leaves the agent list, but a helper session still gets it from `helper`, as a hidden copy whose
-        // name the session's later turns resolve with `get`.
+        // turned off leaves the agent list and `get`, but a helper session still gets it, hidden, from `helper`.
         const helpers: Record<string, Info> = Object.fromEntries(
-          [...off].map((name) => [helperName(name), { ...agents[name], name: helperName(name), hidden: true }]),
+          [...off].map((name) => [name, { ...agents[name], hidden: true }]),
         )
         for (const name of off) delete agents[name]
 
         const get = Effect.fnUntraced(function* (agent: string) {
-          return agents[agent] ?? helpers[agent]
+          return agents[agent]
         })
 
         const helper = Effect.fnUntraced(function* (agent: string) {
-          return agents[agent] ?? helpers[helperName(agent)]
+          return agents[agent] ?? helpers[agent]
         })
 
         const list = Effect.fnUntraced(function* () {
@@ -775,12 +775,6 @@ const layer = Layer.effect(
     })
   }),
 )
-
-// The name a helper's copy of a turned-off specialist goes by. `get` looks in the agent list first, so an agent the
-// user gave this exact name would take the copy's place.
-function helperName(name: string) {
-  return `helper:${name}`
-}
 
 // One user or config rule as it may apply to a read-only specialist that has `tools` and may run the `verification`
 // commands (each a literal prefix ending in `*`). A deny always applies. An allow or ask applies to the tools it

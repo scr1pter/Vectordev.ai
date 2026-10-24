@@ -745,7 +745,7 @@ export const TaskTool = Tool.define(
       const invoked = Array.isArray(ctx.extra?.invokedAgents) && ctx.extra.invokedAgents.includes(subagentType)
       if (generalOff || missing || (!requested && !invoked)) {
         // An omitted type means the general Subagent only where the caller may launch it.
-        const caller = yield* agent.get(ctx.agent)
+        const caller = parent.internal ? yield* agent.helper(ctx.agent) : yield* agent.get(ctx.agent)
         const denied = (name: string) =>
           Permission.evaluate(id, name, caller?.permission ?? [], parent.permission ?? []).action === "deny"
         const permitted = agents
@@ -1104,7 +1104,9 @@ export const TaskTool = Tool.define(
           const currentParent = yield* unreverted(ctx.sessionID, 1_000)
           // The note stays in the parent's history and is sent again on every later request, so it gets the cap a tool
           // result gets, with the rest saved where the parent can read it.
-          const parentAgent = yield* agent.get(currentParent.agent ?? ctx.agent)
+          const parentAgent = currentParent.internal
+            ? yield* agent.helper(currentParent.agent ?? ctx.agent)
+            : yield* agent.get(currentParent.agent ?? ctx.agent)
           const capped = yield* truncate.output(text, { maxBytes: 3072, maxLines: 60 }, parentAgent)
           yield* SubagentLifecycle.update(
             sessions,
