@@ -926,6 +926,52 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("keeps a hidden swarm planner on explore after configuration turns explore off", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const database = yield* Database.Service
+      yield* database.db
+        .update(SessionTable)
+        .set({ internal: "swarm.planner", agent: "explore" })
+        .where(eq(SessionTable.id, sessionID))
+        .run()
+        .pipe(Effect.orDie)
+      const agents = yield* AgentV2.Service
+      const explore = AgentV2.ID.make("explore")
+      yield* agents.transform((editor) =>
+        editor.update(explore, (agent) => {
+          agent.system = "Explore the repository."
+          agent.permissions = [
+            { action: "*", resource: "*", effect: "allow" },
+            { action: "grep", resource: "*", effect: "deny" },
+          ]
+        }),
+      )
+      yield* agents.transform((editor) => editor.remove(explore))
+      const registry = yield* ToolRegistry.Service
+      yield* registry.register(
+        Object.fromEntries(
+          ["read", "grep", "glob", "list", "edit"].map((name) => [
+            name,
+            Tool.make({
+              description: name,
+              input: Schema.Struct({}),
+              output: Schema.String,
+              execute: () => Effect.succeed(name),
+            }),
+          ]),
+        ),
+      )
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Plan this work" }), resume: false })
+      requests.length = 0
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(1)
+      expect(requests[0].tools.map((tool) => tool.name)).toEqual(["read", "glob", "list"])
+      expect(JSON.stringify(requests[0].system)).toContain("Explore the repository.")
+    }),
+  )
+
   it.effect("retries the first provider turn after system context becomes available", () =>
     Effect.gen(function* () {
       yield* setup

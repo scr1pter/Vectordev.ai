@@ -199,8 +199,9 @@ export function SettingsSubagentsV2() {
               <div class="settings-v2-row-description">
                 Named agents with one focus each, such as Review and Security. Turn this off to keep all of their work
                 in the main agent, or turn them off one at a time under Subagent specialists below. Build, Plan, general
-                subagents, agents you define yourself and Vector's own helpers are not changed. As with General
-                subagents, Vector asks first when something is running.
+                subagents and agents you define yourself are not changed, and Vector's own helpers, such as a
+                Vectorscope review, keep working. As with General subagents, Vector asks first when something is
+                running.
               </div>
             </div>
             <div class="settings-v2-row-control settings-v2-row-control--compact">
@@ -315,9 +316,9 @@ export function SettingsSubagentsV2() {
           <p class="settings-v2-row-description">
             Explore, Review, Security and Judge can read your repository and run checks, but cannot edit it. In Plan
             mode, Vector uses only Explore, Review and Security, and with Judge off it skips the LLM-as-a-judge check. A
-            specialist you turn off leaves the @ list and Vector stops calling it. Specialists keep working when General
-            subagents is off. Agents you define yourself count as subagent specialists too, and these switches leave
-            them alone.
+            specialist you turn off leaves the @ list and Vector stops calling it, but Vectorscope still reviews with
+            Review and Security. Specialists keep working when General subagents is off. Agents you define yourself
+            count as subagent specialists too, and these switches leave them alone.
           </p>
         </div>
       </div>

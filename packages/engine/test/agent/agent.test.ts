@@ -7,6 +7,7 @@ import path from "path"
 import { disposeAllInstances, TestInstance, trustWorkspace } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { Agent } from "../../src/agent/agent"
+import PROMPT_REVIEW from "../../src/agent/prompt/review.txt"
 import { GENERAL_SUBAGENT } from "../../src/agent/subagent-kind"
 import { NATIVE_SPECIALISTS } from "@vectordevai/core/agent/specialists"
 import { Auth } from "../../src/auth"
@@ -484,6 +485,7 @@ it.instance(
   () =>
     Effect.gen(function* () {
       const names = (yield* load((svc) => svc.list())).map((agent) => agent.name)
+      expect(names.filter((name) => name.startsWith("helper:"))).toEqual([])
       for (const name of NATIVE_SPECIALISTS) {
         expect(names).not.toContain(name)
         expect(yield* load((svc) => svc.get(name))).toBeUndefined()
@@ -505,6 +507,32 @@ it.instance(
   {
     trusted: true,
     config: { agent: Object.fromEntries(NATIVE_SPECIALISTS.map((name) => [name, { disable: true }])) },
+  },
+)
+
+// Vectorscope runs its reviewers as the review and security specialists, so turning one off in Settings must leave a
+// copy that only a helper session reaches, with the specialist's own prompt and read-only permissions.
+it.instance(
+  "a helper still runs as a specialist that is turned off",
+  () =>
+    Effect.gen(function* () {
+      const review = yield* load((svc) => svc.helper("review"))
+      expect(review?.name).toBe("helper:review")
+      expect(review?.hidden).toBe(true)
+      expect(review?.prompt).toBe(PROMPT_REVIEW)
+      expect(evalPerm(review, "edit")).toBe("deny")
+      expect(evalPerm(review, "grep")).toBe("allow")
+      // The helper's later turns name the copy, and get finds it, but never under the specialist's own name.
+      expect((yield* load((svc) => svc.get("helper:review")))?.prompt).toBe(review?.prompt)
+      expect(yield* load((svc) => svc.get("review"))).toBeUndefined()
+      // A specialist that is on is itself, for a helper too.
+      expect((yield* load((svc) => svc.helper("explore")))?.name).toBe("explore")
+      // A user-defined agent turned off is gone for helpers as well.
+      expect(yield* load((svc) => svc.helper("mine"))).toBeUndefined()
+    }),
+  {
+    trusted: true,
+    config: { agent: { review: { disable: true }, mine: { description: "Mine", mode: "subagent", disable: true } } },
   },
 )
 

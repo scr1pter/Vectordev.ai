@@ -20,6 +20,7 @@ import { dynamicTool, jsonSchema, type Tool } from "ai"
 import { fileURLToPath, pathToFileURL } from "url"
 import { NamedError } from "@vectordevai/core/util/error"
 import { Agent as AgentSvc } from "../../src/agent/agent"
+import { NATIVE_SPECIALISTS } from "@vectordevai/core/agent/specialists"
 import { BackgroundJob } from "@/background/job"
 import { Command } from "../../src/command"
 import { Config } from "@/config/config"
@@ -4015,6 +4016,49 @@ noLLMServer.instance(
       }
     }),
   30_000,
+)
+
+// Vectorscope prompts its reviewers as the review and security specialists in helper sessions. Settings → Agents can
+// turn every specialist off, which must not turn Vectorscope off with them.
+it.instance(
+  "a helper session still runs as its specialist when every specialist is turned off",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig((url) => ({
+        ...providerCfg(url),
+        agent: Object.fromEntries(NATIVE_SPECIALISTS.map((name) => [name, { disable: true }])),
+      }))
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const helper = yield* sessions.create({ title: "Review", internal: "vectorscope.review" })
+      yield* prompt.prompt({
+        sessionID: helper.id,
+        agent: "review",
+        noReply: true,
+        parts: [{ type: "text", text: "review this diff" }],
+      })
+      yield* llm.text("reviewed")
+
+      const result = yield* prompt.loop({ sessionID: helper.id })
+
+      expect(result.info.role).toBe("assistant")
+      expect(result.parts.some((part) => part.type === "text" && part.text === "reviewed")).toBe(true)
+      expect(yield* llm.hits).toHaveLength(1)
+      // It ran as review: the specialist's own prompt went out with the request.
+      expect(JSON.stringify((yield* llm.inputs)[0])).toContain("You are a senior code review specialist.")
+
+      // A session of the user's own still cannot reach a specialist that is turned off.
+      const chat = yield* sessions.create({})
+      const exit = yield* prompt
+        .prompt({ sessionID: chat.id, agent: "review", noReply: true, parts: [{ type: "text", text: "review" }] })
+        .pipe(Effect.exit)
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) {
+        const err = Cause.squash(exit.cause)
+        expect(NamedError.Unknown.isInstance(err) && err.data.message).toContain('Agent not found: "review"')
+      }
+    }),
+  60_000,
 )
 
 noLLMServer.instance(

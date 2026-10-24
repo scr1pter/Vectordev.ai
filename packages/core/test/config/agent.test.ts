@@ -231,6 +231,44 @@ describe("ConfigAgentPlugin.Plugin", () => {
     }),
   )
 
+  // Vector's helper sessions, such as the desktop swarm planner, run as a built-in agent the user can turn off.
+  it.effect("keeps an agent configuration turned off for Vector's helper sessions only", () =>
+    Effect.gen(function* () {
+      const agents = yield* AgentV2.Service
+      const explore = AgentV2.ID.make("explore")
+      yield* agents.transform((editor) =>
+        editor.update(explore, (agent) => {
+          agent.system = "Explore the repository."
+          agent.mode = "subagent"
+        }),
+      )
+
+      const config = Config.Service.of({
+        entries: () =>
+          Effect.succeed([
+            new Config.Document({
+              type: "document",
+              info: decode({ agents: { explore: { disabled: true } } }),
+            }),
+          ]),
+      })
+
+      yield* ConfigAgentPlugin.Plugin.effect(host({ agent: agentHost(agents) })).pipe(
+        Effect.provideService(Config.Service, config),
+      )
+
+      expect(yield* agents.get(explore)).toBeUndefined()
+      expect(yield* agents.resolve(explore)).toBeUndefined()
+      expect((yield* agents.select("explore")).info).toBeUndefined()
+      expect((yield* agents.all()).map((agent) => String(agent.id))).not.toContain("explore")
+      expect(yield* agents.resolve(explore, true)).toMatchObject({ id: explore, system: "Explore the repository." })
+      expect(yield* agents.select("explore", true)).toMatchObject({
+        id: explore,
+        info: { system: "Explore the repository." },
+      })
+    }),
+  )
+
   it.live("loads legacy file-based agents from config directories", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),

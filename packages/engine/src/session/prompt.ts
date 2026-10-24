@@ -1041,7 +1041,14 @@ const layer = Layer.effect(
       options?: PromptOptions,
     ) {
       const agentName = input.agent
-      const ag = agentName ? yield* agents.get(agentName) : yield* agents.defaultInfo()
+      const current = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+      // One of Vector's helpers, such as a Vectorscope reviewer, keeps the specialist it runs as when Settings turns
+      // that specialist off.
+      const ag = !agentName
+        ? yield* agents.defaultInfo()
+        : current.internal
+          ? yield* agents.helper(agentName)
+          : yield* agents.get(agentName)
       if (!ag) {
         const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
         const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
@@ -1099,7 +1106,6 @@ const layer = Layer.effect(
         ...(input.judge ? { judge: input.judge } : {}),
       }
 
-      const current = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       if (
         current.agent !== info.agent ||
         current.model?.providerID !== info.model.providerID ||

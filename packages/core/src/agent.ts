@@ -21,6 +21,8 @@ export interface Selection {
 
 type Data = {
   agents: Map<ID, Types.DeepMutable<Info>>
+  // Agents a transform removed, such as one configuration turned off. Only a helper lookup still finds them.
+  removed: Map<ID, Types.DeepMutable<Info>>
   default?: ID
 }
 
@@ -35,8 +37,12 @@ export type Draft = {
 export interface Interface extends State.Transformable<Draft> {
   readonly get: (id: ID) => Effect.Effect<Info | undefined>
   readonly default: () => Effect.Effect<Info | undefined>
-  readonly resolve: (id?: ID | string) => Effect.Effect<Info | undefined>
-  readonly select: (id?: ID | string) => Effect.Effect<Selection>
+  /**
+   * With `helper`, for one of Vector's helper sessions (`internal` set), an agent that configuration turned off still
+   * resolves: the desktop swarm planner runs as explore whatever Settings → Agents says about explore.
+   */
+  readonly resolve: (id?: ID | string, helper?: boolean) => Effect.Effect<Info | undefined>
+  readonly select: (id?: ID | string, helper?: boolean) => Effect.Effect<Selection>
   readonly all: () => Effect.Effect<Info[]>
 }
 
@@ -46,7 +52,7 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const state = State.create<Data, Draft>({
-      initial: () => ({ agents: new Map() }),
+      initial: () => ({ agents: new Map(), removed: new Map() }),
       draft: (draft) => ({
         list: () => Array.fromIterable(draft.agents.values()) as Info[],
         get: (id) => draft.agents.get(id),
@@ -60,10 +66,16 @@ const layer = Layer.effect(
           current.id = id
         },
         remove: (id) => {
+          const current = draft.agents.get(id)
+          if (current) draft.removed.set(id, current)
           draft.agents.delete(id)
         },
       }),
     })
+    const find = (id: ID, helper?: boolean) => {
+      const data = state.get()
+      return data.agents.get(id) ?? (helper ? data.removed.get(id) : undefined)
+    }
     const selectable = (agent: Info | undefined) =>
       agent && agent.mode !== "subagent" && !agent.hidden ? agent : undefined
     const selectedDefault = () => {
@@ -87,14 +99,14 @@ const layer = Layer.effect(
       default: Effect.fn("AgentV2.default")(function* () {
         return selectedDefault()
       }),
-      resolve: Effect.fn("AgentV2.resolve")(function* (id) {
-        if (id !== undefined) return state.get().agents.get(ID.make(id))
+      resolve: Effect.fn("AgentV2.resolve")(function* (id, helper) {
+        if (id !== undefined) return find(ID.make(id), helper)
         return selectedDefault()
       }),
-      select: Effect.fn("AgentV2.select")(function* (id) {
+      select: Effect.fn("AgentV2.select")(function* (id, helper) {
         if (id !== undefined) {
           const selected = ID.make(id)
-          return { id: selected, info: state.get().agents.get(selected) }
+          return { id: selected, info: find(selected, helper) }
         }
         const info = selectedDefault()
         return { id: info?.id ?? defaultID, info }

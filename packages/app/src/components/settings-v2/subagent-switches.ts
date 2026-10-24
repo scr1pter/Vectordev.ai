@@ -6,13 +6,17 @@ import { GENERAL_SUBAGENT_ID, SUBAGENT_IDENTITIES } from "@vectordevai/session-u
 // Subagent specialist that ships with Vector. Each maps to the engine's
 // `agent.<id>.disable` in the global config. The engine removes a disabled
 // agent from its agent list (packages/engine/src/agent/agent.ts), so the task
-// tool can no longer launch it and the @ list no longer offers it. A switch is
-// on unless the global config says exactly `disable: true`.
+// tool can no longer launch it and the @ list no longer offers it. Vector's own
+// helpers that run as a specialist, such as a Vectorscope review, keep a copy
+// of it (Agent.helper). A switch is on unless the global config says exactly
+// `disable: true`.
 export const agentEnabled = (config: Config, id: string) => config.agent?.[id]?.disable !== true
 
 // The specialists the page lists, and the only agents the all-specialists
-// switch changes: never build or plan, never general, never Vector's own
-// helpers and never an agent the user defined.
+// switch changes: never build or plan, never general, never Vector's hidden
+// engine agents and never an agent the user defined. The engine's own list is
+// NATIVE_SPECIALISTS (@vectordevai/core/agent/specialists), and the tests check
+// the two agree.
 export const SPECIALIST_IDS = Object.keys(SUBAGENT_IDENTITIES).filter((id) => id !== GENERAL_SUBAGENT_ID)
 
 // The global config update deep-merges this patch, so other agent entries,
