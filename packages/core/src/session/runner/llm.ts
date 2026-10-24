@@ -1,3 +1,5 @@
+export * as SessionRunnerLLM from "./llm"
+
 import {
   LLM,
   LLMClient,
@@ -9,6 +11,7 @@ import {
   type ProviderErrorEvent,
 } from "@vectordevai/llm"
 import { Cause, DateTime, Effect, FiberSet, Layer, Option, Semaphore, Stream } from "effect"
+import { and, desc, eq, inArray } from "drizzle-orm"
 import { AgentV2 } from "../../agent"
 import { Config } from "../../config"
 import { Database } from "../../database/database"
@@ -32,6 +35,7 @@ import { TaskSize } from "../../task-size"
 import { SessionInput } from "../input"
 import { SessionSchema } from "../schema"
 import { SessionStore } from "../store"
+import { SessionMessageTable } from "../sql"
 import { internalSessionPermissions } from "../permission"
 import { type RunError, Service } from "./index"
 import { SessionRunnerModel } from "./model"
@@ -41,6 +45,7 @@ import { toLLMMessages } from "./to-llm-message"
 import { MAX_STEPS_PROMPT } from "./max-steps"
 import { Snapshot } from "../../snapshot"
 import { SpendGuard } from "../../spend-guard"
+import { ResearchPlan } from "../../research/plan"
 import { makeLocationNode } from "../../effect/app-node"
 import { llmClient } from "../../effect/app-node-platform"
 
@@ -127,6 +132,35 @@ const layer = Layer.effect(
     const getContext = Effect.fn("SessionRunner.getContext")(function* (sessionID: SessionSchema.ID) {
       return yield* store.context(sessionID)
     })
+    // The agent the newest promoted prompt named, unless the session switched agent after it. A prompt that named none
+    // is answered by the session's own agent, as a V1 message without one is by the default agent.
+    const latestAgent = Effect.fn("SessionRunner.latestAgent")(function* (session: SessionSchema.Info) {
+      const latest = yield* db
+        .select({ type: SessionMessageTable.type, data: SessionMessageTable.data })
+        .from(SessionMessageTable)
+        .where(
+          and(
+            eq(SessionMessageTable.session_id, session.id),
+            inArray(SessionMessageTable.type, ["user", "agent-switched"]),
+          ),
+        )
+        .orderBy(desc(SessionMessageTable.seq))
+        .limit(1)
+        .get()
+        .pipe(Effect.orDie)
+      return latest?.type === "user" && "agent" in latest.data && typeof latest.data.agent === "string"
+        ? latest.data.agent
+        : session.agent
+    })
+    // A prompt's agent is the caller's word, and config may disable or remove an agent after a prompt named it, so an
+    // agent this location does not have answers nothing: the session's own agent answers instead.
+    const selectAgent = Effect.fn("SessionRunner.selectAgent")(function* (
+      session: SessionSchema.Info,
+      named: string | undefined,
+    ) {
+      const selected = yield* agents.select(named)
+      return selected.info || named === session.agent ? selected : yield* agents.select(session.agent)
+    })
     const failInterruptedTools = Effect.fn("SessionRunner.failInterruptedTools")(function* (
       sessionID: SessionSchema.ID,
     ) {
@@ -186,13 +220,30 @@ const layer = Layer.effect(
       const session = yield* getSession(sessionID)
       if (session.location.directory !== location.directory || session.location.workspaceID !== location.workspaceID)
         return yield* Effect.interrupt
-      const agent = yield* agents.select(session.agent)
+      // A prompt names the agent that answers it, so the turn runs under the agent of the newest prompt this boundary
+      // promotes, or of the newest one already promoted. It is read before the context epoch starts, so a session's
+      // first turn starts with its agent's own skills.
+      const cutoff = yield* EventV2.latestSequence(db, session.id)
+      const promoting = promotion ? yield* SessionInput.promotable(db, session.id, promotion, cutoff) : []
+      const newest = promoting.at(-1)
+      const agent = yield* selectAgent(
+        session,
+        newest ? (newest.prompt.agent ?? session.agent) : yield* latestAgent(session),
+      )
+      // Deep research's default caps hold a root run that has no cap of the owner's own (section 11.2), as on the V1
+      // runner. This runner researches Focused only. A budget the owner armed keeps its place.
+      if (agent.id === AgentV2.researchID && (yield* guard.rootOf(session.id)) === session.id)
+        yield* guard.replaceFallback(
+          session.id,
+          ResearchPlan.budget(
+            ResearchPlan.limits(ResearchPlan.settings(yield* config.entries(), config.scope), "focused"),
+          ),
+        )
       const initialized = yield* SessionContextEpoch.initialize(db, loadSystemContext(agent), session.id)
       const toolFibers = yield* FiberSet.make<void, ToolOutputStore.Error>()
       let needsContinuation = false
       let currentStep = step
       if (promotion) {
-        const cutoff = yield* EventV2.latestSequence(db, session.id)
         let promoted = 0
         if (promotion === "steer") promoted = yield* SessionInput.promoteSteers(db, events, session.id, cutoff)
         if (promotion === "queue") {
@@ -209,7 +260,12 @@ const layer = Layer.effect(
       const isLastStep = agent.info?.steps !== undefined && currentStep >= agent.info.steps
       const toolMaterialization = isLastStep
         ? undefined
-        : yield* tools.materialize(agent.info?.permissions ?? [], internalSessionPermissions(session.internal))
+        : yield* tools.materialize(
+            agent.info?.permissions ?? [],
+            internalSessionPermissions(session.internal),
+            AgentV2.reserved(agent),
+            ResearchPlan.withheld(),
+          )
       // Each turn sizes the request it answers from the projected history, as the V1 runner does: a greeting is offered
       // no tools and any other request every tool. V2 has no subagents or judge, so no size brings them in. Vector's
       // own helper sessions keep every tool they were given.
@@ -455,9 +511,10 @@ const layer = Layer.effect(
       const owner = (yield* guard.rootOf(input.sessionID)) === input.sessionID
       // Inputs left pending by a stop stay durable and drain under a fresh run, which keeps the stopped run's cap
       // unless a new budget was armed. That drain often starts at once: a prompt admitted during the stopped turn
-      // wakes a successor drain, and a budget armed then landed on the stopped run.
+      // wakes a successor drain, and a budget armed then landed on the stopped run. A cap the owner armed stays the
+      // owner's in the successor, so research's default caps do not replace it.
       const previous = owner ? yield* guard.snapshot(input.sessionID) : undefined
-      if (owner) yield* guard.begin(input.sessionID, previous?.stopped ? previous.budget : undefined)
+      if (owner) yield* guard.begin(input.sessionID, undefined, previous?.stopped ? previous : undefined)
       yield* Effect.gen(function* () {
         let promotion: SessionInput.Delivery | undefined = hasSteer ? "steer" : hasQueue ? "queue" : undefined
         let shouldRun = input.force || hasSteer || hasQueue

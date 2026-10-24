@@ -27498,6 +27498,9 @@
             "items": {
               "$ref": "#/components/schemas/PromptAgentAttachment"
             }
+          },
+          "agent": {
+            "type": "string"
           }
         },
         "required": ["text"],
@@ -40517,6 +40520,9 @@
             "items": {
               "$ref": "#/components/schemas/PromptAgentAttachment"
             }
+          },
+          "agent": {
+            "type": "string"
           }
         },
         "required": ["text"],
@@ -41700,6 +41706,9 @@
             "items": {
               "$ref": "#/components/schemas/PromptAgentAttachment"
             }
+          },
+          "agent": {
+            "type": "string"
           },
           "type": {
             "type": "string",

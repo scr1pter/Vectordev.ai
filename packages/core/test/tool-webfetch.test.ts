@@ -179,6 +179,20 @@ describe("WebFetchTool registration", () => {
     }),
   )
 
+  it.effect("records a page fetched from the user's own network as private, so research keeps it out of searches", () =>
+    Effect.gen(function* () {
+      reset()
+      const registry = yield* ToolRegistry.Service
+      const local = yield* settleTool(registry, call({ url: "http://localhost:3000/health", format: "text" }))
+      expect(local.output?.structured).toMatchObject({ output: "hello", private: true })
+      const open = yield* settleTool(
+        registry,
+        call({ url: "http://example.com/public", format: "text" }, "call-public"),
+      )
+      expect(open.output?.structured).not.toHaveProperty("private")
+    }),
+  )
+
   it.effect("reauthorizes each public redirect destination", () =>
     Effect.gen(function* () {
       reset()

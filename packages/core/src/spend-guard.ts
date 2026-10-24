@@ -347,7 +347,13 @@ export interface Interface {
   // armed budget does, and one armed only this way is held to begin()'s `fallback` too.
   readonly tighten: (sessionID: SessionID, budget: RunBudget.Info) => Effect.Effect<void>
   // Starts a run for a root session with the armed budget, else `fallback`. A no-op while the run is active.
-  readonly begin: (rootID: SessionID, fallback?: RunBudget.Info) => Effect.Effect<void>
+  // `carried` is a stopped run the new one carries on from, in place of `fallback`: the new run keeps its budget, which
+  // stays the owner's when the owner armed it, so replaceFallback() moves it only when it was a fallback too.
+  readonly begin: (
+    rootID: SessionID,
+    fallback?: RunBudget.Info,
+    carried?: Pick<Run, "budget" | "fallback">,
+  ) => Effect.Effect<void>
   // Moves the active run of `sessionID`'s root from begin()'s fallback to `fallback`, held to every budget tighten()
   // gave it, such as research's default caps moving from Focused's to Deep's. A run the owner armed a budget for keeps
   // that budget, and a root with no run going is left alone.
@@ -521,13 +527,22 @@ const layer = Layer.effect(
           }
         })
       }),
-      begin: Effect.fn("SpendGuard.begin")(function* (rootID, fallback) {
+      begin: Effect.fn("SpendGuard.begin")(function* (rootID, fallback, carried) {
         yield* Ref.update(state, (current) => {
           if (current.active.has(rootID)) return current
           const armed = new Map(current.armed)
           armed.delete(rootID)
           const held = current.armed.get(rootID)
-          const budget = held ? (held.tighten ? tighter(fallback, held.budget) : held.budget) : (fallback ?? {})
+          const base = carried ? carried.budget : fallback
+          const budget = held ? (held.tighten ? tighter(base, held.budget) : held.budget) : (base ?? {})
+          // What replaceFallback() may move: begin()'s fallback, or the carried run's budget when that was one, held to
+          // every budget tighten() gave either. A budget the owner armed, for this run or the one it carries on from,
+          // stays.
+          const movable = held && !held.tighten ? undefined : carried ? carried.fallback : {}
+          const moves =
+            movable && held
+              ? { tightened: movable.tightened ? tighter(movable.tightened, held.budget) : held.budget }
+              : movable
           const bindings = new Map(current.bindings)
           current.roots.forEach((owner, childID) => {
             if (owner === rootID && !bindings.has(childID))
@@ -545,7 +560,7 @@ const layer = Layer.effect(
               lineage: current.next,
               run: {
                 ...start(rootID, budget, !current.quiet.has(rootID)),
-                ...(held && !held.tighten ? {} : { fallback: held ? { tightened: held.budget } : {} }),
+                ...(moves ? { fallback: moves } : {}),
               },
             }),
           }

@@ -94,6 +94,27 @@ export function order(input: {
   return [...(["searxng", "exa", "parallel", "browser"] as const).filter((name) => available[name]), "none"]
 }
 
+/**
+ * A search's results as research shows them to the agent, fenced since the sites wrote them: each title, address,
+ * date and snippet, marked "already read as S#" for a page the run read (`read` maps canonical addresses to sources).
+ */
+export function listing(query: string, results: readonly Result[], read: ReadonlyMap<string, string>) {
+  return WebFence.fenceWebPage(
+    { title: `Search results: ${query}`, tool: "research_search" },
+    results
+      .map((item, index) => {
+        const known = read.get(ResearchCanonical.canonical(item.url) ?? "")
+        return [
+          `${index + 1}. ${item.title}${known ? ` (already read as ${known})` : ""}`,
+          `   ${item.url}`,
+          ...(item.published ? [`   published ${item.published}`] : []),
+          ...(item.snippet ? [`   ${item.snippet}`] : []),
+        ].join("\n")
+      })
+      .join("\n"),
+  )
+}
+
 /** The SearXNG JSON request for a query: its search path under the server's address, with the query's options. */
 export function searxngUrl(base: string, query: Query) {
   const url = new URL(base)

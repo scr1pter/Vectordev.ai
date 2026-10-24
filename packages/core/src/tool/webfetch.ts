@@ -47,6 +47,9 @@ const Output = Schema.Struct({
   contentType: Schema.String,
   format: Input.fields.format,
   output: Schema.String,
+  // A hop reached the user's own computer or network, so the page is theirs: research keeps its text out of searches
+  // and addresses.
+  private: Schema.optional(Schema.Boolean),
 })
 
 type Format = (typeof Input.Type)["format"]
@@ -132,6 +135,8 @@ const layer = Layer.effectDiscard(
             Effect.gen(function* () {
               // The address the model chose is checked once; a redirect's next address is the server's, not the model's.
               const strict = { first: yield* afterWeb(input.url, context.sessionID) }
+              // Whether a hop reached the user's own computer or network, with the user's approval.
+              const reached = { private: false }
               const { body, contentType } = yield* Effect.gen(function* () {
                 const response = yield* WebFetchRequest.execute(http, request(input.url, input.format), {
                   authorize: (url) => {
@@ -150,15 +155,23 @@ const layer = Layer.effectDiscard(
                   // A dev server, an intranet page or a cloud metadata address is reached only with its own
                   // approval, since a model reading a hostile page could otherwise be steered into the user's network.
                   authorizePrivate: (url) =>
-                    permission.assert({
-                      action: "private_network",
-                      resources: [new URL(url).origin],
-                      save: [new URL(url).origin],
-                      metadata: { url },
-                      sessionID: context.sessionID,
-                      agent: context.agent,
-                      source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
-                    }),
+                    permission
+                      .assert({
+                        action: "private_network",
+                        resources: [new URL(url).origin],
+                        save: [new URL(url).origin],
+                        metadata: { url },
+                        sessionID: context.sessionID,
+                        agent: context.agent,
+                        source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
+                      })
+                      .pipe(
+                        Effect.andThen(
+                          Effect.sync(() => {
+                            reached.private = true
+                          }),
+                        ),
+                      ),
                 })
                 const contentType = response.headers["content-type"] || ""
                 const mime = mimeFrom(contentType)
@@ -185,6 +198,7 @@ const layer = Layer.effectDiscard(
                 contentType,
                 format: input.format,
                 output: WebFence.clean(output),
+                ...(reached.private ? { private: true } : {}),
               }
             }).pipe(Effect.mapError(() => new ToolFailure({ message: `Unable to fetch ${input.url}` }))),
         }),

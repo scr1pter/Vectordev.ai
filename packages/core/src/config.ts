@@ -25,6 +25,7 @@ import { ConfigReference } from "./config/reference"
 import { ConfigToolOutput } from "./config/tool-output"
 import { ConfigWatcher } from "./config/watcher"
 import { ConfigV1 } from "./v1/config/config"
+import { ConfigResearchV1 } from "./v1/config/research"
 import { ConfigMigrateV1 } from "./v1/config/migrate"
 import { ConfigMigration } from "./config/migration"
 import { Flag } from "./flag/flag"
@@ -110,6 +111,10 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   }),
   experimental: ConfigExperimental.Experimental.pipe(Schema.optional),
   providers: Schema.Record(Schema.String, ConfigProvider.Info).pipe(Schema.optional),
+  research: ConfigResearchV1.Info.pipe(Schema.optional).annotate({
+    description:
+      "Deep research's settings. Where it searches, its caps and robots.txt are read from your own config only; a repository's may only add sites to avoid. Not on the V2 session runner yet: the build agent's research tool (tool), Deep's researchers and judge, and pages on your own computer or network. There research runs Focused with its lead alone.",
+  }),
 }) {}
 
 export class Document extends Schema.Class<Document>("Config.Document")({
@@ -406,12 +411,8 @@ function bindTrustedProjectExecutables(
       : info.formatter
   const lsp =
     info.lsp && typeof info.lsp === "object"
-      ? rewriteCommandEntries(
-          info.lsp,
-          workspace,
-          trusted,
-          (entry, command) =>
-            command ? new ConfigLSP.Server({ ...entry, command: command.command, cwd: command.cwd }) : entry,
+      ? rewriteCommandEntries(info.lsp, workspace, trusted, (entry, command) =>
+          command ? new ConfigLSP.Server({ ...entry, command: command.command, cwd: command.cwd }) : entry,
         )
       : info.lsp
   const mcp = info.mcp
