@@ -510,7 +510,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Config"
+                  "$ref": "#/components/schemas/ConfigWithLocks"
                 }
               }
             }
@@ -578,17 +578,24 @@
             }
           },
           "403": {
-            "description": "ForbiddenError",
+            "description": "ConfigLocked | ForbiddenError",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ForbiddenError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ConfigLocked"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ForbiddenError"
+                    }
+                  ]
                 }
               }
             }
           }
         },
-        "description": "Update global Vector configuration settings and preferences.",
+        "description": "Update global Vector configuration settings and preferences. Under a company lock, a change to a key the company keeps fails with ConfigLocked; the parts of Vector Local the company leaves to you still change.",
         "summary": "Update global configuration",
         "requestBody": {
           "content": {
@@ -1112,7 +1119,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Config"
+                  "$ref": "#/components/schemas/ConfigWithLocks"
                 }
               }
             }
@@ -1197,17 +1204,24 @@
             }
           },
           "403": {
-            "description": "ForbiddenError",
+            "description": "ConfigLocked | ForbiddenError",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ForbiddenError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ConfigLocked"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ForbiddenError"
+                    }
+                  ]
                 }
               }
             }
           }
         },
-        "description": "Update Vector configuration settings and preferences.",
+        "description": "Update Vector configuration settings and preferences. Under a company lock, a change to a key the company keeps fails with ConfigLocked.",
         "summary": "Update configuration",
         "requestBody": {
           "content": {
@@ -32329,6 +32343,512 @@
         },
         "additionalProperties": false
       },
+      "ConfigWithLocks": {
+        "type": "object",
+        "properties": {
+          "$schema": {
+            "type": "string"
+          },
+          "shell": {
+            "type": "string"
+          },
+          "logLevel": {
+            "$ref": "#/components/schemas/LogLevel"
+          },
+          "server": {
+            "$ref": "#/components/schemas/ServerConfig"
+          },
+          "command": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "template": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "agent": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "variant": {
+                  "type": "string"
+                },
+                "subtask": {
+                  "type": "boolean"
+                },
+                "size": {
+                  "$ref": "#/components/schemas/TaskSizeTier"
+                }
+              },
+              "required": ["template"],
+              "additionalProperties": false
+            }
+          },
+          "skills": {
+            "type": "object",
+            "properties": {
+              "paths": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "urls": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "references": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/components/schemas/ConfigV2ReferenceGit"
+                },
+                {
+                  "$ref": "#/components/schemas/ConfigV2ReferenceLocal"
+                }
+              ]
+            }
+          },
+          "reference": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/components/schemas/ConfigV2ReferenceGit"
+                },
+                {
+                  "$ref": "#/components/schemas/ConfigV2ReferenceLocal"
+                }
+              ]
+            }
+          },
+          "watcher": {
+            "type": "object",
+            "properties": {
+              "ignore": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "snapshot": {
+            "type": "boolean"
+          },
+          "plugin": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "object"
+                    }
+                  ],
+                  "maxItems": 2,
+                  "minItems": 2
+                }
+              ]
+            }
+          },
+          "share": {
+            "type": "string",
+            "enum": ["manual", "auto", "disabled"]
+          },
+          "autoshare": {
+            "type": "boolean"
+          },
+          "autoupdate": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string",
+                "enum": ["notify"]
+              }
+            ],
+            "description": "Automatically update to the latest version. Set to true to auto-update, false to disable, or 'notify' to show update notifications"
+          },
+          "disabled_providers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "enabled_providers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "model": {
+            "type": "string"
+          },
+          "small_model": {
+            "type": "string"
+          },
+          "default_agent": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "object",
+            "properties": {
+              "build": {
+                "$ref": "#/components/schemas/AgentConfig"
+              },
+              "plan": {
+                "$ref": "#/components/schemas/AgentConfig"
+              }
+            },
+            "additionalProperties": {
+              "$ref": "#/components/schemas/AgentConfig"
+            }
+          },
+          "agent": {
+            "type": "object",
+            "properties": {
+              "plan": {
+                "$ref": "#/components/schemas/AgentConfig"
+              },
+              "build": {
+                "$ref": "#/components/schemas/AgentConfig"
+              },
+              "general": {
+                "$ref": "#/components/schemas/AgentConfig"
+              },
+              "explore": {
+                "$ref": "#/components/schemas/AgentConfig"
+              },
+              "title": {
+                "$ref": "#/components/schemas/AgentConfig"
+              },
+              "summary": {
+                "$ref": "#/components/schemas/AgentConfig"
+              },
+              "compaction": {
+                "$ref": "#/components/schemas/AgentConfig"
+              }
+            },
+            "additionalProperties": {
+              "$ref": "#/components/schemas/AgentConfig"
+            }
+          },
+          "provider": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ProviderConfig"
+            }
+          },
+          "mcp": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/McpLocalConfig"
+                },
+                {
+                  "$ref": "#/components/schemas/McpRemoteConfig"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["enabled"],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "formatter": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "disabled": {
+                      "type": "boolean"
+                    },
+                    "command": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "cwd": {
+                      "type": "string"
+                    },
+                    "environment": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "extensions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            ],
+            "description": "Enable or configure formatters. Omit or set to false to disable, true to enable built-ins, or an object to enable built-ins with overrides."
+          },
+          "lsp": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "disabled": {
+                          "type": "boolean",
+                          "enum": [true]
+                        }
+                      },
+                      "required": ["disabled"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "command": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "cwd": {
+                          "type": "string"
+                        },
+                        "extensions": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "disabled": {
+                          "type": "boolean"
+                        },
+                        "env": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        },
+                        "initialization": {
+                          "type": "object"
+                        }
+                      },
+                      "required": ["command"],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            ],
+            "description": "Enable or configure LSP servers. Omit or set to false to disable, true to enable built-ins, or an object to enable built-ins with overrides."
+          },
+          "instructions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "layout": {
+            "$ref": "#/components/schemas/LayoutConfig"
+          },
+          "permission": {
+            "$ref": "#/components/schemas/PermissionConfig"
+          },
+          "tools": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          },
+          "attachment": {
+            "$ref": "#/components/schemas/AttachmentConfig"
+          },
+          "enterprise": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "tool_output": {
+            "type": "object",
+            "properties": {
+              "max_lines": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "max_bytes": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
+          "compaction": {
+            "type": "object",
+            "properties": {
+              "auto": {
+                "type": "boolean"
+              },
+              "prune": {
+                "type": "boolean"
+              },
+              "tail_turns": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "preserve_recent_tokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "reserved": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "max_context": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "clear": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          },
+          "budget": {
+            "type": "object",
+            "properties": {
+              "run": {
+                "$ref": "#/components/schemas/RunBudget"
+              },
+              "loop": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          },
+          "sizing": {
+            "type": "object",
+            "properties": {
+              "auto": {
+                "type": "boolean"
+              },
+              "judge": {
+                "$ref": "#/components/schemas/TaskJudgeMode"
+              }
+            },
+            "additionalProperties": false
+          },
+          "local": {
+            "$ref": "#/components/schemas/LocalConfig"
+          },
+          "research": {
+            "$ref": "#/components/schemas/ResearchConfig"
+          },
+          "experimental": {
+            "type": "object",
+            "properties": {
+              "disable_paste_summary": {
+                "type": "boolean"
+              },
+              "batch_tool": {
+                "type": "boolean"
+              },
+              "openTelemetry": {
+                "type": "boolean"
+              },
+              "primary_tools": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "continue_loop_on_deny": {
+                "type": "boolean"
+              },
+              "mcp_timeout": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "policies": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ConfigV2ExperimentalPolicy"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "locked": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The config keys your company's policy sets and locks, such as local, share and autoupdate. A change to one fails with ConfigLocked. Empty without a company lock."
+          }
+        },
+        "required": ["locked"],
+        "additionalProperties": false
+      },
       "Config": {
         "type": "object",
         "properties": {
@@ -32825,6 +33345,33 @@
             "additionalProperties": false
           }
         },
+        "additionalProperties": false
+      },
+      "ConfigLocked": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": ["ConfigLocked"]
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "keys": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["keys", "message"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["name", "data"],
         "additionalProperties": false
       },
       "ConsoleState": {
