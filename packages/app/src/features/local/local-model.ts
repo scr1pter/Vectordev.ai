@@ -12,6 +12,7 @@ import type {
   ProviderListResponse,
 } from "@vectordevai/sdk/v2/client"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import type { LocalProbe } from "@vectordevai/core/local-mode/probe"
 import { LocalRecommend } from "@vectordevai/core/local-mode/recommend"
 
 // Vector Local in the app, as data: the composer's pill, the session popover's counters, the network log's rows, the
@@ -574,6 +575,36 @@ export function rolesPatch(roles: Partial<Record<Role, string>>): Config {
     ...(roles.agent ? { model: roles.agent } : {}),
     ...(roles.small ? { small_model: roles.small } : {}),
     ...(Object.keys(agents).length ? { agent: agents } : {}),
+  }
+}
+
+/** A server as the Local API sends it, with its numbers as numbers, for views written against the engine's shape. */
+export function probeServer(server: LocalServer): LocalProbe.Server {
+  return {
+    ...server,
+    concurrency: finite(server.concurrency),
+    models: server.models.map((model) => ({
+      ...model,
+      context: finite(model.context),
+      trained: finite(model.trained),
+      output: finite(model.output),
+      size: finite(model.size),
+    })),
+  }
+}
+
+/** The Local API change that puts a server Vector read on the list, pinned as it answered. */
+export function listServer(server: { readonly origin: string; readonly pin: LocalProbe.Pin }): LocalUpdate {
+  return {
+    endpoints: { add: [server.origin] },
+    pins: {
+      [server.origin]: {
+        kind: server.pin.kind,
+        ...(server.pin.version === undefined ? {} : { version: server.pin.version }),
+        ...(server.pin.models === undefined ? {} : { models: server.pin.models }),
+        ...(server.pin.spki ? { spki: server.pin.spki } : {}),
+      },
+    },
   }
 }
 

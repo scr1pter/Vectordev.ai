@@ -9,6 +9,11 @@ export async function saveCustomProvider(input: {
   directory?: string
   conflictMessage: string
   updateConfig: (config: Config) => Promise<unknown>
+  /**
+   * Puts the server Vector read on the model server list through the Local API, which asks the owner first when that
+   * loosens Vector Local; false when the owner said no. Without it the list is written with the provider, as before.
+   */
+  list?: (server: { readonly origin: string; readonly pin: LocalProbe.Pin }) => Promise<boolean>
 }) {
   const providerID = input.result.providerID
   const [providers, config, credential] = await Promise.all([
@@ -28,10 +33,12 @@ export async function saveCustomProvider(input: {
   }
 
   // The server list lives in the user's global config, and a config update replaces a list, so it is read from there
-  // (never from the merged config, which also holds a company's entries) before this server is added to it.
-  const local = input.result.local
-    ? listed((await input.client.global.config.get({ throwOnError: true })).data.local, input.result.local)
-    : undefined
+  // (never from the merged config, which also holds a company's entries) before this server is added to it. With the
+  // Local API the server goes on the list after the provider is saved, and only once the owner agrees.
+  const local =
+    input.result.local && !input.list
+      ? listed((await input.client.global.config.get({ throwOnError: true })).data.local, input.result.local)
+      : undefined
 
   if (input.result.key) {
     // The server checks again while holding the credential-store filesystem lock.
@@ -44,6 +51,7 @@ export async function saveCustomProvider(input: {
   }
 
   await input.updateConfig({ provider: { [providerID]: input.result.config }, ...(local ? { local } : {}) })
+  return { listed: input.result.local && input.list ? await input.list(input.result.local) : local !== undefined }
 }
 
 /** The global `local` block's list and pins with this server added: on the list once, pinned as it answered now. */

@@ -16,6 +16,7 @@ import {
   validateCustomProvider,
 } from "./dialog-custom-provider-form"
 import { listed, saveCustomProvider } from "./dialog-custom-provider-save"
+import { listServer } from "../features/local/local-model"
 
 const t = (key: string) => key
 
@@ -406,5 +407,51 @@ describe("saving a server Vector read", () => {
         },
       },
     ])
+  })
+
+  test("through the Local API, writes the provider alone and lists the server only once the owner agrees", async () => {
+    const client = createVectorClient({
+      baseUrl: "http://fixture.test",
+      fetch: Object.assign(
+        async (source: RequestInfo | URL, init?: RequestInit) => {
+          const request = source instanceof Request ? source : new Request(source, init)
+          const pathname = new URL(request.url).pathname
+          if (pathname === "/provider") return Response.json({ all: [], connected: [], default: {} })
+          if (pathname === "/config") return Response.json({})
+          if (pathname.startsWith("/auth/")) return Response.json(false)
+          throw new Error(`Unexpected request: ${request.method} ${pathname}`)
+        },
+        { preconnect() {} },
+      ),
+    })
+    const result = validateCustomProvider({ form: applyServer(empty(), OLLAMA).form, t }).result!
+    const save = async (agree: boolean) => {
+      const updates: Config[] = []
+      const listed: unknown[] = []
+      const saved = await saveCustomProvider({
+        client,
+        result,
+        conflictMessage: "Choose a different ID",
+        updateConfig: async (config) => {
+          updates.push(config)
+        },
+        list: async (server) => {
+          listed.push(listServer(server))
+          return agree
+        },
+      })
+      return { updates, listed, saved }
+    }
+    const agreed = await save(true)
+    // The list never goes through the config file, which would only hold it while Vector Local is on.
+    expect(agreed.updates).toEqual([{ provider: { ollama: result.config } }])
+    expect(agreed.listed).toEqual([
+      {
+        endpoints: { add: ["http://127.0.0.1:11434"] },
+        pins: { "http://127.0.0.1:11434": { kind: "ollama", version: "0.12.6", models: "sha256:abc" } },
+      },
+    ])
+    expect(agreed.saved).toEqual({ listed: true })
+    expect((await save(false)).saved).toEqual({ listed: false })
   })
 })
