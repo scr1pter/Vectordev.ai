@@ -79,7 +79,8 @@ export function company() {
  * are already trusted, without any, or when the request names its own `ca`.
  */
 export function request<T extends RequestInit>(init: T, list?: Authorities): T {
-  if (typeof Bun === "undefined") return init
+  // Read from globalThis, so this module also type-checks where there is no Bun (desktop main).
+  if (!("Bun" in globalThis)) return init
   const given = (init as { tls?: Record<string, unknown> }).tls
   if (given?.ca !== undefined) return init
   const named = list ?? company()
