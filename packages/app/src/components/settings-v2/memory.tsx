@@ -1,34 +1,53 @@
-import type { VectorClient } from "@vectordevai/sdk/v2/client"
-import { For, Show, createMemo, createResource, createSignal, onCleanup } from "solid-js"
+import type { MemoryImportResult, MemorySettings, VectorClient } from "@vectordevai/sdk/v2/client"
+import { For, Index, Show, createMemo, createResource, createSignal, onCleanup } from "solid-js"
+import { useNavigate } from "@solidjs/router"
 import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 import { Switch } from "@vectordevai/ui/v2/switch-v2"
+import { useDialog } from "@vectordevai/ui/context/dialog"
 import { getFilename } from "@vectordevai/core/util/path"
 import { useGlobal } from "@/context/global"
 import { useServer } from "@/context/server"
+import { sessionHref } from "@/utils/session-route"
 import { LocalMemoryPanel } from "@/features/memory/local-memory-panel"
 import { Markdown } from "@vectordevai/session-ui/markdown"
 import { CITE_PREFIX, HELD, reportMarkdown, reportPath, size, statusLabel } from "@/features/research/research-model"
 import { SettingsMemoryDocuments } from "./memory-documents"
 import { SettingsMemorySearchModel } from "./memory-search-model"
 import {
+  ABOUT,
+  ERASE_SESSION,
+  FACETS,
   MEMORY_FILTERS,
   MEMORY_KINDS,
   MEMORY_TABS,
+  MODEL_LEARNER,
   RECENT,
+  UNDO_DAYS,
+  aboutYou,
   approvable,
+  approvableImports,
+  cameFrom,
   editable,
+  entryText,
+  exportName,
+  facetOf,
   fileLabel,
   forgettable,
   holdLabel,
+  importNotice,
   kindLabel,
+  learnedWhen,
   originLabel,
   pinnable,
   rejectable,
   savedNotice,
   summary,
+  undoable,
   UNDONE,
   usage,
+  type AboutGroup,
   type MemoryEntryView,
+  type MemoryFacet,
   type MemoryFiles,
   type MemoryFilter,
   type MemoryTab,
@@ -156,6 +175,15 @@ export function SettingsMemoryV2(props: { repositoryPath?: string; sessionDirect
         <ResearchRuns client={client} repository={!!directory()} />
       </Show>
 
+      <Show when={tab() === "about"}>
+        <AboutYou
+          client={client}
+          repository={!!directory()}
+          settings={settings.latest}
+          onSettings={(next) => setSettings(next)}
+        />
+      </Show>
+
       <Show when={tab() === "model"}>
         <SettingsMemorySearchModel client={client} />
       </Show>
@@ -183,10 +211,7 @@ export function SettingsMemoryV2(props: { repositoryPath?: string; sessionDirect
                   a failing check pass, or when a lasting decision is made, and uses it from the next request. Each one
                   is listed under Recently learned, where one click undoes it. It never writes rules: only you do. What
                   it learns in a session that read web pages or other outside content, ran MCP tools, or had a guest or
-                  a subagent in it waits for your review instead. Every agent uses what Vector has learned about you:
-                  coding, subagents and the Vectorscope reviews you run in Vector. Sessions with invited guests, and
-                  free models that may train on your prompts, get none of it. Reviews see how you work, not facts
-                  about you.
+                  a subagent in it waits for your review instead. {ABOUT.agents}
                 </div>
               </div>
               <div class="settings-v2-row-control settings-v2-row-control--compact">
@@ -234,7 +259,7 @@ export function SettingsMemoryV2(props: { repositoryPath?: string; sessionDirect
                 classList={{ "is-active": scope() === "personal" }}
                 onClick={() => setScope("personal")}
               >
-                About you
+                Every repository
               </button>
             </div>
             <div class="settings-memory-segments" role="tablist" aria-label="Which entries">
@@ -317,6 +342,16 @@ export function SettingsMemoryV2(props: { repositoryPath?: string; sessionDirect
           <LocalMemoryPanel />
         </Show>
 
+        <TransferCard
+          client={client}
+          repository={!!directory()}
+          scope={scope()}
+          onImported={() => {
+            setFilter("review")
+            refresh()
+          }}
+        />
+
         <EraseCard scope={scope()} repository={!!directory()} act={act} />
       </Show>
     </section>
@@ -362,7 +397,7 @@ function RecentlyLearned(props: {
                     </Show>
                     <span class="settings-memory-id">{entry.id}</span>
                   </div>
-                  <p class="settings-memory-text">{entry.text}</p>
+                  <p class="settings-memory-text">{entryText(entry)}</p>
                   <div class="settings-memory-actions">
                     <ButtonV2
                       size="small"
@@ -487,7 +522,7 @@ function MemoryRow(props: {
         <span class="settings-memory-id">{props.entry.id}</span>
       </div>
 
-      <Show when={editing()} fallback={<p class="settings-memory-text">{props.entry.text}</p>}>
+      <Show when={editing()} fallback={<p class="settings-memory-text">{entryText(props.entry)}</p>}>
         <textarea
           class="settings-memory-edit"
           aria-label="Edit memory"
@@ -506,7 +541,7 @@ function MemoryRow(props: {
         <Show when={props.entry.kind === "review"}> · only code reviews read this</Show> · {usage(props.entry)}
       </p>
       <Show when={waiting()}>
-        <p class="settings-memory-hold">{holdLabel(props.entry.hold)}</p>
+        <p class="settings-memory-hold">{holdLabel(props.entry.hold, props.entry.origin)}</p>
       </Show>
 
       <div class="settings-memory-actions">
@@ -688,7 +723,9 @@ function EraseCard(props: {
         >
           {(scope) => (
             <div class="settings-memory-erase">
-              <p>This erases {what(scope())}. Vector cannot restore it.</p>
+              <p>
+                This erases {what(scope())}. Vector cannot restore it. {ABOUT.erase}
+              </p>
               <div class="settings-v2-action-grid">
                 <ButtonV2
                   variant="danger"
@@ -943,6 +980,642 @@ function ResearchRunDetail(props: {
     </div>
   )
 }
+
+type Act = <T>(
+  run: (current: VectorClient) => Promise<{ error?: unknown; data?: T }>,
+  done: string | ((data: T | undefined) => string),
+) => Promise<void>
+
+// Settings > Memory > About you (section 6.5): what Vector learned about how the user works, grouped by facet, each
+// with the words it came from and the session it was learned in. Undo in its first week, then Forget; a switch per
+// kind for "Don't learn this kind". The routes are the owner's, so a guest is told whose it is.
+function AboutYou(props: {
+  client: () => VectorClient | undefined
+  repository: boolean
+  settings?: MemorySettings
+  /** The settings the engine answered with, for the page's other sections. */
+  onSettings: (settings: MemorySettings) => void
+}) {
+  const [version, setVersion] = createSignal(0)
+  const [notice, setNotice] = createSignal("")
+  const [error, setError] = createSignal("")
+  const [all, setAll] = createSignal<Record<string, boolean>>({})
+  const [erasing, setErasing] = createSignal(false)
+  const [list] = createResource(
+    () => {
+      const current = props.client()
+      if (!current) return false
+      return { client: current, version: version() }
+    },
+    (input) =>
+      input.client.memory
+        .list({ scope: "personal", filter: "all" }, { throwOnError: false })
+        .then((result) => ({ entries: result.data?.entries ?? [], status: result.response?.status ?? 0 }))
+        .catch(() => ({ entries: [], status: 0 })),
+  )
+  // Read only once resolved, so a first read still loading suspends nothing around the page.
+  const loaded = () => (list.state === "ready" || list.state === "refreshing" ? list.latest : undefined)
+  const guest = () => loaded()?.status === 401 || loaded()?.status === 403
+  // An entry that did not change keeps its row, so reading the list again neither redraws nor re-reads it.
+  const kept = new Map<string, { json: string; entry: MemoryEntryView }>()
+  const stable = (entry: MemoryEntryView) => {
+    const json = JSON.stringify(entry)
+    const previous = kept.get(entry.id)
+    if (previous?.json === json) return previous.entry
+    kept.set(entry.id, { json, entry })
+    return entry
+  }
+  const groups = createMemo(() => aboutYou(((loaded()?.entries ?? []) as readonly MemoryEntryView[]).map(stable)))
+  // Each item's evidence, read once per version of the item.
+  const evidence = new Map<string, Promise<readonly { type: string; quote?: string; sessionID?: string }[]>>()
+  const evidenceOf = (entry: MemoryEntryView) => {
+    const key = `${entry.id}:${entry.updatedAt}`
+    const current = props.client()
+    const found = evidence.get(key)
+    if (found || !current) return found ?? Promise.resolve([])
+    const read = current.memory
+      .get({ memoryID: entry.id }, { throwOnError: false })
+      .then((result) => result.data?.evidence ?? [])
+      .catch(() => [])
+    evidence.set(key, read)
+    return read
+  }
+  const act: Act = async (run, done) => {
+    const current = props.client()
+    if (!current) return
+    const result = await run(current).catch((cause: unknown) => ({ error: cause, data: undefined }))
+    if (result.error) {
+      setNotice("")
+      setError(errorMessage(result.error))
+      return
+    }
+    setError("")
+    setNotice(typeof done === "string" ? done : done(result.data))
+    setVersion((value) => value + 1)
+  }
+  const shown = (group: AboutGroup) => (all()[group.value] ? group.entries : group.entries.slice(0, RECENT))
+  // A kind turned off, or when a model may help, as the engine keeps it; the page shows what it answered.
+  const configure = (
+    change: { facets?: Partial<Record<MemoryFacet, boolean>>; modelLearner?: MemorySettings["modelLearner"] },
+    done: string,
+  ) => {
+    const before = props.settings
+    if (before) props.onSettings({ ...before, ...change, facets: { ...before.facets, ...change.facets } })
+    return act(
+      (current) =>
+        current.memory.settings.update(change).then((result) => {
+          // What the engine kept, or, refused, what was there before.
+          if (result.data) props.onSettings(result.data)
+          if (result.error && before) props.onSettings(before)
+          return result
+        }),
+      done,
+    )
+  }
+
+  return (
+    <>
+      <div class="settings-v2-card settings-v2-card--wide" data-component="settings-memory-about">
+        <div class="settings-v2-card-head">
+          <div class="settings-v2-card-copy">
+            <h3 class="settings-v2-card-title">{ABOUT.title}</h3>
+            <p class="settings-v2-card-description">{ABOUT.intro}</p>
+            <p class="settings-v2-card-description">
+              {ABOUT.sensitive} {ABOUT.agents}
+            </p>
+            <p class="settings-v2-card-description">{ABOUT.storage}</p>
+          </div>
+        </div>
+        <div class="settings-v2-card-body">
+          <div class="settings-v2-row-modern">
+            <div class="settings-v2-row-copy">
+              <div class="settings-v2-row-title">Let a model help Vector learn</div>
+              <div class="settings-v2-row-description">
+                Vector learns from your own words with plain rules, at no cost and with no model call. When you correct
+                it ("no, I meant…") and the rules find nothing to keep, a small model can suggest what to learn from
+                your typed words. Its tokens count in that session, and what it suggests after a session read outside
+                content waits for your review. With Vector Local only, it runs on the model servers you list.
+              </div>
+            </div>
+            <div class="settings-v2-row-control settings-v2-row-control--compact">
+              <select
+                class="settings-memory-kind"
+                aria-label="When a model may help Vector learn"
+                value={props.settings?.modelLearner ?? "local-only"}
+                onChange={(event) => {
+                  const modelLearner = event.currentTarget.value as MemorySettings["modelLearner"]
+                  void configure(
+                    { modelLearner },
+                    modelLearner === "off"
+                      ? "Vector learns from your words with its rules only."
+                      : modelLearner === "always"
+                        ? "A model may help Vector learn with any model you use."
+                        : "A model helps Vector learn only with Vector Local on.",
+                  )
+                }}
+              >
+                <For each={MODEL_LEARNER}>{(item) => <option value={item.value}>{item.label}</option>}</For>
+              </select>
+            </div>
+          </div>
+          <Show when={notice()}>
+            <p class="settings-memory-notice" role="status">
+              {notice()}
+            </p>
+          </Show>
+          <Show when={error()}>
+            <p class="settings-memory-error" role="alert">
+              {error()}
+            </p>
+          </Show>
+          <Show when={guest()}>
+            <p class="settings-memory-empty">{ABOUT.guest}</p>
+          </Show>
+        </div>
+      </div>
+
+      <Show when={!guest()}>
+        <Index each={groups()}>
+          {(group) => {
+            // The groups keep their order, so each place in the list is always the same facet.
+            const facet = group().value === "other" ? undefined : (group().value as MemoryFacet)
+            const on = () => (facet ? (props.settings?.facets[facet] ?? true) : true)
+            return (
+              <div
+                class="settings-v2-card settings-v2-card--wide"
+                data-component="settings-memory-facet"
+                data-facet={group().value}
+              >
+                <div class="settings-v2-card-head settings-memory-facet-head">
+                  <div class="settings-v2-card-copy">
+                    <h3 class="settings-v2-card-title">{group().label}</h3>
+                    <p class="settings-v2-card-description">{group().description}</p>
+                  </div>
+                  <Show when={facet}>
+                    {(value) => (
+                      <div class="settings-v2-row-control settings-v2-row-control--compact">
+                        <Switch
+                          checked={on()}
+                          hideLabel
+                          onChange={(checked) =>
+                            void configure(
+                              { facets: { [value()]: checked } },
+                              checked
+                                ? `Vector will learn ${group().label.toLowerCase()} again.`
+                                : `Vector will not learn ${group().label.toLowerCase()}.`,
+                            )
+                          }
+                        >
+                          Learn {group().label.toLowerCase()}
+                        </Switch>
+                      </div>
+                    )}
+                  </Show>
+                </div>
+                <Show when={!on()}>
+                  <p class="settings-memory-hold settings-memory-pad">{ABOUT.off}</p>
+                </Show>
+                <div class="settings-memory-list">
+                  <Show
+                    when={group().entries.length > 0}
+                    fallback={
+                      <p class="settings-memory-empty">
+                        {loaded() ? "Nothing of this kind yet." : "Reading what Vector learned…"}
+                      </p>
+                    }
+                  >
+                    <For each={shown(group())}>
+                      {(entry) => <AboutRow entry={entry} evidence={evidenceOf} act={act} />}
+                    </For>
+                    <Show when={group().entries.length > shown(group()).length}>
+                      <ButtonV2
+                        size="small"
+                        variant="ghost"
+                        onClick={() => setAll((current) => ({ ...current, [group().value]: true }))}
+                      >
+                        Show all {group().entries.length}
+                      </ButtonV2>
+                    </Show>
+                  </Show>
+                </div>
+              </div>
+            )
+          }}
+        </Index>
+
+        <TransferCard
+          client={props.client}
+          repository={props.repository}
+          scope="personal"
+          onImported={() => setVersion((value) => value + 1)}
+        />
+
+        <div class="settings-v2-card settings-v2-card--wide">
+          <div class="settings-v2-card-head">
+            <div class="settings-v2-card-copy">
+              <h3 class="settings-v2-card-title">Erase what Vector learned about you</h3>
+              <p class="settings-v2-card-description">{ABOUT.erase}</p>
+            </div>
+          </div>
+          <div class="settings-v2-card-body">
+            <Show
+              when={erasing()}
+              fallback={
+                <div class="settings-v2-action-grid">
+                  <ButtonV2 variant="outline" onClick={() => setErasing(true)}>
+                    Erase what Vector learned about you
+                  </ButtonV2>
+                </div>
+              }
+            >
+              <div class="settings-memory-erase">
+                <p>This erases everything Vector learned about you, in every repository. Vector cannot restore it.</p>
+                <div class="settings-v2-action-grid">
+                  <ButtonV2
+                    variant="danger"
+                    onClick={async () => {
+                      await act((current) => current.memory.erase({ scope: "personal" }), "Erased.")
+                      setErasing(false)
+                    }}
+                  >
+                    Erase
+                  </ButtonV2>
+                  <ButtonV2 variant="ghost" onClick={() => setErasing(false)}>
+                    Cancel
+                  </ButtonV2>
+                </div>
+              </div>
+            </Show>
+          </div>
+        </div>
+      </Show>
+    </>
+  )
+}
+
+function AboutRow(props: {
+  entry: MemoryEntryView
+  evidence: (entry: MemoryEntryView) => Promise<readonly { type: string; quote?: string; sessionID?: string }[]>
+  act: Act
+}) {
+  const server = useServer()
+  const dialog = useDialog()
+  const navigate = useNavigate()
+  const [editing, setEditing] = createSignal(false)
+  const [draft, setDraft] = createSignal("")
+  const [confirming, setConfirming] = createSignal<"forget" | "session">()
+  // The words it came from and the session it was learned in.
+  const [detail] = createResource(() => props.entry, props.evidence)
+  const from = createMemo(() =>
+    cameFrom(props.entry, detail.state === "ready" || detail.state === "refreshing" ? (detail.latest ?? []) : []),
+  )
+  const waiting = () => props.entry.status === "proposed" || props.entry.status === "quarantined"
+  const update = (
+    change: { text?: string; facet?: MemoryFacet; action?: "approve" | "reject" | "undo" },
+    done: string,
+  ) => props.act((current) => current.memory.update({ memoryID: props.entry.id, ...change }), done)
+  const open = (sessionID: string) => {
+    if (dialog.active) dialog.close()
+    navigate(sessionHref(server.key, sessionID))
+  }
+
+  return (
+    <article
+      class="settings-memory-row"
+      classList={{ "is-waiting": waiting() }}
+      data-component="settings-memory-about-entry"
+    >
+      <div class="settings-memory-row-head">
+        <span class="settings-memory-kind-badge" data-kind={props.entry.kind}>
+          {kindLabel(props.entry.kind)}
+        </span>
+        <Show when={props.entry.pinned}>
+          <span class="settings-memory-tag">Pinned</span>
+        </Show>
+        <Show when={props.entry.private}>
+          <span class="settings-memory-tag" title={PRIVATE}>
+            Private
+          </span>
+        </Show>
+        <span class="settings-memory-id">{props.entry.id}</span>
+      </div>
+
+      <Show when={editing()} fallback={<p class="settings-memory-text">{entryText(props.entry)}</p>}>
+        <textarea
+          class="settings-memory-edit"
+          aria-label="Edit memory"
+          maxlength={1000}
+          value={draft()}
+          onInput={(event) => setDraft(event.currentTarget.value)}
+        />
+      </Show>
+      <Show when={from().quote}>{(quote) => <p class="settings-memory-quote">From your words: "{quote()}"</p>}</Show>
+      <p class="settings-memory-meta">
+        {learnedWhen(props.entry)} · {usage(props.entry)}
+        <Show when={from().sessionID}>
+          {(sessionID) => (
+            <>
+              {" · "}
+              <button type="button" class="settings-memory-link" onClick={() => open(sessionID())}>
+                Open the session it came from
+              </button>
+              <Show when={props.entry.origin === "agent" && !confirming()}>
+                {" · "}
+                <button type="button" class="settings-memory-link" onClick={() => setConfirming("session")}>
+                  {ERASE_SESSION.there}
+                </button>
+              </Show>
+            </>
+          )}
+        </Show>
+      </p>
+      <Show when={waiting()}>
+        <p class="settings-memory-hold">{holdLabel(props.entry.hold, props.entry.origin)}</p>
+      </Show>
+
+      <div class="settings-memory-actions">
+        <Show when={editing()}>
+          <ButtonV2
+            size="small"
+            disabled={!draft().trim()}
+            onClick={async () => {
+              await update({ text: draft() }, "Saved your edit.")
+              setEditing(false)
+            }}
+          >
+            Save
+          </ButtonV2>
+          <ButtonV2 size="small" variant="ghost" onClick={() => setEditing(false)}>
+            Cancel
+          </ButtonV2>
+        </Show>
+        <Show when={!editing() && !confirming()}>
+          <Show when={approvable(props.entry)}>
+            <ButtonV2
+              size="small"
+              variant="outline"
+              icon="check"
+              onClick={() => update({ action: "approve" }, "Approved. Vector will use it.")}
+            >
+              Approve
+            </ButtonV2>
+          </Show>
+          <Show when={rejectable(props.entry)}>
+            <ButtonV2
+              size="small"
+              variant="ghost"
+              onClick={() => update({ action: "reject" }, "Rejected and forgotten.")}
+            >
+              Reject
+            </ButtonV2>
+          </Show>
+          <Show when={undoable(props.entry)}>
+            <ButtonV2
+              size="small"
+              variant="ghost"
+              icon="reset"
+              title={`Undo is offered for ${UNDO_DAYS} days after Vector learns something.`}
+              onClick={() => update({ action: "undo" }, UNDONE)}
+            >
+              Undo
+            </ButtonV2>
+          </Show>
+          <Show when={editable(props.entry)}>
+            <ButtonV2
+              size="small"
+              variant="ghost"
+              icon="edit"
+              onClick={() => {
+                setDraft(props.entry.text)
+                setEditing(true)
+              }}
+            >
+              Edit
+            </ButtonV2>
+          </Show>
+          <Show when={props.entry.kind === "preference" || props.entry.kind === "term"}>
+            <select
+              class="settings-memory-kind"
+              aria-label="What it is about"
+              value={facetOf(props.entry) ?? "style"}
+              onChange={(event) => {
+                const facet = event.currentTarget.value as MemoryFacet
+                const label = FACETS.find((item) => item.value === facet)?.label ?? facet
+                void update({ facet }, `Moved to ${label}.`)
+              }}
+            >
+              <For each={FACETS}>{(item) => <option value={item.value}>{item.label}</option>}</For>
+            </select>
+          </Show>
+          <Show when={forgettable(props.entry)}>
+            <ButtonV2 size="small" variant="ghost" onClick={() => setConfirming("forget")}>
+              Forget
+            </ButtonV2>
+          </Show>
+        </Show>
+        <Show when={confirming() === "forget"}>
+          <span class="settings-memory-confirm">Forget this for good? Vector will not learn it again.</span>
+          <ButtonV2
+            size="small"
+            variant="danger"
+            onClick={async () => {
+              await props.act((current) => current.memory.remove({ memoryID: props.entry.id }), "Forgotten.")
+              setConfirming(undefined)
+            }}
+          >
+            Forget
+          </ButtonV2>
+          <ButtonV2 size="small" variant="ghost" onClick={() => setConfirming(undefined)}>
+            Cancel
+          </ButtonV2>
+        </Show>
+        <Show when={confirming() === "session" ? from().sessionID : undefined}>
+          {(sessionID) => (
+            <>
+              <span class="settings-memory-confirm">{ERASE_SESSION.confirm}</span>
+              <ButtonV2
+                size="small"
+                variant="danger"
+                onClick={async () => {
+                  await props.act(
+                    (current) => current.memory.eraseSession({ sessionID: sessionID() }),
+                    (count) => ERASE_SESSION.done(count ?? 0),
+                  )
+                  setConfirming(undefined)
+                }}
+              >
+                Erase
+              </ButtonV2>
+              <ButtonV2 size="small" variant="ghost" onClick={() => setConfirming(undefined)}>
+                Cancel
+              </ButtonV2>
+            </>
+          )}
+        </Show>
+      </div>
+    </article>
+  )
+}
+
+/** The most an import may be (the engine's IMPORT_CHARS). */
+const IMPORT_CHARS = 2 * 1024 * 1024
+
+// Export and Import (section 6.5): what Vector keeps as Markdown to read or JSON to import elsewhere, and an export read
+// back in, where every item waits for approval, so a changed file cannot put memory in use. "Approve all" is one click
+// for the items held for nothing else; one held as an instruction or for hidden characters stays for its own review.
+function TransferCard(props: {
+  client: () => VectorClient | undefined
+  repository: boolean
+  scope: "personal" | "repository"
+  onImported: () => void
+}) {
+  const [scope, setScope] = createSignal<"personal" | "repository" | "all">()
+  const [notice, setNotice] = createSignal("")
+  const [imported, setImported] = createSignal<MemoryImportResult>()
+  const [busy, setBusy] = createSignal(false)
+  const chosen = () => scope() ?? props.scope
+  const waiting = createMemo(() => approvableImports(imported()?.entries ?? []))
+
+  const download = async (format: "markdown" | "json") => {
+    const current = props.client()
+    if (!current) return
+    const result = await current.memory.export({ scope: chosen(), format }).catch(() => undefined)
+    const body = result?.data as unknown
+    if (body === undefined || body === null || result?.error) {
+      setNotice("Vector could not export its memory. Try again in a moment.")
+      return
+    }
+    const text = typeof body === "string" ? body : JSON.stringify(body, null, 2)
+    const url = URL.createObjectURL(
+      new Blob([text], { type: format === "json" ? "application/json" : "text/markdown" }),
+    )
+    const link = document.createElement("a")
+    link.href = url
+    link.download = exportName(chosen(), format)
+    link.click()
+    URL.revokeObjectURL(url)
+    setNotice(`Exported as ${link.download}.`)
+  }
+
+  const read = async (file: File | undefined) => {
+    const current = props.client()
+    if (!file || !current) return
+    const text = await file.text().catch(() => undefined)
+    if (text === undefined) return setNotice("Vector could not read that file.")
+    if (text.length > IMPORT_CHARS) return setNotice("Vector imports at most 2 MB at a time.")
+    setBusy(true)
+    const result = await current.memory.import({ text }).catch((cause: unknown) => ({ error: cause, data: undefined }))
+    setBusy(false)
+    if (result.error || !result.data) {
+      setImported(undefined)
+      setNotice(errorMessage(result.error))
+      return
+    }
+    setImported(result.data)
+    setNotice(importNotice(result.data))
+    props.onImported()
+  }
+
+  const approveAll = async () => {
+    const current = props.client()
+    const items = waiting()
+    if (!current || items.length === 0) return
+    setBusy(true)
+    // A few at a time: one import brings in at most 500.
+    const results = await Array.from({ length: Math.ceil(items.length / 8) }, (_, index) =>
+      items.slice(index * 8, index * 8 + 8),
+    ).reduce(
+      (chain, batch) =>
+        chain.then(async (done) => [
+          ...done,
+          ...(await Promise.all(
+            batch.map((entry) =>
+              current.memory
+                .update({ memoryID: entry.id, action: "approve" })
+                .then((result) => !result.error)
+                .catch(() => false),
+            ),
+          )),
+        ]),
+      Promise.resolve([] as boolean[]),
+    )
+    setBusy(false)
+    const approved = results.filter(Boolean).length
+    setImported(undefined)
+    setNotice(
+      approved === items.length
+        ? `Approved ${approved}. Vector uses them now.`
+        : `Approved ${approved} of ${items.length}. The rest still wait in Needs review.`,
+    )
+    props.onImported()
+  }
+
+  return (
+    <div class="settings-v2-card settings-v2-card--wide" data-component="settings-memory-transfer">
+      <div class="settings-v2-card-head">
+        <div class="settings-v2-card-copy">
+          <h3 class="settings-v2-card-title">Export and import</h3>
+          <p class="settings-v2-card-description">
+            Export what Vector keeps as Markdown to read, or as JSON to import on another computer. Never the files of
+            your documents. {IMPORTED_COPY}
+          </p>
+        </div>
+      </div>
+      <div class="settings-v2-card-body">
+        <div class="settings-v2-action-grid">
+          <select
+            class="settings-memory-kind"
+            aria-label="What to export"
+            value={chosen()}
+            onChange={(event) => setScope(event.currentTarget.value as "personal" | "repository" | "all")}
+          >
+            <option value="personal">About you</option>
+            <Show when={props.repository}>
+              <option value="repository">This repository</option>
+              <option value="all">Both</option>
+            </Show>
+          </select>
+          <ButtonV2 variant="outline" onClick={() => void download("markdown")}>
+            Export as Markdown
+          </ButtonV2>
+          <ButtonV2 variant="outline" onClick={() => void download("json")}>
+            Export as JSON
+          </ButtonV2>
+          <label class="settings-memory-file">
+            <input
+              type="file"
+              class="sr-only"
+              accept=".md,.markdown,.json,.txt,text/markdown,application/json,text/plain"
+              aria-label="Import memory from a file"
+              disabled={busy()}
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0]
+                event.currentTarget.value = ""
+                void read(file)
+              }}
+            />
+            <span>{busy() ? "Importing…" : "Import a file…"}</span>
+          </label>
+        </div>
+        <Show when={notice()}>
+          <p class="settings-memory-notice" role="status">
+            {notice()}
+          </p>
+        </Show>
+        <Show when={waiting().length > 0}>
+          <div class="settings-v2-action-grid">
+            <ButtonV2 variant="outline" icon="check" disabled={busy()} onClick={() => void approveAll()}>
+              Approve all {waiting().length}
+            </ButtonV2>
+          </div>
+        </Show>
+      </div>
+    </div>
+  )
+}
+
+const IMPORTED_COPY =
+  "What you import waits for your approval, so a changed file cannot put memory in use, and what you forgot is not imported again."
 
 function errorMessage(error: unknown) {
   if (error && typeof error === "object" && "data" in error) {
