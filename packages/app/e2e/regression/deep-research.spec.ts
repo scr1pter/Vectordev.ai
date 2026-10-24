@@ -196,6 +196,7 @@ async function setup(
     questions?: unknown[]
     guest?: boolean
     path?: string
+    research?: boolean
   } = {},
 ) {
   const sent = { prompts: [] as Record<string, any>[], replies: [] as unknown[], kept: 0 }
@@ -203,6 +204,10 @@ async function setup(
     directory,
     project: { id: projectID, worktree: directory, vcs: "git", name: "Deep research" },
     provider,
+    agents: [
+      { name: "build", mode: "primary" },
+      ...(input.research === false ? [] : [{ name: "research", mode: "primary" }]),
+    ],
     sessions: [{ id: sessionID, slug: "heat", projectID, directory, title, time: { created: 1, updated: 1 } }],
     pageMessages: () => ({ items: input.messages ?? [] }),
     questions: input.questions ?? [],
@@ -273,6 +278,14 @@ async function pickMode(page: Page, label: string) {
   await expect(menu).toBeVisible()
   await menu.getByRole("button", { name: new RegExp(`^${label}`) }).click()
 }
+
+test("an engine without research does not offer Deep research", async ({ page }) => {
+  await setup(page, { research: false })
+  await page.locator('[data-action="prompt-execution-mode"]').filter({ visible: true }).first().click()
+  const menu = page.locator('[data-component="prompt-mode-menu"]')
+  await expect(menu).toBeVisible()
+  await expect(menu.getByRole("button", { name: /^Deep research/ })).toHaveCount(0)
+})
 
 test("the Mode menu lists Deep research under Fast, and a research message carries its agent, size and scope", async ({
   page,

@@ -130,6 +130,10 @@ async function setup(
       : {}),
   })
   await mockVectorServer(page, {
+    agents: [
+      { name: "build", mode: "primary" },
+      { name: "research", mode: "primary" },
+    ],
     directory,
     project: {
       id: projectID,
@@ -643,11 +647,11 @@ test("the places Vector Local keeps a feature off say so: outside agents, Provid
   })
   await openSession(page)
 
-  // Outside agents keep their tiles, say they do not start, and offer no Allow….
+  // The shared Host locally tile stays visible, with the Local refusal and no Allow….
   await page.getByRole("button", { name: "New workspace", exact: true }).click()
   const launcher = page.getByRole("dialog", { name: "New isolated agent" })
   await expect(launcher).toBeVisible()
-  await expect(launcher.getByRole("button", { name: /^Claude Code/ })).toContainText("Off in Vector Local")
+  await expect(launcher.getByRole("button", { name: /^Host locally:/ })).toBeVisible()
   const external = launcher.locator('[data-component="local-off"][data-source="external-agents"]')
   await expect(external).toContainText("Off in Vector Local")
   await expect(external.getByRole("button", { name: "Allow…" })).toHaveCount(0)
