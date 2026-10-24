@@ -12,6 +12,52 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Fixture coverage and remaining release gates: docs/vector/local-packet-capture.md.
+  local-packet-capture:
+    name: Vector Local desktop packet capture (30 minutes)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+      - name: Set up Bun
+        uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile --ignore-scripts
+      - name: Install isolated capture and Electron dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends tcpdump tshark xvfb xauth iproute2 libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libx11-xcb1 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libgtk-3-0t64 libasound2t64
+          # Like the air-gap job below, allow sandboxed Chromium's user namespace on this disposable runner.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bun --no-env-file packages/desktop/node_modules/electron/install.js
+      - name: Build this commit's desktop engine
+        working-directory: packages/engine
+        run: |
+          set -euo pipefail
+          export VECTOR_RELEASE_CATALOG_PATH="$PWD/../web/public/models/api.json"
+          export VECTOR_RELEASE_CATALOG_SHA256="$(sha256sum "$VECTOR_RELEASE_CATALOG_PATH" | cut -d ' ' -f 1)"
+          bun --no-env-file script/build-node.ts
+      - name: Check packet evidence validation
+        working-directory: packages/desktop
+        run: bun --no-env-file test scripts/local-mode-capture-audit.test.ts
+      - name: Compare a 30-minute desktop workload with its packet capture
+        working-directory: packages/desktop
+        run: xvfb-run -a -s "-screen 0 1280x900x24 -nolisten tcp" bash scripts/local-mode-capture-linux.sh "$RUNNER_TEMP/vector-local-capture"
+      - name: Preserve capture evidence, including failed checks
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vector-local-capture-${{ github.sha }}
+          path: ${{ runner.temp }}/vector-local-capture/
+          if-no-files-found: warn
+          retention-days: 14
+
   website:
     name: Website build
     runs-on: ubuntu-24.04
