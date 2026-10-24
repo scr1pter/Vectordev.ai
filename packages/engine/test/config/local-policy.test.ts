@@ -1427,7 +1427,9 @@ describe("the network log", () => {
 })
 
 describe("cloud AI services the model catalog lists", () => {
-  const LLAMA = "https://api.llama.com"
+  // A host no real catalog lists: the cloud hosts of every catalog this process read stay known for good, so a real
+  // provider's host would already count as a cloud AI service whenever an earlier test file loaded the catalog.
+  const LLAMA = "https://api.cloud-ai.example"
 
   test("cannot be one of the user's model servers, and a catalog Vector loads applies that at once", () => {
     writeGlobal({ enabled: true, endpoints: [GPU_BOX] })
