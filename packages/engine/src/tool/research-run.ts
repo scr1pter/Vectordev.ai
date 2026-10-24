@@ -7,6 +7,7 @@ import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { BrainPrivate } from "@vectordevai/core/brain/private"
 import { BrainSchema } from "@vectordevai/core/brain/schema"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
+import { Global } from "@vectordevai/core/global"
 import { Egress } from "@vectordevai/core/local-mode/egress"
 import { EgressGuard } from "@vectordevai/core/local-mode/guard"
 import { EgressHttpClient } from "@vectordevai/core/local-mode/http-client"
@@ -481,8 +482,12 @@ const layer = Layer.effect(
           ...named.flatMap((reference) => [reference.name, reference.path, reference.description ?? ""]),
           ...servers.map((server) => server.instructions),
         ].filter(Boolean),
+        // The home folder and the working tree: local paths are read for the user names in them, and a query may not
+        // name the working tree whole.
+        home: [Global.Path.home, where.root],
         typed: yield* typedOf(ctx),
         public: [...results.flatMap((result) => [result.title, result.snippet]), ...sources.open],
+        results: results.map((result) => result.url),
         // The user's own sites become site: filters: the ones they chose, and the sites their own preferences about
         // sources name (section 6.4a), of those the run was shown and that pass the outward screen, read as the check
         // reads tokens. Only public host names among them exempt anything.

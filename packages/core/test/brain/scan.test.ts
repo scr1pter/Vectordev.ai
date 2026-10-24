@@ -154,6 +154,34 @@ describe("BrainScan", () => {
     }
   })
 
+  test("secrets gives the values redact replaces, as the text writes them", () => {
+    const cases = [
+      ["DB_HOST=db.example.com\nDB_PASSWORD=S3cretPassw0rd\n", ["S3cretPassw0rd"]],
+      [
+        "The office Wi-Fi password is correcthorse42 and the router admin login is admin / Tr0ub4dor&3x.",
+        ["correcthorse42", "admin / Tr0ub4dor&3x."],
+      ],
+      ["login:admin/x1y2z3!q done", ["admin/x1y2z3!q"]],
+      ["The wifi passphrase is correct horse battery staple", ["correct horse battery staple"]],
+      ["passwords: Abc123!x, Def456!y", ["Abc123!x", "Def456!y"]],
+      ["Use 'blue velvet sky' as the wifi password.", ["blue velvet sky"]],
+      // Text that already reads [redacted] gives no value of its own.
+      ["A [redacted] B password is Tr0ub4dor&3x", ["Tr0ub4dor&3x"]],
+      ["Nothing secret here.", []],
+    ] as const
+    for (const [text, values] of cases) expect(BrainScan.secrets(text, {}), text).toEqual([...values])
+  })
+
+  test("named redacts what a shape, a name or a word beside it gives away, and leaves bare checksums and IDs", () => {
+    const digest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    for (const text of [`sha256 ${digest}`, "uuid 123e4567-e89b-12d3-a456-426614174000"]) {
+      expect(BrainScan.redact(text, {}).redacted, text).toBe(true)
+      expect(BrainScan.named(text, {}).redacted, text).toBe(false)
+    }
+    for (const text of [`api token ${digest}`, "DB_PASSWORD=S3cretPassw0rd", `key ${"AKIA"}${"IOSFODNN7EXAMPLE"}`])
+      expect(BrainScan.named(text, {}).redacted, text).toBe(true)
+  })
+
   test("redacts the value of a secret environment variable wherever it appears", () => {
     const out = BrainScan.redact("Staging uses abcd1234efgh5678 as its key.", { STAGING_TOKEN: "abcd1234efgh5678" })
     expect(out.text).toBe("Staging uses [redacted] as its key.")

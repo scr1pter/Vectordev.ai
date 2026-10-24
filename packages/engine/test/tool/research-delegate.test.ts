@@ -407,7 +407,11 @@ it.instance(
     Effect.gen(function* () {
       // A prompt the repository's config sets for the lead is the work too.
       const test = yield* setup(web, {
-        agent: { research: { prompt: "Research for the team that ships the zephyrDeploy pipeline." } },
+        agent: {
+          research: {
+            prompt: "Research for the team that ships the zephyrDeploy pipeline to the payments cluster every week.",
+          },
+        },
       })
       const fs = yield* FSUtil.Service
       // The repository's file is the work and the user's own file is private: what they hold reaches the lead, and
@@ -426,15 +430,16 @@ it.instance(
         permission: [...allow, { permission: "private_network", pattern: "*", action: "allow" }],
       })
       yield* test.llm.tool("research_plan", plan({ depth: "deep" }))
+      // The work's sentences are copied 12 words in a row, the private file's 8.
       for (const query of [
-        "ledger job runs every night before the payroll export heat pumps",
+        "the ledger job runs every night before the payroll export and the audit heat pumps",
         "ci07.quarry-ops.internal heat pumps",
         "my manager Dana Whitfield signs off every Falcon release",
-        "research for the team that ships the zephyrDeploy pipeline",
+        "research for the team that ships the zephyrDeploy pipeline to the payments cluster",
       ])
         yield* test.llm.tool("research_search", { query })
       for (const prompt of [
-        "Find out why the ledger job runs every night before the payroll export.",
+        "Find out why the ledger job runs every night before the payroll export and the audit.",
         "Explain why my manager Dana Whitfield signs off every Falcon release.",
       ])
         yield* test.llm.tool("task", {

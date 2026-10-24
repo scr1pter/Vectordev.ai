@@ -760,7 +760,12 @@ it.instance(
         description: "Research",
         prompt: "How do teams migrate a ledger service without downtime?",
         subagent_type: "research",
-        context_pack: { findings: ["The Falcon migration moves\nthe ledger to the next quarter"] },
+        // A file read is the work, so the copy is 12 words in a row.
+        context_pack: {
+          findings: [
+            "The Falcon migration moves the ledger\nto the reconcileLedgerEntries service before the March cutover",
+          ],
+        },
         background: false,
       })
       yield* test.llm.text("Done.")

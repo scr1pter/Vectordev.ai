@@ -281,10 +281,11 @@ describe("ResearchSearch.searxng", () => {
 
   test("sends a site filter on a domain the user prefers, though it looks internal, and checks every other host", async () => {
     // A learned preference names its domains, and they exist to become site: filters (section 6.4a). The work names
-    // wiki.acme.com beside an address at acme.com, so without the preference it reads as an internal host.
+    // wiki.acme.com and a private fact an address at acme.com, so without the preference it reads as an internal host.
     const preferring = {
       ...context,
-      work: ["Prefer primary sources such as wiki.acme.com and nejm.org, and avoid dailymail.co.uk. Ask ops@acme.com."],
+      private: [...context.private, "Ask ops@acme.com for access."],
+      work: ["Prefer primary sources such as wiki.acme.com and nejm.org, and avoid dailymail.co.uk."],
       domains: ["wiki.acme.com", "nejm.org", "dailymail.co.uk"],
     }
     const before = web.count("searxng")

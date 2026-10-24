@@ -1099,8 +1099,9 @@ const layer = Layer.effect(
       const sessionID = input.session.id
       // The judge is an outward role, which may run on a model of its own (agent.research-judge.model): it hears
       // nothing private of the run (sections 6.4 and 6.4a). A note on a page read from the user's own computer or
-      // network, or whose claim (the lead's words) carries text from the run's private context, is not sent, and
-      // stays not judged.
+      // network is not sent, and neither is one whose claim (the lead's words) the outbound check refuses: one that
+      // holds a secret, 8 or more words in a row of the private facts (12 of the work), a contact, a private host or a
+      // home-folder path from the run's private context. Such a note stays not judged; names in a claim are sent.
       const scope = {
         sessionID,
         messageID: input.lastUser.id,

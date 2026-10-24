@@ -203,6 +203,15 @@ function opaque(match: string) {
 
 /** The text with every credential replaced by [redacted], and whether anything was. */
 export function redact(text: string, env: Record<string, string | undefined> = process.env) {
+  const out = named(text, env).text.replace(OPAQUE, (match) => (opaque(match) ? REDACTED : match))
+  return { text: out, redacted: out !== text }
+}
+
+/**
+ * `redact` without the long runs of mixed letters and digits it takes for keys by their look alone, which are as often
+ * a checksum, an ID or an address: only the credentials that their shape, their name or a word beside them gives away.
+ */
+export function named(text: string, env: Record<string, string | undefined> = process.env) {
   const shaped = near(
     spoken(assigned(SECRET_SHAPES.reduce((out, shape) => out.replace(shape, REDACTED), text))).replace(
       LOGIN,
@@ -210,9 +219,31 @@ export function redact(text: string, env: Record<string, string | undefined> = p
     ),
   ).replace(AS_PASSWORD, `$1${REDACTED}$1`)
   const aws = AWS_ID.test(shaped) ? shaped.replace(AWS_SECRET, REDACTED) : shaped
-  const known = keyed(redactSecrets(aws, collectSecretValues(env)))
-  const out = known.replace(OPAQUE, (match) => (opaque(match) ? REDACTED : match))
+  const out = keyed(redactSecrets(aws, collectSecretValues(env)))
   return { text: out, redacted: out !== text }
+}
+
+/** The values `redact` replaces in a text, as the text writes them. */
+export function secrets(text: string, env: Record<string, string | undefined> = process.env) {
+  // What redact keeps between two values is the text's own, except the space it writes after a login's name, so each
+  // kept piece is found again without the spaces around it. Values with only spaces between them are read as one.
+  const kept = redact(text, env).text.split(REDACTED)
+  const head = kept[0]!.trim()
+  return kept
+    .slice(1)
+    .reduce(
+      (found, piece, index) => {
+        const words = piece.trim()
+        const last = index === kept.length - 2
+        if (!words && !last) return found
+        const end = !last ? text.indexOf(words, found.at + 1) : words ? text.lastIndexOf(words) : text.length
+        if (end < found.at) return found
+        found.values.push(text.slice(found.at, end).trim())
+        return { at: end + words.length, values: found.values }
+      },
+      { at: head ? text.indexOf(head) + head.length : 0, values: [] as string[] },
+    )
+    .values.filter((value) => value && value !== REDACTED)
 }
 
 /** How much of the text is left once secrets are removed, so an entry that is mostly a secret is refused, not kept. */

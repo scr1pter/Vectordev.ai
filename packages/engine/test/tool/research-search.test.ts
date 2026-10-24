@@ -67,8 +67,9 @@ it.instance(
       yield* test.llm.tool("research_search", {
         query: "badge number at Hooli is 44172 and my manager is Dana Whitfield",
       })
+      // A file read is the work, so a copy of it is 12 words or more.
       yield* test.llm.tool("research_search", {
-        query: "Falcon migration moves the ledger to the reconcileLedgerEntries service",
+        query: "Falcon migration moves the ledger to the reconcileLedgerEntries service before the March freeze",
       })
       yield* test.llm.tool("research_search", { query: "heat pump savings near Whitfield cold climate" })
       yield* test.llm.text("Done.")
@@ -133,6 +134,39 @@ it.instance(
       const [none] = yield* calls(brainOnly.id, "research_search")
       expect(output(none)).toContain("searches nothing on the web")
       expect(searched() - before).toBe(1)
+      expect(guard.outside()).toEqual([])
+    }),
+  90_000,
+)
+
+it.instance(
+  "the outbound check reads the user's names from the home folder and working tree, and hears the search results' addresses",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web)
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "Research", permission: allow })
+      yield* test.llm.tool("research_plan", plan())
+      yield* test.llm.tool("research_search", { query: "heat pump field study" })
+      yield* test.llm.text("Done.")
+      yield* send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." })
+      const research = yield* ResearchRun.Service
+      const ctx = {
+        sessionID: session.id,
+        messageID: MessageID.make("msg_outbound_context"),
+        agent: "research",
+        abort: AbortSignal.any([]),
+        messages: [],
+        metadata: () => Effect.void,
+        ask: () => Effect.void,
+      }
+      const found = yield* research.current(ctx)
+      if ("refused" in found) throw new Error(found.refused)
+      const context = yield* research.context(ctx, found)
+      // The home folder and the working tree are the paths whose user names local paths are read for, not the
+      // repository's text; a host that only looks internal goes out once a result is on it.
+      expect(context.home).toEqual([Global.Path.home, found.place.root])
+      expect(context.results).toContain(web.url("article", "/"))
       expect(guard.outside()).toEqual([])
     }),
   90_000,
@@ -241,8 +275,9 @@ it.instance(
       const prompt = yield* SessionPrompt.Service
       const session = yield* sessions.create({ title: "Research", permission: allow })
       yield* test.llm.tool("research_plan", plan())
+      // An attached file is the work, so a copy of it is 12 words or more.
       yield* test.llm.tool("research_search", {
-        query: "Falcon migration moves the ledger to the reconcileLedgerEntries service",
+        query: "Falcon migration moves the ledger to the reconcileLedgerEntries service before the March freeze",
       })
       yield* test.llm.tool("research_search", { query: "ledger service migration without downtime" })
       yield* test.llm.text("Done.")

@@ -5,10 +5,11 @@ import { NetworkGuard } from "../lib/network-guard"
 const guard = NetworkGuard.use()
 
 // What a research lead might hold: memory-of-you lines, decision and lesson lines and a private document passage (the
-// private facts), and repository files it read (the work). They name people, companies, tools, versions, ports and
-// public identifiers, which ordinary queries share and the check lets through, and contacts, intranet hosts and home
-// folders, which it keeps out. The secret-shaped values are built at run time so this file holds none, and other
-// scripts' characters are built from their code points so this file shows every character it tests.
+// private facts), and repository files and command output it read (the work). They name people, companies, tools,
+// versions, ports, public identifiers, container users and the standard hosts of Docker and Kubernetes, which ordinary
+// queries share and the check lets through, and secrets, contacts, intranet hosts and home folders, which it keeps out.
+// The values that scanners take for real keys are built at run time so this file holds none, and other scripts'
+// characters are built from their code points so this file shows every character it tests.
 const char = (...codes: number[]) => String.fromCodePoint(...codes)
 // Digits written in Arabic-Indic digits.
 const arabic = (digits: string) => char(...[...digits].map((digit) => 0x660 + Number(digit)))
@@ -30,6 +31,9 @@ const context: ResearchOutbound.Context = {
     "The renewal goes on the card 4417880256719113.",
     "Umbrella pays about 2,400,000 USD a year, and the Q3 budget is 2,815,640 dollars.",
     "Meeting notes 21/10/2025: follow up 2025/11/03. Invoice INV-2025-10-0042 was paid on 22 Oct 2025.",
+    "Ask ops@acme.com for access to the Falcon wiki.",
+    "Old contacts: call 1.415.555.0199, SSN 123-45-1987, card 4417 1999 2001 9113.",
+    "Home Wi-Fi: network Heron, password correcthorse42.",
   ],
   work: [
     [
@@ -41,11 +45,34 @@ const context: ResearchOutbound.Context = {
       "// Order 4417203 was refunded twice in September.",
       "useEffect(() => setRows(useState(0)), []) // document.getElementById('x').querySelector('y') on x86_64",
       '{ "name": "acme-billing", "dependencies": { "react": "19.1.0", "typescript": "5.9.2" } }',
+      "DB_HOST=db.example.com",
+      "DB_PASSWORD=S3cretPassw0rd",
     ].join("\n"),
     "ollama listens on 11434, mongodb on 27017 and grpc on 50051. See vite issue 18234. nameserver = 8.8.8.8, gateway 192.168.1.1.",
     "Docs: https://docs.docker.com/compose/ and https://api.stripe.com/v1/charges. Copy .env.local, and read user.home.",
     "Root: /Users/kbharadwaj/Vectordev.ai. Payroll: C:\\Users\\kbharadwaj\\initech\\payroll-2025.xlsx",
+    [
+      "FROM gradle:8.5-jdk17",
+      "WORKDIR /home/gradle/src",
+      "ENV PATH=/home/airflow/.local/bin:$PATH",
+      "COPY . /home/jovyan/work",
+      'router.get("/users/profile", profile); redirect("/home/dashboard")',
+      "// Example paths in the docs: /home/luke/.config/vector and /Users/foo/project",
+    ].join("\n"),
+    [
+      "extra_hosts: host.docker.internal:host-gateway; REDIS: gateway.docker.internal",
+      "API http://kubernetes.default.svc.cluster.local, DNS kube-dns.kube-system.svc.cluster.local",
+      "META http://metadata.google.internal/computeMetadata/v1/; emulator http://10.0.2.2:8080",
+      "Docker bridge 172.17.0.1; minikube 192.168.49.2; kube-dns 10.96.0.10; Tailscale DNS 100.100.100.100; router fe80::1",
+      "ssh pi@raspberrypi.local, then open http://homeassistant.local:8123",
+      "nameservers ns-123.awsdns-45.com, ns51.domaincontrol.com; MX mx01.mail.icloud.com; see cvpr2023.thecvf.com",
+      "# Maintainer: Jo <jo@archlinux.org>, bugs to bug-foo@gnu.org. Patches to linux-kernel@vger.kernel.org.",
+      "Sources: wiki.archlinux.org, git.savannah.gnu.org, git.kernel.org.",
+    ].join("\n"),
+    'Warning: Each child in a list should have a unique "key" prop. Check the render method of `List`.',
+    "Vector is an open source AI coding agent built for the terminal.",
   ],
+  home: ["/Users/kbharadwaj", "/Users/kbharadwaj/Vectordev.ai"],
   typed: [
     "Research how heat pumps perform in cold climates, and compare SaaS churn benchmarks for robotics companies.",
   ],
@@ -56,16 +83,21 @@ const address = (url: string, using = context) => ResearchOutbound.address(url, 
 
 // Each of these copies private text, and each has to be refused, for the reason it leaks.
 const leaks: readonly (readonly [string, ResearchOutbound.Reason])[] = [
-  // A secret.
+  // A secret, as its name or its shape gives it away, or as the private context holds it, however bare.
   ["my password is Tr0ub4dor&3x", "secret"],
   [`api key ${"AKIA"}${"IOSFODNN7EXAMPLE"}`, "secret"],
+  ["S3cretPassw0rd", "secret"],
+  ["postgres auth failed S3cretPassw0rd", "secret"],
+  ["correcthorse42", "secret"],
+  ["laptop will not join wifi correcthorse42", "secret"],
   // 8 or more words of a memory line or a document, however they are written.
   ["Acme's Q3 churn rose to 7.4 percent after the Falcon pricing change", "words"],
   ["acme q3 churn rose to 7 4 percent after", "words"],
   ["after the falcon pricing change according to the internal board memo", "words"],
   [`${char(0x410)}cme's Q3 churn rose to 7.4 percent after the F${char(0x430)}lcon pricing change`, "words"],
   [`preparing the Falcon account re${char(0xad)}newal for Acme Robo${char(0x200b)}tics`, "words"],
-  ["reconcileLedgerEntries } from ledger const BILLING_URL https billing", "words"],
+  // 12 or more words of a repository file.
+  ["import reconcileLedgerEntries from ledger const BILLING_URL https billing acme internal io v2", "words"],
   // An email address from the private facts.
   ["jane.doe@globex.com", "token"],
   ["contact Jane.Doe@Globex.com about renewal", "token"],
@@ -88,6 +120,15 @@ const leaks: readonly (readonly [string, ResearchOutbound.Reason])[] = [
   [`${arabic("4417880256719113")} renewal`, "token"],
   ["078-05-1120", "token"],
   ["078 05 1120 credit check", "token"],
+  // Dotted phone numbers, and numbers with a group that reads as a year.
+  ["415-555-0199", "token"],
+  ["+1 415 555 0199", "token"],
+  ["1.415.555.0132", "token"],
+  ["+1.415.555.0132", "token"],
+  ["123-45-1987", "token"],
+  ["123451987", "token"],
+  ["4417 1999 2001 9113", "token"],
+  ["4417199920019113", "token"],
   // A private host or IP address from the private context or the repository.
   ["jira.acme.internal outage", "token"],
   ["https://jira.acme.internal/browse/LED-12", "token"],
@@ -97,13 +138,14 @@ const leaks: readonly (readonly [string, ResearchOutbound.Reason])[] = [
   ["10.20.30.40 open ports", "token"],
   ["fd12:3456:789a::7", "token"],
   [`jira.${char(0x430)}cme.internal`, "token"],
-  // A local path in the home folder of the user the repository's root names, or with that user name in it.
+  // A local path in the user's home folder, or with the user name in it.
   ["/Users/kbharadwaj/Vectordev.ai/notes.md", "token"],
   ["error in /users/KBharadwaj/Vectordev.ai/src/app.ts", "token"],
   ["C:\\Users\\kbharadwaj\\initech\\payroll-2025.xlsx", "token"],
   ["C:\\Users\\kbharadwaj ledger.db", "token"],
   ["/home/kbharadwaj/ledger.db", "token"],
   ["D:\\backup\\kbharadwaj\\ledger.db", "token"],
+  ["~kbharadwaj/.bashrc", "token"],
 ]
 
 // Queries a research agent writes for public questions, many on the subjects the private context names. The last
@@ -188,6 +230,47 @@ const fair = [
   "10.0.0.0/8 private address range",
   "~/.ssh/config ProxyJump example",
   "/etc/hosts file format",
+  // Checksums, IDs and addresses the private context does not hold.
+  "uuid 123e4567-e89b-12d3-a456-426614174000 meaning",
+  "sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "docker image sha256:4c4d1d7a6b4e8e7f1f0f2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f70",
+  "bitcoin genesis block hash 000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f",
+  "ethereum address 0xde0B295669a9FD93d5F28D9Ec85E40f4cb697BAe",
+  // Local paths that the repository's Dockerfile, routes and docs hold, with container users and route names in them.
+  "/opt/airflow/dags permission denied",
+  "/home/jovyan/work permission denied docker",
+  "/home/gradle/.gradle cache docker volume",
+  "/etc/profile vs ~/.bashrc",
+  "/users/profile endpoint REST design",
+  "/home/dashboard route redirect next.js",
+  "~/.config/vector/config.json not loading",
+  "/home/luke/.config/vector permissions",
+  "/tmp/foo permission denied",
+  // The standard names and addresses of Docker, Kubernetes, cloud metadata, emulators and home networks, and public
+  // name, mail, web and project servers, which the repository's files name.
+  "host.docker.internal not resolving on linux",
+  "gateway.docker.internal vs host-gateway",
+  "kubernetes.default.svc.cluster.local DNS timeout",
+  "kube-dns.kube-system.svc.cluster.local nslookup fails",
+  "metadata.google.internal 403",
+  "10.0.2.2 android emulator localhost",
+  "172.17.0.1 connection refused docker",
+  "192.168.49.2 minikube ingress not reachable",
+  "10.96.0.10 coredns i/o timeout",
+  "100.100.100.100 tailscale magicdns",
+  "raspberrypi.local not found",
+  "homeassistant.local:8123 not loading",
+  "fe80::1 not resolving",
+  "ns-123.awsdns-45.com not resolving",
+  "ns51.domaincontrol.com not resolving",
+  "mx01.mail.icloud.com bounce",
+  "cvpr2023.thecvf.com papers",
+  "wiki.archlinux.org pacman hooks",
+  "git.savannah.gnu.org mirror",
+  "git.kernel.org stable tree",
+  // Error messages and a README line that the work holds, quoted in fewer than WORK_RUN_WORDS words.
+  "each child in a list should have a unique key prop",
+  "open source AI coding agent built for the terminal",
   // The user's own words, and a long query of its own.
   "SaaS churn benchmarks for robotics companies",
   "how do air source heat pumps perform in very cold climates",
@@ -203,6 +286,9 @@ const fairAddresses = [
   "https://docs.docker.com/compose/",
   "https://www.example.com/heat-pumps/2019/2024?page=2",
   "https://github.com/kbharadwaj/dotfiles",
+  "https://example.com/users/profile",
+  "https://example.com/home/dashboard",
+  "https://www.uuidtools.com/decode?uuid=123e4567-e89b-12d3-a456-426614174000",
 ]
 
 // A data file of numbers only, as a repository's fixtures and exports hold them: a row number, a year, a count, a
@@ -261,6 +347,129 @@ describe("ResearchOutbound.check", () => {
       public: [],
     }
     expect(check("one of the best ways to cut the energy use", plain).ok).toBe(true)
+  })
+
+  test("needs 12 words in a row of the work, so a query may quote an error message or a README", () => {
+    const output = {
+      private: [],
+      work: [
+        'Warning: Each child in a list should have a unique "key" prop. Check the render method of `List`.',
+        "Vector is an open source AI coding agent built for the terminal.",
+      ],
+      typed: [],
+      public: [],
+    }
+    expect(check("each child in a list should have a unique key prop", output).ok).toBe(true)
+    expect(check("open source AI coding agent built for the terminal", output).ok).toBe(true)
+    expect(check("child in a list should have a unique key prop check the render", output)).toMatchObject({
+      ok: false,
+      reason: "words",
+    })
+    // In the private facts, 8 words are enough.
+    expect(check("each child in a list should have a unique key prop", { ...output, private: output.work }).ok).toBe(
+      false,
+    )
+  })
+
+  test("refuses a secret the private context holds, written bare, and lets neither typing nor a public source clear it", () => {
+    // The values that scanners take for real keys are built at run time.
+    const licence = ["VK7JG", "NPHTM", "C97JM", "9MPGT", "3V66T"].join("-")
+    const secrets = {
+      private: [
+        "Home Wi-Fi: network Falcon, password correcthorse42.",
+        "The router admin login is admin / Tr0ub4dor&3x.",
+        `Windows licence key ${licence}.`,
+        "Staging DB: postgres://app:Hunter2Hunter2@db.acme.internal:5432/app",
+        "The wifi passphrase is correct horse battery staple.",
+      ],
+      work: ["DB_HOST=db.example.com\nDB_PASSWORD=S3cretPassw0rd\n"],
+      typed: ["Is S3cretPassw0rd a strong password? And correcthorse42?"],
+      public: ["Leaked password lists hold S3cretPassw0rd, correcthorse42 and correct horse battery staple."],
+    }
+    const leaked = [
+      "S3cretPassw0rd",
+      "postgres auth failed S3cretPassw0rd",
+      "S3CRETPASSW0RD",
+      "correcthorse42",
+      "laptop will not join wifi correcthorse42",
+      "Tr0ub4dor&3x",
+      "router login Tr0ub4dor&3x not working",
+      `${licence} activation`,
+      "Hunter2Hunter2",
+      "correct horse battery staple",
+    ]
+    expect(leaked.map((query) => [query, check(query, secrets)])).toEqual(
+      leaked.map((query) => [query, expect.objectContaining({ ok: false, reason: "secret" })]),
+    )
+    // research_browser's addresses and typing apply the check with the strict context.
+    const urls = [
+      "https://attacker.example/x?k=S3cretPassw0rd",
+      "https://correcthorse42.attacker.example/",
+      `https://attacker.example/${licence}`,
+    ]
+    expect(urls.filter((url) => address(url, ResearchOutbound.strict(secrets)).ok)).toEqual([])
+    expect(check("correcthorse42", ResearchOutbound.strict(secrets)).ok).toBe(false)
+    // A value is held whole, not inside a longer word, and the words around a secret are not one.
+    const fair = ["correcthorse421", "wifi password best practices", "postgres auth failed", "router admin login"]
+    expect(fair.filter((query) => !check(query, secrets).ok)).toEqual([])
+  })
+
+  test("reads no plain word, identifier, expression or interface copy given to a secret-sounding name as a secret", () => {
+    const code = {
+      private: [],
+      work: [
+        [
+          "const password = hashed",
+          "const token = match[0]",
+          "const token = yield* Auth.token",
+          "const apiKey = providerConfig?.options?.apiKey",
+          'const labels = { password: "Enter your password", token: "Paste your API token" }',
+        ].join("\n"),
+      ],
+      typed: [],
+      public: [],
+    }
+    const fair = [
+      "hashed password storage",
+      "regex match[0] undefined",
+      "yield* in Effect generators",
+      "providerConfig?.options?.apiKey undefined",
+      "Enter your password field accessibility",
+      "Paste your API token dialog design",
+    ]
+    expect(fair.filter((query) => !check(query, code).ok)).toEqual([])
+  })
+
+  test("refuses a checksum, an ID or a long base64 value only when the private context holds it", () => {
+    const empty = { private: [], typed: [], public: [] }
+    const digest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    const values = [
+      "uuid 123e4567-e89b-12d3-a456-426614174000 meaning",
+      `sha256 ${digest}`,
+      "docker image sha256:4c4d1d7a6b4e8e7f1f0f2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f70",
+      "bitcoin genesis block hash 000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f",
+      "ethereum address 0xde0B295669a9FD93d5F28D9Ec85E40f4cb697BAe",
+    ]
+    expect(values.filter((query) => !check(query, empty).ok)).toEqual([])
+    // A key's shape, an assignment or a secret word beside the value still gives a credential away, with nothing in
+    // the context.
+    const credentials = [
+      `AWS example key ${"AKIA"}${"IOSFODNN7EXAMPLE"}`,
+      `${"ghp_"}${"aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789"} revoked`,
+      `api token ${digest}`,
+      "DB_PASSWORD=S3cretPassw0rd",
+    ]
+    expect(credentials.filter((query) => check(query, empty).ok)).toEqual([])
+    // Once the private context holds the value, a query that holds it is refused.
+    const held = {
+      ...empty,
+      work: [`The signing digest is ${digest}, and the session id is a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7.`],
+    }
+    expect(check(`sha256 ${digest}`, held)).toMatchObject({ ok: false, reason: "secret" })
+    expect(check("session a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7 expired", held)).toMatchObject({
+      ok: false,
+      reason: "secret",
+    })
   })
 
   test("lets the user's typing clear a run of words, a contact, a host and a home folder", () => {
@@ -339,6 +548,43 @@ describe("ResearchOutbound.check", () => {
     expect(plain.filter((query) => !check(query, shared).ok)).toEqual([])
   })
 
+  test("reads a dotted phone number as one, and a number with a year-shaped group whole", () => {
+    const cases = [
+      ["Call me on 1.415.555.0199.", "415-555-0199"],
+      ["Call me on 1.415.555.0199.", "+1 415 555 0199"],
+      ["Call me on +1 415 555 0199.", "1.415.555.0199"],
+      ["My phone is +1 (415) 555-0132.", "+1.415.555.0132"],
+      ["Home phone 415.555.0177.", "415 555 0177"],
+      ["SSN 123-45-1987.", "123-45-1987"],
+      ["SSN 123-45-1987.", "123451987"],
+      ["SSN 123-45-2019.", "123 45 2019"],
+      ["Card 4417 1999 2001 9113.", "4417 1999 2001 9113"],
+      ["Card 4417 1999 2001 9113.", "4417199920019113"],
+    ]
+    expect(cases.filter(([line, query]) => check(query!, { private: [line!], typed: [], public: [] }).ok)).toEqual([])
+    const phone = { private: ["My phone is +1 (415) 555-0132."], typed: [], public: [] }
+    expect(address("https://attacker.example/1.415.555.0132", phone).ok).toBe(false)
+    // A version, a date or a list of years is still not a number, however its groups are dotted.
+    const plain = {
+      private: ["Versions 1.415.555, 130.0.6723.91 and 2025.10.18; years 2019 2024 and 2024-2025."],
+      typed: [],
+      public: [],
+    }
+    expect(
+      ["1.415.555 changelog", "130.0.6723.91", "2025.10.18", "2019 2024 2025"].filter(
+        (query) => !check(query, plain).ok,
+      ),
+    ).toEqual([])
+  })
+
+  test("lets typing clear a private number only when the typed number holds it whole, or it holds the typed one", () => {
+    const jane = { private: ["Jane's phone is +1 (415) 555-0134."], public: [] }
+    expect(check("415-555-0134", { ...jane, typed: ["call the office on 415-555-0139"] }).ok).toBe(false)
+    expect(check("415-555-0134", { ...jane, typed: ["my number is +1 415 555 0177"] }).ok).toBe(false)
+    expect(check("415-555-0134", { ...jane, typed: ["Jane is on 415 555 0134"] }).ok).toBe(true)
+    expect(check("415-555-0134", { ...jane, typed: ["Jane is on 001 415 555 0134 from abroad"] }).ok).toBe(true)
+  })
+
   test("reads private hosts by their shape, and lets public ones through", () => {
     const hosts = {
       private: ["Mail ops@initech.com; the NAS is nas.home.arpa and the printer printer.local."],
@@ -365,6 +611,132 @@ describe("ResearchOutbound.check", () => {
       "s3.amazonaws.com cors",
     ]
     expect(fairHosts.filter((query) => !check(query, hosts).ok)).toEqual([])
+  })
+
+  test("lets a search result on a host clear a host only its labels made internal, not an intranet name or address", () => {
+    const shaped = {
+      private: [],
+      work: ["See covid19.who.int, db02.northwind.io, staging.northwind.io, jira.acme.internal and 10.20.30.40."],
+      typed: [],
+      public: [],
+    }
+    const queries = [
+      "covid19.who.int dashboard",
+      "staging.northwind.io",
+      "jira.acme.internal outage",
+      "10.20.30.40 open ports",
+    ]
+    expect(queries.filter((query) => check(query, shaped).ok)).toEqual([])
+    const shown = {
+      ...shaped,
+      results: [
+        "https://covid19.who.int/region/euro",
+        "https://staging.northwind.io/",
+        "https://jira.acme.internal/browse/X-1",
+        "http://10.20.30.40/",
+      ],
+    }
+    expect(queries.filter((query) => check(query, shown).ok)).toEqual([
+      "covid19.who.int dashboard",
+      "staging.northwind.io",
+    ])
+    // Only a result on the host itself counts, not one on another host or a public text that names it.
+    expect(check("db02.northwind.io", shown).ok).toBe(false)
+    expect(check("db02.northwind.io", { ...shaped, public: ["db02.northwind.io is down for everyone"] }).ok).toBe(false)
+  })
+
+  test("takes an organisation's domain from the private facts' email addresses, not from a repository's", () => {
+    const maintained = {
+      private: [],
+      work: [
+        "# Maintainer: Jo <jo@archlinux.org>, bugs to bug-foo@gnu.org, DOAP maintainer jo@gnome.org",
+        "Send patches to linux-kernel@vger.kernel.org; see debian-devel@lists.debian.org.",
+        "Sources: wiki.archlinux.org, git.savannah.gnu.org, gitlab.gnome.org, git.kernel.org, wiki.debian.org",
+      ],
+      typed: [],
+      public: [],
+    }
+    const queries = [
+      "wiki.archlinux.org pacman hooks",
+      "git.savannah.gnu.org mirror",
+      "gitlab.gnome.org merge requests",
+      "git.kernel.org stable tree",
+      "wiki.debian.org apt pinning",
+    ]
+    expect(queries.filter((query) => !check(query, maintained).ok)).toEqual([])
+    const employed = { ...maintained, private: ["My work email is jo@archlinux.org."] }
+    expect(check("wiki.archlinux.org pacman hooks", employed)).toMatchObject({ ok: false, reason: "token" })
+  })
+
+  test("reads machine-shaped labels, and not name, mail or web servers or a year's edition", () => {
+    const named = {
+      private: [],
+      work: [
+        "build01.acme.io, db-02.acme.io; nameservers ns-123.awsdns-45.com, ns51.domaincontrol.com; MX mx01.mail.icloud.com",
+        "See cvpr2023.thecvf.com and www2023.thewebconf.org.",
+      ],
+      typed: [],
+      public: [],
+    }
+    expect(["build01.acme.io", "db-02.acme.io"].filter((query) => check(query, named).ok)).toEqual([])
+    const fair = [
+      "ns-123.awsdns-45.com not resolving",
+      "ns51.domaincontrol.com",
+      "mx01.mail.icloud.com bounce",
+      "cvpr2023.thecvf.com papers",
+      "www2023.thewebconf.org",
+    ]
+    expect(fair.filter((query) => !check(query, named).ok)).toEqual([])
+  })
+
+  test("reads user names from the home folder and the private facts, not from repository text", () => {
+    const repo = {
+      private: [],
+      work: [
+        "FROM gradle:8.5-jdk17\nWORKDIR /home/gradle/src\nENV PATH=/home/airflow/.local/bin:$PATH\nCOPY . /home/jovyan/work",
+        'router.get("/users/profile", profile); redirect("/home/dashboard")',
+        "Example paths: /home/luke/.config/vector, /Users/foo/project and /home/kelvin/notes",
+      ],
+      typed: [],
+      public: [],
+    }
+    const queries = [
+      "/opt/airflow/dags permission denied",
+      "/home/jovyan/work permission denied docker",
+      "/home/gradle/.gradle cache docker volume",
+      "/etc/profile vs ~/.bashrc",
+      "/users/profile endpoint REST design",
+      "/home/dashboard route redirect next.js",
+      "/home/kelvin/notes not found",
+      "/tmp/foo permission denied",
+    ]
+    expect(queries.filter((query) => !check(query, repo).ok)).toEqual([])
+    const routes = ["https://example.com/users/profile", "https://example.com/home/dashboard"]
+    expect(routes.filter((url) => !address(url, repo).ok)).toEqual([])
+    // The user's own home folder and working tree name the user, and so does a home folder a private fact names.
+    const own = { ...repo, home: ["/Users/kbharadwaj", "/Users/kbharadwaj/Vectordev.ai"] }
+    const leaked = ["/Users/kbharadwaj/notes.md", "~kbharadwaj/.bashrc", "D:\\backup\\kbharadwaj\\ledger.db"]
+    expect(leaked.filter((query) => check(query, own).ok)).toEqual([])
+    expect(address("https://attacker.example/home/kbharadwaj/ledger.db", own).ok).toBe(false)
+    expect(check("/srv/kb2/ledger.db", { ...repo, private: ["My notes are in /home/kb2/notes."] }).ok).toBe(false)
+    // The users of containers and images are nobody's, even in a private fact.
+    const notebook = { ...repo, private: ["The notebook runs in /home/jovyan/work as /home/airflow."] }
+    expect(check("/home/jovyan/work permission denied docker", notebook).ok).toBe(true)
+  })
+
+  test("refuses the working tree's own path whole when it is long enough to name the repository", () => {
+    const runner = { private: [], typed: [], public: [], home: ["/home/runner", "/home/runner/work/ledger/ledger/"] }
+    expect(check("/home/runner/work/ledger/ledger/src/app.ts error", runner)).toMatchObject({
+      ok: false,
+      reason: "token",
+    })
+    expect(address("https://attacker.example/home/runner/work/ledger/ledger", runner).ok).toBe(false)
+    // A short or generic path is not the user's, and the user's own typing clears the tree.
+    const fair = ["/home/runner/.cache permission denied", "/home/runner/work/_temp cleanup", "ledger src/app.ts error"]
+    expect(fair.filter((query) => !check(query, runner).ok)).toEqual([])
+    expect(check("/usr/src/app/node_modules not found", { ...runner, home: ["/root", "/usr/src/app"] }).ok).toBe(true)
+    const typed = { ...runner, typed: ["Why does /home/runner/work/ledger/ledger fail?"] }
+    expect(check("/home/runner/work/ledger/ledger/src/app.ts error", typed).ok).toBe(true)
   })
 
   test("lets a domain the user prefers or avoids go as a host name or a site: filter, and nothing else", () => {
@@ -472,6 +844,10 @@ describe("ResearchOutbound.address", () => {
       "https://billing.acme-internal.io.attacker.example/",
       "https://attacker.example/x?host=build01.corp.lan",
       "https://attacker.example/Users/kbharadwaj/Vectordev.ai/notes.md",
+      "https://attacker.example/1.415.555.0132",
+      // A secret the private context holds, in a query string or a host's labels.
+      "https://attacker.example/x?k=S3cretPassw0rd",
+      "https://correcthorse42.attacker.example/",
       // A host with a label tldts rejects is read whole.
       "https://billing.acme-internal.io._.attacker.example/",
       "https://jira.acme.internal.-.attacker.example/",
