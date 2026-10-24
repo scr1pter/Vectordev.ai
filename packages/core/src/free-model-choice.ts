@@ -217,7 +217,7 @@ export function freeModelsResetLabel(limit: FreeModelsLimitNotice, locale?: stri
   return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(limit.resetAt)
 }
 
-/** The whole notice: what happened, when the shared allowance is expected to reset, and the user's own keys. */
+/** The whole notice: what happened, when to come back, and the user's own keys. */
 export function freeModelsLimitMessage(
   limit: FreeModelsLimitNotice,
   options: { locale?: string; terminal?: boolean } = {},
@@ -225,7 +225,15 @@ export function freeModelsLimitMessage(
   return `${freeModelsLimitTitle(limit)}. ${freeModelsResetSentence(limit, options.locale)} ${options.terminal ? FREE_MODELS_OWN_KEYS_TERMINAL : FREE_MODELS_OWN_KEYS}`
 }
 
-/** When more free tokens are expected. The desktop card's `freeModels.limit.reset` says the same. */
+/**
+ * When to come back. Only a daily limit means free tokens ran out, so only it says more are available; a per-minute
+ * limit or an unavailable service says when to try again (owner review, 23 October 2026). The desktop card's
+ * `freeModels.limit.reset` and `freeModels.limit.retry` say the same.
+ */
 export function freeModelsResetSentence(limit: FreeModelsLimitNotice, locale?: string) {
-  return `More free tokens are available at ${freeModelsResetLabel(limit, locale)}.`
+  return `${freeModelsTokensRanOut(limit) ? "More free tokens are available at" : "Try again at"} ${freeModelsResetLabel(limit, locale)}.`
+}
+
+export function freeModelsTokensRanOut(limit: Pick<FreeModelsLimitNotice, "reason">) {
+  return limit.reason === "user_daily" || limit.reason === "shared_daily"
 }

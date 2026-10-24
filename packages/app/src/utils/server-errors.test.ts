@@ -195,6 +195,17 @@ describe("isSessionNotFoundError", () => {
   })
 })
 
+// Owner's wording review, 23 October 2026: a per-minute limit is not free tokens running out.
+test("a per-minute free-model limit says when to try again, never that more free tokens are available", () => {
+  const text = formatServerError({
+    name: "FreeModelsLimitError",
+    data: { reason: "user_minute", resetAt: 1893542400000, message: "raw proxy debug" },
+  })
+  expect(text).toStartWith("Give the free models provided by Vector a moment. Try again at")
+  expect(text).toContain("2030")
+  expect(text).not.toMatch(/more free tokens|raw proxy debug/i)
+})
+
 test("free-model quota notifications hide upstream text, say when more free tokens are available and offer the user's own keys", () => {
   const text = formatServerError({
     name: "FreeModelsLimitError",

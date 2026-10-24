@@ -8,6 +8,7 @@ import { useDialog } from "@vectordevai/ui/context/dialog"
 import {
   freeModelsLimitTitle,
   freeModelsResetLabel,
+  freeModelsTokensRanOut,
   type FreeModelsLimitNotice,
 } from "@vectordevai/core/free-model-choice"
 import { useSDK } from "@/context/sdk"
@@ -61,7 +62,11 @@ export function FreeModelsLimit(props: {
     <Card class="error-card" data-free-models-limit="">
       <div class="flex flex-col gap-3">
         <strong>{freeModelsLimitTitle(props.limit)}</strong>
-        <p>{language.t("freeModels.limit.reset", { time: freeModelsResetLabel(props.limit, language.intl()) })}</p>
+        <p>
+          {language.t(freeModelsTokensRanOut(props.limit) ? "freeModels.limit.reset" : "freeModels.limit.retry", {
+            time: freeModelsResetLabel(props.limit, language.intl()),
+          })}
+        </p>
         <p>{language.t("freeModels.limit.ownKeys")}</p>
         <Show when={state.error}>
           <p role="alert">{state.error}</p>

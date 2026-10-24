@@ -16,6 +16,7 @@ import {
   FREE_MODELS_TITLE,
   FREE_MODELS_UNAVAILABLE,
   freeModelsLimitTitle,
+  freeModelsTokensRanOut,
 } from "../../packages/core/src/free-model-choice.js"
 import { freeModelRequest } from "../../packages/core/src/free-model-request.js"
 import { enforceRateLimit, requireTrustedJsonRequest } from "./abuse.js"
@@ -50,7 +51,7 @@ export function freeModelLimit(reason: FreeModelLimitReason, resetAt: number): F
     reason,
     resetAt,
     // Clients from 1.99.109 write their own notice from reason and resetAt; this is for any other reader.
-    message: `${freeModelsLimitTitle({ reason, resetAt })}. More free tokens are available at ${RESET.format(resetAt)}. Until then, use a model from a provider you've connected with your own key.`,
+    message: `${freeModelsLimitTitle({ reason, resetAt })}. ${freeModelsTokensRanOut({ reason }) ? "More free tokens are available at" : "Try again at"} ${RESET.format(resetAt)}. Until then, use a model from a provider you've connected with your own key.`,
   }
 }
 

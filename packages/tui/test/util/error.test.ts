@@ -61,6 +61,11 @@ test("a free-model limit says free tokens ran out and when more are available, w
   expect(cliErrorMessage(limit("shared_daily"))).toStartWith(
     "Free tokens have run out for today. More free tokens are available at",
   )
+  // Only a daily limit means free tokens ran out (owner's wording review, 23 October 2026).
+  expect(cliErrorMessage(limit("user_minute"))).toStartWith(
+    "Give the free models provided by Vector a moment. Try again at",
+  )
+  expect(cliErrorMessage(limit("upstream"))).not.toContain("More free tokens")
   for (const reason of ["user_daily", "user_minute", "shared_daily", "upstream", "balance"]) {
     const text = cliErrorMessage(limit(reason)) ?? ""
     expect(text).toEndWith(FREE_MODELS_OWN_KEYS_TERMINAL)

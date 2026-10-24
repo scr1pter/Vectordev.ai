@@ -1,5 +1,6 @@
 export const dict = {
   "freeModels.limit.reset": "More free tokens are available at {{time}}.",
+  "freeModels.limit.retry": "Try again at {{time}}.",
   "freeModels.limit.ownKeys":
     "To keep working now, choose a model from another provider you've connected, or add your own provider key in Settings → Providers.",
   "freeModels.limit.addKey": "Use my own API key",

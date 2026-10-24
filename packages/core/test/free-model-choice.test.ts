@@ -28,6 +28,7 @@ import {
   freeModelsLimitTitle,
   freeModelsResetLabel,
   freeModelsResetSentence,
+  freeModelsTokensRanOut,
   type FreeModelsLimitNotice,
 } from "../src/free-model-choice"
 
@@ -181,6 +182,24 @@ test("the daily limits say free tokens ran out, the overall one without saying t
   expect(freeModelsLimitMessage(notice("shared_daily"), { terminal: true })).toBe(
     `Free tokens have run out for today. ${freeModelsResetSentence(notice("shared_daily"))} ${FREE_MODELS_OWN_KEYS_TERMINAL}`,
   )
+})
+
+// Owner's wording review, 23 October 2026: only a daily limit means free tokens ran out.
+test("a per-minute limit or an unavailable service says when to try again, never that more free tokens arrive", () => {
+  for (const reason of ["user_minute", "upstream", "balance"] as const) {
+    const limit = { reason, resetAt: Date.UTC(2030, 0, 1, 12) }
+    expect(freeModelsTokensRanOut(limit)).toBe(false)
+    expect(freeModelsResetSentence(limit, "en-US")).toBe(`Try again at ${freeModelsResetLabel(limit, "en-US")}.`)
+    for (const text of [freeModelsLimitMessage(limit), freeModelsLimitMessage(limit, { terminal: true })]) {
+      expect(text).toContain(`. Try again at ${freeModelsResetLabel(limit)}. `)
+      expect(text).not.toMatch(/more free tokens|run out/i)
+    }
+  }
+  for (const reason of ["user_daily", "shared_daily"] as const) {
+    const limit = { reason, resetAt: Date.UTC(2030, 0, 1, 12) }
+    expect(freeModelsTokensRanOut(limit)).toBe(true)
+    expect(freeModelsResetSentence(limit)).toStartWith("More free tokens are available at ")
+  }
 })
 
 test("no user-visible free-model string calls them an allowance, shared or pooled", async () => {

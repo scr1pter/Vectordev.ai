@@ -44,3 +44,9 @@ test("free-model copy never calls them an allowance, shared or pooled", () => {
   expect(copy.filter(([, text]) => /allowance|\bshared\b|\bpool(?:ed)?\b/i.test(text))).toEqual([])
   expect(en["freeModels.limit.reset"]).toBe("More free tokens are available at {{time}}.")
 })
+
+// Owner's wording review, 23 October 2026: a per-minute limit or an unavailable service never says more free tokens.
+test("the limit card's retry line says only when to try again", () => {
+  expect(en["freeModels.limit.retry"]).toBe("Try again at {{time}}.")
+  expect(en["freeModels.limit.retry"]).not.toMatch(/free tokens|run out/i)
+})

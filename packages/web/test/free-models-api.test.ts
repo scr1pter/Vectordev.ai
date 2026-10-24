@@ -647,7 +647,11 @@ describe("shared free inference", () => {
     expect((await chat()).status).toBe(200)
     for (const response of await Promise.all([chat(), chat(), chat()])) {
       expect(response.status).toBe(429)
-      expect((await response.json()).error.reason).toBe("user_minute")
+      const error = (await response.json()).error
+      expect(error.reason).toBe("user_minute")
+      // Owner's wording review, 23 October 2026: a per-minute limit is not free tokens running out.
+      expect(error.message).toStartWith("Give the free models provided by Vector a moment. Try again at")
+      expect(error.message).not.toContain("More free tokens")
     }
     expect(state.keyCalls).toBe(1)
     expect(chats).toHaveLength(1)
