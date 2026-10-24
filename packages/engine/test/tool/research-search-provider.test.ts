@@ -39,7 +39,7 @@ describe("research's search provider", () => {
     expect(searchProvider({ browser: true })).toEqual({ provider: "browser" })
     expect(searchProvider({ browser: false })).toEqual({ provider: "none", reason: ResearchSearch.NEEDS_DESKTOP })
     expect(searchProvider({ browser: true, chosen: "none" })).toEqual({ provider: "none", reason: ResearchSearch.NONE })
-    // A search service the command line used to name changes nothing: there are none.
+    // A search service an earlier version's command line named (its messages may still say so) changes nothing.
     for (const chosen of ["searxng", "exa", "parallel", "auto"])
       expect(searchProvider({ browser: true, chosen })).toEqual({ provider: "browser" })
   })

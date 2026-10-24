@@ -122,7 +122,7 @@ describe("the plan card", () => {
     const card = {
       deep: true,
       deepEstimate: "About 40 pages and 24 searches.",
-      search: { provider: "searxng", host: "gpu-box:8080" },
+      search: { provider: "browser" },
       preferences: { prefer: ["nature.com"], avoid: [] },
       offline: false,
     }
@@ -195,14 +195,8 @@ describe("the plan card", () => {
     ).toBeUndefined()
   })
 
-  test("says what research searches with, and what it uses without a search service", () => {
+  test("says research searches in its own browser, and what it uses without one", () => {
     const card = { deep: false, preferences: { prefer: [], avoid: [] }, offline: false }
-    expect(searchLine({ ...card, search: { provider: "searxng", host: "gpu-box:8080" } })).toBe(
-      "Search: SearXNG (gpu-box:8080)",
-    )
-    expect(searchLine({ ...card, search: { provider: "exa" } })).toBe(
-      "Search: Exa, on your key. Searches go to Exa, billed by Exa.",
-    )
     expect(searchLine({ ...card, search: { provider: "browser" } })).toBe(
       "Search: Google, in each research agent's own browser (DuckDuckGo when Google asks for a check). No search service or key.",
     )
@@ -211,6 +205,8 @@ describe("the plan card", () => {
     ).toBe(
       "Nothing is searched on the web here. Research will use this repository's brain, its files and links you paste.",
     )
+    // An older engine named the search service it used.
+    expect(searchLine({ ...card, search: { provider: "service" } })).toBe("Search: the web")
     expect(searchLine(undefined)).toBeUndefined()
   })
 

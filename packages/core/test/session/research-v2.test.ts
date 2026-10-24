@@ -922,13 +922,16 @@ describe("Deep research on the V2 runner", () => {
   )
 
   it.live(
-    "a repository's config naming a search server changes nothing: research searches in its research browser",
+    "a repository's config from an earlier version naming a search server changes nothing: research searches in its research browser",
     () =>
       Effect.gen(function* () {
         yield* setup()
+        // Research had a search setting once; a config file that still holds one loads, and the setting is dropped.
         settings.repository = new Config.Document({
           type: "document",
-          info: new Config.Info({ research: { search: { provider: "searxng", url: web.url("searxng", "/") } } }),
+          info: Schema.decodeUnknownSync(Config.Info)({
+            research: { search: { provider: "searxng", url: web.url("old-search", "/") } },
+          }),
         })
         yield* answering()
         const session = yield* SessionV2.Service
@@ -951,7 +954,7 @@ describe("Deep research on the V2 runner", () => {
         expect(search?.structured).toMatchObject({ provider: "browser", engine: "google" })
         expect(search?.structured.refused).toBeUndefined()
         expect(searched() - before).toBe(1)
-        expect(web.count("searxng")).toBe(0)
+        expect(web.count("old-search")).toBe(0)
         // The lead's own research browser, by the run and its session, closed again once the search came back.
         expect(sent.slice(-2).map((body) => [body.command, body.sessionID, body.agent])).toEqual([
           ["research.search", sessionID, "research"],

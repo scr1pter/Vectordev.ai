@@ -34,6 +34,7 @@ export const Purpose = Schema.Literals([
   "git-remote",
   "lsp-install",
   "web-page",
+  // No source makes these now; kept so the network log still reads lines an earlier version wrote.
   "web-search",
   "browser",
   "research-reader",

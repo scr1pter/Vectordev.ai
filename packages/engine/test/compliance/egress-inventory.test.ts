@@ -97,8 +97,6 @@ const DECIDED_ELSEWHERE: Readonly<Record<string, string>> = {
     "A V2 route's model calls are refused before the route is built (SessionRunnerModel.allowedInLocal); a V1 call goes through provider.ts's fetch first.",
   "packages/core/src/plugin/provider/google-vertex.ts":
     "A V2 route's model calls are refused before the route is built (SessionRunnerModel.allowedInLocal); a V1 call goes through provider.ts's fetch first.",
-  "packages/engine/src/tool/mcp-websearch.ts":
-    "Sends with the client tool/websearch.ts labels with the provider's source.",
   "packages/engine/src/git/index.ts":
     "Decides each git command that connects with Git.refusal (core git.ts) before git starts: the review's and the GitHub handler's fetches and pushes.",
   "packages/engine/src/review/source.ts":
@@ -239,26 +237,6 @@ const UNLABELLED_CALLS: ReadonlyArray<{ readonly file: string; readonly call: st
     file: "packages/core/src/research/reader.ts",
     call: "HttpClientRequest.get(input.url)",
     why: "Sends with the client its caller hands it, labelled research-reader there (tool/research-read.ts, tool/research-run.ts).",
-  },
-  {
-    file: "packages/core/src/tool/websearch.ts",
-    call: "HttpClientRequest.post(url)",
-    why: "Built inside the search the tool's execute labels with the provider's source (websearch-exa or websearch-parallel).",
-  },
-  {
-    file: "packages/core/src/tool/websearch.ts",
-    call: "filterStatusOk(http).execute(request)",
-    why: "Sent inside the search the tool's execute labels with the provider's source (websearch-exa or websearch-parallel).",
-  },
-  {
-    file: "packages/engine/src/tool/mcp-websearch.ts",
-    call: "HttpClientRequest.post(url)",
-    why: "Sends with the client tool/websearch.ts and tool/research-search.ts label with the provider's source.",
-  },
-  {
-    file: "packages/engine/src/tool/mcp-websearch.ts",
-    call: ".execute(request)",
-    why: "Sends with the client tool/websearch.ts and tool/research-search.ts label with the provider's source.",
   },
   {
     file: "packages/llm/src/route/executor.ts",

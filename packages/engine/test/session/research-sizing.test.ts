@@ -527,22 +527,21 @@ it.instance(
 )
 
 it.instance(
-  "a repository's config cannot choose where research searches",
+  "a repository's config from an earlier version cannot choose where research searches",
   () =>
     Effect.gen(function* () {
       const test = yield* setup()
       const fs = yield* FSUtil.Service
       const config = yield* Config.Service
-      // The cloned repository names a SearXNG server of its author's, and is trusted: research searches in its own
-      // research browsers all the same, and the server gets nothing.
+      // The cloned repository's config, from an earlier version, names a search server of its author's, and is trusted:
+      // the setting no longer exists, research searches in its own research browsers, and the server gets nothing.
       yield* fs.writeWithDirs(path.join(Global.Path.config, "vector.json"), JSON.stringify({}))
       yield* fs.writeWithDirs(
         path.join(test.dir, "vector.json"),
-        JSON.stringify(
-          repositoryConfig(test.llm.url, {
-            research: { search: { provider: "searxng", url: web.url("searxng", "/") } },
-          }),
-        ),
+        JSON.stringify({
+          ...repositoryConfig(test.llm.url),
+          research: { search: { provider: "searxng", url: web.url("old-search", "/") } },
+        }),
       )
       const snapshot = yield* Effect.promise(() =>
         WorkspaceTrust.snapshot(test.dir, [path.join(test.dir, "vector.json")]),
@@ -562,7 +561,7 @@ it.instance(
       const [search] = yield* calls(session.id, "research_search")
       expect(output(search)).toContain("results from Google")
       expect(FakeBridge.searches(bridge).length - searched).toBe(1)
-      expect(web.count("searxng")).toBe(0)
+      expect(web.count("old-search")).toBe(0)
     }),
   60_000,
 )

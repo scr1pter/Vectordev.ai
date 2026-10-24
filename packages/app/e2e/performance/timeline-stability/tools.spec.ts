@@ -74,7 +74,7 @@ test.describe("timeline tool state stability", () => {
     }
     for (const [index, id] of ["skill", "webfetch", "custom", "task", "websearch"].entries()) {
       const key = id as (typeof ids)[number]
-      const metadata = key === "task" ? { sessionId: childID } : key === "websearch" ? { provider: "exa" } : {}
+      const metadata = key === "task" ? { sessionId: childID } : {}
       const output = key === "websearch" ? "Result https://example.com/result" : "Completed"
       await timeline.send(
         partUpdated(toolPart(`prt_state_${key}`, names[key], "completed", inputs[key], { metadata, output })),
@@ -109,7 +109,7 @@ test.describe("timeline tool state stability", () => {
     await expect(
       page.locator(`a[href$="/session/${childID}"]`, { has: page.locator('[data-component="task-tool-card"]') }),
     ).toBeVisible()
-    await expect(page.getByRole("button", { name: /Exa Web Search/ })).toBeVisible()
+    await expect(page.getByRole("button", { name: /^Web Search/ })).toBeVisible()
   })
 
   test("keeps an expanded mixed context group stable through staggered completion and error", async ({

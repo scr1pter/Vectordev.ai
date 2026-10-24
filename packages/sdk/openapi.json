@@ -32226,10 +32226,6 @@
         },
         "additionalProperties": false
       },
-      "ResearchSearchProvider": {
-        "type": "string",
-        "enum": ["auto", "searxng", "exa", "parallel", "browser", "none"]
-      },
       "ResearchDepthConfig": {
         "type": "string",
         "enum": ["auto", "focused", "deep"]
@@ -32268,18 +32264,6 @@
       "ResearchConfig": {
         "type": "object",
         "properties": {
-          "search": {
-            "type": "object",
-            "properties": {
-              "provider": {
-                "$ref": "#/components/schemas/ResearchSearchProvider"
-              },
-              "url": {
-                "type": "string"
-              }
-            },
-            "additionalProperties": false
-          },
           "depth": {
             "$ref": "#/components/schemas/ResearchDepthConfig"
           },
@@ -32317,9 +32301,6 @@
             "additionalProperties": false
           },
           "robots": {
-            "type": "boolean"
-          },
-          "browser_search": {
             "type": "boolean"
           },
           "retain_days": {

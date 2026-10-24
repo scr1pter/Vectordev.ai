@@ -31,9 +31,9 @@ export const LIMITS: Readonly<Record<Research.Depth, Limits>> = {
 export type Settings = { readonly own: ConfigResearchV1.Info; readonly avoid: readonly string[] }
 
 /**
- * Research's settings from a location's config entries, lowest priority first. Where it searches, its caps and
- * robots.txt are the user's own: a checked-in repository config could otherwise send the user's queries to a server its
- * author runs, or raise the caps. A repository's block only adds sites to avoid, which narrows what research reads.
+ * Research's settings from a location's config entries, lowest priority first. Its caps, preferred sites and
+ * robots.txt are the user's own: a checked-in repository config could otherwise raise the caps or choose what research
+ * reads. A repository's block only adds sites to avoid, which narrows what research reads.
  */
 export function settings(
   entries: readonly Config.Entry[],
@@ -203,7 +203,6 @@ function merge(base: ConfigResearchV1.Info, next: ConfigResearchV1.Info): Config
   return {
     ...base,
     ...next,
-    ...(base.search || next.search ? { search: { ...base.search, ...next.search } } : {}),
     ...(focused || deep ? { limits: { ...(focused ? { focused } : {}), ...(deep ? { deep } : {}) } } : {}),
     ...(prefer || avoid ? { domains: { ...(prefer ? { prefer } : {}), ...(avoid ? { avoid } : {}) } } : {}),
   }

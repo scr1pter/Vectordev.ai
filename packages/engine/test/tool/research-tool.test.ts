@@ -130,7 +130,7 @@ it.instance(
   "research as a tool is not offered when the user turned it off",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup({ research: { tool: "off", search: { provider: "none" } } })
+      const test = yield* setup({ research: { tool: "off" } })
       const sessions = yield* Session.Service
       const build = yield* sessions.create({ title: "Build" })
       yield* test.llm.text("Done.")

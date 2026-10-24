@@ -40,7 +40,6 @@ import z from "zod"
 import { Plugin } from "../plugin"
 import { Provider } from "@/provider/provider"
 
-import { WebSearchTool } from "./websearch"
 import { LspTool } from "./lsp"
 import * as Truncate from "./truncate"
 import { ApplyPatchTool } from "./apply_patch"
@@ -68,7 +67,6 @@ import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { BrowserTool } from "./browser"
 import { VectorCloudTool } from "./vector-cloud"
-import { Auth } from "@/auth"
 import { ResearchStore } from "@vectordevai/core/research/store"
 import { ResearchRun } from "./research-run"
 import { ResearchPlanTool } from "./research-plan"
@@ -93,15 +91,6 @@ const RESEARCH_TOOLS: Record<string, readonly string[]> = {
   [ResearchRun.RESEARCHER]: ["research_search", "research_read", "research_browser", "research_note"],
 }
 const RESEARCH_TOOL_IDS = new Set(Object.values(RESEARCH_TOOLS).flat())
-
-export function webSearchEnabled(flags = { exa: false, parallel: false }) {
-  return (
-    flags.exa ||
-    flags.parallel ||
-    process.env.VECTOR_WEBSEARCH_PROVIDER === "exa" ||
-    process.env.VECTOR_WEBSEARCH_PROVIDER === "parallel"
-  )
-}
 
 type TaskDef = Tool.InferDef<typeof TaskTool>
 type ReadDef = Tool.InferDef<typeof ReadTool>
@@ -147,7 +136,6 @@ const layer = Layer.effect(
     const agents = yield* Agent.Service
     const truncate = yield* Truncate.Service
     const flags = yield* RuntimeFlags.Service
-    const auth = yield* Auth.Service
     const fsutil = yield* FSUtil.Service
 
     const invalid = yield* InvalidTool
@@ -161,7 +149,6 @@ const layer = Layer.effect(
     const lsptool = yield* LspTool
     const plan = yield* PlanExitTool
     const webfetch = yield* WebFetchTool
-    const websearch = yield* WebSearchTool
     const shell = yield* ShellTool
     const globtool = yield* GlobTool
     const writetool = yield* WriteTool
@@ -299,7 +286,6 @@ const layer = Layer.effect(
           fetch: Tool.init(webfetch),
           todo: Tool.init(todo),
           teammate: Tool.init(teammate),
-          search: Tool.init(websearch),
           skill: Tool.init(skilltool),
           memory: Tool.init(memorytool),
           patch: Tool.init(patchtool),
@@ -333,7 +319,6 @@ const layer = Layer.effect(
             tool.fetch,
             tool.todo,
             ...(team ? [tool.teammate] : []),
-            tool.search,
             tool.skill,
             // The session runtime removes it from subagents and the quick lane, which leave memory to the main agent.
             tool.memory,
@@ -392,8 +377,6 @@ const layer = Layer.effect(
 
     const tools: Interface["tools"] = Effect.fn("ToolRegistry.tools")(function* (input) {
       const builtin = yield* InstanceState.get(state)
-      const exa = yield* auth.get("exa").pipe(Effect.orDie)
-      const parallel = yield* auth.get("parallel").pipe(Effect.orDie)
       const researchSetting = (yield* config.get()).research?.tool
       // A research agent is offered its own tools and nothing else, whatever a session's or the user's rules allow:
       // no edit, shell, plugin or custom tool reaches Deep research (RC1).
@@ -406,13 +389,6 @@ const layer = Layer.effect(
         // The build agent researches as a tool on its own requests unless the user turned that off; the session
         // runtime's size decides the rest when the tool runs.
         if (tool.id === ResearchTool.id) return input.agent.name === "build" && researchSetting !== "off"
-        if (tool.id === WebSearchTool.id) {
-          return webSearchEnabled({
-            exa: flags.enableExa || !!process.env.EXA_API_KEY || (exa?.type === "api" && !!exa.key),
-            parallel:
-              flags.enableParallel || !!process.env.PARALLEL_API_KEY || (parallel?.type === "api" && !!parallel.key),
-          })
-        }
 
         const usePatch =
           input.modelID.includes("gpt-") && !input.modelID.includes("oss") && !input.modelID.includes("gpt-4")
@@ -574,7 +550,6 @@ export const node = LayerNode.make({
     Format.node,
     Truncate.node,
     RuntimeFlags.node,
-    Auth.node,
     Database.node,
     Ripgrep.node,
     SpendGuard.node,

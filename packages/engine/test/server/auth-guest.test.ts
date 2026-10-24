@@ -963,7 +963,7 @@ test("a guest's prompt cannot choose where the owner's research searches", async
   const guest = { authorization: basic("guest", "guest-secret"), "content-type": "application/json" }
   const call = (url: URL, init: RequestInit = {}) => fetch(url, { ...init, keepalive: false })
   const at = (route: string) => new URL(`${route}?directory=${encodeURIComponent(tmp.path)}`, listener.url)
-  // What `vector run --research --search exa` sends: its choices in a text part's metadata.
+  // What `vector run --research --search none` sends: its choices in a text part's metadata.
   const prompt = (sessionID: string, headers: Record<string, string>) =>
     call(at(`/session/${sessionID}/prompt_async`), {
       method: "POST",
@@ -977,7 +977,7 @@ test("a guest's prompt cannot choose where the owner's research searches", async
             type: "text",
             text: "Research settings",
             synthetic: true,
-            metadata: { "vector.research": { search: "exa" } },
+            metadata: { "vector.research": { search: "none" } },
           },
         ],
       }),
@@ -1010,7 +1010,7 @@ test("a guest's prompt cannot choose where the owner's research searches", async
     // The owner's own choice stands.
     const owned = await session()
     expect((await prompt(owned, owner)).status).toBe(204)
-    expect((await saved(owned))?.metadata?.["vector.research"]).toEqual({ search: "exa" })
+    expect((await saved(owned))?.metadata?.["vector.research"]).toEqual({ search: "none" })
   } finally {
     Flag.VECTOR_WORKSPACE_ID = previousWorkspaceID
     await listener.stop(true)

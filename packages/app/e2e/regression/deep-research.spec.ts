@@ -166,7 +166,8 @@ const finished = [
     metadata: {
       runID,
       query: "heat pump field trial savings cold climate",
-      provider: "searxng",
+      provider: "browser",
+      engine: "duckduckgo",
       results: [{ url: source.url, title: source.title, snippet: "Field trials" }],
     },
   }),
@@ -343,7 +344,7 @@ test("a research plan opens as an editable plan card that answers with only what
   const card = {
     deep: true,
     deepEstimate: "About 40 pages and 24 searches. Estimated $0.90–$2.80 at list prices. Cap $3.00.",
-    search: { provider: "searxng", host: "gpu-box:8080" },
+    search: { provider: "browser" },
     preferences: { prefer: ["nature.com"], avoid: [] },
     offline: false,
   }
@@ -392,7 +393,7 @@ test("a research plan opens as an editable plan card that answers with only what
   await expect(planCard).toContainText("from your preferences")
   await expect(planCard).toContainText("About 15 pages and 8 searches")
   await expect(planCard).toContainText("Start deep: About 40 pages and 24 searches")
-  await expect(planCard).toContainText("Search: SearXNG (gpu-box:8080)")
+  await expect(planCard).toContainText("Search: Google, in each research agent's own browser")
   await expect(planCard).toContainText("Preview")
   await expect(planCard.getByRole("button", { name: "Start deep" })).toBeVisible()
 
@@ -432,7 +433,7 @@ test("the report card cites with chips that show their quote and open the source
   await expect(badge).toHaveAttribute("title", /^Vector's estimate\./)
 
   // Each research call is a one-line row: what it did, in a few words.
-  for (const text of ["Research plan", "approved, focused", "Search · SearXNG", "1 result", "Read S1", "Note N1"])
+  for (const text of ["Research plan", "approved, focused", "Search · DuckDuckGo", "1 result", "Read S1", "Note N1"])
     await expect(page.getByText(text, { exact: true }).first()).toBeVisible()
 
   await chip.click()

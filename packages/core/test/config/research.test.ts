@@ -22,7 +22,6 @@ describe("research and local config", () => {
   test("decodes the documented research and local blocks", () => {
     const config = decode({
       research: {
-        search: { provider: "searxng", url: "https://searx.example.lan" },
         depth: "auto",
         tool: "thorough",
         limits: {
@@ -31,7 +30,6 @@ describe("research and local config", () => {
         },
         domains: { prefer: [], avoid: ["example.com"] },
         robots: true,
-        browser_search: false,
         retain_days: 30,
       },
       local: {
@@ -49,6 +47,21 @@ describe("research and local config", () => {
     expect(config.research?.tool).toBe("thorough")
     expect(config.local?.web).toBe("network")
     expect(config.provider?.box?.options?.concurrency).toBe(4)
+  })
+
+  // Research searches in each research agent's own browser now. A config file from an earlier version may still name a
+  // search service, its address or the browser_search switch: it loads, and those settings are dropped.
+  test("loads an earlier version's search settings and drops them", () => {
+    for (const provider of ["auto", "searxng", "exa", "parallel", "browser", "none", "something-else"]) {
+      const config = decode({
+        research: {
+          search: { provider, url: "https://searx.example.lan" },
+          browser_search: true,
+          tool: "thorough",
+        },
+      })
+      expect(config.research).toEqual({ tool: "thorough" })
+    }
   })
 
   test("refuses more than four researchers and an unknown Web access", () => {

@@ -1379,15 +1379,14 @@ it.instance("a trusted repository's run limits alone leave no budget", () =>
 )
 
 // Research's settings are the user's (sections 5.7 and 7.2): a repository, trusted or not, may only add domains to
-// avoid and turn the build agent's research tool down. Its search server, preferred domains, caps and robots.txt
-// switch never apply, so a cloned repository cannot route the user's queries or choose what research reads.
+// avoid and turn the build agent's research tool down. Its preferred domains, caps and robots.txt switch never apply,
+// so a cloned repository cannot choose what research reads.
 for (const trusted of [true, false])
   it.instance(`${trusted ? "a trusted" : "an untrusted"} repository's research block only adds avoided domains`, () =>
     withGlobalConfig(
       {
         config: {
           research: {
-            search: { provider: "searxng", url: "https://searx.example.lan" },
             domains: { prefer: ["nature.com"], avoid: ["pinterest.com"] },
           },
         },
@@ -1398,18 +1397,15 @@ for (const trusted of [true, false])
           const write = trusted ? writeTrustedConfigEffect : writeConfigEffect
           yield* write(test.directory, {
             research: {
-              search: { provider: "searxng", url: "https://search.attacker.example" },
               limits: { deep: { usd: 50, pages: 400, researchers: 4 } },
               robots: false,
               domains: { prefer: ["attacker.example"], avoid: ["spam.example"] },
               tool: "thorough",
               depth: "deep",
-              browser_search: true,
               retain_days: 365,
             },
           })
           expect((yield* Config.use.get()).research).toEqual({
-            search: { provider: "searxng", url: "https://searx.example.lan" },
             domains: { prefer: ["nature.com"], avoid: ["pinterest.com", "spam.example"] },
             tool: "thorough",
           })
@@ -1419,6 +1415,27 @@ for (const trusted of [true, false])
         }),
     ),
   )
+
+// Research searches in each research agent's own browser now, so there is no search setting. A user's config from an
+// earlier version that names a search service, its address or browser_search still loads, without an error, and those
+// settings are dropped.
+it.instance("an earlier version's research search settings load and are ignored", () =>
+  withGlobalConfig(
+    {
+      config: {
+        research: {
+          search: { provider: "exa", url: "https://searx.example.lan" },
+          browser_search: true,
+          tool: "thorough",
+        },
+      },
+    },
+    () =>
+      Effect.gen(function* () {
+        expect((yield* Config.use.get()).research).toEqual({ tool: "thorough" })
+      }),
+  ),
+)
 
 it.instance("a repository cannot turn the build agent's research tool back on", () =>
   withGlobalConfig({ config: { research: { tool: "off" } } }, () =>

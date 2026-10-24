@@ -32,9 +32,6 @@ export const ENGINES = ["google", "duckduckgo"] as const
 export type Engine = (typeof ENGINES)[number]
 export const NAMES: Readonly<Record<Engine, string>> = { google: "Google", duckduckgo: "DuckDuckGo" }
 
-/** Where searches go, as the plan card says it. */
-export const WHERE =
-  "Google, in each research agent's own browser (DuckDuckGo when Google asks for a check). No search service or key."
 /** The run was told to search nothing (`vector run --research --search none`). */
 export const NONE =
   "This research searches nothing on the web. It uses this repository's brain, its files and the addresses in your message."

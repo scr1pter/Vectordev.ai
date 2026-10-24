@@ -223,37 +223,6 @@ export function sites(): Record<string, Site> {
         body: "heat pump ".repeat(600 * 1024),
       },
     },
-    searxng: {
-      "/search": (request, web) => {
-        const query = new URL(request.url).searchParams
-        if (query.get("format") !== "json") return { status: 403, body: "JSON format is not enabled" }
-        return Response.json({
-          query: query.get("q") ?? "",
-          number_of_results: 3,
-          results: [
-            {
-              url: web.url("article", "/"),
-              title: "How heat pumps cut heating bills in cold climates",
-              content: "A field study of air-source heat pumps in 412 homes.",
-              engine: "fake",
-              publishedDate: "2026-03-14T00:00:00",
-            },
-            {
-              url: web.url("copy", "/heat-pumps"),
-              title: "How heat pumps cut heating bills in cold climates (syndicated)",
-              content: "The study followed 412 homes through two winters.",
-              engine: "fake",
-            },
-            {
-              url: web.url("docs", "/report.pdf"),
-              title: "Heat pump field study (PDF)",
-              content: "Delivered heating energy fell by 61 percent.",
-              engine: "fake",
-            },
-          ],
-        })
-      },
-    },
     ollama: serve("ollama", ["/api/version", "/api/tags", "/api/show", "/api/ps"]),
     lmstudio: serve("lmstudio", ["/api/v0/models"]),
     vllm: serve("vllm", ["/version", "/v1/models"]),

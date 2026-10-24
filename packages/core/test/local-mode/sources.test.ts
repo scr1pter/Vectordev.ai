@@ -19,7 +19,9 @@ describe("LocalSources registry", () => {
 
   test("covers every purpose", () => {
     const purposes = new Set(LocalSources.SOURCES.map((source) => source.purpose))
-    expect(LocalMode.Purpose.literals.filter((purpose) => !purposes.has(purpose))).toEqual([])
+    // web-search stays only so the network log still reads the lines an earlier version wrote for its search
+    // services; Vector searches with its own browser now.
+    expect(LocalMode.Purpose.literals.filter((purpose) => !purposes.has(purpose))).toEqual(["web-search"])
   })
 
   test("points every call site at a file in the repository", async () => {

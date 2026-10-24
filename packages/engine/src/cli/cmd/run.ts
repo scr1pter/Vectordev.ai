@@ -342,9 +342,9 @@ export const RunCommand = effectCmd({
       })
       .option("search", {
         type: "string",
-        choices: ["searxng", "exa", "parallel", "none"],
+        choices: ["browser", "none"],
         describe:
-          "with --research: which search service set up in your config this run uses, or none (this repository's brain, its files and the addresses in the message)",
+          "with --research: browser (the default: each research agent searches the web in its own browser in the desktop app) or none (this repository's brain, its files and the addresses in the message)",
       })
       .option("scope", {
         type: "string",
@@ -1456,7 +1456,7 @@ async function researchParts(input: { search?: string; scope?: string }) {
           `scope ${scope === "brain" ? "this repository's brain and files only" : scope === "web" ? "the web only" : "the web and this repository's brain"}`,
         ]
       : []),
-    ...(input.search ? [input.search === "none" ? "no web search" : `search with ${input.search}`] : []),
+    ...(input.search ? [input.search === "none" ? "no web search" : "search the web in the research browser"] : []),
   ]
   return [
     {

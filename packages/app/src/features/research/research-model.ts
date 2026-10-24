@@ -1,6 +1,5 @@
 import type { Message, Part } from "@vectordevai/sdk/v2/client"
 import { ResearchConfidence } from "@vectordevai/core/research/confidence"
-import { ResearchSearch } from "@vectordevai/core/research/search"
 import { Research } from "@vectordevai/schema/research"
 import { Option, Schema } from "effect"
 
@@ -16,6 +15,9 @@ export const PLACEHOLDER = "What should Vector research?"
 export const GUEST = "Sources are visible to the repository owner."
 export const HELD = "This report and its sources stay private and out of later sessions until you keep them."
 export const WRAP_UP = "Write the report now from what you have"
+/** Where research searches, as the plan card says it. */
+export const SEARCH_WHERE =
+  "Search: Google, in each research agent's own browser (DuckDuckGo when Google asks for a check). No search service or key."
 export const NO_SEARCH =
   "Nothing is searched on the web here. Research will use this repository's brain, its files and links you paste."
 export const PAYWALL =
@@ -147,7 +149,8 @@ export const CANCEL = "Cancel"
 export type Card = {
   readonly deep: boolean
   readonly deepEstimate?: string
-  readonly search: { readonly provider: string; readonly host?: string; readonly reason?: string }
+  /** browser or none; an older engine may name its search service, which reads as the web. */
+  readonly search: { readonly provider: string; readonly reason?: string }
   /** The user's own sites and format: from their config, and from what they ticked Always for on an earlier card. */
   readonly preferences: {
     readonly prefer: readonly string[]
@@ -296,12 +299,9 @@ export function decodePlanAnswer(text: string): Research.PlanAnswer | undefined 
 /** The plan card's search line. */
 export function searchLine(card: Card | undefined) {
   if (!card) return undefined
-  if (card.search.provider === "browser") return `Search: ${ResearchSearch.WHERE}`
-  if (card.search.provider === "searxng") return `Search: SearXNG${card.search.host ? ` (${card.search.host})` : ""}`
-  if (card.search.provider === "exa") return "Search: Exa, on your key. Searches go to Exa, billed by Exa."
-  if (card.search.provider === "parallel")
-    return "Search: Parallel, on your key. Searches go to Parallel, billed by Parallel."
-  return NO_SEARCH
+  if (card.search.provider === "browser") return SEARCH_WHERE
+  if (card.search.provider === "none") return NO_SEARCH
+  return "Search: the web"
 }
 
 // ---------------------------------------------------------------------------------------------------------------
