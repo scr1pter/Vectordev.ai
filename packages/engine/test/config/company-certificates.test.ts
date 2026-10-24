@@ -70,6 +70,8 @@ test("a request through Egress.fetch trusts the certificate authority the compan
     script,
     `const { ConfigManaged } = await import(${JSON.stringify(path.join(CORE, "config/managed.ts"))})
 ConfigManaged.useTestDirectory(process.env.MANAGED)
+const { useManagedPolicyFixture } = await import(${JSON.stringify(path.join(import.meta.dir, "../fixture/managed-policy.ts"))})
+useManagedPolicyFixture(process.env.MANAGED)
 const { LocalCA } = await import(${JSON.stringify(path.join(CORE, "local-mode/ca.ts"))})
 const { Egress } = await import(${JSON.stringify(path.join(CORE, "local-mode/egress.ts"))})
 // Read once, at the first request that asks.

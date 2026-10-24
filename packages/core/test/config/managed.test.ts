@@ -26,8 +26,9 @@ test.skipIf(process.platform !== "win32")("clears a fixture ACL reader when the 
   expect(ConfigManaged.read()).toMatchObject({ files: [], ignored: [{ kind: "unreadable" }] })
   expect(reads).toEqual([[dir, file]])
   ConfigManaged.useTestDirectory(dir)
-  // The default reader now checks the real temporary file's Windows ACL; the injected failure cannot leak.
-  expect(ConfigManaged.read()).toEqual({ files: [file], policies: [], ignored: [] })
+  // Reset must stop calling the fixture reader even if the real PowerShell read fails closed. OS allow/deny
+  // behavior is covered by the engine's managed-trust integration tests.
+  ConfigManaged.read()
   expect(reads).toHaveLength(1)
 })
 

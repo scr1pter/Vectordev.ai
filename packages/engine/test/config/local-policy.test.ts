@@ -206,6 +206,8 @@ describe("resolved at start", () => {
       await import(${url("../../../core/src/local-mode/backstop.ts")})
       const { ConfigManaged } = await import(${url("../../../core/src/config/managed.ts")})
       ConfigManaged.useTestDirectory(${JSON.stringify(managed)})
+      const { useManagedPolicyFixture } = await import(${url("../fixture/managed-policy.ts")})
+      useManagedPolicyFixture(${JSON.stringify(managed)})
       const { untrustedChildEnvironment } = await import(${url("../../../core/src/child-environment.ts")})
       const { Egress } = await import(${url("../../../core/src/local-mode/egress.ts")})
       const { AppRuntime } = await import(${url("../../src/effect/app-runtime.ts")})
@@ -252,6 +254,8 @@ describe("resolved at start", () => {
       const before = { pending: Egress.policy().pending, decision: Egress.decide(inference).decision }
       const { ConfigManaged } = await import(${url("../../../core/src/config/managed.ts")})
       ConfigManaged.useTestDirectory(${JSON.stringify(managed)})
+      const { useManagedPolicyFixture } = await import(${url("../fixture/managed-policy.ts")})
+      useManagedPolicyFixture(${JSON.stringify(managed)})
       const { Config } = await import(${CONFIG})
       const after = {
         same: Egress.policy() === Config.local(),
