@@ -159,17 +159,79 @@ describe("BrainScan", () => {
       ["DB_HOST=db.example.com\nDB_PASSWORD=S3cretPassw0rd\n", ["S3cretPassw0rd"]],
       [
         "The office Wi-Fi password is correcthorse42 and the router admin login is admin / Tr0ub4dor&3x.",
-        ["correcthorse42", "admin / Tr0ub4dor&3x."],
+        ["correcthorse42", "Tr0ub4dor&3x."],
       ],
-      ["login:admin/x1y2z3!q done", ["admin/x1y2z3!q"]],
+      ["login:admin/x1y2z3!q done", ["x1y2z3!q"]],
       ["The wifi passphrase is correct horse battery staple", ["correct horse battery staple"]],
       ["passwords: Abc123!x, Def456!y", ["Abc123!x", "Def456!y"]],
+      // Values side by side are each a value of their own.
+      ["Credentials: Abc123!x Def456!y", ["Abc123!x", "Def456!y"]],
       ["Use 'blue velvet sky' as the wifi password.", ["blue velvet sky"]],
       // Text that already reads [redacted] gives no value of its own.
       ["A [redacted] B password is Tr0ub4dor&3x", ["Tr0ub4dor&3x"]],
       ["Nothing secret here.", []],
     ] as const
     for (const [text, values] of cases) expect(BrainScan.secrets(text, {}), text).toEqual([...values])
+  })
+
+  test("secrets gives the password of an address and a login pair and each line of a private key, not the rest", () => {
+    // The values that scanners take for real keys are built at run time.
+    const [begin, end] = ["BEGIN", "END"].map((word) => `-----${word} ${"PRIVATE"} KEY-----`)
+    const lines = [
+      "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKj",
+      "MkqDHvFKJh0Y3fEfhHEuVOWbqZ1y0O8oKQ2gXdRLFq",
+    ]
+    const cases = [
+      ["Staging DB: postgres://app:S3cretPassw0rd@db.acme.internal:5432/app", ["S3cretPassw0rd"]],
+      ["The router login is admin / Tr0ub4dor&3x", ["Tr0ub4dor&3x"]],
+      [`${begin}\n${lines[0]}\n${lines[1]}\n${end}`, lines],
+      // A key in JSON or an environment file, its line breaks escaped.
+      [`{ "private_key": "${begin}\\n${lines[0]}\\n${lines[1]}\\n${end}\\n" }`, lines],
+      [`${begin}${lines[0]}${end}`, [lines[0]]],
+      // A key cut short still gives its lines, and none of the prose after it.
+      [`deploy key:\n${begin}\n${lines[0]}\n${lines[1]}\nthen we deploy on node18 to us-east-1.`, lines],
+    ] as const
+    for (const [text, values] of cases) expect(BrainScan.secrets(text, {}), text).toEqual([...values])
+    // A header named in prose has no body, and an address's password that stands for one is none.
+    const none = [
+      `Paste the key, which starts with \`${begin.replace("PRIVATE", "OPENSSH PRIVATE")}\`, into the secret.\n\nWe hash with sha256 and deploy to us-east-1.`,
+      `${begin} vs the RSA header format`,
+      "script:\n  - git clone https://oauth2:${GITLAB_TOKEN}@gitlab.com/acme/tools.git",
+      "git remote set-url origin https://oauth2:$CI_TOKEN@gitlab.example.com/group/app.git",
+      "DATABASE_URL=mongodb+srv://admin:<password>@cluster0.mongodb.net/app",
+      "set REDIS_URL=redis://default:%REDIS_PASSWORD%@redis.example.com:6379",
+      "url: postgres://app:{{db_password}}@db/app",
+    ]
+    for (const text of none) {
+      expect(BrainScan.secrets(text, {}), text).toEqual([])
+      expect(BrainScan.redact(text, {}).text, text).toBe(text)
+    }
+  })
+
+  test("secrets without prose leaves what only the words around a value give away", () => {
+    const prose = [
+      ["Add your OpenAI credentials and choose a model such as gpt-4o-2024-08-06.", "gpt-4o-2024-08-06"],
+      ["Sign in with your Anthropic account to use claude-sonnet-4-5 by default.", "claude-sonnet-4-5"],
+      ["Credentials are encrypted at rest with ChaCha20-Poly1305.", "ChaCha20-Poly1305"],
+      ["The session token is sha256-hashed before it is stored.", "sha256-hashed"],
+      ["Use 'blue velvet sky' as the wifi password.", "blue velvet sky"],
+    ] as const
+    for (const [text, value] of prose) {
+      expect(BrainScan.secrets(text, {}), text).toEqual([value])
+      expect(BrainScan.secrets(text, {}, false), text).toEqual([])
+    }
+    // A shape, an assignment, an address's password and a login pair give their values away without prose.
+    const coded = [
+      ["DB_PASSWORD=S3cretPassw0rd", ["S3cretPassw0rd"]],
+      ["password: Tr0ub4dor&3", ["Tr0ub4dor&3"]],
+      ["Staging DB: postgres://app:S3cretPassw0rd@db.acme.internal:5432/app", ["S3cretPassw0rd"]],
+      ["Staging login: deploy / x7Kq!vR2pz", ["x7Kq!vR2pz"]],
+      [
+        `token ${"ghp_"}${"aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789"}`,
+        [`${"ghp_"}${"aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789"}`],
+      ],
+    ] as const
+    for (const [text, values] of coded) expect(BrainScan.secrets(text, {}, false), text).toEqual([...values])
   })
 
   test("named redacts what a shape, a name or a word beside it gives away, and leaves bare checksums and IDs", () => {

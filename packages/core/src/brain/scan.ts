@@ -28,10 +28,14 @@ const ASSIGNED =
 const PLACEHOLDER =
   /^(?:\$.*|<[^>]*>|\{\{.*|process\.env\b.*|env\.\w+|os\.(?:environ|getenv)\b.*|\*+|x{3,}|\.{3,}|string|number|boolean|bool|str|int|any|unknown|null|undefined|none|nil|true|false|optional|required|\[redacted\]|redacted)$/i
 
+// What a found value is replaced with. `secrets` passes one that also notes the value down.
+type Hide = (value: string) => string
+const conceal: Hide = () => REDACTED
+
 // A value given to a secret-sounding name is the secret, whatever it looks like, when it is code or configuration
 // (`=`, a quoted or identifier-like name, a quoted value) or when the name is a password. In prose ("the token:
 // validate it before use") only a value that looks like a key is.
-function assigned(text: string) {
+function assigned(text: string, hide = conceal) {
   return text.replace(ASSIGNED, (match, quote: string, name: string, separator: string, value: string) => {
     // "bypass" and "compass" end in "pass" without naming one.
     if (/(?:pass|pwd)$/i.test(name) && !/(?:^|[_.-])(?:pass|pwd)$/i.test(name) && !/pass(?:word|wd|phrase|code)$/i.test(name))
@@ -43,15 +47,26 @@ function assigned(text: string) {
     const password = /(?:pass(?:word|wd|phrase|code)?|pwd)$/i.test(name)
     if (!code && !password && !(bare.length >= 8 && /[\d$#@!%^&*]/.test(bare))) return match
     if (!code && password && NOT_A_VALUE.test(bare.replace(/[.!?]+$/, ""))) return match
-    return `${match.slice(0, match.length - value.length)}${REDACTED}`
+    return `${match.slice(0, match.length - value.length)}${hide(value)}`
   })
 }
 
+// A private key: its header with its body straight after it (base64, once any "Name: value" lines and line breaks,
+// written or escaped, are passed), up to its END line or the end of the text. A header named in prose ("it starts with
+// -----BEGIN OPENSSH PRIVATE KEY-----, then") has no body, so it is no key.
+const PRIVATE_KEY =
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----(?=(?:\s|\\[rn])*(?:[\w-]+: [^\n]*\n\s*)*[A-Za-z0-9+/]{16})[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g
+// A line of a key's body, which `secrets` gives one at a time: a key is quoted a line at a time as often as whole.
+const KEY_LINE = /(?<=\s|\\[rn]|-----)[A-Za-z0-9+/]{16,}={0,2}(?=\s|\\[rn]|-----|$)/g
+
+// An address with a user name and a password ("postgres://app:S3cretPassw0rd@db"), unless the password stands for one
+// ("https://oauth2:${GITLAB_TOKEN}@gitlab.com"). Group 1 is what comes before the password, 2 the password, 3 the rest.
+const CREDENTIALED = /\b([A-Za-z][A-Za-z0-9+.-]{0,31}:\/\/[^\s:/@]+:)([^\s/@]+)(@\S+)/g
+const STANDS_FOR = /^(?:\$\{[^{}]+\}|\$[A-Z_][A-Z0-9_]*|<[^<>]+>|%\w+%|\{\{[^{}]+\}\})$/
+
 // Shapes that are a credential wherever they appear, beyond the provider token shapes review redaction knows.
 const SECRET_SHAPES = [
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g,
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
-  /\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:/@]+:[^\s/@]+@[^\s]+/gi,
   /\bAIza[0-9A-Za-z_-]{35}\b/g,
   /\b(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{16,}\b/g,
   /\bnpm_[A-Za-z0-9]{36}\b/g,
@@ -87,9 +102,9 @@ const PASSWORD_LIKE = /\d|[!@#$%^&*_+=~?<>|\\]|[a-z][A-Z]/
 // A username and password pair: "login: admin / hunter2hunter2", "credentials are deploy/s3cret!", "basic auth is
 // admin:Tr0ub4dor&3x". The password has a letter and a digit or symbol, so "localhost:3000" is not one. An endpoint is
 // not a pair: an HTTP method is not a username, and after a spaced "/" a path ("Login: POST /v1/session") is not a
-// password.
+// password. Group 1 is the name, 2 the password.
 const LOGIN =
-  /\b((?:login|logins|credentials?|creds|basic auth)\s*(?::|=|\bis\b|\bare\b))\s*["']?(?!(?:GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)\b)[^\s"'/:]+(?:\s*:\s*|\/|\s+\/\s*(?![^\s"',;]*\/)|\/\s+(?![^\s"',;]*\/))(?!\/)(?=[^\s"',;]*[A-Za-z])(?=[^\s"',;]*[\d!@#$%^&*_+=~?])[^\s"',;]+/gi
+  /\b((?:login|logins|credentials?|creds|basic auth)\s*(?::|=|\bis\b|\bare\b))\s*["']?(?!(?:GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)\b)[^\s"'/:]+(?:\s*:\s*|\/|\s+\/\s*(?![^\s"',;]*\/)|\/\s+(?![^\s"',;]*\/))(?!\/)(?=[^\s"',;]*[A-Za-z])(?=[^\s"',;]*[\d!@#$%^&*_+=~?])([^\s"',;]+)/gi
 
 // Words that name a password, a login or a code. A password-like value in the same sentence is that secret, wherever it
 // sits: "the staging admin's password, Tr0ub4dor&3x, is in the seed script", "log in to staging as admin with
@@ -114,7 +129,7 @@ const AS_PASSWORD =
 const AWS_ID = /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/
 const AWS_SECRET = /(?<![A-Za-z0-9/+])[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+=])/g
 
-function spoken(text: string) {
+function spoken(text: string, hide = conceal) {
   return text.replace(SPOKEN, (match, name: string, value: string) => {
     const first = value.split(/\s+/)[0]!.replace(/[.!?]+$/, "")
     if (NOT_A_VALUE.test(first) || /^\$|^[A-Z][A-Z0-9]*_[A-Z0-9_]+$/.test(first)) return match
@@ -131,14 +146,14 @@ function spoken(text: string) {
     if (!secret) return match
     const hidden = phrase ? value.replace(/[.!?]+$/, "") : first
     const at = match.length - value.length
-    return `${match.slice(0, at)}${REDACTED}${match.slice(at + hidden.length)}`
+    return `${match.slice(0, at)}${hide(hidden)}${match.slice(at + hidden.length)}`
   })
 }
 
 // A PIN or a code beside its name: four to six digits, or groups of digits ("8842-1937-2210").
 const DIGITS = /^(?:\d{4,6}|\d{2,5}(?:-\d{2,5})+)$/
 
-function near(text: string) {
+function near(text: string, hide = conceal) {
   return text.replace(SENTENCE, (sentence) => {
     const named = sentence.match(SECRET_NEAR) ?? []
     if (named.length === 0) return sentence
@@ -146,7 +161,7 @@ function near(text: string) {
     const worded = named.some((word) => !/^pins?(?: codes?)?$/i.test(word))
     return sentence.replace(/\S+/g, (word) => {
       const token = word.replace(EDGE, "")
-      return (worded && passwordLike(token)) || (coded && DIGITS.test(token)) ? word.replace(token, REDACTED) : word
+      return (worded && passwordLike(token)) || (coded && DIGITS.test(token)) ? word.replace(token, hide(token)) : word
     })
   })
 }
@@ -186,11 +201,11 @@ const OPAQUE = /\b[A-Za-z0-9_\-+/]{32,}={0,2}/g
 const HEX = /\b[0-9a-f]{32,}\b/gi
 const SECRET_WORD = /(?:^|[^a-z])(?:keys?|secrets?|tokens?|passw\w*|credentials?)(?:[^a-z]|$)/i
 
-function keyed(text: string) {
+function keyed(text: string, hide = conceal) {
   return text.replace(HEX, (match: string, offset: number) =>
     SECRET_WORD.test(text.slice(Math.max(0, offset - 40), offset)) ||
     SECRET_WORD.test(text.slice(offset + match.length, offset + match.length + 25))
-      ? REDACTED
+      ? hide(match)
       : match,
   )
 }
@@ -212,38 +227,48 @@ export function redact(text: string, env: Record<string, string | undefined> = p
  * a checksum, an ID or an address: only the credentials that their shape, their name or a word beside them gives away.
  */
 export function named(text: string, env: Record<string, string | undefined> = process.env) {
-  const shaped = near(
-    spoken(assigned(SECRET_SHAPES.reduce((out, shape) => out.replace(shape, REDACTED), text))).replace(
-      LOGIN,
-      `$1 ${REDACTED}`,
-    ),
-  ).replace(AS_PASSWORD, `$1${REDACTED}$1`)
-  const aws = AWS_ID.test(shaped) ? shaped.replace(AWS_SECRET, REDACTED) : shaped
-  const out = keyed(redactSecrets(aws, collectSecretValues(env)))
+  const out = scrub(text, env)
   return { text: out, redacted: out !== text }
 }
 
-/** The values `redact` replaces in a text, as the text writes them. */
-export function secrets(text: string, env: Record<string, string | undefined> = process.env) {
-  // What redact keeps between two values is the text's own, except the space it writes after a login's name, so each
-  // kept piece is found again without the spaces around it. Values with only spaces between them are read as one.
-  const kept = redact(text, env).text.split(REDACTED)
-  const head = kept[0]!.trim()
-  return kept
-    .slice(1)
-    .reduce(
-      (found, piece, index) => {
-        const words = piece.trim()
-        const last = index === kept.length - 2
-        if (!words && !last) return found
-        const end = !last ? text.indexOf(words, found.at + 1) : words ? text.lastIndexOf(words) : text.length
-        if (end < found.at) return found
-        found.values.push(text.slice(found.at, end).trim())
-        return { at: end + words.length, values: found.values }
-      },
-      { at: head ? text.indexOf(head) + head.length : 0, values: [] as string[] },
-    )
-    .values.filter((value) => value && value !== REDACTED)
+/**
+ * The values `redact` replaces in a text, as the text writes them. Of an address with a password and of a login pair it
+ * gives the password, not the user name and host around it, and of a private key each line of its body. Without
+ * `prose`, it leaves out the values that only the words around them give away ("the token is sha256-hashed", a word
+ * with digits in a sentence about credentials): code, documentation and command output name algorithms, models and
+ * machines that way far more often than they give a password.
+ */
+export function secrets(text: string, env: Record<string, string | undefined> = process.env, prose = true) {
+  const found: string[] = []
+  const out = scrub(text, env, found, prose)
+  found.push(...(out.match(OPAQUE) ?? []).filter(opaque))
+  return found.filter((value) => value && !value.includes(REDACTED))
+}
+
+// `named`'s work. Given `found`, it notes each value down, and only the secret part of an address, a login pair and a
+// private key.
+function scrub(text: string, env: Record<string, string | undefined>, found?: string[], prose = true) {
+  const hide = (value: string) => {
+    found?.push(value.trim())
+    return REDACTED
+  }
+  const keys = text.replace(PRIVATE_KEY, (block) => (found ? block.replace(KEY_LINE, hide) : hide(block)))
+  const addresses = keys.replace(CREDENTIALED, (match, head: string, password: string, rest: string) => {
+    if (STANDS_FOR.test(password)) return match
+    return found ? `${head}${hide(password)}${rest}` : hide(match)
+  })
+  const coded = assigned(
+    SECRET_SHAPES.reduce((out, shape) => out.replace(shape, hide), addresses),
+    hide,
+  )
+  const paired = (prose ? spoken(coded, hide) : coded).replace(LOGIN, (match, name: string, password: string) =>
+    found ? `${match.slice(0, match.length - password.length)}${hide(password)}` : `${name} ${hide(match)}`,
+  )
+  const shaped = prose
+    ? near(paired, hide).replace(AS_PASSWORD, (_, quote: string, words: string) => `${quote}${hide(words)}${quote}`)
+    : paired
+  const aws = AWS_ID.test(shaped) ? shaped.replace(AWS_SECRET, hide) : shaped
+  return keyed(redactSecrets(aws, collectSecretValues(env), hide), hide)
 }
 
 /** How much of the text is left once secrets are removed, so an entry that is mostly a secret is refused, not kept. */

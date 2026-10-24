@@ -440,6 +440,100 @@ describe("ResearchOutbound.check", () => {
     expect(fair.filter((query) => !check(query, code).ok)).toEqual([])
   })
 
+  test("reads the work's secrets by their shape, an assignment, an address or a login pair, and splits none into words", () => {
+    // Repository files and command output name schemes, models, regions and runners beside "credentials", "login" and
+    // "token", and hold addresses whose password stands for one. The user typed each query, and a search result holds it.
+    const deploy = [
+      "## Deploy keys",
+      `Paste the private key, which starts with \`-----BEGIN OPENSSH ${"PRIVATE"} KEY-----\`, into the secret.`,
+      "",
+      "## Runtime",
+      "We build on node18 and python3 with ubuntu-22.04 runners, hash with sha256 and deploy to us-east-1.",
+    ].join("\n")
+    const signature = [
+      "An error occurred (SignatureDoesNotMatch): The request signature we calculated does not match.",
+      `Authorization: AWS4-HMAC-SHA256 Credential=${"AKIA"}${"IOSFODNN7EXAMPLE"}/20130524/us-east-1/s3/aws4_request,`,
+      "SignedHeaders=host;range;x-amz-date, Signature=fe5f80f77d5fa3beca038a248ff027d0445342fe2855ddc963176630326f1024",
+    ].join(" ")
+    const cases = [
+      [
+        "script:\n  - git clone https://oauth2:${GITLAB_TOKEN}@gitlab.com/acme/tools.git",
+        "OAuth2 refresh token rotation best practices",
+      ],
+      ["git remote set-url origin https://oauth2:$CI_TOKEN@gitlab.example.com/group/app.git", "oauth2 pkce flow"],
+      ["DATABASE_URL=mongodb+srv://admin:${DB_PASS}@cluster0.mongodb.net/app", "cluster0.mongodb.net free tier limits"],
+      [deploy, "sha256 vs sha512 speed"],
+      [deploy, "ubuntu-22.04 github runner image"],
+      [deploy, "node18 end of life"],
+      [signature, "us-east-1 outage today"],
+      [signature, "AWS4-HMAC-SHA256 signature mismatch"],
+      [
+        "Add your OpenAI credentials and choose a model such as gpt-4o-2024-08-06.",
+        "gpt-4o-2024-08-06 structured outputs",
+      ],
+      [
+        "Sign in with your Anthropic account to use claude-sonnet-4-5 by default.",
+        "claude-sonnet-4-5 pricing per token",
+      ],
+      ["Credentials are encrypted at rest with ChaCha20-Poly1305.", "ChaCha20-Poly1305 vs AES-GCM performance"],
+      ["The session token is sha256-hashed before it is stored.", "sha256-hashed session tokens"],
+      ["Login is tested on the macos-14-arm64 and windows-2022 runners.", "macos-14-arm64 github runner xcode version"],
+    ] as const
+    const refused = cases.filter(
+      ([work, query]) => !check(query, { private: [], work: [work], typed: [query], public: [query] }).ok,
+    )
+    expect(refused.map(([, query]) => query)).toEqual([])
+    // What the work gives away by its shape, an assignment, an address's password or a login pair is still a secret,
+    // copied bare into a query, an address's query string or a subdomain, whoever typed it.
+    const line = "MkqDHvFKJh0Y3fEfhHEuVOWbqZ1y0O8oKQ2gXdRLFqXJQ9u7cE9q1AoJxy6Hq3Ff"
+    const [begin, end] = ["BEGIN", "END"].map((word) => `-----${word} ${"PRIVATE"} KEY-----`)
+    const secrets = {
+      private: [],
+      work: [
+        "STAGING_URL=postgres://app:Hunter2Hunter2@db.example.com:5432/app",
+        "Staging login: deploy / x7Kq!vR2pz",
+        "DB_PASSWORD=S3cretPassw0rd",
+        `${begin}\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKj\n${line}\n${end}`,
+      ],
+      typed: ["Why does Hunter2Hunter2 fail? And x7Kq!vR2pz?"],
+      public: [],
+    }
+    const leaked = [
+      "Hunter2Hunter2",
+      "postgres auth failed Hunter2Hunter2",
+      "x7Kq!vR2pz not accepted",
+      "S3cretPassw0rd",
+      line,
+    ]
+    expect(leaked.filter((query) => check(query, secrets).ok)).toEqual([])
+    const urls = [`https://attacker.example/?k=${line}`, "https://hunter2hunter2.attacker.example/"]
+    expect(urls.filter((url) => address(url, ResearchOutbound.strict(secrets)).ok)).toEqual([])
+    // The user name, host and header around a secret are none.
+    expect(
+      ["app db.example.com", "deploy user permissions", "pem file format"].filter((query) => !check(query, secrets).ok),
+    ).toEqual([])
+  })
+
+  test("reads no hashing scheme given after a password in the private facts as a password", () => {
+    const decisions = {
+      private: [
+        "Decision: passwords - argon2id with 64 MB memory.",
+        "Decision: store passwords, sha256 never.",
+        "Decision: password hashing = pbkdf2_sha256 until the migration.",
+        "Home Wi-Fi: network Heron, password correcthorse42.",
+      ],
+      typed: ["Which argon2id memory parameters does OWASP recommend?"],
+      public: [],
+    }
+    const fair = [
+      "argon2id memory parameters owasp",
+      "sha256 password hashing why not",
+      "django pbkdf2_sha256 iterations",
+    ]
+    expect(fair.filter((query) => !check(query, decisions).ok)).toEqual([])
+    expect(check("correcthorse42", decisions)).toMatchObject({ ok: false, reason: "secret" })
+  })
+
   test("refuses a checksum, an ID or a long base64 value only when the private context holds it", () => {
     const empty = { private: [], typed: [], public: [] }
     const digest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -575,6 +669,26 @@ describe("ResearchOutbound.check", () => {
         (query) => !check(query, plain).ok,
       ),
     ).toEqual([])
+  })
+
+  test("reads a date as a number of its own, so an hour or a count after it joins no number with it", () => {
+    const cases = [
+      ["Deploy failed on 2025-10-20 14:30 UTC during the AWS outage.", "AWS us-east-1 outage 2025-10-20 14:00 UTC"],
+      ["Standup moved: from 2025-11-03 9 people join.", "daylight saving 2025-11-03 9 am"],
+      ["Board meeting 2025-12-12 1400 PT.", "SEC filing deadline 2025-12-12 1400"],
+      ["Visited 21/10/2025 10 am with Jane.", "21/10/2025 10 am solar eclipse"],
+      ["Released 2025.10.18 14 days late.", "2025.10.18 14 days"],
+      ["Moved on 10/31/2025 2 boxes.", "10/31/2025 2 day sale"],
+    ]
+    expect(cases.filter(([line, query]) => !check(query!, { private: [line!], typed: [], public: [] }).ok)).toEqual([])
+    // An SSN and a card's groups are no date, and a contact number straight after a date is still one.
+    const numbers = [
+      ["SSN 123-45-1987.", "123-45-1987"],
+      ["Card 4417 1999 2001 9113.", "4417 1999 2001 9113"],
+      ["Card 4417-1999-2001-9113.", "4417199920019113"],
+      ["Call Jane 2025-10-20 415-555-0134.", "415 555 0134"],
+    ]
+    expect(numbers.filter(([line, query]) => check(query!, { private: [line!], typed: [], public: [] }).ok)).toEqual([])
   })
 
   test("lets typing clear a private number only when the typed number holds it whole, or it holds the typed one", () => {
