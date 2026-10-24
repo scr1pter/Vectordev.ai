@@ -53,7 +53,10 @@ function LearnedChip(props: { message: AssistantMessage }) {
         ),
       ).then((found) => found.filter((entry): entry is MemoryEntry => entry !== undefined)),
   )
-  const items = createMemo(() => entries.latest ?? [])
+  // Read only once resolved: reading a resource still loading for the first time suspends the whole timeline.
+  const items = createMemo(() =>
+    entries.state === "ready" || entries.state === "refreshing" ? (entries.latest ?? []) : [],
+  )
   const label = createMemo(() =>
     chipLabel(items().map((entry) => ({ text: entryText(entry), status: entry.status, typed: typed().has(entry.id) }))),
   )
