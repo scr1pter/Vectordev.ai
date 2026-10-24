@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { Message, Part } from "@vectordevai/sdk/v2/client"
 import type { Research } from "@vectordevai/schema/research"
+import { ResearchSearch } from "@vectordevai/core/research/search"
 import {
   capLabel,
   chipText,
@@ -24,6 +25,7 @@ import {
   reportMarkdown,
   reportPath,
   runChips,
+  searchHelp,
   searchLine,
   segments,
   sessionRuns,
@@ -208,6 +210,16 @@ describe("the plan card", () => {
     // An older engine named the search service it used.
     expect(searchLine({ ...card, search: { provider: "service" } })).toBe("Search: the web")
     expect(searchLine(undefined)).toBeUndefined()
+  })
+
+  test("offers the engine's reason alone when nothing is searched, and Set up only without one", () => {
+    const card = { deep: false, preferences: { prefer: [], avoid: [] }, offline: false }
+    // `vector run --research --search none`: nothing to set up, so no "open this repository there to search".
+    for (const reason of [ResearchSearch.NONE, ResearchSearch.NEEDS_DESKTOP])
+      expect(searchHelp({ ...card, search: { provider: "none", reason } })).toEqual({ label: "Why", text: reason })
+    expect(searchHelp({ ...card, search: { provider: "none" } })).toMatchObject({ label: "Set up" })
+    expect(searchHelp({ ...card, search: { provider: "browser" } })).toBeUndefined()
+    expect(searchHelp(undefined)).toBeUndefined()
   })
 
   test("says why a plan cannot start", () => {

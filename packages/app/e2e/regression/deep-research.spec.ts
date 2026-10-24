@@ -418,6 +418,51 @@ test("a research plan opens as an editable plan card that answers with only what
   })
 })
 
+test("a plan card that searches nothing says why, with the engine's reason alone and nothing to set up", async ({
+  page,
+}) => {
+  // What the engine says for `vector run --research --search none`, where no set-up would change anything.
+  const reason =
+    "This research searches nothing on the web. It uses this repository's brain, its files and the addresses in your message."
+  const card = {
+    deep: false,
+    search: { provider: "none", reason },
+    preferences: { prefer: [], avoid: [] },
+    offline: false,
+  }
+  await setup(page, {
+    messages: [
+      user,
+      assistant([tool("plan", "research_plan", { status: "running", input: plan, metadata: { plan, card } })], false),
+    ],
+    questions: [
+      {
+        id: "que_plan",
+        sessionID,
+        questions: [
+          {
+            header: "Research plan",
+            question: `Research: ${plan.question}`,
+            options: [
+              { label: "Start", description: "Research at this depth (focused)" },
+              { label: "Cancel", description: "Stop without searching or reading anything" },
+            ],
+            custom: true,
+          },
+        ],
+        tool: { messageID: "msg_02_assistant", callID: "call_plan" },
+      },
+    ],
+  })
+  const planCard = page.locator('[data-component="research-plan-card"]')
+  await expect(planCard).toBeVisible({ timeout: 30_000 })
+  await expect(planCard).toContainText("Nothing is searched on the web here.")
+  await expect(planCard.getByRole("button", { name: "Set up" })).toHaveCount(0)
+  await planCard.getByRole("button", { name: "Why", exact: true }).click()
+  await expect(planCard).toContainText(reason)
+  await expect(planCard).not.toContainText("open this repository there to search")
+})
+
 test("the report card cites with chips that show their quote and open the source at that passage", async ({ page }) => {
   const sent = await setup(page, { messages: [user, assistant(finished)] })
   const card = page.locator('[data-component="research-report"]')
