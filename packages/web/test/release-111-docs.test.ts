@@ -11,6 +11,7 @@ import { ResearchProvenance } from "@vectordevai/core/research/provenance"
 import { ResearchQuote } from "@vectordevai/core/research/quote"
 import { ResearchRate } from "@vectordevai/core/research/rate"
 import { ResearchStore } from "@vectordevai/core/research/store"
+import { ConfigResearchV1 } from "@vectordevai/core/v1/config/research"
 import { memoryRoleRows, researchCapRows } from "../src/data/docs-content"
 import { docsNav } from "../src/data/docs-nav"
 import { publishedDesktopVersion, release111, release111Copy, release111Version } from "../src/data/vector-releases"
@@ -89,6 +90,17 @@ test("the research page's caps, limits and refusals are the engine's", () => {
   // The outbound check checks copied text; the page never says it prevents a leak.
   expect(page).toContain("Vector checks outgoing searches for text from your private files.")
   expect(page).not.toMatch(/\bprevents?\b/i)
+})
+
+test("the docs name the search services research can use, and no other", () => {
+  // When a search service is added or removed (the browser-search branch removes all three), the research page's
+  // Search section and the Vector Local page's forwarding line change with it.
+  const services = { searxng: "SearXNG", exa: "Exa", parallel: "Parallel" } as const
+  const offered: readonly string[] = ConfigResearchV1.Provider.literals
+  for (const [id, name] of Object.entries(services)) {
+    expect(text(research).includes(name)).toBe(offered.includes(id))
+  }
+  expect(text(local).includes("SearXNG")).toBe(offered.includes("searxng"))
 })
 
 test("the research page quotes the app's own words", async () => {
