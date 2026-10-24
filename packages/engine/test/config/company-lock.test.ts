@@ -148,9 +148,10 @@ describe("a locked key", () => {
     await using tmp = await tmpdir({ trusted: true, config: { formatter: false, lsp: false } })
     expect((await json(request("/global/config"))).body.locked).toEqual([])
     expect((await json(request("/config", tmp.path))).body.locked).toEqual([])
-    // Without a lock nothing is refused.
+    // Without a lock nothing is refused, and a config a client read and sends back whole keeps no `locked` key.
     await seedGlobal({})
-    expect((await patch("/global/config", { autoupdate: "notify" })).status).toBe(200)
+    expect((await patch("/global/config", { autoupdate: "notify", locked: ["share"] })).status).toBe(200)
+    expect(await Bun.file(globalFile).json()).not.toHaveProperty("locked")
 
     writeManaged({ local: { lock: true, locked_keys: ["model", "agent", "not_a_key"] } })
     const policy = applyPolicy()
