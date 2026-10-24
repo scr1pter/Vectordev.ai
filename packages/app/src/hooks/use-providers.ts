@@ -51,6 +51,9 @@ export function useProviders(directory?: Accessor<string | undefined>) {
     const directory = dir()
     if (directory ? !serverSync().child(directory)[0].provider_ready : !serverSync().data.ready) return
     for (const item of providers().unavailable ?? []) {
+      // Vector Local keeps these off on purpose and keeps the credential; the model picker's Off in Vector Local group
+      // says why, so an expected block is not toasted as an ignored credential.
+      if (item.reason === "off-in-local") continue
       if (!takeProviderNotice(serverSDK().scope, `credential:${item.id}:${item.reason}`)) continue
       showToast({
         title: language.t("provider.unavailable.title", { provider: providers().all.get(item.id)?.name ?? item.id }),
