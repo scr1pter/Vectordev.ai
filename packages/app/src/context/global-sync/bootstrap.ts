@@ -18,7 +18,7 @@ import type { State, VcsCache } from "./types"
 import type { ServerSession } from "../server-session"
 import { cmp, normalizeAgentList, normalizeProviderList } from "./utils"
 import { formatServerError } from "@/utils/server-errors"
-import { QueryClient, queryOptions } from "@tanstack/solid-query"
+import { CancelledError, QueryClient, queryOptions, type FetchQueryOptions, type QueryKey } from "@tanstack/solid-query"
 import { loadMcpQuery, loadMcpResourcesQuery } from "../server-sync"
 import { NormalizedProviderListResponse } from "@vectordevai/session-ui/context"
 import { ScopedKey, ServerScope } from "@/utils/server-scope"
@@ -52,8 +52,35 @@ function waitForPaint() {
   })
 }
 
+// A cancelled query is never a failed reload: fetchLatest follows the fetch that superseded it, and anything else
+// that cancels one does so on purpose.
 function errors(list: PromiseSettledResult<unknown>[]) {
-  return list.filter((item): item is PromiseRejectedResult => item.status === "rejected").map((item) => item.reason)
+  return list
+    .filter((item): item is PromiseRejectedResult => item.status === "rejected")
+    .map((item) => item.reason)
+    .filter((reason) => !(reason instanceof CancelledError))
+}
+
+/**
+ * fetchQuery for a reload. fetchQuery joins a fetch of the same query that is already in flight, and when something
+ * newer refetches that query first, TanStack cancels the older fetch and the joined promise rejects with a silent
+ * CancelledError although the newer fetch carries on. Saving a Settings switch twice in a row did exactly that (the
+ * second save invalidates the providers the first save's reload is still loading) and showed "Failed to reload
+ * <repository>: CancelledError". This follows the newer fetch instead. With `restart`, for a reload after the engine
+ * changed, a fetch already in flight may have started before the change and carry the old state, so it is cancelled
+ * and the query fetched again, the way TanStack's own cancelRefetch does.
+ */
+export function fetchLatest<TQueryFnData, TQueryKey extends QueryKey>(
+  queryClient: QueryClient,
+  options: FetchQueryOptions<TQueryFnData, Error, TQueryFnData, TQueryKey>,
+  restart = false,
+): Promise<TQueryFnData> {
+  if (restart)
+    void queryClient.cancelQueries({ queryKey: options.queryKey, exact: true }, { silent: true, revert: false })
+  return queryClient.fetchQuery(options).catch((error: unknown) => {
+    if (error instanceof CancelledError && error.silent) return fetchLatest(queryClient, options)
+    throw error
+  })
 }
 
 const providerRev = new Map<string, number>()
@@ -236,6 +263,9 @@ export async function bootstrapDirectory(input: {
   session?: ServerSession
 }) {
   const loading = input.store.status !== "complete"
+  // A directory that has loaded before is reloading because the engine changed, for example the dispose after a
+  // config save, so its queries must not take the result of a fetch that started before that.
+  const restart = !loading
   const seededProject = projectID(input.directory, input.global.project)
   const seededPath = input.global.path.directory === input.directory ? input.global.path : undefined
   if (seededProject) input.setStore("project", seededProject)
@@ -251,13 +281,13 @@ export async function bootstrapDirectory(input: {
   ;(async () => {
     const slow = [
       () => Promise.resolve(input.loadSessions(input.directory)),
-      // fetchQuery, not ensureQueryData: a re-bootstrap follows an engine
-      // dispose, for example after Settings → Agents turns General subagents
-      // off, and cached agents would keep the removed agent in the @ list.
+      // A fetch, not ensureQueryData: a re-bootstrap follows an engine
+      // dispose, for example after Settings → Agents turns a subagent off,
+      // and cached agents would keep the removed agent in the @ list.
       () =>
-        input.queryClient
-          .fetchQuery(loadAgentsQuery(input.scope, input.directory, input.sdk))
-          .then((data) => input.setStore("agent", data)),
+        fetchLatest(input.queryClient, loadAgentsQuery(input.scope, input.directory, input.sdk), restart).then((data) =>
+          input.setStore("agent", data),
+        ),
       () =>
         retry(() => input.sdk.config.get().then((x) => input.setStore("config", reconcile(x.data!, { merge: false })))),
       () =>
@@ -305,7 +335,7 @@ export async function bootstrapDirectory(input: {
           }),
         ),
       input.mcp && (() => retry(() => input.sdk.command.list().then((x) => input.setStore("command", x.data ?? [])))),
-      () => input.queryClient.fetchQuery(loadReferencesQuery(input.scope, input.directory, input.sdk)),
+      () => fetchLatest(input.queryClient, loadReferencesQuery(input.scope, input.directory, input.sdk), restart),
       () =>
         retry(() =>
           input.sdk.permission.list().then((x) => {
@@ -367,17 +397,22 @@ export async function bootstrapDirectory(input: {
           }),
         ),
       () => Promise.resolve(input.loadSessions(input.directory)),
-      input.mcp && (() => input.queryClient.fetchQuery(loadMcpQuery(input.scope, input.directory, input.sdk))),
-      input.mcp && (() => input.queryClient.fetchQuery(loadMcpResourcesQuery(input.scope, input.directory, input.sdk))),
+      input.mcp &&
+        (() => fetchLatest(input.queryClient, loadMcpQuery(input.scope, input.directory, input.sdk), restart)),
+      input.mcp &&
+        (() => fetchLatest(input.queryClient, loadMcpResourcesQuery(input.scope, input.directory, input.sdk), restart)),
       () =>
-        input.queryClient.fetchQuery(loadProvidersQuery(input.scope, input.directory, input.sdk)).catch((err) => {
-          const project = getFilename(input.directory)
-          showToast({
-            variant: "error",
-            title: input.translate("toast.project.reloadFailed.title", { project }),
-            description: formatServerError(err, input.translate),
-          })
-        }),
+        fetchLatest(input.queryClient, loadProvidersQuery(input.scope, input.directory, input.sdk), restart).catch(
+          (err) => {
+            if (err instanceof CancelledError) return
+            const project = getFilename(input.directory)
+            showToast({
+              variant: "error",
+              title: input.translate("toast.project.reloadFailed.title", { project }),
+              description: formatServerError(err, input.translate),
+            })
+          },
+        ),
     ].filter(Boolean) as (() => Promise<any>)[]
 
     await waitForPaint()

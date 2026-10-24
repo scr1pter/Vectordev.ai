@@ -19,6 +19,7 @@ import {
   bootstrapDirectory,
   bootstrapGlobal,
   clearProviderRev,
+  fetchLatest,
   loadAgentsQuery,
   loadGlobalConfigQuery,
   loadPathQuery,
@@ -214,7 +215,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
   const queue = createRefreshQueue({
     paused,
     key: directoryKey,
-    bootstrap: () => queryClient.fetchQuery({ queryKey: [serverSDK.scope, "bootstrap"] }),
+    bootstrap: () => fetchLatest(queryClient, { queryKey: [serverSDK.scope, "bootstrap"] }).then(() => {}),
     bootstrapInstance,
   })
 
@@ -475,7 +476,13 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
 
   const updateConfigMutation = useMutation(() => ({
     mutationFn: (config: Config) => serverSDK.client.global.config.update({ config }),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      // The update returns the saved config, so a switch that saved it reads the new value at once instead of the old
+      // one until the reload below refetches it. A config fetch still in flight started before this save and would
+      // put the old config back when it landed, so it is dropped first.
+      const configKey = queryOptionsApi.globalConfig().queryKey
+      void queryClient.cancelQueries({ queryKey: configKey, exact: true })
+      queryClient.setQueryData(configKey, result.data)
       bootstrap.refetch()
       // Invalidate all provider queries so newly configured custom providers
       // appear immediately in the available provider list across all directories.
@@ -499,6 +506,12 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     peek: children.peek,
     disableMcp: children.disableMcp,
     queryOptions: queryOptionsApi,
+    // The global config as this context's query holds it: undefined until it loads, where data.config reads {}, so a
+    // setting can wait for its saved value. Read it here rather than with useQuery: a dialog such as Settings renders
+    // under the route's QueryClient, not this context's, so a query made there never sees the saves and reloads made
+    // here, and reopening Settings showed whatever it read the first time.
+    globalConfig: () => configQuery.data,
+    globalConfigFailed: () => configQuery.isError,
     refreshProviders: () =>
       queryClient.invalidateQueries({
         predicate: (query) => query.queryKey[0] === serverSDK.scope && query.queryKey[2] === "providers",

@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import { createStore } from "solid-js/store"
-import { QueryClient } from "@tanstack/solid-query"
+import { QueryClient, QueryObserver } from "@tanstack/solid-query"
 import type { Config, VectorClient, Project, Session } from "@vectordevai/sdk/v2/client"
 import type { NormalizedProviderListResponse } from "@vectordevai/session-ui/context"
-import { bootstrapDirectory, loadPathQuery, loadProvidersQuery } from "./bootstrap"
+import { bootstrapDirectory, loadAgentsQuery, loadPathQuery, loadProvidersQuery } from "./bootstrap"
 import type { State, VcsCache } from "./types"
 import { createServerSession } from "../server-session"
 import { ServerScope } from "@/utils/server-scope"
@@ -159,6 +159,143 @@ describe("bootstrapDirectory", () => {
 
     expect(session.data.session_status["ses_busy"]?.type).toBe("busy")
     expect(session.data.session_status[stale.id]).toBeUndefined()
+  })
+})
+
+// A directory client whose agent and provider lists the test answers by hand, one call at a time. `started` resolves
+// once the reload has started every fetch, after its wait for a paint.
+function heldClient() {
+  const agents: PromiseWithResolvers<unknown>[] = []
+  const providers: PromiseWithResolvers<unknown>[] = []
+  const started = Promise.withResolvers<void>()
+  const held = (list: PromiseWithResolvers<unknown>[]) => () => {
+    const next = Promise.withResolvers<unknown>()
+    list.push(next)
+    return next.promise
+  }
+  const sdk = {
+    app: { agents: held(agents) },
+    config: { get: async () => ({ data: {} }) },
+    session: { status: async () => ({ data: {} }) },
+    vcs: { get: async () => ({ data: undefined }) },
+    command: { list: async () => ({ data: [] }) },
+    permission: {
+      list: async () => {
+        started.resolve()
+        return { data: [] }
+      },
+    },
+    question: { list: async () => ({ data: [] }) },
+    v2: { reference: { list: async () => ({ data: { data: [] } }) } },
+    mcp: { status: async () => ({ data: {} }) },
+    provider: { list: held(providers) },
+  } as unknown as VectorClient
+  return { sdk, agents, providers, started: started.promise }
+}
+
+function reload(input: { sdk: VectorClient; store: ReturnType<typeof directoryState>; queryClient: QueryClient }) {
+  const translated: string[] = []
+  void bootstrapDirectory({
+    directory: "/project",
+    scope: ServerScope.local,
+    mcp: false,
+    global: {
+      config: {} satisfies Config,
+      path: { state: "", config: "", worktree: "/project", directory: "/project", home: "/home" },
+      project: [{ id: "project", worktree: "/project" } as Project],
+      provider,
+    },
+    sdk: input.sdk,
+    store: input.store[0],
+    setStore: input.store[1],
+    vcsCache: { setStore() {} } as unknown as VcsCache,
+    loadSessions() {},
+    // The reload translates the "Failed to reload" title only to show that toast.
+    translate: (key) => {
+      translated.push(key)
+      return key
+    },
+    queryClient: input.queryClient,
+  })
+  return translated
+}
+
+async function until(check: () => boolean) {
+  const deadline = Date.now() + 2_000
+  while (!check() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5))
+}
+
+const PROVIDERS = { data: { all: [], connected: [], default: {} } }
+
+describe("bootstrapDirectory reloads", () => {
+  // Saving a Settings switch twice in a row: the second save invalidates the providers while the first save's reload
+  // is still waiting on them, which used to show "Failed to reload <repository>: CancelledError".
+  test("shows no toast when a newer reload supersedes its providers fetch", async () => {
+    const queryClient = new QueryClient()
+    const client = heldClient()
+    const store = directoryState()
+    const options = loadProvidersQuery(ServerScope.local, "/project", client.sdk)
+    queryClient.setQueryData(options.queryKey, provider)
+    // The directory's own providers query, as the child store mounts it, is fetching when the reload starts.
+    const unsubscribe = new QueryObserver(queryClient, options).subscribe(() => {})
+
+    const translated = reload({ sdk: client.sdk, store, queryClient })
+    await client.started
+    void queryClient.invalidateQueries({ queryKey: options.queryKey })
+    // A directory loading for the first time joins the fetch in flight rather than starting another.
+    expect(client.providers).toHaveLength(2)
+    for (const list of client.providers) list.resolve(PROVIDERS)
+    for (const list of client.agents) list.resolve({ data: [{ name: "build", mode: "primary" }] })
+    await until(() => store[0].status === "complete")
+
+    expect(store[0].status).toBe("complete")
+    expect(translated).not.toContain("toast.project.reloadFailed.title")
+    unsubscribe()
+  })
+
+  test("still shows a toast when the providers fetch really fails", async () => {
+    const queryClient = new QueryClient()
+    const client = heldClient()
+    const store = directoryState()
+
+    const translated = reload({ sdk: client.sdk, store, queryClient })
+    await client.started
+    client.agents[0].resolve({ data: [{ name: "build", mode: "primary" }] })
+    client.providers[0].reject(new Error("provider list failed"))
+    await until(() => translated.includes("toast.project.reloadFailed.title"))
+
+    expect(translated).toContain("toast.project.reloadFailed.title")
+  })
+
+  // A directory that has loaded before reloads because the engine changed, for example after Settings turned the
+  // review specialist off. An agents fetch that started before that would put review back in the @ list.
+  test("refetches what was in flight when a loaded directory reloads", async () => {
+    const queryClient = new QueryClient()
+    const client = heldClient()
+    const store = directoryState()
+    store[1]("status", "complete")
+    const options = loadAgentsQuery(ServerScope.local, "/project", client.sdk)
+    queryClient.setQueryData(options.queryKey, [])
+    const unsubscribe = new QueryObserver(queryClient, options).subscribe(() => {})
+    expect(client.agents).toHaveLength(1)
+
+    const translated = reload({ sdk: client.sdk, store, queryClient })
+    await client.started
+    expect(client.agents).toHaveLength(2)
+    client.agents[0].resolve({
+      data: [
+        { name: "build", mode: "primary" },
+        { name: "review", mode: "subagent" },
+      ],
+    })
+    client.agents[1].resolve({ data: [{ name: "build", mode: "primary" }] })
+    for (const list of client.providers) list.resolve(PROVIDERS)
+    await until(() => store[0].agent.length > 0)
+
+    expect(store[0].agent.map((agent) => agent.name)).toEqual(["build"])
+    expect(queryClient.getQueryData(options.queryKey)?.map((agent) => agent.name)).toEqual(["build"])
+    expect(translated).not.toContain("toast.project.reloadFailed.title")
+    unsubscribe()
   })
 })
 
