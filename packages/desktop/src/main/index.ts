@@ -209,6 +209,7 @@ const main = Effect.gen(function* () {
       })
     },
     {
+      localEnabled: () => Egress.policy().enabled,
       logger: {
         log: (message, meta) => logger.log(message, meta),
         error: (message, meta) => logger.error(message, meta),
@@ -535,7 +536,10 @@ const main = Effect.gen(function* () {
     const local = connectDesktopLocal({
       engine: { url, password },
       own: () => readDesktopLocal(app.getPath("userData")),
-      changed: () => chromium.apply(),
+      changed: () => {
+        chromium.apply()
+        void wslServers.applyLocalPolicy().catch((error) => logger.error("could not stop WSL for Vector Local", error))
+      },
       log: (message, data) => logger.log(message, data),
     })
     app.once("will-quit", () => local.stop())

@@ -195,9 +195,21 @@ describe("where these agents can run", () => {
     ]
     const files = (await Promise.all(hosted.map((directory) => sources(join(repository, directory))))).flat()
     expect(files.length).toBeGreaterThan(100)
-    const offending = files.flatMap(([path, text]) =>
-      /schema\/external-agent|runExternalCodingAgent|launchAgentTerminal|external-agents["']/.test(text) ? [path] : [],
-    )
+    const invokesExternal = (text: string) =>
+      /(?:\bfrom\s*|\bimport\s*(?:\(\s*)?|\brequire\s*\(\s*)["'][^"']*(?:schema\/external-agent|external-agents)["']|\b(?:runExternalCodingAgent|launchAgentTerminal)\s*\(/.test(
+        text,
+      )
+    for (const text of [
+      'import { runExternalCodingAgent } from "../desktop/external-agents"',
+      'await import("./external-agents")',
+      'require("./external-agents")',
+      'import "./external-agents"',
+      "runExternalCodingAgent(input)",
+      "bridge.launchAgentTerminal(input)",
+    ])
+      expect(invokesExternal(text)).toBe(true)
+    expect(invokesExternal('source: "external-agents"')).toBe(false)
+    const offending = files.flatMap(([path, text]) => (invokesExternal(text) ? [path] : []))
     expect(offending).toEqual([])
   })
 

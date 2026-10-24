@@ -5,7 +5,7 @@ import { app } from "electron"
 import { Egress } from "@vectordevai/core/local-mode/egress"
 import { checkHealth } from "../server"
 import { type WslCommandLine, resolveWslVector, wslArgs, wslLocalPolicy, wslNetwork } from "./runtime"
-import { pollWslHealth, requireWslAuthentication, wslReinstallMessage } from "./startup"
+import { pollWslHealth, requireWslAuthentication, wslReinstallMessage, wslLocalRefusal } from "./startup"
 import { wslServerScript } from "./scripts"
 import { redactWslOutput, wslLaunchEnvironment, wslProcessLifetime } from "./lifecycle"
 import { VECTOR_AGENT_RUNTIME_ENV } from "../agent-runtime"
@@ -23,6 +23,7 @@ export type WslSidecar = {
 export async function spawnWslSidecar(
   distro: string,
   opts: {
+    version: string
     token: string
     signal: AbortSignal
     onStart: (stop: () => Promise<void>) => () => void
@@ -31,6 +32,8 @@ export async function spawnWslSidecar(
   },
 ): Promise<WslSidecar> {
   opts.signal.throwIfAborted()
+  const refusal = wslLocalRefusal(opts.version, Egress.policy().enabled, distro)
+  if (refusal) throw new Error(refusal)
   const vector = await resolveWslVector(distro, { signal: opts.signal })
   if (!vector) throw new Error(wslReinstallMessage(distro))
 
@@ -60,6 +63,8 @@ export async function spawnWslSidecar(
       ...(process.env.VECTOR_CREDENTIAL_KEY ? { VECTOR_CREDENTIAL_KEY: process.env.VECTOR_CREDENTIAL_KEY } : {}),
     },
   })
+  const changed = wslLocalRefusal(opts.version, Egress.policy().enabled, distro)
+  if (changed) throw new Error(changed)
   const child = spawn(
     "wsl",
     wslArgs(

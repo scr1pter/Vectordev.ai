@@ -14,6 +14,8 @@ import {
   formatPreference,
   highlights,
   modesFor,
+  hasResearch,
+  requireResearch,
   ownerOnly,
   planCard,
   planEdits,
@@ -73,12 +75,25 @@ describe("the composer's mode", () => {
   })
 
   test("offers no Fast for a model on a server someone hosts, and sends a Fast picked for another model as Normal", () => {
-    expect(modesFor(false).map((mode) => mode.id)).toEqual(["normal", "quick", "fast", "research"])
-    expect(modesFor(true).map((mode) => mode.id)).toEqual(["normal", "quick", "research"])
+    expect(modesFor(false, true).map((mode) => mode.id)).toEqual(["normal", "quick", "fast", "research"])
+    expect(modesFor(true, true).map((mode) => mode.id)).toEqual(["normal", "quick", "research"])
     expect(sendMode("fast", true)).toBe("normal")
     expect(sendMode("fast", false)).toBe("fast")
     expect(sendMode("research", true)).toBe("research")
     expect(sendMode("quick", true)).toBe("quick")
+  })
+
+  test("offers research only when this engine advertises it and never downgrades remembered intent", () => {
+    expect(modesFor(false, false).map((mode) => mode.id)).toEqual(["normal", "quick", "fast"])
+    expect(modesFor(true, false).map((mode) => mode.id)).toEqual(["normal", "quick"])
+    expect(hasResearch(undefined)).toBe(false)
+    expect(hasResearch([{ name: "build" }])).toBe(false)
+    expect(hasResearch([{ name: "research" }])).toBe(true)
+    expect(() => requireResearch(true, undefined)).toThrow("not available on this engine")
+    expect(() => requireResearch(true, [{ name: "build" }])).toThrow("not available on this engine")
+    expect(() => requireResearch(false, [])).not.toThrow()
+    expect(() => requireResearch(true, [{ name: "research" }])).not.toThrow()
+    expect(sendMode("research", false)).toBe("research")
   })
 
   test("maps the Depth chip to the request's size, Auto leaving it to Vector", () => {

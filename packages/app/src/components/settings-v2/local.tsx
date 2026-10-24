@@ -116,7 +116,11 @@ export function SettingsLocalV2() {
           when={reader.status()}
           fallback={
             <p class="settings-v2-card-description">
-              {reader.loading() ? "Reading Vector Local…" : "Vector could not read Vector Local from its engine."}
+              {reader.loading()
+                ? "Reading Vector Local…"
+                : reader.unsupported()
+                  ? "This engine does not support Vector Local. Use the current desktop engine, or update this engine before setting it up."
+                  : "Vector could not read Vector Local from its engine."}
             </p>
           }
         >

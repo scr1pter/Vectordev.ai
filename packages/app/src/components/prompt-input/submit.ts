@@ -39,8 +39,9 @@ import { modelDisplayName } from "@/utils/provider-brand"
 import { freeModelMayTrain, type FreeModelChoice } from "@vectordevai/core/free-model-choice"
 import { NO_VISION } from "@/features/local/local-model"
 import { cachedSpendPolicy, promptRunBudget } from "@/features/economics/spend-limits-api"
-import { AGENT as RESEARCH, sizeOf, type Depth } from "@/features/research/research-model"
+import { AGENT as RESEARCH, requireResearch, sizeOf, type Depth } from "@/features/research/research-model"
 import type { Research } from "@vectordevai/schema/research"
+import { requireLocalEngine } from "@/features/local/engine-compatibility"
 import { BrainSchema } from "@vectordevai/core/brain/schema"
 
 type PendingPrompt = {
@@ -137,6 +138,8 @@ const attachments = (prompt: Prompt, context: readonly unknown[]) => {
 const SYNTHETIC_SLOTS = 2
 
 export async function sendFollowupDraft(input: FollowupSendInput) {
+  requireResearch(input.draft.agent === RESEARCH, input.sync.data.agent)
+  await requireLocalEngine(input.client)
   const text = draftText(input.draft.prompt)
   const images = draftImages(input.draft.prompt)
   const messages = input.sync.data.message?.[input.draft.sessionID] ?? []
@@ -173,6 +176,9 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
   const wait = async () => {
     const ok = await input.before?.()
     if (ok === false) return false
+    // A queued draft may wait while the engine or its policy changes. Recheck at dispatch, before any model call.
+    requireResearch(input.draft.agent === RESEARCH, input.sync.data.agent)
+    await requireLocalEngine(input.client)
     return true
   }
 
@@ -720,6 +726,16 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return
     }
 
+    const destination = sdk()
+    try {
+      requireResearch(mode !== "shell" && requestedExecutionMode === "research", sync().data.agent)
+      await requireLocalEngine(destination.client)
+    } catch (error) {
+      showToast({ title: "This engine cannot run this request", description: errorMessage(error) })
+      return
+    }
+    if (sdk().client !== destination.client) return
+
     const currentModel = local.model.current()
     const currentAgent = local.agent.current()
     const selectedVariant = local.model.variant.current()
@@ -826,7 +842,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     const agent = resolveExecutionAgent({
       planMode: isPlanMode,
       quickRequested: requestedExecutionMode === "quick",
-      researchRequested: requestedExecutionMode === "research",
+      researchRequested: mode !== "shell" && requestedExecutionMode === "research",
       difficulty,
       current: resolvedAgent,
     })
@@ -845,14 +861,14 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     input.addToHistory(currentPrompt, mode)
     input.resetHistoryNavigation()
 
-    const projectDirectory = sdk().directory
+    const projectDirectory = destination.directory
 
     const isNewSession = !params.id
     const shouldAutoAccept = !isPlanMode && isNewSession && input.autoAccept()
     const worktreeSelection = input.newSessionWorktree?.() || "main"
 
     let sessionDirectory = projectDirectory
-    let client = sdk().client
+    let client = destination.client
 
     if (isNewSession) {
       if (worktreeSelection === "create") {
@@ -883,7 +899,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       }
 
       if (sessionDirectory !== projectDirectory) {
-        client = sdk().createClient({
+        client = destination.createClient({
           directory: sessionDirectory,
           throwOnError: true,
         })
@@ -996,6 +1012,16 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return
     }
 
+    // Shell and slash commands bypass sendFollowupDraft, so recheck their destination after asynchronous setup too.
+    if (mode === "shell" || text.startsWith("/")) {
+      try {
+        await requireLocalEngine(client)
+      } catch (error) {
+        showToast({ title: "This engine cannot run this request", description: errorMessage(error) })
+        restorePastes(target, text)
+        return
+      }
+    }
     input.onSubmit?.()
 
     if (mode === "shell") {

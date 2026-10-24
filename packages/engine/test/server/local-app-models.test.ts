@@ -4,7 +4,7 @@ import path from "path"
 import { createVectorClient } from "@vectordevai/sdk/v2/client"
 import { Global } from "@vectordevai/core/global"
 import { hostedServer, roleModels } from "../../../app/src/features/local/local-model"
-import { capLabel, modesFor } from "../../../app/src/features/research/research-model"
+import { capLabel, hasResearch, modesFor } from "../../../app/src/features/research/research-model"
 import { Config } from "../../src/config/config"
 import { Server } from "../../src/server/server"
 import { resetDatabase } from "../fixture/db"
@@ -76,7 +76,9 @@ describe("a model server added in Vector, as the app reads it", () => {
       )
 
       const model = { providerID: added.data.provider, modelID: added.data.models[0]! }
-      expect(modesFor(hostedServer(list.hosted, model) !== undefined).map((mode) => mode.id)).toEqual([
+      const research = hasResearch((await sdk.app.agents({}, { throwOnError: true })).data)
+      expect(research).toBe(true)
+      expect(modesFor(hostedServer(list.hosted, model) !== undefined, research).map((mode) => mode.id)).toEqual([
         "normal",
         "quick",
         "research",
@@ -129,7 +131,8 @@ describe("a model server added in Vector, as the app reads it", () => {
     expect(company).toEqual({ providerID: "company", modelID: "kimi", origin: "https://llm.example.com", local: false })
     expect(priced).toEqual({ providerID: "priced", modelID: "large", origin: "http://127.0.0.1:8000", local: false })
     // Both are servers someone hosts, so Fast is hidden, but the run guard prices their steps, so the cap is in dollars.
-    expect(modesFor(company !== undefined).some((mode) => mode.id === "fast")).toBe(false)
+    const research = hasResearch((await sdk.app.agents({}, { throwOnError: true })).data)
+    expect(modesFor(company !== undefined, research).some((mode) => mode.id === "fast")).toBe(false)
     expect(capLabel({ depth: "focused", local: company?.local === true })).toBe("Cap $1.00")
     expect(capLabel({ depth: "focused", local: priced?.local === true })).toBe("Cap $1.00")
     // An endpoint on the internet that is not on the list is a cloud API: Fast stays, and Roles does not offer it.

@@ -15,6 +15,7 @@ import { WSL_SERVERS_KEY } from "../store-keys"
 import { getStore } from "../store"
 import {
   expectVectorVersion,
+  wslLocalRefusal,
   pendingRestartAfterWslInstall,
   wslServerIdsToStartOnInitialize,
   wslReinstallMessage,
@@ -47,7 +48,7 @@ type RunningSidecar = {
 
 type SpawnSidecar = (
   distro: string,
-  input: { token: string; signal: AbortSignal; onStart: (stop: () => Promise<void>) => () => void },
+  input: { version: string; token: string; signal: AbortSignal; onStart: (stop: () => Promise<void>) => () => void },
 ) => Promise<RunningSidecar>
 
 type ControllerLogger = {
@@ -57,6 +58,7 @@ type ControllerLogger = {
 
 type WslServersControllerOptions = {
   logger?: ControllerLogger
+  localEnabled?: () => boolean
   readServers?: () => WslServerConfig[]
   writeServers?: (servers: WslServerConfig[]) => void
   probeDistro?: typeof probeWslDistro
@@ -219,6 +221,8 @@ export function createWslServersController(
       if (!isCurrentStartAttempt(id, attempt)) return
       setRuntime(id, { kind: "starting" })
       logger?.log("wsl sidecar starting", { id, distro: item.config.distro })
+      const refusal = wslLocalRefusal(requiredCliVersion, options?.localEnabled?.() === true, item.config.distro)
+      if (refusal) throw new Error(refusal)
       const token = accountToken
       if (!token) throw new Error(wslSignInMessage)
       const check = await checkVector(item.config.distro, { signal: abort.signal })
@@ -226,7 +230,10 @@ export function createWslServersController(
       setVectorCheck(item.config.distro, check)
       if (!check.resolvedPath) throw new Error(wslReinstallMessage(item.config.distro))
       expectVectorVersion(check.version, requiredCliVersion, item.config.distro)
+      const changed = wslLocalRefusal(requiredCliVersion, options?.localEnabled?.() === true, item.config.distro)
+      if (changed) throw new Error(changed)
       const sidecar = await spawnSidecar(item.config.distro, {
+        version: requiredCliVersion,
         token,
         signal: abort.signal,
         onStart: (stop) => {
@@ -443,6 +450,24 @@ export function createWslServersController(
     },
 
     startServer,
+
+    async applyLocalPolicy() {
+      if (!wslLocalRefusal(requiredCliVersion, options?.localEnabled?.() === true, "WSL")) return
+      // Stop both launching and live engines without signing the owner out. Turning Local off never restarts them.
+      await stopManaged().catch((error) => {
+        for (const item of state.servers)
+          setRuntime(item.config.id, {
+            kind: "failed",
+            message:
+              "Vector Local could not confirm that this older WSL engine stopped. Stop this WSL server before continuing.",
+          })
+        throw error
+      })
+      for (const item of state.servers) {
+        const message = wslLocalRefusal(requiredCliVersion, true, item.config.distro)!
+        setRuntime(item.config.id, { kind: "failed", message })
+      }
+    },
 
     async replaceAccount(token: string | undefined, synchronize: () => Promise<void> = async () => {}) {
       const revision = ++accountRevision
