@@ -3,11 +3,12 @@ import { filterSettingsGroups, isSettingsTab, settingsGroups, settingsItemCount 
 
 describe("settings registry", () => {
   test("keeps every settings page reachable", () => {
-    expect(settingsItemCount(settingsGroups)).toBe(13)
+    expect(settingsItemCount(settingsGroups)).toBe(14)
     expect(settingsGroups.flatMap((group) => group.items.map((item) => item.value))).toEqual([
       "account",
       "general",
       "memory",
+      "local",
       "usage",
       "spend",
       "subagents",
@@ -50,6 +51,13 @@ describe("settings registry", () => {
   test("finds the Memory page, which replaced the rules page and the Local memory card, by what people call them", () => {
     for (const query of ["rules", "RULES.md", "MEMORY.md", "forget", "remember", "brain"])
       expect(filterSettingsGroups(query).flatMap((group) => group.items.map((item) => item.value))).toEqual(["memory"])
+  })
+
+  test("puts Vector Local in the Personal group, found by what people call models they host and the network log", () => {
+    expect(settingsGroups[0]!.items.find((item) => item.value === "local")?.label).toBe("Vector Local")
+    for (const query of ["Vector Local", "ollama", "models you host", "network log", "what Vector sent", "web access"])
+      expect(filterSettingsGroups(query).flatMap((group) => group.items.map((item) => item.value))).toEqual(["local"])
+    expect(isSettingsTab("local")).toBe(true)
   })
 
   test("finds spend limits by budget vocabulary", () => {

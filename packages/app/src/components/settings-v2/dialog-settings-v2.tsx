@@ -15,6 +15,7 @@ import { SettingsProjectTrustV2 } from "./project-trust"
 import { SettingsSubagentsV2 } from "./subagents"
 import { SettingsSpendLimitsV2 } from "./spend-limits"
 import { SettingsMemoryV2 } from "./memory"
+import { SettingsLocalV2 } from "./local"
 import { spendLimitsApi } from "@/features/economics/spend-limits-api"
 import {
   filterSettingsGroups,
@@ -72,6 +73,7 @@ export const SettingsWorkspace: Component<SettingsWorkspaceProps> = (props) => {
     if (item === "subagents") return <SettingsSubagentsV2 />
     if (item === "memory")
       return <SettingsMemoryV2 repositoryPath={props.repositoryPath} sessionDirectory={props.sessionDirectory} />
+    if (item === "local") return <SettingsLocalV2 />
     if (item === "providers") return <SettingsProvidersV2 />
     if (item === "models") return <SettingsModelsV2 />
     if (item === "servers") return <SettingsServersV2 />

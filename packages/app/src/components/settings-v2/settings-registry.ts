@@ -13,6 +13,7 @@ export type SettingsTab =
   | "trust"
   | "subagents"
   | "memory"
+  | "local"
 
 export type SettingsItem = {
   value: SettingsTab
@@ -73,6 +74,26 @@ export const settingsGroups: readonly SettingsGroup[] = [
           "reports",
           "sources",
           "citations",
+        ],
+      },
+      {
+        value: "local",
+        label: "Vector Local",
+        icon: "server",
+        keywords: [
+          "vector local",
+          "local models",
+          "models you host",
+          "ollama",
+          "lm studio",
+          "vllm",
+          "llama.cpp",
+          "offline",
+          "network log",
+          "what vector sent",
+          "web access",
+          "privacy",
+          "company policy",
         ],
       },
       {
