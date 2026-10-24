@@ -106,7 +106,9 @@ describe("ResearchEstimate.copy", () => {
     expect(line("local")).toBe(
       "About 25 pages and 8 searches, about 60 calls to your local model. No per-token charge. Step cap 120. On this server that is about 9 minutes.",
     )
-    expect(line("free")).toBe("About 25 pages and 8 searches. Uses your free allowance.")
+    expect(line("free")).toBe(
+      "About 25 pages and 8 searches. No per-token charge on this free model, within its daily limits. Step cap 120.",
+    )
     expect(line("plan")).toBe("About 25 pages and 8 searches. Counts toward your plan's usage limits. Step cap 120.")
     expect(line("unknown")).toBe(
       "About 25 pages and 8 searches. This model has no listed price, so Vector cannot estimate the cost. Step cap 120.",
@@ -115,10 +117,12 @@ describe("ResearchEstimate.copy", () => {
 
   test("says who bills for searches on the user's own key", () => {
     expect(line("free", { search: "exa" })).toBe(
-      "About 25 pages and 8 searches. Uses your free allowance. Searches go to Exa on your key, billed by Exa.",
+      "About 25 pages and 8 searches. No per-token charge on this free model, within its daily limits. Step cap 120. Searches go to Exa on your key, billed by Exa.",
     )
     expect(line("free", { search: "parallel" })).toContain("billed by Parallel.")
-    expect(line("free", { search: "searxng" })).toBe("About 25 pages and 8 searches. Uses your free allowance.")
+    expect(line("free", { search: "searxng" })).toBe(
+      "About 25 pages and 8 searches. No per-token charge on this free model, within its daily limits. Step cap 120.",
+    )
   })
 
   test("formats the single-agent estimate in dollars and cents", () => {
