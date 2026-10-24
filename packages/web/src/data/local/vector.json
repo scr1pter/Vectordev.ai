@@ -1,0 +1,49 @@
+{
+  "$schema": "https://vectordev.ai/config.json",
+  "share": "disabled",
+  "autoupdate": false,
+  "model": "company/coder",
+  "small_model": "company/small",
+  "provider": {
+    "company": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Company model servers",
+      "options": {
+        "baseURL": "https://llm.corp.example.com/v1"
+      },
+      "models": {
+        "coder": {
+          "name": "Coder",
+          "tool_call": true,
+          "limit": { "context": 131072, "output": 8192 }
+        },
+        "small": {
+          "name": "Small",
+          "tool_call": true,
+          "limit": { "context": 32768, "output": 4096 }
+        }
+      }
+    }
+  },
+  "local": {
+    "enabled": true,
+    "lock": true,
+    "web": "network",
+    "endpoints": [
+      "https://llm.corp.example.com",
+      "https://*.ml.corp.example.com"
+    ],
+    "user_may": ["endpoints", "web"],
+    "endpoint_domains": ["*.corp.example.com"],
+    "web_domains": {
+      "allow": ["docs.corp.example.com"],
+      "deny": []
+    },
+    "locked_keys": ["model", "small_model"],
+    "ca": { "files": ["corp-root.pem"] },
+    "updates": {
+      "url": "https://mirror.corp.example.com/vector/"
+    },
+    "log": { "retain_days": 90 }
+  }
+}

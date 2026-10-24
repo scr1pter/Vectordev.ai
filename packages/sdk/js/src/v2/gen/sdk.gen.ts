@@ -1926,7 +1926,7 @@ export class Config extends HeyApiClient {
   /**
    * Update global configuration
    *
-   * Update global Vector configuration settings and preferences.
+   * Update global Vector configuration settings and preferences. Under a company lock, a change to a key the company keeps fails with ConfigLocked; the parts of Vector Local the company leaves to you still change.
    */
   public update<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -2143,7 +2143,7 @@ export class Config2 extends HeyApiClient {
   /**
    * Update configuration
    *
-   * Update Vector configuration settings and preferences.
+   * Update Vector configuration settings and preferences. Under a company lock, a change to a key the company keeps fails with ConfigLocked.
    */
   public update<ThrowOnError extends boolean = false>(
     parameters?: {

@@ -7,6 +7,7 @@ import type { LocalMode } from "@vectordevai/schema/local-mode"
 import { makeGlobalNode } from "../effect/app-node"
 import { isHelperName } from "../session/helper"
 import { EgressAttribution } from "./attribution"
+import { LocalCA } from "./ca"
 import { EgressGuard } from "./guard"
 import { EgressLogStore } from "./log-store"
 import { LocalPolicy } from "./policy"
@@ -335,7 +336,9 @@ export async function fetch(
   init: FetchInit = {},
   send: Send = (target, options) => globalThis.fetch(target, options),
 ): Promise<Response> {
-  const { manual, tool, ...options } = init
+  const { manual, tool, ...rest } = init
+  // Under Bun, a company's certificate authorities go with each request (LocalCA), Local on or off.
+  const options = LocalCA.request(rest)
   if (!state.policy.enabled) return send(input, options)
   const inference = (LocalSources.get(source)?.purpose ?? "unknown") === "inference"
   const mode = inference ? "error" : (options.redirect ?? (input instanceof Request ? input.redirect : "follow"))

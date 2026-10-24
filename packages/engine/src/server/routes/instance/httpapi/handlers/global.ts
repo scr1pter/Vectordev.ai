@@ -15,6 +15,7 @@ import * as Sse from "effect/unstable/encoding/Sse"
 import { RootHttpApi } from "../api"
 import { type Principal, RequestPrincipal } from "@vectordevai/protocol/middleware/authorization"
 import { GlobalUpgradeInput } from "../groups/global"
+import { configLocked } from "./config"
 
 function eventData(data: unknown): Sse.Event {
   return {
@@ -93,7 +94,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     })
 
     const configGet = Effect.fn("GlobalHttpApi.configGet")(function* () {
-      const global = Redaction.redactConfig(yield* config.getGlobal())
+      const global = { ...Redaction.redactConfig(yield* config.getGlobal()), locked: Config.lockedKeys() }
       // Vector Local's block is the owner's: their model servers' addresses, identities and the services they allowed.
       // A guest loads the app from this route but cannot change it, so it gets the rest.
       if ((yield* RequestPrincipal).kind !== "owner") return omit(global, ["local"])
@@ -101,6 +102,8 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     })
 
     const configUpdate = Effect.fn("GlobalHttpApi.configUpdate")(function* (ctx) {
+      const locked = Config.lockedIn(ctx.payload, "global")
+      if (locked.length > 0) return yield* configLocked(locked)
       const result = yield* config.updateGlobal(ctx.payload)
       if (result.changed) bridge.fork(disposeAllInstancesAndEmitGlobalDisposed({ swallowErrors: true }))
       return Redaction.redactConfig(result.info)
