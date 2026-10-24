@@ -76,6 +76,13 @@ export const brainBudgetRows = [
   ["Thorough", "Up to 500 tokens, or 900 in a repository with documents."],
 ]
 
+// Deep research's default caps for one run, from desktop 1.99.111 (ResearchPlan.LIMITS in packages/core;
+// test/release-111-docs.test.ts checks the two agree). They apply only when the user has no spend cap of their own.
+export const researchCapRows = [
+  ["Focused", "$1, 80 steps, 15 pages, 8 searches and up to 2 researchers."],
+  ["Deep", "$3, 240 steps, 40 pages, 24 searches and up to 4 researchers."],
+]
+
 // vector memory, as packages/engine/src/cli/cmd/memory.ts describes each command.
 export const brainCommandRows = [
   [
