@@ -15,38 +15,45 @@ import { Instruction } from "../../src/session/instruction"
 import { SessionPrompt } from "../../src/session/prompt"
 import { MessageID } from "../../src/session/schema"
 import { ResearchRun } from "../../src/tool/research-run"
+import { FakeBridge } from "../lib/fake-bridge"
 import { TestLLMServer } from "../lib/llm-server"
 import { calls, output, plan, ref, repositoryConfig, runtime, send, setup } from "../lib/research"
 import { FakeWeb } from "../../../core/test/lib/fake-web"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
 
 // research_search (section 5.4): a query passes the outbound check against the run's private context before it
-// leaves. That context counts every memory line the run was given, whatever its scope (a fact the memory tool found, an
-// entry pinned in the digest, one learned beside a private document), and the repository files it read. A refused
-// query is never sent and never counted; the user's own typed words are theirs to send, and only the user's own sites
-// clear a host name. Results join the run's provenance, so research_read may read them.
+// leaves for the agent's research browser. That context counts every memory line the run was given, whatever its scope
+// (a fact the memory tool found, an entry pinned in the digest, one learned beside a private document), and the
+// repository files it read. A refused query never reaches the desktop and is never counted; the user's own typed words
+// are theirs to send, and only the user's own sites clear a host name. Results join the run's provenance, so
+// research_read may read them. The desktop is a fake one, whose research browsers answer each search with the fake
+// web's pages.
 
 const guard = NetworkGuard.use()
 const web = FakeWeb.start({ sites: FakeWeb.sites() })
 const it = runtime(web)
-afterAll(() => web.close())
+const bridge = FakeBridge.start(FakeBridge.searching(web))
+const desktop = FakeBridge.use(bridge)
+afterAll(async () => {
+  desktop.off()
+  await bridge.close()
+  await web.close()
+})
+// The searches that reached the desktop's research browsers.
+const searched = () => FakeBridge.searches(bridge).length
 
 const FACT = "My badge number at Hooli is 44172 and my manager is Dana Whitfield"
 const MEMO =
   "# Pricing memo\n\nWe will raise the Enterprise heat pump tier to forty dollars per seat in Lisbon next spring.\n"
 const NOTES = "The Falcon migration moves the ledger to the reconcileLedgerEntries service before the March freeze."
-// The user approved reading pages for these runs, and the search server on their own network (the fake web resolves
-// to this computer, so SearXNG on it is a private address, which asks once for its origin).
-const allow = [
-  { permission: "research_read", pattern: "*", action: "allow" as const },
-  { permission: "private_network", pattern: "*", action: "allow" as const },
-]
+// The user approved reading pages for these runs.
+const allow = [{ permission: "research_read", pattern: "*", action: "allow" as const }]
 
 it.instance(
   "a query carrying a personal fact the run was given, or a token from a file it read, is refused before it is sent",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const fs = yield* FSUtil.Service
       yield* fs.writeWithDirs(path.join(test.dir, "notes", "plan.md"), `# Plan\n\n${NOTES}\n`)
       const brain = yield* Brain.Service
@@ -84,8 +91,15 @@ it.instance(
       expect(searches.map(output).slice(0, 2)).toEqual([ResearchOutbound.REFUSAL, ResearchOutbound.REFUSAL])
       expect(output(searches[2])).toContain("result")
       expect(output(searches[2])).toContain("untrusted_web_page")
-      // Only the query that passed reached the search server, and only it counted.
-      expect(web.hits().filter((hit) => hit.site === "searxng")).toHaveLength(1)
+      // Only the query that passed reached the research browser, and only it counted.
+      const sent = FakeBridge.searches(bridge).at(-1)?.body
+      expect(sent).toMatchObject({
+        command: "research.search",
+        query: "heat pump savings near Whitfield cold climate",
+        sessionID: session.id,
+        agent: "research",
+        engines: ["google", "duckduckgo"],
+      })
       const runID = searches[2]!.state.status === "completed" ? (searches[2]!.state.metadata.runID as string) : ""
       const store = yield* ResearchStore.Service
       const detail = yield* store.get(place, runID)
@@ -100,10 +114,9 @@ it.instance(
   "search results join the run's provenance, so a result may be read; a brain-only run searches nothing",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research", permission: allow })
-      const searched = () => web.hits().filter((hit) => hit.site === "searxng").length
       const before = searched()
       yield* test.llm.tool("research_plan", plan())
       yield* test.llm.tool("research_search", { query: "heat pump field study" })
@@ -138,16 +151,18 @@ it.instance(
   "nothing is searched before a plan is approved",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research", permission: allow })
       const before = web.hits().length
+      const desk = searched()
       yield* test.llm.tool("research_search", { query: "heat pump field study" })
       yield* test.llm.text("Done.")
       yield* send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." })
       const [search] = yield* calls(session.id, "research_search")
       expect(output(search)).toContain("Plan the research with research_plan first")
       expect(web.hits().length).toBe(before)
+      expect(searched()).toBe(desk)
     }),
   90_000,
 )
@@ -156,7 +171,7 @@ it.instance(
   "a sentence of a private document the lead was shown stays out of its searches and its researchers' searches",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const knowledge = yield* BrainKnowledge.Service
       const instruction = yield* Instruction.Service
       const place = yield* instruction.place()
@@ -182,7 +197,7 @@ it.instance(
       yield* test.llm.toolMatch(researcher, "research_search", { query: `${copied} prices` })
       yield* test.llm.textMatch(researcher, "Nothing found.")
       yield* test.llm.text("Done.")
-      const before = web.hits().filter((hit) => hit.site === "searxng").length
+      const before = searched()
       yield* send({ sessionID: lead.id, agent: "research", text: "Research what heat pumps cost." })
 
       const [memory] = yield* calls(lead.id, "memory")
@@ -194,7 +209,7 @@ it.instance(
       const [child] = yield* sessions.children(lead.id)
       const [inner] = yield* calls(child!.id, "research_search")
       expect(output(inner)).toBe(ResearchOutbound.REFUSAL)
-      expect(web.hits().filter((hit) => hit.site === "searxng").length).toBe(before)
+      expect(searched()).toBe(before)
       expect(guard.outside()).toEqual([])
     }),
   120_000,
@@ -204,7 +219,7 @@ it.instance(
   "a site the lead put in a plan it approved on its own does not clear a host name from what the run read",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const fs = yield* FSUtil.Service
       yield* fs.writeWithDirs(
         path.join(test.dir, "notes", "hosts.md"),
@@ -216,11 +231,11 @@ it.instance(
       yield* test.llm.tool("read", { filePath: path.join(test.dir, "notes", "hosts.md") })
       yield* test.llm.tool("research_search", { query: "outage history", site: "status.acmecorp.com" })
       yield* test.llm.text("Done.")
-      const before = web.hits().filter((hit) => hit.site === "searxng").length
+      const before = searched()
       yield* send({ sessionID: session.id, agent: "research", text: "Research how often status pages report outages." })
       const [search] = yield* calls(session.id, "research_search")
       expect(output(search)).toBe(ResearchOutbound.REFUSAL)
-      expect(web.hits().filter((hit) => hit.site === "searxng").length).toBe(before)
+      expect(searched()).toBe(before)
     }),
   90_000,
 )
@@ -229,7 +244,7 @@ it.instance(
   "a file the user attached to the question counts as the run's private context",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const fs = yield* FSUtil.Service
       const file = path.join(test.dir, "notes", "plan.md")
       yield* fs.writeWithDirs(file, `# Plan\n\n${NOTES}\n`)
@@ -240,7 +255,7 @@ it.instance(
       yield* test.llm.tool("research_search", { query: "reconcileLedgerEntries service migration" })
       yield* test.llm.tool("research_search", { query: "ledger service migration without downtime" })
       yield* test.llm.text("Done.")
-      const before = web.hits().filter((hit) => hit.site === "searxng").length
+      const before = searched()
       yield* prompt.prompt({
         sessionID: session.id,
         agent: "research",
@@ -253,7 +268,7 @@ it.instance(
       const [copied, fair] = yield* calls(session.id, "research_search")
       expect(output(copied)).toBe(ResearchOutbound.REFUSAL)
       expect(output(fair)).toContain("result")
-      expect(web.hits().filter((hit) => hit.site === "searxng").length - before).toBe(1)
+      expect(searched() - before).toBe(1)
       expect(guard.outside()).toEqual([])
     }),
   90_000,
@@ -263,14 +278,14 @@ it.instance(
   "text from outside the conversation, such as what was piped in, counts as private, names included",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const prompt = yield* SessionPrompt.Service
       const session = yield* sessions.create({ title: "Research", permission: allow })
       yield* test.llm.tool("research_plan", plan())
       yield* test.llm.tool("research_search", { query: "Initech heat pump contract renewal" })
       yield* test.llm.text("Done.")
-      const before = web.hits().filter((hit) => hit.site === "searxng").length
+      const before = searched()
       yield* prompt.prompt({
         sessionID: session.id,
         agent: "research",
@@ -286,7 +301,7 @@ it.instance(
       })
       const [search] = yield* calls(session.id, "research_search")
       expect(output(search)).toBe(ResearchOutbound.REFUSAL)
-      expect(web.hits().filter((hit) => hit.site === "searxng").length).toBe(before)
+      expect(searched()).toBe(before)
     }),
   90_000,
 )
@@ -302,7 +317,7 @@ for (const entry of [
     `a pinned repository ${entry.kind}${entry.private ? " learned beside a private document" : ""} keeps its host and names out of the lead's searches`,
     () =>
       Effect.gen(function* () {
-        const test = yield* setup(web)
+        const test = yield* setup()
         const brain = yield* Brain.Service
         const instruction = yield* Instruction.Service
         const place = yield* instruction.place()
@@ -323,7 +338,7 @@ for (const entry of [
         yield* test.llm.tool("research_search", { query: "Globex heat pump billing outage" })
         yield* test.llm.tool("research_search", { query: "heat pump billing outage" })
         yield* test.llm.text("Done.")
-        const before = web.hits().filter((hit) => hit.site === "searxng").length
+        const before = searched()
         const bodies = yield* send({
           sessionID: session.id,
           agent: "research",
@@ -334,7 +349,7 @@ for (const entry of [
         const searches = yield* calls(session.id, "research_search")
         expect(searches.map(output).slice(0, 2)).toEqual([ResearchOutbound.REFUSAL, ResearchOutbound.REFUSAL])
         expect(output(searches[2])).toContain("untrusted_web_page")
-        expect(web.hits().filter((hit) => hit.site === "searxng").length - before).toBe(1)
+        expect(searched() - before).toBe(1)
         expect(guard.outside()).toEqual([])
       }),
     90_000,
@@ -344,7 +359,7 @@ it.instance(
   "an entry learned beside a private document, found by the memory tool, stays out of a researcher's searches and of searches after a compaction",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const brain = yield* Brain.Service
       const instruction = yield* Instruction.Service
       const place = yield* instruction.place()
@@ -374,7 +389,7 @@ it.instance(
       yield* test.llm.toolMatch(researcher, "research_search", { query: "Globex competitors heat pump billing" })
       yield* test.llm.textMatch(researcher, "Nothing found.")
       yield* test.llm.text("Done.")
-      const before = web.hits().filter((hit) => hit.site === "searxng").length
+      const before = searched()
       yield* send({ sessionID: lead.id, agent: "research", text: "Research heat pump billing vendors." })
 
       // The memory tool found it, and the transcript keeps its id only.
@@ -387,7 +402,7 @@ it.instance(
       const [child] = yield* sessions.children(lead.id)
       const [inner] = yield* calls(child!.id, "research_search")
       expect(output(inner)).toBe(ResearchOutbound.REFUSAL)
-      expect(web.hits().filter((hit) => hit.site === "searxng").length).toBe(before)
+      expect(searched()).toBe(before)
 
       // A step after a compaction works from the stored history alone.
       const research = yield* ResearchRun.Service
@@ -417,7 +432,7 @@ for (const own of [false, true])
       : "a site a repository's config avoids, trusted or not, clears no host name from the outbound check",
     () =>
       Effect.gen(function* () {
-        const test = yield* setup(web)
+        const test = yield* setup()
         const fs = yield* FSUtil.Service
         const config = yield* Config.Service
         const server = yield* TestLLMServer
@@ -426,10 +441,7 @@ for (const own of [false, true])
           path.join(Global.Path.config, "vector.json"),
           JSON.stringify({
             ...repositoryConfig(server.url),
-            research: {
-              search: { provider: "searxng", url: web.url("searxng", "/") },
-              ...(own ? { domains: { avoid: ["victimcorp.com"] } } : {}),
-            },
+            research: own ? { domains: { avoid: ["victimcorp.com"] } } : {},
           }),
         )
         yield* fs.writeWithDirs(
@@ -468,7 +480,7 @@ it.instance(
   "a site the owner's own sources preference names clears itself as a site: value, and a site another facet names does not",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const brain = yield* Brain.Service
       const instruction = yield* Instruction.Service
       const place = yield* instruction.place()

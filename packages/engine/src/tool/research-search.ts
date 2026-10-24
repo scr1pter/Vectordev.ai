@@ -1,41 +1,30 @@
-import { ResearchCanonical } from "@vectordevai/core/research/canonical"
-import { WebFence } from "@vectordevai/core/research/fence"
 import { ResearchOutbound } from "@vectordevai/core/research/outbound"
 import { ResearchSearch } from "@vectordevai/core/research/search"
 import { ResearchStore } from "@vectordevai/core/research/store"
-import { Egress } from "@vectordevai/core/local-mode/egress"
-import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
-import { ConfigResearchV1 } from "@vectordevai/core/v1/config/research"
 import type { SessionV1 } from "@vectordevai/core/v1/session"
 import { Research } from "@vectordevai/schema/research"
-import { Cause, Effect, Option, Schema } from "effect"
-import { HttpClient } from "effect/unstable/http"
-import { EgressHttpClient } from "@vectordevai/core/local-mode/http-client"
-import { Auth } from "@/auth"
-import { Config } from "@/config/config"
+import { Effect, Option, Schema } from "effect"
 import { Session } from "@/session/session"
 import { SessionTaskSize } from "../session/task-size"
-import { McpWebSearch } from "./mcp-websearch"
+import { ResearchBrowser } from "./research-browser"
 import { ResearchRun } from "./research-run"
 import { Tool } from "./tool"
-import { webSearchAuthHeaders } from "./websearch"
 import DESCRIPTION from "./research-search.txt"
 
-// research_search (sections 5.4 and 5.7): a query passes the outbound check against the run's private context before
-// it leaves, then counts against the run's search budget and is kept for the Sources tab. Every result joins the run's
-// provenance (its call's metadata is the record), and comes back fenced, marked when the run already read it.
+// research_search (sections 5.4, 5.6a and 5.7): research searches the web with Vector's own Chromium, in the calling
+// agent's own research browser (the lead's, or each researcher's), through the bridge's POST /research as
+// research.search. The desktop loads the results page for the query, Google's first and DuckDuckGo's HTML page once
+// when Google asks for a check, shows a consent wall or a page it cannot read, and returns the organic results it read
+// off the page; it never answers a check (research-browser.ts and research-search-page.ts there). There is no search
+// service and no key.
 //
-// Where it searches is the user's choice, read from their own config only (the engine's config keeps a repository's
-// search server out, so a checked-in config cannot send the user's queries to a server its author runs):
-// - searxng: a SearXNG server the user set up, through its JSON API;
-// - exa, parallel: the existing search services on the user's own key, sent the query and nothing that ties it to the
-//   session or the model, and billed by them. Only with a key: the keyless access VECTOR_ENABLE_EXA and
-//   VECTOR_ENABLE_PARALLEL give the websearch tool is not research's. Under Vector Local only when the user allowed
-//   them there. Neither filters by date: Parallel is asked for the period in its objective, and the result says so;
-// - browser: a results page in a research browser, which is not built yet;
-// - none: nothing is searched; research uses the brain, the repository's files and the addresses the user typed;
-// - auto (the default): the first of SearXNG, Exa and Parallel that is set up and allowed, else none.
-// `vector run --research --search` picks one for its own run, among those the user set up.
+// Here, before anything leaves: the query (with its site filter) passes the outbound check against the run's private
+// context, then Vector Local's Web access as it is now decides each results page as research-browser traffic
+// (ResearchSearch.reachable), and only then does the search count against the run's budget and go to the desktop. The
+// results come back fenced, marked when the run already read them, and join the run's provenance (this call's metadata
+// is the record), so research_read and research_browser may open them. Where there is no research browser (the CLI,
+// WSL, a remote server, a headless run) nothing is searched, and the tool says so; research goes on with the brain and
+// the addresses the user typed. `vector run --research --search none` searches nothing for its run.
 
 export const Parameters = Schema.Struct({
   query: Schema.String.check(Schema.isLengthBetween(1, 200)).annotate({
@@ -57,104 +46,42 @@ type Metadata = {
   runID?: string
   query?: string
   provider?: string
+  /** The results page that answered: google or duckduckgo. */
+  engine?: string
   results?: ResearchRun.Result[]
-  refused?: "outbound" | "budget" | "scope" | "none" | "offline"
+  /** Every results page asked for a check or could not be read. */
+  unavailable?: boolean
+  refused?: "outbound" | "budget" | "scope" | "none" | "offline" | "desktop" | "local"
 }
 
 /** Where `vector run --research` puts its own choices for the run: a text part's metadata on its prompt. */
 export const OPTIONS = ResearchRun.OPTIONS
 
-/** The search and scope `vector run --research` was given. */
+/**
+ * The search and scope `vector run --research` was given. Only `none` changes where research searches now: every
+ * other search is the research browser's. A name the command line used to take reads as none given.
+ */
 export const Options = Schema.Struct({
-  search: Schema.optional(ConfigResearchV1.Provider),
+  search: Schema.optional(Schema.String),
   scope: Schema.optional(Research.Scope),
 })
 export type Options = typeof Options.Type
 const decodeOptions = Schema.decodeUnknownOption(Options)
 
-export const BROWSER =
-  "Searching through a results page in a research browser is not available yet. Set up a SearXNG server, or an Exa or Parallel key, for research."
-export const PAID = "Searches go to {name} on your key, billed by {name}."
-export const UNDATED = "{name} does not filter results by date, so check each one's date against the past {recency}."
+export const SITE = ResearchSearch.SITE
 
-const PAID_URL = { exa: McpWebSearch.EXA_URL, parallel: McpWebSearch.PARALLEL_URL } as const
-const PAID_NAME = { exa: "Exa", parallel: "Parallel" } as const
-
-/** Where research searches. */
-export type Provider =
-  | { readonly provider: "searxng"; readonly url: string }
-  | { readonly provider: "exa" | "parallel" }
-  | { readonly provider: "none"; readonly reason?: string }
-
-/** The search services the user set up besides SearXNG, and which of them Vector Local lets through. */
-export type Available = {
-  readonly exa: boolean
-  readonly parallel: boolean
-  /** Vector Local is on: the services the user allowed through it. */
-  readonly local?: { readonly allowed: readonly ("exa" | "parallel")[] }
-}
+/** Where research searches: in the agent's own research browser, or nowhere, with why. */
+export type Provider = { readonly provider: "browser" } | { readonly provider: "none"; readonly reason: string }
 
 /**
- * Where research searches, from the user's research settings and what they set up. `chosen`, the search
- * `vector run --research --search` was given, picks among those; it never reaches a server the settings do not name.
+ * Where research searches: the agent's own research browser when this engine runs inside the desktop app, unless
+ * `vector run --research --search none` asked for no search.
  */
-export function searchProvider(
-  research: ConfigResearchV1.Info | undefined,
-  available: Available = { exa: false, parallel: false },
-  chosen?: ConfigResearchV1.Provider,
-): Provider {
-  const url = research?.search?.url?.trim()
-  const provider = chosen && chosen !== "auto" ? chosen : (research?.search?.provider ?? "auto")
-  const first = ResearchSearch.order({
-    provider,
-    ...(url && URL.canParse(url) ? { searxng: url } : {}),
-    exa: available.exa,
-    parallel: available.parallel,
-    ...(available.local ? { local: available.local } : {}),
-    // The research browsers that would read a results page are not built yet.
-    browser: false,
-  })[0]
-  if (first === "searxng" && url) return { provider: "searxng", url }
-  if (first === "exa" || first === "parallel") return { provider: first }
-  return { provider: "none", ...(why(provider, available) ? { reason: why(provider, available) } : {}) }
+export function searchProvider(input: { readonly browser: boolean; readonly chosen?: string }): Provider {
+  if (input.chosen === "none") return { provider: "none", reason: ResearchSearch.NONE }
+  if (!input.browser) return { provider: "none", reason: ResearchSearch.NEEDS_DESKTOP }
+  return { provider: "browser" }
 }
-
-// Why a search the user named is not used.
-function why(provider: ConfigResearchV1.Provider, available: Available) {
-  if (provider === "browser") return BROWSER
-  if (provider === "searxng")
-    return "Research is set to search with SearXNG, and no SearXNG address is set up (research.search.url). Research will use this repository's brain, its files and links you paste."
-  if (provider !== "exa" && provider !== "parallel") return undefined
-  const name = PAID_NAME[provider]
-  if (!available[provider])
-    return `Research is set to search with ${name}, and no ${name} key is set up. Add one in Settings, or research will use this repository's brain, its files and links you paste.`
-  return `Vector Local keeps research's searches off ${name} until you allow it. Research will use this repository's brain, its files and links you paste.`
-}
-
-/**
- * What the user set up to search with, and what Vector Local lets through, read where research runs. Research searches
- * Exa and Parallel on the user's own key alone, so its searches are always billed to them as the plan card says.
- */
-export const available = Effect.fn("ResearchSearchTool.available")(function* () {
-  const auth = yield* Auth.Service
-  const policy = Egress.policy()
-  return {
-    exa: !!(yield* searchKey(auth, "exa")),
-    parallel: !!(yield* searchKey(auth, "parallel")),
-    // A pure decision: nothing is logged for a request that is not made.
-    ...(policy.enabled
-      ? {
-          local: {
-            allowed: (["exa", "parallel"] as const).filter(
-              (name) =>
-                LocalPolicy.decide(policy, { purpose: "web-search", url: PAID_URL[name], source: `websearch-${name}` })
-                  .decision === "allow",
-            ),
-          },
-        }
-      : {}),
-  } satisfies Available
-})
 
 /** The choices `vector run --research` made for this request: on the newest message the user sent. */
 export function options(messages: readonly SessionV1.WithParts[]): Options {
@@ -170,18 +97,13 @@ export function options(messages: readonly SessionV1.WithParts[]): Options {
 export const ResearchSearchTool = Tool.define<
   typeof Parameters,
   Metadata,
-  ResearchRun.Service | ResearchStore.Service | Config.Service | HttpClient.HttpClient | Session.Service | Auth.Service
+  ResearchRun.Service | ResearchStore.Service | Session.Service
 >(
   "research_search",
   Effect.gen(function* () {
     const research = yield* ResearchRun.Service
     const store = yield* ResearchStore.Service
-    const config = yield* Config.Service
-    // A search is decided and logged as its service's source while Vector Local is on: SearXNG's when its server is
-    // listed and Web access allows it, Exa's and Parallel's once the user allowed them there.
-    const http = EgressHttpClient.make(yield* HttpClient.HttpClient)
     const sessions = yield* Session.Service
-    const auth = yield* Auth.Service
 
     return {
       description: DESCRIPTION,
@@ -213,26 +135,38 @@ export const ResearchSearchTool = Tool.define<
                 "This research's scope is the brain and the repository's files, so it searches nothing on the web.",
               metadata: { runID, refused: "scope" as const },
             }
-          const provider = searchProvider(
-            (yield* config.get()).research,
-            yield* available().pipe(Effect.provideService(Auth.Service, auth)),
-            chosen.search,
-          )
+          const provider = searchProvider({ browser: ResearchBrowser.available(), chosen: chosen.search })
           if (provider.provider === "none")
             return {
-              title: "No search service",
-              output: provider.reason ?? ResearchSearch.NONE,
-              metadata: { runID, refused: "none" as const },
+              title: chosen.search === "none" ? "Not searched" : "Needs the desktop browser",
+              output: provider.reason,
+              metadata: { runID, refused: chosen.search === "none" ? ("none" as const) : ("desktop" as const) },
             }
+          if (params.site !== undefined && !ResearchSearch.site(params.site))
+            return { title: "Not searched", output: SITE, metadata: { runID } }
           const query = params.query.trim()
-          const context = yield* research.context(ctx, found)
+          const asked: ResearchSearch.Query = {
+            query,
+            ...(params.site ? { site: params.site } : {}),
+            ...(params.recency ? { recency: params.recency } : {}),
+            ...(params.limit ? { limit: params.limit } : {}),
+          }
           // Checked before it counts: a refused query was never sent.
-          const checked = ResearchOutbound.check(params.site ? `${query} site:${params.site}` : query, context)
+          const checked = ResearchOutbound.check(ResearchSearch.words(asked), yield* research.context(ctx, found))
           if (!checked.ok)
             return {
               title: "Search refused",
               output: checked.message,
               metadata: { runID, query, refused: "outbound" as const },
+            }
+          // Vector Local's Web access as it is now, which the desktop's research proxy may not have yet: each results
+          // page is research-browser traffic.
+          const reachable = ResearchSearch.reachable(asked)
+          if (reachable.engines.length === 0)
+            return {
+              title: "Search refused",
+              output: [ResearchSearch.LOCAL, reachable.refused].filter(Boolean).join(" "),
+              metadata: { runID, query, refused: "local" as const },
             }
           const counted = yield* store.searched(found.place, runID, query)
           if (counted.type === "refused")
@@ -241,245 +175,55 @@ export const ResearchSearchTool = Tool.define<
               output: counted.message,
               metadata: { runID, query, refused: "budget" as const },
             }
-          yield* ctx.metadata({ title: `Searching: ${query}`, metadata: { runID, query, provider: provider.provider } })
-          const asked: ResearchSearch.Query = {
-            query,
-            ...(params.site ? { site: params.site } : {}),
-            ...(params.recency ? { recency: params.recency } : {}),
-            ...(params.limit ? { limit: params.limit } : {}),
-          }
-          const results =
-            provider.provider === "searxng"
-              ? yield* ResearchSearch.searxng(asked, {
-                  http,
-                  url: provider.url,
-                  context,
-                  // Vector Local decides the search server's address as the request is sent (websearch-searxng).
-                  authorize: () => Effect.void,
-                  // A SearXNG server on the user's own network asks once for its origin.
-                  authorizePrivate: (url) =>
-                    ctx.ask({
-                      permission: "private_network",
-                      patterns: [new URL(url).origin],
-                      always: [new URL(url).origin],
-                      metadata: { url: new URL(url).origin, tool: "research_search" },
-                    }),
-                  resolver: research.network.resolver,
-                }).pipe(
-                  EgressHttpClient.labelled("websearch-searxng"),
-                  Effect.map((items) => ({ type: "results" as const, items })),
-                  // What the server or the network did, and the outbound check's own refusal, are answers; a declined
-                  // approval for a server on the user's network fails the call as any declined approval does.
-                  Effect.catchIf(
-                    (error): error is ResearchSearch.SearchFailed | ResearchSearch.QueryRefused =>
-                      error instanceof ResearchSearch.SearchFailed || error instanceof ResearchSearch.QueryRefused,
-                    (error) => Effect.succeed({ type: "failed" as const, message: error.message }),
-                  ),
-                )
-              : yield* paid(
-                  http,
-                  provider.provider,
-                  asked,
-                  (yield* searchKey(auth, provider.provider)) ?? undefined,
-                ).pipe(EgressHttpClient.labelled(`websearch-${provider.provider}`))
-          if (results.type === "failed")
-            return {
-              title: "Search failed",
-              output: results.message,
-              metadata: { runID, query, provider: provider.provider },
-            }
+          yield* ctx.metadata({ title: `Searching: ${query}`, metadata: { runID, query, provider: "browser" } })
+          const report = yield* ResearchBrowser.send({
+            research,
+            ctx,
+            found,
+            body: {
+              command: "research.search",
+              query: ResearchSearch.words(asked),
+              ...(asked.recency ? { recency: asked.recency } : {}),
+              limit: asked.limit ?? ResearchSearch.DEFAULT_RESULTS,
+              engines: reachable.engines,
+            },
+          })
+          const tried = (report.search?.tried ?? []).map((item) => item.reason)
+          if (!report.ok)
+            return report.search
+              ? {
+                  title: "Search unavailable",
+                  output: [ResearchSearch.UNAVAILABLE, ...tried].join(" "),
+                  metadata: { runID, query, provider: "browser", unavailable: true },
+                }
+              : {
+                  title: "Search failed",
+                  output: report.error ?? ResearchBrowser.BROWSER_DOWN,
+                  metadata: { runID, query, provider: "browser" },
+                }
+          const items = ResearchSearch.clean(
+            report.search?.results ?? [],
+            asked.limit ?? ResearchSearch.DEFAULT_RESULTS,
+          )
+          const engine = report.search?.engine
+          const name = engine ? ResearchSearch.NAMES[engine] : "the search engine"
+          // Why another engine's page answered: what the one before it showed.
+          const instead = tried.length ? ` ${tried.join(" ")} Vector searched ${name} instead.` : ""
           const read = new Map(found.detail.sources.map((source) => [source.canonical_url, source.id]))
-          const billed =
-            provider.provider === "exa" || provider.provider === "parallel"
-              ? [
-                  `\n${PAID.replaceAll("{name}", PAID_NAME[provider.provider])}`,
-                  ...(params.recency
-                    ? [
-                        ` ${UNDATED.replaceAll("{name}", PAID_NAME[provider.provider]).replace("{recency}", params.recency)}`,
-                      ]
-                    : []),
-                ].join("")
-              : ""
           return {
             title: `Searched: ${query}`,
-            output: results.items.length
-              ? `${results.items.length} result${results.items.length === 1 ? "" : "s"}. Read the useful ones with research_read.${billed}\n${ResearchSearch.listing(query, results.items, read)}`
-              : `No results. Try other words, or a broader query.${billed}`,
+            output: items.length
+              ? `${items.length} result${items.length === 1 ? "" : "s"} from ${name}. Read the useful ones with research_read.${instead}\n${ResearchSearch.listing(query, items, read)}`
+              : `No results on ${name}. Try other words, or a broader query.${instead}`,
             metadata: {
               runID,
               query,
-              provider: provider.provider,
-              results: results.items.map((item) => ({ url: item.url, title: item.title, snippet: item.snippet })),
+              provider: "browser",
+              ...(engine ? { engine } : {}),
+              results: items.map((item) => ({ url: item.url, title: item.title, snippet: item.snippet })),
             },
           }
         }).pipe(Effect.orDie),
     }
   }),
 )
-
-// The key for a search service, as the websearch tool reads it: the environment's first, then the one in Settings.
-function searchKey(auth: Auth.Interface, provider: "exa" | "parallel") {
-  return Effect.gen(function* () {
-    const env = provider === "exa" ? process.env.EXA_API_KEY : process.env.PARALLEL_API_KEY
-    if (env) return env
-    const saved = yield* auth.get(provider)
-    return saved?.type === "api" ? saved.key : undefined
-  })
-}
-
-/**
- * Searches Exa or Parallel through their MCP search tools, as the websearch tool does: the query alone, with no session
- * ID or model name. A site filter goes in the query as `site:`. Their answer is text, read for results with addresses
- * (`parsePaid`); what the service or the network did is an answer, never a failed call.
- */
-export function paid(
-  http: HttpClient.HttpClient,
-  provider: "exa" | "parallel",
-  query: ResearchSearch.Query,
-  key?: string,
-) {
-  const text = query.site ? `${query.query} site:${query.site}` : query.query
-  const limit = query.limit ?? ResearchSearch.DEFAULT_RESULTS
-  const request =
-    provider === "parallel"
-      ? McpWebSearch.call(
-          http,
-          McpWebSearch.PARALLEL_URL,
-          "web_search",
-          McpWebSearch.ParallelSearchArgs,
-          // Parallel reads its objective as a request, so the period goes there; it is not a filter.
-          {
-            objective: query.recency ? `${text} (published in the past ${query.recency})` : text,
-            search_queries: [text],
-          },
-          "25 seconds",
-          webSearchAuthHeaders(provider, key),
-        )
-      : McpWebSearch.call(
-          http,
-          McpWebSearch.EXA_URL,
-          "web_search_exa",
-          McpWebSearch.SearchArgs,
-          { query: text, type: "auto", numResults: limit, livecrawl: "fallback" },
-          "25 seconds",
-          webSearchAuthHeaders(provider, key),
-        )
-  return request.pipe(
-    Effect.map((body) => ({ type: "results" as const, items: parsePaid(body ?? "", limit) })),
-    Effect.catchCause((cause) =>
-      Cause.hasInterruptsOnly(cause)
-        ? Effect.failCause(cause)
-        : Effect.succeed({
-            type: "failed" as const,
-            message: `${PAID_NAME[provider]} did not answer the search. Check its key in Settings and try again.`,
-          }),
-    ),
-  )
-}
-
-const PaidResult = Schema.Struct({
-  url: Schema.String,
-  title: Schema.optional(Schema.NullOr(Schema.String)),
-  text: Schema.optional(Schema.NullOr(Schema.String)),
-  snippet: Schema.optional(Schema.NullOr(Schema.String)),
-  summary: Schema.optional(Schema.NullOr(Schema.String)),
-  excerpts: Schema.optional(Schema.NullOr(Schema.Array(Schema.String))),
-  highlights: Schema.optional(Schema.NullOr(Schema.Array(Schema.String))),
-  publishedDate: Schema.optional(Schema.NullOr(Schema.String)),
-  publish_date: Schema.optional(Schema.NullOr(Schema.String)),
-})
-const decodePaid = Schema.decodeUnknownOption(
-  Schema.fromJsonString(Schema.Struct({ results: Schema.Array(Schema.Unknown) })),
-)
-const decodePaidResult = Schema.decodeUnknownOption(PaidResult)
-const TITLE_CHARS = 300
-const SNIPPET_CHARS = 500
-
-/**
- * The results in a search service's answer: its JSON results when it sends them, else its text blocks ("Title: …",
- * "URL: …"), else the addresses it names. Only http and https addresses, each page once by its canonical form, and the
- * title and snippet cleaned of hidden characters and cut to length.
- */
-export function parsePaid(body: string, limit = ResearchSearch.DEFAULT_RESULTS): readonly ResearchSearch.Result[] {
-  const json = decodePaid(body.trim())
-  const raw: { url: string; title?: string; snippet?: string; published?: string }[] = Option.isSome(json)
-    ? json.value.results.flatMap((item) => {
-        const result = decodePaidResult(item)
-        if (Option.isNone(result)) return []
-        const value = result.value
-        return [
-          {
-            url: value.url,
-            title: value.title ?? undefined,
-            snippet:
-              value.snippet ??
-              value.summary ??
-              value.excerpts?.join(" ") ??
-              value.highlights?.join(" ") ??
-              value.text ??
-              undefined,
-            published: value.publishedDate ?? value.publish_date ?? undefined,
-          },
-        ]
-      })
-    : blocks(body)
-  const seen = new Set<string>()
-  return raw
-    .flatMap((item) => {
-      const canonical = ResearchCanonical.canonical(item.url)
-      if (!canonical || seen.has(canonical) || !/^https?:$/.test(new URL(canonical).protocol)) return []
-      seen.add(canonical)
-      const published =
-        item.published && !Number.isNaN(Date.parse(item.published))
-          ? new Date(Date.parse(item.published)).toISOString().slice(0, 10)
-          : undefined
-      return [
-        {
-          url: item.url,
-          title: clip(item.title ?? "", TITLE_CHARS) || new URL(canonical).hostname,
-          snippet: clip(item.snippet ?? "", SNIPPET_CHARS),
-          ...(published ? { published } : {}),
-        },
-      ]
-    })
-    .slice(0, Math.min(Math.max(1, limit), ResearchSearch.MAX_RESULTS))
-}
-
-// "Title: …" / "URL: …" blocks, as Exa's search tool writes them; without any, every address the text names.
-function blocks(body: string) {
-  const records = body.split("\n").reduce<Block[]>((list, line) => {
-    const field = FIELD.exec(line)
-    const name = field?.[1]?.toLowerCase()
-    const value = (field ? field[2]! : line).trim()
-    const current = list.at(-1)
-    const rest = list.slice(0, -1)
-    if (name === "title") return [...list, { title: value, text: [] }]
-    if (name === "url")
-      return current && !current.url ? [...rest, { ...current, url: value }] : [...list, { url: value, text: [] }]
-    if (!current) return list
-    if (name === "published date" || name === "published") return [...rest, { ...current, published: value }]
-    if (name === "author" || !current.url || !value || current.text.join(" ").length >= SNIPPET_CHARS) return list
-    return [...rest, { ...current, text: [...current.text, value] }]
-  }, [])
-  const items = records.flatMap((record) =>
-    record.url
-      ? [{ url: record.url, title: record.title, snippet: record.text.join(" "), published: record.published }]
-      : [],
-  )
-  if (items.length) return items
-  return [...body.matchAll(/https?:\/\/[^\s<>"')\]]+/g)].map((match) => ({ url: match[0] }))
-}
-
-// One result of a search service's text answer, as its lines are read.
-type Block = {
-  readonly url?: string
-  readonly title?: string
-  readonly published?: string
-  readonly text: readonly string[]
-}
-const FIELD = /^\s*(Title|URL|Published Date|Published|Author|Text|Highlights|Summary):\s*(.*)$/i
-
-function clip(value: string, max: number) {
-  const cleaned = WebFence.clean(value).replace(/\s+/g, " ").trim()
-  return cleaned.length > max ? `${cleaned.slice(0, max - 1).trimEnd()}…` : cleaned
-}

@@ -3,7 +3,6 @@ import path from "path"
 import { Effect, Fiber } from "effect"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { FSUtil } from "@vectordevai/core/fs-util"
-import { ResearchSearch } from "@vectordevai/core/research/search"
 import { ResearchStore } from "@vectordevai/core/research/store"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
@@ -20,6 +19,7 @@ import { SessionCompaction } from "../../src/session/compaction"
 import { ResearchRun } from "../../src/tool/research-run"
 import { reply } from "../lib/llm-server"
 import { calls, output, plan, ref, repositoryConfig, runtime, send, setup } from "../lib/research"
+import { FakeBridge } from "../lib/fake-bridge"
 import { FakeWeb } from "../../../core/test/lib/fake-web"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
 
@@ -35,7 +35,12 @@ const web = FakeWeb.start({ sites: FakeWeb.sites() })
 const it = runtime(web)
 // Where someone can answer the plan card.
 const app = runtime(web, { client: "app" })
-afterAll(() => web.close())
+// A desktop whose research browsers answer each search with the fake web's pages, for the tests that search.
+const bridge = FakeBridge.start(FakeBridge.searching(web))
+afterAll(async () => {
+  await bridge.close()
+  await web.close()
+})
 
 const allow = [{ permission: "research_read", pattern: "*", action: "allow" as const }]
 const names = (body: string) =>
@@ -48,7 +53,7 @@ it.instance(
   "a greeting in the research mode goes to the quick lane with no memory and no recall",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const brain = yield* Brain.Service
       const instruction = yield* Instruction.Service
       yield* brain.propose(yield* instruction.place(), {
@@ -81,7 +86,7 @@ it.instance(
   "a question in the research mode is Work: the lead may start researchers, up to Focused's 2",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const lead = yield* sessions.create({ title: "Research", permission: allow })
       const brief = (description: string, prompt: string) => ({ description, prompt, subagent_type: "researcher" })
@@ -130,7 +135,7 @@ it.instance(
   '"no subagents" keeps the research lead on its own',
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const lead = yield* sessions.create({ title: "Research", permission: allow })
       yield* test.llm.text("I will research it myself.")
@@ -150,7 +155,7 @@ app.instance(
   '"ok" on an open plan card starts the plan, with no new request and no recall',
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const question = yield* Question.Service
       const asked: string[] = []
       yield* Effect.gen(function* () {
@@ -211,7 +216,7 @@ it.instance(
   "a child's plan cannot raise a request: build's research tool at Work keeps the lead and build at Work",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const build = yield* sessions.create({ title: "Build", permission: allow })
       const child = (hit: { body: Record<string, unknown> }) =>
@@ -256,7 +261,7 @@ app.instance(
   "\"Start deep\" on the root plan card raises the request to Thorough and research's caps to Deep's",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const question = yield* Question.Service
       yield* Effect.gen(function* () {
         while (true) {
@@ -293,7 +298,7 @@ app.instance(
   "a request the user sized Focused is proposed Focused, whatever the model planned, and Start keeps it there",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const question = yield* Question.Service
       const offered: string[][] = []
       yield* Effect.gen(function* () {
@@ -337,7 +342,7 @@ it.instance(
   "research's default caps are the run's budget only when the user set none",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const guard = yield* SpendGuard.Service
       const prompt = yield* SessionPrompt.Service
@@ -387,16 +392,13 @@ it.instance(
 // A test of the user's run budget in config: the user's config is read once, when the repository's instance first
 // loads its config, so each test sets one.
 const configured = Effect.fn("test.configured")(function* (run: Record<string, number>) {
-  const test = yield* setup(web)
+  const test = yield* setup()
   const fs = yield* FSUtil.Service
   const config = yield* Config.Service
   const sessions = yield* Session.Service
   const spend = yield* SpendGuard.Service
   // The user's own run limits: a repository's config cannot set them.
-  yield* fs.writeWithDirs(
-    path.join(Global.Path.config, "vector.json"),
-    JSON.stringify({ research: { search: { provider: "searxng", url: web.url("searxng", "/") } }, budget: { run } }),
-  )
+  yield* fs.writeWithDirs(path.join(Global.Path.config, "vector.json"), JSON.stringify({ budget: { run } }))
   yield* config.invalidate()
   const session = yield* sessions.create({ title: "Research", permission: allow })
   yield* test.llm.text("Planning.")
@@ -431,7 +433,7 @@ it.instance(
   "a cap sent while a run goes stays when the request is raised to Deep, and a guest's limit holds Deep's caps too",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const prompt = yield* SessionPrompt.Service
       const spend = yield* SpendGuard.Service
@@ -496,7 +498,7 @@ it.instance(
   "once the page budget is used the run ends with a report from what it read",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web, { research: { limits: { focused: { pages: 1 } } } })
+      const test = yield* setup({ research: { limits: { focused: { pages: 1 } } } })
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research", permission: allow })
       yield* test.llm.tool("research_plan", plan())
@@ -528,10 +530,11 @@ it.instance(
   "a repository's config cannot choose where research searches",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const fs = yield* FSUtil.Service
       const config = yield* Config.Service
-      // The user set up no search; the cloned repository names a SearXNG server of its author's, and is trusted.
+      // The cloned repository names a SearXNG server of its author's, and is trusted: research searches in its own
+      // research browsers all the same, and the server gets nothing.
       yield* fs.writeWithDirs(path.join(Global.Path.config, "vector.json"), JSON.stringify({}))
       yield* fs.writeWithDirs(
         path.join(test.dir, "vector.json"),
@@ -551,9 +554,14 @@ it.instance(
       yield* test.llm.tool("research_plan", plan())
       yield* test.llm.tool("research_search", { query: "heat pump field study savings" })
       yield* test.llm.text("Done.")
-      yield* send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." })
+      const searched = FakeBridge.searches(bridge).length
+      yield* FakeBridge.within(
+        bridge,
+        send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." }),
+      )
       const [search] = yield* calls(session.id, "research_search")
-      expect(output(search)).toBe(ResearchSearch.NONE)
+      expect(output(search)).toContain("results from Google")
+      expect(FakeBridge.searches(bridge).length - searched).toBe(1)
       expect(web.count("searxng")).toBe(0)
     }),
   60_000,
@@ -563,7 +571,7 @@ it.instance(
   "the research lead recalls how the owner works and no fact about them",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const brain = yield* Brain.Service
       const instruction = yield* Instruction.Service
       const place = yield* instruction.place()
@@ -612,7 +620,7 @@ it.instance(
   "once Run Guard warns the lead starts no new researcher",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const prompt = yield* SessionPrompt.Service
       const spend = yield* SpendGuard.Service
@@ -662,7 +670,7 @@ it.instance(
   "once Run Guard warns, a research lead the build agent started starts no new researcher either",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const prompt = yield* SessionPrompt.Service
       const spend = yield* SpendGuard.Service
@@ -723,7 +731,7 @@ it.instance(
   "a compaction of a research session keeps the run, where its sub-questions stand and its notes",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const prompt = yield* SessionPrompt.Service
       const compaction = yield* SessionCompaction.Service

@@ -256,19 +256,17 @@ export function repositoryConfig(llm: string, extra: Partial<ConfigV1.Info> = {}
 const userConfig = path.join(Global.Path.config, "vector.json")
 
 /**
- * Writes the repository's config and trusts it, as the user would, and research's settings to the user's own config:
- * SearXNG on the fake web as research's search, with `research` laid over it.
+ * Writes the repository's config and trusts it, as the user would, and `research`, research's settings, to the user's
+ * own config. Research searches in the desktop's research browsers: a test that searches points the engine at a fake
+ * desktop (FakeBridge.searching).
  */
-export const setup = Effect.fn("ResearchTest.setup")(function* (web: FakeWeb.Web, extra: Partial<ConfigV1.Info> = {}) {
+export const setup = Effect.fn("ResearchTest.setup")(function* (extra: Partial<ConfigV1.Info> = {}) {
   const dir = (yield* TestInstance).directory
   const llm = yield* TestLLMServer
   const fs = yield* FSUtil.Service
   const config = yield* Config.Service
   const { research, ...repository } = extra
-  yield* fs.writeWithDirs(
-    userConfig,
-    JSON.stringify({ research: { search: { provider: "searxng", url: web.url("searxng", "/") }, ...research } }),
-  )
+  yield* fs.writeWithDirs(userConfig, JSON.stringify({ research: { ...research } }))
   yield* config.invalidate()
   yield* fs.writeWithDirs(path.join(dir, "vector.json"), JSON.stringify(repositoryConfig(llm.url, repository)))
   const snapshot = yield* Effect.promise(() => WorkspaceTrust.snapshot(dir, [path.join(dir, "vector.json")]))

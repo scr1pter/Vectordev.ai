@@ -1,5 +1,6 @@
 import type { Message, Part } from "@vectordevai/sdk/v2/client"
 import { ResearchConfidence } from "@vectordevai/core/research/confidence"
+import { ResearchSearch } from "@vectordevai/core/research/search"
 import { Research } from "@vectordevai/schema/research"
 import { Option, Schema } from "effect"
 
@@ -16,7 +17,7 @@ export const GUEST = "Sources are visible to the repository owner."
 export const HELD = "This report and its sources stay private and out of later sessions until you keep them."
 export const WRAP_UP = "Write the report now from what you have"
 export const NO_SEARCH =
-  "No search service set up. Research will use this repository's brain, its files and links you paste."
+  "Nothing is searched on the web here. Research will use this repository's brain, its files and links you paste."
 export const PAYWALL =
   "Paywalled: Vector kept the public excerpt only. Use Open in browser to read the rest with your own sign-in."
 export const VIEW_ONLY =
@@ -295,6 +296,7 @@ export function decodePlanAnswer(text: string): Research.PlanAnswer | undefined 
 /** The plan card's search line. */
 export function searchLine(card: Card | undefined) {
   if (!card) return undefined
+  if (card.search.provider === "browser") return `Search: ${ResearchSearch.WHERE}`
   if (card.search.provider === "searxng") return `Search: SearXNG${card.search.host ? ` (${card.search.host})` : ""}`
   if (card.search.provider === "exa") return "Search: Exa, on your key. Searches go to Exa, billed by Exa."
   if (card.search.provider === "parallel")

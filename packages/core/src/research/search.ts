@@ -1,58 +1,61 @@
 export * as ResearchSearch from "./search"
 
-import { Data, Duration, Effect, Option, Schema } from "effect"
-import { HttpClientError, HttpClientRequest, type HttpClient } from "effect/unstable/http"
-import { collectBoundedResponseBody } from "../tool/http-body"
-import { WebFetchRequest } from "../util/webfetch-request"
+import { Schema } from "effect"
+import { Egress } from "../local-mode/egress"
+import { LocalPolicy } from "../local-mode/policy"
 import { ResearchCanonical } from "./canonical"
 import { WebFence } from "./fence"
-import { ResearchOutbound } from "./outbound"
 
-// Where research searches. SearXNG is a search server the user runs or chooses: Vector asks its JSON API
-// (`GET {url}/search?q=…&format=json`), which the server's settings have to allow. Exa and Parallel are the existing
-// search clients, on the user's own key. The `browser` provider reads a results page in the agent's own research
-// browser and is off until each engine's terms are checked. `none` searches nothing: research uses the repository's
-// brain, its files and the addresses the user pasted. `auto` takes the first of these that is set up, and under Vector
-// Local skips Exa and Parallel unless the user allowed them. The search server is the user's choice, so it is read
-// only from their own config (the engine enforces that).
-
-export const Provider = Schema.Literals(["auto", "searxng", "exa", "parallel", "browser", "none"])
-export type Provider = typeof Provider.Type
+// How research searches the web (section 5.7, owner decision 23 Oct 2026): with Vector's own Chromium, as the user's
+// visible browser turns typed words into a Google search. The calling agent's own research browser (the lead's, or
+// each researcher's) loads the results page for the query, and the desktop reads the organic results off it (title,
+// address, snippet). There is no search service, no search server and no key. When Google answers with a check for
+// automated traffic, a consent wall or a page Vector cannot read, the same research browser loads DuckDuckGo's HTML
+// results page once instead; Vector never answers, clicks through or works around such a check. Where there is no
+// research browser (the CLI, WSL, a remote server, a headless run) research searches nothing, and says so.
+//
+// A results page is browsing the user asked for, as the visible browser's address-bar search is, so robots.txt, which
+// research's own page reads follow, does not decide it. Everything else about research browsers holds: the query
+// passes the outbound check first, the page is research-browser traffic under Vector Local, the run's rate limits
+// apply, and each result's address joins the run's provenance so it may be read. What the page says is the web's.
 
 export const Recency = Schema.Literals(["day", "week", "month", "year"])
 export type Recency = typeof Recency.Type
 
 export const MAX_RESULTS = 20
 export const DEFAULT_RESULTS = 8
-export const MAX_BYTES = 2 * 1024 * 1024
-export const TIMEOUT = Duration.seconds(20)
 const TITLE_CHARS = 300
 const SNIPPET_CHARS = 500
 
+/** The results pages research loads, in the order it tries them. */
+export const ENGINES = ["google", "duckduckgo"] as const
+export type Engine = (typeof ENGINES)[number]
+export const NAMES: Readonly<Record<Engine, string>> = { google: "Google", duckduckgo: "DuckDuckGo" }
+
+/** Where searches go, as the plan card says it. */
+export const WHERE =
+  "Google, in each research agent's own browser (DuckDuckGo when Google asks for a check). No search service or key."
+/** The run was told to search nothing (`vector run --research --search none`). */
 export const NONE =
-  "No search service set up. Research will use this repository's brain, its files and links you paste. Set up search."
-export const JSON_OFF =
-  "This SearXNG server does not answer in JSON. Turn on the json format in its settings (search.formats) and try again."
-export const BUSY = "The search server is limiting searches right now. Try again in a minute."
-export const FORWARDING =
-  "This server may pass your prompts or queries on to services it is set up to use. Vector can't see past it."
+  "This research searches nothing on the web. It uses this repository's brain, its files and the addresses in your message."
+/** No research browser here, so no search. */
+export const NEEDS_DESKTOP =
+  "Searching the web needs Vector's browser in the desktop app, which this Vector does not have (the CLI, WSL, a remote server or a headless run). Research will use this repository's brain, its files and the addresses in your message."
+/** Every results page asked for a check or could not be read. */
+export const UNAVAILABLE =
+  "Search is unavailable right now: Google and DuckDuckGo answered with a check for automated traffic, a consent page or a page Vector could not read, and Vector never answers or works around those. Continue with this repository's brain, its files, the addresses in the user's message and the pages already found, and say in the report that web search was unavailable."
 export const SITE = "The site filter has to be a host name, such as nature.com."
+/** Vector Local's Web access lets neither results page through. */
+export const LOCAL = "Vector Local's Web access keeps research's searches off Google and DuckDuckGo."
 
 // A host name: labels of letters, digits and hyphens, the last one starting with a letter.
 const HOST = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/i
-
-/** Why Vector Local lets a paid search service see the queries, shown beside the allow. */
-export function provided(provider: "exa" | "parallel") {
-  const name = provider === "exa" ? "Exa" : "Parallel"
-  return `${name} sees your search queries; billed by ${name} on your key`
-}
 
 export type Result = {
   readonly url: string
   readonly title: string
   readonly snippet: string
   readonly published?: string
-  readonly engine?: string
 }
 
 export type Query = {
@@ -62,36 +65,112 @@ export type Query = {
   readonly limit?: number
 }
 
-export class SearchFailed extends Data.TaggedError("ResearchSearchFailed")<{ readonly message: string }> {}
-/** The outbound check refused the search: it would send private text. Nothing was sent. */
-export class QueryRefused extends Data.TaggedError("ResearchSearchRefused")<{
-  readonly reason: ResearchOutbound.Reason
-  readonly message: string
-}> {}
-// The caller's own refusal, carried through the request so it is passed on as it was.
-class Declined extends Data.TaggedError("ResearchSearchDeclined")<{ readonly cause: unknown }> {}
+/** Whether a site filter is a host name, the only kind a search takes. */
+export function site(value: string) {
+  return HOST.test(value)
+}
 
-/** The providers `auto` tries, in order, with what is set up and allowed. */
-export function order(input: {
-  readonly provider: Provider
-  readonly searxng?: string
-  readonly exa: boolean
-  readonly parallel: boolean
-  /** Vector Local is on; `allowed` lists the paid services the user let through. */
-  readonly local?: { readonly allowed: readonly ("exa" | "parallel")[] }
-  /** Searching through a results page in the research browser: off by default, desktop only. */
-  readonly browser?: boolean
-}): readonly Exclude<Provider, "auto">[] {
-  const paid = (name: "exa" | "parallel") => input[name] && (!input.local || input.local.allowed.includes(name))
-  const available: Readonly<Record<Exclude<Provider, "auto" | "none">, boolean>> = {
-    searxng: !!input.searxng,
-    exa: paid("exa"),
-    parallel: paid("parallel"),
-    browser: !!input.browser,
+/** The words a search sends: the query, with its site filter as `site:`, which both results pages read. */
+export function words(query: Query) {
+  return query.site ? `${query.query} site:${query.site}` : query.query
+}
+
+// Each engine's period filter: Google's tbs=qdr:<d|w|m|y>, DuckDuckGo's df=<d|w|m|y>.
+const PERIOD: Readonly<Record<Recency, string>> = { day: "d", week: "w", month: "m", year: "y" }
+
+/** The results page for a query on one engine, as research loads it. */
+export function page(engine: Engine, query: Query) {
+  if (engine === "duckduckgo") {
+    const url = new URL("https://html.duckduckgo.com/html/")
+    url.searchParams.set("q", words(query))
+    if (query.recency) url.searchParams.set("df", PERIOD[query.recency])
+    return url.toString()
   }
-  if (input.provider === "none") return ["none"]
-  if (input.provider !== "auto") return available[input.provider] ? [input.provider, "none"] : ["none"]
-  return [...(["searxng", "exa", "parallel", "browser"] as const).filter((name) => available[name]), "none"]
+  const url = new URL("https://www.google.com/search")
+  url.searchParams.set("q", words(query))
+  if (query.recency) url.searchParams.set("tbs", `qdr:${PERIOD[query.recency]}`)
+  return url.toString()
+}
+
+/**
+ * The engines whose results page Vector Local's Web access lets this search load now, as research-browser traffic,
+ * and why the first it kept back was kept back; with Vector Local off, both. Each page kept back is logged, as Vector
+ * Local logs what it refuses, and the person is told. The desktop's research proxy decides every request again.
+ */
+export function reachable(query: Query, tool = "research_search") {
+  const policy = Egress.policy()
+  const decided = ENGINES.map((engine) => {
+    const url = page(engine, query)
+    const verdict = policy.enabled
+      ? LocalPolicy.decide(policy, { purpose: "research-browser", url, source: "research-browser" })
+      : undefined
+    if (!verdict || verdict.decision === "allow") return { engine, refused: undefined }
+    Egress.record({ source: "research-browser", url, tool, notify: true }, verdict)
+    return { engine, refused: verdict.reason }
+  })
+  return {
+    engines: decided.flatMap((item) => (item.refused === undefined ? [item.engine] : [])),
+    refused: decided.find((item) => item.refused !== undefined)?.refused,
+  }
+}
+
+/** The engine whose results page this address is, as `page` builds one; undefined for any other address. */
+export function engineOf(url: string): Engine | undefined {
+  if (!URL.canParse(url)) return undefined
+  const address = new URL(url)
+  if (address.protocol !== "https:" || address.port || address.username || address.password) return undefined
+  if (address.hostname === "www.google.com" && address.pathname === "/search") return "google"
+  if (address.hostname === "html.duckduckgo.com" && (address.pathname === "/html/" || address.pathname === "/html"))
+    return "duckduckgo"
+  return undefined
+}
+
+/**
+ * Results as research keeps them, from whatever page or process read them: http and https addresses only, each page
+ * once by its canonical form, never a search engine's own pages, the title and snippet cleaned of hidden characters
+ * and cut to length, at most `limit`.
+ */
+export function clean(
+  items: readonly {
+    readonly url: string
+    readonly title?: string
+    readonly snippet?: string
+    readonly published?: string
+  }[],
+  limit = DEFAULT_RESULTS,
+): readonly Result[] {
+  const seen = new Set<string>()
+  return items
+    .flatMap((item) => {
+      const canonical = ResearchCanonical.canonical(item.url)
+      if (!canonical || seen.has(canonical)) return []
+      const address = new URL(canonical)
+      if (!/^https?:$/.test(address.protocol) || own(address.hostname)) return []
+      seen.add(canonical)
+      const published = date(item.published)
+      return [
+        {
+          url: item.url,
+          title: text(item.title, TITLE_CHARS) || address.hostname,
+          snippet: text(item.snippet, SNIPPET_CHARS),
+          ...(published ? { published } : {}),
+        },
+      ]
+    })
+    .slice(0, Math.min(Math.max(1, limit), MAX_RESULTS))
+}
+
+/**
+ * Whether a host is a search engine's own: Google's search pages on any of its country domains, its sign-in, consent,
+ * policy and maps hosts, its cache, static and ad hosts, and DuckDuckGo's. A link there is the engine's, not a result.
+ */
+export function own(hostname: string) {
+  const host = hostname.toLowerCase().replace(/\.$/, "")
+  if (/^(?:(?:www|accounts|consent|policies|maps)\.)?google\.(?:com|[a-z]{2}|co\.[a-z]{2}|com\.[a-z]{2})$/.test(host))
+    return true
+  if (/(?:^|\.)(?:googleusercontent|gstatic|googleadservices|googlesyndication|doubleclick)\.(?:com|net)$/.test(host))
+    return true
+  return host === "duckduckgo.com" || host.endsWith(".duckduckgo.com")
 }
 
 /**
@@ -114,132 +193,6 @@ export function listing(query: string, results: readonly Result[], read: Readonl
       .join("\n"),
   )
 }
-
-/** The SearXNG JSON request for a query: its search path under the server's address, with the query's options. */
-export function searxngUrl(base: string, query: Query) {
-  const url = new URL(base)
-  url.pathname = `${url.pathname.replace(/\/+$/, "")}/search`
-  url.search = ""
-  url.hash = ""
-  url.searchParams.set("q", query.site ? `${query.query} site:${query.site}` : query.query)
-  url.searchParams.set("format", "json")
-  if (query.recency) url.searchParams.set("time_range", query.recency)
-  return url.toString()
-}
-
-const SearxngResult = Schema.Struct({
-  url: Schema.String,
-  title: Schema.optional(Schema.NullOr(Schema.String)),
-  content: Schema.optional(Schema.NullOr(Schema.String)),
-  publishedDate: Schema.optional(Schema.NullOr(Schema.String)),
-  engine: Schema.optional(Schema.NullOr(Schema.String)),
-})
-const SearxngAnswer = Schema.Struct({ results: Schema.Array(Schema.Unknown) })
-const decodeAnswer = Schema.decodeUnknownOption(Schema.fromJsonString(SearxngAnswer))
-const decodeResult = Schema.decodeUnknownOption(SearxngResult)
-
-/**
- * The results of a SearXNG JSON answer: http and https addresses only, each page once (by its canonical form), the
- * title and snippet cleaned of hidden characters and cut to length. Results the parser cannot read are left out, and
- * an answer that is not SearXNG's JSON gives none.
- */
-export function parseSearxng(body: string, limit = DEFAULT_RESULTS): readonly Result[] {
-  const answer = decodeAnswer(body)
-  if (Option.isNone(answer)) return []
-  const seen = new Set<string>()
-  return answer.value.results
-    .flatMap((raw) => {
-      const result = decodeResult(raw)
-      if (Option.isNone(result)) return []
-      const canonical = ResearchCanonical.canonical(result.value.url)
-      if (!canonical || seen.has(canonical)) return []
-      seen.add(canonical)
-      const published = date(result.value.publishedDate)
-      return [
-        {
-          url: result.value.url,
-          title: text(result.value.title, TITLE_CHARS) || new URL(canonical).hostname,
-          snippet: text(result.value.content, SNIPPET_CHARS),
-          ...(published ? { published } : {}),
-          ...(result.value.engine ? { engine: text(result.value.engine, 40) } : {}),
-        },
-      ]
-    })
-    .slice(0, Math.min(Math.max(1, limit), MAX_RESULTS))
-}
-
-/**
- * Searches a SearXNG server. The words it sends, the query with its `site:` filter, pass the outbound check against
- * the run's `context` first, and the site has to be a host name. The caller puts the sources facet's preferred and
- * avoided domains in `context.domains`, so one of them can be the site filter although the private context names it
- * (section 6.4a). The request goes through WebFetchRequest like any web read: the name is pinned and a server on the
- * user's own network asks `authorizePrivate` once. `authorize` is the caller's decision for the server's address
- * (Vector Local's Web access); its failure is passed on unchanged.
- */
-export const searxng = Effect.fn("ResearchSearch.searxng")(
-  function* (
-    query: Query,
-    options: {
-      readonly http: HttpClient.HttpClient
-      readonly url: string
-      readonly context: ResearchOutbound.Context
-      readonly authorize: (url: string) => Effect.Effect<void, unknown>
-      readonly authorizePrivate?: (url: string) => Effect.Effect<void, unknown>
-      readonly resolver?: WebFetchRequest.DestinationResolver
-    },
-  ) {
-    if (query.site !== undefined && !HOST.test(query.site)) return yield* new SearchFailed({ message: SITE })
-    const address = searxngUrl(options.url, query)
-    const checked = ResearchOutbound.check(new URL(address).searchParams.get("q") ?? "", options.context)
-    if (!checked.ok) return yield* new QueryRefused({ reason: checked.reason, message: checked.message })
-    const answer = yield* Effect.gen(function* () {
-      const response = yield* WebFetchRequest.execute(
-        options.http,
-        HttpClientRequest.get(address).pipe(HttpClientRequest.setHeaders({ Accept: "application/json" })),
-        {
-          authorize: (url) => options.authorize(url).pipe(Effect.mapError((cause) => new Declined({ cause }))),
-          authorizePrivate: options.authorizePrivate
-            ? (url) => options.authorizePrivate!(url).pipe(Effect.mapError((cause) => new Declined({ cause })))
-            : undefined,
-          resolver: options.resolver,
-        },
-      ).pipe(
-        Effect.catchIf(
-          (error): error is HttpClientError.HttpClientError =>
-            HttpClientError.isHttpClientError(error) && error.reason._tag === "StatusCodeError" && !!error.response,
-          (error) => Effect.succeed(error.response!),
-        ),
-      )
-      const body = yield* collectBoundedResponseBody(
-        response,
-        MAX_BYTES,
-        () => new SearchFailed({ message: "The search server sent more than Vector reads for one search." }),
-      )
-      return { status: response.status, body: new TextDecoder().decode(body) }
-    }).pipe(
-      Effect.scoped,
-      Effect.timeoutOrElse({
-        duration: TIMEOUT,
-        orElse: () => Effect.fail(new SearchFailed({ message: "The search server did not answer in time." })),
-      }),
-      Effect.catchIf(
-        (error) => !(error instanceof Declined) && !(error instanceof SearchFailed),
-        () => Effect.fail(new SearchFailed({ message: "Vector could not reach the search server." })),
-      ),
-    )
-    // SearXNG answers 403 when its settings leave the json format off, and 429 when its limiter holds a client back.
-    if (answer.status === 403) return yield* new SearchFailed({ message: JSON_OFF })
-    if (answer.status === 429) return yield* new SearchFailed({ message: BUSY })
-    if (answer.status < 200 || answer.status >= 300)
-      return yield* new SearchFailed({ message: `The search server answered ${answer.status}.` })
-    if (Option.isNone(decodeAnswer(answer.body))) return yield* new SearchFailed({ message: JSON_OFF })
-    return parseSearxng(answer.body, query.limit)
-  },
-  Effect.catchIf(
-    (error) => error instanceof Declined,
-    (error) => Effect.fail((error as Declined).cause),
-  ),
-)
 
 function text(value: string | null | undefined, max: number) {
   const cleaned = WebFence.clean(value ?? "")

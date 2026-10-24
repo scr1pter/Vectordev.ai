@@ -30,7 +30,7 @@ const FORMATS: readonly { value: Research.Format; label: string }[] = [
 ]
 
 const SETUP =
-  "To search the web, add a SearXNG server (with its JSON format turned on) or an Exa or Parallel key to research.search in your user config. Changing config restarts Vector's engine, which stops running sessions, so set it up between runs."
+  "Research searches the web in Vector's desktop app, where each research agent has a browser of its own: open this repository there to search. No search service or key is needed."
 
 /**
  * The research_plan question as a plan card (section 8.2): every field of the plan can be changed before Start, Start

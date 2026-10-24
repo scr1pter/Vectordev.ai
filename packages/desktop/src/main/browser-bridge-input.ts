@@ -1,3 +1,4 @@
+import { ResearchSearch } from "@vectordevai/core/research/search"
 import type { BrowserAgentInput } from "../preload/types"
 import type { ResearchCommand, ResearchInput } from "./research-browser"
 
@@ -66,6 +67,7 @@ const RESEARCH_COMMANDS = new Set<ResearchCommand>([
   "research.scroll",
   "research.back",
   "research.screenshot",
+  "research.search",
   "research.close",
 ])
 const RESEARCH_FIELDS = new Set([
@@ -84,6 +86,10 @@ const RESEARCH_FIELDS = new Set([
   "text",
   "key",
   "deltaY",
+  "query",
+  "recency",
+  "limit",
+  "engines",
 ])
 const RESEARCH_ID = /^[A-Za-z0-9_-]{1,64}$/
 // A run reads at most a few hundred pages and searches; this bounds one command's copy of its addresses.
@@ -122,7 +128,32 @@ export function parseResearchBrowserInput(value: unknown): ResearchInput {
     ...(input.text === undefined ? {} : { text: optionalString(input.text, "text", 2_000)! }),
     ...(input.key === undefined ? {} : { key: optionalString(input.key, "key", 32)! }),
     ...(input.deltaY === undefined ? {} : { deltaY: optionalNumber(input.deltaY, "deltaY")! }),
+    // A query is the agent's words and a site filter: at most 200 characters and a host name.
+    ...(input.query === undefined ? {} : { query: optionalString(input.query, "query", 600)! }),
+    ...(input.recency === undefined ? {} : { recency: recency(input.recency) }),
+    ...(input.limit === undefined ? {} : { limit: limit(input.limit) }),
+    ...(input.engines === undefined ? {} : { engines: engines(input.engines) }),
   }
+}
+
+function recency(value: unknown) {
+  const found = (["day", "week", "month", "year"] as const).find((item) => item === value)
+  if (!found) throw new Error("Invalid research browser recency.")
+  return found
+}
+
+function limit(value: unknown) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > ResearchSearch.MAX_RESULTS)
+    throw new Error("Invalid research browser limit.")
+  return value
+}
+
+// The engines a search may reach, each once, in Vector's order.
+function engines(value: unknown) {
+  if (!Array.isArray(value) || value.length === 0) throw new Error("Invalid research browser engines.")
+  if (value.some((item) => !ResearchSearch.ENGINES.includes(item)) || new Set(value).size !== value.length)
+    throw new Error("Invalid research browser engines.")
+  return ResearchSearch.ENGINES.filter((engine) => value.includes(engine))
 }
 
 function researchID(value: unknown, name: string) {

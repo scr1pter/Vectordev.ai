@@ -58,8 +58,8 @@ afterAll(async () => {
   await web.close()
 })
 
-// The user approved reading pages for these runs, and the search server on their own network (the fake web resolves to
-// this computer, so SearXNG on it is a private address, which asks once for its origin).
+// The user approved reading pages for these runs, and pages on their own network (the fake web resolves to this
+// computer).
 const allow = [
   { permission: "research_read", pattern: "*", action: "allow" as const },
   { permission: "private_network", pattern: "*", action: "allow" as const },
@@ -77,6 +77,7 @@ const desktop = (pages: Record<string, unknown> = {}, html: (url: string) => str
     if (body.generation !== undefined && body.generation !== state.generation)
       return FakeBridge.research({ ok: false, resync: true })
     if (body.command === "research.open") state.url = String(body.url)
+    if (body.command === "research.search") return FakeBridge.searched(web)
     const shown = {
       generation: state.generation,
       url: state.url,
@@ -145,7 +146,7 @@ it.instance(
   "opens only an address in the run's provenance, sends the desktop only what it lacks, and saves what it reads",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research", permission: allow })
       bridge.answer(desktop())
@@ -173,22 +174,30 @@ it.instance(
       const [note] = yield* calls(session.id, "research_note")
       expect(note?.state.status === "completed" ? note.state.metadata.note : undefined).toBeTruthy()
 
-      // The desktop was asked to open the article only, and to close the browser once the lead's turn ended.
+      // The desktop was asked to search in the lead's browser, to open the article only, and to close the browser once
+      // the lead's turn ended.
       const sent = yield* settled(before)
-      expect(sent.map((call) => call.body.command)).toEqual(["research.open", "research.read", "research.close"])
-      const [open, read] = sent
+      expect(sent.map((call) => call.body.command)).toEqual([
+        "research.search",
+        "research.open",
+        "research.read",
+        "research.close",
+      ])
+      const [search, open, read] = sent
       const runID = browsed[1]!.state.status === "completed" ? browsed[1]!.state.metadata.runID : undefined
-      expect(open!.body).toMatchObject({
+      const own = {
         runID,
         sessionID: session.id,
         rootID: session.id,
         agent: "research",
         max: 1 + ResearchRun.LIMITS.focused.researchers,
         images: false,
-        url: ARTICLE,
-      })
-      expect(open!.body.generation).toBeUndefined()
-      // The run's search results, sent whole to start the desktop's copy.
+      }
+      // The search starts the desktop's copy of the run's provenance, which then holds nothing yet.
+      expect(search!.body).toMatchObject({ ...own, query: "heat pump savings in cold climates", provenance: [] })
+      expect(search!.body.generation).toBeUndefined()
+      expect(open!.body).toMatchObject({ ...own, url: ARTICLE, generation: "desktop-copy-1" })
+      // The search's results, which the desktop's copy lacks.
       expect(open!.body.provenance).toEqual(expect.arrayContaining([ARTICLE, COPY, web.url("docs", "/report.pdf")]))
       // The next command names that copy and sends nothing it already has.
       expect(read!.body).toMatchObject({ generation: "desktop-copy-1", provenance: [], typed: [] })
@@ -201,7 +210,7 @@ it.instance(
   "sends the whole provenance again when the desktop holds another copy of it",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research", permission: allow })
       const handler = desktop()
@@ -242,7 +251,7 @@ it.instance(
   "a link the browser followed joins the run's provenance, so research may read it",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research", permission: allow })
       bridge.answer(desktop({ "research.click": { url: COPY, address: COPY, joined: [COPY] } }))
@@ -273,7 +282,7 @@ it.instance(
   "typed text passes the outbound check with the run's private context, and a page listing a number does not clear it",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const fs = yield* FSUtil.Service
       const notes = path.join(test.dir, "notes.md")
       yield* fs.writeWithDirs(notes, "Ticket 48213 tracks the payments migration.\n")
@@ -316,7 +325,7 @@ it.instance(
   "a researcher's typing is checked against the lead's private context too: the whole run's",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const lead = yield* sessions.create({ title: "Research", permission: allow })
       bridge.answer(desktop())
@@ -370,7 +379,7 @@ it.instance(
   "a researcher is shown no private source of the run, by its address in its own browser or by its S#",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const lead = yield* sessions.create({ title: "Research", permission: allow })
       const notes = web.direct("planner", "/")
@@ -422,7 +431,7 @@ it.instance(
   "a researcher's typing is checked against what it read itself, and its sub-question exempts nothing",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const lead = yield* sessions.create({ title: "Research", permission: allow })
       bridge.answer(desktop())
@@ -482,7 +491,7 @@ it.instance(
   "a PDF that a click reaches is read into memory and saved as a source, as an opened one is",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research", permission: allow })
       const report = web.url("docs", "/report.pdf")
@@ -524,7 +533,7 @@ it.instance(
   "with Vector Local's Web access set to Your network, a research browser opens no site on the internet, whatever the desktop's proxy holds",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research", permission: allow })
       bridge.answer(desktop())
@@ -566,7 +575,7 @@ it.instance(
   "takes screenshots only for a model that reads images",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research", permission: allow })
       bridge.answer(desktop())
@@ -586,7 +595,7 @@ it.instance(
   "a script-built page is read in the agent's research browser when the desktop has one",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research", permission: allow })
       const spa = web.url("spa", "/")
@@ -626,7 +635,7 @@ it.instance(
     Effect.gen(function* () {
       pointed.off()
       try {
-        const test = yield* setup(web)
+        const test = yield* setup()
         const sessions = yield* Session.Service
         const session = yield* sessions.create({ title: "Research", permission: allow })
         const spa = web.url("spa", "/")

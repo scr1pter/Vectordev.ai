@@ -5,6 +5,7 @@ import { ResearchProvenance } from "@vectordevai/core/research/provenance"
 import { ResearchRate } from "@vectordevai/core/research/rate"
 import { ResearchReader } from "@vectordevai/core/research/reader"
 import { ResearchRobots } from "@vectordevai/core/research/robots"
+import { ResearchSearch } from "@vectordevai/core/research/search"
 import { queueTurn, runInWorld } from "./browser-agent"
 import { isCredentialField } from "./browser-credential-field"
 import { CredentialFocusChangedError, sendGuardedCharacters } from "./browser-credential-input"
@@ -21,6 +22,7 @@ import {
 } from "./browser-page"
 import { POST, addLinks, decideResearchNavigation, spelled, type Decision, type Kind } from "./research-navigation"
 import { NEEDS_GUARD, startResearchProxy, type ResearchProxy } from "./research-proxy"
+import { readSearchPage, searchOutcome, type SearchOutcome, type SearchPageRead } from "./research-search-page"
 import { egressFilter } from "./egress-filter"
 
 // Every research agent's own browser (section 5.6a). The lead `research` agent and each `researcher` it starts drive
@@ -74,6 +76,13 @@ import { egressFilter } from "./egress-filter"
 // - A browser closes when its agent's session finishes (the engine closes it), when its run is stopped, after 10 idle
 //   minutes, or when its page stops answering.
 //
+// Searching (research_search, section 5.7): the agent's own browser loads the results page Vector builds for the query,
+// Google's first, and Vector reads the organic results off it (research-search-page.ts). A check for automated
+// traffic, a consent wall or a page Vector cannot read is never answered or clicked through: the browser loads
+// DuckDuckGo's HTML results page once instead, and when that is no better, search is unavailable for this call. While
+// the browser shows a results page (or a check one led to), the agent may only open, go back, search again or close:
+// nothing on it can be read as a source, clicked or typed into.
+//
 // Electron keeps one listener per webRequest event per session, and Vector Local's Chromium dispatcher
 // (egress-filter.ts) holds each session's onBeforeRequest: the navigation rule registers there as a step, which runs
 // after Vector Local's own decision. The other webRequest events are this file's alone.
@@ -113,6 +122,10 @@ export const NO_DEVTOOLS =
   "Vector could not attach to the research browser's page, so it closed the browser: without that it cannot hold the page's scripts between commands or keep file dialogs from opening."
 export const SERVICE_WORKER = "Research browsers do not run service workers."
 export const STOPPED = "The user stopped this research browser, so this agent browses no more in this research."
+export const ON_SEARCH =
+  "Your research browser is on a search engine's page. Its results came back from research_search: open one of them to read it."
+/** How long one results page may take to load: both engines' pages and their settling fit in the command deadline. */
+export const SEARCH_LOAD_MS = 15_000
 /** The CSP every research browser document gets: scripts, its own origin and GET forms, and no dialogs of any kind. */
 export const SANDBOX = "sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
 export const ROBOTS = ResearchReader.ROBOTS
@@ -130,6 +143,7 @@ export type ResearchCommand =
   | "research.scroll"
   | "research.back"
   | "research.screenshot"
+  | "research.search"
   | "research.close"
 
 export type ResearchInput = {
@@ -153,6 +167,12 @@ export type ResearchInput = {
   readonly text?: string
   readonly key?: string
   readonly deltaY?: number
+  /** search: the words to search for, the site filter already in them as `site:`. */
+  readonly query?: string
+  readonly recency?: ResearchSearch.Recency
+  readonly limit?: number
+  /** search: the engines Vector Local lets this search reach, in order (both by default). */
+  readonly engines?: readonly ResearchSearch.Engine[]
 }
 
 export type Report = {
@@ -178,6 +198,12 @@ export type Report = {
   readonly pdf?: { readonly url: string; readonly base64: string; readonly contentType: string }
   /** What typing left in the field, when it is not what was typed. */
   readonly value?: string
+  /** search: the engine whose results page answered, its results, and why each engine before it did not. */
+  readonly search?: {
+    readonly engine?: ResearchSearch.Engine
+    readonly results: readonly ResearchSearch.Result[]
+    readonly tried: readonly { readonly engine: ResearchSearch.Engine; readonly reason: string }[]
+  }
 }
 
 /** One live chip per research browser, for watching (the Sources tab). */
@@ -297,6 +323,8 @@ type Browser = {
   actedAt?: number
   /** The page's address as the rule decided it. */
   decided?: string
+  /** The page shown is a results page a search loaded, or a page its load led to on its own. */
+  search: boolean
   status?: number
   /** A load Vector itself started, already decided: the agent's open or back, or a popup the rule allowed. */
   expected?: { readonly url: string; readonly decision: Decision & { readonly allow: true } }
@@ -510,6 +538,7 @@ async function open(key: string, input: ResearchInput, run: Run): Promise<Browse
     images: input.images === true,
     state: "opening",
     debugger: false,
+    search: false,
     links: new Set(),
     forms: new Set(),
     requests: new Map(),
@@ -562,8 +591,22 @@ async function perform(browser: Browser, input: ResearchInput): Promise<Report> 
   return { ...report(browser), ok: true, ...result }
 }
 
+// What may not be done on a search engine's page: its results are research_search's, and a check is never answered.
+const OFF_SEARCH = new Set<ResearchCommand>([
+  "research.read",
+  "research.links",
+  "research.find",
+  "research.observe",
+  "research.click",
+  "research.type",
+  "research.press",
+  "research.scroll",
+  "research.screenshot",
+])
+
 async function act(browser: Browser, input: ResearchInput): Promise<Partial<Report>> {
   const contents = browser.contents
+  if (browser.search && OFF_SEARCH.has(input.command)) return fail(ON_SEARCH)
   switch (input.command) {
     case "research.open": {
       if (!input.url) return fail("Give the address to open.")
@@ -678,9 +721,65 @@ async function act(browser: Browser, input: ResearchInput): Promise<Partial<Repo
       const image = await contents.capturePage()
       return { screenshot: image.toDataURL() }
     }
+    case "research.search": {
+      const query = (input.query ?? "").trim()
+      if (!query) return fail("Give the words to search for.")
+      browser.state = "loading"
+      changed()
+      return search(
+        browser,
+        { query, ...(input.recency ? { recency: input.recency } : {}) },
+        input.limit ?? ResearchSearch.DEFAULT_RESULTS,
+        input.engines ?? ResearchSearch.ENGINES,
+        [],
+      )
+    }
     case "research.close":
       return {}
   }
+}
+
+// Searches on each engine in turn until one answers with a results page; the next is tried only after a check, a
+// consent wall or a page Vector could not read, so DuckDuckGo is tried once at most.
+async function search(
+  browser: Browser,
+  query: ResearchSearch.Query,
+  limit: number,
+  engines: readonly ResearchSearch.Engine[],
+  tried: readonly { readonly engine: ResearchSearch.Engine; readonly reason: string }[],
+): Promise<Partial<Report>> {
+  const engine = engines[0]
+  if (!engine) return { ok: false, error: ResearchSearch.UNAVAILABLE, search: { results: [], tried } }
+  const outcome = await searchOn(browser, engine, query, limit)
+  if (outcome.kind === "results") return { search: { engine, results: outcome.results, tried } }
+  return search(browser, query, limit, engines.slice(1), [...tried, { engine, reason: outcome.reason }])
+}
+
+// One engine's results page, loaded as Vector's own navigation and read without touching it.
+async function searchOn(
+  browser: Browser,
+  engine: ResearchSearch.Engine,
+  query: ResearchSearch.Query,
+  limit: number,
+): Promise<SearchOutcome> {
+  const url = ResearchSearch.page(engine, query)
+  const decision = decide(browser, url, "search")
+  if (!decision.allow) return { kind: "unreadable", reason: decision.reason }
+  browser.actedAt = Date.now()
+  browser.expected = { url: spelled(url), decision }
+  const failed = await load(browser, () => browser.contents.loadURL(url), SEARCH_LOAD_MS).then(
+    () => undefined,
+    (error: unknown) => (error instanceof Error ? error.message : String(error)),
+  )
+  if (failed) return { kind: "unreadable", reason: failed }
+  await quiet(browser)
+  return world<SearchPageRead>(browser, readSearchPage, engine).then(
+    (read) => searchOutcome(engine, read, limit),
+    (): SearchOutcome => ({
+      kind: "unreadable",
+      reason: `Vector could not read ${ResearchSearch.NAMES[engine]}'s results page.`,
+    }),
+  )
 }
 
 // The field's value once the page has taken the keys: Chromium hands the page key events after sendInputEvent returns,
@@ -724,6 +823,7 @@ function decide(
     ...(browser.actedAt !== undefined ? { actedAt: browser.actedAt } : {}),
     now: Date.now(),
     ...(extra.typedHost ? { typedHost: extra.typedHost } : {}),
+    ...(browser.search ? { searching: true } : {}),
   })
 }
 
@@ -748,7 +848,7 @@ function fail(error: string): Partial<Report> {
 }
 
 // Loads within the timeout. A load the rule cancelled reads as the rule's reason, not as a network error.
-async function load(browser: Browser, start: () => Promise<void>) {
+async function load(browser: Browser, start: () => Promise<void>, timeout = LOAD_TIMEOUT_MS) {
   const before = browser.refused.length
   const outcome = await Promise.race([
     start().then(
@@ -756,7 +856,7 @@ async function load(browser: Browser, start: () => Promise<void>) {
       (error: unknown) => (error instanceof Error ? error.message : String(error)),
     ),
     new Promise<string>((resolve) =>
-      setTimeout(() => resolve(`The page did not load within ${LOAD_TIMEOUT_MS / 1000} seconds.`), LOAD_TIMEOUT_MS),
+      setTimeout(() => resolve(`The page did not load within ${timeout / 1000} seconds.`), timeout),
     ),
   ])
   if (!outcome) return
@@ -1031,8 +1131,17 @@ async function frame(browser: Browser, details: BeforeRequest) {
   // A new page: what the last one still had in flight is the network's to cancel, not this page's to wait for.
   browser.inflight = new Set([details.id])
   const address = new URL(details.url)
-  const typed = prior?.typedHost ?? (!decision.robots && decision.via === "provenance" ? address.hostname : undefined)
+  // A redirect on the host the user typed, or on a results page's own host, is not decided by robots.txt either.
+  const typed =
+    prior?.typedHost ??
+    (!decision.robots && (decision.via === "provenance" || decision.via === "search" || decision.via === "same-origin")
+      ? address.hostname
+      : undefined)
   browser.requests.set(details.id, typed ? { typedHost: typed } : {})
+  // A results page, a redirect of its load (a check, a consent wall) and the page's own navigations on its origin.
+  browser.search = prior
+    ? browser.search
+    : decision.via === "search" || (decision.via === "same-origin" && browser.search)
   browser.page = { requests: 0, start: browser.proxy.received(), over: false, cut: false }
   if (decision.join) {
     browser.run.provenance = addLinks(browser.run.provenance, [decision.join], "link")

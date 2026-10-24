@@ -10,6 +10,7 @@ import { Instruction } from "../../src/session/instruction"
 import { SessionMemory } from "../../src/session/memory"
 import { ResearchRun } from "../../src/tool/research-run"
 import { SubagentLifecycle } from "../../src/tool/subagent-lifecycle"
+import { FakeBridge } from "../lib/fake-bridge"
 import { raw, reply, TestLLMServer } from "../lib/llm-server"
 import { ResearchOutbound } from "@vectordevai/core/research/outbound"
 import { calls, output, plan, runtime, send, setup } from "../lib/research"
@@ -25,7 +26,14 @@ import { NetworkGuard } from "../../../core/test/lib/network-guard"
 const guard = NetworkGuard.use()
 const web = FakeWeb.start({ sites: FakeWeb.sites() })
 const it = runtime(web)
-afterAll(() => web.close())
+// A desktop whose research browsers answer each search with the fake web's pages.
+const bridge = FakeBridge.start(FakeBridge.searching(web))
+const desktop = FakeBridge.use(bridge)
+afterAll(async () => {
+  desktop.off()
+  await bridge.close()
+  await web.close()
+})
 
 // A researcher hears the owner's preferences about format, sources and style (section 6.4a), so how they work here is
 // about sources; a workflow line such as how they run tests is the lead's alone.
@@ -59,7 +67,7 @@ it.instance(
   "a researcher's request carries its sub-question and only the how-you-work lines it may hear, and returns capped",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       yield* remember()
       const sessions = yield* Session.Service
       const lead = yield* sessions.create({ title: "Research", permission: allow })
@@ -132,7 +140,7 @@ it.instance(
   "a brief that carries a line of a file the lead read is refused before any researcher starts",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const fs = yield* FSUtil.Service
       yield* fs.writeWithDirs(path.join(test.dir, "notes", "plan.md"), `# Plan\n\n${NOTES}\n`)
       const sessions = yield* Session.Service
@@ -159,7 +167,7 @@ it.instance(
   "only the research lead launches researchers, and only Vector launches the research judge",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const build = yield* sessions.create({ title: "Build" })
       yield* test.llm.tool("task", {
@@ -201,7 +209,7 @@ it.instance(
   "a run starts no more researchers than its depth allows",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web, { research: { limits: { deep: { researchers: 1 } } } })
+      const test = yield* setup({ research: { limits: { deep: { researchers: 1 } } } })
       const sessions = yield* Session.Service
       const lead = yield* sessions.create({ title: "Research", permission: allow })
       yield* test.llm.tool("research_plan", plan({ depth: "deep" }))
@@ -238,7 +246,7 @@ it.instance(
   "one batch of researchers cannot start past the run's cap",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web, { research: { limits: { deep: { researchers: 2 } } } })
+      const test = yield* setup({ research: { limits: { deep: { researchers: 2 } } } })
       const sessions = yield* Session.Service
       const lead = yield* sessions.create({ title: "Research", permission: allow })
       const brief = (description: string, prompt: string) => ({ description, prompt, subagent_type: "researcher" })
@@ -273,7 +281,7 @@ it.instance(
   "task calls made in one step cannot start researchers past the run's cap together",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web, { research: { limits: { deep: { researchers: 1 } } } })
+      const test = yield* setup({ research: { limits: { deep: { researchers: 1 } } } })
       const sessions = yield* Session.Service
       const lead = yield* sessions.create({ title: "Research", permission: allow })
       yield* test.llm.tool("research_plan", plan({ depth: "deep" }))
@@ -302,7 +310,7 @@ it.instance(
   "a session rule that allows task does not hand the lead a subagent its own rules deny",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const lead = yield* sessions.create({
         title: "Research",
@@ -329,7 +337,7 @@ it.instance(
   "a file the lead names in a sub-question is not attached to the researcher",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const fs = yield* FSUtil.Service
       yield* fs.writeWithDirs(path.join(test.dir, "notes", "plan.md"), `# Plan\n\n${NOTES}\n`)
       const sessions = yield* Session.Service
@@ -363,7 +371,7 @@ it.instance(
   "a researcher's request carries no instruction file of the repository, and its searches cannot name the working tree",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const fs = yield* FSUtil.Service
       yield* fs.writeWithDirs(
         path.join(test.dir, "AGENTS.md"),
@@ -406,7 +414,7 @@ it.instance(
   () =>
     Effect.gen(function* () {
       // A prompt the repository's config sets for the lead is the work too.
-      const test = yield* setup(web, {
+      const test = yield* setup({
         agent: { research: { prompt: "Research for the team that ships the zephyrDeploy pipeline." } },
       })
       const fs = yield* FSUtil.Service
@@ -420,11 +428,7 @@ it.instance(
       yield* fs.writeWithDirs(personal, "# Mine\n\nMy manager Dana Whitfield signs off every Falcon release.\n")
       yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(personal, { force: true })))
       const sessions = yield* Session.Service
-      // The fake web's SearXNG is on this computer, which asks once for its origin.
-      const lead = yield* sessions.create({
-        title: "Research",
-        permission: [...allow, { permission: "private_network", pattern: "*", action: "allow" }],
-      })
+      const lead = yield* sessions.create({ title: "Research", permission: allow })
       yield* test.llm.tool("research_plan", plan({ depth: "deep" }))
       for (const query of [
         "reconcileLedgerEntries heat pumps",
@@ -445,7 +449,7 @@ it.instance(
         })
       yield* test.llm.tool("research_search", { query: "heat pump savings in cold climates" })
       yield* test.llm.text("Done.")
-      const before = web.count("searxng")
+      const before = FakeBridge.searches(bridge).length
       const bodies = yield* send({
         sessionID: lead.id,
         agent: "research",
@@ -460,7 +464,7 @@ it.instance(
       // A query in public terms still goes out, and it is the only one that did.
       expect(searches[4]?.state.status).toBe("completed")
       expect(output(searches[4])).not.toBe(ResearchOutbound.REFUSAL)
-      expect(web.count("searxng") - before).toBe(1)
+      expect(FakeBridge.searches(bridge).length - before).toBe(1)
       const tasks = yield* calls(lead.id, "task")
       expect(tasks).toHaveLength(2)
       for (const task of tasks) {
@@ -478,7 +482,7 @@ it.instance(
   "a researcher that fails partway hands back no more than one that finishes",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const lead = yield* sessions.create({ title: "Research", permission: allow })
       yield* test.llm.tool("research_plan", plan({ depth: "deep" }))

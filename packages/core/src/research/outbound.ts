@@ -97,8 +97,8 @@ import { ResearchWords } from "./words"
 // a public source holds them, the numbers of a fair query included ("ISO 14001" when 14001 is one of its values). And a
 // private date is not kept out of queries.
 //
-// It checks literal overlap only: a model can still paraphrase. The queries go to the search service the user set up
-// and are shown in the Sources tab, so what went out can be seen.
+// It checks literal overlap only: a model can still paraphrase. The queries go to a search engine's results page in the
+// agent's own research browser and are shown in the Sources tab, so what went out can be seen.
 
 export const REFUSAL = "That search would send text from your private files. Rephrase it with public terms."
 

@@ -16,6 +16,7 @@ import { ResearchRun } from "../../src/tool/research-run"
 import { SubagentLifecycle } from "../../src/tool/subagent-lifecycle"
 import { TestLLMServer } from "../lib/llm-server"
 import { calls, output, plan, ref, runtime, send, setup } from "../lib/research"
+import { FakeBridge } from "../lib/fake-bridge"
 import { FakeWeb } from "../../../core/test/lib/fake-web"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
 
@@ -36,7 +37,12 @@ const web = FakeWeb.start({
   },
 })
 const it = runtime(web)
-afterAll(() => web.close())
+// A desktop whose research browsers answer each search with the fake web's pages, for the runs that search.
+const bridge = FakeBridge.start(FakeBridge.searching(web))
+afterAll(async () => {
+  await bridge.close()
+  await web.close()
+})
 
 const allow = [
   { permission: "research_read", pattern: "*", action: "allow" as const },
@@ -91,7 +97,7 @@ it.instance(
   "a Deep report is judged, an unsupported note sends the lead back once, and only new notes are judged again",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const brain = yield* Brain.Service
       const instruction = yield* Instruction.Service
       const place = yield* instruction.place()
@@ -207,7 +213,7 @@ it.instance(
   "a Focused report is judged only once it cites 8 notes, and a line the judge garbles leaves its note unjudged",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const article = web.url("article", "/")
 
@@ -264,7 +270,7 @@ it.instance(
   "a Deep run the user asked to skip the judge for is not judged",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const prompt = yield* SessionPrompt.Service
       const article = web.url("article", "/")
@@ -311,14 +317,13 @@ it.instance(
   "the user's own judge setting off turns the research judge off",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       // The user's config, read when the repository's instance first loads its config.
       const fs = yield* FSUtil.Service
       const config = yield* Config.Service
       yield* fs.writeWithDirs(
         path.join(Global.Path.config, "vector.json"),
         JSON.stringify({
-          research: { search: { provider: "searxng", url: web.url("searxng", "/") } },
           sizing: { judge: "off" },
         }),
       )
@@ -352,10 +357,10 @@ it.instance(
   "a full Deep run ends with its researchers, a judge and a report, and nothing leaves this computer",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
-      // The first researcher asks before the run's first page and before it searches the SearXNG server on the user's
-      // own network (the fake web resolves to this computer): the user approves both, as they would on their cards.
+      // The first researcher asks before the run's first page (the fake web resolves to this computer): the user approves
+      // it, as they would on their card. The researchers search in their own research browsers in the desktop app.
       const permission = yield* Permission.Service
       yield* Effect.gen(function* () {
         while (true) {
@@ -407,9 +412,19 @@ it.instance(
       yield* test.llm.textMatch(leading, "Heat pumps cut delivered heating energy by 61 percent [N2].")
       yield* test.llm.textMatch(judging, "N1: supported: stated\nN2: supported: stated")
 
-      yield* send({ sessionID: session.id, agent: "research", text: `Research this, be thorough: ${QUESTION}` })
+      const searched = FakeBridge.searches(bridge).length
+      yield* FakeBridge.within(
+        bridge,
+        send({ sessionID: session.id, agent: "research", text: `Research this, be thorough: ${QUESTION}` }),
+      )
 
       const children = yield* sessions.children(session.id)
+      // Each researcher searched in its own research browser.
+      expect(
+        FakeBridge.searches(bridge)
+          .slice(searched)
+          .map((call) => [call.body.sessionID, call.body.agent]),
+      ).toEqual(children.slice(0, 2).map((child) => [child.id, "researcher"]))
       expect(children.map((child) => SubagentLifecycle.read(child)?.agent)).toEqual([
         ResearchRun.RESEARCHER,
         ResearchRun.RESEARCHER,
@@ -432,7 +447,7 @@ it.instance(
   "the judge gets the passage around a quote across a line break, and nothing of a private page or a private claim",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research", permission: allow })
       const wrapped = web.url("wrapped", "/")
@@ -507,7 +522,7 @@ it.instance(
   "only Vector's own judge gate starts the research judge: not the lead, even when the user named the judge",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const prompt = yield* SessionPrompt.Service
       const session = yield* sessions.create({ title: "Research", permission: allow })

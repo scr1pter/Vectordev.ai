@@ -1981,14 +1981,23 @@ ToolRegistry.register({
 // on opening it, what it found. The app's plan card, Sources tab and report card show the rest. What pages wrote
 // reaches these rows only as titles, addresses and snippets, and is shown as plain text, never as Markdown.
 
-const RESEARCH_SEARCH: Record<string, string> = { searxng: "SearXNG", exa: "Exa", parallel: "Parallel" }
+// The results page a search read, by its engine; an older engine named its search service instead.
+const RESEARCH_SEARCH: Record<string, string> = {
+  google: "Google",
+  duckduckgo: "DuckDuckGo",
+  searxng: "SearXNG",
+  exa: "Exa",
+  parallel: "Parallel",
+}
 
 const RESEARCH_REFUSED: Record<string, string> = {
   outbound: "refused: it would send private text",
   provenance: "refused: address not from a search, a page link or your message",
   budget: "budget used",
   scope: "outside this research's scope",
-  none: "no search service set up",
+  none: "no web search for this run",
+  desktop: "needs the desktop app's browser",
+  local: "Vector Local's Web access",
   offline: "Web access is None",
 }
 
@@ -2065,6 +2074,7 @@ ToolRegistry.register({
     const state = createMemo(() => {
       if (props.status !== "completed") return undefined
       if (typeof props.metadata.refused === "string") return RESEARCH_REFUSED[props.metadata.refused] ?? "refused"
+      if (props.metadata.unavailable === true) return "search unavailable right now"
       return `${results().length} result${results().length === 1 ? "" : "s"}`
     })
     return (
@@ -2072,7 +2082,7 @@ ToolRegistry.register({
         {...props}
         icon="magnifying-glass"
         trigger={{
-          title: `Search${RESEARCH_SEARCH[props.metadata.provider] ? ` · ${RESEARCH_SEARCH[props.metadata.provider]}` : ""}`,
+          title: `Search${RESEARCH_SEARCH[props.metadata.engine ?? props.metadata.provider] ? ` · ${RESEARCH_SEARCH[props.metadata.engine ?? props.metadata.provider]}` : ""}`,
           subtitle: typeof props.input.query === "string" ? props.input.query : "",
           args: state() ? [state()!] : [],
         }}

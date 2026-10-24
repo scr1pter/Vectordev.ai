@@ -111,7 +111,39 @@ const web = FakeWeb.start({
   },
 })
 const root = mkdtempSync(path.join(os.tmpdir(), "vector-research-v2-"))
+// The desktop app's browser bridge, as the desktop hands it to the engine: its research browsers answer each search
+// with the fake web's pages, as a results page would list them, and keep every command they were sent.
+const sent: Record<string, unknown>[] = []
+const desktop = Bun.serve({
+  hostname: "127.0.0.1",
+  port: 0,
+  fetch: async (request) => {
+    const body = (await request.json()) as Record<string, unknown>
+    sent.push(body)
+    const results = [
+      {
+        url: web.url("article", "/"),
+        title: "How heat pumps cut heating bills in cold climates",
+        snippet: "412 homes.",
+      },
+      { url: web.url("copy", "/heat-pumps"), title: "How heat pumps cut heating bills (syndicated)", snippet: "" },
+      { url: web.url("docs", "/report.pdf"), title: "Heat pump field study (PDF)", snippet: "" },
+    ]
+    return Response.json(
+      body.command === "research.search"
+        ? { ok: true, generation: "copy", search: { engine: "google", results, tried: [] } }
+        : { ok: true, generation: "copy" },
+    )
+  },
+})
+process.env.VECTOR_BROWSER_BRIDGE_URL = `http://127.0.0.1:${desktop.port}`
+process.env.VECTOR_BROWSER_BRIDGE_TOKEN = "bridge-token"
+// The searches that reached the desktop's research browsers.
+const searched = () => sent.filter((body) => body.command === "research.search").length
 afterAll(async () => {
+  delete process.env.VECTOR_BROWSER_BRIDGE_URL
+  delete process.env.VECTOR_BROWSER_BRIDGE_TOKEN
+  await desktop.stop(true)
   await web.close()
   rmSync(root, { recursive: true, force: true })
 })
@@ -395,7 +427,6 @@ const recorded = (name: string) =>
     const store = yield* SessionStore.Service
     return ResearchRunV2.calls(yield* store.all(sessionID), name)
   })
-const searxng = { search: { provider: "searxng" as const, url: web.url("searxng", "/") } }
 const plan = (question: string) =>
   call("research_plan", { question, subquestions: ["Which steps keep it online?"], scope: "web", depth: "focused" })
 
@@ -737,7 +768,7 @@ describe("Deep research on the V2 runner", () => {
 
   it.live("the scripted research run on V2 stores the rows the V1 runner stores", () =>
     Effect.gen(function* () {
-      yield* setup({ research: { search: { provider: "searxng", url: web.url("searxng", "/") } } })
+      yield* setup()
       const asked = yield* answering()
       const session = yield* SessionV2.Service
       for (const item of ResearchScript.calls(web)) turns.push({ events: call(item.tool, item.input) })
@@ -787,7 +818,7 @@ describe("Deep research on the V2 runner", () => {
 
   it.live("an address no search result, page link or typed message gave is refused, and nothing is fetched", () =>
     Effect.gen(function* () {
-      yield* setup({ research: { search: { provider: "searxng", url: web.url("searxng", "/") } } })
+      yield* setup()
       yield* answering()
       const session = yield* SessionV2.Service
       const before = web.count("article")
@@ -818,10 +849,10 @@ describe("Deep research on the V2 runner", () => {
 
   it.live("a search that would send text from a file the session read is refused before it leaves", () =>
     Effect.gen(function* () {
-      yield* setup({ research: { search: { provider: "searxng", url: web.url("searxng", "/") } } })
+      yield* setup()
       yield* answering()
       const session = yield* SessionV2.Service
-      const before = web.count("searxng")
+      const before = searched()
       turns.push(
         { events: call("read", {}) },
         {
@@ -846,8 +877,8 @@ describe("Deep research on the V2 runner", () => {
       expect(searches[0]?.structured.refused).toBe("outbound")
       expect(searches[0]?.text).toBe(ResearchOutbound.REFUSAL)
       expect(searches[1]?.structured.refused).toBeUndefined()
-      // Only the public query reached the search server, and only it counts against the run's budget.
-      expect(web.count("searxng") - before).toBe(1)
+      // Only the public query reached the research browser, and only it counts against the run's budget.
+      expect(searched() - before).toBe(1)
       const runID = (yield* recorded("research_plan"))[0]?.structured.runID as string
       const run = yield* ResearchRunV2.Service
       const store = yield* ResearchStore.Service
@@ -861,7 +892,7 @@ describe("Deep research on the V2 runner", () => {
     "with Vector Local's Web access None, research is offered no tool that reaches the web and plans the brain",
     () =>
       Effect.gen(function* () {
-        yield* setup({ research: { search: { provider: "searxng", url: web.url("searxng", "/") } } })
+        yield* setup()
         yield* answering()
         Egress.configure(LocalPolicy.resolve({ global: { enabled: true, web: "none" } }))
         const session = yield* SessionV2.Service
@@ -890,42 +921,51 @@ describe("Deep research on the V2 runner", () => {
       }).pipe(Effect.ensuring(Effect.sync(() => Egress.configure(LocalPolicy.OFF)))),
   )
 
-  it.live("a repository's config cannot choose where research searches", () =>
-    Effect.gen(function* () {
-      yield* setup()
-      settings.repository = new Config.Document({
-        type: "document",
-        info: new Config.Info({ research: { search: { provider: "searxng", url: web.url("searxng", "/") } } }),
-      })
-      yield* answering()
-      const session = yield* SessionV2.Service
-      const before = web.count("searxng")
-      turns.push(
-        {
-          events: call("research_plan", {
-            question: ResearchScript.QUESTION,
-            subquestions: ResearchScript.SUBQUESTIONS,
-            scope: "web",
-            depth: "focused",
-          }),
-        },
-        { events: call("research_search", { query: "heat pump savings" }) },
-      )
-      yield* session.prompt({ sessionID, prompt: research("Research heat pump savings."), resume: false })
-      yield* session.resume(sessionID)
+  it.live(
+    "a repository's config naming a search server changes nothing: research searches in its research browser",
+    () =>
+      Effect.gen(function* () {
+        yield* setup()
+        settings.repository = new Config.Document({
+          type: "document",
+          info: new Config.Info({ research: { search: { provider: "searxng", url: web.url("searxng", "/") } } }),
+        })
+        yield* answering()
+        const session = yield* SessionV2.Service
+        const before = searched()
+        turns.push(
+          {
+            events: call("research_plan", {
+              question: ResearchScript.QUESTION,
+              subquestions: ResearchScript.SUBQUESTIONS,
+              scope: "web",
+              depth: "focused",
+            }),
+          },
+          { events: call("research_search", { query: "heat pump savings" }) },
+        )
+        yield* session.prompt({ sessionID, prompt: research("Research heat pump savings."), resume: false })
+        yield* session.resume(sessionID)
 
-      const [searched] = yield* recorded("research_search")
-      expect(searched?.structured.refused).toBe("none")
-      expect(web.count("searxng") - before).toBe(0)
-    }),
+        const [search] = yield* recorded("research_search")
+        expect(search?.structured).toMatchObject({ provider: "browser", engine: "google" })
+        expect(search?.structured.refused).toBeUndefined()
+        expect(searched() - before).toBe(1)
+        expect(web.count("searxng")).toBe(0)
+        // The lead's own research browser, by the run and its session, closed again once the search came back.
+        expect(sent.slice(-2).map((body) => [body.command, body.sessionID, body.agent])).toEqual([
+          ["research.search", sessionID, "research"],
+          ["research.close", sessionID, "research"],
+        ])
+      }),
   )
 
   it.live("pages webfetch read on the user's own network, and their saved copies read back, stay out of searches", () =>
     Effect.gen(function* () {
-      yield* setup({ research: searxng })
+      yield* setup()
       const asked = yield* answering()
       const session = yield* SessionV2.Service
-      const before = web.count("searxng")
+      const before = searched()
 
       // Build fetches an intranet page after the private network ask, too long to show whole, then reads it back.
       turns.push({ events: call("webfetch", { url: web.direct("intranet", "/plan"), format: "text" }) })
@@ -962,7 +1002,7 @@ describe("Deep research on the V2 runner", () => {
         "outbound",
         undefined,
       ])
-      expect(web.count("searxng") - before).toBe(1)
+      expect(searched() - before).toBe(1)
       expect(
         asked.permissions.filter(
           (request) => request.action === "private_network" && request.resources[0] === web.origin,
@@ -974,7 +1014,7 @@ describe("Deep research on the V2 runner", () => {
 
   it.live("the user's own agent prompts are private facts, and a repository's are the work", () =>
     Effect.gen(function* () {
-      yield* setup({ research: searxng })
+      yield* setup()
       const folder = path.join(root, "own-config")
       mkdirSync(path.join(folder, "agents"), { recursive: true })
       writeFileSync(
@@ -995,7 +1035,7 @@ describe("Deep research on the V2 runner", () => {
       })
       yield* answering()
       const session = yield* SessionV2.Service
-      const before = web.count("searxng")
+      const before = searched()
       turns.push(
         { events: plan("How do heat pumps perform in cold climates?") },
         { events: call("research_search", { query: "Brightwater heat pump study" }) },
@@ -1007,7 +1047,7 @@ describe("Deep research on the V2 runner", () => {
 
       const searches = yield* recorded("research_search")
       expect(searches.map((search) => search.structured.refused)).toEqual(["outbound", "outbound", undefined])
-      expect(web.count("searxng") - before).toBe(1)
+      expect(searched() - before).toBe(1)
     }),
   )
 
@@ -1015,10 +1055,10 @@ describe("Deep research on the V2 runner", () => {
     "a prompt's words clear nothing for searches, and its addresses are read as links: the user's own network is refused",
     () =>
       Effect.gen(function* () {
-        yield* setup({ research: searxng })
+        yield* setup()
         const asked = yield* answering()
         const session = yield* SessionV2.Service
-        const before = { searxng: web.count("searxng"), notes: web.count("docs", "/private/notes") }
+        const before = { searched: searched(), notes: web.count("docs", "/private/notes") }
         const intranet = web.direct("docs", "/private/notes")
         turns.push(
           { events: call("read", {}) },
@@ -1037,9 +1077,9 @@ describe("Deep research on the V2 runner", () => {
         })
         yield* session.resume(sessionID)
 
-        const [searched] = yield* recorded("research_search")
-        expect(searched?.structured.refused).toBe("outbound")
-        expect(web.count("searxng") - before.searxng).toBe(0)
+        const [search] = yield* recorded("research_search")
+        expect(search?.structured.refused).toBe("outbound")
+        expect(searched() - before.searched).toBe(0)
         // The public address in the prompt is read; the one on the user's own network is refused without asking.
         const reads = yield* recorded("research_read")
         expect(reads.map((read) => [read.input.url, read.structured.status])).toEqual([
@@ -1055,7 +1095,7 @@ describe("Deep research on the V2 runner", () => {
 
   it.live("a public page's links into the user's network or to a cloud metadata address are refused", () =>
     Effect.gen(function* () {
-      yield* setup({ research: searxng })
+      yield* setup()
       const asked = yield* answering()
       const session = yield* SessionV2.Service
       const before = web.count("docs", "/private/notes")
@@ -1086,10 +1126,10 @@ describe("Deep research on the V2 runner", () => {
 
   it.live("a private source the run saved stays private context when it is read again", () =>
     Effect.gen(function* () {
-      yield* setup({ research: searxng })
+      yield* setup()
       yield* answering()
       const session = yield* SessionV2.Service
-      const before = web.count("searxng")
+      const before = searched()
       const gate = yield* Deferred.make<void>()
       const started = yield* Deferred.make<void>()
       turns.push(
@@ -1123,7 +1163,7 @@ describe("Deep research on the V2 runner", () => {
       expect(again?.structured).toMatchObject({ source: "S1", private: true })
       const searches = yield* recorded("research_search")
       expect(searches.map((search) => search.structured.refused)).toEqual(["outbound", undefined])
-      expect(web.count("searxng") - before).toBe(1)
+      expect(searched() - before).toBe(1)
     }),
   )
 })

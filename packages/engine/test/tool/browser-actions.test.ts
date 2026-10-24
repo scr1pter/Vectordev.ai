@@ -133,7 +133,7 @@ it.instance(
   "handoff opens the page, asks the user, and resumes on Continue; read then reads the page they reached",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Dashboard" })
       bridge.answer(visible().handler)
@@ -168,7 +168,7 @@ it.instance(
   "a cancelled handoff carries on without the page",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Dashboard" })
       bridge.answer(visible().handler)
@@ -187,7 +187,7 @@ it.instance(
   "observe gives ref handles, a click by ref uses trusted input, and screenshots wait for a model that reads images",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Docs" })
       bridge.answer(visible("http://localhost:4000/").handler)
@@ -219,7 +219,7 @@ it.instance(
   "in Deep research the lead hands a page over and reads only the page the user reached, as a private source",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const session = yield* sessions.create({
         title: "Research",
@@ -282,7 +282,7 @@ it.instance(
   "a page read after a handoff is the user's signed-in text in full, beside the public excerpt research_read kept",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const session = yield* sessions.create({
         title: "Research",
@@ -333,7 +333,7 @@ it.instance(
   "in Deep research the lead hands over no page a page offered on this computer or the user's network, and asks first",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const session = yield* sessions.create({
         title: "Research",
@@ -386,7 +386,7 @@ it.instance(
   "a researcher is shown nothing the lead read signed in, by its address or by its S#",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const session = yield* sessions.create({
         title: "Research",

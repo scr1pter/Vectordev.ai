@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import { ResearchProvenance } from "@vectordevai/core/research/provenance"
+import { ResearchSearch } from "@vectordevai/core/research/search"
 import {
   ACTED_MS,
   BACK,
   CREDENTIALS,
   DATA_LIKE,
   NOT_LINK,
+  NOT_SEARCH,
   PAGE_STARTED,
   POST,
   PRIVATE,
@@ -43,6 +45,42 @@ const decide = (input: Partial<Input> & Pick<Input, "url">) =>
   })
 
 describe("research browser navigation rule", () => {
+  test("a search loads only the results page Vector built for it, which robots.txt does not decide", () => {
+    for (const engine of ResearchSearch.ENGINES)
+      expect(decide({ url: ResearchSearch.page(engine, { query: "heat pumps" }), kind: "search" })).toEqual({
+        allow: true,
+        via: "search",
+        robots: false,
+      })
+    // Any other address is refused as a search, a result's included: those are opened, not searched.
+    for (const url of [
+      RESULT,
+      "https://www.google.com/url?q=https://evil.example/",
+      "http://www.google.com/search?q=x",
+    ])
+      expect(decide({ url, kind: "search" })).toEqual({ allow: false, reason: NOT_SEARCH })
+    expect(decide({ url: "https://user:pw@www.google.com/search?q=x", kind: "search" })).toEqual({
+      allow: false,
+      reason: CREDENTIALS,
+    })
+    // The results page's own navigations on its origin (Google's page reloads itself by script) are the search's, and
+    // robots.txt does not decide them; a page that is not a search's keeps robots.txt, and no search page reaches
+    // another site on its own.
+    const results = ResearchSearch.page("google", { query: "heat pumps" })
+    const reload = `${results}&sei=abc`
+    expect(decide({ url: reload, current: results, searching: true })).toEqual({
+      allow: true,
+      via: "same-origin",
+      robots: false,
+    })
+    expect(decide({ url: reload, current: results })).toEqual({ allow: true, via: "same-origin", robots: true })
+    expect(decide({ url: RESULT, current: results, searching: true })).toEqual({ allow: false, reason: PAGE_STARTED })
+    // A results page is not something the agent may open: it is in no run's provenance.
+    expect(decide({ url: ResearchSearch.page("google", { query: "heat pumps" }), kind: "open" })).toMatchObject({
+      allow: false,
+    })
+  })
+
   test("the agent opens only addresses in the run's provenance", () => {
     expect(decide({ url: RESULT, kind: "open" })).toEqual({ allow: true, via: "provenance", robots: true })
     // robots.txt does not apply to an address the user typed, as research_read reads one.

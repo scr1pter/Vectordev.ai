@@ -107,7 +107,7 @@ it.instance(
   "what the research lead writes to memory waits for the user, from its first step",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research" })
       yield* test.llm.tool("memory", {
@@ -135,7 +135,7 @@ it.instance(
   "a build request whose research child read the web is held as web",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const build = yield* sessions.create({ title: "Build" })
       const lead = (hit: { body: Record<string, unknown> }) =>
@@ -168,7 +168,7 @@ it.instance(
   "a build request whose general subagent fetched a page is held as web through the task call alone",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const permission = yield* Permission.Service
       // The user lets the subagent fetch the page, which the fake web serves on this computer.
       yield* Effect.gen(function* () {

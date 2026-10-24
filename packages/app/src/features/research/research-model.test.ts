@@ -203,8 +203,13 @@ describe("the plan card", () => {
     expect(searchLine({ ...card, search: { provider: "exa" } })).toBe(
       "Search: Exa, on your key. Searches go to Exa, billed by Exa.",
     )
-    expect(searchLine({ ...card, search: { provider: "none" } })).toBe(
-      "No search service set up. Research will use this repository's brain, its files and links you paste.",
+    expect(searchLine({ ...card, search: { provider: "browser" } })).toBe(
+      "Search: Google, in each research agent's own browser (DuckDuckGo when Google asks for a check). No search service or key.",
+    )
+    expect(
+      searchLine({ ...card, search: { provider: "none", reason: "Searching the web needs Vector's browser." } }),
+    ).toBe(
+      "Nothing is searched on the web here. Research will use this repository's brain, its files and links you paste.",
     )
     expect(searchLine(undefined)).toBeUndefined()
   })
