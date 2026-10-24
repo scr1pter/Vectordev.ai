@@ -1,5 +1,6 @@
 import { Effect } from "effect"
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
+import { ModelPlans } from "@vectordevai/core/model-plans"
 import { VectorAccount } from "@vectordevai/core/vector-account"
 import { Auth } from "@/auth"
 import { effectCmd } from "../effect-cmd"
@@ -20,9 +21,11 @@ export const CodiumCommand = effectCmd({
         stored: async () => (stored?.type === "api" ? stored.key : undefined),
       }).catch(() => undefined),
     )
-    const status = yield* Effect.promise(() => ModelPlanStatus.fetchStatus(token))
+    const status = yield* Effect.promise(() => ModelPlanStatus.fetchStatus(token, ModelPlans.plansCatalog))
     // While sales are off the purchase page only says Codium is coming soon, so it is not offered.
-    const open = status.signedIn ? status.enabled : yield* Effect.promise(() => ModelPlanStatus.salesOpen())
+    const open = status.signedIn
+      ? status.enabled
+      : yield* Effect.promise(() => ModelPlanStatus.salesOpen(ModelPlans.plansCatalog))
     UI.println(UI.Style.TEXT_NORMAL_BOLD + "Vector Codium" + UI.Style.TEXT_NORMAL)
     for (const line of ModelPlanStatus.describe(status)) UI.println(line)
     if (open) UI.println(`Buy credits or a plan: ${ModelPlanStatus.PURCHASE_URL}`)

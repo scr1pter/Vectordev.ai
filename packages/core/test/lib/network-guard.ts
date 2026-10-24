@@ -20,11 +20,6 @@ const suiteState: { names?: readonly string[]; handle?: EgressGuard.Handle } = {
 /** Installs the strict guard for a whole test run. A package's preload calls it once, before any test file loads. */
 export function suite(options: Pick<EgressGuard.StrictOptions, "names"> = {}) {
   if (suiteState.handle) return suiteState.handle
-  // The proxy variables are set, empty, first. Removing a guard restores them, deleting one that was unset, and Bun's
-  // fetch never sees a variable that was deleted set again: a file's guard put in the suite's place would then have its
-  // proxy ignored, and a name it pins to this computer would be looked up and connected to where it really is.
-  for (const name of ["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"])
-    process.env[name] ??= ""
   suiteState.names = options.names ?? []
   suiteState.handle = install(suiteState.names)
   return suiteState.handle
@@ -73,5 +68,11 @@ export function use(options: Pick<EgressGuard.StrictOptions, "names" | "proxy"> 
 }
 
 function install(names: readonly string[], proxy?: boolean) {
+  // The proxy variables are set, empty, first. Removing a guard restores them, deleting one that was unset, and Bun's
+  // fetch never sees a variable that was deleted set again: any strict guard installed later in the same run (a file's
+  // put in the suite's place, the next file's in a package with no suite, guard.test.ts's own) would then have its
+  // proxy ignored, and Bun.fetch would connect to where a name really is.
+  for (const name of ["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"])
+    process.env[name] ??= ""
   return EgressGuard.installStrict({ names: [FakeWeb.DOMAIN, ...names], ...(proxy === false ? { proxy } : {}) })
 }

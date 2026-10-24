@@ -116,6 +116,7 @@ describe("LocationServiceMap", () => {
             "grep",
             "question",
             "read",
+            // Deep research's tools are in every Location's registry; only the research agent is offered them.
             "research_note",
             "research_plan",
             "research_read",
@@ -138,6 +139,7 @@ describe("LocationServiceMap", () => {
             "grep",
             "question",
             "read",
+            // Deep research's tools are in every Location's registry; only the research agent is offered them.
             "research_note",
             "research_plan",
             "research_read",

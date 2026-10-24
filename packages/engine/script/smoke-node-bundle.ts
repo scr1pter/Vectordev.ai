@@ -13,7 +13,8 @@
 // worker cannot start under Node and reading falls back to the main thread. Then it checks that ONNX Runtime's wasm for
 // the search model ships beside the bundle and that /memory/model answers; given VECTOR_TEST_EMBED_DIR (a folder of the
 // pinned arctic-embed-xs files) it installs the model over HTTP and waits until the eval worker has embedded the PDF,
-// checked against the pinned canary vectors. It uses node: APIs only and must run under node, never bun:
+// checked against the pinned canary vectors. It also reads this computer's local-model recommendation, whose
+// hardware probe must work without Bun. It uses node: APIs only and must run under node, never bun:
 //
 //   bun script/build-node.ts && node script/smoke-node-bundle.ts [path/to/node.js]
 
@@ -68,6 +69,7 @@ async function smoke(bundle: string) {
         ...(await runTurn(engine, project, marker, NPM_PROVIDER)).map((failure) => `${NPM_PACKAGE}: ${failure}`),
         ...(await runTurn(engine, project, marker, PROVIDER, KEEP)).map((failure) => `document: ${failure}`),
         ...(await searchModel(engine, project, bundle)).map((failure) => `search model: ${failure}`),
+        ...(await localRecommendation(engine, project)).map((failure) => `local recommendation: ${failure}`),
       ])
       .catch((error) => [`the turn could not run: ${String(error)}`])
       .finally(engine.stop)
@@ -317,6 +319,31 @@ async function runTurn(
   return [...outcome, ...(text === KEEP ? keptFailures(messages) : messageFailures(messages, marker))]
 }
 
+// The desktop's local-model setup reads hardware through this route; Bun-only probes otherwise pass unit tests.
+async function localRecommendation(engine: { url: URL; authorization: string }, project: string) {
+  const response = await fetch(new URL("/local/recommend", engine.url), {
+    headers: {
+      authorization: engine.authorization,
+      "x-vector-directory": encodeURIComponent(project),
+    },
+    signal: AbortSignal.timeout(15_000),
+  })
+  const body: unknown = await response.json()
+  if (
+    response.ok &&
+    isRecord(body) &&
+    isRecord(body.hardware) &&
+    typeof body.hardware.total === "number" &&
+    body.hardware.total > 0 &&
+    typeof body.hardware.usable === "number" &&
+    body.hardware.usable > 0 &&
+    typeof body.hardware.summary === "string" &&
+    body.hardware.summary.length > 0
+  )
+    return []
+  return [`GET /local/recommend answered ${response.status}: ${JSON.stringify(body)}`]
+}
+
 // The search model on the bundle: its wasm beside it, /memory/model answering, and with the pinned files at hand, the
 // model installed over HTTP, checked against its canaries and embedding the kept PDF in the eval worker.
 async function searchModel(engine: { url: URL; authorization: string }, project: string, bundle: string) {
@@ -343,7 +370,11 @@ async function searchModel(engine: { url: URL; authorization: string }, project:
   const from = process.env.VECTOR_TEST_EMBED_DIR
   if (!from || failures.length > 0) return failures
   const installed = await request("/memory/model", { action: "install", from })
-  if (installed.body?.state !== "ready" || installed.body.check?.by !== "vectors" || installed.body.check.lowest < 0.995)
+  if (
+    installed.body?.state !== "ready" ||
+    installed.body.check?.by !== "vectors" ||
+    installed.body.check.lowest < 0.995
+  )
     return [`installing from ${from} answered ${installed.status}: ${JSON.stringify(installed.body)}`]
   const deadline = Date.now() + TURN_TIMEOUT
   for (;;) {
@@ -382,7 +413,9 @@ function specPdf() {
     { text: "Refresh tokens expire after 14 days.", size: 11, font: "F1", y: 680 },
     { text: "Clients MUST retry at most 3 times after a 429 response.", size: 11, font: "F1", y: 664 },
   ]
-  const content = lines.map((line) => `BT /${line.font} ${line.size} Tf 72 ${line.y} Td (${line.text}) Tj ET`).join("\n")
+  const content = lines
+    .map((line) => `BT /${line.font} ${line.size} Tf 72 ${line.y} Td (${line.text}) Tj ET`)
+    .join("\n")
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
     "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
@@ -532,7 +565,8 @@ async function handleModelRequest(req: IncomingMessage, res: ServerResponse, not
   const keeping = JSON.stringify(body.messages ?? []).includes(KEEP)
   const tool = keeping ? "memory" : "read"
   const call =
-    body.tools?.some((item) => item.function?.name === tool) && !body.messages?.some((message) => message.role === "tool")
+    body.tools?.some((item) => item.function?.name === tool) &&
+    !body.messages?.some((message) => message.role === "tool")
   const reply = keeping ? KEPT : REPLY
   const args = JSON.stringify(keeping ? { action: "add", file: "spec.pdf" } : { filePath: notes })
   const finish = call ? "tool_calls" : "stop"

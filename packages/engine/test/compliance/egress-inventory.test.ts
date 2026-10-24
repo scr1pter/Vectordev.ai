@@ -127,6 +127,8 @@ const ADDRESSES: Readonly<Record<string, string>> = {
     "The embedding model's download addresses, which brain/embed.ts fetches as embedding-model.",
   "packages/core/src/config/migration.ts": SHOWN,
   "packages/core/src/github-copilot/copilot-provider.ts": MODEL_API,
+  "packages/core/src/model-plan-status.ts":
+    "Codium's addresses; it sends with the transport its caller hands it, model-plans.ts's plans-catalog in the engine.",
   "packages/core/src/npm-config.ts": "npm's default registry, which npm.ts reaches as npm-plugins or lsp-install.",
   "packages/core/src/oauth/poe.ts": SIGN_IN,
   "packages/core/src/plugin/provider/cloudflare-workers-ai.ts": MODEL_API,

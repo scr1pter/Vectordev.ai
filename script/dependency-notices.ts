@@ -21,6 +21,13 @@ type Locked = [
   string?,
 ]
 
+// Development packages a workspace's source names without importing them, which the scan below would count as
+// imported: Vector Local's command allowlists (core's local-mode/command.ts) name the drizzle-kit command, and core
+// uses that package only for its own migrations.
+const NAMED_ONLY: Readonly<Record<string, readonly string[]>> = {
+  "@vectordevai/core": ["drizzle-kit"],
+}
+
 export async function dependencyNotices(root: string, refreshPlatforms = false) {
   const lock = Bun.JSON5.parse(await Bun.file(path.join(root, "bun.lock")).text()) as {
     packages: Record<string, Locked>
@@ -369,6 +376,7 @@ export async function dependencyNotices(root: string, refreshPlatforms = false) 
         const source = await Bun.file(path.join(dir, file)).text()
         Object.keys(pkg.devDependencies ?? {})
           .filter((name) => source.includes(`"${name}`) || source.includes(`'${name}`))
+          .filter((name) => !NAMED_ONLY[pkg.name]?.includes(name))
           .forEach((name) => extra.add(name))
       }
       if (pkg.name === "vector-desktop") extra.add("electron")

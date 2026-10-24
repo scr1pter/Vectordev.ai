@@ -1,6 +1,7 @@
 export * as LocalSources from "./sources"
 
 import type { LocalMode } from "@vectordevai/schema/local-mode"
+import { sha256 } from "../util/sha256"
 import { LocalPolicy } from "./policy"
 
 // Every connection Vector makes, as data: what it is for, where it goes, what it sends, why Vector makes it, and how it
@@ -128,18 +129,13 @@ const CLOUD_INFERENCE_DIGESTS = new Set(["15f3d522b114416a3a7cacfa7426bb80a64c3d
 // What a `${VARIABLE}` in a catalog address is read as while the address is parsed.
 const PLACEHOLDER = "vector-variable"
 
-// Node's crypto where there is one. The app reads this module's pure parts in the browser, which has no synchronous
-// SHA-256 and decides no requests, so there a host is never listed by its digest.
-const crypto = globalThis.process?.getBuiltinModule?.("node:crypto")
-
 /** Whether a host is, or is under, a cloud AI service listed by its digest. */
 export function digestListed(input: string, digests: ReadonlySet<string> = CLOUD_INFERENCE_DIGESTS) {
   const name = LocalPolicy.host(input)
-  if (!name || !crypto) return false
+  if (!name) return false
+  // A plain-JavaScript digest, so the app's policy in the browser lists the same hosts as the engine's.
   const labels = name.split(".")
-  return labels.some((_, index) =>
-    digests.has(crypto.createHash("sha256").update(labels.slice(index).join(".")).digest("hex")),
-  )
+  return labels.some((_, index) => digests.has(sha256(labels.slice(index).join("."))))
 }
 
 /**
@@ -294,7 +290,7 @@ export const SOURCES: readonly Source[] = [
     why: "Lists Vector Codium plans and credits",
     local: "blocked",
     where: ["engine"],
-    callSites: ["packages/core/src/model-plans.ts", "packages/core/src/model-plan-status.ts"],
+    callSites: ["packages/core/src/model-plans.ts"],
   },
   {
     id: "provider-policy",

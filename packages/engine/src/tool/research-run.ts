@@ -1,5 +1,6 @@
 export * as ResearchRun from "./research-run"
 
+import { readFile } from "node:fs/promises"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { httpClient } from "@vectordevai/core/effect/app-node-platform"
 import { Brain } from "@vectordevai/core/brain/brain"
@@ -901,9 +902,5 @@ function refusal(message: string, checked: Extract<ResearchOutbound.Result, { ok
 
 const normal = ResearchPlan.normal
 
-const text = (file: string) =>
-  Effect.promise(() =>
-    Bun.file(file)
-      .text()
-      .catch(() => ""),
-  )
+// Node's API, since the desktop's engine runs on Node.
+const text = (file: string) => Effect.promise(() => readFile(file, "utf8").catch(() => ""))

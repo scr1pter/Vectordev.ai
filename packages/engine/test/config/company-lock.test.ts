@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdirSync, rmSync, writeFileSync } from "fs"
 import path from "path"
 import { Global } from "@vectordevai/core/global"
@@ -29,6 +29,10 @@ const LAN = "http://192.168.1.20:11434"
 const CORP = "https://llm.corp.example.com"
 const ELSEWHERE = "https://llm.elsewhere.example.com"
 const GITHUB = { source: "github", reason: "Pull requests", added_at: 1, added_by: "cli" as const }
+
+// An earlier test file in the run may leave a global config behind, and a PATCH writes to vector.jsonc before
+// vector.json, the file these tests seed and read.
+beforeEach(() => GLOBAL_FILES.forEach((file) => rmSync(file, { force: true })))
 
 afterEach(async () => {
   ENVIRONMENT.forEach((key) => {

@@ -9,13 +9,10 @@ export const CONFIG_URL = `${API_URL}/config`
 export const PURCHASE_URL = `${SITE}/codium`
 export const MANAGE_URL = `${SITE}/account`
 
-// Codium's status and offers come from vectordev.ai, labelled so Vector Local decides them (blocked unless allowed).
-// The egress layer loads only when a request is made: the app imports this module in the browser for its pure parts,
-// and the egress layer needs Node (async_hooks), which a browser cannot load.
-const send = async (url: string, init: RequestInit) => {
-  const { Egress } = await import("./local-mode/egress")
-  return Egress.fetch("plans-catalog", url, init)
-}
+// The app imports this module in the browser, so it holds only what a browser can run and sends with the transport its
+// caller hands it. Node callers hand it ModelPlans.plansCatalog, which labels each request for Vector Local; that egress
+// layer needs Node (async_hooks), so nothing here may import it, not even lazily: Vite bundles a dynamic import too.
+type Send = (url: string, init: RequestInit) => Promise<Response>
 
 // The stable internal ID stays "vector-plan"; people see the provider as Vector Codium.
 export const PROVIDER_ID = "vector-plan"
@@ -93,10 +90,7 @@ const percent = new Intl.NumberFormat("en-US", { style: "percent", maximumFracti
 const PURCHASED = { available: "Available", low: "Running low", used: "Used up" } as const
 
 /** Reads the signed-in account's Codium plan and balances. The token is only ever sent to vectordev.ai. */
-export async function fetchStatus(
-  token: string | undefined,
-  request: (url: string, init: RequestInit) => Promise<Response> = send,
-): Promise<Status> {
+export async function fetchStatus(token: string | undefined, request: Send): Promise<Status> {
   if (!token) return EMPTY
   const response = await request(STATUS_URL, {
     headers: { authorization: `Bearer ${token}`, accept: "application/json" },
@@ -116,7 +110,7 @@ export async function fetchStatus(
  * Whether vectordev.ai sells Codium now, from its public configuration, for someone who is not signed in; undefined
  * when it cannot tell. Nothing should point at the purchase page while it only says Codium is coming soon.
  */
-export async function salesOpen(request: (url: string, init: RequestInit) => Promise<Response> = send) {
+export async function salesOpen(request: Send) {
   const response = await request(CONFIG_URL, {
     headers: { accept: "application/json" },
     redirect: "error",
@@ -145,9 +139,7 @@ export type Offer = { id: string; name: string; price: number; available: boolea
 export type Offers = { enabled: boolean; plans: Offer[]; topups: Offer[] }
 
 /** The plans and top-ups vectordev.ai lists publicly, for buying inside Vector; undefined when they cannot be read. */
-export async function fetchOffers(
-  request: (url: string, init: RequestInit) => Promise<Response> = send,
-): Promise<Offers | undefined> {
+export async function fetchOffers(request: Send): Promise<Offers | undefined> {
   const response = await request(CONFIG_URL, {
     headers: { accept: "application/json" },
     redirect: "error",
