@@ -218,12 +218,17 @@ export const apply = Effect.fn("LocalSettings.apply")(function* (update: Update,
   const changes = Config.localLoosening(own)
   if (changes.length > 0 && agentMarked()) return refused("agent", AGENT, changes)
   if (changes.length > 0 && update.confirm !== true) return { type: "confirm" as const, changes }
-  if (changes.length > 0) Config.confirmingLocal(own)
+  const release = changes.length > 0 ? Config.confirmingLocal(own) : () => {}
   // The config writer takes the mutable config shape; nothing here changes the block after it is built. Resolving
   // again after the write applies the owner's confirmation even when the files already said the same.
-  yield* config
-    .updateGlobal({ local: block(current.block, update, by, now) as Block })
-    .pipe(Effect.ensuring(Effect.sync(() => Config.refreshLocal())))
+  yield* config.updateGlobal({ local: block(current.block, update, by, now) as Block }).pipe(
+    Effect.ensuring(
+      Effect.sync(() => {
+        Config.refreshLocal()
+        release()
+      }),
+    ),
+  )
   Object.entries(update.pins ?? {}).forEach(([origin, pin]) => {
     if (pin) holds?.confirm(origin)
   })

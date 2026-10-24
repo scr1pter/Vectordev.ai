@@ -1026,6 +1026,37 @@ describe("loosening edits wait for the owner", () => {
     expect(Config.localPending()?.changes).toEqual(["turns Vector Local off"])
   })
 
+  test("the owner's confirmation stands when the files are read again before the change is written", () => {
+    writeGlobal({ enabled: true, web: "network" })
+    Config.refreshLocal()
+    const release = Config.confirmingLocal({ enabled: true, web: "network", endpoints: [SERVER] })
+    // The watcher, or a catalog the provider service loads, can resolve the files while the Local API writes them.
+    expect(Config.refreshLocal().endpoints).toEqual([])
+    expect(Config.localConfirmedBlock()).toEqual({ enabled: true, web: "network", endpoints: [SERVER] })
+    writeGlobal({ enabled: true, web: "network", endpoints: [SERVER] })
+    Config.refreshLocal()
+    release()
+    expect(Config.localPending()).toBe(undefined)
+    expect(Config.local().endpoints).toEqual([{ origin: SERVER, from: "user" }])
+    // Once the write has applied it, the files decide again: a later edit that loosens is held as before.
+    writeGlobal({ enabled: true, web: "network", endpoints: [SERVER, GPU_BOX] })
+    Config.refreshLocal()
+    expect(Config.localPending()?.changes).toEqual([`adds the model server ${GPU_BOX}`])
+  })
+
+  test("a confirmation whose write never lands lets the files decide", () => {
+    writeGlobal({ enabled: true, web: "network" })
+    Config.refreshLocal()
+    const release = Config.confirmingLocal({ enabled: true, web: "network", endpoints: [SERVER] })
+    Config.refreshLocal()
+    release()
+    expect(Config.localConfirmedBlock()).toEqual({ enabled: true, web: "network" })
+    writeGlobal({ enabled: true, web: "network", endpoints: [SERVER] })
+    Config.refreshLocal()
+    expect(Config.localPending()?.changes).toEqual([`adds the model server ${SERVER}`])
+    expect(Config.local().endpoints).toEqual([])
+  })
+
   test("a company change applies without asking", () => {
     writeManaged({ local: { enabled: true, web: "none" } })
     expect(Config.refreshLocal()).toMatchObject({ enabled: true, web: "none" })

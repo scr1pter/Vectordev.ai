@@ -619,6 +619,11 @@ const localState: {
   /** The inputs in effect: what the owner last let apply, with what has tightened it since. Set at the first resolution. */
   confirmed: LocalInputs | undefined
   /**
+   * What the owner just confirmed through the Local API while its write is under way. It stands in for `confirmed`
+   * until the caller releases it, so a resolution of the files from before the write cannot take the confirmation back.
+   */
+  confirming: LocalInputs | undefined
+  /**
    * The copy of the user's block in the state folder, as this process last read or wrote it: written only when the
    * block changes, and never over a copy another Vector wrote since.
    */
@@ -641,6 +646,7 @@ const localState: {
 } = {
   policy: LocalPolicy.PENDING,
   confirmed: undefined,
+  confirming: undefined,
   saved: undefined,
   pending: undefined,
   announced: undefined,
@@ -778,18 +784,25 @@ export function confirmLocal() {
  * Local API or `vector local` makes is judged against it, so an edit config is holding never counts as that change's.
  */
 export function localConfirmedBlock() {
-  return localState.confirmed?.user
+  return (localState.confirming ?? localState.confirmed)?.user
 }
 
 /**
  * Records `block`, the user's block as the owner just confirmed a change to it, as the one to compare with. The caller
  * writes the change next, and that write's resolution holds whatever else the files hold beyond `block`, as before.
  * Only the owner's answer to a dialog that listed what the change loosens may lead here; under the agent marker it
- * records nothing.
+ * records nothing. The watcher, or a model catalog the provider service loads, can resolve the files while the write
+ * is under way, so `block` stays the one to compare with until the caller calls the function this returns, after the
+ * write's own resolution.
  */
 export function confirmingLocal(block: ConfigLocalV1.Info | undefined) {
-  if (agentMarked() || !localState.confirmed) return
-  localState.confirmed = { user: block, overrides: localState.confirmed.overrides }
+  if (agentMarked() || !localState.confirmed) return () => {}
+  const confirming = { user: block, overrides: localState.confirmed.overrides }
+  localState.confirmed = confirming
+  localState.confirming = confirming
+  return () => {
+    if (localState.confirming === confirming) localState.confirming = undefined
+  }
 }
 
 /**
@@ -831,7 +844,7 @@ export function localLog() {
  */
 export function localLoosening(block: ConfigLocalV1.Info | undefined) {
   const sources = readLocalSources()
-  const confirmed = localState.confirmed ?? { user: undefined, overrides: sources.overrides }
+  const confirmed = localState.confirming ?? localState.confirmed ?? { user: undefined, overrides: sources.overrides }
   const proposed = resolveLocal(sources, { user: block, overrides: sources.overrides })
   return heldChanges(sources.managed, resolveLocal(sources, confirmed), proposed, confirmed.user, block, agentMarked())
 }
@@ -928,7 +941,7 @@ export function watchLocal() {
 function evaluateLocal() {
   const sources = readLocalSources()
   const start = localState.confirmed === undefined
-  const confirmed = localState.confirmed ?? startConfirmed(sources)
+  const confirmed = localState.confirming ?? localState.confirmed ?? startConfirmed(sources)
   // A user block Vector cannot decode applies its fail-closed policy at once, and while a user file cannot be read at
   // all the block in effect stays. Neither counts as let apply, so fixing it needs no confirmation.
   const current = {
