@@ -94,6 +94,14 @@ function writeManaged(config: object) {
   writeFileSync(path.join(managedDirectory, "vector.json"), JSON.stringify(config))
 }
 
+// A folder's watch on macOS can miss a write made just as it starts, so a test that edits a file the watcher reads
+// writes it again until the change arrives; writing the same text again changes nothing more.
+async function writeUntil<T>(write: () => void, change: Promise<T>) {
+  const timer = setInterval(write, 250)
+  write()
+  return await change.finally(() => clearInterval(timer))
+}
+
 function nextChange(type: Config.LocalChange["type"]) {
   const change = Promise.withResolvers<Config.LocalChange>()
   const timer = setTimeout(() => change.reject(new Error(`no ${type} change within 5 seconds`)), 5_000)
@@ -736,9 +744,10 @@ describe("loosening edits wait for the owner", () => {
     GlobalBus.on("event", onEvent)
     const stop = Config.watchLocal()
     try {
-      const asked = nextChange("loosening")
-      writeGlobal({ enabled: false, endpoints: [SERVER, GPU_BOX] })
-      const change = await asked
+      const change = await writeUntil(
+        () => writeGlobal({ enabled: false, endpoints: [SERVER, GPU_BOX] }),
+        nextChange("loosening"),
+      )
       expect(change).toMatchObject({ type: "loosening", changes: ["turns Vector Local off"] })
       // Nothing loosened: the policy in effect and what children inherit stay as they were.
       expect(Config.local()).toMatchObject({ enabled: true, web: "network", endpoints: [{ origin: SERVER }] })
@@ -765,9 +774,11 @@ describe("loosening edits wait for the owner", () => {
     Config.refreshLocal()
     const stop = Config.watchLocal()
     try {
-      const applied = nextChange("updated")
-      writeGlobal({ enabled: true, web: "none", endpoints: [SERVER] })
-      expect((await applied).type).toBe("updated")
+      const applied = await writeUntil(
+        () => writeGlobal({ enabled: true, web: "none", endpoints: [SERVER] }),
+        nextChange("updated"),
+      )
+      expect(applied.type).toBe("updated")
       expect(Config.local()).toMatchObject({ web: "none", endpoints: [{ origin: SERVER }] })
       expect(Config.localPending()).toBe(undefined)
     } finally {
@@ -781,9 +792,12 @@ describe("loosening edits wait for the owner", () => {
       writeGlobal({ enabled: true, web: "ask", endpoints: [SERVER] })
       Config.refreshLocal()
       yield* Config.use.get()
-      const asked = nextChange("loosening")
-      writeGlobal({ enabled: true, web: "ask", endpoints: [SERVER, GPU_BOX] })
-      const change = yield* Effect.promise(() => asked)
+      const change = yield* Effect.promise(() =>
+        writeUntil(
+          () => writeGlobal({ enabled: true, web: "ask", endpoints: [SERVER, GPU_BOX] }),
+          nextChange("loosening"),
+        ),
+      )
       expect(change).toMatchObject({ changes: [`adds the model server ${GPU_BOX}`] })
       expect(Config.local().endpoints).toEqual([{ origin: SERVER, from: "user" }])
     }),
