@@ -52,13 +52,8 @@ function waitForPaint() {
   })
 }
 
-// A cancelled query is never a failed reload: fetchLatest follows the fetch that superseded it, and anything else
-// that cancels one does so on purpose.
 function errors(list: PromiseSettledResult<unknown>[]) {
-  return list
-    .filter((item): item is PromiseRejectedResult => item.status === "rejected")
-    .map((item) => item.reason)
-    .filter((reason) => !(reason instanceof CancelledError))
+  return list.filter((item): item is PromiseRejectedResult => item.status === "rejected").map((item) => item.reason)
 }
 
 /**
@@ -404,7 +399,7 @@ export async function bootstrapDirectory(input: {
       () =>
         fetchLatest(input.queryClient, loadProvidersQuery(input.scope, input.directory, input.sdk), restart).catch(
           (err) => {
-            if (err instanceof CancelledError) return
+            if (err instanceof CancelledError) throw err
             const project = getFilename(input.directory)
             showToast({
               variant: "error",
@@ -416,7 +411,11 @@ export async function bootstrapDirectory(input: {
     ].filter(Boolean) as (() => Promise<any>)[]
 
     await waitForPaint()
-    const slowErrs = errors(await runAll(slow))
+    const rejected = errors(await runAll(slow))
+    // fetchLatest follows a fetch a newer one superseded, so a cancellation that still arrives here came from something
+    // that cancelled the query on purpose. That is no failure to show, but what it cancelled never loaded, so the
+    // directory stays partial (below) and its next reload loads it again.
+    const slowErrs = rejected.filter((reason) => !(reason instanceof CancelledError))
     if (slowErrs.length > 0) {
       console.error("Failed to finish bootstrap instance", slowErrs[0])
       const project = getFilename(input.directory)
@@ -427,6 +426,6 @@ export async function bootstrapDirectory(input: {
       })
     }
 
-    if (loading && slowErrs.length === 0) input.setStore("status", "complete")
+    if (loading && rejected.length === 0) input.setStore("status", "complete")
   })()
 }

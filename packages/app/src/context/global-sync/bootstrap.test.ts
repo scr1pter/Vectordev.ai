@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import { createStore } from "solid-js/store"
-import { QueryClient, QueryObserver } from "@tanstack/solid-query"
+import { CancelledError, QueryClient, QueryObserver } from "@tanstack/solid-query"
 import type { Config, VectorClient, Project, Session } from "@vectordevai/sdk/v2/client"
 import type { NormalizedProviderListResponse } from "@vectordevai/session-ui/context"
-import { bootstrapDirectory, loadAgentsQuery, loadPathQuery, loadProvidersQuery } from "./bootstrap"
+import { bootstrapDirectory, fetchLatest, loadAgentsQuery, loadPathQuery, loadProvidersQuery } from "./bootstrap"
 import type { State, VcsCache } from "./types"
 import { createServerSession } from "../server-session"
 import { ServerScope } from "@/utils/server-scope"
@@ -267,6 +267,28 @@ describe("bootstrapDirectory reloads", () => {
     expect(translated).toContain("toast.project.reloadFailed.title")
   })
 
+  // Only a fetch a newer one superseded is followed. One something cancelled on purpose never loaded, so the directory
+  // must not count as loaded, or its agents would never load until a reload after the next engine change.
+  test("keeps a first load partial, with no toast, when something cancels its agents fetch", async () => {
+    const queryClient = new QueryClient()
+    const client = heldClient()
+    const store = directoryState()
+
+    const translated = reload({ sdk: client.sdk, store, queryClient })
+    await client.started
+    await queryClient.cancelQueries({ queryKey: loadAgentsQuery(ServerScope.local, "/project", client.sdk).queryKey })
+    for (const list of client.providers) list.resolve(PROVIDERS)
+    await until(
+      () =>
+        queryClient.getQueryState(loadProvidersQuery(ServerScope.local, "/project", client.sdk).queryKey)?.status ===
+        "success",
+    )
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(store[0].status).toBe("partial")
+    expect(translated).not.toContain("toast.project.reloadFailed.title")
+  })
+
   // A directory that has loaded before reloads because the engine changed, for example after Settings turned the
   // review specialist off. An agents fetch that started before that would put review back in the @ list.
   test("refetches what was in flight when a loaded directory reloads", async () => {
@@ -296,6 +318,36 @@ describe("bootstrapDirectory reloads", () => {
     expect(queryClient.getQueryData(options.queryKey)?.map((agent) => agent.name)).toEqual(["build"])
     expect(translated).not.toContain("toast.project.reloadFailed.title")
     unsubscribe()
+  })
+})
+
+describe("fetchLatest", () => {
+  // server-sync's loadReferences joins a references fetch, and a reload after the engine changed cancels that fetch to
+  // start a new one. The joined call follows the new fetch instead of rejecting with nothing to catch it.
+  test("a call that joined a fetch a restart cancels gets the newer result", async () => {
+    const queryClient = new QueryClient()
+    const answers: PromiseWithResolvers<string>[] = []
+    const options = {
+      queryKey: ["references"],
+      queryFn: () => {
+        const next = Promise.withResolvers<string>()
+        answers.push(next)
+        return next.promise
+      },
+    }
+    const started = queryClient.fetchQuery(options)
+    const plain = queryClient.fetchQuery(options).catch((error: unknown) => error)
+    const joined = fetchLatest(queryClient, options)
+    const restarted = fetchLatest(queryClient, options, true)
+    await until(() => answers.length === 2)
+    answers[0].resolve("old")
+    answers[1].resolve("new")
+
+    expect(await restarted).toBe("new")
+    expect(await joined).toBe("new")
+    expect(await started).toBe("new")
+    // What server-sync's plain fetchQuery got before.
+    expect(await plain).toBeInstanceOf(CancelledError)
   })
 })
 

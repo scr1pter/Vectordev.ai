@@ -431,8 +431,10 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
       loadLsp: () => {
         void queryClient.fetchQuery(queryOptionsApi.lsp(key))
       },
+      // fetchLatest: a reload after the engine changed cancels a references fetch in flight, and this would otherwise
+      // join that fetch and reject with nothing to catch it.
       loadReferences: () => {
-        void queryClient.fetchQuery(queryOptionsApi.references(key))
+        void fetchLatest(queryClient, queryOptionsApi.references(key))
       },
     })
   })
