@@ -83,6 +83,25 @@ export const researchCapRows = [
   ["Deep", "$3, 240 steps, 40 pages, 24 searches and up to 4 researchers."],
 ]
 
+// Who gets what Vector learned about the owner, from desktop 1.99.111 (section 6.4a of the build plan: Brain.HABITS
+// and the research facets in packages/core; test/release-111-docs.test.ts checks the budgets agree).
+export const memoryRoleRows = [
+  ["Main agent", "How you work and facts about you, as in desktop 1.99.110, for build and plan."],
+  [
+    "Subagents",
+    "Up to 100 tokens of how you work at every size, recalled with the task. A Thorough request's subagents also get up to 200 tokens of the cards and memory that bear on the task.",
+  ],
+  [
+    "Vectorscope",
+    "Up to 300 tokens of how you review, chosen with the changed paths and file types, never with the pull request's own text. A pull request Vector cannot trust, such as one from a fork, gets your preferences, review notes and rules only. Vector tells reviewers that no memory line drops or downgrades a security finding or a blocking one.",
+  ],
+  [
+    "Deep research",
+    "The research lead recalls how you work and the private documents its scope allows, beside what every request carries. Researchers get the formats, sources and style you prefer, and the citation judge the sources you prefer. A research run the build agent starts gets how you work and the private documents its scope allows, and nothing else private.",
+  ],
+  ["Titles, summaries and compaction", "Nothing."],
+]
+
 // vector memory, as packages/engine/src/cli/cmd/memory.ts describes each command.
 export const brainCommandRows = [
   [
