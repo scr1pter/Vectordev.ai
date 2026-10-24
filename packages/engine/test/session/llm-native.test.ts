@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { LLMEvent, ToolFailure } from "@vectordevai/llm"
 import { LLMClient, RequestExecutor, WebSocketExecutor, type LLMClientShape } from "@vectordevai/llm/route"
 import { jsonSchema, tool, type ModelMessage, type Tool } from "ai"
@@ -72,6 +72,19 @@ const providerInfo: Provider.Info = {
   options: { apiKey: "test-openai-key" },
   models: {},
 }
+
+const owned = "vector-native-test-registration"
+const stamp = { clientId: owned, enterpriseUrl: "https://auth.openai.com" }
+
+test("native OpenAI OAuth stays paused without a registration of Vector's own", () => {
+  expect(
+    LLMNativeRuntime.status({
+      model: baseModel,
+      provider: { ...providerInfo, options: { apiKey: OAUTH_DUMMY_KEY, fetch: async () => new Response() } },
+      auth: { type: "oauth", refresh: "fixture-refresh", access: "fixture-access", expires: 1 },
+    }),
+  ).toEqual({ type: "unsupported", reason: "provider sign-in is paused" })
+})
 
 const it = testEffect(
   LLMClient.layer.pipe(
@@ -154,6 +167,15 @@ const expectOpenAIResponsesRequest = (input: {
   })
 
 describe("session.llm-native.request", () => {
+  // Exercise a Vector-owned registration only inside this fixture; the shipped sign-in remains off.
+  const before = process.env.VECTOR_OPENAI_OAUTH_CLIENT_ID
+  beforeAll(() => {
+    process.env.VECTOR_OPENAI_OAUTH_CLIENT_ID = owned
+  })
+  afterAll(() => {
+    if (before === undefined) delete process.env.VECTOR_OPENAI_OAUTH_CLIENT_ID
+    else process.env.VECTOR_OPENAI_OAUTH_CLIENT_ID = before
+  })
   test("maps normalized stream inputs to a native LLM request", () => {
     const messages: ModelMessage[] = [
       {
@@ -426,14 +448,14 @@ describe("session.llm-native.request", () => {
       LLMNativeRuntime.status({
         model: baseModel,
         provider: providerInfo,
-        auth: { type: "oauth", refresh: "refresh", access: "access", expires: 1 },
+        auth: { type: "oauth", refresh: "refresh", access: "access", expires: 1, ...stamp },
       }),
     ).toEqual({ type: "unsupported", reason: "OAuth auth requires a provider fetch override" })
     expect(
       LLMNativeRuntime.status({
         model: baseModel,
         provider: { ...providerInfo, options: { apiKey: OAUTH_DUMMY_KEY, fetch: async () => new Response() } },
-        auth: { type: "oauth", refresh: "refresh", access: "access", expires: 1 },
+        auth: { type: "oauth", refresh: "refresh", access: "access", expires: 1, ...stamp },
       }),
     ).toMatchObject({ type: "supported", apiKey: OAUTH_DUMMY_KEY })
     expect(
@@ -790,7 +812,7 @@ describe("session.llm-native.request", () => {
       const native = LLMNativeRuntime.stream({
         model: baseModel,
         provider: { ...providerInfo, options: { apiKey: OAUTH_DUMMY_KEY, fetch: customFetch } },
-        auth: { type: "oauth", refresh: "refresh", access: "access", expires: Date.now() + 60_000 },
+        auth: { type: "oauth", refresh: "refresh", access: "access", expires: Date.now() + 60_000, ...stamp },
         llmClient,
         messages: [{ role: "user", content: "hello" }],
         tools: {},

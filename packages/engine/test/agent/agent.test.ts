@@ -6,7 +6,7 @@ import os from "os"
 import path from "path"
 import { disposeAllInstances, TestInstance, trustWorkspace } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
-import { Agent } from "../../src/agent/agent"
+import { Agent, RESEARCHER, RESEARCH_JUDGE } from "../../src/agent/agent"
 import PROMPT_REVIEW from "../../src/agent/prompt/review.txt"
 import { GENERAL_SUBAGENT } from "../../src/agent/subagent-kind"
 import { NATIVE_SPECIALISTS } from "@vectordevai/core/agent/specialists"
@@ -470,13 +470,15 @@ it.instance(
   { trusted: true, config: { agent: { general: { disable: true } } } },
 )
 
-it.instance("NATIVE_SPECIALISTS names every Subagent specialist that ships with Vector", () =>
+it.instance("native Subagents include the configurable coding specialists and dedicated research helpers", () =>
   Effect.gen(function* () {
     const specialists = (yield* load((svc) => svc.list()))
       .filter((agent) => agent.native === true && agent.mode === "subagent" && agent.name !== GENERAL_SUBAGENT)
       .map((agent) => agent.name)
       .toSorted()
-    expect(specialists).toEqual([...NATIVE_SPECIALISTS])
+    expect(specialists).toEqual([...NATIVE_SPECIALISTS, RESEARCHER, RESEARCH_JUDGE].toSorted())
+    expect(NATIVE_SPECIALISTS).not.toContain(RESEARCHER)
+    expect(NATIVE_SPECIALISTS).not.toContain(RESEARCH_JUDGE)
   }),
 )
 

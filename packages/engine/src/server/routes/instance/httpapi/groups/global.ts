@@ -103,7 +103,7 @@ export const GlobalApi = HttpApi.make("global").add(
       ),
       HttpApiEndpoint.patch("configUpdate", GlobalPaths.config, {
         payload: ConfigV1.Info,
-        success: described(ConfigV1.Info, "Successfully updated global config"),
+        success: described(ConfigWithLocks, "Successfully updated global config"),
         error: [HttpApiError.BadRequest, ConfigLockedError],
       }).annotateMerge(
         OpenApi.annotations({

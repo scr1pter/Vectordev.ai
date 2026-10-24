@@ -110,7 +110,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       if (result.changed) bridge.fork(disposeAllInstancesAndEmitGlobalDisposed({ swallowErrors: true }))
       // An update that wrote nothing keeps the cached config, which may predate an edit made outside Vector.
       if (!result.changed) yield* config.invalidate()
-      return Redaction.redactConfig(yield* config.getGlobal())
+      return yield* configGet()
     })
 
     const dispose = Effect.fn("GlobalHttpApi.dispose")(function* () {

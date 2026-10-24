@@ -3,7 +3,7 @@ import { SessionV1 } from "@vectordevai/core/v1/session"
 import { ModelCatalog } from "@vectordevai/core/model-catalog"
 import { HttpRecorder } from "@vectordevai/http-recorder"
 import { HttpRecorderInternal } from "@vectordevai/http-recorder/internal"
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { tool, type ModelMessage, type JSONValue } from "ai"
 import { Effect, Layer, Stream } from "effect"
 import path from "node:path"
@@ -28,6 +28,7 @@ import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { LayerNodePlatform } from "@vectordevai/core/effect/app-node-platform"
 
 const FIXTURES_DIR = path.join(import.meta.dir, "../fixtures/recordings")
+const owned = "vector-native-recorded-test-registration"
 
 const replayOpenAIOAuth = {
   type: "oauth",
@@ -35,6 +36,8 @@ const replayOpenAIOAuth = {
   access: "fixture-access-token",
   expires: Date.now() + 60 * 60 * 1000,
   accountId: "fixture-account",
+  clientId: owned,
+  enterpriseUrl: "https://auth.openai.com",
 } satisfies Auth.Info
 
 type RecordedScenario = {
@@ -350,6 +353,15 @@ const driveToolLoop = (scenario: RecordedScenario) =>
   })
 
 describe("session.llm native recorded", () => {
+  // Recorded OAuth requests use a synthetic Vector-owned registration, never the disabled built-in sign-in.
+  const before = process.env.VECTOR_OPENAI_OAUTH_CLIENT_ID
+  beforeAll(() => {
+    process.env.VECTOR_OPENAI_OAUTH_CLIENT_ID = owned
+  })
+  afterAll(() => {
+    if (before === undefined) delete process.env.VECTOR_OPENAI_OAUTH_CLIENT_ID
+    else process.env.VECTOR_OPENAI_OAUTH_CLIENT_ID = before
+  })
   for (const scenario of RECORDED_SCENARIOS.filter(isSelected)) {
     if (!canRun(scenario)) {
       if (shouldRecord && selectedScenarios.size > 0) {
