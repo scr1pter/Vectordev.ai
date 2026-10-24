@@ -143,39 +143,54 @@ export function locate(input: string) {
 
 /** The server at `input`, or undefined when nothing Vector recognises answers there. */
 export async function probe(input: string, options: Options = {}): Promise<Server | undefined> {
+  return (await examine(input, options))?.server
+}
+
+// What answers at `input`: the server Vector recognises there, if any; the kinds whose identity read got an answer
+// (`answered`), whatever it said; and an https server's certificate key, read on a connection of its own while the
+// identity is read, whatever the server says it is. Undefined for an address `locate` refuses.
+async function examine(input: string, options: Options = {}) {
   const place = locate(input)
   if (!place) return undefined
   const hostname = new URL(place.origin).hostname
   const timeout =
     options.timeout ?? (LocalPolicy.loopback(hostname) ? IDENTIFY_TIMEOUT.loopback : IDENTIFY_TIMEOUT.remote)
-  const identify = reader(place.root, { ...options, timeout })
-  const answers = await Promise.all(SPECS.map(async (spec) => ({ spec, json: await identify(spec.identify) })))
+  const encrypted = place.origin.startsWith("https:")
+  const [answers, key] = await Promise.all([
+    Promise.all(
+      SPECS.map(async (spec) => {
+        const answered = { any: false }
+        const json = await reader(place.root, { ...options, timeout }, answered)(spec.identify)
+        return { spec, json, answered: answered.any }
+      }),
+    ),
+    encrypted ? spki(place.origin, options.timeout ?? IDENTIFY_TIMEOUT.remote) : Promise.resolve(null),
+  ])
+  const answered = new Set<string>(answers.filter((answer) => answer.answered).map((answer) => answer.spec.kind))
   const found = answers.find((answer) => answer.json !== undefined && answer.spec.matches(answer.json))
-  if (!found) return undefined
+  if (!found) return { answered, spki: key, server: undefined }
   const inspection = await found.spec.inspect(reader(place.root, { ...options, timeout: INSPECT_TIMEOUT }), found.json)
   const models = inspection.models
     .map((model) => (model.context ? { ...model, output: output(model.context) } : model))
     .toSorted((left, right) => left.id.localeCompare(right.id))
-  const encrypted = place.origin.startsWith("https:")
   // The server writes its version, and Vector shows it ("Ollama 0.12.6 on this computer") and pins it, so it is kept
   // as plain text like a server's error.
   const version = inspection.version === undefined ? undefined : LocalErrors.plain(inspection.version)
   return {
-    kind: found.spec.kind,
-    name: found.spec.name,
-    origin: place.origin,
-    baseURL: place.baseURL,
-    version,
-    class: LocalPolicy.hostClass(hostname),
-    encrypted,
-    concurrency: inspection.concurrency,
-    forwards: inspection.forwards,
-    models,
-    pin: {
+    answered,
+    spki: key,
+    server: {
       kind: found.spec.kind,
+      name: found.spec.name,
+      origin: place.origin,
+      baseURL: place.baseURL,
       version,
-      models: modelSet(models),
-      spki: encrypted ? await spki(place.origin, options.timeout ?? IDENTIFY_TIMEOUT.remote) : null,
+      class: LocalPolicy.hostClass(hostname),
+      encrypted,
+      concurrency: inspection.concurrency,
+      forwards: inspection.forwards,
+      models,
+      pin: { kind: found.spec.kind, version, models: modelSet(models), spki: key },
     },
   }
 }
@@ -194,8 +209,9 @@ export function output(context: number) {
  */
 export const SERVER_CHECK = "local-server-check"
 
-// `answered` is set once any read gets an answer, whatever its status, so a caller can tell a server that is down
-// from one that is not of the kind it asked.
+// `answered` is set once a read gets an answer that is not a server error, so a caller can tell a server that is down
+// from one that is not of the kind it asked. A server error (5xx) counts as no answer: a proxy in front of a server
+// that is down answers 502, and the server behind it has not changed.
 function reader(root: string, options: Options & { readonly timeout: number }, answered?: { any: boolean }): Read {
   return async (path, body) => {
     const response = await Egress.fetch(SERVER_CHECK, `${root}${path}`, {
@@ -210,7 +226,7 @@ function reader(root: string, options: Options & { readonly timeout: number }, a
       signal: signal(options.signal, options.timeout),
     }).catch(() => undefined)
     if (!response) return undefined
-    if (answered) answered.any = true
+    if (answered && response.status < 500) answered.any = true
     if (!response.ok) {
       await response.body?.cancel().catch(() => undefined)
       return undefined
@@ -313,6 +329,11 @@ export function changedMessage(origin: string) {
   return `${new URL(origin).host} now answers as a different server. Check it before sending prompts.`
 }
 
+/** Why a model call to a pinned server was not sent: nothing answered when Vector read who it is. */
+export function uncheckedMessage(origin: string) {
+  return `Vector could not check ${new URL(origin).host}'s identity, so nothing was sent to it. Make sure the server is running; Vector checks it again at the next request.`
+}
+
 /** The note for a server on this computer, which anyone signed in to it could have started. */
 export const SHARED_MACHINE = "Another user on this computer could run a server on this port."
 
@@ -320,7 +341,8 @@ export type Verified =
   | { readonly status: "same"; readonly server: Server }
   | {
       readonly status: "changed"
-      readonly server: Server
+      /** What answers now, or undefined when it answers as no server Vector knows. */
+      readonly server: Server | undefined
       readonly changes: readonly Change[]
       readonly message: string
     }
@@ -329,6 +351,14 @@ export type Verified =
 /**
  * Reads the server at `origin` again and compares it with its pin. A change holds the server in `holds`, so its
  * requests are refused until the user confirms it; a server that matches is not released by this, only by confirm.
+ *
+ * Whatever answers the pinned kind's identity read but not as the pinned server is a change: another kind, another
+ * version or model list, or an answer that identifies no server Vector knows (a program that answers only
+ * /v1/chat/completions and 404s the rest, say). So is another certificate on an https server, which is read on a
+ * connection of its own whatever the server answers. When that identity read gets no answer (the server is down, the
+ * read times out, or it answers with a server error), or the pinned certificate could not be read, the server is
+ * `unreachable`, even if it answers another kind's read: Vector cannot tell who is there, and the caller must not
+ * send it a prompt.
  */
 export async function verify(input: {
   readonly origin: string
@@ -336,13 +366,20 @@ export async function verify(input: {
   readonly holds?: Holds
   readonly options?: Options
 }): Promise<Verified> {
-  const server = await probe(input.origin, input.options)
-  if (!server) return { status: "unreachable" }
-  const changed = changes(input.pin, server)
-  if (changed.length === 0) return { status: "same", server }
-  const message = changedMessage(server.origin)
-  input.holds?.hold(server.origin, message)
-  return { status: "changed", server, changes: changed, message }
+  const now = await examine(input.origin, input.options)
+  if (!now) return { status: "unreachable" }
+  const pinned = input.pin.spki ?? null
+  const key = now.spki !== null && now.spki !== pinned
+  const answered = now.answered.has(input.pin.kind)
+  if (!key && (!answered || (pinned !== null && now.spki === null))) return { status: "unreachable" }
+  const changed = now.server
+    ? changes(input.pin, now.server)
+    : Change.literals.filter((change) => (change === "kind" ? answered : change === "spki" && key))
+  if (now.server && changed.length === 0) return { status: "same", server: now.server }
+  const origin = LocalPolicy.origin(input.origin) ?? input.origin
+  const message = changedMessage(origin)
+  input.holds?.hold(origin, message)
+  return { status: "changed", server: now.server, changes: changed, message }
 }
 
 /** A request to a server whose identity changed, refused until the user confirms the server. */
@@ -356,18 +393,36 @@ export class IdentityChanged extends Error {
   }
 }
 
+/** A request to a pinned server whose identity Vector could not read, refused until a read gets an answer. */
+export class IdentityUnchecked extends Error {
+  override readonly name = "IdentityUnchecked"
+  constructor(
+    readonly origin: string,
+    message: string,
+  ) {
+    super(message)
+  }
+}
+
 export interface Holds {
   /** Holds the server's requests until `confirm`. */
   readonly hold: (origin: string, message: string) => void
-  /** The warning for a held server, or undefined. */
+  /**
+   * Why requests to the server at `origin` are refused, or undefined: its identity changed (`changedMessage`, until
+   * `confirm`), or the last read of its pin got no answer (`uncheckedMessage`, until a read gets one).
+   */
   readonly held: (origin: string) => string | undefined
   /** The user checked the server: its requests go again. The caller writes the server's new pin. */
   readonly confirm: (origin: string) => void
-  /** Throws IdentityChanged while the server at `url` is held. Model requests call this before they are sent. */
+  /**
+   * Throws IdentityChanged while the server at `url` is held, and IdentityUnchecked while the last read of its pin got
+   * no answer. Model requests call this before they are sent.
+   */
   readonly gate: (url: string | URL) => void
   /**
    * Reads the listed server `url` goes to, and model requests wait for this before they are sent. A pinned server is
-   * compared with its pin in `policy` (`verify`) and held when it answers as a different one. Any listed server that
+   * compared with its pin in `policy` (`verify`) and held when it answers as a different one; when nothing answers,
+   * its requests are refused (`gate`, `held`) until a later read gets an answer. Any listed server that
    * answers as Ollama says which of its models run somewhere else (`forwards`), pinned or not: a server a company lists
    * has no pin. It is read before its first model call in this process, again once the policy or the pin changes,
    * again when a call names one of `models` the server did not list when it was read (once for each model under a
@@ -400,6 +455,8 @@ export class HoldsService extends Context.Service<HoldsService, Holds>()("@vecto
 
 export function makeHolds(options: Options = {}): Holds {
   const held = new Map<string, string>()
+  // Pinned servers whose last read got no answer, so Vector cannot tell who is there: refused until a read answers.
+  const unchecked = new Map<string, string>()
   // The reads made under each policy in effect, by server and pin, so a new policy or pin reads again, and the models
   // calls named that a server did not list, each read again once under that policy.
   const checks = new WeakMap<
@@ -420,16 +477,29 @@ export function makeHolds(options: Options = {}): Holds {
   // Whether anything answered: a pinned server's identity, or what a server with no pin says about its models.
   const read = async (origin: string, pin: Pin | undefined) => {
     if (pin) {
-      const verified = await verify({ origin, pin, holds, options }).catch(() => undefined)
-      if (!verified || verified.status === "unreachable") return false
-      const models = verified.server.models
-      learn(
+      // A model call waits for this read, and is refused when it gets no answer, so a pinned server on this computer
+      // gets as long to answer as one elsewhere: the short wait is for Detect, which reads many ports at once.
+      const verified = await verify({
         origin,
-        models,
-        models.filter((model) => model.cloud).map((model) => model.id),
-      )
+        pin,
+        holds,
+        options: { timeout: IDENTIFY_TIMEOUT.remote, ...options },
+      }).catch(() => undefined)
+      if (!verified || verified.status === "unreachable") {
+        unchecked.set(origin, uncheckedMessage(origin))
+        return false
+      }
+      unchecked.delete(origin)
+      const models = verified.server?.models
+      if (models)
+        learn(
+          origin,
+          models,
+          models.filter((model) => model.cloud).map((model) => model.id),
+        )
       return true
     }
+    unchecked.delete(origin)
     const ollama = await ollamaModels(origin, options)
     if (!ollama) return false
     learn(origin, ollama.models, ollama.models?.filter((model) => model.cloud).map((model) => model.id) ?? [])
@@ -439,7 +509,7 @@ export function makeHolds(options: Options = {}): Holds {
     hold: (origin, message) => {
       held.set(key(origin), message)
     },
-    held: (origin) => held.get(key(origin)),
+    held: (origin) => held.get(key(origin)) ?? unchecked.get(key(origin)),
     confirm: (origin) => {
       held.delete(key(origin))
     },
@@ -447,6 +517,8 @@ export function makeHolds(options: Options = {}): Holds {
       const origin = key(url)
       const message = held.get(origin)
       if (message) throw new IdentityChanged(origin, message)
+      const missing = unchecked.get(origin)
+      if (missing) throw new IdentityUnchecked(origin, missing)
     },
     check: (url, policy, models = []) => {
       const origin = key(url)
@@ -467,7 +539,8 @@ export function makeHolds(options: Options = {}): Holds {
       const existing = state.done.get(id)
       if (existing) return existing
       const running: Promise<void> = read(origin, pin).then((answered) => {
-        // Nothing answered: the next model call reads it again, whatever answers on the port by then.
+        // Nothing answered: the next model call reads it again, whatever answers on the port by then. A pinned server
+        // stays refused (`unchecked`) until then.
         if (!answered && state.done.get(id) === running) state.done.delete(id)
       })
       state.done.set(id, running)

@@ -571,6 +571,118 @@ describe("the provider under Vector Local", () => {
     }),
   )
 
+  // A provider for the model the vLLM cassette lists, on the server at `origin`.
+  const coderBox = (origin: string) => ({
+    trusted: true,
+    config: {
+      provider: {
+        box: {
+          name: "GPU box",
+          npm: "@ai-sdk/openai-compatible",
+          models: { [CODER]: qwen(CODER) },
+          options: { apiKey: "test-key", baseURL: `${origin}/v1` },
+        },
+      },
+    },
+  })
+
+  pinned.live("sends no prompt to a pinned server that now answers model calls but no identity read", () =>
+    Effect.gen(function* () {
+      // Another program on a pinned vLLM's port, as another user of this computer could start one: it 404s every
+      // identity read and answers model calls.
+      const prompts: string[] = []
+      const stranger = yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch: async (request) => {
+              if (new URL(request.url).pathname !== "/v1/chat/completions")
+                return new Response("Not found", { status: 404 })
+              prompts.push(await request.text())
+              return completion()
+            },
+          }),
+        ),
+        (server) => Effect.promise(() => server.stop(true)),
+      )
+      const origin = `http://127.0.0.1:${stranger.port}`
+      const pin = { kind: "vllm" as const, version: "0.11.0", models: "sha256:x", spki: null }
+      yield* provideTmpdirInstance(
+        () =>
+          withLocal({ enabled: true, endpoints: [origin], pins: { [origin]: pin } }, () =>
+            Effect.gen(function* () {
+              const provider = yield* Provider.Service
+              const language = yield* provider.getLanguage(
+                yield* provider.getModel(ProviderV2.ID.make("box"), ModelV2.ID.make(CODER)),
+              )
+              const refused = yield* stream(language, "secret prompt")
+              expect(refused instanceof Error ? refused.message : String(refused)).toContain(
+                LocalProbe.changedMessage(origin),
+              )
+              expect(prompts).toEqual([])
+              const holds = yield* LocalProbe.HoldsService
+              holds.confirm(origin)
+              expect(guard.outside()).toEqual([])
+            }),
+          ),
+        coderBox(origin),
+      )
+    }),
+  )
+
+  pinned.live(
+    "refuses a model call while a pinned server's identity read gets no answer, and sends the next once it answers",
+    () =>
+      Effect.gen(function* () {
+        // vLLM's /version, its identity read, answers too late for Vector's wait (3 s) until `late` is turned off.
+        const late = { on: false }
+        const version = (yield* Effect.promise(() => LocalServers.load("vllm"))).interactions.find((item) =>
+          item.request.url.endsWith("/version"),
+        )!.response
+        const server = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            LocalServers.serve("vllm", {
+              routes: {
+                "POST /v1/chat/completions": completion,
+                "GET /version": async () => {
+                  if (late.on) await Bun.sleep(3_500)
+                  return new Response(version.body, { status: version.status, headers: version.headers })
+                },
+              },
+            }),
+          ),
+          (fake) => Effect.promise(() => fake.close()),
+        )
+        const added = yield* Effect.promise(() => LocalProbe.probe(server.origin))
+        expect(added?.kind).toBe("vllm")
+        const completions = () => server.hits().filter((hit) => hit.path.endsWith("/chat/completions"))
+        yield* provideTmpdirInstance(
+          () =>
+            withLocal({ enabled: true, endpoints: [server.origin], pins: { [server.origin]: added!.pin } }, () =>
+              Effect.gen(function* () {
+                const provider = yield* Provider.Service
+                const language = yield* provider.getLanguage(
+                  yield* provider.getModel(ProviderV2.ID.make("box"), ModelV2.ID.make(CODER)),
+                )
+                late.on = true
+                const refused = yield* stream(language, "secret prompt")
+                expect(refused instanceof Error ? refused.message : String(refused)).toContain(
+                  LocalProbe.uncheckedMessage(server.origin),
+                )
+                expect(completions()).toEqual([])
+                // Nothing is held for the user to confirm: the next call reads the server again, and it answers.
+                late.on = false
+                expect(yield* stream(language, "hi")).toBe("streamed")
+                expect(completions().map((hit) => hit.body.includes("secret prompt"))).toEqual([false])
+                expect(guard.outside()).toEqual([])
+              }),
+            ),
+          coderBox(server.origin),
+        )
+      }),
+  )
+
   it.instance(
     "changes nothing with Vector Local off",
     () =>

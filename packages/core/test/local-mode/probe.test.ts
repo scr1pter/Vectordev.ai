@@ -21,7 +21,7 @@ import { NetworkGuard } from "../lib/network-guard"
 // Every server here is a fake on 127.0.0.1 answering from its cassette, and the strict guard refuses anything else.
 const guard = NetworkGuard.use()
 
-const fakes: LocalServers.Fake[] = []
+const fakes: { readonly close: () => Promise<void> }[] = []
 afterEach(async () => {
   await Promise.all(fakes.splice(0).map((fake) => fake.close()))
 })
@@ -30,6 +30,59 @@ async function fake(kind: LocalServers.Kind, routes: Record<string, LocalServers
   const server = await LocalServers.serve(kind, { routes })
   fakes.push(server)
   return server
+}
+
+// A program on 127.0.0.1 that is no model server Vector knows: it 404s every identity read and answers model calls.
+function stranger() {
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: (request) =>
+      new URL(request.url).pathname === "/v1/chat/completions"
+        ? Response.json({ choices: [{ index: 0, message: { role: "assistant", content: "prompt received" } }] })
+        : new Response("Not found", { status: 404 }),
+  })
+  fakes.push({ close: () => server.stop(true) })
+  return `http://127.0.0.1:${server.port}`
+}
+
+// A vLLM server whose /version, its identity read, answers `late` milliseconds late; its /v1/models, which any
+// OpenAI-compatible server answers, answers at once.
+async function slow(late: { ms: number }) {
+  const server = await fake("vllm")
+  const version = (await LocalServers.load("vllm")).interactions.find((item) => item.request.url.endsWith("/version"))!
+  server.route("GET /version", async () => {
+    await Bun.sleep(late.ms)
+    return new Response(version.response.body, { status: version.response.status, headers: version.response.headers })
+  })
+  return server
+}
+
+// A self-signed certificate for localhost made with openssl, and its public key's pin as openssl itself works it out:
+// the SHA-256 of the DER public key, base64.
+function certificate(dir: string, name: string) {
+  const key = path.join(dir, `${name}-key.pem`)
+  const cert = path.join(dir, `${name}-cert.pem`)
+  const made = Bun.spawnSync([
+    "openssl",
+    "req",
+    "-x509",
+    "-newkey",
+    "rsa:2048",
+    "-nodes",
+    "-subj",
+    "/CN=localhost",
+    "-days",
+    "1",
+    "-keyout",
+    key,
+    "-out",
+    cert,
+  ])
+  expect(made.exitCode).toBe(0)
+  const der = Bun.spawnSync(["openssl", "x509", "-in", cert, "-pubkey", "-noout"]).stdout
+  const spki = Bun.spawnSync(["openssl", "pkey", "-pubin", "-outform", "der"], { stdin: der }).stdout
+  return { key: Bun.file(key), cert: Bun.file(cert), pin: new Bun.CryptoHasher("sha256").update(spki).digest("base64") }
 }
 
 const GB = 1024 ** 3
@@ -190,7 +243,7 @@ describe("identity pins", () => {
     expect(() => holds.gate(`${server.origin}/v1/chat/completions`)).toThrow(verified.message)
 
     // A later check that matches does not release it; only the user's confirmation does.
-    await LocalProbe.verify({ origin: server.origin, pin: verified.server.pin, holds })
+    await LocalProbe.verify({ origin: server.origin, pin: verified.server!.pin, holds })
     expect(holds.held(server.origin)).toBe(verified.message)
     holds.confirm(server.origin)
     expect(() => holds.gate(`${server.origin}/v1/chat/completions`)).not.toThrow()
@@ -205,41 +258,82 @@ describe("identity pins", () => {
     expect(await LocalProbe.verify({ origin: server.origin, pin })).toEqual({ status: "unreachable" })
   })
 
+  test("a program that answers the pinned kind's identity read as no server Vector knows is a change", async () => {
+    // What the shared-machine case looks like: another program on a pinned Ollama's port, answering model calls only.
+    const origin = stranger()
+    const holds = LocalProbe.makeHolds()
+    const pin: LocalProbe.Pin = { kind: "ollama", version: "0.12.6", models: "sha256:x", spki: null }
+    expect(await LocalProbe.verify({ origin, pin, holds })).toEqual({
+      status: "changed",
+      server: undefined,
+      changes: ["kind"],
+      message: LocalProbe.changedMessage(origin),
+    })
+    expect(() => holds.gate(`${origin}/v1/chat/completions`)).toThrow(LocalProbe.IdentityChanged)
+  })
+
+  test("an identity read that times out or gets a server error is unreachable, even when another kind's read answers", async () => {
+    const late = { ms: 300 }
+    const server = await slow(late)
+    late.ms = 0
+    const added = (await LocalProbe.probe(server.origin))!
+    expect(added.kind).toBe("vllm")
+    late.ms = 300
+    // /v1/models alone would make it a generic OpenAI-compatible server, which is not what was pinned.
+    expect(await LocalProbe.verify({ origin: server.origin, pin: added.pin, options: { timeout: 100 } })).toEqual({
+      status: "unreachable",
+    })
+    // A proxy in front of a server that is down answers 502.
+    server.route("GET /version", () => new Response("Bad Gateway", { status: 502 }))
+    expect(await LocalProbe.verify({ origin: server.origin, pin: added.pin })).toEqual({ status: "unreachable" })
+  })
+
   test.skipIf(!Bun.which("openssl"))("reads an https server's public key pin", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "vector-spki-"))
-    const key = path.join(dir, "key.pem")
-    const cert = path.join(dir, "cert.pem")
-    const made = Bun.spawnSync([
-      "openssl",
-      "req",
-      "-x509",
-      "-newkey",
-      "rsa:2048",
-      "-nodes",
-      "-subj",
-      "/CN=localhost",
-      "-days",
-      "1",
-      "-keyout",
-      key,
-      "-out",
-      cert,
-    ])
-    expect(made.exitCode).toBe(0)
+    const made = certificate(dir, "server")
     const tls = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
-      tls: { cert: Bun.file(cert), key: Bun.file(key) },
+      tls: { cert: made.cert, key: made.key },
       fetch: () => new Response("ok"),
     })
-    // The expected pin, worked out by openssl itself: SHA-256 of the DER public key, base64.
-    const der = Bun.spawnSync(["openssl", "x509", "-in", cert, "-pubkey", "-noout"]).stdout
-    const spki = Bun.spawnSync(["openssl", "pkey", "-pubin", "-outform", "der"], { stdin: der }).stdout
-    const expected = new Bun.CryptoHasher("sha256").update(spki).digest("base64")
-    expect(await LocalProbe.spki(`https://127.0.0.1:${tls.port}`)).toBe(expected)
+    expect(await LocalProbe.spki(`https://127.0.0.1:${tls.port}`)).toBe(made.pin)
     await tls.stop(true)
     await rm(dir, { recursive: true, force: true })
   })
+
+  test.skipIf(!Bun.which("openssl"))(
+    "another certificate on an https server is a change, whatever its identity reads answer",
+    async () => {
+      const dir = await mkdtemp(path.join(os.tmpdir(), "vector-spki-"))
+      const added = certificate(dir, "added")
+      const other = certificate(dir, "other")
+      const pin: LocalProbe.Pin = { kind: "vllm", version: "0.11.0", models: "sha256:x", spki: added.pin }
+      // Neither certificate is one this computer trusts, so the identity reads themselves get no answer: only the
+      // certificate's key, read on a connection of its own, says who is there.
+      const serve = (made: typeof added) =>
+        Bun.serve({
+          hostname: "127.0.0.1",
+          port: 0,
+          tls: { cert: made.cert, key: made.key },
+          fetch: () => new Response("Not found", { status: 404 }),
+        })
+      const swapped = serve(other)
+      const origin = `https://127.0.0.1:${swapped.port}`
+      const holds = LocalProbe.makeHolds()
+      const verified = await LocalProbe.verify({ origin, pin, holds })
+      expect(verified.status === "changed" && verified.changes).toEqual(["spki"])
+      expect(holds.held(origin)).toBe(LocalProbe.changedMessage(origin))
+      await swapped.stop(true)
+      // The pinned key alone is not an answer: with no identity read answering, Vector cannot tell who is there.
+      const same = serve(added)
+      expect(await LocalProbe.verify({ origin: `https://127.0.0.1:${same.port}`, pin })).toEqual({
+        status: "unreachable",
+      })
+      await same.stop(true)
+      await rm(dir, { recursive: true, force: true })
+    },
+  )
 
   test("a server that does not speak TLS gives no key", async () => {
     const plain = await fake("vllm")
@@ -384,14 +478,52 @@ describe("checking a listed server before its first model call", () => {
     const pinned = policy(origin, added.pin)
     Egress.configure(pinned)
     const holds = LocalProbe.makeHolds()
-    // The first model call finds nothing on the port.
+    // The first model call finds nothing on the port, so it is refused: Vector cannot tell who would get the prompt.
     await holds.check(`${origin}/v1/chat/completions`, pinned)
-    expect(holds.held(origin)).toBeUndefined()
+    expect(holds.held(origin)).toBe(LocalProbe.uncheckedMessage(origin))
+    expect(() => holds.gate(`${origin}/v1/chat/completions`)).toThrow(LocalProbe.IdentityUnchecked)
     // Another server now answers there, as another user of this computer could start one.
     const other = await LocalServers.serve("ollama", { port })
     fakes.push(other)
     await holds.check(`${origin}/v1/chat/completions`, pinned)
     expect(holds.held(origin)).toBe(LocalProbe.changedMessage(origin))
+  })
+
+  test("holds a pinned server that now answers only model calls, so its prompt is never sent", async () => {
+    const origin = stranger()
+    const pinned = policy(origin, { kind: "ollama", version: "0.12.6", models: "sha256:abc", spki: null })
+    Egress.configure(pinned)
+    const holds = LocalProbe.makeHolds()
+    await holds.check(`${origin}/v1/chat/completions`, pinned, ["llama3"])
+    expect(holds.held(origin)).toBe(LocalProbe.changedMessage(origin))
+    expect(() => holds.gate(`${origin}/v1/chat/completions`)).toThrow(LocalProbe.IdentityChanged)
+  })
+
+  test("refuses a model call while a pinned server's identity read gets no answer, and reads it again at the next", async () => {
+    const late = { ms: 0 }
+    const server = await slow(late)
+    const added = (await LocalProbe.probe(server.origin))!
+    const pinned = policy(server.origin, added.pin)
+    Egress.configure(pinned)
+    const call = `${server.origin}/v1/chat/completions`
+    // A pinned server on this computer gets the long wait before a model call, not Detect's 400 ms.
+    late.ms = 600
+    const patient = LocalProbe.makeHolds()
+    await patient.check(call, pinned)
+    expect(patient.held(server.origin)).toBeUndefined()
+    expect(() => patient.gate(call)).not.toThrow()
+
+    // Too late for the wait: the call is refused, and nothing holds the server for the user to confirm.
+    const holds = LocalProbe.makeHolds({ timeout: 100 })
+    await holds.check(call, pinned)
+    expect(holds.held(server.origin)).toBe(LocalProbe.uncheckedMessage(server.origin))
+    expect(() => holds.gate(call)).toThrow(LocalProbe.IdentityUnchecked)
+    expect(() => holds.gate(call)).toThrow(LocalProbe.uncheckedMessage(server.origin))
+    // The next model call reads it again, and it answers in time, as the server that was pinned.
+    late.ms = 0
+    await holds.check(call, pinned)
+    expect(holds.held(server.origin)).toBeUndefined()
+    expect(() => holds.gate(call)).not.toThrow()
   })
 
   test("reads a server again after a model call to it found nothing answering", async () => {
