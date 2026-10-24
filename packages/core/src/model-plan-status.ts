@@ -1,5 +1,6 @@
 export * as ModelPlanStatus from "./model-plan-status"
 
+import { CodiumPlan } from "@vectordevai/schema/codium-plan"
 import { Option, Schema } from "effect"
 
 export const SITE = "https://vectordev.ai"
@@ -148,10 +149,11 @@ export async function fetchOffers(
     ? Schema.decodeUnknownOption(Config)(await response.json().catch(() => undefined))
     : Option.none()
   if (Option.isNone(decoded)) return undefined
-  // Only these four fields, whatever else the configuration carries.
+  // Only these four fields, whatever else the configuration carries. A plan or top-up Vector knows takes its current
+  // name, so a site still answering an older name shows the same one as everything else.
   const offer = (item: Offer) => ({
     id: item.id,
-    name: item.name,
+    name: CodiumPlan.name(item.id) ?? item.name,
     price: item.price,
     available: decoded.value.enabled && item.available,
   })
@@ -171,7 +173,7 @@ export function fromRemote(remote: typeof Remote.Type): Status {
     ...(remote.customer ? { customer: true } : {}),
     plan: remote.plan && {
       id: remote.plan.id,
-      name: remote.plan.name,
+      name: CodiumPlan.name(remote.plan.id) ?? remote.plan.name,
       ...(remote.plan.left === undefined ? {} : { left: remote.plan.left }),
       renewsAt: remote.plan.renewsAt,
       cancelAtPeriodEnd: remote.plan.cancelAtPeriodEnd,
@@ -212,7 +214,7 @@ export function describe(status: Status) {
   const lines = [
     plan
       ? `Plan: ${plan.name}, ${plan.left === undefined ? "balance unavailable" : `${formatShare(plan.left)} of this month's credits left`}, ${plan.cancelAtPeriodEnd ? "ends" : "renews"} ${formatDate(plan.renewsAt)}`
-      : "Plan: none",
+      : `Plan: ${CodiumPlan.FREE}`,
     `Purchased credits: ${formatPurchased(status.purchased).toLowerCase()}`,
   ]
   const current = notice(status)

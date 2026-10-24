@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { publicModelPlans } from "../../../../../../api/_lib/model-plan-config"
 import { codiumPricing } from "../../../lib/codium-pricing"
 import { readModelPlanConfig, type ModelPlanConfig } from "../../../lib/model-plans"
+import { CodiumPlan } from "@vectordevai/schema/codium-plan"
 import { CodiumPricing, CodiumQuestions, codiumMode, codiumModeUrl, type CodiumMode } from "./CodiumPricing"
 
 const config: ModelPlanConfig = {
@@ -12,14 +13,14 @@ const config: ModelPlanConfig = {
   interval: "month",
   product: "Vector Codium",
   plans: [
-    { id: "vector-10", name: "Codium 10", price: 10, available: true, tasks: [[60, 550], null] },
-    { id: "vector-50", name: "Codium 50", price: 50, available: true, multiple: 5, tasks: [[300, 2700], null] },
+    { id: "vector-10", name: "Plus", price: 10, available: true, tasks: [[60, 550], null] },
+    { id: "vector-50", name: "Pro", price: 50, available: true, multiple: 5, tasks: [[300, 2700], null] },
   ],
   topups: [
-    { id: "codium-topup-10", name: "Codium 10 top-up", price: 10, available: true, tasks: [[60, 550], null] },
+    { id: "codium-topup-10", name: "$10 credit top-up", price: 10, available: true, tasks: [[60, 550], null] },
     {
       id: "codium-topup-50",
-      name: "Codium 50 top-up",
+      name: "$50 credit top-up",
       price: 50,
       available: true,
       multiple: 5,
@@ -84,26 +85,33 @@ describe("Codium pricing page", () => {
     expect(source).toContain("<CodiumQuestions client:load")
   })
 
-  test("offers exactly the four monthly plans, with no free card, and highlights Codium 50", () => {
+  test("offers the four monthly plans by name, Plus, Pro, Max and Ultra, with no free card, and highlights Pro", () => {
     const monthly = part(render(selling), "monthly")
-    expect(live.plans.map((plan) => plan.price)).toEqual([10, 50, 100, 200])
+    expect(live.plans.map((plan) => [plan.id, plan.name, plan.price])).toEqual([
+      ["vector-10", "Plus", 10],
+      ["vector-50", "Pro", 50],
+      ["vector-100", "Max", 100],
+      ["vector-200", "Ultra", 200],
+    ])
+    // The server configuration takes its names from the module the app reads too.
+    expect(live.plans.map((plan) => plan.name)).toEqual(CodiumPlan.PLANS.map((plan) => plan.name))
     const plans = cards(monthly)
     expect(plans).toHaveLength(4)
     for (const [index, plan] of live.plans.entries()) {
-      expect(plans[index]).toContain(`<h3 class="cx-type-md">Codium ${plan.price}</h3>`)
+      expect(plans[index]).toContain(`<h3 class="cx-type-md">${plan.name}</h3>`)
       expect(plans[index]).toContain(
         `<span class="cx-amount cx-type-lg">$${plan.price}</span><span class="cx-per">/month</span>`,
       )
-      expect(plans[index]).toContain(`>Get Codium ${plan.price}</button>`)
+      expect(plans[index]).toContain(`>Get ${plan.name}</button>`)
     }
     // One plan carries the badge and the light button; the others use the dark one.
     expect(monthly.match(/Most popular/g)).toHaveLength(1)
     expect(plans[1]).toContain('<span class="cx-badge cx-type-xs">Most popular</span>')
-    expect(plans[1]).toContain('<button class="cx-btn" type="button">Get Codium 50</button>')
+    expect(plans[1]).toContain('<button class="cx-btn" type="button">Get Pro</button>')
     for (const index of [0, 2, 3]) expect(plans[index]).toContain('class="cx-btn cx-btn--secondary"')
     expect(monthly).not.toContain(">Free<")
     expect(monthly).not.toContain("$0")
-    expect(monthly).not.toMatch(/Codium 20(?!0)/)
+    expect(monthly).not.toMatch(/Codium \d/)
   })
 
   test("every plan card states its typical tasks for each model, and later plans state their usage as a multiple", () => {
@@ -123,7 +131,7 @@ describe("Codium pricing page", () => {
       }
     for (const [index, multiple] of [5, 10, 20].entries())
       expect(plans[index + 1]).toContain(
-        `Everything in Codium ${[10, 50, 100][index]}, and: ${multiple}x more usage than Codium 10`,
+        `Everything in ${["Plus", "Pro", "Max"][index]}, and: ${multiple}x more usage than Plus`,
       )
     expect(plans[3]).toContain(
       "DeepSeek V4.1 Flash: 1,000–10,000 Xiaomi MiMo V2.6 Flash: 1,600–16,000 Claude Haiku 5.5: 600–6,000",
@@ -145,26 +153,27 @@ describe("Codium pricing page", () => {
     expect(live.topups?.map((pack) => pack.price)).toEqual([10, 50, 100, 200])
     const [pack, plans] = cards(topups)
     expect(pack).toContain('<fieldset class="cx-seg cx-picker" aria-label="Top-up amount">')
-    // Each amount is a radio named as checkout names it, so a top-up never shares a plan's name.
+    // Each amount is a radio named as checkout names it, by its amount, so a top-up never shares a plan's name.
     for (const [index, item] of (live.topups ?? []).entries()) {
-      expect(item.name).toBe(`Codium ${item.price} top-up`)
+      expect(item.name).toBe(`$${item.price} credit top-up`)
       // The accessible name starts with the amount the radio shows.
       expect(pack).toContain(
-        `aria-label="$${item.price}, ${item.name}" name="cx-topup"${index === 0 ? ' checked=""' : ""} value="${index}"/>`,
+        `aria-label="${item.name}" name="cx-topup"${index === 0 ? ' checked=""' : ""} value="${index}"/>`,
       )
       expect(pack).toContain(`<span>$${item.price}</span>`)
     }
     expect(pack).toContain('<span class="cx-amount cx-type-lg">$10</span><span class="cx-per">one-time</span>')
-    expect(pack).toContain('<button class="cx-btn" type="button">Buy Codium 10 top-up</button>')
+    expect(pack).toContain('<button class="cx-btn" type="button">Buy $10 credit top-up</button>')
     expect(text(pack)).toContain("Codium credits that carry forward, with no subscription")
     expect(text(pack)).toContain("DeepSeek V4.1 Flash: 50–500 tasks")
     expect(text(pack)).toContain("Unused credits carry forward")
     // The chosen top-up is named visibly, as checkout and the account page name it.
-    expect(text(pack)).toContain("*Codium 10 top-up: one-time purchase.")
+    expect(text(pack)).toContain("*$10 credit top-up: one-time purchase.")
     expect(text(pack)).not.toMatch(/never expire|no expiration|expiry/i)
     expect(plans).toContain('<span class="cx-amount cx-type-lg">$10–$200</span><span class="cx-per">/month</span>')
     expect(plans).toContain('<button class="cx-btn cx-btn--secondary" type="button">Compare plans</button>')
-    expect(text(plans)).toContain("Up to 20x the usage of Codium 10")
+    expect(text(plans)).toContain("Plans from Plus to Ultra")
+    expect(text(plans)).toContain("Up to 20x the usage of Plus")
   })
 
   test("the plan type is a native radio group, so it has one tab stop and arrow keys move between the tabs", () => {
@@ -213,10 +222,10 @@ describe("Codium pricing page", () => {
     const columns = [...table.matchAll(/<th scope="col">(.*?)<\/th>/g)].map((match) => text(match[1]!).trim())
     expect(columns).toEqual([
       "Feature",
-      "Codium 10 $10 /month Coming soon",
-      "Codium 50 $50 /month Coming soon",
-      "Codium 100 $100 /month Coming soon",
-      "Codium 200 $200 /month Coming soon",
+      "Plus $10 /month Coming soon",
+      "Pro $50 /month Coming soon",
+      "Max $100 /month Coming soon",
+      "Ultra $200 /month Coming soon",
     ])
     const groups = [...table.matchAll(/<th class="cx-compare-group"[^>]*><div>.*?<\/svg>(.*?)<\/div>/g)].map(
       (match) => match[1],
@@ -235,7 +244,7 @@ describe("Codium pricing page", () => {
         [...match[2]!.matchAll(/<td>(.*?)<\/td>/g)].map((cell) => text(cell[1]!).trim()),
       ]),
     )
-    expect(rows.get("Usage")).toEqual(["Base", "5x Codium 10", "10x Codium 10", "20x Codium 10"])
+    expect(rows.get("Usage")).toEqual(["Base", "5x Plus", "10x Plus", "20x Plus"])
     expect(rows.get("DeepSeek V4.1 Flash (default)")).toEqual(Array(4).fill("Included"))
     expect(rows.get("Claude Haiku 5.5")).toEqual(["30–300", "150–1,500", "300–3,000", "600–6,000"])
     for (const feature of [
@@ -310,6 +319,11 @@ describe("Codium pricing page", () => {
     expect(answers).toContain(
       "Use DeepSeek V4.1 Flash or Xiaomi MiMo V2.6 Flash for routine work and save Claude Haiku 5.5",
     )
+    expect(answers).toContain(
+      "Start with Plus to try Codium on everyday coding. Pro suits coding with agents most days, Max daily agent " +
+        "work across repositories, and Ultra long sessions with parallel agents.",
+    )
+    expect(answers).not.toMatch(/Codium \d/)
     expect(answers).toContain("no overage charges and no automatic top-ups")
     expect(answers).toContain("route them only to zero-data-retention endpoints")
     for (const model of live.models ?? []) expect(html).toContain(`<strong>${model.name}</strong>`)
@@ -343,11 +357,10 @@ describe("Codium pricing page", () => {
       const open = [...render(value).matchAll(/<button class="(cx-btn[^"]*)"/g)].map((match) => match[1])
       expect(buys.map((match) => match[1])).toEqual(open)
       expect(html).toContain('<button class="cx-btn cx-btn--secondary" type="button">Compare plans</button>')
-      expect(html).not.toContain("Get Codium")
-      expect(html).not.toContain("Buy Codium")
+      expect(html).not.toMatch(/>(?:Get|Buy) [^<]*<\/button>/)
     }
     // A plan that reports itself available still waits while the product as a whole is off.
-    expect(render({ ...config, enabled: false })).not.toContain("Get Codium 10")
+    expect(render({ ...config, enabled: false })).not.toContain("Get Plus")
     expect(render(live)).toContain("Coming soon")
     const open = render(config)
     expect(open).not.toContain("Coming soon")

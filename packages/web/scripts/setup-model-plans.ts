@@ -18,6 +18,7 @@ if (!Bun.argv.includes("--apply")) {
   )
   console.table(
     modelPlans().map((plan) => ({
+      plan: plan.name,
       price: plan.price,
       monthlyCredits: plan.credits,
       topupCredits: modelTopups().find((pack) => pack.price === plan.price)?.credits,
@@ -37,7 +38,8 @@ if (!Bun.argv.includes("--apply")) {
 }
 
 const monthly: { product: string; price: string }[] = []
-for (const amount of MODEL_PLAN_PRICES) {
+for (const plan of modelPlans()) {
+  const amount = plan.price
   const lookup = `vector-models-${amount}-monthly-v1`
   const result = await modelPlanStripe(`prices?${new URLSearchParams({ "lookup_keys[]": lookup, limit: "2" })}`)
   const existing = Array.isArray(result.data) ? result.data.filter(stripeRecord) : []
@@ -51,7 +53,8 @@ for (const amount of MODEL_PLAN_PRICES) {
         currency: "usd",
         unit_amount: String(amount * 100),
         "recurring[interval]": "month",
-        "product_data[name]": `Vector Codium ${amount}`,
+        // Only a new price makes a product; an existing product keeps the name it has in Stripe.
+        "product_data[name]": `Vector Codium ${plan.name}`,
         lookup_key: lookup,
       }),
     }))
@@ -83,7 +86,7 @@ for (const pack of modelTopups()) {
       body: new URLSearchParams({
         currency: "usd",
         unit_amount: String(pack.price * 100),
-        "product_data[name]": `Vector Codium ${pack.price} top-up`,
+        "product_data[name]": `Vector Codium ${pack.name}`,
         lookup_key: lookup,
       }),
     }))

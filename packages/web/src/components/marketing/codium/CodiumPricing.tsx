@@ -1,5 +1,6 @@
 /** @jsxImportSource react */
 import React from "react"
+import { CodiumPlan } from "@vectordevai/schema/codium-plan"
 import type { CodiumOffer, CodiumPricingView } from "../../../lib/codium-pricing"
 import { modelPlanRedirect } from "../../../lib/model-plans"
 import "./codium-pricing.css"
@@ -16,6 +17,8 @@ const MODES = [
 ] as const
 // The plan marked "Most popular", by position: the second of the four.
 const POPULAR = 1
+// The four plans, cheapest first, as the plan question describes them.
+const [STARTER, REGULAR, DAILY, HEAVY] = CodiumPlan.PLANS
 // Plans differ only in usage. What they share is listed once, on the cards with room for it, under labels that say
 // it applies to every plan; the list lengths follow the reference layout's cards.
 const EVERY_PLAN = [
@@ -310,8 +313,8 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
                     options={topups.map((item, index) => ({
                       value: String(index),
                       label: usd.format(item.price),
-                      // The accessible name starts with the visible amount, then names the top-up as checkout does.
-                      title: `${usd.format(item.price)}, ${item.name}`,
+                      // The top-up's name, as checkout gives it, starts with the visible amount.
+                      title: item.name,
                     }))}
                     value={String(pack)}
                     onChange={(value) => setPack(Number(value))}
@@ -342,7 +345,7 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
                     ],
                   },
                 ],
-                // Names the chosen top-up as checkout and the account page do, such as "Codium 10 top-up".
+                // Names the chosen top-up as checkout and the account page do, such as "$10 credit top-up".
                 footnote: `*${topup.name}: one-time purchase. Typical tasks estimated.`,
               })}
               {plans.length > 0 &&
@@ -516,9 +519,9 @@ export function CodiumQuestions(props: { models: CodiumPricingView["models"] }) 
       question: "What is the right plan for me?",
       answer: (
         <p>
-          Start with Codium 10 to try Codium on everyday coding. Codium 50 suits coding with agents most days, Codium
-          100 daily agent work across repositories, and Codium 200 long sessions with parallel agents. Whichever plan you
-          choose, a top-up covers a busy week without changing plans.
+          Start with {STARTER.name} to try Codium on everyday coding. {REGULAR.name} suits coding with agents most days,{" "}
+          {DAILY.name} daily agent work across repositories, and {HEAVY.name} long sessions with parallel agents.
+          Whichever plan you choose, a top-up covers a busy week without changing plans.
         </p>
       ),
     },
