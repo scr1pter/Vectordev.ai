@@ -5,6 +5,7 @@ import os from "node:os"
 import path from "path"
 import { Cause, DateTime, Effect, Exit, Fiber, Layer } from "effect"
 import { ConfigV1 } from "@vectordevai/core/v1/config/config"
+import { ConfigManaged } from "@vectordevai/core/config/managed"
 import type { ConfigLocalV1 } from "@vectordevai/core/v1/config/local"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
@@ -110,7 +111,11 @@ function withLocal<A, E, R>(
       writeFileSync(file, JSON.stringify({ local: block }))
       apply()
     }),
-    body,
+    () =>
+      Effect.gen(function* () {
+        if (where === "managed") expect(ConfigManaged.read()).toEqual({ files: [file], policies: [], ignored: [] })
+        return yield* body()
+      }),
     () =>
       Effect.sync(() => {
         rmSync(file, { force: true })

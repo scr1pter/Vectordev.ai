@@ -6,6 +6,10 @@ import fs from "fs/promises"
 import { setTimeout as sleep } from "node:timers/promises"
 import { afterAll } from "bun:test"
 
+// Managed-policy fixtures must pass the production ownership check even when a Linux runner starts with umask 0002.
+// Keep newly created test paths unwritable by other users; trust tests explicitly chmod the unsafe cases.
+if (process.platform !== "win32") process.umask(process.umask() | 0o022)
+
 // Set XDG env vars FIRST, before any src/ imports
 const dir = path.join(os.tmpdir(), "vector-test-data-" + process.pid)
 await fs.mkdir(dir, { recursive: true })
