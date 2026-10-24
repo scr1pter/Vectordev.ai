@@ -186,6 +186,7 @@ async function sources() {
   const files = await Array.fromAsync(new Bun.Glob("packages/{core,engine,llm}/src/**/*.{ts,tsx}").scan({ cwd: ROOT }))
   return Promise.all(
     files
+      .map((file) => file.replaceAll("\\", "/"))
       .filter((file) => !/\.test\.tsx?$/.test(file))
       .toSorted()
       .map(async (file) => ({ file, text: strip(await Bun.file(path.join(ROOT, file)).text()) })),
