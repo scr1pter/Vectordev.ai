@@ -271,11 +271,13 @@ const main = Effect.gen(function* () {
     commandLine: app.commandLine,
     log: (message, data) => logger.log(message, data),
   })
-  // On a first run, the requests Vector makes for itself at start wait until the person chooses how to run models.
+  // On a first run, the requests Vector makes for itself at start wait until the person chooses how to run models. The
+  // engine's database, in <XDG_DATA_HOME>/vector, which preferAppEnv set, tells an upgraded install from a new one.
   const firstRun = startFirstRun({
     userData: app.getPath("userData"),
     store: getStore(LOCAL_STORE),
     reported: getStore(USAGE_STORE).get("sent") !== undefined,
+    engineData: process.env.XDG_DATA_HOME ? join(process.env.XDG_DATA_HOME, "vector") : undefined,
   })
 
   app.on("second-instance", (_event: Event, argv: string[]) => {

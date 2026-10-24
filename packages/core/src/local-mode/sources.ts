@@ -690,12 +690,13 @@ export const SOURCES: readonly Source[] = [
     id: "chromium-network",
     purpose: "unknown",
     hosts: [],
-    sends: "Name lookups, early connections and certificate checks for the hosts the app's windows and browsers name",
+    sends:
+      "Name lookups, early connections and certificate checks for the hosts the app's windows and browsers name, and the proxy setup file a system set to find its proxy names",
     why: "Chromium makes these itself for the pages it shows, below the layer where Vector decides each request",
     local: "not-covered",
     where: ["desktop"],
     callSites: ["packages/desktop/src/main/egress-filter.ts", "packages/desktop/src/main/local-mode.ts"],
-    note: "Vector decides and logs every request Chromium makes for its windows, the agent's browser, the research browsers and the updater. Some traffic happens below that and is not in the network log. Chromium may look up a name a page links to, and open a connection to a host a page names, before the request Vector refuses: Vector Local turns that name prefetching off when Vector starts, so after Vector Local is turned on it stops only once Vector restarts. With Vector Local on, WebRTC uses no UDP. Its TCP goes through a research browser's proxy, the agent's browser has no WebRTC in any frame, and Vector's own windows run only the app. The operating system checks the certificates of the sites the windows load (revocation lists and OCSP on macOS and Windows). On Windows and Linux, Vector Local points Chromium's spellcheck dictionary downloads at this computer",
+    note: "Vector decides and logs every request Chromium makes for its windows, the agent's browser, the research browsers and the updater. Some traffic happens below that and is not in the network log. Chromium may look up a name a page links to before the request Vector refuses: Vector Local turns that name prefetching off when Vector starts, so after Vector Local is turned on it stops only once Vector restarts. A page can still have Chromium look up and connect to a host it names with a preconnect link, without sending a request, and Vector Local does not stop that. With Vector Local on, WebRTC uses no UDP. Its TCP goes through a research browser's proxy, and Vector's own windows run only the app. The agent's browser has no WebRTC peer connections and no WebTransport in its pages, in the frames they make and in their dedicated workers, but a shared or service worker a page starts still has WebTransport, and its connections are not in the network log. QUIC is off from the next start. The Electron smoke checks the agent's browser on macOS; it has not run on Windows or Linux yet. A system set to find its proxy itself (WPAD or a proxy setup file) has Chromium fetch that file. The operating system checks the certificates of the sites the windows load (revocation lists and OCSP on macOS and Windows). On Windows and Linux, Vector Local points Chromium's spellcheck dictionary downloads at this computer",
   },
   {
     id: "agent-programs",

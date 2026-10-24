@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { tmpdir } from "node:os"
 import path from "node:path"
 import tls, { getCACertificates } from "node:tls"
+import vm from "node:vm"
 import type { LocalMode } from "@vectordevai/schema/local-mode"
 import { Egress } from "@vectordevai/core/local-mode/egress"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
@@ -21,9 +22,11 @@ import {
   desktopLocalStatus,
   firstRunHeld,
   forwardEgress,
+  guardAgentContents,
   installChromiumLocal,
   policyMismatch,
   releaseStartupHold,
+  startDesktopLocal,
   startFirstRun,
   stricterPolicy,
   usageCheckinAllowed,
@@ -198,8 +201,20 @@ describe("Chromium under Vector Local", () => {
       },
     ])
     const script = readFileSync(agent.preloads[0]!.filePath, "utf8")
-    expect(script).toContain("RTCPeerConnection")
     expect(script).toContain("executeInMainWorld")
+    // Run where the main world is not reachable, the preload takes WebRTC and WebTransport from the page it runs in.
+    const page: Record<string, unknown> = {
+      RTCPeerConnection: class {},
+      RTCDataChannel: class {},
+      WebTransport: class {},
+      fetch: () => undefined,
+      require: () => {
+        throw new Error("no electron here")
+      },
+    }
+    vm.runInNewContext(script, page)
+    expect([page.RTCPeerConnection, page.RTCDataChannel, page.WebTransport]).toEqual([undefined, undefined, undefined])
+    expect(typeof page.fetch).toBe("function")
     if (process.platform !== "win32") expect(statSync(agent.preloads[0]!.filePath).mode & 0o777).toBe(0o600)
     // A session Electron makes later gets the dispatcher too.
     const later = { listener: false, webRequest: { onBeforeRequest: () => void (later.listener = true) } }
@@ -250,6 +265,178 @@ describe("Chromium under Vector Local", () => {
     expect(made.made.get("persist:vector-browser")!.preloads).toEqual([])
   })
 
+  test("turns name prefetching and QUIC off at a start with Vector Local on, and says a later turn-on needs a restart", () => {
+    const saved = { config: process.env.XDG_CONFIG_HOME, state: process.env.XDG_STATE_HOME }
+    delete process.env.XDG_CONFIG_HOME
+    delete process.env.XDG_STATE_HOME
+    try {
+      const start = (local?: { enabled: boolean }) => {
+        const userData = folder()
+        if (local) {
+          mkdirSync(path.join(userData, "xdg-config", "vector"), { recursive: true })
+          writeFileSync(path.join(userData, "xdg-config", "vector", "vector.json"), JSON.stringify({ local }))
+        }
+        const switches: string[] = []
+        const policy = startDesktopLocal({
+          userData,
+          commandLine: { appendSwitch: (name: string) => void switches.push(name) },
+          log: () => undefined,
+        })
+        return { policy, switches }
+      }
+      const local = start({ enabled: true })
+      expect(local.policy.enabled).toBe(true)
+      expect(local.switches).toEqual(["dns-prefetch-disable", "disable-quic"])
+      expect(desktopLocalStatus().restartNeeded).toBe(false)
+      // Turned on after a start without it: WebTransport is already gone from the agent's browser, QUIC is not.
+      const plain = start()
+      expect(plain.switches).toEqual(plain.policy.enabled ? ["dns-prefetch-disable", "disable-quic"] : [])
+      Egress.configure(on())
+      expect(desktopLocalStatus().restartNeeded).toBe(!plain.policy.enabled)
+    } finally {
+      if (saved.config !== undefined) process.env.XDG_CONFIG_HOME = saved.config
+      if (saved.state !== undefined) process.env.XDG_STATE_HOME = saved.state
+    }
+  })
+
+  // A web contents with a debugger that records what it was sent, and can say a frame or worker attached.
+  const debuggee = (options: { url?: string; attach?: () => void } = {}) => {
+    const sent: { method: string; params?: Record<string, unknown>; session?: string }[] = []
+    const listeners = new Set<(event: unknown, method: string, params: unknown) => void>()
+    const events = new EventEmitter()
+    const state = { attached: false }
+    const contents = {
+      getURL: () => options.url ?? "",
+      isLoading: () => false,
+      once: (name: string, listener: () => void) => events.once(name, listener),
+      setWebRTCIPHandlingPolicy: () => undefined,
+      debugger: {
+        attach: () => {
+          options.attach?.()
+          state.attached = true
+        },
+        detach: () => void (state.attached = false),
+        isAttached: () => state.attached,
+        sendCommand: async (method: string, params?: Record<string, unknown>, session?: string) => {
+          sent.push({ method, ...(params ? { params } : {}), ...(session ? { session } : {}) })
+          return {}
+        },
+        on: (_name: string, listener: (event: unknown, method: string, params: unknown) => void) =>
+          void listeners.add(listener),
+        removeListener: (_name: string, listener: (event: unknown, method: string, params: unknown) => void) =>
+          void listeners.delete(listener),
+      },
+    }
+    return {
+      contents,
+      sent,
+      events,
+      state,
+      listeners,
+      attach: (sessionId: string, type: string) =>
+        listeners.forEach((listener) =>
+          listener({}, "Target.attachedToTarget", { sessionId, targetInfo: { type }, waitingForDebugger: true }),
+        ),
+    }
+  }
+
+  test("guards the agent browser's blank frames, frames of other sites and workers through the debugger", async () => {
+    const tab = debuggee()
+    const stop = guardAgentContents(tab.contents as never)!
+    expect(tab.state.attached).toBe(true)
+    // Nothing loaded yet: Electron has no page to send to until the first navigation starts.
+    await settle()
+    expect(tab.sent).toEqual([])
+    tab.events.emit("did-start-navigation")
+    await settle()
+    expect(tab.sent.map((item) => item.method)).toEqual([
+      "Page.enable",
+      "Page.addScriptToEvaluateOnNewDocument",
+      "Target.setAutoAttach",
+    ])
+    const script = tab.sent[1]!.params!
+    expect(script.runImmediately).toBe(true)
+    // Frames of other sites and dedicated workers only: a service worker held as it starts would never start.
+    expect(tab.sent[2]!.params).toEqual({
+      autoAttach: true,
+      waitForDebuggerOnStart: true,
+      flatten: true,
+      filter: [{ type: "iframe" }, { type: "worker" }],
+    })
+    // The script takes WebRTC and WebTransport from the document it runs in, and nothing else.
+    const page: Record<string, unknown> = {
+      RTCPeerConnection: class {},
+      WebTransport: class {},
+      fetch: () => undefined,
+    }
+    vm.runInNewContext(String(script.source), page)
+    expect([page.RTCPeerConnection, page.WebTransport, typeof page.fetch]).toEqual([undefined, undefined, "function"])
+    // A frame of another site and a worker each wait as they start, get the script, then go.
+    tab.sent.splice(0)
+    tab.attach("frame-1", "iframe")
+    tab.attach("worker-1", "worker")
+    tab.attach("service-1", "service_worker")
+    await settle()
+    // Anything else that attaches goes at once, as it would without Vector Local.
+    expect(tab.sent.filter((item) => item.session === "service-1").map((item) => item.method)).toEqual([
+      "Runtime.runIfWaitingForDebugger",
+    ])
+    const frame = tab.sent.filter((item) => item.session === "frame-1").map((item) => item.method)
+    const worker = tab.sent.filter((item) => item.session === "worker-1").map((item) => item.method)
+    expect(frame).toEqual([
+      "Page.enable",
+      "Page.addScriptToEvaluateOnNewDocument",
+      "Target.setAutoAttach",
+      "Runtime.runIfWaitingForDebugger",
+    ])
+    expect(worker).toEqual(["Runtime.evaluate", "Target.setAutoAttach", "Runtime.runIfWaitingForDebugger"])
+    expect(tab.sent.find((item) => item.session === "worker-1")!.params!.expression).toBe(script.source)
+    stop()
+    expect([tab.state.attached, tab.listeners.size]).toEqual([false, 0])
+  })
+
+  test("guards a page already open at once, and leaves the preload alone when the debugger cannot attach", async () => {
+    const open = debuggee({ url: "http://localhost:5173/" })
+    guardAgentContents(open.contents as never)
+    await settle()
+    expect(open.sent.map((item) => item.method)).toContain("Page.addScriptToEvaluateOnNewDocument")
+    const held = debuggee({
+      attach: () => {
+        throw new Error("Another debugger is already attached")
+      },
+    })
+    expect(guardAgentContents(held.contents as never)).toBeUndefined()
+  })
+
+  test("guards the agent browser's web contents only with Vector Local on, and stops once it is off", async () => {
+    const local = { current: LocalPolicy.OFF }
+    const app = new EventEmitter()
+    const made = sessions()
+    const agent = debuggee()
+    const window = debuggee()
+    const chromium = installChromiumLocal({
+      app: app as never,
+      defaultSession: made.defaultSession,
+      fromPartition: made.fromPartition,
+      webContents: () => [{ ...agent.contents, session: made.made.get("persist:vector-browser") } as never],
+      directory: folder(),
+      filter: createEgressFilter({ policy: () => local.current, record: () => undefined }),
+      policy: () => local.current,
+    })
+    const browser = { ...agent.contents, session: made.made.get("persist:vector-browser") }
+    app.emit("web-contents-created", {}, browser)
+    expect(agent.state.attached).toBe(false)
+    local.current = on()
+    // Vector's own windows are never debugged.
+    app.emit("web-contents-created", {}, { ...window.contents, session: made.defaultSession })
+    expect(window.state.attached).toBe(false)
+    app.emit("web-contents-created", {}, browser)
+    expect(agent.state.attached).toBe(true)
+    local.current = LocalPolicy.OFF
+    chromium.apply()
+    expect(agent.state.attached).toBe(false)
+  })
+
   test("registers the peer-connection preload from a folder only this user can open", () => {
     const directory = path.join(folder(), "local-mode")
     const registered: string[] = []
@@ -269,15 +456,46 @@ describe("Chromium under Vector Local", () => {
 
 describe("the first-run hold", () => {
   test("holds on a first run only", () => {
-    const base = { answered: false, managed: false, enabled: false, reported: false }
+    const base = { answered: false, managed: false, enabled: false, heldBefore: false, ranBefore: false }
     expect(firstRunHeld(base)).toBe(true)
     expect(firstRunHeld({ ...base, answered: true })).toBe(false)
     // A company policy says how Vector runs before the app is ready, so nothing is held.
     expect(firstRunHeld({ ...base, managed: true })).toBe(false)
     // Vector Local already on blocks those requests itself.
     expect(firstRunHeld({ ...base, enabled: true })).toBe(false)
-    // An install that already checked in has run before.
-    expect(firstRunHeld({ ...base, reported: true })).toBe(false)
+    // An install that ran before is not on its first run...
+    expect(firstRunHeld({ ...base, ranBefore: true })).toBe(false)
+    // ...unless a start held and the person never answered.
+    expect(firstRunHeld({ ...base, ranBefore: true, heldBefore: true })).toBe(true)
+  })
+
+  test("takes an install upgraded with usage sharing off for one that ran before, from what earlier starts left", () => {
+    const values = new Map<string, unknown>()
+    const store = {
+      get: (key: string) => values.get(key),
+      set: (key: string, value: unknown) => values.set(key, value),
+    }
+    const start = (userData: string, engineData?: string) => {
+      const folders = { config: path.join(userData, "config"), managed: [path.join(userData, "managed")], ...trusted }
+      return startFirstRun({ userData, store, reported: false, engineData, folders })
+    }
+    // The app's windows kept their state (the renderer's stores), with no usage check-in ever sent.
+    const windows = folder()
+    writeFileSync(path.join(windows, "vector.global.dat"), "{}")
+    expect(start(windows).held()).toBe(false)
+    // The engine kept its database, whatever the channel names it.
+    const engine = folder()
+    writeFileSync(path.join(engine, "vector-beta.db"), "")
+    expect(start(folder(), engine).held()).toBe(false)
+    expect(values.size).toBe(0)
+    // A new install holds, and still does at its next start, once its windows and engine have left their state.
+    const fresh = folder()
+    const data = path.join(fresh, "xdg-data", "vector")
+    expect(start(fresh, data).held()).toBe(true)
+    mkdirSync(data, { recursive: true })
+    writeFileSync(path.join(data, "vector.db"), "")
+    writeFileSync(path.join(fresh, "default.dat"), "{}")
+    expect(start(fresh, data).held()).toBe(true)
   })
 
   test("has no timeout, and resumes the held requests when the person answers", async () => {

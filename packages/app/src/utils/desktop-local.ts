@@ -6,7 +6,10 @@ export type DesktopLocal = {
   readonly enabled: boolean
   /** A first run's startup requests wait until the person has chosen how to run models. */
   readonly held: boolean
-  /** Vector Local was turned on after the app started; Chromium's DNS prefetching stays on until Vector restarts. */
+  /**
+   * Vector Local was turned on after the app started; Chromium's DNS prefetching and QUIC stay on until Vector
+   * restarts.
+   */
   readonly restartNeeded?: boolean
   /** What Vector Local does with a request of the app's own, by its source: allow, ask (once) or block. */
   readonly sources: Readonly<Record<string, "allow" | "ask" | "block">>

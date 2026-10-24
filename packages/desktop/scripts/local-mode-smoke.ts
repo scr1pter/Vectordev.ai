@@ -13,7 +13,9 @@
 //   image a reply would show there loads nothing;
 // - every web contents keeps WebRTC off UDP, a window opened before Vector Local was turned on included;
 // - the agent's browser follows Web access (Ask loads a page and what it loads, None refuses it and still loads this
-//   computer), and neither its pages nor a frame a page's script makes have RTCPeerConnection;
+//   computer), and neither its pages, the frames they make (a blank frame in a frame of another site included) nor
+//   their dedicated workers have RTCPeerConnection or WebTransport, while shared and service workers still start (a
+//   note line says they keep WebTransport);
 // - the network log counts a page once and what it loaded once per host, and the counters leave the page's own host
 //   out of the other hosts;
 // - the updater's session (electron-updater's net.request) reaches the dispatcher: an automatic check is refused

@@ -1,6 +1,6 @@
-import { mkdirSync, writeFileSync } from "node:fs"
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import type { App, CommandLine, Session, WebContents } from "electron"
+import type { App, CommandLine, Debugger, Session, WebContents } from "electron"
 import { Option, Schema } from "effect"
 import { LocalMode } from "@vectordevai/schema/local-mode"
 import { LocalEvent } from "@vectordevai/schema/local-event"
@@ -14,15 +14,16 @@ import { desktopLocalFolders, resolveDesktopLocal } from "./local-policy"
 
 // Vector Local in the desktop app (plan sections 4.2, 4.3.6, 4.7 and 4.9). Desktop main resolves the policy before
 // app.whenReady from the folders its engine reads (local-policy.ts), and from then on:
-// - Chromium: one dispatcher per session (egress-filter.ts), WebRTC kept to the proxy, no DNS prefetching, no
-//   spellcheck downloads on Windows and Linux, and no WebRTC peer connections in the agent's browser;
+// - Chromium: one dispatcher per session (egress-filter.ts), WebRTC kept to the proxy, no DNS prefetching, no QUIC
+//   (so no WebTransport), no spellcheck downloads on Windows and Linux, and no WebRTC peer connections or WebTransport
+//   in the agent's browser;
 // - the company's certificate authorities are added to the certificates desktop main and its engine trust;
 // - once the engine runs, desktop main compares its policy with the engine's (GET /local) as soon as the engine says
 //   Vector Local changed (its local.updated event) and every half minute, reading its own folders again each time,
 //   and when they differ it uses the stricter of the two and says so; a change applies to Chromium at once where it
-//   can (WebRTC, spellcheck dictionaries, the agent browser's peer connections), and DNS prefetching, which only a
-//   start sets, says a restart is needed; and it sends what its own windows and requests did to the engine's network
-//   log (POST /local/egress/report), so "What Vector sent" lists the desktop's requests too;
+//   can (WebRTC, spellcheck dictionaries, the agent browser's peer connections and WebTransport), and DNS prefetching
+//   and QUIC, which only a start sets, say a restart is needed; and it sends what its own windows and requests did to
+//   the engine's network log (POST /local/egress/report), so "What Vector sent" lists the desktop's requests too;
 // - on the first run, with no company policy and no model connected, the requests Vector makes for itself at start
 //   (the usage check-in, the update check, the dictation model's pre-warm, release notes, and in the engine the model
 //   catalog's refresh, the free models and plans catalogs and the provider policy) wait until the person has chosen
@@ -42,7 +43,14 @@ const EVENTS_RETRY_MAX = 30_000
 const RELEASE_TRIES = 4
 const FIRST_RUN_CHECK = 15_000
 const CERTIFICATES_CHECK = 60_000
+// Chromium's switches under Vector Local, which only a start sets. Name prefetching may look up a name a page links to
+// before the request the dispatcher would refuse. QUIC carries WebTransport, whose connections no webRequest listener
+// sees: in a session with no proxy (the agent's browser, Vector's windows) a page could reach the internet with it
+// whatever Web access says. Without QUIC, Chromium uses HTTP/2 and HTTP/1.1, which the dispatcher decides.
+const LOCAL_SWITCHES = ["dns-prefetch-disable", "disable-quic"]
 const ANSWERED = "firstRunAnswered"
+// A start held for the first run's question, which a start that left state behind (ranBefore) still holds for.
+const HELD = "firstRunHeld"
 /** Desktop main's own store for Vector Local: whether the first run's question was answered. */
 export const LOCAL_STORE = "local"
 // What the app's windows fetch from the internet, by registry source, as the dispatcher decides it.
@@ -63,8 +71,9 @@ export type DesktopLocalStatus = {
   /** The app and its engine read Vector Local differently; the app uses the stricter of the two. */
   readonly mismatch?: string
   /**
-   * Vector Local was turned on after the app started, and Chromium still looks up the names pages link to before
-   * anyone opens them until Vector restarts (DNS prefetching is set only at start). Everything else already applies.
+   * Vector Local was turned on after the app started, and until Vector restarts Chromium still looks up the names pages
+   * link to before anyone opens them, and still speaks QUIC (DNS prefetching and QUIC are set only at start), though
+   * the agent's browser already has no WebTransport. Everything else already applies.
    */
   readonly restartNeeded: boolean
   /** Whether the app's windows may fetch each of these from the internet now: allow, ask (once) or block. */
@@ -74,9 +83,9 @@ export type DesktopLocalStatus = {
 export type Engine = { readonly url: string; readonly password: string }
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>
 
-const state: { mismatch?: string; hold: FirstRunHold; prefetchOff: boolean } = {
+const state: { mismatch?: string; hold: FirstRunHold; switchesSet: boolean } = {
   hold: createFirstRunHold(false),
-  prefetchOff: false,
+  switchesSet: false,
 }
 
 /**
@@ -89,10 +98,10 @@ export function startDesktopLocal(input: {
   readonly log: (message: string, data?: unknown) => void
 }) {
   const policy = resolveDesktopLocal(input.userData)
-  // Chromium may still look up a name a page names, before the request the dispatcher would refuse. Only a start sets
-  // this, so turning Vector Local on later says a restart is needed (DesktopLocalStatus.restartNeeded).
-  state.prefetchOff = policy.enabled
-  if (policy.enabled) input.commandLine.appendSwitch("dns-prefetch-disable")
+  // Only a start sets these, so turning Vector Local on later says a restart is needed
+  // (DesktopLocalStatus.restartNeeded).
+  state.switchesSet = policy.enabled
+  if (policy.enabled) LOCAL_SWITCHES.forEach((name) => input.commandLine.appendSwitch(name))
   policy.warnings.forEach((warning) => input.log("vector local", { warning }))
   // Node's own certificate lists are read through OpenSSL and the system's store, either of which can fail on a
   // broken installation; Vector then keeps the certificates Node starts with.
@@ -137,14 +146,15 @@ export function watchCompanyCertificates(input: {
 /**
  * Once the app is ready: the dispatcher on the default session and every session Electron makes, the kinds of the
  * sessions Vector knows, WebRTC kept off UDP on every web contents, and, with Vector Local on, no WebRTC peer
- * connections in the agent's browser. Returns `apply`, which brings all of it in line with the policy in effect after
- * it changed: every open web contents, every session's spellcheck dictionaries, and the agent browser's preload.
+ * connections and no WebTransport in the agent's browser (its preload, and guardAgentContents for what the preload
+ * never reaches). Returns `apply`, which brings all of it in line with the policy in effect after it changed: every
+ * open web contents, every session's spellcheck dictionaries, and the agent browser's preload and guards.
  */
 export function installChromiumLocal(deps: {
   readonly app: Pick<App, "on">
   readonly defaultSession: Target
   readonly fromPartition: (partition: string, options?: { cache: boolean }) => Target & Partial<PreloadTarget>
-  readonly webContents: () => readonly Pick<WebContents, "setWebRTCIPHandlingPolicy">[]
+  readonly webContents: () => readonly ChromiumContents[]
   /** Where the agent's browser's preload is written. */
   readonly directory: string
   readonly filter?: EgressFilter
@@ -157,11 +167,31 @@ export function installChromiumLocal(deps: {
   const agent = deps.fromPartition(AGENT_BROWSER)
   filter.prepare(agent, "agent-browser")
   filter.prepare(deps.fromPartition(UPDATER, UPDATER_OPTIONS), "updates")
-  deps.app.on("web-contents-created", (_event, contents) => filter.protect(contents))
+  // The agent browser's web contents guarded while Vector Local is on, each with the function that stops its guard.
+  const guarded = new Map<ChromiumContents, () => void>()
+  const guard = (contents: ChromiumContents) => {
+    if (!policy().enabled || contents.session !== agent || guarded.has(contents) || !isDebuggee(contents)) return
+    const stop = guardAgentContents(contents)
+    if (!stop) return
+    guarded.set(contents, stop)
+    contents.once("destroyed", () => guarded.delete(contents))
+  }
+  deps.app.on("web-contents-created", (_event, contents) => {
+    filter.protect(contents)
+    guard(contents)
+  })
   const preload: { id?: string } = {}
   const apply = () => {
-    deps.webContents().forEach((contents) => filter.protect(contents))
+    deps.webContents().forEach((contents) => {
+      filter.protect(contents)
+      guard(contents)
+    })
     filter.refresh()
+    // A page loaded while Vector Local was on keeps what its guard took away until it loads again.
+    if (!policy().enabled) {
+      guarded.forEach((stop) => stop())
+      guarded.clear()
+    }
     if (!agent.registerPreloadScript) return
     const on = policy().enabled
     if (on && !preload.id) preload.id = denyPeerConnections(agent as PreloadTarget, deps.directory)
@@ -175,24 +205,112 @@ export function installChromiumLocal(deps: {
 }
 
 type PreloadTarget = Pick<Session, "registerPreloadScript" | "unregisterPreloadScript">
+/** A web contents as installChromiumLocal reads it: the agent browser's are guarded too. */
+type ChromiumContents = Pick<WebContents, "setWebRTCIPHandlingPolicy"> &
+  Partial<Pick<WebContents, "session" | "once" | "getURL" | "isLoading">> & { readonly debugger?: Debuggee["debugger"] }
+type Debuggee = Pick<WebContents, "once" | "getURL" | "isLoading"> & {
+  readonly debugger: Pick<Debugger, "attach" | "detach" | "isAttached" | "sendCommand" | "on" | "removeListener">
+}
 
-// Before a page's own scripts, in the page's world: no WebRTC peer connections, whose traffic no webRequest listener
-// sees, and which in a session with no proxy (the agent's browser) would connect over TCP directly, around Web access.
+function isDebuggee(contents: ChromiumContents): contents is ChromiumContents & Debuggee {
+  return (
+    contents.debugger !== undefined &&
+    contents.once !== undefined &&
+    contents.getURL !== undefined &&
+    contents.isLoading !== undefined
+  )
+}
+
+// What the agent's browser loses under Vector Local, before a page's own scripts: WebRTC peer connections and
+// WebTransport, whose traffic no webRequest listener sees, and which in a session with no proxy (the agent's browser)
+// would connect directly, around Web access. QUIC is off too from the next start (LOCAL_SWITCHES).
+const NO_PEER_CONNECTIONS = `() => {
+  for (const name of ["RTCPeerConnection", "webkitRTCPeerConnection", "RTCDataChannel", "RTCSessionDescription", "RTCIceCandidate", "WebTransport"]) {
+    try { Object.defineProperty(globalThis, name, { value: undefined, configurable: false, writable: false }) } catch {}
+  }
+}`
+// The same, as a script the browser's debugging protocol runs in a document or a worker.
+const NO_PEER_CONNECTIONS_SCRIPT = `(${NO_PEER_CONNECTIONS})()`
 // A sandboxed preload with context isolation reaches the page's world through executeInMainWorld; one without
 // isolation already runs there. Electron runs a session's preloads in the main frame only, unless the web contents
 // sets nodeIntegrationInSubFrames, as the agent's browser does (AGENT_BROWSER_PREFERENCES, browser-agent.ts): then
-// they run in every frame a page makes too, still sandboxed and without Node. The Electron smoke checks both.
+// they run in every frame that loads a document too, still sandboxed and without Node. A blank frame a page's script
+// makes loads none, so no preload runs there, nor in a worker: guardAgentContents covers those and dedicated workers.
+// The Electron smoke checks each.
 const PEER_CONNECTIONS_OFF = `"use strict"
-// Vector Local: the agent's browser makes no WebRTC peer connections. Written by Vector (local-mode.ts).
-const off = () => {
-  for (const name of ["RTCPeerConnection", "webkitRTCPeerConnection", "RTCDataChannel", "RTCSessionDescription", "RTCIceCandidate"]) {
-    try { Object.defineProperty(globalThis, name, { value: undefined, configurable: false, writable: false }) } catch {}
-  }
-}
+// Vector Local: the agent's browser makes no WebRTC peer connections and no WebTransport.
+// Written by Vector (local-mode.ts).
+const off = ${NO_PEER_CONNECTIONS}
 try { require("electron").contextBridge.executeInMainWorld({ func: off }) } catch { off() }
 `
+// How the agent browser's frames of other sites and its dedicated workers are attached: each waits as it starts until
+// Vector let it go. Shared and service workers are left out: a service worker the debugger holds as it starts never
+// takes the script and never starts, which would hold the page that registered it. A frame or worker is let go after
+// PREPARE_LIMIT whatever happened, so no page waits on the debugger for good.
+const AUTO_ATTACH = {
+  autoAttach: true,
+  waitForDebuggerOnStart: true,
+  flatten: true,
+  filter: [{ type: "iframe" }, { type: "worker" }],
+}
+const PREPARE_LIMIT = 2_000
 
-/** Registers the preload that turns WebRTC peer connections off in the pages of `target`. */
+/**
+ * Turns WebRTC peer connections and WebTransport off, before their own scripts, where the agent browser's preload
+ * never runs: a blank frame a page's script makes, a blank frame in a frame of another site, and dedicated workers. It
+ * drives the browser's debugging protocol, as research browsers do: every document gets the script before its own
+ * (Page.addScriptToEvaluateOnNewDocument), and a frame of another site or a dedicated worker, which is a target of its
+ * own, waits as it starts until it has the script too (Target.setAutoAttach). Shared and service workers keep
+ * WebTransport. Returns the function that stops, or undefined when the debugger could not attach, where the preload
+ * alone applies.
+ */
+export function guardAgentContents(contents: Debuggee) {
+  const tools = contents.debugger
+  const attached = (() => {
+    try {
+      tools.attach("1.3")
+      return true
+    } catch {
+      return false
+    }
+  })()
+  if (!attached) return undefined
+  const send = (method: string, params: Record<string, unknown> = {}, sessionId?: string) =>
+    tools.sendCommand(method, params, sessionId).catch(() => undefined)
+  const prepare = (sessionId?: string, type?: string) =>
+    Promise.all([
+      ...(type === "worker"
+        ? [send("Runtime.evaluate", { expression: NO_PEER_CONNECTIONS_SCRIPT }, sessionId)]
+        : [
+            send("Page.enable", {}, sessionId),
+            send(
+              "Page.addScriptToEvaluateOnNewDocument",
+              { source: NO_PEER_CONNECTIONS_SCRIPT, runImmediately: true },
+              sessionId,
+            ),
+          ]),
+      send("Target.setAutoAttach", AUTO_ATTACH, sessionId),
+    ])
+  const attachedTo = (_event: unknown, method: string, params: unknown) => {
+    if (method !== "Target.attachedToTarget") return
+    const target = params as { readonly sessionId: string; readonly targetInfo: { readonly type: string } }
+    const type = target.targetInfo.type
+    const ready = type === "iframe" || type === "worker" ? prepare(target.sessionId, type) : Promise.resolve()
+    const limit = new Promise<void>((resolve) => setTimeout(resolve, PREPARE_LIMIT).unref?.())
+    void Promise.race([ready, limit]).then(() => send("Runtime.runIfWaitingForDebugger", {}, target.sessionId))
+  }
+  tools.on("message", attachedTo)
+  // A web contents that has loaded nothing has no page to send to yet (Electron answers "target closed"); its first
+  // navigation's start has one, and what it sends then reaches the page before the page's own scripts.
+  if (contents.getURL() === "" && !contents.isLoading()) contents.once("did-start-navigation", () => void prepare())
+  else void prepare()
+  return () => {
+    tools.removeListener("message", attachedTo)
+    if (tools.isAttached()) tools.detach()
+  }
+}
+
+/** Registers the preload that turns WebRTC peer connections and WebTransport off in the pages of `target`. */
 export function denyPeerConnections(target: Pick<Session, "registerPreloadScript">, directory: string) {
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   const filePath = join(directory, "no-peer-connections.js")
@@ -502,33 +620,66 @@ export function createFirstRunHold(held: boolean) {
 /**
  * Whether this start holds the requests Vector makes for itself: on a first run, with no company policy (which says
  * how Vector runs before the app is ready) and Vector Local not already on, until the person chooses how to run models.
- * An install that has already checked in (`reported`) has run before.
+ * An install that ran before (`ranBefore`) is not on its first run, unless an earlier start held and the person never
+ * answered (`heldBefore`): dismissing the question asks again at the next start.
  */
 export function firstRunHeld(input: {
   readonly answered: boolean
   readonly managed: boolean
   readonly enabled: boolean
-  readonly reported: boolean
+  readonly heldBefore: boolean
+  readonly ranBefore: boolean
 }) {
-  return !input.answered && !input.managed && !input.enabled && !input.reported
+  return !input.answered && !input.managed && !input.enabled && (input.heldBefore || !input.ranBefore)
 }
 
 /** Decides this start's first-run hold, from the desktop's own records and its folders. */
 export function startFirstRun(input: {
   readonly userData: string
   readonly store: { get(key: string): unknown; set(key: string, value: unknown): void }
+  /** Whether the usage check-in has reported this install. */
   readonly reported: boolean
+  /** The engine's data folder (<XDG_DATA_HOME>/vector), which holds its database. */
+  readonly engineData?: string
   readonly folders?: LocalStartup.Input
 }) {
   const held = firstRunHeld({
     answered: input.store.get(ANSWERED) === true,
     managed: LocalStartup.managed(input.folders ?? desktopLocalFolders(input.userData)),
     enabled: Egress.policy().enabled,
-    reported: input.reported,
+    heldBefore: input.store.get(HELD) === true,
+    ranBefore: ranBefore(input),
   })
   state.hold = createFirstRunHold(held)
-  if (held) void state.hold.answered().then(() => input.store.set(ANSWERED, true))
+  if (!held) return state.hold
+  input.store.set(HELD, true)
+  void state.hold.answered().then(() => input.store.set(ANSWERED, true))
   return state.hold
+}
+
+/**
+ * Whether this install ran before this start, from what earlier starts left: a usage check-in (`reported`), the state
+ * the app's windows keep (the renderer's .dat stores in userData) or the engine's database. An install upgraded from a
+ * release that never asked the first run's question has one of these, with usage sharing on or off.
+ */
+export function ranBefore(input: {
+  readonly userData: string
+  readonly engineData?: string
+  readonly reported: boolean
+}) {
+  if (input.reported) return true
+  if (entries(input.userData).some((name) => name.endsWith(".dat"))) return true
+  return input.engineData !== undefined && entries(input.engineData).some((name) => name.endsWith(".db"))
+}
+
+// A folder's entries, or none when it is missing or Vector cannot read it: this runs before the app is ready, where a
+// throw would stop Vector from starting.
+function entries(folder: string) {
+  try {
+    return readdirSync(folder)
+  } catch {
+    return []
+  }
 }
 
 /** The hold this start decided. */
@@ -668,7 +819,7 @@ export function desktopLocalStatus(): DesktopLocalStatus {
     lock: policy.lock,
     held: state.hold.held(),
     ...(state.mismatch ? { mismatch: state.mismatch } : {}),
-    restartNeeded: policy.enabled && !state.prefetchOff,
+    restartNeeded: policy.enabled && !state.switchesSet,
     sources: {
       "release-notes": decide(RENDERER["release-notes"]),
       "site-assets": decide(RENDERER["site-assets"]),

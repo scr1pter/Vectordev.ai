@@ -1067,9 +1067,9 @@ async function devtools(browser: Browser) {
   // keyboard from the user's own window.
   await send("Emulation.setFocusEmulationEnabled", { enabled: true })
   // Before the page's own scripts in every frame, a frame its script just made included (the Electron smoke checks it):
-  // no print dialog, no peer connections and no file pickers. What holds whatever a page does is the documents' sandbox
-  // for print() and dialogs, the proxy-only WebRTC policy, the Blink feature turned off for file pickers, and the
-  // network stack's refusal of service workers.
+  // no print dialog, no peer connections, no WebTransport (whose connections no webRequest listener sees) and no
+  // file pickers. What holds whatever a page does is the documents' sandbox for print() and dialogs, the proxy-only
+  // WebRTC policy, the Blink feature turned off for file pickers, and the network stack's refusal of service workers.
   await send("Page.addScriptToEvaluateOnNewDocument", { source: STUBS, runImmediately: true })
   // For holding the page's scripts between commands (lifecycle).
   await send("Debugger.enable")
@@ -1088,6 +1088,7 @@ const STUBS = `(() => {
   stub(window, "RTCPeerConnection", undefined);
   stub(window, "webkitRTCPeerConnection", undefined);
   stub(window, "RTCDataChannel", undefined);
+  stub(window, "WebTransport", undefined);
   const cancelled = () => Promise.reject(new DOMException("The user aborted a request.", "AbortError"));
   ["showOpenFilePicker", "showSaveFilePicker", "showDirectoryPicker"].forEach((key) => {
     if (key in window) stub(window, key, cancelled);

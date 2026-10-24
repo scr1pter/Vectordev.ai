@@ -280,8 +280,8 @@ export function createEgressFilter(deps: {
     /**
      * Under Vector Local, turns WebRTC's UDP off in a web contents. WebRTC can then use TCP only, through the session's
      * proxy when it has one (the research proxy, for research browsers). Vector's windows and the agent's browser have
-     * no proxy, so there its TCP connects directly: the agent's browser also loses RTCPeerConnection in every frame
-     * (local-mode.ts), and Vector's windows run only the app.
+     * no proxy, so there its TCP connects directly: the agent's browser also loses RTCPeerConnection and WebTransport
+     * in its frames and dedicated workers (local-mode.ts), and Vector's windows run only the app.
      */
     protect(contents: Pick<WebContents, "setWebRTCIPHandlingPolicy">) {
       if (!deps.policy().enabled) return false
