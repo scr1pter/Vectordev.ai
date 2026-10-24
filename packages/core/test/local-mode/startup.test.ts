@@ -19,9 +19,25 @@ const write = (file: string, text: string) => {
   fs.mkdirSync(path.dirname(file), { recursive: true })
   fs.writeFileSync(file, text)
 }
-// A test cannot make files only root or Administrators own, so the user running it may own the managed folder's files
-// here; no one else may write them still (ConfigManaged.check).
-const trusted = { trust: { user: true } }
+// Policy semantics use an ACL reader limited to this fixture's existing managed files on Windows. Calls without
+// trusted() still exercise the real owner/access checks; POSIX mode and owner checks remain in place throughout.
+function trusted(root: string) {
+  if (process.platform !== "win32") return { trust: { user: true } }
+  const managed = path.join(root, "managed")
+  const owned = new Set([managed, path.join(managed, "vector.json"), path.join(managed, "vector.jsonc")])
+  return {
+    trust: {
+      user: true,
+      acl: (paths: readonly string[]) => ({
+        entries: Object.fromEntries(
+          paths
+            .filter((file) => owned.has(file) && fs.existsSync(file))
+            .map((file) => [file, { owner: "S-1-5-18", rules: [] }]),
+        ),
+      }),
+    },
+  }
+}
 const COMPANY = {
   lock: true,
   web: "network",
@@ -147,7 +163,7 @@ describe("LocalStartup.policy", () => {
 
   test("reads a company's file as the engine's config does: its lists, its lock and its mirror", async () => {
     await using dir = await tmpdir()
-    const input = { ...folders(dir.path), ...trusted }
+    const input = { ...folders(dir.path), ...trusted(dir.path) }
     write(
       path.join(input.config, "vector.json"),
       JSON.stringify({ local: { web: "ask", endpoints: ["http://127.0.0.1:1"] } }),
@@ -186,10 +202,16 @@ describe("LocalStartup.policy", () => {
     // One another user could change is left out too, whoever owns it.
     if (process.platform !== "win32") {
       fs.chmodSync(company, 0o664)
-      expect(LocalStartup.policy({ ...input, ...trusted, env: {} })).toMatchObject({ enabled: false, lock: false })
+      expect(LocalStartup.policy({ ...input, ...trusted(dir.path), env: {} })).toMatchObject({
+        enabled: false,
+        lock: false,
+      })
       fs.chmodSync(company, 0o644)
     }
-    expect(LocalStartup.policy({ ...input, ...trusted, env: {} })).toMatchObject({ enabled: true, lock: true })
+    expect(LocalStartup.policy({ ...input, ...trusted(dir.path), env: {} })).toMatchObject({
+      enabled: true,
+      lock: true,
+    })
   })
 
   test("lets an override and the confirmed block only turn it on and tighten Web access", async () => {
@@ -217,7 +239,7 @@ describe("LocalStartup.policy", () => {
 
   test("turns it on with Web access None for a company policy file it cannot read, as config does", async () => {
     await using dir = await tmpdir()
-    const input = { ...folders(dir.path), ...trusted }
+    const input = { ...folders(dir.path), ...trusted(dir.path) }
     write(path.join(input.config, "vector.json"), JSON.stringify({ local: { enabled: false } }))
     // A folder where the company's file belongs: the file system refuses to read it, as it refuses a file without
     // permission, whoever runs the test.
@@ -250,7 +272,7 @@ describe("LocalStartup.policy", () => {
 describe("LocalStartup.managed", () => {
   test("is whether company policy an administrator alone could have written is on this computer", async () => {
     await using dir = await tmpdir()
-    const input = { ...folders(dir.path), ...trusted }
+    const input = { ...folders(dir.path), ...trusted(dir.path) }
     expect(LocalStartup.managed({ ...input, env: {} })).toBe(false)
     write(path.join(input.config, "vector.json"), JSON.stringify({ local: { enabled: true } }))
     expect(LocalStartup.managed({ ...input, env: {} })).toBe(false)
@@ -269,7 +291,7 @@ describe("LocalStartup.managed", () => {
 describe("LocalStartup.ca", () => {
   test("names the company's certificate files, then the user's, read from the folder of the file that names them", async () => {
     await using dir = await tmpdir()
-    const input = { ...folders(dir.path), ...trusted }
+    const input = { ...folders(dir.path), ...trusted(dir.path) }
     expect(LocalStartup.ca({ ...input, env: {} })).toEqual([])
     write(path.join(input.managed[0]!, "vector.json"), JSON.stringify({ local: { ca: { files: ["corp-root.pem"] } } }))
     write(
@@ -288,7 +310,7 @@ describe("LocalStartup.ca", () => {
 
   test("says which files the company named and which the user's own config did", async () => {
     await using dir = await tmpdir()
-    const input = { ...folders(dir.path), ...trusted, env: {} }
+    const input = { ...folders(dir.path), ...trusted(dir.path), env: {} }
     const corp = path.join(dir.path, "corp.pem")
     const lab = path.join(dir.path, "lab.pem")
     write(path.join(input.managed[0]!, "vector.json"), JSON.stringify({ local: { ca: { files: [corp] } } }))
@@ -300,7 +322,7 @@ describe("LocalStartup.ca", () => {
 
   test("reads only the company's files under a lock, and none from the environment or a block it cannot decode", async () => {
     await using dir = await tmpdir()
-    const input = { ...folders(dir.path), ...trusted }
+    const input = { ...folders(dir.path), ...trusted(dir.path) }
     const user = path.join(dir.path, "user.pem")
     const corp = path.join(dir.path, "corp.pem")
     write(path.join(input.config, "vector.json"), JSON.stringify({ local: { ca: { files: [user] } } }))
@@ -325,12 +347,14 @@ describe("LocalStartup.ca", () => {
     // One another user could change, though only an administrator may own the folder's files.
     if (process.platform !== "win32") {
       fs.chmodSync(company, 0o664)
-      expect(LocalStartup.ca({ ...input, ...trusted, env: {} })).toEqual([user])
+      expect(LocalStartup.ca({ ...input, ...trusted(dir.path), env: {} })).toEqual([user])
       fs.chmodSync(path.dirname(company), 0o777)
       fs.chmodSync(company, 0o644)
-      expect(LocalStartup.ca({ ...input, ...trusted, env: {} })).toEqual([user])
+      expect(LocalStartup.ca({ ...input, ...trusted(dir.path), env: {} })).toEqual([user])
       fs.chmodSync(path.dirname(company), 0o755)
     }
-    expect(LocalStartup.ca({ ...input, ...trusted, env: {} })).toEqual([path.join(input.managed[0]!, "evil.pem")])
+    expect(LocalStartup.ca({ ...input, ...trusted(dir.path), env: {} })).toEqual([
+      path.join(input.managed[0]!, "evil.pem"),
+    ])
   })
 })

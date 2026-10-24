@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { X509Certificate } from "node:crypto"
 import { EventEmitter } from "node:events"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import tls, { getCACertificates } from "node:tls"
@@ -117,8 +117,25 @@ const authority = (dir: string, name: string, host: string) => {
     key: readFileSync(file("leaf.key"), "utf8"),
   }
 }
-// The user running a test owns the managed folder's files it writes, which no one else may change (ConfigManaged).
-const trusted = { trust: { user: true } }
+// Policy semantics use an ACL reader limited to this fixture's existing managed files on Windows. Calls without
+// trusted() still exercise the real owner/access checks; POSIX mode and owner checks remain in place throughout.
+function trusted(root: string) {
+  if (process.platform !== "win32") return { trust: { user: true } }
+  const managed = path.join(root, "managed")
+  const owned = new Set([managed, path.join(managed, "vector.json"), path.join(managed, "vector.jsonc")])
+  return {
+    trust: {
+      user: true,
+      acl: (paths: readonly string[]) => ({
+        entries: Object.fromEntries(
+          paths
+            .filter((file) => owned.has(file) && existsSync(file))
+            .map((file) => [file, { owner: "S-1-5-18", rules: [] }]),
+        ),
+      }),
+    },
+  }
+}
 // An engine event stream that says nothing, so no test opens the engine's own.
 const silent = () => (async function* () {})()
 
@@ -478,7 +495,11 @@ describe("the first-run hold", () => {
       set: (key: string, value: unknown) => values.set(key, value),
     }
     const start = (userData: string, engineData?: string) => {
-      const folders = { config: path.join(userData, "config"), managed: [path.join(userData, "managed")], ...trusted }
+      const folders = {
+        config: path.join(userData, "config"),
+        managed: [path.join(userData, "managed")],
+        ...trusted(userData),
+      }
       return startFirstRun({ userData, store, reported: false, engineData, folders })
     }
     // The app's windows kept their state (the renderer's stores), with no usage check-in ever sent.
@@ -536,7 +557,11 @@ describe("the first-run hold", () => {
     }
     const userData = folder()
     // No company policy file on this computer, whatever the machine running the test has.
-    const folders = { config: path.join(userData, "config"), managed: [path.join(userData, "managed")], ...trusted }
+    const folders = {
+      config: path.join(userData, "config"),
+      managed: [path.join(userData, "managed")],
+      ...trusted(userData),
+    }
     const start = () => startFirstRun({ userData, store, reported: false, folders })
     const hold = start()
     const gate = createUpdateGate({
@@ -699,7 +724,7 @@ describe("company certificate authorities", () => {
     writeFileSync(corp, pem("company-root"))
     mkdirSync(managed, { recursive: true })
     writeFileSync(path.join(managed, "vector.json"), JSON.stringify({ local: { ca: { files: [corp] } } }))
-    const folders = { config: path.join(dir, "config"), managed: [managed], ...trusted, env: {} }
+    const folders = { config: path.join(dir, "config"), managed: [managed], ...trusted(dir), env: {} }
     const applied: string[][] = []
     const trustedNow = trustCompanyCertificates({
       userData: dir,
@@ -886,7 +911,12 @@ describe("the app and its engine", () => {
     }
     mkdirSync(managed, { recursive: true })
     writeFileSync(path.join(managed, "vector.json"), JSON.stringify({ local: company }))
-    const desktop = LocalStartup.policy({ config: path.join(dir, "config"), managed: [managed], ...trusted, env: {} })
+    const desktop = LocalStartup.policy({
+      config: path.join(dir, "config"),
+      managed: [managed],
+      ...trusted(dir),
+      env: {},
+    })
     const engine = LocalPolicy.resolve({ managed: company, env: {} })
     expect(policyMismatch(desktop, engine)).toBeUndefined()
     // So the company's mirror stays allowed in the app: automatic checks reach it.
