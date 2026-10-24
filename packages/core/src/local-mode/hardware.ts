@@ -1,5 +1,7 @@
 export * as LocalHardware from "./hardware"
 
+import { execFile } from "node:child_process"
+import { readFile } from "node:fs/promises"
 import os from "node:os"
 import { which } from "../util/which"
 
@@ -123,8 +125,7 @@ export async function read(): Promise<Hardware> {
     platform === "darwin"
       ? run(["/usr/bin/vm_stat"]).then((text) => (text ? parseVmStat(text) : undefined))
       : platform === "linux"
-        ? Bun.file("/proc/meminfo")
-            .text()
+        ? readFile("/proc/meminfo", "utf8")
             .then(parseMeminfo)
             .catch(() => undefined)
         : Promise.resolve(undefined),
@@ -142,11 +143,13 @@ export async function read(): Promise<Hardware> {
 }
 
 // A command's output, or undefined when it is missing, fails or takes over two seconds. The program is found the way
-// Vector finds every program, never in the repository it runs in.
+// Vector finds every program, never in the repository it runs in. Node's API, since the desktop's engine runs on Node.
 async function run(command: readonly string[]) {
   const executable = command[0] && which(command[0])
   if (!executable) return undefined
-  const child = Bun.spawn([executable, ...command.slice(1)], { stdout: "pipe", stderr: "ignore", timeout: 2_000 })
-  const [text, code] = await Promise.all([new Response(child.stdout).text(), child.exited])
-  return code === 0 ? text : undefined
+  return new Promise<string | undefined>((resolve) =>
+    execFile(executable, command.slice(1), { timeout: 2_000, windowsHide: true }, (error, stdout) =>
+      resolve(error ? undefined : stdout),
+    ),
+  )
 }
