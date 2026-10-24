@@ -38,6 +38,7 @@ import {
 import { modelDisplayName } from "@/utils/provider-brand"
 import { FREE_MODEL_POLICY_NOTICE, firstFreeModelPolicyNotice } from "@/utils/free-model-policy-notice"
 import { freeModelMayTrain, type FreeModelChoice } from "@vectordevai/core/free-model-choice"
+import { NO_VISION } from "@/features/local/local-model"
 import { cachedSpendPolicy, promptRunBudget } from "@/features/economics/spend-limits-api"
 import { AGENT as RESEARCH, sizeOf, type Depth } from "@/features/research/research-model"
 import type { Research } from "@vectordevai/schema/research"
@@ -590,6 +591,8 @@ type PromptSubmitInput = {
   connectProvider?: () => void
   /** Asks once before the first prompt to a free model whose provider may train on prompts; false keeps it unsent. */
   confirmFreeModelTraining?: (model: FreeModelChoice) => Promise<boolean>
+  /** Vector Local is on: the models offered are only those on the servers the user listed. */
+  localMode?: Accessor<boolean>
 }
 
 export function createPromptSubmit(input: PromptSubmitInput) {
@@ -780,6 +783,11 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       ? routeModelForImages({ current: taskRoute.model, available: availableModels })
       : undefined
     if (hasImageInput && !imageRoute?.model) {
+      // With Vector Local on, the models listed are only those on the user's servers; images can go nowhere else.
+      if (input.localMode?.()) {
+        showToast({ ...NO_VISION, variant: "error", duration: 10_000 })
+        return
+      }
       showToast({
         title: "Connect an image-capable model",
         description: isFreeModelSelection(currentModel)

@@ -106,8 +106,10 @@ import {
   stickyMode,
   type Depth,
 } from "@/features/research/research-model"
-import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import type { Research } from "@vectordevai/schema/research"
+import { onHostedServer } from "@/features/local/local-model"
+import { LocalStatusPill } from "@/features/local/status-pill"
+import { useLocalStatus } from "@/features/local/use-local"
 import "@/features/research/research.css"
 
 export type PromptInputState = ReturnType<typeof usePrompt>
@@ -663,12 +665,25 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   // last until the composer changes session, as before.
   const [pickedModes, setPickedModes] = createStore<Record<string, ExecutionMode>>({})
   const modeKey = () => props.controls.session.id ?? `new:${sdk().directory}`
+  // Vector Local as the engine holds it, for the pill, the Mode menu and the image check on send.
+  const localMode = useLocalStatus()
+  // A model on a server the user hosts (this computer, their network or a server on the Vector Local list) has no
+  // per-token price, so its research cap is a step count, and Fast is hidden: it promises priority capacity that a
+  // server someone hosts cannot give.
+  const hostedModel = createMemo(() =>
+    onHostedServer(props.controls.model.selection.current()?.api?.url, localMode.status()?.policy),
+  )
+  const modes = createMemo(() => EXECUTION_MODES.filter((mode) => mode.id !== "fast" || !hostedModel()))
+  const sessionTitle = (id: string) => sync().data.session.find((item) => item.id === id)?.title
   const executionMode = createMemo<ExecutionMode>(() => {
-    const picked = pickedModes[modeKey()]
-    if (picked) return picked
-    const id = props.controls.session.id
-    if (id) return stickyMode(sync().data.message?.[id] ?? []) ?? "normal"
-    return rememberedMode(browserStorage(), sdk().directory) ?? "normal"
+    const chosen = (() => {
+      const picked = pickedModes[modeKey()]
+      if (picked) return picked
+      const id = props.controls.session.id
+      if (id) return stickyMode(sync().data.message?.[id] ?? []) ?? "normal"
+      return rememberedMode(browserStorage(), sdk().directory) ?? "normal"
+    })()
+    return chosen === "fast" && hostedModel() ? "normal" : chosen
   })
   const setExecutionMode = (mode: ExecutionMode) => {
     setPickedModes(modeKey(), mode)
@@ -689,12 +704,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const researching = createMemo(() => executionMode() === "research" && store.mode !== "shell")
   const [researchDepth, setResearchDepth] = createSignal<Depth>("auto")
   const [researchScope, setResearchScope] = createSignal<Research.Scope>("web+brain")
-  // A model on a server the user hosts has no per-token price, so its research cap is a step count.
-  const hostedModel = createMemo(() => {
-    const url = props.controls.model.selection.current()?.api?.url
-    if (!url || !URL.canParse(url)) return false
-    return LocalPolicy.hostClass(new URL(url).hostname) !== "internet"
-  })
   const researchCap = createMemo(() =>
     capLabel({
       depth: researchDepth(),
@@ -1730,6 +1739,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       judgeScope: settings.general.judgeScope,
       autoModelRouting: settings.general.autoModelRouting,
       connectProvider: () => setModelStartNudge((count) => count + 1),
+      localMode: () => localMode.status()?.policy.enabled === true,
       confirmFreeModelTraining: (model) => {
         const client = sdk().client
         return freeModelTrainingGate({
@@ -2380,7 +2390,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                         <MenuV2.Content>
                           <div class="w-[286px] p-1" role="group" aria-label="Mode" data-component="prompt-mode-menu">
                             <div class="px-2 pb-1 pt-1 text-[11px] font-medium text-v2-text-text-faint">Mode</div>
-                            {EXECUTION_MODES.map((mode) => (
+                            {modes().map((mode) => (
                               <button
                                 type="button"
                                 class="flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-white/[0.06]"
@@ -2410,6 +2420,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                         </MenuV2.Content>
                       </MenuV2.Portal>
                     </MenuV2>
+                  </Show>
+                  <Show when={store.mode !== "shell"}>
+                    <LocalStatusPill
+                      reader={localMode}
+                      sessionID={props.controls.session.id}
+                      sessionTitle={sessionTitle}
+                    />
                   </Show>
                 </div>
                 <Show when={micAvailable() && !listening() && !transcribing()}>
@@ -2799,7 +2816,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                         <TooltipV2 placement="top" gutter={4} value={executionModeMeta().description}>
                           <Select
                             size="normal"
-                            options={EXECUTION_MODES.map((mode) => mode.id)}
+                            options={modes().map((mode) => mode.id)}
                             current={executionMode()}
                             label={(value) => EXECUTION_MODES.find((mode) => mode.id === value)?.label ?? "Normal"}
                             onSelect={(value) => {
@@ -2813,6 +2830,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                             variant="ghost"
                           />
                         </TooltipV2>
+                        <LocalStatusPill
+                          reader={localMode}
+                          sessionID={props.controls.session.id}
+                          sessionTitle={sessionTitle}
+                        />
                       </Show>
                     </Show>
                   </div>
