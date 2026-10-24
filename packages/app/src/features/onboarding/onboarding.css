@@ -802,3 +802,14 @@
     transition: none;
   }
 }
+
+/* The third way to connect a model, under the first step: model servers the person or their company hosts. */
+.vprogress-host {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  margin: -0.4rem 0 0 2.5rem;
+  padding: 0.65rem 0.85rem;
+  border: 1px dashed var(--vx-line);
+  border-radius: 12px;
+}
