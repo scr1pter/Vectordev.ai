@@ -43,15 +43,32 @@ process.env["VECTOR_BRAIN_EMBED"] = "off"
 process.env["VECTOR_EXPERIMENTAL_EVENT_SYSTEM"] = "true"
 process.env["VECTOR_EXPERIMENTAL_WORKSPACES"] = "true"
 
+// Every engine test runs under the strict network guard: a connection that would leave this computer throws
+// EgressBlocked before it is made, and a child process reaches the guard's own proxy, which refuses it too. It goes in
+// before any src/ module loads, so none keeps a fetch, WebSocket or socket class of its own from before it. A file that
+// pins names of its own (NetworkGuard.use) puts its guard in this one's place while it runs, then puts this one back.
+const { NetworkGuard } = await import("../../core/test/lib/network-guard")
+NetworkGuard.suite()
+// Without ripgrep on PATH Vector downloads it from GitHub, which the guard refuses, so the tests that search files
+// need it installed (CI installs it). Said here once, since each of them fails with "Install ripgrep (rg)".
+if (!Bun.which("rg"))
+  console.warn(
+    "ripgrep (rg) is not on PATH. The engine tests that search files need it: the strict network guard keeps Vector from downloading it.",
+  )
+
 // Set test home directory to isolate tests from user's actual home directory
 // This prevents tests from picking up real user configs/skills from ~/.claude/skills
 const testHome = path.join(dir, "home")
 await fs.mkdir(testHome, { recursive: true })
 process.env["VECTOR_TEST_HOME"] = testHome
 
-// Set test managed config directory to isolate tests from system managed settings
+// Set test managed config directory to isolate tests from system managed settings. Vector reads it only through
+// ConfigManaged.useTestDirectory, called here before anything resolves Vector Local; the variable only tells test files
+// where the folder is.
 const testManagedConfigDir = path.join(dir, "managed")
 process.env["VECTOR_TEST_MANAGED_CONFIG_DIR"] = testManagedConfigDir
+const { ConfigManaged } = await import("@vectordevai/core/config/managed")
+ConfigManaged.useTestDirectory(testManagedConfigDir)
 
 // Write the cache version file to prevent global/index.ts from clearing the cache
 const cacheDir = path.join(dir, "cache", "vector")
@@ -69,8 +86,6 @@ delete process.env["AWS_PROFILE"]
 delete process.env["AWS_REGION"]
 delete process.env["AWS_BEARER_TOKEN_BEDROCK"]
 delete process.env["OPENROUTER_API_KEY"]
-delete process.env["EXA_API_KEY"]
-delete process.env["PARALLEL_API_KEY"]
 delete process.env["LLM_GATEWAY_API_KEY"]
 delete process.env["GROQ_API_KEY"]
 delete process.env["MISTRAL_API_KEY"]

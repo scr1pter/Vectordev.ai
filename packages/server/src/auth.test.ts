@@ -63,6 +63,29 @@ describe("server authentication", () => {
       expect(ServerAuth.isOwnerOnlyRoute(method!, route!)).toBe(true)
   })
 
+  test("Vector Local is the owner's own: its settings, its checks and the network log", () => {
+    for (const [method, route] of [
+      ["GET", "/local"],
+      ["PATCH", "/local"],
+      ["GET", "/local/egress"],
+      ["GET", "/local/egress/summary"],
+      ["GET", "/local/egress/export"],
+      ["DELETE", "/local/egress"],
+      ["POST", "/local/egress/report"],
+      ["POST", "/local/detect"],
+      ["POST", "/local/probe"],
+      ["POST", "/local/servers"],
+      ["POST", "/local/check"],
+      ["POST", "/local/grant"],
+      ["POST", "/local/startup/release"],
+      ["GET", "/local/recommend"],
+      ["HEAD", "/local"],
+    ])
+      expect(ServerAuth.isOwnerOnlyRoute(method!, route!)).toBe(true)
+    // Only the local group: a route that merely starts with the same letters is judged on its own.
+    expect(ServerAuth.isOwnerOnlyRoute("GET", "/locale")).toBe(false)
+  })
+
   test("what documents are linked to, and what needs the owner's look, are the owner's own", () => {
     for (const [method, route] of [
       ["GET", "/memory/links"],

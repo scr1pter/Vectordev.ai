@@ -7,6 +7,7 @@ import { useLanguage } from "@/context/language"
 import { useMcpAdd, useMcpRemove, useMcpToggle } from "@/context/mcp"
 import type { McpLocalConfig, McpRemoteConfig } from "@vectordevai/sdk/v2/client"
 import { showToast } from "@/utils/toast"
+import { OffInLocal } from "@/features/local/off-in-local"
 
 const statusLabels = {
   connected: "mcp.status.connected",
@@ -134,6 +135,7 @@ export const DialogSelectMcp: Component = () => {
       class="vector-mcp-dialog"
     >
       <div class="max-h-[72vh] overflow-y-auto px-3 pb-3 flex flex-col gap-4">
+        <OffInLocal source="mcp-remote" named />
         <div class="flex flex-col gap-2">
           <button
             type="button"

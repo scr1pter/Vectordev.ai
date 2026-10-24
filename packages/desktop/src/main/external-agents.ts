@@ -22,6 +22,7 @@ import {
   workspaceRoots,
   type AgentTurnFinish,
 } from "./external-agent-events"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 
 import {
   fallbackBinDirectories,
@@ -1079,9 +1080,19 @@ function trackAgent(child: ChildProcessWithoutNullStreams) {
   })
 }
 
+/**
+ * Why an external agent does not start while Vector Local is on (its `external-agents` source): the program makes its
+ * own connections, usually to its maker's cloud models, which Vector Local neither sees nor can allow one by one.
+ */
+export function externalAgentOffInLocal(label: string) {
+  return `${label} does not start while Vector Local is on. It makes its own connections, usually to its maker's cloud models, and Vector Local does not see them. Turn Vector Local off in Settings to use it.`
+}
+
 export async function runExternalCodingAgent(input: RunExternalAgentInput): Promise<ExternalAgentRunResult> {
   const agent = chatAgent(input.runtime)
   const setup = { label: agent.name }
+  // Vector Local also holds starts requested outside the launcher.
+  if (Egress.policy().enabled) throw new Error(externalAgentOffInLocal(setup.label))
   const env = input.env ?? agentEnvironment()
   const found = await findAgentBinary(agent, { env: input.env })
   if (!found) {

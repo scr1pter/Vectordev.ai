@@ -7,6 +7,7 @@ import { BrainAnchor } from "@vectordevai/core/brain/anchor"
 import { BrainFuse } from "@vectordevai/core/brain/fuse"
 import { BrainSchema } from "@vectordevai/core/brain/schema"
 import { FSUtil } from "@vectordevai/core/fs-util"
+import { LocalCommand } from "@vectordevai/core/local-mode/command"
 import { attachedMemory, links, type Asking } from "./instruction"
 
 // What the session runtime and the memory tool read from a conversation to use and to grow Vector's memory: the user's
@@ -19,7 +20,8 @@ export const RECALL = "vector.memory.recall"
 
 /**
  * Metadata key of a text part a slash command wrote: its template, an MCP server's prompt, a skill, or what its shell
- * snippets printed. The value says which arguments the user typed and whether the text came from outside.
+ * snippets printed. The value says which arguments the user typed, which spans of them they pasted, and whether the
+ * text came from outside.
  */
 export const COMMAND = "vector.command"
 
@@ -132,19 +134,107 @@ const LOCAL_TOOLS = new Set([
   "StructuredOutput",
 ])
 
+// Tools whose output is the web's: pages, search results, the browsers, Vector Cloud's logs, and every research tool
+// (a research run reads the web by design, and its notes and reports quote pages; research_browser is the research
+// agents' own browser, and research is the build agent's way to start a run).
+const WEB_TOOLS = new Set([
+  "webfetch",
+  "websearch",
+  "browser",
+  "vector_cloud",
+  "research",
+  "research_plan",
+  "research_search",
+  "research_read",
+  "research_browser",
+  "research_note",
+  "research_report",
+])
+
+// Agents whose sessions take in the web by design: the research lead and its workers. Their writes wait for the user
+// from the first step, before any research tool has run.
+const WEB_AGENTS = new Set(["research", "researcher"])
+
+/** Metadata key of a task call's part that says what the subagent it ran took in, so its hold passes up. */
+export const HOLD = "hold"
+
 /**
  * What the user typed in a message, without Vector's synthetic notes or attached file contents. A slash command's text
  * is someone else's words (a template, an MCP server's prompt, a skill, a snippet's output), so of it only the
- * arguments the user typed count, and text from outside (an imported transcript, an issue) does not count at all.
+ * arguments the user typed count, and text from outside (an imported transcript, an issue) or that the user pasted (an
+ * email, a log, someone else's message), as a part of its own or a span of a typed one or of a command's arguments,
+ * does not count at all: Vector learns what the user likes only from this.
  */
 export function typed(message: SessionV1.WithParts) {
+  return own(message, true)
+}
+
+/**
+ * What the user sent in a message themselves: what they typed and what they pasted into it, without Vector's synthetic
+ * notes, attached file contents, text from outside or a slash command's template. Where an address or a question came
+ * from reads this, not `typed`: a link the user pasted came from them, though Vector learns nothing from it.
+ */
+export function said(message: SessionV1.WithParts) {
+  return own(message, false)
+}
+
+function own(message: SessionV1.WithParts, unpaste: boolean) {
   return message.parts
     .flatMap((part) => {
-      if (part.type !== "text" || part.synthetic || part.ignored || outside(part)) return []
-      return [command(part)?.arguments ?? part.text]
+      if (part.type !== "text" || part.synthetic || part.ignored) return []
+      // Where text from outside sat, two blank lines: what the user typed after it is a paragraph of its own, and not
+      // the one a line before it such as "Here is the email:" introduces.
+      if (outside(part)) return [PASTE_BREAK]
+      const found = command(part)
+      if (!unpaste) return [found ? found.arguments : part.text]
+      return [
+        found ? unpasted(found.arguments, found.pasted) : unpasted(part.text, part.metadata?.[BrainSchema.PASTED]),
+      ]
     })
     .join("\n")
     .trim()
+}
+
+// A typed part's text without the lines the user pasted into it, each left as two blank lines so the words on either
+// side neither join nor run into a quote across it, and a line before the paste that introduces it ("Bob wrote:")
+// introduces nothing the user typed. A span takes the whole lines it touches: a clause typed around a pasted name
+// ("never push to <main> without a review") would otherwise be learned cut short. Spans that do not fit the text leave
+// nothing of it: a part that says it holds pasted text, but not where, vouches for none of its words.
+function unpasted(text: string, spans: unknown) {
+  if (spans === undefined) return text
+  if (!Array.isArray(spans) || !spans.every((span) => fits(span, text.length))) return ""
+  const cut = (spans as [number, number][])
+    .flatMap(([start, end]): [number, number][] => {
+      const inner = text.slice(start, end)
+      const from = start + inner.length - inner.trimStart().length
+      const to = end - (inner.length - inner.trimEnd().length)
+      if (from >= to) return []
+      const after = text.indexOf("\n", to)
+      return [[from === 0 ? 0 : text.lastIndexOf("\n", from - 1) + 1, after === -1 ? text.length : after]]
+    })
+    .toSorted((a, b) => a[0] - b[0])
+    .reduce(
+      (out, span) => ({
+        at: Math.max(out.at, span[1]),
+        text: span[0] > out.at ? `${out.text}${text.slice(out.at, span[0])}${PASTE_BREAK}` : out.text,
+      }),
+      { at: 0, text: "" },
+    )
+  return cut.text + text.slice(cut.at)
+}
+
+const PASTE_BREAK = "\n\n\n"
+
+function fits(span: unknown, length: number) {
+  return (
+    Array.isArray(span) &&
+    span.length === 2 &&
+    Number.isInteger(span[0]) &&
+    Number.isInteger(span[1]) &&
+    span[0] >= 0 &&
+    span[0] < span[1] &&
+    span[1] <= length
+  )
 }
 
 /** What a message asks for, a slash command's text included: what recall reads a request by. */
@@ -162,6 +252,8 @@ export function command(part: SessionV1.Part) {
   if (!value || typeof value !== "object") return undefined
   return {
     arguments: "arguments" in value && typeof value.arguments === "string" ? value.arguments : "",
+    /** The spans of the arguments the user pasted, as the composer sent them. */
+    pasted: "pasted" in value ? value.pasted : undefined,
     outside: "outside" in value && (value.outside === "web" || value.outside === "mcp") ? value.outside : undefined,
   }
 }
@@ -234,6 +326,8 @@ export function recall(part: SessionV1.Part) {
     newest: "newest" in value && value.newest === true,
     /** Which of `ids` are document cards, which the saved text never holds. */
     cards: "cards" in value ? strings(value.cards) : [],
+    /** How the owner reviews, for a Vectorscope reviewer: rendered as its own fenced block. */
+    review: "review" in value && value.review === true,
   }
 }
 
@@ -275,8 +369,9 @@ const WORKING = 20
 
 /**
  * What a request is working on, for recall to bring in what is linked to it: files the last 20 messages edited, wrote,
- * patched, attached or read, files and symbols the request names, and the working tree's changed files. At most
- * `BrainFuse.SEEDS`, strongest first; a file touched several ways counts the strongest way.
+ * patched, attached or read, files and symbols the request names (in what the user pasted too, such as a stack trace),
+ * and the working tree's changed files. At most `BrainFuse.SEEDS`, strongest first; a file touched several ways counts
+ * the strongest way.
  */
 export function workingSet(messages: readonly SessionV1.WithParts[], root: string, changed: readonly string[] = []) {
   const relative = (file: string) =>
@@ -301,7 +396,7 @@ export function workingSet(messages: readonly SessionV1.WithParts[], root: strin
     }),
   )
   const asked = request(messages).flatMap((message) =>
-    BrainAnchor.names({ text: typed(message) }).flatMap((name): BrainFuse.Seed[] => {
+    BrainAnchor.names({ text: said(message) }).flatMap((name): BrainFuse.Seed[] => {
       if (name.kind === "path") return [{ path: relative(name.text), weight: BrainFuse.SEED.attached }]
       if (name.kind === "symbol" || name.kind === "env") return [{ symbol: name.text, weight: BrainFuse.SEED.symbol }]
       return []
@@ -530,18 +625,27 @@ export function touched(messages: readonly SessionV1.WithParts[], file: string, 
  * skill came from the web), holds
  * text from outside (an imported transcript, an issue or pull request), used the browser or Vector Cloud, ran an MCP
  * tool or an MCP server's prompt, or took a subagent's report. Memory poisoning works by planting text the agent later
- * saves as its own, so once outside content is in the history, every write is held for review.
+ * saves as its own, so once outside content is in the history, every write is held for review. A research session is
+ * held as web throughout, and a subagent that read the web passes that up: its parent is held as web, not subagent.
  */
 export function taint(messages: readonly SessionV1.WithParts[]): BrainSchema.Hold | undefined {
   const calls = messages.flatMap((message) => message.parts.flatMap((part) => (part.type === "tool" ? [part] : [])))
   const tools = calls.map((part) => part.tool)
   const commands = messages.flatMap((message) => message.parts.flatMap((part) => command(part)?.outside ?? []))
-  if (tools.some((tool) => tool === "webfetch" || tool === "websearch" || tool === "browser" || tool === "vector_cloud"))
-    return "web"
-  // A local file an editor embedded is this computer's, like what the read tool returns; other outside text is not.
+  if (tools.some((tool) => WEB_TOOLS.has(tool))) return "web"
+  if (messages.some((message) => WEB_AGENTS.has(message.info.agent))) return "web"
+  if (calls.some((part) => part.state.status !== "pending" && part.state.metadata?.[HOLD] === "web")) return "web"
+  // A local file an editor embedded is this computer's, like what the read tool returns, and what the user pasted they
+  // chose to send; other outside text is not.
   if (
     messages.some((message) =>
-      message.parts.some((part) => part.type === "text" && outside(part) && part.metadata?.[BrainSchema.OUTSIDE] !== "file"),
+      message.parts.some(
+        (part) =>
+          part.type === "text" &&
+          outside(part) &&
+          part.metadata?.[BrainSchema.OUTSIDE] !== "file" &&
+          part.metadata?.[BrainSchema.OUTSIDE] !== BrainSchema.PASTE,
+      ),
     )
   )
     return "web"
@@ -554,7 +658,13 @@ export function taint(messages: readonly SessionV1.WithParts[]): BrainSchema.Hol
     )
   )
     return "web"
-  if (tools.some((tool) => tool === "task" || tool === "task_manage" || tool === "send_teammate_message"))
+  // A background subagent's report arrives as a synthetic note in a user message, after its task call.
+  if (
+    tools.some((tool) => tool === "task" || tool === "task_manage" || tool === "send_teammate_message") ||
+    messages.some((message) =>
+      message.parts.some((part) => part.type === "text" && part.metadata?.["taskNotification"] !== undefined),
+    )
+  )
     return "subagent"
   if (commands.includes("mcp") || tools.some((tool) => !LOCAL_TOOLS.has(tool))) return "mcp"
   return undefined
@@ -578,226 +688,7 @@ export function since(messages: readonly SessionV1.WithParts[]) {
 }
 
 /**
- * Whether a shell command's output comes from this computer: its files, the repository's own history, and the checks
- * and scripts it runs. Anything else (a fetch, a hosted issue or pull request, a remote's history, a package run
- * straight from a registry, code passed inline to an interpreter, or a program Vector does not know) may print someone
- * else's text, so it is an allowlist: what is not known to be local counts as outside content.
+ * Whether a shell command's output comes from this computer (LocalCommand.local): its files, the repository's own
+ * history, and the checks and scripts it runs. What is not known to be local counts as outside content.
  */
-export function local(command: string) {
-  return simple(withoutHeredocs(command)).every(runsLocally)
-}
-
-// Text utilities, shell builtins and the repository's own build and check tools. Their output is this computer's.
-const LOCAL_PROGRAMS = new Set([
-  ...["ls", "cat", "head", "tail", "less", "more", "grep", "egrep", "fgrep", "rg", "ag", "ack", "find", "fd", "sed", "awk"],
-  ...["gawk", "cut", "tr", "wc", "sort", "uniq", "diff", "cmp", "comm", "echo", "printf", "pwd", "cd", "pushd", "popd"],
-  ...["mkdir", "rmdir", "rm", "cp", "mv", "touch", "chmod", "chown", "ln", "stat", "file", "which", "whereis", "type"],
-  ...["test", "[", "[[", "]", "]]", "true", "false", ":", "export", "set", "unset", "source", ".", "tree", "jq", "yq"],
-  ...["xxd", "hexdump", "od", "basename", "dirname", "realpath", "readlink", "date", "sleep", "tee", "seq", "column"],
-  ...["paste", "join", "split", "tar", "gzip", "gunzip", "zip", "unzip", "shasum", "sha1sum", "sha256sum", "md5", "md5sum"],
-  ...["du", "df", "ps", "kill", "pkill", "pgrep", "uname", "whoami", "id", "clear", "exit", "read", "wait", "trap", "nl"],
-  ...["rev", "fold", "fmt", "iconv", "strings", "base64", "bc", "expr", "let", "local", "declare", "printenv", "patch"],
-  ...["in", "return", "shift", "open", "lsof", "tsc", "tsgo", "vitest", "jest", "pytest", "mypy", "pyright", "ruff"],
-  ...["eslint", "biome", "oxlint", "prettier", "rspec", "phpunit", "xcodebuild", "xcrun", "swiftc", "clang", "gcc", "cc"],
-  ...["c++", "make", "cmake", "ninja", "mvn", "gradle", "gradlew", "dotnet", "swift", "mix", "turbo", "playwright", "tsx"],
-  ...["ts-node", "mocha", "knip", "vite", "drizzle-kit", "stylelint", "rustc", "rustfmt", "gofmt", "black", "isort"],
-])
-
-// What `npx` and its kin may run without counting as a registry download: tools a repository installs itself.
-const LOCAL_TOOLS_RUN = new Set([
-  ...["tsc", "tsgo", "vitest", "jest", "eslint", "biome", "prettier", "playwright", "tsx", "turbo", "oxlint", "mocha"],
-  ...["ts-node", "knip", "svelte-check", "vue-tsc", "astro", "next", "vite", "drizzle-kit", "stylelint", "c8", "nyc"],
-])
-
-const GIT_LOCAL = new Set([
-  ...["status", "diff", "log", "show", "add", "commit", "branch", "checkout", "switch", "restore", "reset", "stash"],
-  ...["rev-parse", "rev-list", "merge-base", "merge", "rebase", "cherry-pick", "revert", "blame", "grep", "ls-files"],
-  ...["ls-tree", "cat-file", "describe", "tag", "worktree", "mv", "rm", "clean", "apply", "am", "format-patch"],
-  ...["shortlog", "reflog", "notes", "bisect", "init", "config", "symbolic-ref", "for-each-ref", "show-ref", "name-rev"],
-  ...["check-ignore", "check-attr", "var", "help", "version", "gc", "fsck", "count-objects", "whatchanged", "range-diff"],
-  ...["sparse-checkout", "update-index", "write-tree", "read-tree", "hash-object", "cherry", "diff-tree", "diff-index"],
-  ...["diff-files", "update-ref", "stage", "annotate", "prune", "repack", "--version", "--help"],
-])
-
-// Package manager commands that reach a registry and print what it sends: a package's readme or metadata, a template,
-// advisories, or a package run straight from it.
-const REGISTRY = new Set([
-  ...["x", "dlx", "create", "init", "view", "info", "show", "v", "docs", "home", "repo", "bugs", "search", "s"],
-  ...["publish", "login", "logout", "adduser", "whoami", "owner", "access", "token", "deprecate", "dist-tag", "star"],
-  ...["stars", "unpublish", "team", "org", "hook", "profile", "ping", "audit", "outdated", "upgrade", "fund"],
-  ...["upgrade-interactive", "self-update", "feedback", "repl"],
-])
-
-const SHELLS = new Set(["bash", "sh", "zsh", "dash", "ksh", "fish"])
-// Reserved words open or close a compound command and run nothing themselves: in `if true; then curl …; fi` and
-// `{ curl …; }` the command after them is what runs.
-const KEYWORDS = new Set(["if", "then", "else", "elif", "fi", "do", "done", "while", "until", "esac", "!", "{", "}"])
-// A loop's or a case's header (`for url in https://…`, `case $1 in`) is a list of words, not a command.
-const HEADERS = new Set(["for", "select", "case"])
-// A redirection may come before the command it applies to (`> out.txt echo`, `done < urls.txt`). An operator on its own
-// takes the next word as its file.
-const REDIRECT = /^(?:\d*(?:>&|<&|<>|>\||>>|<<<|<<-?|>|<)|&>>?)/
-const WRAPPERS = new Set(["sudo", "time", "nice", "nohup", "command", "builtin", "exec", "env", "xargs", "timeout", "stdbuf"])
-const RUNTIMES = new Set(["node", "deno", "python", "python3", "ruby", "perl", "php", "lua"])
-const PACKAGES = new Set(["bun", "npm", "pnpm", "yarn"])
-const PYTHON_PACKAGES = new Set(["pip", "pip3", "uv", "poetry", "pipenv"])
-const INLINE = new Set(["-e", "--eval", "-p", "--print", "-c", "-r", "eval"])
-const URL_ARG = /^(?:[a-z][a-z0-9+.-]*:\/\/|git@|github:|gitlab:|bitbucket:|gist:)/i
-
-function runsLocally(words: readonly string[]): boolean {
-  const [first, ...rest] = words
-  if (first === undefined) return true
-  // `FOO=1 cmd`: the assignment, then the command.
-  if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(first)) return runsLocally(rest)
-  if (KEYWORDS.has(first)) return runsLocally(rest)
-  if (HEADERS.has(first)) return true
-  // `function name { …`: the name, then the body.
-  if (first === "function") return runsLocally(rest.slice(1))
-  const redirect = REDIRECT.exec(first)?.[0]
-  if (redirect !== undefined) return runsLocally(rest.slice(redirect === first ? 1 : 0))
-  const name = first.split("/").pop() ?? first
-  if (WRAPPERS.has(name)) return runsLocally(rest.slice(rest.findIndex((word) => !/^-|^\d+[smhd]?$|^[A-Za-z_]\w*=/.test(word)) >>> 0))
-  if (SHELLS.has(name) || name === "eval") {
-    const inline = name === "eval" ? 0 : rest.findIndex((word) => /^-[a-z]*c[a-z]*$/.test(word))
-    if (inline < 0) return true
-    return simple(rest.slice(name === "eval" ? 0 : inline + 1).join(" ")).every(runsLocally)
-  }
-  if (name === "find") {
-    const at = rest.findIndex((word) => word === "-exec" || word === "-execdir" || word === "-ok")
-    return at < 0 || runsLocally(rest.slice(at + 1))
-  }
-  if (name === "git") return gitLocally(rest)
-  if (LOCAL_PROGRAMS.has(name)) return true
-  if (rest.some((word) => URL_ARG.test(word))) return false
-  if (name === "npx" || name === "bunx" || name === "pnpx")
-    return LOCAL_TOOLS_RUN.has(rest.find((word) => !word.startsWith("-")) ?? "")
-  if (PACKAGES.has(name)) {
-    if (rest.some((word) => INLINE.has(word) && word !== "-c" && word !== "-r")) return false
-    const sub = rest.find((word) => !word.startsWith("-"))
-    if (sub === "exec") return LOCAL_TOOLS_RUN.has(rest.slice(rest.indexOf("exec") + 1).find((word) => !word.startsWith("-")) ?? "")
-    if (sub === "pm") return !["view", "whoami"].includes(rest[rest.indexOf("pm") + 1] ?? "")
-    return sub === undefined || !REGISTRY.has(sub)
-  }
-  if (RUNTIMES.has(name)) {
-    if (rest.some((word) => INLINE.has(word))) return false
-    // `python -m pip download` fetches like `pip download` does.
-    const module = rest.indexOf("-m")
-    return module < 0 || !(rest[module + 1] === "pip" && ["download", "index", "search"].includes(rest[module + 2] ?? ""))
-  }
-  if (PYTHON_PACKAGES.has(name)) return !["download", "index", "search", "publish", "upload"].includes(rest[0] ?? "")
-  if (name === "go") return rest[0] !== "get" && !rest.some((word) => /^[\w.-]+\.[a-z]{2,}\/\S*@/.test(word))
-  if (name === "cargo") return !["search", "install", "info", "publish", "login"].includes(rest[0] ?? "")
-  // A script or binary named by its path is the repository's own, unless it is one of the known fetchers.
-  return first.includes("/") && !/^(?:curl|wget|gh|glab|ssh|scp|sftp|ftp|rsync|nc|telnet|http|https|xh|aria2c)$/.test(name)
-}
-
-function gitLocally(words: readonly string[]): boolean {
-  const [first, ...rest] = words
-  if (first === undefined) return true
-  // A configuration override can turn any command into a fetch or a shell (`-c alias.x='!curl …'`).
-  if (first === "-c" || first.startsWith("--config-env")) return false
-  if (["-C", "--git-dir", "--work-tree", "--namespace"].includes(first)) return gitLocally(rest.slice(1))
-  if (first.startsWith("-")) return gitLocally(rest)
-  if (first === "remote") return ["-v", "--verbose", "get-url", "add", "remove", "rm", "rename", "set-url", undefined].includes(rest[0])
-  if (first === "submodule") return rest[0] === "status"
-  return GIT_LOCAL.has(first)
-}
-
-// A heredoc's body is data for the command that reads it, not commands of its own.
-function withoutHeredocs(command: string) {
-  return command.split("\n").reduce<{ lines: string[]; until?: string }>(
-    (state, line) => {
-      if (state.until !== undefined) return line.trim() === state.until ? { lines: state.lines } : state
-      const heredoc = /<<-?\s*["']?([A-Za-z_][\w-]*)["']?/.exec(line)?.[1]
-      return { lines: [...state.lines, line], ...(heredoc ? { until: heredoc } : {}) }
-    },
-    { lines: [] },
-  ).lines.join("\n")
-}
-
-/**
- * The simple commands of a command line, each as its words: split at `;`, `&`, `|` and newlines outside quotes, with
- * `$(…)` and backticks as commands of their own (they run inside double quotes too), and comments dropped.
- */
-function simple(line: string) {
-  const out: string[][] = []
-  // The quoting each open `$(` or backtick interrupted, restored when it closes.
-  const open: { readonly quote: string | undefined; readonly tick: boolean }[] = []
-  let words: string[] = []
-  let word = ""
-  let quote: string | undefined
-  const end = () => {
-    if (word) words.push(word)
-    word = ""
-  }
-  const cut = () => {
-    end()
-    if (words.length) out.push(words)
-    words = []
-  }
-  for (let index = 0; index < line.length; index++) {
-    const char = line[index]!
-    const next = line[index + 1]
-    if (quote === "'") {
-      if (char === "'") quote = undefined
-      else word += char
-      continue
-    }
-    if (char === "\\") {
-      if (next !== "\n") word += next ?? ""
-      index++
-      continue
-    }
-    if (char === "$" && next === "(") {
-      cut()
-      open.push({ quote, tick: false })
-      quote = undefined
-      index++
-      continue
-    }
-    if (char === "`") {
-      cut()
-      if (open.at(-1)?.tick) quote = open.pop()!.quote
-      else {
-        open.push({ quote, tick: true })
-        quote = undefined
-      }
-      continue
-    }
-    if (quote === '"') {
-      if (char === '"') quote = undefined
-      else word += char
-      continue
-    }
-    if (char === ")" && open.length && !open.at(-1)!.tick) {
-      cut()
-      quote = open.pop()!.quote
-      continue
-    }
-    if (char === "'" || char === '"') {
-      quote = char
-      continue
-    }
-    if (char === "#" && word === "") {
-      const stop = line.indexOf("\n", index)
-      index = stop < 0 ? line.length : stop - 1
-      continue
-    }
-    // `2>&1` and `&>` are redirections; `&&`, `&` and `|` end a command.
-    if (char === "&" && (word.endsWith(">") || word.endsWith("<") || next === ">")) {
-      word += char
-      continue
-    }
-    if (char === ";" || char === "&" || char === "|" || char === "\n" || char === "(" || char === ")") {
-      cut()
-      continue
-    }
-    if (char === " " || char === "\t") {
-      end()
-      continue
-    }
-    word += char
-  }
-  cut()
-  return out
-}
+export const local = LocalCommand.local

@@ -3,6 +3,8 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
 import { afterAll, describe, expect, test } from "bun:test"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 
 import { ExternalAgent } from "@vectordevai/schema/external-agent"
 
@@ -21,6 +23,7 @@ import {
   executableNames,
   externalModelValue,
   modelRejected,
+  externalAgentOffInLocal,
   resolveAgentPath,
   runCli,
   runExternalCodingAgent,
@@ -46,6 +49,41 @@ async function installFakeCli(directory: string, name: string) {
 }
 
 afterAll(() => rm(root, { recursive: true, force: true }))
+
+describe("Vector Local", () => {
+  // Settings > Vector Local says external agents do not start while it is on. A real CLI is installed here, so the
+  // refusal is the gate's, not a missing program's.
+  test("an outside agent does not start while Vector Local is on, and starts again once it is off", async () => {
+    const directory = join(root, "local-gate")
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, "started"), "")
+    await writeFile(
+      join(directory, "claude"),
+      `#!/bin/sh
+echo yes > "${join(directory, "started")}"
+printf '%s\n' '{"type":"result","is_error":false,"result":"OK","session_id":"s"}'
+`,
+    )
+    await chmod(join(directory, "claude"), 0o755)
+    const run = () =>
+      runExternalCodingAgent({
+        runtime: "claude-code",
+        cwd: directory,
+        prompt: "fixture only",
+        env: { HOME: root, PATH: `${directory}:/usr/bin:/bin` },
+        timeoutMs: 15_000,
+      })
+    Egress.configure({ ...LocalPolicy.OFF, enabled: true })
+    try {
+      await expect(run()).rejects.toThrow(externalAgentOffInLocal("Claude Code"))
+      expect(await Bun.file(join(directory, "started")).text()).toBe("")
+    } finally {
+      Egress.configure(LocalPolicy.OFF)
+    }
+    expect((await run()).exitCode).toBe(0)
+    expect((await Bun.file(join(directory, "started")).text()).trim()).toBe("yes")
+  }, 20_000)
+})
 
 describe("structured external chat", () => {
   // Captured from a real cursor-agent 2026.09.02 run that created one file; only

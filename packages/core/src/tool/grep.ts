@@ -9,6 +9,7 @@ import { FSUtil } from "../fs-util"
 import { Location } from "../location"
 import { LocationMutation } from "../location-mutation"
 import { PermissionV2 } from "../permission"
+import { WebFence } from "../research/fence"
 import { Ripgrep } from "../ripgrep"
 import { RelativePath } from "../schema"
 import { ToolRegistry } from "./registry"
@@ -36,19 +37,22 @@ export const Input = Schema.Struct({
 export const Output = Schema.Array(FileSystem.Match)
 type ModelOutput = typeof Output.Encoded
 
-/** Format raw search matches into the familiar concise model output. */
+/**
+ * Format raw search matches into the familiar concise model output. Lines from a page a web tool saved whole are web
+ * text, so they come back fenced again.
+ */
 export const toModelOutput = (output: ModelOutput) => {
-  const lines = output.length === 0 ? ["No files found"] : [`Found ${output.length} matches`]
-  let current = ""
-  for (const match of output) {
-    if (current !== match.entry.path) {
-      if (current) lines.push("")
-      current = match.entry.path
-      lines.push(`${match.entry.path}:`)
-    }
-    lines.push(`  Line ${match.line}: ${match.text}`)
-  }
-  return lines.join("\n")
+  const render = (match: { readonly line: number; readonly text: string }) => `  Line ${match.line}: ${match.text}`
+  return [
+    output.length === 0 ? "No files found" : `Found ${output.length} matches`,
+    ...[...Map.groupBy(output, (match) => match.entry.path).entries()].flatMap(([file, matches], index) => [
+      ...(index > 0 ? [""] : []),
+      `${file}:`,
+      ...(WebFence.savedFile(file)
+        ? [WebFence.fenceLines({ tool: name, file }, matches, render)]
+        : matches.map(render)),
+    ]),
+  ].join("\n")
 }
 
 /** Grep leaf that defaults its filesystem root to the active Location. */

@@ -1,4 +1,6 @@
+import type { LocalProbe } from "@vectordevai/core/local-mode/probe"
 import { Button } from "@vectordevai/ui/button"
+import { Checkbox } from "@vectordevai/ui/checkbox"
 import { useDialog } from "@vectordevai/ui/context/dialog"
 import { Dialog } from "@vectordevai/ui/dialog"
 import { IconButton } from "@vectordevai/ui/icon-button"
@@ -6,19 +8,55 @@ import { ProviderIcon } from "@vectordevai/ui/provider-icon"
 import { useMutation } from "@tanstack/solid-query"
 import { TextField } from "@vectordevai/ui/text-field"
 import { showToast } from "@/utils/toast"
-import { type Accessor, batch, For } from "solid-js"
+import { type Accessor, batch, createMemo, For, Show } from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { Link } from "@/components/link"
 import { useServerSDK } from "@/context/server-sdk"
+import { useServer } from "@/context/server"
 import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
-import { type FormState, headerRow, modelRow, validateCustomProvider } from "./dialog-custom-provider-form"
+import {
+  applyPreset,
+  applyServer,
+  COPY,
+  type FormState,
+  headerRow,
+  identifyHeaders,
+  identity,
+  labels,
+  modelRow,
+  PRESETS,
+  type Preset,
+  validateCustomProvider,
+} from "./dialog-custom-provider-form"
 import { saveCustomProvider } from "./dialog-custom-provider-save"
 import { DialogSelectProvider } from "./dialog-select-provider"
+import { useLocalChange } from "@/features/local/allow-dialog"
+import { enginePlace, listServer, probeServer } from "@/features/local/local-model"
 
 type Props = {
   back?: "providers" | "close"
   directory?: Accessor<string | undefined>
+  /**
+   * Find servers: the engine's search of its own computer (loopback only), since the search runs where the engine
+   * runs, not in this window. Without it the dialog asks the engine through the Local API (POST /local/detect).
+   */
+  detect?: () => Promise<readonly LocalProbe.Server[]>
+  /**
+   * Reads the server at a typed address through the engine, for Identify, with the key and headers typed here.
+   * Without it the dialog asks the engine through the Local API (POST /local/probe).
+   */
+  identify?: (input: {
+    readonly url: string
+    readonly headers: Readonly<Record<string, string>>
+  }) => Promise<LocalProbe.Server | undefined>
+}
+
+type Search = {
+  status: "idle" | "looking" | "done" | "failed"
+  servers: readonly LocalProbe.Server[]
+  message?: string
+  skipped: number
 }
 
 export function DialogCustomProvider(props: Props) {
@@ -26,6 +64,9 @@ export function DialogCustomProvider(props: Props) {
   const serverSync = useServerSync()
   const serverSDK = useServerSDK()
   const language = useLanguage()
+  const server = useServer()
+  // Find servers asks the engine's computer, which is another one when Vector is connected to a remote server.
+  const place = () => enginePlace(server.isLocal() ? undefined : server.name)
 
   const [form, setForm] = createStore<FormState>({
     providerID: "",
@@ -34,8 +75,64 @@ export function DialogCustomProvider(props: Props) {
     apiKey: "",
     models: [modelRow()],
     headers: [headerRow()],
+    concurrency: "",
     err: {},
   })
+  const [search, setSearch] = createStore<Search>({ status: "idle", servers: [], skipped: 0 })
+  const local = useLocalChange()
+  // Finding and reading servers run in the engine, on its own computer; a guest is refused them, as the owner's.
+  const detect =
+    props.detect ??
+    (() =>
+      serverSDK()
+        .client.local.detect({}, { throwOnError: true })
+        .then((result) => result.data.map(probeServer)))
+  const identify =
+    props.identify ??
+    ((input: { readonly url: string; readonly headers: Readonly<Record<string, string>> }) =>
+      serverSDK()
+        .client.local.probe({ url: input.url, headers: { ...input.headers } }, { throwOnError: true })
+        .then((result) => (result.data.server ? probeServer(result.data.server) : undefined)))
+  const label = createMemo(() => labels(form))
+
+  const existing = () => [
+    ...serverSync().data.provider.all.keys(),
+    ...serverSync().data.provider.connected,
+    ...Object.keys(serverSync().data.config.provider ?? {}),
+    ...(serverSync().data.config.disabled_providers ?? []),
+  ]
+
+  const pickPreset = (preset: Preset) => {
+    setForm(applyPreset(form, preset, existing()))
+    setSearch({ skipped: 0, message: undefined })
+  }
+
+  const chooseServer = (server: LocalProbe.Server) => {
+    const applied = applyServer(form, server, existing())
+    setForm(applied.form)
+    setSearch({ skipped: applied.skipped })
+  }
+
+  const find = async () => {
+    setSearch({ status: "looking", servers: [], message: undefined })
+    const servers = await detect().catch(() => undefined)
+    if (!servers) return setSearch({ status: "failed", message: "Vector could not look for servers. Try again." })
+    setSearch({
+      status: "done",
+      servers,
+      message: servers.length ? undefined : `No model server answered ${place()}. Start one, or type its address.`,
+    })
+    if (servers.length === 1) chooseServer(servers[0])
+  }
+
+  const identifyTyped = async () => {
+    if (!form.baseURL.trim()) return
+    setSearch({ status: "looking", message: undefined })
+    const server = await identify({ url: form.baseURL.trim(), headers: identifyHeaders(form) }).catch(() => undefined)
+    if (!server) return setSearch({ status: "failed", message: "Nothing Vector recognises answered at this address." })
+    setSearch({ status: "done", message: undefined })
+    chooseServer(server)
+  }
 
   const goBack = () => {
     if (props.back === "close") {
@@ -83,13 +180,13 @@ export function DialogCustomProvider(props: Props) {
     )
   }
 
-  const setField = (key: "providerID" | "name" | "baseURL" | "apiKey", value: string) => {
+  const setField = (key: "providerID" | "name" | "baseURL" | "apiKey" | "concurrency", value: string) => {
     setForm(key, value)
     if (key === "apiKey") return
     setForm("err", key, undefined)
   }
 
-  const setModel = (index: number, key: "id" | "name", value: string) => {
+  const setModel = (index: number, key: "id" | "name" | "context" | "output", value: string) => {
     batch(() => {
       setForm("models", index, key, value)
       setForm("models", index, "err", key, undefined)
@@ -103,16 +200,15 @@ export function DialogCustomProvider(props: Props) {
     })
   }
 
+  const setModelFlag = (index: number, key: "tools" | "vision", value: boolean) => {
+    setForm("models", index, key, value)
+  }
+
   const validate = () => {
     const output = validateCustomProvider({
       form,
       t: language.t,
-      existing: [
-        ...serverSync().data.provider.all.keys(),
-        ...serverSync().data.provider.connected,
-        ...Object.keys(serverSync().data.config.provider ?? {}),
-        ...(serverSync().data.config.disabled_providers ?? []),
-      ],
+      existing: existing(),
     })
     batch(() => {
       setForm("err", output.err)
@@ -124,14 +220,22 @@ export function DialogCustomProvider(props: Props) {
 
   const saveMutation = useMutation(() => ({
     mutationFn: async (result: NonNullable<ReturnType<typeof validate>>) => {
-      await saveCustomProvider({
-        client: serverSDK().client,
+      const client = serverSDK().client
+      // The server goes on the Vector Local list through the Local API, which asks first when that loosens it.
+      const outcome = { listing: "" }
+      const saved = await saveCustomProvider({
+        client,
         result,
         directory: props.directory?.(),
         updateConfig: (config) => serverSync().updateConfig(config),
         conflictMessage: language.t("provider.custom.error.providerID.exists"),
+        list: async (server) => {
+          const changed = await local.change(client, listServer(server))
+          if (changed.type === "failed") outcome.listing = changed.message
+          return changed.type === "applied"
+        },
       })
-      return result
+      return { ...result, listed: saved.listed, listing: outcome.listing }
     },
     onSuccess: (result) => {
       dialog.close()
@@ -141,6 +245,12 @@ export function DialogCustomProvider(props: Props) {
         title: language.t("provider.connect.toast.connected.title", { provider: result.name }),
         description: language.t("provider.connect.toast.connected.description", { provider: result.name }),
       })
+      // Saved, but its server is not on the Vector Local list: its models stay off while Vector Local is on.
+      if (result.local && !result.listed)
+        showToast({
+          title: `${result.name} is not on your Vector Local list`,
+          description: `${result.listing ? `${result.listing} ` : ""}Its models stay off while Vector Local is on. Add its server in Settings > Vector Local.`,
+        })
     },
     onError: (err) => {
       const message = err instanceof Error ? err.message : String(err)
@@ -185,6 +295,57 @@ export function DialogCustomProvider(props: Props) {
             {language.t("provider.custom.description.suffix")}
           </p>
 
+          <div class="flex flex-col gap-2">
+            <label class="text-12-medium text-text-weak">Server</label>
+            <div class="flex flex-wrap gap-2">
+              <For each={PRESETS}>
+                {(preset) => (
+                  <Button
+                    type="button"
+                    size="small"
+                    variant={form.kind === preset.kind ? "primary" : "ghost"}
+                    aria-pressed={form.kind === preset.kind}
+                    onClick={() => pickPreset(preset)}
+                  >
+                    {preset.label}
+                  </Button>
+                )}
+              </For>
+            </div>
+            <Button
+              type="button"
+              size="small"
+              variant="secondary"
+              class="self-start"
+              disabled={search.status === "looking"}
+              onClick={find}
+            >
+              {search.status === "looking" ? `Looking ${place()}…` : `Find servers ${place()}`}
+            </Button>
+            <Show when={search.servers.length > 1}>
+              <div class="flex flex-col gap-1">
+                <For each={search.servers}>
+                  {(server) => (
+                    <Button
+                      type="button"
+                      size="small"
+                      variant={form.server?.origin === server.origin ? "primary" : "ghost"}
+                      class="self-start"
+                      onClick={() => chooseServer(server)}
+                    >
+                      {`${identity(server)} · ${server.origin}`}
+                    </Button>
+                  )}
+                </For>
+              </div>
+            </Show>
+            <Show when={search.message}>
+              <p class="text-12-regular text-text-weak" role="status">
+                {search.message}
+              </p>
+            </Show>
+          </div>
+
           <div class="flex flex-col gap-4">
             <TextField
               autofocus
@@ -204,14 +365,44 @@ export function DialogCustomProvider(props: Props) {
               validationState={form.err.name ? "invalid" : undefined}
               error={form.err.name}
             />
-            <TextField
-              label={language.t("provider.custom.field.baseURL.label")}
-              placeholder={language.t("provider.custom.field.baseURL.placeholder")}
-              value={form.baseURL}
-              onChange={(v) => setField("baseURL", v)}
-              validationState={form.err.baseURL ? "invalid" : undefined}
-              error={form.err.baseURL}
-            />
+            <div class="flex flex-col gap-1.5">
+              <div class="flex gap-2 items-end">
+                <div class="flex-1">
+                  <TextField
+                    label={language.t("provider.custom.field.baseURL.label")}
+                    placeholder={language.t("provider.custom.field.baseURL.placeholder")}
+                    value={form.baseURL}
+                    onChange={(v) => setField("baseURL", v)}
+                    validationState={form.err.baseURL ? "invalid" : undefined}
+                    error={form.err.baseURL}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  size="small"
+                  variant="ghost"
+                  disabled={search.status === "looking" || !form.baseURL.trim()}
+                  onClick={identifyTyped}
+                >
+                  Identify
+                </Button>
+              </div>
+              <Show when={label().identity}>
+                <p class="text-12-regular text-text-base">{label().identity}</p>
+              </Show>
+              <Show when={label().notEncrypted}>
+                <p class="text-12-medium text-text-strong">{COPY.notEncrypted}</p>
+              </Show>
+              <Show when={label().sharedMachine}>
+                <p class="text-12-regular text-text-weak">{COPY.sharedMachine}</p>
+              </Show>
+              <Show when={label().forwarding}>
+                <p class="text-12-regular text-text-weak">{COPY.forwarding}</p>
+              </Show>
+              <Show when={label().changedAddress}>
+                <p class="text-12-regular text-text-weak">{COPY.changedAddress}</p>
+              </Show>
+            </div>
             <TextField
               label={language.t("provider.custom.field.apiKey.label")}
               placeholder={language.t("provider.custom.field.apiKey.placeholder")}
@@ -219,44 +410,93 @@ export function DialogCustomProvider(props: Props) {
               value={form.apiKey}
               onChange={(v) => setField("apiKey", v)}
             />
+            <Show when={form.kind}>
+              <TextField
+                label="Requests at once"
+                placeholder={COPY.concurrencyEmpty(label().hosted)}
+                description="How many requests Vector sends this server at once. The user's turn goes first, then subagents, then titles and summaries."
+                value={form.concurrency ?? ""}
+                onChange={(v) => setField("concurrency", v)}
+                validationState={form.err.concurrency ? "invalid" : undefined}
+                error={form.err.concurrency}
+              />
+            </Show>
           </div>
 
           <div class="flex flex-col gap-3">
             <label class="text-12-medium text-text-weak">{language.t("provider.custom.models.label")}</label>
+            <Show when={search.skipped > 0}>
+              <p class="text-12-regular text-text-weak">{COPY.cloudModels(search.skipped)}</p>
+            </Show>
             <For each={form.models}>
               {(m, i) => (
-                <div class="flex gap-2 items-start" data-row={m.row}>
-                  <div class="flex-1">
-                    <TextField
-                      label={language.t("provider.custom.models.id.label")}
-                      hideLabel
-                      placeholder={language.t("provider.custom.models.id.placeholder")}
-                      value={m.id}
-                      onChange={(v) => setModel(i(), "id", v)}
-                      validationState={m.err.id ? "invalid" : undefined}
-                      error={m.err.id}
+                <div class="flex flex-col gap-2" data-row={m.row}>
+                  <div class="flex gap-2 items-start">
+                    <div class="flex-1">
+                      <TextField
+                        label={language.t("provider.custom.models.id.label")}
+                        hideLabel
+                        placeholder={language.t("provider.custom.models.id.placeholder")}
+                        value={m.id}
+                        onChange={(v) => setModel(i(), "id", v)}
+                        validationState={m.err.id ? "invalid" : undefined}
+                        error={m.err.id}
+                      />
+                    </div>
+                    <div class="flex-1">
+                      <TextField
+                        label={language.t("provider.custom.models.name.label")}
+                        hideLabel
+                        placeholder={language.t("provider.custom.models.name.placeholder")}
+                        value={m.name}
+                        onChange={(v) => setModel(i(), "name", v)}
+                        validationState={m.err.name ? "invalid" : undefined}
+                        error={m.err.name}
+                      />
+                    </div>
+                    <IconButton
+                      type="button"
+                      icon="trash"
+                      variant="ghost"
+                      class="mt-1.5"
+                      onClick={() => removeModel(i())}
+                      disabled={form.models.length <= 1}
+                      aria-label={language.t("provider.custom.models.remove")}
                     />
                   </div>
-                  <div class="flex-1">
-                    <TextField
-                      label={language.t("provider.custom.models.name.label")}
-                      hideLabel
-                      placeholder={language.t("provider.custom.models.name.placeholder")}
-                      value={m.name}
-                      onChange={(v) => setModel(i(), "name", v)}
-                      validationState={m.err.name ? "invalid" : undefined}
-                      error={m.err.name}
-                    />
+                  <div class="flex gap-2 items-start pl-1">
+                    <div class="flex-1">
+                      <TextField
+                        label="Context (tokens)"
+                        placeholder="Unknown"
+                        value={m.context ?? ""}
+                        onChange={(v) => setModel(i(), "context", v)}
+                        validationState={m.err.context ? "invalid" : undefined}
+                        error={m.err.context}
+                      />
+                    </div>
+                    <div class="flex-1">
+                      <TextField
+                        label="Reply limit (tokens)"
+                        placeholder="A quarter of the context"
+                        value={m.output ?? ""}
+                        onChange={(v) => setModel(i(), "output", v)}
+                        validationState={m.err.output ? "invalid" : undefined}
+                        error={m.err.output}
+                      />
+                    </div>
                   </div>
-                  <IconButton
-                    type="button"
-                    icon="trash"
-                    variant="ghost"
-                    class="mt-1.5"
-                    onClick={() => removeModel(i())}
-                    disabled={form.models.length <= 1}
-                    aria-label={language.t("provider.custom.models.remove")}
-                  />
+                  <div class="flex gap-4 items-center pl-1">
+                    <Checkbox checked={m.tools !== false} onChange={(value) => setModelFlag(i(), "tools", value)}>
+                      Calls tools
+                    </Checkbox>
+                    <Checkbox checked={m.vision === true} onChange={(value) => setModelFlag(i(), "vision", value)}>
+                      Reads images
+                    </Checkbox>
+                  </div>
+                  <Show when={label().hosted && m.id.trim() && !m.context?.trim()}>
+                    <p class="text-12-regular text-text-weak pl-1">{COPY.unknownContext}</p>
+                  </Show>
                 </div>
               )}
             </For>

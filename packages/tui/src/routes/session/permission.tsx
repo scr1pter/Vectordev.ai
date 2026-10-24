@@ -12,7 +12,6 @@ import { useSync } from "../../context/sync"
 import { useProject } from "../../context/project"
 import { filetype } from "../../util/filetype"
 import { Locale } from "../../util/locale"
-import { webSearchProviderLabel } from "../../util/tool-display"
 import { getScrollAcceleration } from "../../util/scroll"
 import { useTuiConfig } from "../../config"
 import { VECTOR_BASE_MODE, useBindings, useCommandShortcut } from "../../keymap"
@@ -369,21 +368,6 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
                   <Show when={url}>
                     <box paddingLeft={1}>
                       <text fg={theme.textMuted}>{"A local or private address: " + url}</text>
-                    </box>
-                  </Show>
-                ),
-              }
-            }
-
-            if (permission === "websearch") {
-              const query = typeof data.query === "string" ? data.query : ""
-              return {
-                icon: "◈",
-                title: `${webSearchProviderLabel(data.provider)} "${query}"`,
-                body: (
-                  <Show when={query}>
-                    <box paddingLeft={1}>
-                      <text fg={theme.textMuted}>{"Query: " + query}</text>
                     </box>
                   </Show>
                 ),

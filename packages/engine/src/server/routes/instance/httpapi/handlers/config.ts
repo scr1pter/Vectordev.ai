@@ -8,7 +8,19 @@ import { Effect } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import { ServerAuth } from "@/server/auth"
 import { InstanceHttpApi } from "../api"
+import { ConfigLockedError } from "../groups/config"
 import { markInstanceForDisposal } from "../lifecycle"
+
+/** The refusal for a change to keys a company lock keeps, in the words the app shows. */
+export function configLocked(keys: readonly string[]) {
+  return new ConfigLockedError({
+    name: "ConfigLocked",
+    data: {
+      keys: [...keys],
+      message: `Set by your company. Ask your administrator to change ${keys.length === 1 ? "it" : "them"}: ${keys.join(", ")}.`,
+    },
+  })
+}
 
 export const configHandlers = HttpApiBuilder.group(InstanceHttpApi, "config", (handlers) =>
   Effect.gen(function* () {
@@ -19,10 +31,13 @@ export const configHandlers = HttpApiBuilder.group(InstanceHttpApi, "config", (h
     // `vector invite`, so stored keys go out as Redaction.MARKER. Config.update
     // treats a MARKER sent back as "unchanged".
     const get = Effect.fn("ConfigHttpApi.get")(function* () {
-      return Redaction.redactConfig(yield* configSvc.get())
+      return { ...Redaction.redactConfig(yield* configSvc.get()), locked: Config.lockedKeys() }
     })
 
     const update = Effect.fn("ConfigHttpApi.update")(function* (ctx) {
+      // This writes the repository's vector.json, whose local block never applies.
+      const locked = Config.lockedIn(ctx.payload, "repository")
+      if (locked.length > 0) return yield* configLocked(locked)
       yield* configSvc.update(ctx.payload)
       yield* markInstanceForDisposal(yield* InstanceState.context)
       return Redaction.redactConfig(ctx.payload)

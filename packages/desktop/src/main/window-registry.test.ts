@@ -78,6 +78,29 @@ describe("window registry", () => {
     expect(app.registry.lastFocused()).toBeUndefined()
   })
 
+  test("picks only a main window to show, and counts only main windows", () => {
+    const app = setup()
+    // A window the registry does not hold, as the research browsers' hidden host is not a main window.
+    const host = { name: "research host" }
+    expect(app.registry.pick(host)).toBeUndefined()
+    expect(app.registry.pick(null)).toBeUndefined()
+    expect(app.registry.count()).toBe(0)
+    const a = { name: "a" }
+    const b = { name: "b" }
+    app.registry.register("a", a)
+    app.registry.register("b", b)
+    // The focused main window, else the last focused, else any open one; the host is never picked.
+    expect(app.registry.pick(b)).toBe(b)
+    expect(app.registry.pick(host)).toBe(a)
+    app.registry.focused("b")
+    expect(app.registry.pick(host)).toBe(b)
+    expect(app.registry.count()).toBe(2)
+    app.registry.closed("b")
+    app.registry.closed("a")
+    expect(app.registry.pick(host)).toBeUndefined()
+    expect(app.registry.count()).toBe(0)
+  })
+
   test("resumes forgetting closed windows after the quit flag resets", () => {
     const app = setup()
     app.registry.register("a", { name: "a" })

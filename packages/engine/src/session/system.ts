@@ -229,6 +229,11 @@ export type EnvironmentOptions = {
   /** This is a subagent's own session: it reports to its parent, never to the user. */
   nested?: boolean
   /**
+   * Whether the agent is told where it works: the working tree, its root and the repository's references. A research
+   * worker and the judge are not, since a folder's name can name a client and what they send leaves the machine.
+   */
+  workspace?: boolean
+  /**
    * When the history the model is shown starts (its first user message), in epoch milliseconds. Its day is the date
    * the environment states, so the prompt does not change from step to step or at midnight; a later day reaches the
    * model as a note on the user message that starts it (SessionReminders.dates). Defaults to now.
@@ -264,16 +269,24 @@ const layer = Layer.effect(
         options?: EnvironmentOptions,
       ) {
         const ctx = yield* InstanceState.context
-        const references = yield* Effect.gen(function* () {
-          return (yield* (yield* Reference.Service).list()).filter((reference) => reference.description !== undefined)
-        }).pipe(Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) }))))
+        const workspace = options?.workspace !== false
+        const references = workspace
+          ? yield* Effect.gen(function* () {
+              const service = yield* Reference.Service
+              return (yield* service.list()).filter((reference) => reference.description !== undefined)
+            }).pipe(Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) }))))
+          : []
         const session = [
           [
             `Here is some useful information about the environment you are running in:`,
             `<env>`,
-            `  Working directory: ${ctx.directory}`,
-            `  Workspace root folder: ${ctx.worktree}`,
-            `  Is directory a git repo: ${ctx.project.vcs === "git" ? "yes" : "no"}`,
+            ...(workspace
+              ? [
+                  `  Working directory: ${ctx.directory}`,
+                  `  Workspace root folder: ${ctx.worktree}`,
+                  `  Is directory a git repo: ${ctx.project.vcs === "git" ? "yes" : "no"}`,
+                ]
+              : []),
             `  Platform: ${process.platform}`,
             `  Today's date: ${new Date(options?.date ?? Date.now()).toDateString()}`,
             `</env>`,

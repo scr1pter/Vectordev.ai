@@ -12,9 +12,11 @@ import { Token } from "../util/token"
 import { BrainCard } from "./card"
 import { BrainCredit } from "./credit"
 import { BrainDatabase } from "./database"
+import { BrainLearn } from "./learn"
 import { BrainLexical } from "./lexical"
 import { BrainParse } from "./parse"
 import { BrainPaths } from "./paths"
+import { BrainPrivate } from "./private"
 import { BrainScan } from "./scan"
 import type { BrainSchema } from "./schema"
 import {
@@ -56,12 +58,14 @@ export const LIMIT = {
   user: 1_000,
   /** Active learned entries per repository and for the personal scope; tidying archives the least used past this. */
   repository: 300,
-  personal: 120,
+  personal: 300,
   /** Writes the agent may make per request message, new entries and merges alike; past it, writes are refused. */
   perMessage: 3,
   /** Entries waiting for review (proposed or held) that one session may leave, and that one scope may hold. */
   pendingPerSession: 50,
   pending: 200,
+  /** Imported entries waiting for review in one scope, counted apart from the rest: a whole export's worth. */
+  imported: 500,
   /** Bytes read from one mirrored file. */
   file: 256 * 1024,
   /** Evidence rows and history events one entry keeps, newest first. */
@@ -96,6 +100,37 @@ export function recallText(lines: readonly string[], options?: { readonly newest
     "</vector_memory_recall>",
   ].join("\n")
 }
+
+/**
+ * Who a digest or how-you-work lines are for (section 6.4a). owner: an agent whose output stays in the session.
+ * outward: a role whose output leaves the machine or reaches the web (Vectorscope's reviewers and its judge, research
+ * workers), which gets how the owner works and nothing about them: no MEMORY.md, no fact, nothing learned beside a
+ * private document, and decisions and lessons only when they pass the outward screen (BrainPrivate.screened).
+ */
+export type Audience = "owner" | "outward"
+
+/**
+ * Personal entries that say how the owner works, the review notes reviewers get besides, and the owner's terms, which a
+ * role gets only when it is given them and its work names them.
+ */
+export type HabitKind = "preference" | "decision" | "lesson" | "review" | "term"
+export const HABIT_KINDS: readonly HabitKind[] = ["preference", "decision", "lesson"]
+
+/** The facets research works from (section 6.4): everything but the owner's tooling. */
+export const RESEARCH_FACETS: readonly BrainSchema.Facet[] = ["format", "sources", "style", "vocabulary", "workflow"]
+
+/** When the optional model learner runs: with Vector Local on (the default), with any model, or never. */
+export type ModelLearner = "local-only" | "always" | "off"
+
+/** What Vector may learn on its own (section 7.4): at all, which facets, and whether a model may help. */
+export type LearnSettings = {
+  readonly learning: boolean
+  readonly facets: Readonly<Record<BrainSchema.Facet, boolean>>
+  readonly modelLearner: ModelLearner
+}
+
+/** Tokens of how-you-work lines a role gets, its wrapper counted: a subagent at every size, and a reviewer. */
+export const HABITS = { subagent: 100, review: 300 } as const
 
 /** Tokens recalled for a request of each size. A greeting recalls nothing. */
 export function recallBudget(tier: "chat" | "light" | "standard" | "thorough") {
@@ -141,7 +176,25 @@ export type Proposal = {
   readonly evidence?: Evidence
   /** The entry this one replaces. */
   readonly supersedes?: string
-  readonly origin: "agent" | "user"
+  /** import: read from a file the user imported, so it waits for their approval however it reads. */
+  readonly origin: "agent" | "user" | "import"
+  /** What a preference or a term is about; a preference's words choose it when absent, and a term is vocabulary. */
+  readonly facet?: BrainSchema.Facet
+  /**
+   * Write it waiting rather than in use. sighting: Vector's learner read it in a long message, so the same words seen
+   * again in another session put it in use. review: a model suggested it in a session that read outside content, so
+   * only the user puts it in use.
+   */
+  readonly pending?: "sighting" | "review"
+  /**
+   * Vector's learner (section 6.3) read it in what the owner typed in a top-level session, or the owner ticked it on a
+   * plan card, which only the engine's end-of-request learner and the plan card say. Such a write is personal only when
+   * it names nothing of one repository, in the first person or not, so an instruction about how they work anywhere
+   * ("always use tables") is personal without a first-person quote and "I prefer Acme's numbers" stays with its
+   * repository; its quote is checked against what the owner took back as well as its text. The memory tool's writes
+   * never are: a subagent's quote comes from the task its launching agent wrote.
+   */
+  readonly learner?: boolean
   readonly sessionID?: string
   /** Entries this session's current request message may still make active, counted by the caller. */
   readonly since?: number
@@ -162,6 +215,7 @@ export type Refusal =
   | "not-found"
   | "limit"
   | "put-away"
+  | "not-a-term"
 
 export type WriteResult =
   | {
@@ -176,6 +230,8 @@ export type WriteResult =
 export type Change = {
   readonly text?: string
   readonly pinned?: boolean
+  /** Files a preference or a term under another facet. */
+  readonly facet?: BrainSchema.Facet
   /** undo: the user takes back what Vector learned. It is put away as theirs to bring back, and not learned again. */
   readonly action?: "approve" | "reject" | "archive" | "restore" | "undo"
 }
@@ -193,7 +249,7 @@ export type Injection = {
   readonly text?: string
   readonly ids: readonly string[]
   readonly tokens: number
-  /** Recall only: which of `ids` are the user's personal memory. */
+  /** Which of `ids` are the user's personal memory (recall and the digest). */
   readonly personal?: readonly string[]
   /** Recall only: the text without personal memory, which is all a session's saved transcript may keep. */
   readonly shared?: string
@@ -253,8 +309,54 @@ export interface Interface {
   /** `documents`: the line about the repository's documents, which goes in with the memory index. */
   readonly digest: (
     place: Place,
-    options: { readonly personal: boolean; readonly index: boolean; readonly documents?: string },
+    options: {
+      readonly personal: boolean
+      readonly index: boolean
+      readonly documents?: string
+      /** outward: no MEMORY.md, no pinned fact or private entry, and pinned decisions and lessons screened. */
+      readonly audience?: Audience
+      /**
+       * outward only: the owner's own pinned kinds it keeps besides their rules, all by default. A reviewer of a pull
+       * request Vector cannot trust keeps their preferences only (6.4a).
+       */
+      readonly kinds?: readonly HabitKind[]
+      /** outward only: of the owner's pinned preferences and terms, only those of these facets. */
+      readonly facets?: readonly BrainSchema.Facet[]
+    },
   ) => Effect.Effect<Injection>
+  /**
+   * How the owner works, for an agent beside the main one (section 6.4a): their own personal entries of `kinds`, never
+   * a fact, a MEMORY.md line or a pinned entry (the digest carries those). Lines that bear on `query` or cover one of
+   * `files` come first, then what the owner said in general; a line scoped to other files stays out, and so does a term
+   * `query` does not name. `budget` counts the lines as `wrap` renders them (recallText by default). outward: every line
+   * passes the outward screen. `facets`: of preferences and terms, only those of these facets.
+   */
+  readonly habits: (
+    place: Place,
+    input: {
+      readonly query: string
+      readonly files?: readonly string[]
+      readonly budget: number
+      readonly audience: Audience
+      readonly kinds: readonly HabitKind[]
+      readonly facets?: readonly BrainSchema.Facet[]
+      readonly exclude?: ReadonlySet<string>
+      readonly wrap?: (lines: readonly string[]) => string
+      readonly sessionID?: string
+      readonly requestID?: string
+      /** Where the use is counted: a subagent's brief, or a review. */
+      readonly tier: "brief" | "review"
+    },
+  ) => Effect.Effect<Injection>
+  /**
+   * What the posting check compares a post with (BrainPosting): how the owner works (personal rules, preferences,
+   * decisions, lessons, past failures and review notes) and private facts (MEMORY.md, personal facts, and entries
+   * learned beside a private document here), whoever they reached, plus the document cards recalled in `sessionIDs`.
+   */
+  readonly posting: (
+    place: Place,
+    input: { readonly sessionIDs: readonly string[] },
+  ) => Effect.Effect<{ readonly habits: readonly string[]; readonly facts: readonly string[]; readonly cards: readonly string[] }>
   /** The scoring half of recall: entries that bear on a request, best first, before any budget. */
   readonly candidates: (
     place: Place,
@@ -324,6 +426,18 @@ export interface Interface {
   readonly stats: (place: Place) => Effect.Effect<Stats>
   readonly learning: () => Effect.Effect<boolean>
   readonly setLearning: (enabled: boolean) => Effect.Effect<void>
+  /** What Vector may learn on its own: learning at all, each facet, and the model learner. */
+  readonly learnSettings: () => Effect.Effect<LearnSettings>
+  readonly setLearnSettings: (change: {
+    readonly learning?: boolean
+    readonly facets?: Partial<Record<BrainSchema.Facet, boolean>>
+    readonly modelLearner?: ModelLearner
+  }) => Effect.Effect<LearnSettings>
+  /**
+   * "Erase what Vector learned in this session": forgets every entry Vector learned whose only evidence is that session,
+   * so it is not learned again either. What the user wrote and what other sessions also taught stay. Returns the count.
+   */
+  readonly eraseSession: (place: Place, sessionID: string) => Effect.Effect<number>
   /** How many writes this session's agent made since `since`, new entries and merges alike, for the per-message cap. */
   readonly written: (sessionID: string, since: number) => Effect.Effect<number>
   /** The user's own memory and rules files, which the brain reads and never writes. */
@@ -337,7 +451,7 @@ type Row = typeof BrainEntryTable.$inferSelect
 const HOUR = 60 * 60 * 1000
 const DAY = 24 * HOUR
 const PERSONAL = ""
-const LEARNED: readonly BrainSchema.Origin[] = ["agent", "user"]
+const LEARNED: readonly BrainSchema.Origin[] = ["agent", "user", "import"]
 
 const build = (input: { readonly data?: string; readonly config?: string }) =>
   Layer.effect(
@@ -517,6 +631,9 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
         origin_session_id: null,
         signature: item.signature ?? null,
         private: false,
+        // A file's preference is filed by its words when read (facetOf).
+        facet: null,
+        term_key: null,
       } satisfies Row
     })
     const rendered = render(source, content, rows)
@@ -621,20 +738,40 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
 
   const digest = Effect.fn("Brain.digest")(function* (
     place: Place,
-    options: { personal: boolean; index: boolean; documents?: string },
+    options: {
+      personal: boolean
+      index: boolean
+      documents?: string
+      audience?: Audience
+      kinds?: readonly HabitKind[]
+      facets?: readonly BrainSchema.Facet[]
+    },
   ) {
     yield* sync(place)
+    const outward = options.audience === "outward"
+    const kinds = new Set<string>(["rule", ...(options.kinds ?? [...HABIT_KINDS, "failure"])])
+    const facets = options.facets ? new Set(options.facets) : undefined
     const paths = [
       personalFiles.rules,
       ...place.sources.filter((source) => source.type === "rules").map((source) => source.path),
-      ...(options.personal ? [personalFiles.memory] : []),
+      ...(options.personal && !outward ? [personalFiles.memory] : []),
     ]
     const sources = new Map(
       (yield* db.select().from(BrainSourceTable).where(inArray(BrainSourceTable.path, paths)).all().pipe(Effect.orDie)).map(
         (row) => [row.path, row],
       ),
     )
-    const rows = yield* visibleRows(place, options.personal, ["active"])
+    // An outward role hears how the owner works, never about them: no MEMORY.md item, no fact and nothing learned
+    // beside a private document, only the decisions, lessons and past failures with nothing particular in them, and of
+    // the owner's own entries only the kinds (and facets) it was given.
+    const rows = (yield* visibleRows(place, options.personal, ["active"])).filter(
+      (row) =>
+        !outward ||
+        (row.source_file !== personalFiles.memory &&
+          row.kind !== "fact" &&
+          (row.repository_id !== PERSONAL || (kinds.has(row.kind) && inFacets(row, facets))) &&
+          BrainPrivate.screened({ kind: row.kind, text: row.body, private: row.private })),
+    )
     const pinned = rows
       .filter((row) => row.pinned && !row.tier0 && row.kind !== "review" && !row.stale)
       .toSorted((a, b) => a.created_at - b.created_at)
@@ -671,7 +808,12 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     ]
       .filter((part): part is string => part !== undefined)
       .join("\n")
-    return { text, ids: [...shown], tokens: Token.estimate(text) }
+    // Which of the entries shown are the owner's own (their rules, MEMORY.md and personal entries) or were learned
+    // beside a private document, for Vector Local's count of what a request carries.
+    const personal = rows
+      .filter((row) => shown.has(row.id) && (row.repository_id === PERSONAL || row.private))
+      .map((row) => row.id)
+    return { text, ids: [...shown], tokens: Token.estimate(text), personal }
   })
 
   const recallable = Effect.fnUntraced(function* (place: Place, personal: boolean, exclude: ReadonlySet<string>) {
@@ -698,8 +840,14 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
       .flatMap((row): Candidate[] => {
         const lexical = scored.get(row.id)
         const pathHit = row.paths.length > 0 && files.some((file) => row.paths.some((pattern) => matches(pattern, file)))
+        // A term comes only to a request that names it, whatever else it shares, and then it leads: it says what the
+        // request's own words mean.
+        const named = row.kind === "term" && BrainLearn.names(input.query, row.term_key ?? "")
         // One shared word is noise in a long request; two, or the only word of a short one, is a topic.
-        const relevant = pathHit || (lexical !== undefined && (lexical.matched.length >= 2 || (query.size <= 2 && lexical.matched.length >= 1)))
+        const relevant =
+          row.kind === "term"
+            ? named
+            : pathHit || (lexical !== undefined && (lexical.matched.length >= 2 || (query.size <= 2 && lexical.matched.length >= 1)))
         if (!relevant) return []
         const recency = Math.max(0.5, 0.995 ** ((now - (row.last_used_at ?? row.updated_at)) / HOUR))
         const proven = BrainCredit.lift({ helpful: row.helpful, harmful: row.harmful, ignored: 0 }, row)
@@ -707,7 +855,7 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
           {
             id: row.id,
             line: line(row),
-            score: ((lexical?.score ?? 0) + (pathHit ? 5 : 0)) * row.confidence * recency * proven,
+            score: ((lexical?.score ?? 0) + (pathHit ? 5 : 0) + (named ? 10 : 0)) * row.confidence * recency * proven,
             matched: lexical?.matched ?? [],
             path: pathHit,
             personal: row.repository_id === PERSONAL || row.private,
@@ -808,6 +956,126 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
       tokens,
     )
     return { text, ids: picked.map((row) => row.id), tokens }
+  })
+
+  const habits = Effect.fn("Brain.habits")(function* (
+    place: Place,
+    input: {
+      query: string
+      files?: readonly string[]
+      budget: number
+      audience: Audience
+      kinds: readonly HabitKind[]
+      facets?: readonly BrainSchema.Facet[]
+      exclude?: ReadonlySet<string>
+      wrap?: (lines: readonly string[]) => string
+      sessionID?: string
+      requestID?: string
+      tier: "brief" | "review"
+    },
+  ) {
+    if (input.budget <= 0 || input.kinds.length === 0) return { ids: [], tokens: 0 }
+    yield* sync(place)
+    const exclude = input.exclude ?? new Set<string>()
+    const facets = input.facets ? new Set(input.facets) : undefined
+    const wrap = input.wrap ?? ((lines: readonly string[]) => recallText(lines))
+    const rows = (yield* db
+      .select()
+      .from(BrainEntryTable)
+      .where(
+        and(
+          eq(BrainEntryTable.repository_id, PERSONAL),
+          eq(BrainEntryTable.status, "active"),
+          inArray(BrainEntryTable.kind, [...input.kinds]),
+        ),
+      )
+      .all()
+      .pipe(Effect.orDie)).filter(
+      (row) =>
+        !row.pinned &&
+        !row.tier0 &&
+        !row.stale &&
+        row.source_file !== personalFiles.memory &&
+        !exclude.has(row.id) &&
+        inFacets(row, facets) &&
+        (row.kind !== "term" || BrainLearn.names(input.query, row.term_key ?? "")) &&
+        (input.audience === "owner" || BrainPrivate.screened({ kind: row.kind, text: row.body, private: row.private })),
+    )
+    const files = (input.files ?? []).map((file) => BrainPaths.relative(place.root, file))
+    const scored = new Map(
+      BrainLexical.rank(
+        rows.map((row) => ({ id: row.id, terms: decode(row.terms) })),
+        BrainLexical.terms([input.query, ...files].join(" ")),
+      ).map((item) => [item.id, item.score]),
+    )
+    const picked = rows
+      .flatMap((row) => {
+        const covered = files.some((file) => row.paths.some((pattern) => matches(pattern, file)))
+        // A line scoped to files this work does not touch says nothing about it.
+        if (row.paths.length > 0 && !covered) return []
+        return [{ row, score: (scored.get(row.id) ?? 0) + (covered ? 5 : 0) }]
+      })
+      .toSorted(
+        (a, b) =>
+          b.score - a.score ||
+          b.row.uses - a.row.uses ||
+          b.row.updated_at - a.row.updated_at ||
+          a.row.id.localeCompare(b.row.id),
+      )
+      .reduce<Row[]>(
+        (kept, item) => (Token.estimate(wrap([...kept, item.row].map(line))) > input.budget ? kept : [...kept, item.row]),
+        [],
+      )
+    if (picked.length === 0) return { ids: [], tokens: 0 }
+    const text = wrap(picked.map(line))
+    const tokens = Token.estimate(text)
+    const ids = picked.map((row) => row.id)
+    yield* used(ids, input.sessionID, input.tier, tokens, input.requestID)
+    return { text, ids, tokens, personal: ids, shared: "" }
+  })
+
+  const posting = Effect.fn("Brain.posting")(function* (place: Place, input: { sessionIDs: readonly string[] }) {
+    yield* sync(place)
+    const rows = yield* db
+      .select()
+      .from(BrainEntryTable)
+      .where(
+        and(
+          eq(BrainEntryTable.status, "active"),
+          or(
+            eq(BrainEntryTable.repository_id, PERSONAL),
+            and(eq(BrainEntryTable.repository_id, place.repository), eq(BrainEntryTable.private, true)),
+          ),
+        ),
+      )
+      .all()
+      .pipe(Effect.orDie)
+    const fact = (row: Row) => row.private || row.source_file === personalFiles.memory || row.kind === "fact"
+    const seen = input.sessionIDs.length
+      ? (yield* db
+          .selectDistinct({ id: BrainUseTable.entry_id })
+          .from(BrainUseTable)
+          .where(inArray(BrainUseTable.session_id, [...input.sessionIDs]))
+          .all()
+          .pipe(Effect.orDie)).map((row) => row.id)
+      : []
+    const entries = seen.length
+      ? new Set(
+          (yield* db
+            .select({ id: BrainEntryTable.id })
+            .from(BrainEntryTable)
+            .where(inArray(BrainEntryTable.id, seen))
+            .all()
+            .pipe(Effect.orDie)).map((row) => row.id),
+        )
+      : new Set<string>()
+    return {
+      // Rules, preferences, decisions, lessons, past failures and review notes: everything that is not about them.
+      habits: rows.filter((row) => !fact(row)).map((row) => row.body),
+      facts: rows.filter(fact).map((row) => row.body),
+      // What else those sessions were shown is document cards: the caller checks which are private.
+      cards: seen.filter((id) => !entries.has(id)),
+    }
   })
 
   const search = Effect.fn("Brain.search")(function* (
@@ -962,6 +1230,44 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
       .pipe(Effect.orDie)
   })
 
+  // Every facet is learned, and the model learner runs only with Vector Local on, until the user says otherwise
+  // (section 7.4).
+  const learnSettings = Effect.fn("Brain.learnSettings")(function* () {
+    const row = yield* db
+      .select()
+      .from(BrainStateTable)
+      .where(eq(BrainStateTable.repository_id, PERSONAL))
+      .get()
+      .pipe(Effect.orDie)
+    return {
+      learning: row?.learning ?? true,
+      facets: Object.fromEntries(
+        BrainLearn.FACETS.map((facet) => [facet, row?.learn_facets?.[facet] !== false]),
+      ) as Record<BrainSchema.Facet, boolean>,
+      modelLearner: row?.model_learner ?? "local-only",
+    } satisfies LearnSettings
+  })
+
+  const setLearnSettings = Effect.fn("Brain.setLearnSettings")(function* (change: {
+    learning?: boolean
+    facets?: Partial<Record<BrainSchema.Facet, boolean>>
+    modelLearner?: ModelLearner
+  }) {
+    const current = yield* learnSettings()
+    const next = {
+      learning: change.learning ?? current.learning,
+      learn_facets: { ...current.facets, ...change.facets },
+      model_learner: change.modelLearner ?? current.modelLearner,
+    }
+    yield* db
+      .insert(BrainStateTable)
+      .values({ repository_id: PERSONAL, ...next })
+      .onConflictDoUpdate({ target: BrainStateTable.repository_id, set: next })
+      .run()
+      .pipe(Effect.orDie)
+    return yield* learnSettings()
+  })
+
   // Every write that changes memory leaves one evidence row, so this counts merges into known entries as well as new
   // ones, and the agent cannot pile writes onto one entry past the per-message cap either.
   const written = Effect.fn("Brain.written")(function* (sessionID: string, since: number) {
@@ -974,15 +1280,21 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     return rows.length
   })
 
-  // What waits for review in one scope, and how much of it one session left there.
-  const waiting = Effect.fnUntraced(function* (repository: string, sessionID: string | undefined) {
+  // What waits for review in one scope, of the origins given, and how much of it one session left there. Imports are
+  // counted apart from what Vector learned and the user wrote, so a large import neither stops Vector learning nor is
+  // cut short by what already waits.
+  const waiting = Effect.fnUntraced(function* (
+    repository: string,
+    sessionID: string | undefined,
+    origins: readonly BrainSchema.Origin[],
+  ) {
     const rows = yield* db
       .select({ session: BrainEntryTable.origin_session_id })
       .from(BrainEntryTable)
       .where(
         and(
           eq(BrainEntryTable.repository_id, repository),
-          inArray(BrainEntryTable.origin, [...LEARNED]),
+          inArray(BrainEntryTable.origin, [...origins]),
           inArray(BrainEntryTable.status, ["proposed", "quarantined"]),
         ),
       )
@@ -1061,6 +1373,38 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     return row !== undefined && row.until > Date.now()
   })
 
+  // Whether a quote of the user's words is, or holds, an entry they forgot in this repository or their own: the same
+  // words, or every term of it with each of its turns ("always", "never" and what they apply to).
+  const quoted = Effect.fnUntraced(function* (repository: string, quote: string) {
+    const hash = normHash(quote)
+    if ((yield* tombstoned(repository, hash)) || (yield* tombstoned(PERSONAL, hash))) return true
+    const terms = BrainLexical.terms(quote)
+    const turns = new Set(BrainLexical.polarity(quote).split(" ").filter(Boolean))
+    const forgotten = yield* db
+      .select({ terms: BrainTombstoneTable.terms, polarity: BrainTombstoneTable.polarity })
+      .from(BrainTombstoneTable)
+      .where(
+        and(
+          inArray(BrainTombstoneTable.repository_id, [...new Set([repository, PERSONAL])]),
+          gt(BrainTombstoneTable.until, Date.now()),
+          isNotNull(BrainTombstoneTable.terms),
+        ),
+      )
+      .all()
+      .pipe(Effect.orDie)
+    return forgotten.some((row) => {
+      const own = decode(row.terms!)
+      return (
+        own.size > 0 &&
+        [...own].every(([term, count]) => (terms.get(term) ?? 0) >= count) &&
+        (row.polarity ?? "")
+          .split(" ")
+          .filter(Boolean)
+          .every((turn) => turns.has(turn))
+      )
+    })
+  })
+
   // A replacement that waited for review replaces its entry once it is approved. Only the user's approval replaces what
   // the user wrote.
   const settle = Effect.fnUntraced(function* (id: string, actor: "user" | "agent" | "vector") {
@@ -1087,11 +1431,27 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
 
   const propose = Effect.fn("Brain.propose")(function* (place: Place, proposal: Proposal) {
     const agent = proposal.origin === "agent"
-    if (agent && !(yield* learning()))
+    // What a file the user imported says waits for them, however it reads, so a changed file cannot plant memory in use.
+    const imported = proposal.origin === "import"
+    const actor = agent ? ("agent" as const) : ("user" as const)
+    const settings = agent ? yield* learnSettings() : undefined
+    if (settings && !settings.learning)
       return refuse("learning-off", "Learning is turned off in Settings > Memory, so nothing was saved.")
     const hiddenText = BrainScan.hidden(proposal.text)
     const cleaned = BrainScan.stripHidden(proposal.text).replace(/\s+/g, " ").trim()
     if (!cleaned) return refuse("empty", "Nothing to save.")
+    // A term says what one of the user's words means, and is found again by that word.
+    const term = proposal.kind === "term" ? BrainLearn.term(cleaned) : undefined
+    if (proposal.kind === "term" && !term)
+      return refuse("not-a-term", 'A term reads "When I say X, I mean Y". Save anything else as a preference.')
+    const facet =
+      proposal.facet ??
+      (term ? "vocabulary" : proposal.kind === "preference" ? BrainLearn.facetOf(cleaned) : undefined)
+    if (settings && facet && !settings.facets[facet])
+      return refuse(
+        "learning-off",
+        `Learning about your ${facet} is turned off in Settings > Memory, so nothing was saved.`,
+      )
     const limit = agent ? LIMIT.agent : LIMIT.user
     if (cleaned.length > limit)
       return refuse("too-long", `Keep one memory to ${limit} characters: one fact, lesson or decision per entry.`)
@@ -1111,6 +1471,8 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     }
     const text = redacted.text
     const evidence = proposal.evidence
+    // A term replaces the term in use for the same words, as an explicit update would.
+    const keyed = term && !proposal.supersedes ? yield* sameTerm(place, term.key, normHash(text)) : undefined
     // What the agent learns goes into use at once unless the session took in outside content (`hold`). Evidence it gives
     // is checked, kept and raises confidence, and counts only for what it says: a quote has to state the memory, and a
     // check has to be the one it names. The user's own words still decide personal memory and changes to theirs.
@@ -1118,9 +1480,16 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
       !agent || (evidence !== undefined && evidence.type !== "user" && evidence.verified && supports(text, evidence))
     // The user's own words: what they wrote in Settings, or a checked quote of what they said in this conversation.
     const said = !agent || (verified && evidence?.type === "message")
-    // Personal memory follows the user into every repository, so it takes what they said about themselves.
-    const own = !agent || (said && evidence?.type === "message" && FIRST_PERSON.test(evidence.quote))
-    const previous = proposal.supersedes ? yield* find(place, proposal.supersedes, true) : undefined
+    // Personal memory follows the user into every repository, so it takes what they said about themselves. What Vector's
+    // learner read is held to more, whatever voice it is in: it follows them only when it names nothing of one
+    // repository, as "I prefer tables" and "always use tables" do and "I prefer Acme's churn numbers from the dashboard"
+    // or "always cc jane@acme.com" do not.
+    const own =
+      !agent ||
+      (said &&
+        evidence?.type === "message" &&
+        (proposal.learner === true ? general(text, evidence.quote, facet) : FIRST_PERSON.test(evidence.quote)))
+    const previous = proposal.supersedes ? yield* find(place, proposal.supersedes, true) : keyed
     if (proposal.supersedes && !previous) return refuse("not-found", `No memory ${proposal.supersedes} here.`)
     if (previous && !LEARNED.includes(previous.origin))
       return refuse(
@@ -1149,13 +1518,39 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
       )
     const scope: BrainSchema.Scope = (previous?.scope ?? proposal.scope) === "personal" && own ? "personal" : "repository"
     const repository = scope === "personal" ? PERSONAL : place.repository
+    // What Vector's learner keeps for this repository because it names someone or something in particular ("always
+    // cc jane@acme.com", "always ask Priya before merging", "never deploy to acme-prod on Fridays") is memory of the
+    // owner, not of the code (section 6.4a). It is kept private, so it goes only where personal memory goes: never to
+    // a session an invited guest is in nor to a model that may train on prompts, and no outward role hears it. What
+    // names only the code ("always use pnpm in this repo") is the repository's, like the code a guest works on.
+    const named =
+      proposal.learner === true &&
+      scope === "repository" &&
+      [text, evidence?.type === "message" ? evidence.quote : text].some((value) => names(value, facet))
     const hash = normHash(text)
-    // What the user took out of their own memory is not learned for a repository instead either.
-    if (agent && ((yield* tombstoned(repository, hash)) || (yield* tombstoned(PERSONAL, hash))))
+    // What the user took out of their own memory is not learned for a repository instead either, nor imported again.
+    if ((agent || imported) && ((yield* tombstoned(repository, hash)) || (yield* tombstoned(PERSONAL, hash))))
       return refuse("forgotten", "The user took this out of memory, so it was not saved again.")
-    const hold = !agent
-      ? undefined
-      : (proposal.hold ?? (hiddenText ? "hidden-unicode" : BrainScan.instructionLike(text) ? "instruction-like" : undefined))
+    // A model learner writes its own words for what the user typed, so what the user took back is found in the quote
+    // too: the same words, or a quote that says all of an entry they forgot, the same way round.
+    if (
+      agent &&
+      proposal.learner === true &&
+      evidence?.type === "message" &&
+      normalise(evidence.quote) !== normalise(text) &&
+      (yield* quoted(repository, evidence.quote))
+    )
+      return refuse("forgotten", "The user took out a memory that says this, so it was not saved again.")
+    // A file the user imported can carry what anyone wrote into it, so it is held as the agent's writes are: what
+    // reads as instructions, or hid characters, waits apart from the rest of the import, which one click approves.
+    const hold =
+      !agent && !imported
+        ? undefined
+        : (proposal.hold ??
+          (hiddenText ? "hidden-unicode" : BrainScan.instructionLike(text) ? "instruction-like" : undefined))
+    // A write that waits without being held: Vector's learner read it in a long message, a model suggested it in a
+    // session that read outside content, or a file brought it in.
+    const pending = hold ? undefined : imported ? ("review" as const) : proposal.pending
 
     const peers = yield* db
       .select()
@@ -1175,16 +1570,22 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     // The same words again: the entry gains this evidence, and the user writing what waits for review approves it.
     const exact = peers.find((row) => row.norm_hash === hash && row.id !== previous?.id)
     if (exact) {
-      // A held write never adds to an entry outside the review queue, so outside content cannot vouch for memory.
-      if (hold && exact.status !== "quarantined") return { type: "merged" as const, entry: toEntry(exact) }
+      // A held write never adds to an entry outside the review queue, so outside content cannot vouch for memory; nor
+      // does a model's suggestion from such a session, or an imported file, change what is known.
+      if ((hold && exact.status !== "quarantined") || pending === "review" || imported)
+        return { type: "merged" as const, entry: toEntry(exact) }
       // What the user put away stays away until they bring it back; the agent may restore only what it or tidying
       // put away.
       if (agent && exact.status === "archived" && (yield* archivedBy(exact.id)) === "user")
         return { type: "merged" as const, entry: toEntry(exact) }
       // A write with nothing from outside behind it goes into use, as a new entry would: a proposal an earlier version
-      // left waiting, or what the agent or tidying put away. Only the user approves what was held.
-      const confirms = exact.status === "proposed"
-      const restores = exact.status === "archived"
+      // left waiting, or what the agent or tidying put away. Only the user approves what was held. Words the learner
+      // read in a long message confirm a waiting entry only from another session (a second sighting), and put nothing
+      // away back in use.
+      const row = evidenceRow(exact.id, evidence, proposal.sessionID, verified)
+      const repeated = yield* seen(row)
+      const confirms = exact.status === "proposed" && (pending !== "sighting" || !repeated)
+      const restores = exact.status === "archived" && pending === undefined
       const approves = !agent && exact.status === "quarantined"
       const status: BrainSchema.Status = confirms || restores || approves ? "active" : exact.status
       // What the user wrote themselves is theirs, so the agent cannot put it away later.
@@ -1196,19 +1597,20 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
         confidence: Math.max(exact.confidence, confidence(proposal, verified)),
         updated_at: now,
         paths: [...new Set([...exact.paths, ...(proposal.paths ?? [])])],
+        // The learner's words make the entry the owner's, as a new entry would be.
+        private: exact.private || named,
       }
       // Words already in memory: in use now, or as they were (held, put away or in use), and never held anew.
       const outcome = (entry: BrainSchema.Entry) => ({
         type: status !== exact.status ? ("promoted" as const) : ("merged" as const),
         entry,
       })
-      const row = evidenceRow(exact.id, evidence, proposal.sessionID, verified)
-      const repeated = yield* seen(row)
       const changed =
         status !== exact.status ||
         origin !== exact.origin ||
         next.confidence !== exact.confidence ||
-        next.paths.length !== exact.paths.length
+        next.paths.length !== exact.paths.length ||
+        next.private !== exact.private
       // The agent repeating itself changes nothing; the user saving the same words again marks it as just confirmed.
       if (agent && repeated && !changed) return outcome(toEntry(exact))
       yield* db
@@ -1220,8 +1622,8 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
         )
         .pipe(Effect.orDie)
       yield* trim(exact.id)
-      if (status === "active" && exact.status !== "active") yield* settle(exact.id, proposal.origin)
-      yield* event(exact, confirms ? "promoted" : restores ? "restored" : approves ? "approved" : "merged", proposal.origin)
+      if (status === "active" && exact.status !== "active") yield* settle(exact.id, actor)
+      yield* event(exact, confirms ? "promoted" : restores ? "restored" : approves ? "approved" : "merged", actor)
       yield* bump(repository)
       return outcome(toEntry({ ...exact, ...next }))
     }
@@ -1234,7 +1636,7 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     // "... from packages/app" share most of them), so a wording only joins an entry when it adds nothing to it.
     const fresh = { body: text, terms: words }
     const similar =
-      previous || hold || !agent
+      previous || hold || pending || !agent
         ? undefined
         : peers
             .filter((row) => row.kind === proposal.kind && row.status === "active")
@@ -1259,17 +1661,22 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
             )
             .pipe(Effect.orDie)
           yield* trim(similar.id)
-          yield* event(similar, "merged", proposal.origin)
+          yield* event(similar, "merged", actor)
           yield* bump(repository)
         }
       }
       return { type: "merged" as const, entry: toEntry(similar) }
     }
 
-    const status: BrainSchema.Status = hold ? "quarantined" : "active"
+    const status: BrainSchema.Status = hold ? "quarantined" : pending ? "proposed" : "active"
     if (status !== "active") {
-      const queue = yield* waiting(repository, proposal.sessionID)
-      if (queue.session >= LIMIT.pendingPerSession || queue.all >= LIMIT.pending)
+      const queue = yield* waiting(repository, proposal.sessionID, imported ? ["import"] : ["agent", "user"])
+      if (imported && queue.all >= LIMIT.imported)
+        return refuse(
+          "limit",
+          "Enough imported memory already waits for the user's review. Approve or reject it in Settings > Memory before importing more.",
+        )
+      if (!imported && (queue.session >= LIMIT.pendingPerSession || queue.all >= LIMIT.pending))
         return refuse(
           "limit",
           "Enough memory already waits for the user's review. Ask them to go through Settings > Memory before saving more.",
@@ -1318,7 +1725,9 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
       origin_session_id: proposal.sessionID ?? null,
       signature: null,
       // A replacement for a private entry stays private.
-      private: proposal.private === true || previous?.private === true,
+      private: proposal.private === true || previous?.private === true || named,
+      facet: facet ?? null,
+      term_key: term?.key ?? null,
     }
     yield* db
       .transaction((tx) =>
@@ -1332,7 +1741,7 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
               .set({ status: "superseded", superseded_by: id, updated_at: now })
               .where(eq(BrainEntryTable.id, previous.id))
               .run()
-          if (!agent)
+          if (proposal.origin === "user")
             yield* tx
               .delete(BrainTombstoneTable)
               .where(and(eq(BrainTombstoneTable.repository_id, repository), eq(BrainTombstoneTable.norm_hash, hash)))
@@ -1343,7 +1752,7 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     yield* event(
       row,
       previous && status === "active" ? "superseded" : "added",
-      proposal.origin,
+      actor,
       previous ? (status === "active" ? { previous: previous.id } : { pending: previous.id }) : undefined,
     )
     if (status === "active") yield* capacity(repository)
@@ -1353,6 +1762,25 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     const extra = near ? { related: toEntry(near) } : {}
     if (status === "quarantined") return { type: "held" as const, entry, ...extra }
     return { type: "added" as const, entry, ...extra }
+  })
+
+  // The term in use for the same words, in this repository or the user's own, unless it already says these words.
+  const sameTerm = Effect.fnUntraced(function* (place: Place, key: string, hash: string) {
+    return yield* db
+      .select()
+      .from(BrainEntryTable)
+      .where(
+        and(
+          inArray(BrainEntryTable.repository_id, [place.repository, PERSONAL]),
+          eq(BrainEntryTable.kind, "term"),
+          eq(BrainEntryTable.status, "active"),
+          eq(BrainEntryTable.term_key, key),
+          ne(BrainEntryTable.norm_hash, hash),
+        ),
+      )
+      .orderBy(desc(BrainEntryTable.updated_at))
+      .get()
+      .pipe(Effect.orDie)
   })
 
   // The entry this one was written to replace, at once or once approved, while that one is still replaced by it. A
@@ -1484,6 +1912,10 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
       const redacted = BrainScan.redact(cleaned)
       if (redacted.redacted && BrainScan.remainder(redacted.text) < 16)
         return refuse("secret", "That is a secret. Memory never stores secrets, keys, tokens or passwords.")
+      // An edited term is found by its new words; an edited preference is filed by them unless the user says where.
+      const term = row.kind === "term" ? BrainLearn.term(redacted.text) : undefined
+      if (row.kind === "term" && !term)
+        return refuse("not-a-term", 'A term reads "When I say X, I mean Y". Keep its words and change what follows.')
       yield* db
         .update(BrainEntryTable)
         .set({
@@ -1493,11 +1925,24 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
           confidence: actor === "user" ? 1 : row.confidence,
           stale: false,
           updated_at: now,
+          ...(term ? { term_key: term.key } : {}),
+          ...(row.kind === "preference" && change.facet === undefined
+            ? { facet: BrainLearn.facetOf(redacted.text) }
+            : {}),
         })
         .where(eq(BrainEntryTable.id, id))
         .run()
         .pipe(Effect.orDie)
       yield* event(row, "edited", actor, { previous: row.body })
+    }
+    if (change.facet !== undefined && (row.kind === "preference" || row.kind === "term")) {
+      yield* db
+        .update(BrainEntryTable)
+        .set({ facet: change.facet, updated_at: now })
+        .where(eq(BrainEntryTable.id, id))
+        .run()
+        .pipe(Effect.orDie)
+      yield* event(row, "filed", actor, { facet: change.facet })
     }
     if (change.pinned !== undefined) {
       yield* db.update(BrainEntryTable).set({ pinned: change.pinned }).where(eq(BrainEntryTable.id, id)).run().pipe(Effect.orDie)
@@ -1754,6 +2199,50 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     if (scope === "all") yield* db.run("VACUUM").pipe(Effect.orDie)
     yield* bump(scope === "personal" ? PERSONAL : place.repository)
     return rows.length
+  })
+
+  // What Vector learned in one session alone: its entries whose every piece of evidence came from that session. An
+  // entry another session also taught, or the user wrote, stays; what goes is forgotten, so it is not learned again.
+  const eraseSession = Effect.fn("Brain.eraseSession")(function* (place: Place, sessionID: string) {
+    const rows = (yield* db
+      .select()
+      .from(BrainEntryTable)
+      .where(
+        and(
+          inArray(BrainEntryTable.repository_id, [place.repository, PERSONAL]),
+          eq(BrainEntryTable.origin, "agent"),
+          inArray(
+            BrainEntryTable.id,
+            db
+              .select({ id: BrainEvidenceTable.entry_id })
+              .from(BrainEvidenceTable)
+              .where(eq(BrainEvidenceTable.session_id, sessionID)),
+          ),
+        ),
+      )
+      .all()
+      .pipe(Effect.orDie))
+    const others = rows.length
+      ? new Set(
+          (yield* db
+            .selectDistinct({ id: BrainEvidenceTable.entry_id })
+            .from(BrainEvidenceTable)
+            .where(
+              and(
+                inArray(
+                  BrainEvidenceTable.entry_id,
+                  rows.map((row) => row.id),
+                ),
+                or(isNull(BrainEvidenceTable.session_id), ne(BrainEvidenceTable.session_id, sessionID)),
+              ),
+            )
+            .all()
+            .pipe(Effect.orDie)).map((row) => row.id),
+        )
+      : new Set<string>()
+    const only = rows.filter((row) => !others.has(row.id))
+    yield* Effect.forEach(only, forgetRow, { discard: true })
+    return only.length
   })
 
   // --- Tidying ----------------------------------------------------------------------------------------------------
@@ -2050,6 +2539,8 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
   return {
     sync,
     digest,
+    habits,
+    posting,
     candidates,
     used: (ids, input) => used(ids, input.sessionID, input.tier, input.tokens, input.requestID),
     credit,
@@ -2067,6 +2558,9 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     stats,
     learning,
     setLearning,
+    learnSettings,
+    setLearnSettings,
+    eraseSession,
     written,
     files: () => personalFiles,
   }
@@ -2296,6 +2790,54 @@ function overlap(own: ReadonlyMap<string, number>, other: ReadonlyMap<string, nu
 // Personal memory is what the user said about themselves.
 const FIRST_PERSON = /\b(?:i|me|my|mine|myself)\b/i
 
+// What Vector's learner read in the owner's typed words, about how they work anywhere. Neither its words nor the quote
+// may name anything of one repository or company: no path, file or identifier of the code, no email, no host name but
+// a public site a sources preference names ("prefer nature.com"), no long number, no name ("the Acme billing tests",
+// "cc jane"), nor this repository alone ("in this repo"). It is then what they said about themselves ("I prefer
+// tables"), unless it is a catch-all style line about parts of the code ("I'd rather you never call the billing client
+// from the controller"), or an instruction in so many words whose facet holds in every repository (format, workflow,
+// tooling or sources, as "always use tables" and "never squash merge" do). Anything else stays with its repository,
+// where its names belong.
+function general(text: string, quote: string, facet: BrainSchema.Facet | undefined) {
+  if (facet === undefined) return false
+  const plain = [text, quote].every(
+    (value) =>
+      !BrainLearn.scoped(value) &&
+      !names(value, facet) &&
+      BrainPrivate.tokens(value, ["path", "identifier"]).every(
+        (token) => token.kind === "identifier" && BrainLearn.known(token.value),
+      ),
+  )
+  if (!plain) return false
+  if (FIRST_PERSON.test(quote)) return facet !== "style" || !CODE_PART.test(quote)
+  return normalise(text) === normalise(quote) && GENERAL_FACETS.has(facet) && BrainLearn.instruction(quote)
+}
+const GENERAL_FACETS: ReadonlySet<BrainSchema.Facet> = new Set(["format", "workflow", "tooling", "sources"])
+
+// Whether words the learner read name someone or something in particular, which is the owner's and not the code's: a
+// person, team, client or system (BrainLearn.particular), an email, a host but a public site a sources preference
+// names, or a long number. A path or an identifier names the code.
+function names(value: string, facet: BrainSchema.Facet | undefined) {
+  return (
+    BrainLearn.particular(value) ||
+    BrainPrivate.tokens(value, BrainPrivate.SHAPED).some(
+      (token) => !(token.kind === "host" && facet === "sources" && publicHost(token.value)),
+    )
+  )
+}
+// Parts of a codebase a style line may name, which make it about that codebase.
+const CODE_PART =
+  /\b(?:clients?|controllers?|services?|modules?|components?|handlers?|functions?|methods?|class(?:es)?|endpoints?|routes?|apis?|files?|folders?|director(?:y|ies)|schemas?|migrations?|quer(?:y|ies)|databases?|config(?:s|uration)?|scripts?|jobs?|workers?|queues?|hooks?|utils?|helpers?|packages?|librar(?:y|ies)|dependenc(?:y|ies)|variables?|fields?|columns?|pages?|screens?|dashboards?|views?|buttons?|forms?)\b/i
+
+// A site anyone can reach: a host name under a public top-level domain, not a machine address or a name of a network
+// of one company ("wiki.acme.internal", "build.local").
+function publicHost(value: string) {
+  return (
+    !/^[\d.]+$|:/.test(value) &&
+    !/\.(?:internal|local|lan|corp|intra|home|test|example|localhost|invalid)$/i.test(value)
+  )
+}
+
 // A quote counts as evidence only for a memory it states whole and the same way round; a cited file's path counts as
 // part of its quote.
 function supports(text: string, evidence: Exclude<Evidence, { readonly type: "user" }>) {
@@ -2364,7 +2906,25 @@ function toEntry(row: Row): BrainSchema.Entry {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     ...(row.private ? { private: true } : {}),
+    ...(facetOf(row) ? { facet: facetOf(row) } : {}),
+    ...(row.kind === "term" && row.term_key
+      ? { term: { key: row.term_key, meaning: BrainLearn.term(row.body)?.meaning ?? row.body } }
+      : {}),
   }
+}
+
+// What a preference or a term is about: its own facet, or, for a preference saved before facets existed, what its words
+// name. Other kinds have none.
+function facetOf(row: Pick<Row, "kind" | "facet" | "body">): BrainSchema.Facet | undefined {
+  if (row.kind === "term") return row.facet ?? "vocabulary"
+  if (row.kind !== "preference") return undefined
+  return row.facet ?? BrainLearn.facetOf(row.body)
+}
+
+// Whether an entry is of one of `facets`: always, for no list, and for a kind no facet covers.
+function inFacets(row: Pick<Row, "kind" | "facet" | "body">, facets: ReadonlySet<BrainSchema.Facet> | undefined) {
+  const facet = facetOf(row)
+  return !facets || facet === undefined || facets.has(facet)
 }
 
 async function removeFailure(file: string, signature: string) {

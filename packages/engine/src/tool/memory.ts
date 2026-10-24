@@ -76,8 +76,9 @@ export const MemoryTool = Tool.define<
           const place = yield* instruction.place()
           const guest = yield* guests.marked(SessionID.make(ctx.sessionID))
           // The owner's personal memory is not for a session an invited guest drives, nor for a model that may train on
-          // prompts. The session runtime says which the model is; without its word, personal memory stays out.
-          const personal = !guest && ctx.extra?.mayTrain === false
+          // prompts, nor for a role whose output leaves the machine or reaches the web (section 6.4a). The session
+          // runtime says which the model is; without its word, personal memory stays out.
+          const personal = !guest && ctx.extra?.mayTrain === false && ctx.extra?.outward !== true
 
           if (params.action === "search") {
             const found = yield* brain.search(place, {

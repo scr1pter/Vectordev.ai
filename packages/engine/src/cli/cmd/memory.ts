@@ -3,6 +3,7 @@ import { EOL } from "os"
 import path from "path"
 import { Effect } from "effect"
 import { Brain } from "@vectordevai/core/brain/brain"
+import { BrainExport } from "@vectordevai/core/brain/export"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import type { BrainSchema } from "@vectordevai/core/brain/schema"
 import { Instruction } from "@/session/instruction"
@@ -40,6 +41,7 @@ export const MemoryCommand = cmd({
       .command(MemoryEraseCommand)
       .command(MemoryLearningCommand)
       .command(MemoryExportCommand)
+      .command(MemoryImportCommand)
       .command(MemoryDocCommand)
       .command(MemoryLinksCommand)
       .command(MemoryReviewCommand)
@@ -131,7 +133,7 @@ export const MemoryAddCommand = effectCmd({
       .positional("text", { type: "string", array: true, demandOption: true })
       .option("kind", {
         describe: "what it is",
-        choices: ["preference", "decision", "lesson", "fact"] as const,
+        choices: ["preference", "decision", "lesson", "fact", "term"] as const,
         default: "lesson" as const,
       }),
   handler: Effect.fn("Cli.memory.add")(function* (args) {
@@ -260,64 +262,57 @@ export const MemoryLearningCommand = effectCmd({
   }),
 })
 
-// A readable page per kind, each entry with its evidence below it: open your brain and read it.
+// A readable page per kind, each entry with its evidence below it: open your brain and read it. Settings > Memory
+// exports the same page (BrainExport).
 export const MemoryExportCommand = effectCmd({
   command: "export",
-  describe: "print memory as Markdown: entries with their evidence, and what Vector read from documents",
-  builder: (yargs) => scopeOption(yargs),
+  describe: "print memory as Markdown (or JSON): entries with their evidence, and what Vector read from documents",
+  builder: (yargs) =>
+    scopeOption(yargs)
+      .option("repository", { describe: "only this repository's memory and documents", type: "boolean", default: false })
+      .option("json", { describe: "print JSON, which `vector memory import` reads back", type: "boolean", default: false }),
   handler: Effect.fn("Cli.memory.export")(function* (args) {
     const memory = yield* where
-    const entries = yield* memory.brain.list(memory.place, { filter: "all", ...(args.personal ? { scope: "personal" as const } : {}) })
-    const kinds: readonly BrainSchema.Kind[] = ["rule", "preference", "decision", "lesson", "fact", "failure", "review"]
-    const sections = yield* Effect.forEach(kinds, (kind) =>
-      Effect.gen(function* () {
-        const items = entries.filter((entry) => entry.kind === kind)
-        if (items.length === 0) return []
-        const body = yield* Effect.forEach(items, (entry) =>
-          Effect.gen(function* () {
-            const detail = yield* memory.brain.get(memory.place, entry.id, { personal: true })
-            return [
-              `- **${entry.id}** ${entry.text}${entry.status === "active" ? "" : ` _(${entry.status})_`}`,
-              ...(entry.source ? [`  - from ${path.basename(entry.source.file)}`] : []),
-              ...(detail?.evidence ?? []).map(
-                (item) =>
-                  `  - ${new Date(item.createdAt).toISOString().slice(0, 10)} | ${item.type}${item.quote ? `: "${item.quote}"` : ""}${item.command ? `: \`${item.command}\`` : ""}`,
-              ),
-            ]
-          }),
-        )
-        return [`## ${kind[0]!.toUpperCase()}${kind.slice(1)}s`, "", ...body.flat(), ""]
-      }),
-    )
-    // Documents with what Vector read from them, never their files: the originals are the user's own to keep.
     const knowledge = yield* BrainKnowledge.Service
-    const documents = args.personal ? [] : yield* knowledge.documents(memory.place, { personal: true })
-    const read = yield* Effect.forEach(documents, (document) =>
-      Effect.gen(function* () {
-        const records: BrainSchema.Record[] = []
-        for (let cursor: string | undefined = undefined; ; ) {
-          const page: BrainKnowledge.RecordPage = yield* knowledge.records(memory.place, {
-            document: document.id,
-            limit: BrainKnowledge.LIMIT.records,
-            ...(cursor ? { cursor } : {}),
-            personal: true,
-          })
-          records.push(...page.records)
-          if (!page.cursor) break
-          cursor = page.cursor
-        }
-        return [
-          `### ${document.title}`,
-          "",
-          `${document.format}${document.pages ? `, ${document.pages} pages` : ""}, ${document.origin}, ${document.visibility}, ${document.status}${document.version > 1 ? `, version ${document.version}` : ""}`,
-          "",
-          ...records.map((record) => `- **${record.id}** ${record.kind}${record.page ? ` (p.${record.page})` : ""}: ${record.card}`),
-          "",
-        ]
-      }),
+    const text = yield* BrainExport.render({
+      brain: memory.brain,
+      knowledge,
+      place: memory.place,
+      scope: args.personal ? "personal" : args.repository ? "repository" : "all",
+      format: args.json ? "json" : "markdown",
+    })
+    process.stdout.write(text.replaceAll("\n", EOL))
+  }),
+})
+
+// An import never puts memory in use: every entry waits in Settings > Memory (or `vector memory approve`).
+export const MemoryImportCommand = effectCmd({
+  command: "import <file>",
+  describe: "read an export back in; every entry waits for your approval",
+  builder: (yargs) => yargs.positional("file", { type: "string", demandOption: true }),
+  handler: Effect.fn("Cli.memory.import")(function* (args) {
+    const file = Bun.file(path.resolve(args.file))
+    if (!(yield* Effect.promise(() => file.exists()))) return yield* fail(`No file ${args.file}.`)
+    if (file.size > BrainExport.LIMIT.text) return yield* fail("Vector imports at most 2 MB at a time.")
+    const memory = yield* where
+    const result = yield* BrainExport.importText({
+      brain: memory.brain,
+      place: memory.place,
+      text: yield* Effect.promise(() => file.text()),
+    })
+    UI.println(
+      UI.Style.TEXT_SUCCESS_BOLD +
+        `Imported ${result.entries.length} entr${result.entries.length === 1 ? "y" : "ies"} to review` +
+        UI.Style.TEXT_NORMAL,
     )
-    const documentSection = read.length ? ["## Documents", "", ...read.flat()] : []
-    process.stdout.write(`${["# Vector memory", "", ...sections.flat(), ...documentSection].join(EOL)}${EOL}`)
+    for (const entry of result.entries) UI.println(line(entry))
+    const left = [
+      result.known ? `${result.known} already in memory` : undefined,
+      result.refused ? `${result.refused} refused` : undefined,
+      result.over ? `${result.over} past the ${BrainExport.LIMIT.entries} one import brings in` : undefined,
+    ].filter((item): item is string => item !== undefined)
+    if (left.length) UI.println(UI.Style.TEXT_DIM + `Left out: ${left.join(", ")}.` + UI.Style.TEXT_NORMAL)
+    if (result.entries.length) UI.println("Approve each with `vector memory approve <id>`, or in Settings > Memory.")
   }),
 })
 
@@ -329,6 +324,7 @@ function line(entry: BrainSchema.Entry) {
     entry.stale ? "stale" : undefined,
     entry.scope === "personal" ? "personal" : undefined,
     entry.private ? "private" : undefined,
+    entry.facet,
     entry.source ? path.basename(entry.source.file) : undefined,
   ].filter((mark): mark is string => mark !== undefined)
   return `${UI.Style.TEXT_HIGHLIGHT}${entry.id}${UI.Style.TEXT_NORMAL} ${entry.kind}: ${entry.text.replace(/\s+/g, " ").slice(0, 160)}${marks.length ? `${UI.Style.TEXT_DIM} (${marks.join(", ")})${UI.Style.TEXT_NORMAL}` : ""}`

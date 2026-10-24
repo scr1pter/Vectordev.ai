@@ -17,9 +17,21 @@ export type Scope = typeof Scope.Type
  * - fact: something checkable in the code.
  * - failure: a check that failed this way before and the repair that worked (failure memory).
  * - review: what Vectorscope was told not to flag; read by reviews, never sent with coding requests.
+ * - term: what the user means by a word or phrase ("when I say ship it I mean open a PR, wait for CI, then merge"),
+ *   delivered only to a request whose words name it.
  */
-export const Kind = Schema.Literals(["rule", "preference", "decision", "lesson", "fact", "failure", "review"])
+export const Kind = Schema.Literals(["rule", "preference", "decision", "lesson", "fact", "failure", "review", "term"])
 export type Kind = typeof Kind.Type
+
+/**
+ * What a preference or a term is about (section 6.3), so Settings can group what Vector learned about the user, each
+ * kind can be turned off, and a role hears only the kinds its work needs: format (tables, bullets, charts, units,
+ * citation style, length), workflow (pull requests, CI, merging, tests, commits, deploys), vocabulary (what the user
+ * means by their words), tooling (package manager, editor, language), sources (papers, primary sources, named sites),
+ * and style (everything else).
+ */
+export const Facet = Schema.Literals(["format", "workflow", "vocabulary", "tooling", "sources", "style"])
+export type Facet = typeof Facet.Type
 
 /**
  * Metadata key of a message part whose text came from outside this conversation: a transcript imported as passive
@@ -30,14 +42,29 @@ export type Kind = typeof Kind.Type
  */
 export const OUTSIDE = "vector.outside"
 
-/** What the agent and the user may write themselves. */
-export const LearnedKind = Schema.Literals(["preference", "decision", "lesson", "fact"])
+/**
+ * The OUTSIDE value of a text part the user pasted into the composer rather than typed: an email, a log, someone
+ * else's message. Like a local file an editor embedded, it holds nothing, since the user chose to send it; but it
+ * vouches for nothing either, so Vector never learns what the user likes from it.
+ */
+export const PASTE = "paste"
+
+/**
+ * Metadata key of the spans of a text part the user pasted into what they typed, as `[start, end]` offsets into the
+ * part's text: what a composer that expands pastes inline sends (the terminal UI does). Like a part marked PASTE, those
+ * spans hold nothing and vouch for nothing, so Vector never learns what the user likes from them.
+ */
+export const PASTED = "vector.pasted"
+
+/** What the agent and the user may write themselves. A term's text reads "when I say X, I mean Y". */
+export const LearnedKind = Schema.Literals(["preference", "decision", "lesson", "fact", "term"])
 export type LearnedKind = typeof LearnedKind.Type
 
 /**
  * - active: used by the agent. What the agent learns is active at once, unless it is held.
- * - proposed: left by an earlier version, which held what the agent wrote without evidence it could check. Active once
- *   the user approves it, or once a session with nothing from outside in it writes the same words.
+ * - proposed: waits for a second sighting or one click: what Vector learned from a long message, what a model suggested
+ *   it learn, what was imported, and what an earlier version held without evidence it could check. Active once the
+ *   user approves it, or once a session with nothing from outside in it writes the same words.
  * - quarantined: held for the user's review (untrusted source, guest, web or MCP content, instruction-like text).
  *   Neither proposed nor quarantined entries are ever shown to the agent, so a session cannot launder its own writes.
  * - archived: decayed or put away; restorable.
@@ -46,7 +73,8 @@ export type LearnedKind = typeof LearnedKind.Type
 export const Status = Schema.Literals(["active", "proposed", "quarantined", "archived", "superseded"])
 export type Status = typeof Status.Type
 
-export const Origin = Schema.Literals(["file", "user", "agent", "failure-memory"])
+/** import: read from a file the user imported, which waits for their approval however it reads. */
+export const Origin = Schema.Literals(["file", "user", "agent", "failure-memory", "import"])
 export type Origin = typeof Origin.Type
 
 /**
@@ -93,10 +121,15 @@ export const Entry = Schema.Struct({
   createdAt: Schema.Finite,
   updatedAt: Schema.Finite,
   /**
-   * Learned in a session that read a private document, so kept from the same places the document is: sessions an
-   * invited guest is in and models that may train on prompts.
+   * Kept from the same places personal memory is (sessions an invited guest is in and models that may train on
+   * prompts): learned in a session that read a private document, or by Vector's learner from the owner's own words
+   * when they name someone or something in particular ("always cc jane@acme.com on release PRs").
    */
   private: Schema.optional(Schema.Boolean),
+  /** What a preference or a term is about. */
+  facet: Schema.optional(Facet),
+  /** A term's word or phrase, as recall matches it, and what the user means by it. */
+  term: Schema.optional(Schema.Struct({ key: Schema.String, meaning: Schema.String })),
 }).annotate({ identifier: "MemoryEntry" })
 export type Entry = typeof Entry.Type
 
@@ -138,8 +171,11 @@ export type Format = typeof Format.Type
 export const Visibility = Schema.Literals(["private", "repository"])
 export type Visibility = typeof Visibility.Type
 
-/** How a document arrived. */
-export const DocumentOrigin = Schema.Literals(["upload", "chat", "agent", "repository", "cli"])
+/**
+ * How a document arrived. web: a page Deep research read, kept held under its run. research: a research run's report,
+ * held until the user keeps it.
+ */
+export const DocumentOrigin = Schema.Literals(["upload", "chat", "agent", "repository", "cli", "web", "research"])
 export type DocumentOrigin = typeof DocumentOrigin.Type
 
 /**

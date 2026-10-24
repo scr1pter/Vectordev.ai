@@ -48,6 +48,7 @@ const MODELS = [
   model("anthropic/sonnet", { input: 3, output: 15, cacheRead: 0.3 }),
   model("openai/gpt", { input: 1.25, output: 10, cacheRead: 0.125 }),
   model("local/unpriced"),
+  model("ollama/qwen"),
   model("vector/acme/coder:free"),
   model("openrouter/acme/coder:free"),
   model("tiny/small", { context: 16_000, input: 1, output: 1 }),
@@ -84,6 +85,11 @@ const services = (setup: Setup) =>
                 },
               }
             : {},
+        ),
+      // Only the ollama provider's server is one someone hosts: on this computer, so its steps have no per-token price.
+      line: (model) =>
+        Effect.succeed(
+          model.providerID === "ollama" ? { origin: "http://127.0.0.1:11434", hosted: true, local: true } : undefined,
         ),
       getModel: (providerID, modelID) => {
         const found = MODELS.find((item) => item.providerID === providerID && item.id === modelID)
@@ -197,6 +203,11 @@ describe("ReviewModel.resolveReviewModel cost", () => {
       expect(priced.costKind).toBe("priced")
       expect(priced.price).toEqual({ input: 1.25, output: 10, cacheRead: 0.125 })
       expect(priced.context).toBe(128_000)
+
+      // A server the provider counts as having no per-token price runs the review with no dollar checks.
+      const local = yield* resolve({ trigger: "command", env: { MODEL: "ollama/qwen" } })
+      expect(local.costKind).toBe("local")
+      expect(local.price).toBeUndefined()
     }),
   )
 })

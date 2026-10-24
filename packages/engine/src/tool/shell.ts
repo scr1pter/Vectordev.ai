@@ -25,6 +25,9 @@ import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { ShellPrompt, type Parameters } from "./shell/prompt"
 import { BashArity } from "@/permission/arity"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
+import { LocalCommand } from "@vectordevai/core/local-mode/command"
 
 export { Parameters } from "./shell/prompt"
 
@@ -725,6 +728,23 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan,
     })
   }
 
+  // With Vector Local on, a command that may reach the network asks first, with the command shown: one whose output is
+  // not this computer's own (LocalCommand.local: a fetch, a push, a publish, a program Vector does not know, commands a
+  // shell reads from its input), a package install, a build that fetches dependencies, or a web address opened in the
+  // default browser. Vector does not see where such a command connects, so it asks every time: no saved approval, rule
+  // or auto-accept answers it (PermissionPolicy.requiresApproval).
+  if (scan.patterns.size > 0 && Egress.policy().enabled && LocalCommand.networked(input.command)) {
+    yield* ctx.ask({
+      permission: PermissionPolicy.NETWORK_COMMAND,
+      patterns: [input.command],
+      always: [],
+      metadata: {
+        command: input.command,
+        reason: PermissionPolicy.NETWORK_COMMAND_REASON,
+      },
+    })
+  }
+
   // The read tool's permission and patterns, so the read rules that ask for
   // `.env` files (and a session that may not read them) apply to the shell too.
   // Asked even when the command has no shell pattern: a statement whose only
@@ -762,6 +782,12 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan,
   }
 })
 
+// Whether Vector Local is on with Web access None, which it also is while the policy is still being resolved.
+function webNone() {
+  const policy = Egress.policy()
+  return policy.enabled && policy.web === "none"
+}
+
 const cmd = Effect.fn("ShellTool.cmd")(function* (
   shell: string,
   command: string,
@@ -769,7 +795,29 @@ const cmd = Effect.fn("ShellTool.cmd")(function* (
   env: NodeJS.ProcessEnv,
   workspaceRoot: string,
   ctx: Tool.Context,
+  offline: Sandbox.Offline | undefined,
 ) {
+  // With Vector Local's Web access None the command runs in the sandbox with no network but this computer's, whatever
+  // VECTOR_SHELL_SANDBOX says, and is never run unwrapped (Sandbox.offline). Windows has no sandbox: there it runs as
+  // below, and its notice says so.
+  if (offline?.type === "refused") return yield* Effect.die(new Error(offline.message))
+  if (offline?.type === "sandboxed") {
+    yield* Effect.logInfo("shell tool sandbox", {
+      sandboxed: true,
+      mechanism: offline.wrapped.mechanism,
+      network: "none",
+      workspaceRoot,
+      cwd,
+    })
+    return ChildProcess.make(offline.wrapped.command, offline.wrapped.args, {
+      shell: false,
+      cwd,
+      env: offline.wrapped.env,
+      stdin: "ignore",
+      detached: true,
+    })
+  }
+
   if (Sandbox.sandboxEnabled()) {
     const wrapped = Sandbox.wrapCommand({ shell, command, cwd, env, workspaceRoot })
     yield* Effect.logInfo("shell tool sandbox", {
@@ -1207,6 +1255,9 @@ export const ShellTool = Tool.define(
       return untrustedChildEnvironment(process.env, extra.env)
     })
 
+    // The sessions already told, on their first command with Web access None, that the sandbox limits commands.
+    const told = new Set<string>()
+
     const run = Effect.fn("ShellTool.run")(function* (
       input: {
         shell: string
@@ -1258,9 +1309,16 @@ export const ShellTool = Tool.define(
         ).pipe(Effect.catch(() => Effect.void))
       })
 
+      const offline = webNone() ? Sandbox.offline(input) : undefined
+      const notice = offline && offline.type !== "refused" ? offline.notice : undefined
+      // The first command of a session with Web access None says what the sandbox limits, before its own output.
+      const first = notice !== undefined && !told.has(ctx.sessionID)
+      if (first) told.add(ctx.sessionID)
+
       yield* ctx.metadata({
         metadata: {
           output: "",
+          ...(notice ? { sandbox: notice } : {}),
         },
       })
 
@@ -1268,7 +1326,7 @@ export const ShellTool = Tool.define(
         Effect.gen(function* () {
           yield* Effect.addFinalizer(closeSink)
           const handle = yield* spawner.spawn(
-            yield* cmd(input.shell, input.command, input.cwd, input.env, input.workspaceRoot, ctx),
+            yield* cmd(input.shell, input.command, input.cwd, input.env, input.workspaceRoot, ctx, offline),
           )
 
           const output = yield* Effect.forkScoped(
@@ -1392,6 +1450,7 @@ export const ShellTool = Tool.define(
       if (cut && file) {
         output = `...output truncated...\n\nFull output saved to: ${file}\n\n` + output
       }
+      if (first) output = `${notice}\n\n${output}`
 
       if (meta.length > 0) {
         output += "\n\n<shell_metadata>\n" + meta.join("\n") + "\n</shell_metadata>"
@@ -1403,6 +1462,7 @@ export const ShellTool = Tool.define(
           exit: code,
           truncated: cut,
           ...(cut && file ? { outputPath: file } : {}),
+          ...(notice ? { sandbox: notice } : {}),
         },
         output,
       }
@@ -1430,6 +1490,10 @@ export const ShellTool = Tool.define(
                 throw new Error(`Invalid timeout value: ${params.timeout}. Timeout must be a positive number.`)
               }
               const timeout = params.timeout ?? defaultTimeoutMs
+              // Refused before anything is asked: with Web access None a command runs only in the sandbox, and this
+              // computer has none to run it in.
+              const refused = webNone() ? Sandbox.offlineRefusal() : undefined
+              if (refused) return yield* Effect.die(new Error(refused))
               const ps = Shell.ps(shell)
               yield* Effect.scoped(
                 Effect.gen(function* () {

@@ -15,7 +15,6 @@ import { DialogCustomProvider } from "./dialog-custom-provider"
 import { SettingsList } from "./settings-list"
 import { SettingsServerPicker, SettingsServerScope } from "./settings-server-picker"
 import { brandProviderName } from "@/utils/provider-brand"
-import { SettingsSearch } from "./settings-search"
 import { SettingsVectorTeams } from "./settings-vector-teams"
 import { SettingsVectorAccount } from "./settings-vector-account"
 
@@ -270,7 +269,6 @@ const SettingsProvidersContent: Component = () => {
             {language.t("dialog.provider.viewAll")}
           </Button>
         </div>
-        <SettingsSearch />
       </div>
     </div>
   )

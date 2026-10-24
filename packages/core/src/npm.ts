@@ -13,6 +13,9 @@ import { filesystem } from "./effect/app-node-platform"
 import { LayerNode } from "./effect/layer-node"
 import { makeRuntime } from "./effect/runtime"
 import { NpmConfig } from "./npm-config"
+import { Egress } from "./local-mode/egress"
+import { EgressAttribution } from "./local-mode/attribution"
+import { EgressGuard } from "./local-mode/guard"
 
 export class InstallFailedError extends Schema.TaggedErrorClass<InstallFailedError>()("NpmInstallFailedError", {
   add: Schema.Array(Schema.String).pipe(Schema.optional),
@@ -25,10 +28,32 @@ export interface EntryPoint {
   readonly entrypoint?: string
 }
 
+/** How a package is added: within a time limit, installed again, only from the cache, or within a Vector Local grant. */
+export type AddOptions = {
+  readonly timeout?: number
+  readonly force?: boolean
+  /** Only a copy installed earlier: nothing is installed and nothing connects. */
+  readonly cached?: boolean
+  /** The Vector Local grant the installer's requests run within (EgressAttribution.granted). */
+  readonly grant?: Parameters<typeof EgressAttribution.granted>[0]
+}
+
 export interface Interface {
   readonly add: (
     pkg: string,
-    options?: { timeout: number; force?: boolean },
+    options?: AddOptions,
+  ) => Effect.Effect<EntryPoint, InstallFailedError | EffectFlock.LockError>
+  /**
+   * `add` for a package Vector installs for itself, decided as `source` while Vector Local is on (section 4.3.5): a copy
+   * installed earlier loads as it is, and a missing one installs only when Vector Local lets `source` reach everything
+   * the install reaches (the registry the npm config names for it, and the host of a git or tarball address). Otherwise
+   * nothing starts that could connect, no installer and no git, and the error says why. With Vector Local off it is
+   * `add`.
+   */
+  readonly addAs: (
+    source: string,
+    pkg: string,
+    options?: Pick<AddOptions, "timeout" | "force">,
   ) => Effect.Effect<EntryPoint, InstallFailedError | EffectFlock.LockError>
   readonly install: (
     dir: string,
@@ -39,7 +64,13 @@ export interface Interface {
       }[]
     },
   ) => Effect.Effect<void, EffectFlock.LockError | InstallFailedError>
-  readonly which: (pkg: string, bin?: string) => Effect.Effect<string | undefined>
+  readonly which: (
+    pkg: string,
+    bin?: string,
+    options?: Pick<AddOptions, "cached" | "grant">,
+  ) => Effect.Effect<string | undefined>
+  /** `which`, decided as `source` the way `addAs` is: a missing package installs only when Vector Local allows it. */
+  readonly whichAs: (source: string, pkg: string, bin?: string) => Effect.Effect<string | undefined>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@vector/Npm") {}
@@ -122,7 +153,7 @@ const layer = Layer.effect(
     const fs = yield* FileSystem.FileSystem
     const flock = yield* EffectFlock.Service
     const directory = (pkg: string) => path.join(global.cache, "packages", sanitize(pkg))
-    const reify = (input: { dir: string; add?: string[]; timeout?: number }) =>
+    const reify = (input: { dir: string; add?: string[]; timeout?: number; grant?: AddOptions["grant"] }) =>
       Effect.gen(function* () {
         yield* flock.acquire(`npm-install:${input.dir}`)
         const { Arborist } = yield* Effect.promise(() => import("@npmcli/arborist"))
@@ -144,12 +175,14 @@ const layer = Layer.effect(
               savePrefix: "",
               ignoreScripts: true,
             }
-            return new Arborist(options).reify({
-              ...options,
-              add,
-              save: true,
-              saveType: "prod",
-            })
+            const run = () =>
+              new Arborist(options).reify({
+                ...options,
+                add,
+                save: true,
+                saveType: "prod",
+              })
+            return input.grant ? EgressAttribution.granted(input.grant, run) : run()
           },
           catch: (cause) =>
             new InstallFailedError({
@@ -161,7 +194,7 @@ const layer = Layer.effect(
       }).pipe(
         Effect.interruptible,
         Effect.withSpan("Npm.reify", {
-          attributes: input,
+          attributes: { dir: input.dir, add: input.add, timeout: input.timeout },
         }),
       )
 
@@ -178,8 +211,9 @@ const layer = Layer.effect(
       if (!options?.force && (yield* afs.existsSafe(path.join(dir, "node_modules", name)))) {
         return resolveEntryPoint(name, path.join(dir, "node_modules", name))
       }
+      if (options?.cached) return yield* new InstallFailedError({ add: [pkg], dir })
 
-      const tree = yield* reify({ dir, add: [pkg], timeout: options?.timeout })
+      const tree = yield* reify({ dir, add: [pkg], timeout: options?.timeout, grant: options?.grant })
       const first = tree.edgesOut.values().next().value?.to
       if (!first) {
         const result = resolveEntryPoint(name, path.join(dir, "node_modules", name))
@@ -242,7 +276,65 @@ const layer = Layer.effect(
       return
     }, Effect.scoped)
 
-    const which = Effect.fn("Npm.which")(function* (pkg: string, bin?: string) {
+    // Where installing `pkg` reaches, as http(s) addresses Vector Local decides: the registry the npm config names for
+    // it (its scope's own, if it has one), where every dependency comes from, and the host of a git or tarball address.
+    // Undefined when Vector cannot tell, which is refused.
+    const reaches = Effect.fnUntraced(function* (pkg: string) {
+      const parsed = (() => {
+        try {
+          return npa(pkg)
+        } catch {
+          return undefined
+        }
+      })()
+      if (!parsed) return undefined
+      const config = yield* NpmConfig.load(directory(pkg))
+      const scoped = parsed.scope ? config[`${parsed.scope}:registry`] : undefined
+      const named = typeof scoped === "string" ? scoped : config.registry
+      const registry = typeof named === "string" && URL.canParse(named) ? named : "https://registry.npmjs.org/"
+      if (parsed.type !== "git" && parsed.type !== "remote") return [new URL(registry)]
+      const host =
+        parsed.type === "git"
+          ? gitHost(parsed)
+          : URL.canParse(parsed.fetchSpec ?? "")
+            ? new URL(parsed.fetchSpec!).host
+            : undefined
+      return host ? [new URL(registry), new URL(`https://${host}/`)] : undefined
+    })
+
+    // Decides installing `pkg` as `source` under Vector Local, and logs it: the grant to install within, or why not.
+    const decide = Effect.fnUntraced(function* (source: string, pkg: string) {
+      const urls = yield* reaches(pkg)
+      if (!urls) return { reason: "Vector cannot tell where this package comes from." }
+      const decided = urls.map((url) => Egress.decide({ source, url: url.href }))
+      const refused = decided.find((item) => item.decision !== "allow")
+      if (refused) return { reason: refused.reason }
+      return {
+        grant: { source, purpose: decided[0]!.purpose, grants: urls.flatMap((url) => EgressGuard.destinations(url)) },
+      }
+    })
+
+    const addAs: Interface["addAs"] = Effect.fn("Npm.addAs")(function* (source, pkg, options) {
+      if (!Egress.policy().enabled) return yield* add(pkg, options)
+      if (!options?.force) {
+        const cached = yield* add(pkg, { cached: true }).pipe(Effect.option)
+        if (Option.isSome(cached)) return cached.value
+      }
+      const decided = yield* decide(source, pkg)
+      if (!decided.grant)
+        return yield* new InstallFailedError({
+          add: [pkg],
+          dir: directory(pkg),
+          cause: new Error(`Vector Local did not install ${pkg}. ${decided.reason}`),
+        })
+      return yield* add(pkg, { ...options, grant: decided.grant })
+    })
+
+    const which = Effect.fn("Npm.which")(function* (
+      pkg: string,
+      bin?: string,
+      options?: Pick<AddOptions, "cached" | "grant">,
+    ) {
       const dir = directory(pkg)
       const binDir = path.join(dir, "node_modules", ".bin")
 
@@ -279,9 +371,10 @@ const layer = Layer.effect(
             return Option.some(path.join(binDir, bin.value))
           }
 
+          if (options?.cached) return Option.none<string>()
           yield* fs.remove(path.join(dir, "package-lock.json")).pipe(Effect.orElseSucceed(() => {}))
 
-          yield* add(pkg)
+          yield* add(pkg, { grant: options?.grant })
 
           const resolved = yield* pick()
           if (Option.isNone(resolved)) return Option.none<string>()
@@ -293,10 +386,21 @@ const layer = Layer.effect(
       )
     })
 
+    const whichAs: Interface["whichAs"] = Effect.fn("Npm.whichAs")(function* (source, pkg, bin) {
+      if (!Egress.policy().enabled) return yield* which(pkg, bin)
+      const cached = yield* which(pkg, bin, { cached: true })
+      if (cached) return cached
+      const decided = yield* decide(source, pkg)
+      if (!decided.grant) return undefined
+      return yield* which(pkg, bin, { grant: decided.grant })
+    })
+
     return Service.of({
       add,
+      addAs,
       install,
       which,
+      whichAs,
     })
   }),
 )
@@ -319,4 +423,21 @@ export async function add(...args: Parameters<Interface["add"]>) {
 
 export async function which(...args: Parameters<Interface["which"]>) {
   return runPromise((svc) => svc.which(...args))
+}
+
+export async function addAs(...args: Parameters<Interface["addAs"]>) {
+  return runPromise((svc) => svc.addAs(...args))
+}
+
+export async function whichAs(...args: Parameters<Interface["whichAs"]>) {
+  return runPromise((svc) => svc.whichAs(...args))
+}
+
+// The host a git package address names: a known host's (github:org/x), or the one in its URL or scp-style address.
+function gitHost(parsed: ReturnType<typeof npa>) {
+  const hosted = (parsed.hosted as { readonly domain?: string } | undefined)?.domain
+  if (hosted) return hosted
+  const spec = (parsed.fetchSpec ?? "").replace(/^git\+/, "")
+  if (URL.canParse(spec)) return new URL(spec).host || undefined
+  return /^(?:[^@/]+@)?([^:/]+):/.exec(spec)?.[1]
 }

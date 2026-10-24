@@ -9,6 +9,8 @@ export function create(input: {
   sessionID: Session.Info["id"]
   model: Provider.Model
   publish: EventV2.Interface["publish"]
+  /** What the request was for: a title unless said otherwise. */
+  purpose?: "title" | "memory"
 }) {
   const pending: { id: EventV2.ID; usage?: Usage }[] = []
   const state = { current: undefined as (typeof pending)[number] | undefined }
@@ -21,7 +23,7 @@ export function create(input: {
         sessionID: input.sessionID,
         timestamp: yield* DateTime.now,
         usageID: id,
-        purpose: "title",
+        purpose: input.purpose ?? "title",
         model: { providerID: input.model.providerID, id: input.model.id },
         // Billing metadata can report a charge without counters; keep that subtotal without inventing usage.
         ...(measured || usage.cost > 0 ? { cost: usage.cost } : {}),

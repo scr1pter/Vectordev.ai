@@ -116,6 +116,12 @@ describe("LocationServiceMap", () => {
             "grep",
             "question",
             "read",
+            // Deep research's tools are in every Location's registry; only the research agent is offered them.
+            "research_note",
+            "research_plan",
+            "research_read",
+            "research_report",
+            "research_search",
             "send_teammate_message",
             "skill",
             "todowrite",
@@ -133,6 +139,12 @@ describe("LocationServiceMap", () => {
             "grep",
             "question",
             "read",
+            // Deep research's tools are in every Location's registry; only the research agent is offered them.
+            "research_note",
+            "research_plan",
+            "research_read",
+            "research_report",
+            "research_search",
             "send_teammate_message",
             "skill",
             "todowrite",
@@ -144,7 +156,9 @@ describe("LocationServiceMap", () => {
     ),
   )
 
-  it.live("registers websearch in a location once a search key is stored", () =>
+  // Web search keys saved by an earlier version stay where they are, but no tool reads them: Vector searches the web
+  // with its own browser now.
+  it.live("registers no web search tool when an old search key is stored", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),
       (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
@@ -168,7 +182,8 @@ describe("LocationServiceMap", () => {
               LocationServiceMap.Service.get(Location.Ref.make({ directory: AbsolutePath.make(dir.path) })),
             ),
           )
-          expect(tools.map((tool) => tool.name)).toContain("websearch")
+          expect(tools.map((tool) => tool.name)).not.toContain("websearch")
+          expect(yield* credentials.list(Integration.ID.make("exa"))).toHaveLength(1)
         }),
       ),
     ),

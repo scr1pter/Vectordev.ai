@@ -419,17 +419,7 @@ function taskAgent(
   }
 }
 
-function webSearchProviderLabel(provider: unknown) {
-  if (provider === "parallel") return "Parallel Web Search"
-  if (provider === "exa") return "Exa Web Search"
-  return "Web Search"
-}
-
-export function getToolInfo(
-  tool: string,
-  input: any = {},
-  metadata: Record<string, unknown> | undefined = {},
-): ToolInfo {
+export function getToolInfo(tool: string, input: any = {}): ToolInfo {
   const i18n = useI18n()
   switch (tool) {
     case "read":
@@ -462,12 +452,25 @@ export function getToolInfo(
         title: i18n.t("ui.tool.webfetch"),
         subtitle: input.url,
       }
+    // Sessions from earlier versions may hold web search calls; the tool itself is gone.
     case "websearch":
       return {
         icon: "window-cursor",
-        title: webSearchProviderLabel(metadata?.provider),
+        title: i18n.t("ui.tool.websearch"),
         subtitle: input.query,
       }
+    case "research_plan":
+      return { icon: "checklist", title: "Research plan", subtitle: input.question }
+    case "research_search":
+      return { icon: "magnifying-glass", title: "Search", subtitle: input.query }
+    case "research_read":
+      return { icon: "glasses", title: "Read", subtitle: input.url ?? input.source }
+    case "research_note":
+      return { icon: "comment", title: "Note", subtitle: input.claim }
+    case "research_report":
+      return { icon: "bullet-list", title: "Research report", subtitle: input.title }
+    case "research_browser":
+      return { icon: "window-cursor", title: "Research browser", subtitle: input.url ?? input.action }
     case "task": {
       const type =
         typeof input.subagent_type === "string" && input.subagent_type
@@ -806,11 +809,7 @@ function isContextGroupTool(part: PartType): part is ToolPart {
 }
 
 function contextToolDetail(part: ToolPart): string | undefined {
-  const info = getToolInfo(
-    part.tool,
-    part.state.input ?? {},
-    "metadata" in part.state ? part.state.metadata : undefined,
-  )
+  const info = getToolInfo(part.tool, part.state.input ?? {})
   if (info.subtitle) return info.subtitle
   if (part.state.status === "error") return part.state.error
   if ((part.state.status === "running" || part.state.status === "completed") && part.state.title)
@@ -862,7 +861,7 @@ function contextToolTrigger(part: ToolPart, i18n: ReturnType<typeof useI18n>) {
       }
     }
     default: {
-      const info = getToolInfo(part.tool, input, "metadata" in part.state ? part.state.metadata : undefined)
+      const info = getToolInfo(part.tool, input)
       return {
         title: info.title,
         subtitle: info.subtitle || contextToolDetail(part),
@@ -879,17 +878,17 @@ function contextToolSummary(parts: ToolPart[]) {
   return { read, search, list }
 }
 
-function ExaOutput(props: { output?: string }) {
+function WebResults(props: { output?: string }) {
   const links = createMemo(() => urls(props.output))
 
   return (
     <Show when={links().length > 0}>
-      <div data-component="exa-tool-output">
-        <div data-slot="exa-tool-links">
+      <div data-component="web-results">
+        <div data-slot="web-results-links">
           <For each={links()}>
             {(url) => (
               <a
-                data-slot="exa-tool-link"
+                data-slot="web-results-link"
                 href={url}
                 target="_blank"
                 rel="noopener noreferrer"
@@ -1410,6 +1409,21 @@ export const ToolRegistry = {
   render: getTool,
 }
 
+/** What the app draws under a finished reply, below its copy button and details. */
+export type ReplyFooterComponent = Component<{ message: AssistantMessage }>
+
+const replyFooter: { component?: ReplyFooterComponent } = {}
+
+/**
+ * The app's slot under a reply, such as the "Learned 2 things" chip for what Vector learned from the request it
+ * answers. session-ui has no engine client of its own, so the app registers the component that reads one.
+ */
+export const ReplyFooter = {
+  register(component: ReplyFooterComponent) {
+    replyFooter.component = component
+  },
+}
+
 function ToolFileAccordion(props: { path: string; actions?: JSX.Element; children: JSX.Element }) {
   const value = createMemo(() => props.path || "tool-file")
 
@@ -1508,7 +1522,6 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
                 <ToolErrorCard
                   tool={part().tool}
                   error={error()}
-                  title={part().tool === "websearch" ? webSearchProviderLabel(partMetadata().provider) : undefined}
                   defaultOpen={props.defaultOpen}
                   open={controlledOpen()}
                   onOpenChange={props.onToolOpenChange ? handleToolOpenChange : undefined}
@@ -1720,6 +1733,11 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
             </Show>
           </div>
         </Show>
+        <Show
+          when={showCopy() && props.message.role === "assistant" && !streaming() ? replyFooter.component : undefined}
+        >
+          {(footer) => <Dynamic component={footer()} message={props.message as AssistantMessage} />}
+        </Show>
       </div>
     </Show>
   )
@@ -1919,28 +1937,267 @@ ToolRegistry.register({
   },
 })
 
+// Sessions from earlier versions may hold web search calls; the tool itself is gone.
 ToolRegistry.register({
   name: "websearch",
   render(props) {
+    const i18n = useI18n()
     const query = createMemo(() => {
       const value = props.input.query
       if (typeof value !== "string") return ""
       return value
     })
-    const title = createMemo(() => webSearchProviderLabel(props.metadata.provider))
 
     return (
       <BasicTool
         {...props}
         icon="window-cursor"
         trigger={{
-          title: title(),
+          title: i18n.t("ui.tool.websearch"),
           subtitle: query(),
-          subtitleClass: "exa-tool-query",
+          subtitleClass: "web-results-query",
         }}
       >
-        <ExaOutput output={props.output} />
+        <WebResults output={props.output} />
       </BasicTool>
+    )
+  },
+})
+
+// Deep research's tools (section 5.4 of the build plan), each a one-line row beside webfetch: what the call did, and
+// on opening it, what it found. The app's plan card, Sources tab and report card show the rest. What pages wrote
+// reaches these rows only as titles, addresses and snippets, and is shown as plain text, never as Markdown.
+
+// The results page a search read, by its engine.
+const RESEARCH_SEARCH: Record<string, string> = {
+  google: "Google",
+  duckduckgo: "DuckDuckGo",
+}
+
+const RESEARCH_REFUSED: Record<string, string> = {
+  outbound: "refused: it would send private text",
+  provenance: "refused: address not from a search, a page link or your message",
+  budget: "budget used",
+  scope: "outside this research's scope",
+  none: "no web search for this run",
+  desktop: "needs the desktop app's browser",
+  local: "Vector Local's Web access",
+  offline: "Web access is None",
+}
+
+// What became of a research_plan call, in a few words.
+function researchPlanState(status: string | undefined, metadata: Record<string, any>) {
+  if (status === "running" || status === "pending") return "waiting for you"
+  const depth = metadata.plan?.depth === "deep" ? "deep" : "focused"
+  if (metadata.answer === "start" || metadata.answer === "start-deep") return `approved, ${depth}`
+  if (metadata.answer === "automatic") return `approved within the request, ${depth}`
+  if (metadata.answer === "status") return "progress noted"
+  if (metadata.answer === "cancel") return "cancelled"
+  if (metadata.answer === "steer") return "not started: you replied"
+  return undefined
+}
+
+function webAddress(value: unknown) {
+  if (typeof value !== "string" || !URL.canParse(value)) return undefined
+  const url = new URL(value)
+  return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : undefined
+}
+
+function hostOf(value: unknown) {
+  const url = webAddress(value)
+  return url ? new URL(url).host : undefined
+}
+
+ToolRegistry.register({
+  name: "research_plan",
+  render(props) {
+    const plan = createMemo(
+      () =>
+        (props.metadata.plan ?? props.input) as {
+          question?: string
+          subquestions?: string[]
+          scope?: string
+          depth?: string
+        },
+    )
+    const state = createMemo(() => researchPlanState(props.status, props.metadata))
+    return (
+      <BasicTool
+        {...props}
+        icon="checklist"
+        trigger={{
+          title: "Research plan",
+          subtitle: typeof plan().question === "string" ? plan().question : "",
+          args: state() ? [state()!] : [],
+        }}
+      >
+        <Show when={Array.isArray(plan().subquestions) && plan().subquestions!.length > 0}>
+          <div data-component="tool-output" data-scrollable tabIndex={0} role="region" aria-label="Research plan">
+            <ol>
+              <For each={plan().subquestions}>{(item) => <li>{String(item)}</li>}</For>
+            </ol>
+            <Show when={typeof props.metadata.estimate === "string"}>
+              <p>{props.metadata.estimate}</p>
+            </Show>
+          </div>
+        </Show>
+      </BasicTool>
+    )
+  },
+})
+
+ToolRegistry.register({
+  name: "research_search",
+  render(props) {
+    const results = createMemo(() =>
+      (Array.isArray(props.metadata.results) ? props.metadata.results : []).flatMap((item: any) => {
+        const url = webAddress(item?.url)
+        return url ? [{ url, title: typeof item.title === "string" && item.title ? item.title : url }] : []
+      }),
+    )
+    const state = createMemo(() => {
+      if (props.status !== "completed") return undefined
+      if (typeof props.metadata.refused === "string") return RESEARCH_REFUSED[props.metadata.refused] ?? "refused"
+      if (props.metadata.unavailable === true) return "search unavailable right now"
+      return `${results().length} result${results().length === 1 ? "" : "s"}`
+    })
+    return (
+      <BasicTool
+        {...props}
+        icon="magnifying-glass"
+        trigger={{
+          title: `Search${RESEARCH_SEARCH[props.metadata.engine] ? ` · ${RESEARCH_SEARCH[props.metadata.engine]}` : ""}`,
+          subtitle: typeof props.input.query === "string" ? props.input.query : "",
+          args: state() ? [state()!] : [],
+        }}
+      >
+        <Show when={results().length > 0}>
+          <div data-component="web-results">
+            <div data-slot="web-results-links">
+              <For each={results()}>
+                {(item) => (
+                  <a
+                    data-slot="web-results-link"
+                    href={item.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={item.url}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    {item.title}
+                  </a>
+                )}
+              </For>
+            </div>
+          </div>
+        </Show>
+      </BasicTool>
+    )
+  },
+})
+
+ToolRegistry.register({
+  name: "research_read",
+  render(props) {
+    const address = createMemo(() => webAddress(props.metadata.url ?? props.input.url))
+    const state = createMemo(() => {
+      if (props.status === "running" || props.status === "pending") return "reading"
+      if (typeof props.metadata.refused === "string") return RESEARCH_REFUSED[props.metadata.refused] ?? "refused"
+      if (props.metadata.status === "robots") return "blocked by robots.txt"
+      if (props.metadata.status === "needs-render") return "needs the desktop browser"
+      if (props.metadata.status === "paywalled") return "paywalled (excerpt only)"
+      return typeof props.metadata.status === "string" ? props.metadata.status : undefined
+    })
+    return (
+      <BasicTool
+        {...props}
+        hideDetails
+        icon="glasses"
+        trigger={{
+          title: `Read${typeof props.metadata.source === "string" ? ` ${props.metadata.source}` : ""}`,
+          subtitle:
+            hostOf(address()) ?? (typeof props.input.source === "string" ? props.input.source : (address() ?? "")),
+          args: state() ? [state()!] : [],
+        }}
+      />
+    )
+  },
+})
+
+ToolRegistry.register({
+  name: "research_note",
+  render(props) {
+    const state = createMemo(() => {
+      if (props.status !== "completed") return undefined
+      if (props.metadata.refused) return "not saved"
+      return props.metadata.support === false ? "paraphrase" : undefined
+    })
+    return (
+      <BasicTool
+        {...props}
+        hideDetails
+        icon="comment"
+        trigger={{
+          title: `Note${typeof props.metadata.note === "string" ? ` ${props.metadata.note}` : ""}`,
+          subtitle: typeof props.input.claim === "string" ? props.input.claim : "",
+          args: [
+            ...(typeof props.input.source === "string" ? [String(props.input.source).toUpperCase()] : []),
+            ...(state() ? [state()!] : []),
+          ],
+        }}
+      />
+    )
+  },
+})
+
+ToolRegistry.register({
+  name: "research_report",
+  render(props) {
+    const state = createMemo(() => {
+      if (props.status !== "completed") return undefined
+      if (props.metadata.refused) return "not saved"
+      return typeof props.metadata.version === "number" ? `version ${props.metadata.version}` : undefined
+    })
+    return (
+      <BasicTool
+        {...props}
+        icon="bullet-list"
+        trigger={{
+          title: "Research report",
+          subtitle: typeof props.input.title === "string" ? props.input.title : "",
+          args: state() ? [state()!] : [],
+        }}
+      >
+        <Show when={props.output}>
+          <div data-component="tool-output" data-scrollable tabIndex={0} role="region" aria-label="Research report">
+            <p style={{ "white-space": "pre-wrap" }}>{props.output}</p>
+          </div>
+        </Show>
+      </BasicTool>
+    )
+  },
+})
+
+ToolRegistry.register({
+  name: "research_browser",
+  render(props) {
+    const address = createMemo(() => webAddress(props.metadata.url ?? props.input.url))
+    return (
+      <BasicTool
+        {...props}
+        hideDetails
+        icon="window-cursor"
+        trigger={{
+          title: `Research browser${typeof props.input.action === "string" ? ` · ${props.input.action}` : ""}`,
+          subtitle: hostOf(address()) ?? "",
+          args: [
+            ...(typeof props.metadata.source === "string" ? [props.metadata.source] : []),
+            ...(typeof props.metadata.refused === "string"
+              ? [RESEARCH_REFUSED[props.metadata.refused] ?? "refused"]
+              : []),
+          ],
+        }}
+      />
     )
   },
 })

@@ -618,6 +618,98 @@ const scenarios: Scenario[] = [
       body: { accountID: "httpapi-account", orgID: "httpapi-org" },
     }))
     .status(400, undefined, "none"),
+  // Vector Local: each route as the owner reads or changes it, with Vector Local off as the exercise starts. Nothing here
+  // leaves this computer: Find servers asks only this computer's ports, and the address read is one nothing answers.
+  http.protected.get("/local", "local.get").json(200, (body) => {
+    object(body)
+    object(body.policy)
+    check(body.policy.enabled === false, "Vector Local is off until the owner turns it on")
+    check(body.agent === false, "the exercise is not a Vector the agent started")
+    check(Array.isArray(body.sources) && body.sources.length > 0, "the status should list Vector's services")
+  }),
+  http.protected
+    .patch("/local", "local.update")
+    .mutating()
+    .at((ctx) => ({ path: "/local", headers: ctx.headers(), body: { enabled: false } }))
+    .json(200, (body) => {
+      object(body)
+      object(body.policy)
+      check(body.policy.enabled === false, "keeping Vector Local off tightens nothing and needs no confirmation")
+    }),
+  http.protected.get("/local/egress", "local.egress.list").json(200, array),
+  http.protected.get("/local/egress/summary", "local.egress.summary").json(200, (body) => {
+    object(body)
+    object(body.model_calls)
+    check(typeof body.pages === "number", "the summary should count web pages")
+  }),
+  http.protected
+    .get("/local/egress/export", "local.egress.export")
+    .at((ctx) => ({ path: "/local/egress/export?format=csv", headers: ctx.headers() }))
+    .status(200, (_ctx, result) =>
+      Effect.sync(() => {
+        check(result.contentType.includes("text/csv"), "a CSV export should say it is CSV")
+        check(result.text.startsWith("time,source,purpose"), "a CSV export should start with its columns")
+      }),
+    ),
+  http.protected
+    .delete("/local/egress", "local.egress.clear")
+    .json(200, (body) => check(body === true, "the owner may erase the network log")),
+  http.protected
+    .post("/local/egress/report", "local.egress.report")
+    .at((ctx) => ({ path: "/local/egress/report", headers: ctx.headers(), body: { events: [] } }))
+    .json(200, (body) => check(body === 0, "with Vector Local off the log takes no events")),
+  http.protected
+    .post("/local/detect", "local.detect")
+    .at((ctx) => ({ path: "/local/detect", headers: ctx.headers(), body: {} }))
+    .json(200, array),
+  http.protected
+    .post("/local/probe", "local.probe")
+    .at((ctx) => ({ path: "/local/probe", headers: ctx.headers(), body: { url: "http://127.0.0.1:9" } }))
+    .json(200, (body) => {
+      object(body)
+      check(body.server === null, "nothing answers on the discard port")
+      check(typeof body.message === "string", "the result should say why no server was read")
+    }),
+  http.protected
+    .post("/local/servers", "local.servers.add")
+    .mutating()
+    .at((ctx) => ({ path: "/local/servers", headers: ctx.headers(), body: { url: "http://127.0.0.1:9" } }))
+    .json(
+      400,
+      (body) => {
+        object(body)
+        check(body.name === "LocalError", "Add server should reach the Local handler, not fail decoding")
+      },
+      "status",
+    ),
+  http.protected
+    .post("/local/check", "local.check")
+    .at((ctx) => ({ path: "/local/check", headers: ctx.headers(), body: {} }))
+    .json(200, (body) => {
+      object(body)
+      check(body.result === "off", "with Vector Local off the check says so")
+      check(Array.isArray(body.rows), "the check should return its rows")
+    }),
+  http.protected
+    .post("/local/grant", "local.grant")
+    .at((ctx) => ({ path: "/local/grant", headers: ctx.headers(), body: { source: "github" } }))
+    .json(
+      400,
+      (body) => {
+        object(body)
+        check(body.name === "LocalError", "a grant for a service Vector Local never asks about should be refused")
+      },
+      "status",
+    ),
+  http.protected
+    .post("/local/startup/release", "local.startup.release")
+    .at((ctx) => ({ path: "/local/startup/release", headers: ctx.headers() }))
+    .json(200, (body) => check(body === false, "a Vector that started without the first run's hold holds nothing")),
+  http.protected.get("/local/recommend", "local.recommend").json(200, (body) => {
+    object(body)
+    check(typeof body.label === "string", "model suggestions should carry their dated label")
+    object(body.roles)
+  }),
   http.protected.get("/memory", "memory.list").json(200, (body) => {
     object(body)
     check(Array.isArray(body.entries), "memory list should return entries")
@@ -699,7 +791,34 @@ const scenarios: Scenario[] = [
     .mutating()
     .at((ctx) => ({ path: "/memory/erase", headers: ctx.headers(), body: { scope: "repository" } }))
     .json(200, (body) => check(typeof body === "number", "memory erase should return a count"), "status"),
-  http.protected.get("/memory/settings", "memory.settings.get").json(200, object),
+  http.protected
+    .delete("/memory/sessions/{sessionID}", "memory.eraseSession")
+    .mutating()
+    .at((ctx) => ({ path: route("/memory/sessions/{sessionID}", { sessionID: "ses_none" }), headers: ctx.headers() }))
+    .json(200, (body) => check(body === 0, "a session that taught nothing erases nothing"), "status"),
+  http.protected
+    .get("/memory/export", "memory.export")
+    .at((ctx) => ({ path: "/memory/export?scope=personal&format=json", headers: ctx.headers() }))
+    .json(200, (body) => {
+      object(body)
+      check(body.format === "vector-memory" && body.version === 1, "an export should say what it is")
+    }),
+  http.protected
+    .post("/memory/import", "memory.import")
+    .mutating()
+    .at((ctx) => ({ path: "/memory/import", headers: ctx.headers(), body: { text: "# Notes\n\nNothing to bring in." } }))
+    .json(
+      200,
+      (body) => {
+        object(body)
+        check(Array.isArray(body.entries) && body.entries.length === 0, "a page with no entries imports none")
+      },
+      "status",
+    ),
+  http.protected.get("/memory/settings", "memory.settings.get").json(200, (body) => {
+    object(body)
+    check(typeof body.facets === "object" && body.modelLearner === "local-only", "learning settings should say each facet and the model learner")
+  }),
   http.protected
     .patch("/memory/settings", "memory.settings.update")
     .mutating()
@@ -830,6 +949,13 @@ const scenarios: Scenario[] = [
     }))
     .json(400, object, "status"),
   http.protected
+    .post("/memory/posting-check", "memory.posting.check")
+    .at((ctx) => ({ path: "/memory/posting-check", headers: ctx.headers(), body: { parts: ["Fixed the retry loop."], typed: false } }))
+    .json(200, (body) => {
+      object(body)
+      check(body.status === "clean", "text that repeats nothing of the owner's memory posts as it is")
+    }),
+  http.protected
     .get("/memory/knowledge", "memory.knowledge")
     .at((ctx) => ({ path: "/memory/knowledge?ids=rnone,dnone", headers: ctx.headers() }))
     .json(200, (body) => check(Array.isArray(body) && body.length === 0, "ids nothing holds give no cards")),
@@ -837,6 +963,48 @@ const scenarios: Scenario[] = [
     .get("/memory/links", "memory.links")
     .at((ctx) => ({ path: "/memory/links?file=src/none.ts", headers: ctx.headers() }))
     .json(200, (body) => check(Array.isArray(body) && body.length === 0, "a file nothing is linked to has no links")),
+  http.protected.get("/memory/research", "memory.research.list").json(200, (body) => {
+    object(body)
+    check(Array.isArray(body.runs), "the research list should return runs")
+    check(typeof body.limit === "number" && typeof body.retain === "number", "the research list should say its limits")
+  }),
+  http.protected
+    .delete("/memory/research", "memory.research.forgetAll")
+    .mutating()
+    .json(200, (body) => check(typeof body === "number", "forgetting all research should return a count"), "status"),
+  http.protected
+    .get("/memory/research/{runID}", "memory.research.get")
+    .at((ctx) => ({ path: route("/memory/research/{runID}", { runID: "run_none" }), headers: ctx.headers() }))
+    .json(400, object, "status"),
+  http.protected
+    .delete("/memory/research/{runID}", "memory.research.forget")
+    .mutating()
+    .at((ctx) => ({ path: route("/memory/research/{runID}", { runID: "run_none" }), headers: ctx.headers() }))
+    .json(400, object, "status"),
+  http.protected
+    .post("/memory/research/{runID}/keep", "memory.research.keep")
+    .mutating()
+    .at((ctx) => ({ path: route("/memory/research/{runID}/keep", { runID: "run_none" }), headers: ctx.headers() }))
+    .json(400, object, "status"),
+  http.protected
+    .get("/memory/research/{runID}/export", "memory.research.export")
+    .at((ctx) => ({ path: route("/memory/research/{runID}/export", { runID: "run_none" }), headers: ctx.headers() }))
+    .json(400, object, "status"),
+  http.protected
+    .get("/memory/research/{runID}/sources/{sourceID}", "memory.research.source")
+    .at((ctx) => ({
+      path: route("/memory/research/{runID}/sources/{sourceID}", { runID: "run_none", sourceID: "S1" }),
+      headers: ctx.headers(),
+    }))
+    .json(400, object, "status"),
+  http.protected
+    .delete("/memory/research/{runID}/sources/{sourceID}", "memory.research.forgetSource")
+    .mutating()
+    .at((ctx) => ({
+      path: route("/memory/research/{runID}/sources/{sourceID}", { runID: "run_none", sourceID: "S1" }),
+      headers: ctx.headers(),
+    }))
+    .json(400, object, "status"),
   http.protected.get("/memory/review", "memory.review.list").json(200, array),
   http.protected
     .patch("/memory/review/{itemID}", "memory.review.resolve")

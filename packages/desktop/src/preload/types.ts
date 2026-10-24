@@ -16,6 +16,8 @@ import type {
   CloudProviderProjectLink,
   CloudProviderResource,
 } from "../main/cloud-connections"
+import type { Observed, PageRead } from "../main/browser-page"
+import type { Chip as ResearchBrowserChip } from "../main/research-browser"
 import type { CloudOverview } from "../main/cloud-overview"
 import type { SupabaseCommand, SupabaseProgressEvent } from "../main/cloud-supabase"
 import type { VercelCloudApi } from "../main/cloud-vercel-ipc"
@@ -64,6 +66,7 @@ import type {
   PullRequestSummary,
 } from "../main/github-pr"
 import type { LocalMemoryState } from "../main/local-memory"
+import type { DesktopLocalStatus } from "../main/local-mode"
 import type { RuntimeName, RuntimeStatus } from "../main/runtime-bootstrap"
 export type { RuntimeName, RuntimeStatus } from "../main/runtime-bootstrap"
 import type { CiFailure, CiRepo, CiRun, CiUnavailable } from "../main/ci-watch"
@@ -92,6 +95,7 @@ export type { FailureMemory, FailureRepair, FailureSignatureRecord } from "../ma
 import type { AgentTeam, TeamCollaborationGraph, TeamMessage, TeamTopology } from "../main/agent-team-model"
 export type { AgentTeam, TeamCollaborationGraph, TeamLink, TeamMessage, TeamTopology } from "../main/agent-team-model"
 export type { LocalMemoryState } from "../main/local-memory"
+export type { DesktopLocalStatus } from "../main/local-mode"
 export type {
   AutoReviewSecret,
   AutoReviewSetup,
@@ -234,6 +238,11 @@ export type RuntimeAPI = {
   preparePluginCommand: (command: string[]) => Promise<{ command: string[]; status?: RuntimeStatus }>
 }
 
+/** Vector Local as the app's windows see it: the policy desktop main uses, the first run's hold and the mismatch. */
+export type VectorLocalAPI = {
+  status: () => Promise<DesktopLocalStatus>
+}
+
 export type LocalMemoryAPI = {
   read: () => Promise<LocalMemoryState>
   write: (content: string) => Promise<LocalMemoryState>
@@ -297,6 +306,10 @@ export type PullRequestsAPI = {
     // using fallbackBody (or body) as its body.
     comments?: PullRequestReviewComment[]
     fallbackBody?: string
+    // The review's sessions, whose recalled memory the posting check compares the text with, and whether the pull
+    // request comes from someone Vector cannot trust (its links and images may then point only at GitHub).
+    sessionIDs?: string[]
+    untrusted?: boolean
   }) => Promise<{ posted: boolean; inline?: number }>
   merge: (input: {
     cwd: string
@@ -413,6 +426,10 @@ export type BrowserAutomationRun = {
     rect: { x: number; y: number; width: number; height: number }
   }[]
   pageHtml?: string
+  /** For readPage: the page as the research reader reads it. */
+  page?: PageRead
+  /** For observePage: the page's text and its controls, each with a ref handle clickRef takes. */
+  observed?: Observed
   diagnostics?: {
     consoleCount: number
     runtimeErrorCount: number
@@ -452,9 +469,14 @@ export type BrowserAgentInput = {
     | "scroll"
     | "clearLogs"
     | "setVisible"
+    | "readPage"
+    | "observePage"
+    | "clickRef"
   url?: string
   allowExternal?: boolean
   selector?: string
+  /** A ref_N handle from observePage, for clickRef, or for inspectDom to name what a click there would press. */
+  ref?: string
   text?: string
   key?: string
   milliseconds?: number
@@ -749,6 +771,7 @@ export type ElectronAPI = {
   agentTeams: AgentTeamsAPI
   convertHeic: (bytes: Uint8Array) => Promise<{ data: Uint8Array; mime: string } | { error: string }>
   runtime: RuntimeAPI
+  vectorLocal: VectorLocalAPI
   localMemory: LocalMemoryAPI
   repoRules: RepoRulesAPI
   pullRequests: PullRequestsAPI
@@ -861,6 +884,16 @@ export type ElectronAPI = {
       sourcePath: string
       taskID: string
     }) => Promise<import("@vectordevai/schema/task").StopResult>
+    onChange: (callback: () => void) => () => void
+  }
+  /**
+   * Watching research browsers from the Sources tab: one chip per browser, snapshots of its page (about two a second is
+   * what a watcher needs) and Stop. There is no way to send input to one.
+   */
+  researchWatch: {
+    list: () => Promise<ResearchBrowserChip[]>
+    snapshot: (id: string) => Promise<string | undefined>
+    stop: (id: string) => Promise<boolean>
     onChange: (callback: () => void) => () => void
   }
   swarmOrchestrator: {

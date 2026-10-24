@@ -1,5 +1,14 @@
 import { BrowserWindow, WebContentsView, session, type IpcMainInvokeEvent, type WebContents } from "electron"
 import { clickTargetLabel } from "./browser-click-target"
+import {
+  clickElement,
+  clickPoint,
+  observePage,
+  readPage,
+  type ClickPoint,
+  type Observed,
+  type PageRead,
+} from "./browser-page"
 import { isCredentialField } from "./browser-credential-field"
 import { CredentialFocusChangedError, sendGuardedCharacters } from "./browser-credential-input"
 import {
@@ -18,6 +27,7 @@ import { AsyncLocalStorage } from "node:async_hooks"
 
 import type { BrowserAgentInput, BrowserAgentPageEvent, BrowserAutomationRun } from "../preload/types"
 import { redactText } from "./security-redaction"
+import { egressFilter } from "./egress-filter"
 
 type BrowserAgentLog = { level: string; message: string; location?: string }
 type BrowserAgentActionLog = { label: string; ok: boolean; error?: string; result?: unknown; at: string }
@@ -25,10 +35,18 @@ type BrowserAgentNetworkError = { url: string; status?: number; error?: string; 
 type BrowserAgentDom = NonNullable<BrowserAutomationRun["domSummary"]>
 type BrowserAgentComputedStyle = NonNullable<BrowserAutomationRun["computedStyles"]>[number]
 type BrowserAgentBounds = { x: number; y: number; width: number; height: number }
-type BrowserContext = {
+export type BrowserContext = {
   id: string
   view?: WebContentsView
   hostWindow?: BrowserWindow
+  /** Hidden because a dialog covers its window, so it shows again when the dialog closes. */
+  covered?: boolean
+  /** The command running on this page; the next one starts when it settles or runs past its deadline. */
+  queue: Promise<unknown>
+  /** Aborted when the page is closed, which ends its running command and every waiting one at once. */
+  closing: AbortController
+  /** Commands on their way to this page, queued or running; a page with any is never retired to make room. */
+  busy: number
   lastBounds?: BrowserAgentBounds
   consoleLogs: BrowserAgentLog[]
   pageErrors: string[]
@@ -47,6 +65,43 @@ type BrowserContext = {
 let attaching: Promise<void> | undefined
 const contexts = new Map<string, BrowserContext>()
 const contextStorage = new AsyncLocalStorage<BrowserContext>()
+// Windows a dialog in the app covers: their browser views stay hidden until it closes.
+const coveredWindows = new WeakSet<BrowserWindow>()
+const hardenedSessions = new WeakSet<Electron.Session>()
+
+const PARTITION = "persist:vector-browser"
+/**
+ * The agent browser's page preferences. The session's preloads run in every frame, sandboxed and without Node, so
+ * Vector Local's no-peer-connections preload (local-mode.ts) reaches a frame a page makes as well as the page.
+ */
+export const AGENT_BROWSER_PREFERENCES = {
+  contextIsolation: true,
+  nodeIntegration: false,
+  nodeIntegrationInSubFrames: true,
+  sandbox: true,
+  webSecurity: true,
+} as const
+// A browser context the engine's browser tool opened is named by its session (tool/browser.ts, contextId).
+const SESSION_ID = /^ses_[0-9A-Za-z]+$/
+export const DOWNLOADS_OFF = "Downloads are off in the agent browser."
+// Commands that only place or show the panel's view. They never wait behind a page command, so resizing or opening
+// a dialog stays immediate while the agent waits on a page.
+const PANEL_COMMANDS = new Set(["attach", "setBounds", "detach", "setVisible"])
+// The Preview's own buttons, sent from the panel with an IPC event: the user's navigation never waits behind the
+// agent's command either. Close never waits, from anyone, and ends whatever the page is still running.
+const USER_COMMANDS = new Set(["openUrl", "goBack", "goForward", "reload"])
+/**
+ * The longest one command may hold its page. A page that never answers (a busy loop, or a script that replaces the
+ * timers and observers a wait relies on) would otherwise hold every later command on it for good.
+ */
+export const TURN_DEADLINE_MS = 60_000
+// The wait helpers run in their own JavaScript world, which shares the page's DOM but not its globals, so a page
+// cannot stop them by replacing setTimeout, MutationObserver or Promise.
+const WAIT_WORLD = 1_291
+// observePage's ref handles live in this world's globals, so they last as long as the page and the page cannot read them.
+const PAGE_WORLD = 1_292
+// The most of a page readPage serializes for the reader, as the research reader reads at most.
+const READ_BYTES = 5 * 1024 * 1024
 
 function currentContext() {
   const context = contextStorage.getStore()
@@ -69,9 +124,98 @@ function getContext(id: string, create = true) {
     lastUsedAt: Date.now(),
     allowedExternalOrigins: new Set(),
     intent: navigationIntent(),
+    queue: Promise.resolve(),
+    closing: new AbortController(),
+    busy: 0,
   }
   contexts.set(id, context)
   return context
+}
+
+/**
+ * The agent browser grants a page no permission but fullscreen: no camera, microphone, location, notifications,
+ * clipboard, devices or any other, and it never asks the user on a page's behalf.
+ */
+export function browserPermissionAllowed(permission: string) {
+  return permission === "fullscreen"
+}
+
+/** Records a download the agent browser cancelled, so the command's report says why nothing was saved. */
+export function refuseDownload(context: BrowserContext, url: string) {
+  const shown = redactText(url)
+  context.networkErrors = [...context.networkErrors, { url: shown, error: DOWNLOADS_OFF }].slice(-50)
+  pushAction("Cancelled a download", false, DOWNLOADS_OFF, undefined, context)
+}
+
+/**
+ * Runs a command on a page once the page's earlier commands settle, so two calls never interleave their steps on it.
+ * A command that runs past the deadline gives the page up: the next one starts, and this one reports the timeout
+ * instead of waiting on. Closing the page ends the running command and every waiting one at once.
+ */
+export function queueTurn<T>(
+  page: { queue: Promise<unknown>; closing: AbortController },
+  run: () => Promise<T>,
+  end: (reason: "timeout" | "closed") => T,
+  ms = TURN_DEADLINE_MS,
+) {
+  const closing = page.closing.signal
+  const turn = page.queue.then(
+    () =>
+      new Promise<T>((resolve, reject) => {
+        if (closing.aborted) return resolve(end("closed"))
+        const closed = () => resolve(end("closed"))
+        const timer = setTimeout(() => resolve(end("timeout")), ms)
+        closing.addEventListener("abort", closed, { once: true })
+        run()
+          .then(resolve, reject)
+          .finally(() => {
+            clearTimeout(timer)
+            closing.removeEventListener("abort", closed)
+          })
+      }),
+  )
+  page.queue = turn.catch(() => undefined)
+  return turn
+}
+
+/**
+ * Hides every browser view in a window while a dialog covers it, and shows again only the views it hid. A dialog
+ * is DOM, and a WebContentsView paints over all DOM, so the view would otherwise cover the dialog.
+ */
+export function setWindowVisible(
+  window: BrowserWindow,
+  visible: boolean,
+  all: Iterable<BrowserContext> = contexts.values(),
+) {
+  if (visible) coveredWindows.delete(window)
+  else coveredWindows.add(window)
+  for (const context of all) {
+    const view = context.view
+    if (context.hostWindow !== window || !view || view.webContents.isDestroyed()) continue
+    if (!visible && view.getVisible()) {
+      view.setVisible(false)
+      context.covered = true
+    }
+    if (visible && context.covered) {
+      view.setVisible(true)
+      context.covered = false
+    }
+  }
+}
+
+// The partition's own handlers: permissions denied but fullscreen, and downloads cancelled and reported.
+function hardenSession(partition: Electron.Session) {
+  if (hardenedSessions.has(partition)) return
+  hardenedSessions.add(partition)
+  partition.setPermissionRequestHandler((_contents, permission, callback) =>
+    callback(browserPermissionAllowed(permission)),
+  )
+  partition.setPermissionCheckHandler((_contents, permission) => browserPermissionAllowed(permission))
+  partition.on("will-download", (event, item, contents) => {
+    event.preventDefault()
+    const context = Array.from(contexts.values()).find((candidate) => candidate.view?.webContents === contents)
+    if (context) refuseDownload(context, item.getURL())
+  })
 }
 
 // Vector sets no cap on browser tasks. A new context only retires the oldest
@@ -79,7 +223,7 @@ function getContext(id: string, create = true) {
 // a live view is never closed to make room, and none is refused.
 function pruneContexts() {
   const oldest = Array.from(contexts.values())
-    .filter((context) => !context.view || context.view.webContents.isDestroyed())
+    .filter((context) => context.busy === 0 && (!context.view || context.view.webContents.isDestroyed()))
     .toSorted((a, b) => a.lastUsedAt - b.lastUsedAt)[0]
   if (oldest) destroyContext(oldest)
 }
@@ -254,7 +398,10 @@ async function attachView(event: IpcMainInvokeEvent, bounds?: { x: number; y: nu
     if (!win) throw new Error("Browser Agent could not find the requesting window.")
     const active = ensureBrowserView()
     for (const item of contexts.values()) {
-      if (item.id !== context.id && item.hostWindow === win && item.view) item.view.setVisible(false)
+      if (item.id !== context.id && item.hostWindow === win && item.view) {
+        item.view.setVisible(false)
+        item.covered = false
+      }
     }
     if (context.hostWindow !== win) {
       if (context.hostWindow && !context.hostWindow.isDestroyed())
@@ -270,7 +417,9 @@ async function attachView(event: IpcMainInvokeEvent, bounds?: { x: number; y: nu
       context.lastBounds = scaledBounds(event.sender, bounds)
       active.setBounds(context.lastBounds)
     }
-    active.setVisible(true)
+    // Under an open dialog the view waits, hidden, for the dialog to close.
+    context.covered = coveredWindows.has(win)
+    active.setVisible(!context.covered)
   })()
   try {
     await attaching
@@ -282,17 +431,17 @@ async function attachView(event: IpcMainInvokeEvent, bounds?: { x: number; y: nu
 function ensureBrowserView() {
   const context = currentContext()
   if (context.view && !context.view.webContents.isDestroyed()) return context.view
-  context.view = new WebContentsView({
-    webPreferences: {
-      session: session.fromPartition("persist:vector-browser"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      webSecurity: true,
-    },
-  })
+  const partition = session.fromPartition(PARTITION)
+  hardenSession(partition)
+  context.view = new WebContentsView({ webPreferences: { session: partition, ...AGENT_BROWSER_PREFERENCES } })
   context.view.setBackgroundColor("#18181a")
-  wireView(context, context.view.webContents)
+  // What its pages load counts in the session the agent browses for, in Vector Local's network log.
+  const contents = context.view.webContents
+  if (SESSION_ID.test(context.id)) {
+    const stop = egressFilter.attribute(contents.id, { sessionID: context.id })
+    contents.on("destroyed", stop)
+  }
+  wireView(context, contents)
   pushAction("Controlled browser launched")
   return context.view
 }
@@ -302,6 +451,7 @@ function detachView() {
   // agent (or the user) left off. closeBrowser destroys it for real.
   const context = currentContext()
   if (context.view && context.hostWindow && !context.hostWindow.isDestroyed()) context.view.setVisible(false)
+  context.covered = false
 }
 
 async function closeBrowser() {
@@ -311,6 +461,7 @@ async function closeBrowser() {
 function destroyContext(context: BrowserContext) {
   const active = context.view
   context.view = undefined
+  context.closing.abort()
   if (active) {
     if (context.hostWindow && !context.hostWindow.isDestroyed()) context.hostWindow.contentView.removeChildView(active)
     if (!active.webContents.isDestroyed()) active.webContents.close()
@@ -386,7 +537,7 @@ export async function click(selector: string) {
 /**
  * Executor-level guard (defense in depth beyond the planner prompt): typing
  * into credential fields is always refused so the run hands control to the user
- * via wait_for_user instead of ever filling passwords, OTPs, or cards.
+ * with the browser tool's handoff instead of ever filling passwords, OTPs, or cards.
  *
  * This is serialized into the page with toString(), so the body has to stay
  * self-contained: anything it read from module scope would be a ReferenceError
@@ -457,7 +608,7 @@ const NON_TYPING_KEYS = new Set([
 ])
 
 function credentialRefusal(target: string) {
-  return `Refused to send keystrokes to ${target}: it is a credential field (password, one-time code, or card number). Vector never fills credentials — emit the wait_for_user action so the user can complete this step in the live browser.`
+  return `Refused to send keystrokes to ${target}: it is a credential field (password, one-time code, or card number). Vector never fills credentials — use handoff so the user can complete this step in the live browser.`
 }
 
 export async function type(selector: string, text: string, clear = true) {
@@ -617,8 +768,56 @@ export async function wait(milliseconds: number) {
   pushAction(`Waited ${milliseconds}ms`)
 }
 
+async function runIsolatedScript<T>(script: string): Promise<T> {
+  const contents = ensureView()
+  return (await contents.executeJavaScriptInIsolatedWorld(WAIT_WORLD, [{ code: script }], true)) as T
+}
+
+// Runs one of browser-page.ts's functions in the page's own world for Vector, with the window and these arguments.
+function runPageScript<T>(fn: (win: Window, ...rest: never[]) => unknown, ...args: unknown[]) {
+  return runInWorld<T>(ensureView(), PAGE_WORLD, fn, ...args)
+}
+
+/**
+ * Runs one of browser-page.ts's functions in an isolated world of a page, apart from the page's own globals, with the
+ * window and these arguments (a function argument goes as its source). The research browsers use it too.
+ */
+export async function runInWorld<T>(
+  contents: Pick<WebContents, "executeJavaScriptInIsolatedWorld">,
+  world: number,
+  fn: (win: Window, ...rest: never[]) => unknown,
+  ...args: unknown[]
+): Promise<T> {
+  const values = args.map((value) => (typeof value === "function" ? value.toString() : JSON.stringify(value)))
+  return (await contents.executeJavaScriptInIsolatedWorld(
+    world,
+    [{ code: `(${fn.toString()})(window${values.map((value) => `, ${value}`).join("")})` }],
+    true,
+  )) as T
+}
+
+/**
+ * Clicks what observePage named `ref` with trusted input at its centre, as the user's own click would land, or with the
+ * DOM's click when something else covers that point. A file field, or a label for one, is refused.
+ */
+export async function clickRef(ref: string) {
+  const contents = ensureView()
+  const point = await runPageScript<ClickPoint>(clickPoint, ref)
+  if (!point.ok) throw new Error(point.reason)
+  // The page measures in CSS pixels; input goes to the view in its own coordinates.
+  const zoom = contents.getZoomFactor()
+  const at = { x: Math.round(point.x * zoom), y: Math.round(point.y * zoom) }
+  if (point.hit) {
+    contents.sendInputEvent({ type: "mouseMove", ...at })
+    contents.sendInputEvent({ type: "mouseDown", ...at, button: "left", clickCount: 1 })
+    contents.sendInputEvent({ type: "mouseUp", ...at, button: "left", clickCount: 1 })
+  }
+  if (!point.hit) await runPageScript(clickElement, ref)
+  pushAction(`Clicked ${ref}`)
+}
+
 export async function waitForSelector(selector: string) {
-  await runScript(`new Promise((resolve, reject) => {
+  await runIsolatedScript(`new Promise((resolve, reject) => {
     const selector = ${JSON.stringify(selector)};
     if (document.querySelector(selector)) return resolve(true);
     const observer = new MutationObserver(() => {
@@ -637,7 +836,7 @@ export async function waitForSelector(selector: string) {
 }
 
 export async function waitForText(text: string) {
-  await runScript(`new Promise((resolve, reject) => {
+  await runIsolatedScript(`new Promise((resolve, reject) => {
     const text = ${JSON.stringify(text)};
     const hasText = () => (document.body?.innerText || "").includes(text);
     if (hasText()) return resolve(true);
@@ -802,6 +1001,12 @@ export async function runBrowserAgent(
 ): Promise<BrowserAutomationRun> {
   const contextId = input.contextId.trim()
   if (!contextId) throw new Error("The controlled browser needs an active Vector task context.")
+  // The app's dialogs hide and restore every browser view in their own window, whichever task each one belongs to.
+  if (input.command === "setVisible" && event) {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    if (window) setWindowVisible(window, input.visible !== false)
+    return stoppedReport()
+  }
   const passive =
     input.command === "detach" ||
     input.command === "setBounds" ||
@@ -809,13 +1014,28 @@ export async function runBrowserAgent(
     input.command === "setVisible"
   const context = getContext(contextId, !passive)
   if (!context) return stoppedReport()
-  const driving = DRIVING_COMMANDS.has(input.command ?? "")
-  if (driving) beginAutomation(context.intent)
-  try {
-    return await contextStorage.run(context, () => runBrowserAgentInContext(event, input))
-  } finally {
-    if (driving) endAutomation(context.intent, Date.now())
+  const run = async () => {
+    const driving = DRIVING_COMMANDS.has(input.command ?? "")
+    if (driving) beginAutomation(context.intent)
+    try {
+      return await contextStorage.run(context, () => runBrowserAgentInContext(event, input))
+    } finally {
+      if (driving) endAutomation(context.intent, Date.now())
+    }
   }
+  const command = input.command ?? ""
+  const immediate =
+    PANEL_COMMANDS.has(command) || command === "closeBrowser" || (event !== undefined && USER_COMMANDS.has(command))
+  context.busy++
+  // One command at a time on a page; the number of pages stays uncapped.
+  const report = immediate
+    ? run()
+    : queueTurn(context, run, (reason) =>
+        reason === "closed" ? closedReport(command) : timedOutReport(context, command),
+      )
+  return report.finally(() => {
+    context.busy--
+  })
 }
 
 async function runBrowserAgentInContext(
@@ -828,6 +1048,8 @@ async function runBrowserAgentInContext(
   let screenshotDataUrl = ""
   let computedStyles: BrowserAgentComputedStyle[] | undefined
   let pageHtml: string | undefined
+  let page: PageRead | undefined
+  let observed: Observed | undefined
   let target: BrowserAutomationRun["target"]
 
   try {
@@ -839,7 +1061,10 @@ async function runBrowserAgentInContext(
         context.hostWindow &&
         !context.hostWindow.isDestroyed()
       ) {
-        context.view.setVisible(input.visible !== false)
+        // Under an open dialog the view waits, hidden, for the dialog to close, whoever asks to show it.
+        const show = input.visible !== false
+        context.covered = show && coveredWindows.has(context.hostWindow)
+        context.view.setVisible(show && !context.covered)
       }
       return stoppedReport()
     }
@@ -874,6 +1099,18 @@ async function runBrowserAgentInContext(
       case "click":
         if (!input.selector) throw new Error("The controlled browser needs a selector to click.")
         await click(input.selector)
+        break
+      case "clickRef":
+        if (!input.ref) throw new Error("The controlled browser needs a ref from observe to click.")
+        await clickRef(input.ref)
+        break
+      case "readPage":
+        page = await runPageScript<PageRead>(readPage, { maxBytes: READ_BYTES })
+        pushAction("Read the page", true, undefined, `${page.html.length} characters`)
+        break
+      case "observePage":
+        observed = await runPageScript<Observed>(observePage, { maxText: 1_200, maxElements: 60 })
+        pushAction("Observed the page", true, undefined, `${observed.elements.length} controls`)
         break
       case "type":
         if (!input.selector) throw new Error("The controlled browser needs a selector to type into.")
@@ -921,8 +1158,18 @@ async function runBrowserAgentInContext(
         clearLogs()
         break
       case "inspectDom":
-        // With a selector, the engine is about to click it and needs the name of what it would press.
-        if (input.selector) {
+        // With a selector or a ref, the engine is about to click it and needs the name of what it would press.
+        if (input.ref) {
+          target = await runPageScript<NonNullable<BrowserAutomationRun["target"]>>(
+            (win: Window, ref: string, label: typeof clickTargetLabel) => {
+              const element = (win as unknown as { __vectorRefs?: Map<string, Element> }).__vectorRefs?.get(ref)
+              return element ? { found: true, label: label(element) } : { found: false, label: "" }
+            },
+            input.ref,
+            clickTargetLabel,
+          )
+        }
+        if (input.selector && !input.ref) {
           target = await runScript<NonNullable<BrowserAutomationRun["target"]>>(`(() => {
             const clickTargetLabel = ${clickTargetLabel.toString()};
             const el = document.querySelector(${JSON.stringify(input.selector)});
@@ -992,6 +1239,8 @@ async function runBrowserAgentInContext(
     target,
     computedStyles,
     pageHtml,
+    ...(page ? { page } : {}),
+    ...(observed ? { observed } : {}),
     diagnostics: {
       consoleCount: context.consoleLogs.length,
       runtimeErrorCount: context.pageErrors.length,
@@ -1005,6 +1254,41 @@ async function runBrowserAgentInContext(
     inputs: dom.inputs,
     browserStatus: alive ? "running" : "stopped",
     currentPage: dom.title || url || "No page open",
+  }
+}
+
+// A command still waiting, or still running, when its page was closed.
+function closedReport(command: string): BrowserAutomationRun {
+  return {
+    ...stoppedReport(),
+    ok: false,
+    status: 409,
+    error: `The browser was closed before ${command || "this command"} finished.`,
+  }
+}
+
+// What the page last showed, read from what Vector already holds: a page that stopped answering is not asked again.
+function timedOutReport(context: BrowserContext, command: string): BrowserAutomationRun {
+  const message = `The page did not answer within ${TURN_DEADLINE_MS / 1000} seconds, so Vector stopped waiting for ${command || "this command"}. Later commands on this page run again; close the browser if the page stays stuck.`
+  pushAction(`Stopped waiting for ${command || "a command"}`, false, message, undefined, context)
+  const contents = context.view?.webContents
+  const alive = Boolean(contents && !contents.isDestroyed())
+  const url = alive ? contents!.getURL() : ""
+  return {
+    ...stoppedReport(),
+    url,
+    finalUrl: url,
+    ok: false,
+    status: 504,
+    error: message,
+    title: context.currentPageTitle,
+    viewport: context.lastBounds ?? { x: 0, y: 0, width: 0, height: 0 },
+    console: context.consoleLogs.slice(-30),
+    pageErrors: context.pageErrors.slice(-30),
+    networkErrors: context.networkErrors.slice(-30),
+    actions: context.actionTimeline.slice(0, 40),
+    browserStatus: alive ? "running" : "stopped",
+    currentPage: context.currentPageTitle || url || "No page open",
   }
 }
 

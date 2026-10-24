@@ -6,7 +6,7 @@ import * as AnthropicMessages from "@vectordevai/llm/protocols/anthropic-message
 import * as OpenAICompatibleChat from "@vectordevai/llm/protocols/openai-compatible-chat"
 import * as OpenAIResponses from "@vectordevai/llm/protocols/openai-responses"
 import { Auth, type AnyRoute } from "@vectordevai/llm/route"
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Option, Schema, Stream } from "effect"
 import { produce } from "immer"
 import { FreeModels } from "../../free-models"
 import { FreeModelGuests } from "../../free-model-guests"
@@ -30,6 +30,14 @@ import { WorkspaceTrust } from "../../workspace-trust/workspace-trust"
 import { SpendGuard } from "../../spend-guard"
 import { NEXT_STEP_SLACK } from "../../review/plan"
 import { isFreeModel } from "@vectordevai/schema/free-model"
+import { ModelSlots } from "../../local-mode/model-slots"
+import { LocalPolicy } from "../../local-mode/policy"
+import { Egress } from "../../local-mode/egress"
+import { OllamaServer } from "../../local-mode/servers/ollama"
+import { LocalSources } from "../../local-mode/sources"
+import type { LocalMode } from "@vectordevai/schema/local-mode"
+import { OFF_IN_LOCAL } from "@vectordevai/schema/provider-unavailable"
+import { LocalProbe } from "../../local-mode/probe"
 
 export class ModelNotSelectedError extends Schema.TaggedErrorClass<ModelNotSelectedError>()(
   "SessionRunnerModel.ModelNotSelectedError",
@@ -93,12 +101,23 @@ export class UnsafeEndpointError extends Schema.TaggedErrorClass<UnsafeEndpointE
   }
 }
 
+export class OffInLocalError extends Schema.TaggedErrorClass<OffInLocalError>()("SessionRunnerModel.OffInLocalError", {
+  providerID: ProviderV2.ID,
+  modelID: ModelV2.ID,
+  reason: Schema.String,
+}) {
+  override get message() {
+    return `${this.providerID}/${this.modelID}: off in Vector Local. ${this.reason}`
+  }
+}
+
 export type Error =
   | ModelNotSelectedError
   | ModelUnavailableError
   | VariantUnavailableError
   | UnsupportedApiError
   | UnsafeEndpointError
+  | OffInLocalError
   | Integration.AuthorizationError
 
 export interface Interface {
@@ -188,6 +207,9 @@ export const spendStep = (
       oauthPlan: false,
       listed:
         reportedUsd(model, settlement.providerMetadata) !== undefined || (costUsd !== undefined && price !== undefined),
+      // V2 does not read the server list yet, so only a server on this computer counts, and never for a model it passes
+      // on to another service.
+      local: ModelSlots.local(model.route.endpoint.baseURL, { model: model.id, forwards: forwarders.has(model) }),
     }),
     price,
     contextTokens,
@@ -232,14 +254,32 @@ const apiKey = (model: ModelV2.Info, credential?: Credential.Value) => {
   if (typeof value === "string") return Auth.value(value)
 }
 
-const withDefaults = (model: ModelV2.Info, route: AnyRoute, mayTrain: Effect.Effect<boolean>) => {
+/** The line a session's requests wait in at a model server someone hosts. */
+export type Slots = {
+  readonly slots: ModelSlots.Interface
+  readonly priority: ModelSlots.Priority
+  /** Every provider, so one that points at the same server and configures a smaller count holds these requests to it. */
+  readonly providers?: readonly ProviderV2.Info[]
+}
+
+// Models whose provider passes every prompt on to other services (`forwards`, as Check models records for a LiteLLM
+// proxy), so their steps are never counted as free local ones.
+const forwarders = new WeakSet<Model>()
+
+const withDefaults = (
+  model: ModelV2.Info,
+  route: AnyRoute,
+  mayTrain: Effect.Effect<boolean>,
+  slots: Slots | undefined,
+) => {
   const body = model.request.body
   const httpBody = Object.hasOwn(body, "apiKey")
     ? Object.fromEntries(Object.entries(body).filter(([key]) => key !== "apiKey"))
     : body
-  const routed = sendsToOpenRouter({ providerID: model.providerID, destinations: destinations(model) })
+  const trained = sendsToOpenRouter({ providerID: model.providerID, destinations: destinations(model) })
     ? withoutUnconsentedTraining(route, model.api.id, mayTrain)
     : route
+  const routed = withSlots(trained, slots, model)
   return routed.with({
     provider: model.providerID,
     endpoint: model.api.url === undefined ? undefined : { baseURL: model.api.url },
@@ -275,6 +315,40 @@ const withoutUnconsentedTraining = (route: AnyRoute, modelID: string, mayTrain: 
     },
   })
 
+// A request to a server on this computer or the user's network holds its place in the server's line until its reply
+// ends, fails or is interrupted, so helpers on that server wait for it. It waits for a permit by the smallest
+// `concurrency` its own provider or another one pointing at the same server sets, as V1 does, so requests from the two
+// runners never take turns lifting the limit; with none set, ModelSlots holds the server to one. A cloud API gets a
+// line only when such a provider sets `concurrency`, as in V1.
+const withSlots = (route: AnyRoute, slots: Slots | undefined, model: ModelV2.Info) => {
+  const at = model.api.url === undefined ? undefined : LocalPolicy.origin(model.api.url)
+  const counts = [
+    model.api.settings,
+    ...(slots?.providers ?? []).flatMap((item) =>
+      at && item.api.url !== undefined && LocalPolicy.origin(item.api.url) === at ? [item.api.settings] : [],
+    ),
+  ].flatMap((settings) => {
+    const value = settings?.["concurrency"]
+    return typeof value === "number" && value > 0 ? [value] : []
+  })
+  const permits = counts.length ? Math.min(...counts) : undefined
+  const origin = ModelSlots.server(model.api.url) ?? (permits !== undefined ? at : undefined)
+  if (!slots || !origin) return route
+  return route.with({
+    transport: {
+      ...route.transport,
+      frames: (...input: Parameters<AnyRoute["transport"]["frames"]>) =>
+        Stream.unwrap(
+          slots.slots.take({ origin, permits, priority: slots.priority }).pipe(
+            // Only helpers are dropped for a new prompt, and a session's turn is never one.
+            Effect.orDie,
+            Effect.as(route.transport.frames(...input)),
+          ),
+        ),
+    },
+  })
+}
+
 const withVariant = (
   model: ModelV2.Info,
   variantID: ModelV2.VariantID | undefined,
@@ -307,6 +381,7 @@ export const fromCatalogModel = (
   credential?: Credential.Value,
   /** Whether the user accepted the "May train on your prompts" notice and no invited guest has worked in the session. */
   mayTrain: Effect.Effect<boolean> = Effect.succeed(false),
+  slots?: Slots,
 ): Effect.Effect<Model, UnsupportedApiError | UnsafeEndpointError> => {
   const resolved =
     credential?.type !== "key" || credential.metadata === undefined
@@ -315,6 +390,10 @@ export const fromCatalogModel = (
           Object.assign(draft.request.body, credential.metadata)
         })
   const key = apiKey(resolved, credential)
+  const settled = (built: Model) => {
+    if (resolved.api.settings?.["forwards"] === true) forwarders.add(built)
+    return withPricing(built, resolved.cost)
+  }
   if (resolved.api.url && !WorkspaceTrust.userRemoteUrlAllowed(resolved.api.url)) {
     return Effect.fail(
       new UnsafeEndpointError({ providerID: resolved.providerID, modelID: resolved.id, url: resolved.api.url }),
@@ -322,31 +401,28 @@ export const fromCatalogModel = (
   }
   if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/openai") {
     return Effect.succeed(
-      withPricing(
-        withDefaults(resolved, OpenAIResponses.route, mayTrain)
+      settled(
+        withDefaults(resolved, OpenAIResponses.route, mayTrain, slots)
           .with({ auth: key === undefined ? Auth.none : Auth.bearer(key) })
           .model({ id: resolved.api.id }),
-        resolved.cost,
       ),
     )
   }
   if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/anthropic") {
     return Effect.succeed(
-      withPricing(
-        withDefaults(resolved, AnthropicMessages.route, mayTrain)
+      settled(
+        withDefaults(resolved, AnthropicMessages.route, mayTrain, slots)
           .with({ auth: key === undefined ? Auth.none : Auth.header("x-api-key", key) })
           .model({ id: resolved.api.id }),
-        resolved.cost,
       ),
     )
   }
   if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/openai-compatible" && resolved.api.url) {
     return Effect.succeed(
-      withPricing(
-        withDefaults(resolved, OpenAICompatibleChat.route, mayTrain)
+      settled(
+        withDefaults(resolved, OpenAICompatibleChat.route, mayTrain, slots)
           .with({ auth: key === undefined ? Auth.none : Auth.bearer(key) })
           .model({ id: resolved.api.id }),
-        resolved.cost,
       ),
     )
   }
@@ -364,9 +440,19 @@ export const resolve = (
   model: ModelV2.Info,
   credential?: Credential.Value,
   mayTrain?: Effect.Effect<boolean>,
+  slots?: ModelSlots.Interface,
+  /** Every provider, for the smallest count a provider pointing at the same server configures. */
+  providers?: readonly ProviderV2.Info[],
 ) =>
   withVariant(model, session.model?.variant).pipe(
-    Effect.flatMap((model) => fromCatalogModel(model, credential, mayTrain)),
+    Effect.flatMap((model) =>
+      fromCatalogModel(
+        model,
+        credential,
+        mayTrain,
+        slots ? { slots, priority: session.parentID ? "subagent" : "user", providers } : undefined,
+      ),
+    ),
   )
 
 export const supported = (model: ModelV2.Info) =>
@@ -393,6 +479,54 @@ function requiresFreeRoute(model: ModelV2.Info) {
   )
 }
 
+// Where the SDK packages send a model's requests when the catalog names no address.
+const PACKAGE_ORIGINS: Record<string, string> = {
+  "@ai-sdk/openai": "https://api.openai.com",
+  "@ai-sdk/anthropic": "https://api.anthropic.com",
+}
+
+/**
+ * Vector Local keeps every model call on the model servers on the list, as the V1 provider does: a turn on any other
+ * model fails here, before a route is built or a stream starts, with the notice the V1 provider gives. A listed
+ * server's identity is checked against its pin first (Holds.check), so a server that answers as a different one, or
+ * says the model runs elsewhere, is refused here too. Nothing is logged, since no model request is made.
+ */
+export const allowedInLocal = (model: ModelV2.Info, holds?: LocalProbe.Holds) =>
+  Effect.gen(function* () {
+    const policy = Egress.policy()
+    if (!policy.enabled) return
+    const url = address(model)
+    if (holds && url) yield* Effect.promise(() => holds.check(url, policy, [model.api.id]))
+    const reason = localRefusal(model, policy, holds)
+    if (reason === undefined) return
+    return yield* new OffInLocalError({ providerID: model.providerID, modelID: model.id, reason })
+  })
+
+// Why Vector Local refuses a model, or undefined when its requests go to a model server on the list. Vector's own
+// models (free models and Vector Codium) and an Ollama cloud model (by its name, or by what its server said when it
+// was checked) are never allowed, nor is one whose address is unknown.
+function localRefusal(model: ModelV2.Info, policy: LocalMode.Policy, holds?: LocalProbe.Holds) {
+  if (model.providerID === ModelPlans.PROVIDER_ID || requiresFreeRoute(model)) return OFF_IN_LOCAL.vector
+  const url = address(model)
+  if (!url) return OFF_IN_LOCAL.unknown
+  if (
+    holds
+      ? holds.passesOn(url, [model.api.id], policy)
+      : ModelSlots.server(url, policy) && OllamaServer.cloud({ name: model.api.id })
+  )
+    return OFF_IN_LOCAL.ollama
+  const held = holds?.held(url)
+  if (held) return held
+  const verdict = LocalPolicy.decide(policy, { purpose: "inference", url, source: LocalSources.inference(url) })
+  if (verdict.decision === "allow") return undefined
+  return verdict.rule === "not-allowable" ? OFF_IN_LOCAL.cloud(LocalPolicy.origin(url) ?? url) : OFF_IN_LOCAL.listed
+}
+
+// Where a model's requests go: its catalog address, or the SDK package's own.
+function address(model: ModelV2.Info) {
+  return model.api.url ?? (model.api.type === "aisdk" ? PACKAGE_ORIGINS[model.api.package] : undefined)
+}
+
 // Whatever decides where a model's requests go.
 function destinations(model: ModelV2.Info) {
   return [model.api.url, model.request.body.baseURL, model.api.type === "aisdk" ? model.api.package : undefined]
@@ -408,9 +542,14 @@ export const locationLayer = Layer.effect(
     const modelPlans = yield* ModelPlans.Service
     const freeCredentials = yield* FreeModels.CredentialsService
     const guests = yield* FreeModelGuests.Service
+    // Optional so a resolver built without the process's lines, as in tests, sends requests as they come.
+    const slots = Option.getOrUndefined(yield* Effect.serviceOption(ModelSlots.Service))
+    // Optional for the same reason; the HTTP client model calls go through checks the pin again either way.
+    const holds = Option.getOrUndefined(yield* Effect.serviceOption(LocalProbe.HoldsService))
     return Service.of({
       resolve: Effect.fn("SessionRunnerModel.resolve")(function* (session) {
         const selected = yield* select(catalog, session)
+        yield* allowedInLocal(selected, holds)
         if (selected.providerID === ModelPlans.PROVIDER_ID)
           return withPricing(modelPlanRoute(selected, modelPlans, freeCredentials), selected.cost)
         // Configuration can overwrite API metadata or add a free ID after catalog validation.
@@ -429,6 +568,8 @@ export const locationLayer = Layer.effect(
           guests
             .marked(session.id)
             .pipe(Effect.flatMap((guest) => (guest ? Effect.succeed(false) : freeModels.trainingConsent()))),
+          slots,
+          slots ? yield* catalog.provider.all() : undefined,
         )
       }),
     })
@@ -445,6 +586,8 @@ export const node = makeLocationNode({
     FreeModels.credentialsNode,
     FreeModelGuests.node,
     ModelPlans.node,
+    ModelSlots.node,
+    LocalProbe.holdsNode,
   ],
 })
 
@@ -488,5 +631,14 @@ export const select = Effect.fn("SessionRunnerModel.select")(function* (
 
 // Codium spends the account's credits, so it is never chosen automatically. Nor is a free model that may train on
 // prompts: its notice is accepted for a model someone chose, not for one picked for them.
-const automaticModel = (models: readonly ModelV2.Info[]) =>
-  models.find((model) => supported(model) && model.providerID !== ModelPlans.PROVIDER_ID && !freeModelMayTrain(model))
+// With Vector Local on, only a model on a server on the list is chosen.
+const automaticModel = (models: readonly ModelV2.Info[]) => {
+  const policy = Egress.policy()
+  return models.find(
+    (model) =>
+      supported(model) &&
+      model.providerID !== ModelPlans.PROVIDER_ID &&
+      !freeModelMayTrain(model) &&
+      (!policy.enabled || localRefusal(model, policy) === undefined),
+  )
+}

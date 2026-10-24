@@ -5,7 +5,7 @@ import { Image } from "@/image/image"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { Cause, Deferred, Effect, Exit, Fiber, Layer, Context, Scope, Schema } from "effect"
 import * as Stream from "effect/Stream"
-import type { Tool } from "ai"
+import { asSchema, type Tool } from "ai"
 import { Agent } from "@/agent/agent"
 import { Config } from "@/config/config"
 import { Permission } from "@/permission"
@@ -14,16 +14,18 @@ import { Snapshot } from "@/snapshot"
 import { Session } from "./session"
 import { LLM } from "./llm"
 import { MessageV2 } from "./message-v2"
-import { isOverflow } from "./overflow"
+import { isOverflow, refusal } from "./overflow"
+import { SystemPrompt } from "./system"
 import { PartID } from "./schema"
 import type { SessionID } from "./schema"
 import { SessionRetry } from "./retry"
 import { SessionAdmission } from "./admission"
 import { SessionStatus } from "./status"
 import { SessionSummary } from "./summary"
-import type { Provider } from "@/provider/provider"
+import { Provider } from "@/provider/provider"
 import { Question } from "@/question"
 import { errorMessage } from "@/util/error"
+import { NamedError } from "@vectordevai/core/util/error"
 import { isRecord } from "@/util/record"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@vectordevai/core/database/database"
@@ -35,6 +37,9 @@ import { NEXT_STEP_SLACK } from "@vectordevai/core/review/plan"
 import { providerCredentialAllowed, providerUsable } from "@vectordevai/core/provider-policy"
 import { isFreeModel } from "@vectordevai/schema/free-model"
 import { Auth } from "@/auth"
+import { ModelSlots } from "@vectordevai/core/local-mode/model-slots"
+import { LocalErrors } from "@vectordevai/core/local-mode/errors"
+import { Token } from "@vectordevai/core/util/token"
 
 const DOOM_LOOP_THRESHOLD = 3
 // Tools that change files. Without a snapshot to diff, a successful call to one of these counts as a file change for
@@ -124,6 +129,10 @@ const layer = Layer.effect(
     const database = yield* Database.Service
     const auth = yield* Auth.Service
     const guard = yield* SpendGuard.Service
+    const provider = yield* Provider.Service
+    const slots = yield* ModelSlots.Service
+    // The user message each root session last answered, so its first step for a new prompt drops waiting helpers.
+    const prompts = new Map<SessionID, string>()
 
     // A session's snapshot work runs in order and off the request path: each piece starts after the one before it, so
     // the closing snapshot and patch of one step land before the next step's opening snapshot. Every tool call waits
@@ -159,9 +168,30 @@ const layer = Layer.effect(
       // The opening snapshot is taken while the request is built and sent rather than before it. The AI SDK may run
       // tools before it emits start-step, so tools are held until it lands instead (see `gate` in process).
       const opening = yield* enqueue(input.sessionID, snapshot.track())
+      // The line this model's requests wait in at its server, read the way the provider holds them, so every request
+      // that waits in it is named: the user's turn, or a subagent's in a child session. On a server someone hosts the
+      // agent also needs its fixed prompt to fit, and its errors come with their fix. A cloud API with no configured
+      // `concurrency` has no line and skips all of it.
+      const line = yield* provider.line(input.model)
+      const hosted = line?.hosted ? line.origin : undefined
+      const parentID = line
+        ? yield* session.get(input.sessionID).pipe(
+            Effect.map((info) => info.parentID),
+            Effect.catch(() => Effect.succeed(undefined)),
+          )
+        : undefined
+      // The first step for a new prompt in a root session: helpers still waiting for a server can wait for the next.
+      if (line && !parentID && prompts.get(input.sessionID) !== input.assistantMessage.parentID) {
+        prompts.delete(input.sessionID)
+        prompts.set(input.sessionID, input.assistantMessage.parentID)
+        if (prompts.size > 500) prompts.delete(prompts.keys().next().value!)
+        slots.prompted()
+      }
       // How this model's steps count against a run budget. A plan, such as a ChatGPT plan, pays for them only when
       // the credential llm.ts actually sends is the stored OAuth sign-in, so this applies the same credential rule.
-      // The sign-in is read from disk while the request is sent, off the request path.
+      // A server on this computer, or a private one on the model server list in effect (the user's or the company's,
+      // without an edit still held for the owner), has no per-token price. The sign-in is read from disk while the
+      // request is sent, off the request path.
       const costKind = yield* auth.get(input.model.providerID).pipe(
         Effect.catch(() => Effect.succeed(undefined)),
         Effect.map((signIn) =>
@@ -175,6 +205,7 @@ const layer = Layer.effect(
                 providerUsable(input.model.providerID, { npm: input.model.api.npm, api: input.model.api.url }),
               ),
             listed: input.model.cost.input > 0 || input.model.cost.output > 0,
+            local: line?.local ?? false,
           }),
         ),
         Effect.forkIn(scope),
@@ -880,7 +911,7 @@ const layer = Layer.effect(
           yield* events.publish(Session.Event.Error, { sessionID: ctx.sessionID, error })
           return
         }
-        ctx.assistantMessage.error = error
+        ctx.assistantMessage.error = hosted ? explain(error, ctx.model.id, hosted) : error
         yield* events.publish(Session.Event.Error, {
           sessionID: ctx.assistantMessage.sessionID,
           error: ctx.assistantMessage.error,
@@ -918,6 +949,30 @@ const layer = Layer.effect(
         const admission = current?.sessionID === input.sessionID ? current : undefined
         let denied = false
         const tools = gate(streamInput.tools, yield* EffectBridge.make())
+        // An agent that works through tools must fit its fixed prompt on a server someone hosts. Hidden helpers, such
+        // as compaction, run on any size.
+        const refused =
+          hosted && !streamInput.agent.hidden && Object.keys(streamInput.tools).length > 0
+            ? refusal({
+                model: streamInput.model,
+                fixed: yield* fixedTokens(streamInput),
+                agent: streamInput.agent.name,
+              })
+            : undefined
+        if (refused) {
+          ctx.assistantMessage.error = new SessionV1.APIError({
+            message: refused,
+            isRetryable: false,
+            metadata: { code: "ContextTooSmall" },
+          }).toObject()
+          ctx.blocked = true
+          yield* session.updateMessage(ctx.assistantMessage)
+          yield* events.publish(Session.Event.Error, { sessionID: ctx.sessionID, error: ctx.assistantMessage.error })
+          return "stop" as const
+        }
+        const model = line
+          ? Provider.withPriority(streamInput.model, parentID ? "subagent" : "user")
+          : streamInput.model
 
         return yield* Effect.gen(function* () {
           yield* Effect.uninterruptibleMask((restore) =>
@@ -950,6 +1005,7 @@ const layer = Layer.effect(
                   llm
                     .stream({
                       ...streamInput,
+                      model,
                       // Hidden SDK retries would bypass the per-attempt admission boundary.
                       ...(admission ? { retries: 0 } : {}),
                       tools: lease?.tools
@@ -1010,7 +1066,8 @@ const layer = Layer.effect(
                   return status.set(ctx.sessionID, {
                     type: "retry",
                     attempt: info.attempt,
-                    message: info.message,
+                    // A server someone hosts that is not running is retried too, with the fix in front meanwhile.
+                    message: hosted ? fixed(info.message, ctx.model.id, hosted) : info.message,
                     action: info.action,
                     next: info.next,
                   })
@@ -1042,6 +1099,51 @@ const layer = Layer.effect(
   }),
 )
 
+// A server someone hosts says what went wrong in its own terms; the common failures get their fix in front. When nothing
+// answered at all, the words are the runtime's rather than the server's.
+function fixed(message: string, model: string, origin: string, body = "") {
+  const explained = LocalErrors.explain({ text: `${message} ${body}`, model, origin })
+  if (!explained) return message
+  const said = explained.kind === "connection-refused" ? "The error was" : "The server said"
+  return `${explained.fix} ${said}: ${LocalErrors.plain(message)}`
+}
+
+// The error a step ends with. Besides the server's own refusals, an unknown error is how the runtime's fetch can report
+// that nothing answered.
+function explain(error: ReturnType<typeof MessageV2.fromError>, model: string, origin: string) {
+  if (SessionV1.APIError.isInstance(error)) {
+    const message = fixed(error.data.message, model, origin, error.data.responseBody)
+    return message === error.data.message ? error : new SessionV1.APIError({ ...error.data, message }).toObject()
+  }
+  if (!NamedError.Unknown.isInstance(error)) return error
+  const message = fixed(error.data.message, model, origin)
+  return message === error.data.message ? error : new NamedError.Unknown({ message }).toObject()
+}
+
+// The part of every request an agent makes that does not change from step to step: the system prompt LLMRequestPrep
+// builds (the agent's own prompt or the model's, then the stable and per-session parts) and the tool definitions.
+const fixedTokens = (input: LLM.StreamInput) =>
+  Effect.promise(async () => {
+    const tools = await Promise.all(
+      Object.entries(input.tools).map(async ([name, item]) =>
+        JSON.stringify({
+          name,
+          description: item.description,
+          parameters: item.inputSchema ? await asSchema(item.inputSchema).jsonSchema : {},
+        }),
+      ),
+    )
+    return Token.estimate(
+      [
+        ...(input.agent.prompt ? [input.agent.prompt] : SystemPrompt.provider(input.model)),
+        ...(input.stableSystem ?? []),
+        ...input.system,
+        input.user.system ?? "",
+        ...tools,
+      ].join("\n"),
+    )
+  })
+
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
@@ -1060,6 +1162,8 @@ export const node = LayerNode.make({
     Database.node,
     Auth.node,
     SpendGuard.node,
+    Provider.node,
+    ModelSlots.node,
   ],
 })
 

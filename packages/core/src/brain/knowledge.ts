@@ -209,7 +209,7 @@ export type DistillRun = {
     readonly cacheWrite: number
   }
   readonly cost: number
-  readonly costKind: "free" | "priced" | "plan" | "unknown"
+  readonly costKind: "free" | "priced" | "plan" | "local" | "unknown"
   readonly dropped: BrainDistill.Dropped
   readonly error?: string
 }
@@ -504,6 +504,11 @@ export interface Interface {
   readonly count: (place: Brain.Place, options: { readonly personal: boolean }) => Effect.Effect<number>
   /** The digest's line about the repository's documents, or nothing without any. */
   readonly digest: (place: Brain.Place, options: { readonly personal: boolean }) => Effect.Effect<string | undefined>
+  /** The titles the digest's line names from, with their documents' visibility: usable, and visible to it. */
+  readonly titles: (
+    place: Brain.Place,
+    options: { readonly personal: boolean },
+  ) => Effect.Effect<readonly { readonly title: string; readonly visibility: BrainSchema.Visibility }[]>
   readonly recall: (
     place: Brain.Place,
     input: {
@@ -929,10 +934,17 @@ function make(input: {
     state.added = [...state.added.filter((at) => now - at < MINUTE), now]
     if (state.added.length > LIMIT.perMinute)
       return refuse("busy", "Vector is reading many documents at once; add this one again in a minute.")
+    // Pages Deep research read have caps of their own (ResearchStore.LIMIT), so they take no room from documents.
     const kept = yield* db
       .select({ origin: BrainDocumentTable.origin, count: sql<number>`count(*)` })
       .from(BrainDocumentTable)
-      .where(and(eq(BrainDocumentTable.repository_id, place.repository), ne(BrainDocumentTable.status, "superseded")))
+      .where(
+        and(
+          eq(BrainDocumentTable.repository_id, place.repository),
+          ne(BrainDocumentTable.status, "superseded"),
+          ne(BrainDocumentTable.origin, "web"),
+        ),
+      )
       .groupBy(BrainDocumentTable.origin)
       .all()
       .pipe(Effect.orDie)
@@ -1010,6 +1022,9 @@ function make(input: {
       created_at: now,
       updated_at: now,
       indexed_at: null,
+      source_url: null,
+      fetched_at: null,
+      run_id: null,
     } satisfies DocumentRow
     yield* db
       .transaction((tx) =>
@@ -1763,6 +1778,7 @@ function make(input: {
 
   // --- Reading what is stored -------------------------------------------------------------------------------------
 
+  // Pages Deep research read are listed under their run (GET /memory/research), not one by one with documents.
   const documents = Effect.fn("BrainKnowledge.documents")(function* (place: Brain.Place, options: { personal: boolean }) {
     const rows = yield* db
       .select()
@@ -1771,6 +1787,7 @@ function make(input: {
         and(
           eq(BrainDocumentTable.repository_id, place.repository),
           ne(BrainDocumentTable.status, "superseded"),
+          ne(BrainDocumentTable.origin, "web"),
           visibility(options.personal),
         ),
       )
@@ -1964,9 +1981,9 @@ function make(input: {
     return row?.count ?? 0
   })
 
-  const digest = Effect.fn("BrainKnowledge.digest")(function* (place: Brain.Place, options: { personal: boolean }) {
-    const rows = yield* db
-      .select({ title: BrainDocumentTable.title })
+  const titles = Effect.fn("BrainKnowledge.titles")(function* (place: Brain.Place, options: { personal: boolean }) {
+    return yield* db
+      .select({ title: BrainDocumentTable.title, visibility: BrainDocumentTable.visibility })
       .from(BrainDocumentTable)
       .where(
         and(
@@ -1977,11 +1994,15 @@ function make(input: {
       )
       .all()
       .pipe(Effect.orDie)
+  })
+
+  const digest = Effect.fn("BrainKnowledge.digest")(function* (place: Brain.Place, options: { personal: boolean }) {
+    const rows = yield* titles(place, options)
     if (rows.length === 0) return undefined
-    const titles = rows
+    const clipped = rows
       .map((row) => BrainCard.escape(BrainCard.clip(row.title, 24)))
       .toSorted((a, b) => a.localeCompare(b))
-    const named = [...titles.slice(0, 3), ...(titles.length > 3 ? ["…"] : [])].join(", ")
+    const named = [...clipped.slice(0, 3), ...(clipped.length > 3 ? ["…"] : [])].join(", ")
     const line = (names: string) =>
       `Vector also holds ${rows.length} document${rows.length === 1 ? "" : "s"} for this repository${names ? ` (${names})` : ""}; memory search finds their cards.`
     // At most 30 tokens: titles go before the line does.
@@ -5861,11 +5882,18 @@ function make(input: {
       .limit(REVIEW)
       .all()
       .pipe(Effect.orDie)
-    // Held content is listed from where it waits, so approving or rejecting it anywhere settles it here too.
+    // Held content is listed from where it waits, so approving or rejecting it anywhere settles it here too. A page
+    // Deep research read waits with its run, whose report is what the user looks at here.
     const documents = yield* db
       .select()
       .from(BrainDocumentTable)
-      .where(and(eq(BrainDocumentTable.repository_id, place.repository), eq(BrainDocumentTable.status, "held")))
+      .where(
+        and(
+          eq(BrainDocumentTable.repository_id, place.repository),
+          eq(BrainDocumentTable.status, "held"),
+          ne(BrainDocumentTable.origin, "web"),
+        ),
+      )
       .orderBy(desc(BrainDocumentTable.updated_at))
       .limit(REVIEW)
       .all()
@@ -6590,6 +6618,7 @@ function make(input: {
     update,
     count,
     digest,
+    titles,
     recall,
     lines,
     outline,

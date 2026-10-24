@@ -105,7 +105,7 @@ export const prerender = true
 
           <h2 id="cli-models">Models in the terminal</h2>
           <p>
-            <code>vector models</code> lists the supported model catalog. Connect a provider with <code>vector providers login</code> to use its models. Pass a provider id to filter and <code>--verbose</code> for metadata such as per-token cost. The catalog is bundled with the release. From 1.99.99, <code>--refresh</code> only fetches when a mirror is explicitly configured with <code>VECTOR_MODELS_URL</code>, <code>VECTOR_MODELS_PATH</code> selects a local catalog, and <code>VECTOR_DISABLE_MODELS_FETCH=1</code> disables refresh.
+            <code>vector models</code> lists the supported model catalog. Connect a provider with <code>vector providers login</code> to use its models. Pass a provider id to filter and <code>--verbose</code> for metadata such as per-token cost. The catalog is bundled with the release, and from 1.99.99 Vector refreshes it from Vector's mirror, <code>https://vectordev.ai/models</code>, once it has loaded and then every hour, keeping the last catalog it had when the mirror cannot be reached. <code>VECTOR_MODELS_URL</code> points it at another mirror, <code>VECTOR_MODELS_PATH</code> selects a local catalog file and stops the refresh, and <code>VECTOR_DISABLE_MODELS_FETCH=1</code> stops the refresh too. <code>--refresh</code> fetches at once, but only when <code>VECTOR_MODELS_URL</code> is set. With <a href="/docs/local">Vector Local</a> on, the refresh is blocked unless you allow it or the mirror is on this computer.
           </p>
           <p class="doc-cmd"><code>vector models
 vector models anthropic --verbose</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>

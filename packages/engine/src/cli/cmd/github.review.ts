@@ -116,6 +116,7 @@ import { resolveGithubAuth } from "./github.auth"
 import { appRequested, verifyAppPullRequest } from "./github.app"
 import { prepareGithubGit } from "./github.git"
 import { withGithubCallbacks, withGithubSignals } from "./github.lifecycle"
+import { SessionPosting } from "@/session/posting"
 
 // Reviews post with the workflow's GITHUB_TOKEN.
 export const ACTIONS_BOT = "github-actions[bot]"
@@ -1186,6 +1187,10 @@ export const githubReview = Effect.fn("Cli.github.review")(function* (args: {
                 botLogin,
                 ...(env["GITHUB_API_URL"] ? { baseUrl: env["GITHUB_API_URL"] } : {}),
                 log,
+                // Nobody answers questions in a review job: what repeats the owner's memory is dropped and counted,
+                // and a fork's review links and embeds only on GitHub.
+                check: (parts, pull) =>
+                  run(SessionPosting.headless({ parts: [...parts], typed: false, untrusted: pull.untrusted, log })),
               }),
               git: createReviewGit({
                 directory: instance.worktree,

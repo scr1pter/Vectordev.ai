@@ -91,6 +91,10 @@ import { DragDropProvider, DragDropSensors, DragOverlay, SortableProvider, close
 import type { DragEvent } from "@thisbeyond/solid-dnd"
 import type { Message, Part, SnapshotFileDiff, VcsFileDiff } from "@vectordevai/sdk/v2"
 import { Message as SessionMessage } from "@vectordevai/session-ui/message-part"
+import { ResearchSourcesTab } from "@/features/research/sources-tab"
+import { registerResearchReportCard } from "@/features/research/report-card"
+import { registerLearnedChip } from "@/features/memory/learned-chip"
+import { OPEN_SOURCES, sessionRuns, type OpenSources } from "@/features/research/research-model"
 import { ConstrainDragYAxis, getDraggableId } from "@/utils/solid-dnd"
 import { sameWorkspaceRevisions } from "@/utils/workspace-revisions"
 
@@ -3805,6 +3809,14 @@ function StableCodespaceWorkbench(props: {
   )
 }
 
+// The session timeline draws a research report as the app's report card, with its chips and actions.
+registerResearchReportCard()
+// Under a reply, what Vector learned from the request it answers, with Undo.
+registerLearnedChip()
+
+// A page the Sources tab asked Preview to open, for the browser context it names.
+const [previewRequest, setPreviewRequest] = createSignal<{ contextId: string; url: string }>()
+
 const PREVIEW_URL_STORAGE_PREFIX = "vector.preview.url.v1:"
 // Lovable-style app preview: no chrome by default — Vector finds the running
 // dev server on its own and just shows the app. A manual URL lives behind the
@@ -3888,6 +3900,15 @@ export function PreviewPanel(props: {
       .finally(() => setLoading(false))
   }
 
+  // A source the Sources tab opened: the user asked for this page, so it may be on any site.
+  const [attached, setAttached] = createSignal(false)
+  createEffect(() => {
+    const request = previewRequest()
+    if (!request || request.contextId !== props.contextId || !attached()) return
+    setPreviewRequest(undefined)
+    applyUrl(request.url, true)
+  })
+
   // Auto-detect the running app: saved URL first, then common dev-server
   // ports. Keeps polling quietly until something is up.
   const ownPort = globalThis.location?.port ?? ""
@@ -3923,7 +3944,10 @@ export function PreviewPanel(props: {
     const run = browserApi()
     if (!run) return
     void run({ contextId: props.contextId, command: "attach" })
-      .then(() => detect())
+      .then(() => {
+        setAttached(true)
+        return detect()
+      })
       .catch(() => undefined)
     resizeObserver = new ResizeObserver(() => syncBrowserBounds())
     if (viewportRef) resizeObserver.observe(viewportRef)
@@ -4656,6 +4680,7 @@ export function SessionSidePanel(props: {
   })
   const contextOpen = tabState.contextOpen
   const previewOpen = tabState.previewOpen
+  const sourcesOpen = tabState.sourcesOpen
   const openedTabs = tabState.openedTabs
   const activeTab = tabState.activeTab
   const activeFileTab = tabState.activeFileTab
@@ -4674,6 +4699,7 @@ export function SessionSidePanel(props: {
     if (tabs().active() === "context") tabs().close("context")
     if (tabs().active() === "codespace") tabs().close("codespace")
     if (tabs().active() === "preview") tabs().close("preview")
+    if (tabs().active() === "sources") tabs().close("sources")
     announceWorkspaceMode("agent")
   }
 
@@ -4741,6 +4767,45 @@ export function SessionSidePanel(props: {
     announceWorkspaceMode("agent")
   }
 
+  // Deep research's Sources tab: offered once the session has a research run, and opened by the report card's
+  // citations and Sources button.
+  const [sourcesRequest, setSourcesRequest] = createSignal<OpenSources>()
+  const hasResearch = createMemo(() => {
+    const id = params.id
+    if (!id) return false
+    return (
+      sessionRuns((sync().data.message[id] ?? []).flatMap((message) => sync().data.part[message.id] ?? [])).length > 0
+    )
+  })
+  const openSourcesTab = (request?: OpenSources) => {
+    view().reviewPanel.open("other")
+    layout.fileTree.close()
+    void tabs().open("sources")
+    tabs().setActive("sources")
+    if (request) setSourcesRequest({ ...request })
+    announceWorkspaceMode("agent")
+  }
+  const onOpenSources = (event: Event) => {
+    const detail = (event as CustomEvent<OpenSources>).detail
+    const page = params.id
+    if (!detail || !page) return
+    if (!sessionLineage(detail.sessionID, sessionParent).includes(page) && detail.sessionID !== page) return
+    openSourcesTab(detail)
+  }
+  globalThis.window?.addEventListener(OPEN_SOURCES, onOpenSources)
+  onCleanup(() => globalThis.window?.removeEventListener(OPEN_SOURCES, onOpenSources))
+  // "Open in browser" from a source: Preview on the desktop, the system browser elsewhere.
+  const openInBrowser = (url: string) => {
+    if (!globalThis.window?.api?.runBrowserAgent) {
+      const openLink = globalThis.window?.api?.openLink
+      if (openLink) openLink(url)
+      else globalThis.window?.open(url, "_blank", "noopener,noreferrer")
+      return
+    }
+    setPreviewRequest({ contextId: params.id ?? sessionKey(), url })
+    openPreviewTab()
+  }
+
   const handleTabChange = (value: string) => {
     if (value === "codespace") {
       vectorspaceTab()
@@ -4748,6 +4813,10 @@ export function SessionSidePanel(props: {
     }
     if (value === "preview") {
       openPreviewTab()
+      return
+    }
+    if (value === "sources") {
+      openSourcesTab()
       return
     }
     announceWorkspaceMode("agent")
@@ -4955,6 +5024,27 @@ export function SessionSidePanel(props: {
                                   </div>
                                 </Tabs.Trigger>
                               </Show>
+                              <Show when={sourcesOpen() || hasResearch()}>
+                                <Tabs.Trigger
+                                  value="sources"
+                                  closeButton={
+                                    <IconButton
+                                      icon="close-small"
+                                      variant="ghost"
+                                      class="h-5 w-5"
+                                      onClick={() => tabs().close("sources")}
+                                      aria-label="Close Sources"
+                                    />
+                                  }
+                                  hideCloseButton={!sourcesOpen()}
+                                  onMiddleClick={() => tabs().close("sources")}
+                                >
+                                  <div class="flex items-center gap-2">
+                                    <Icon name="bullet-list" size="small" />
+                                    <div>Sources</div>
+                                  </div>
+                                </Tabs.Trigger>
+                              </Show>
                               <Show when={activeTab() !== "preview" && reviewTab() && props.canReview()}>
                                 <Tabs.Trigger
                                   value="review"
@@ -5053,6 +5143,18 @@ export function SessionSidePanel(props: {
                             view().reviewPanel.close()
                           }}
                         />
+                      </Show>
+                    </Tabs.Content>
+
+                    <Tabs.Content value="sources" class="flex flex-col h-full overflow-hidden contain-strict">
+                      <Show when={reviewOpen() && activeTab() === "sources" && params.id}>
+                        {(id) => (
+                          <ResearchSourcesTab
+                            sessionID={id()}
+                            request={sourcesRequest()}
+                            onOpenInBrowser={openInBrowser}
+                          />
+                        )}
                       </Show>
                     </Tabs.Content>
 

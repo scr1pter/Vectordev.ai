@@ -1,3 +1,6 @@
+import type { LocalMode } from "@vectordevai/schema/local-mode"
+import { LocalPolicy } from "./local-mode/policy"
+
 const PRIVATE_RUNTIME_ENVIRONMENT = new Set([
   "BLOB_READ_WRITE_TOKEN",
   "VECTOR_AUTH_CONTENT",
@@ -8,6 +11,16 @@ const PRIVATE_RUNTIME_ENVIRONMENT = new Set([
 ])
 
 /**
+ * Set in every untrusted child of a process that runs agents. `vector local off`, `allow` and `web` refuse under it.
+ * Its presence is what counts, whatever its value: a source's "0" is kept as it is and still marks the child.
+ */
+export const AGENT_MARKER = "VECTOR_AGENT_SESSION"
+
+// What untrusted children inherit from Vector itself, set by the process that resolved Vector Local. Nothing is added
+// until a process says so, so a process that runs no agents passes its environment through unchanged.
+const inherited: { local?: LocalMode.Web; agent: boolean } = { agent: false }
+
+/**
  * Builds an environment for project-controlled or otherwise untrusted child
  * processes without exposing Vector's in-process vault and bridge secrets.
  * Filtering is case-insensitive because Windows environment keys are too.
@@ -16,17 +29,55 @@ const PRIVATE_RUNTIME_ENVIRONMENT = new Set([
  * NODE_OPTIONS, PYTHONPATH and LD_LIBRARY_PATH, reach their commands unchanged;
  * preload variables a project config tries to set are refused when that
  * config is loaded (WorkspaceTrust.unsafeProjectEnvironment).
+ *
+ * Once a process has called `inherit`, its children also get the Vector Local
+ * floor (VECTOR_LOCAL=1 and a Web access at least as strict, so a nested
+ * vector keeps Local on whatever config it reads) and the agent marker. A
+ * source environment cannot lower either.
  */
-export function untrustedChildEnvironment(...sources: Array<NodeJS.ProcessEnv | undefined>) {
+export function untrustedChildEnvironment(...sources: Array<NodeJS.ProcessEnv | undefined>): Record<string, string> {
   const environment: NodeJS.ProcessEnv = Object.assign(
     {},
     ...(sources.length ? sources.filter(Boolean) : [process.env]),
   )
-  return Object.fromEntries(
-    Object.entries(environment).flatMap(([key, value]) =>
-      typeof value === "string" && !privateRuntimeKey(key) ? [[key, value] as const] : [],
-    ),
+  const filtered = Object.entries(environment).flatMap(([key, value]) =>
+    typeof value === "string" && !privateRuntimeKey(key) ? [[key, value] as const] : [],
   )
+  const added = floor(filtered)
+  // Windows keys are case-insensitive, so a source's own spelling of a key the floor sets is dropped, not doubled.
+  const replaced = new Set(Object.keys(added))
+  return {
+    ...Object.fromEntries(filtered.filter(([key]) => !replaced.has(key.toUpperCase()))),
+    ...added,
+  }
+}
+
+/**
+ * Sets what this process's untrusted children inherit: the Vector Local floor while Local is on, and the agent marker
+ * in a process that runs agents. The engine calls it when it resolves Vector Local at start and whenever the policy
+ * in effect changes.
+ */
+export function inherit(input: {
+  readonly local?: { readonly enabled: boolean; readonly web: LocalMode.Web }
+  readonly agent?: boolean
+}) {
+  inherited.local = input.local?.enabled ? input.local.web : undefined
+  if (input.agent !== undefined) inherited.agent = input.agent
+}
+
+function floor(environment: ReadonlyArray<readonly [string, string]>) {
+  const value = (name: string) => environment.find(([key]) => key.toUpperCase() === name)?.[1]
+  const web = inherited.local
+  // VECTOR_LOCAL_WEB names only the stricter settings; Ask is what Local means without it.
+  const current = (["network", "none"] as const).find(
+    (setting) => setting === value("VECTOR_LOCAL_WEB")?.trim().toLowerCase(),
+  )
+  const strictest = web === undefined ? undefined : LocalPolicy.stricter(web, current)
+  return {
+    ...(inherited.agent ? { [AGENT_MARKER]: value(AGENT_MARKER) || "1" } : {}),
+    ...(strictest === undefined ? {} : { VECTOR_LOCAL: "1" }),
+    ...(strictest === undefined || strictest === "ask" ? {} : { VECTOR_LOCAL_WEB: strictest }),
+  }
 }
 
 function privateRuntimeKey(key: string) {

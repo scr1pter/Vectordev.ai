@@ -16,6 +16,7 @@ import { Process } from "@/util/process"
 import { errorMessage } from "@/util/error"
 import { text } from "node:stream/consumers"
 import { Effect, Option } from "effect"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 
 type PluginAuth = NonNullable<Hooks["auth"]>
 
@@ -340,7 +341,8 @@ export const ProvidersLoginCommand = effectCmd({
     if (args.url) {
       const url = args.url.replace(/\/+$/, "")
       const wellknown = (yield* cliTry(`Failed to load auth provider metadata from ${url}: `, async () => {
-        const response = await fetch(`${url}/.well-known/vector`)
+        // Labelled as remote config, so Vector Local decides it: a host on the list, or one the user allowed.
+        const response = await Egress.fetch("remote-config", `${url}/.well-known/vector`)
         if (response.status === 404)
           throw new Error(
             `Organization config at ${url} is not available for Vector (HTTP 404). Ask your administrator to serve /.well-known/vector, or run vector providers logout ${url}.`,

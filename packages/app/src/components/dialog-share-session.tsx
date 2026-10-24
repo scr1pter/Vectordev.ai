@@ -8,6 +8,7 @@ import { Dialog } from "@vectordevai/ui/dialog"
 import { useDialog } from "@vectordevai/ui/context/dialog"
 import { useSDK } from "@/context/sdk"
 import { usePlatform } from "@/context/platform"
+import { OffInLocal } from "@/features/local/off-in-local"
 
 export function DialogShareSession(props: { sessionID: string }) {
   const client = useSDK()().client
@@ -147,6 +148,7 @@ export function DialogShareSession(props: { sessionID: string }) {
           visible tool input and output, which may contain secrets. Attachments are descriptions only; files are not
           uploaded or fetched.
         </p>
+        <OffInLocal source="share" />
         <p class="text-12-regular text-text-weak">
           Publishing uses your Vector account. Sign in through Vector account settings, or run <code>vector login</code>{" "}
           on the connected server.
@@ -211,7 +213,9 @@ export function DialogShareSession(props: { sessionID: string }) {
                 Also allow automatic public sharing of future sessions on this Vector account
               </Checkbox>
               <Show when={!state.updates}>
-                <p class="text-12-regular text-text-weak">Automatic sharing of future sessions requires future updates.</p>
+                <p class="text-12-regular text-text-weak">
+                  Automatic sharing of future sessions requires future updates.
+                </p>
               </Show>
               <Show when={state.remember}>
                 <p class="text-12-regular text-text-weak">

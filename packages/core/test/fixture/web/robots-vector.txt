@@ -1,0 +1,5 @@
+User-agent: Vector
+Disallow: /
+
+User-agent: *
+Allow: /

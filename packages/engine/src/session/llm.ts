@@ -2,6 +2,7 @@ import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { llmClient } from "@vectordevai/core/effect/app-node-platform"
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { Provider } from "@/provider/provider"
+import { ModelSlots } from "@vectordevai/core/local-mode/model-slots"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { serviceUse } from "@vectordevai/core/effect/service-use"
 import { providerCredentialAllowed, providerUsable } from "@vectordevai/core/provider-policy"
@@ -32,6 +33,10 @@ import { LLMNativeRuntime } from "./llm/native-runtime"
 import { LLMRequestPrep } from "./llm/request"
 import { LLMTiming } from "./llm/timing"
 import { NativePatch } from "./llm/native-patch"
+import { Session } from "./session"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { EgressAttribution } from "@vectordevai/core/local-mode/attribution"
+import type { LocalMode } from "@vectordevai/schema/local-mode"
 import { ToolOrder } from "./llm/tool-order"
 import { REQUEST_ID_HEADER } from "@/plugin/openai/transport"
 
@@ -65,6 +70,9 @@ export type StreamInput = {
   started?: (usage: UsageInput) => void
   // Called at the first event of the response, once the provider has the request and is answering it.
   answering?: () => void
+  // What the request carries out of the brain (personal memory, private document passages, repository excerpts), for
+  // Vector Local's network log. It travels in the request's attribution, never in a header.
+  carried?: LocalMode.Carried
 }
 
 export type StreamRequest = StreamInput & {
@@ -91,6 +99,8 @@ const live: Layer.Layer<
   | EventV2Bridge.Service
   | LLMClientService
   | RuntimeFlags.Service
+  | ModelSlots.Service
+  | Session.Service
 > = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -102,6 +112,33 @@ const live: Layer.Layer<
     const events = yield* EventV2Bridge.Service
     const llmClient = yield* LLMClient.Service
     const flags = yield* RuntimeFlags.Service
+    const slots = yield* ModelSlots.Service
+    const sessions = yield* Session.Service
+
+    // The top of a session's parent chain, or the last ancestor that could still be read.
+    const rootOf = (session: Session.Info): Effect.Effect<Session.Info> =>
+      session.parentID
+        ? sessions.get(session.parentID).pipe(
+            Effect.flatMap(rootOf),
+            Effect.catch(() => Effect.succeed(session)),
+          )
+        : Effect.succeed(session)
+
+    // Who a model call is for, for Vector Local's network log: the session, the root of its chain (so a subagent, a title,
+    // a compaction, the judge and Vectorscope's helpers count in the session that started them), the agent, or a helper
+    // session's internal name, and what the call carried out of the brain. It is read only while Vector Local is on.
+    const attribution = Effect.fnUntraced(function* (input: StreamRequest) {
+      if (!Egress.policy().enabled) return undefined
+      const session = yield* sessions.get(SessionID.make(input.sessionID)).pipe(Effect.option)
+      const root = Option.isSome(session) ? yield* rootOf(session.value) : undefined
+      return {
+        sessionID: input.sessionID,
+        rootID: root?.id ?? input.parentSessionID ?? input.sessionID,
+        agent: (Option.isSome(session) ? session.value.internal : undefined) ?? input.agent.name,
+        purpose: "inference",
+        carried: input.carried,
+      } satisfies EgressAttribution.Info
+    })
 
     const run = Effect.fn("LLM.run")(function* (input: StreamRequest) {
       yield* Effect.logInfo("stream", {
@@ -114,9 +151,11 @@ const live: Layer.Layer<
         mode: input.agent.mode,
       })
 
+      // A small request is a title or a name: on a model server someone hosts, its reply stays short.
+      const laned = input.small ? Provider.brief(input.model) : input.model
       const [language, cfg, item, info] = yield* Effect.all(
         [
-          provider.getLanguage(input.model),
+          provider.getLanguage(laned),
           config.get(),
           provider.getProvider(input.model.providerID),
           auth
@@ -272,6 +311,12 @@ const live: Layer.Layer<
           })
         : undefined
 
+      const scope = yield* attribution(input)
+      // The AI SDK starts its request inside streamText, so the request and everything it waits on (its place at a model
+      // server, the provider's fetch) run inside the attribution scope.
+      const send = (options: Parameters<typeof streamText>[0]) =>
+        scope ? EgressAttribution.run(scope, () => streamText(options)) : streamText(options)
+
       // Runtime seam: native is an opt-in adapter over @vectordevai/llm. It
       // either returns a ready LLMEvent stream or a concrete fallback reason.
       if (flags.experimentalNativeLlm) {
@@ -297,9 +342,19 @@ const live: Layer.Layer<
             "llm.provider": input.model.providerID,
             "llm.model": input.model.id,
           })
+          // The native runtime sends its requests itself, so on a server with a line (Provider.line) the stream holds
+          // a permit in it, as getLanguage's requests do, until the reply ends.
+          const line = yield* provider.line(input.model)
+          const held = line
+            ? Stream.unwrap(
+                slots
+                  .take({ origin: line.origin, permits: line.permits, priority: Provider.priorityOf(laned) })
+                  .pipe(Effect.as(native.stream)),
+              )
+            : native.stream
           return {
             type: "native" as const,
-            stream: native.stream,
+            stream: scope ? held.pipe(Stream.provideService(EgressAttribution.Reference, scope)) : held,
           }
         }
         yield* Effect.logInfo("llm runtime selected", {
@@ -328,7 +383,7 @@ const live: Layer.Layer<
       // LLMAISDK.toLLMEvents below normalizes fullStream parts for the processor.
       return {
         type: "ai-sdk" as const,
-        result: streamText({
+        result: send({
           onError(error) {
             bridge.fork(
               Effect.logError("stream error", {
@@ -494,6 +549,8 @@ export const node = LayerNode.make({
     EventV2Bridge.node,
     llmClient,
     RuntimeFlags.node,
+    ModelSlots.node,
+    Session.node,
   ],
 })
 

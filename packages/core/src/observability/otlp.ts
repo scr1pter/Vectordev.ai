@@ -3,6 +3,9 @@ import { OtlpLogger } from "effect/unstable/observability"
 import { Flag } from "../flag/flag"
 import { InstallationChannel, InstallationVersion } from "../installation/version"
 import { runID } from "./shared"
+import { EgressAttribution } from "../local-mode/attribution"
+import { Egress } from "../local-mode/egress"
+import { EgressGuard } from "../local-mode/guard"
 
 const endpoint = Flag.OTEL_EXPORTER_OTLP_ENDPOINT
 
@@ -65,14 +68,27 @@ export async function tracingLayer() {
   manager.enable()
   context.setGlobalContextManager(manager)
 
+  const exporter = new OTLP.OTLPTraceExporter({ url: `${endpoint}/v1/traces`, headers })
   return NodeSdk.layer(() => ({
     resource: resource(),
-    spanProcessor: new SdkBase.BatchSpanProcessor(
-      new OTLP.OTLPTraceExporter({
-        url: `${endpoint}/v1/traces`,
-        headers,
-      }),
-    ),
+    spanProcessor: new SdkBase.BatchSpanProcessor({
+      // With Vector Local on, each batch is decided as the telemetry source before it is sent (allowed when the
+      // endpoint is on this computer or the user allowed telemetry), and the exporter's own connection is granted for
+      // it alone.
+      export: (spans, done) => {
+        if (!Egress.policy().enabled) return exporter.export(spans, done)
+        const url = new URL(`${endpoint}/v1/traces`)
+        const decided = Egress.decide({ source: "telemetry", url })
+        // code 1 is ExportResultCode.FAILED: the batch is dropped, as when the endpoint cannot be reached.
+        if (decided.decision !== "allow") return done({ code: 1, error: new Error(decided.reason) })
+        EgressAttribution.granted(
+          { source: "telemetry", purpose: decided.purpose, grants: EgressGuard.destinations(url) },
+          () => exporter.export(spans, done),
+        )
+      },
+      shutdown: () => exporter.shutdown(),
+      forceFlush: () => exporter.forceFlush(),
+    }),
   }))
 }
 

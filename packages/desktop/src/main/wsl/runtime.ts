@@ -3,6 +3,8 @@ import { existsSync } from "node:fs"
 import { createRequire } from "node:module"
 import { join } from "node:path"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import type { LocalMode } from "@vectordevai/schema/local-mode"
 import type { WslDistroProbe, WslInstalledDistro, WslOnlineDistro, WslRuntimeCheck } from "../../preload/types"
 import { wslTerminalArgs } from "./policy"
 import { shellEscape, wslInstallScript, wslToolsProbeScript, wslResolveScript } from "./scripts"
@@ -310,6 +312,66 @@ export async function probeWslDistro(name: string, opts?: RunWslOptions): Promis
 
 export async function resolveWslVector(distro: string, opts?: RunWslOptions) {
   return firstLine((await runWslSh(wslResolveScript(), distro, opts)).stdout)
+}
+
+/**
+ * How WSL networks a distro, for the Vector Local policy an engine there gets. `shared`: its 127.0.0.1 is Windows' own
+ * (mirrored networking, or WSL 1). `nat` (WSL 2's default): it has a loopback of its own, and Windows is the default
+ * gateway. `unknown`: the distro did not say.
+ */
+export type WslNetwork = { readonly mode: "shared" | "nat" | "unknown"; readonly gateway?: string }
+
+// wslinfo comes with WSL 2.0, the release that added mirrored networking, so a WSL 2 kernel without it is NAT.
+const WSL_NETWORK_SCRIPT = [
+  'printf "mode=%s\\n" "$(wslinfo --networking-mode 2>/dev/null || true)"',
+  'printf "kernel=%s\\n" "$(uname -r 2>/dev/null || true)"',
+  "ip route show default 2>/dev/null || true",
+].join("\n")
+
+/** How WSL networks `distro`, read inside it. A distro that does not answer is `unknown`. */
+export async function wslNetwork(distro: string, opts?: RunWslOptions): Promise<WslNetwork> {
+  const result = await runWslSh(WSL_NETWORK_SCRIPT, distro, opts).catch(() => undefined)
+  return parseWslNetwork(result?.stdout ?? "")
+}
+
+/** Reads WSL_NETWORK_SCRIPT's output: wslinfo's networking mode, the kernel release and the default route. */
+export function parseWslNetwork(stdout: string): WslNetwork {
+  const mode = /^mode=(.*)$/m.exec(stdout)?.[1]?.trim().toLowerCase() ?? ""
+  const kernel = /^kernel=(.*)$/m.exec(stdout)?.[1]?.trim() ?? ""
+  const route = /^default via (\d{1,3}(?:\.\d{1,3}){3})\b/m.exec(stdout)?.[1]
+  // The gateway WSL gives a distro is a private address of the Windows host; anything else is not taken for it.
+  const gateway = route && LocalPolicy.hostClass(route) === "your-network" ? route : undefined
+  const wsl2 = /microsoft-standard-wsl2/i.test(kernel)
+  if (mode === "mirrored" || (!wsl2 && /microsoft/i.test(kernel))) return { mode: "shared" }
+  if (mode === "nat" || (wsl2 && !mode)) return gateway ? { mode: "nat", gateway } : { mode: "nat" }
+  return { mode: "unknown" }
+}
+
+/**
+ * The desktop's Vector Local for an engine it starts in WSL, as VECTOR_LOCAL_POLICY: on, its Web access and its model
+ * servers. It is user-level policy (LocalPolicy.resolve reads it so), so it can only turn Vector Local on, tighten Web
+ * access and add servers there; it never carries a lock, the services or sites the desktop allows, or a company's
+ * wildcard and address-range entries, which apply on Windows only. A distro needs its own /etc/vector/vector.json for
+ * those. In NAT networking a server on Windows' 127.0.0.1 is at the gateway from inside the distro, so each server on
+ * this computer is listed there too. Undefined while Vector Local is off.
+ */
+export function wslLocalPolicy(policy: LocalMode.Policy, network: WslNetwork) {
+  if (!policy.enabled) return undefined
+  const origins = policy.endpoints.flatMap((item) => {
+    const origin = item.origin.includes("*") ? undefined : LocalPolicy.origin(item.origin)
+    return origin ? [origin] : []
+  })
+  const gateway = network.mode === "nat" ? network.gateway : undefined
+  const windows = gateway
+    ? origins
+        .filter((origin) => LocalPolicy.loopback(new URL(origin).hostname))
+        .map((origin) => {
+          const url = new URL(origin)
+          url.hostname = gateway
+          return url.origin
+        })
+    : []
+  return JSON.stringify({ enabled: true, web: policy.web, endpoints: [...new Set([...origins, ...windows])] })
 }
 
 export async function readWslCommandVersion(command: string, distro: string, opts?: RunWslOptions) {

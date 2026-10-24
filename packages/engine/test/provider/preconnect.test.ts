@@ -12,6 +12,11 @@ import { testProviderConfig } from "../lib/test-provider"
 import { Env } from "@/env"
 import { Plugin } from "@/plugin"
 import { Provider } from "@/provider/provider"
+import { NetworkGuard } from "../../../core/test/lib/network-guard"
+
+// Bun's fetch.preconnect does nothing while a proxy environment is set, so this file's strict guard runs without its
+// own proxy. Its fetch and socket wraps still refuse any connection off this computer.
+NetworkGuard.use({ proxy: false })
 
 afterEach(async () => {
   await disposeAllInstances()

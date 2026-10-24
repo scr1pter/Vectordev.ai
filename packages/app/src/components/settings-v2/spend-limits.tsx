@@ -18,6 +18,7 @@ import {
   withWarnAt,
   type LimitKey,
 } from "./spend-limits-model"
+import { COST } from "@/features/local/local-model"
 import "./settings-v2.css"
 
 const COLUMNS: readonly { key: keyof SpendPolicy; title: string }[] = [
@@ -108,6 +109,20 @@ function SpendLimitsPanel(props: { api: SpendLimitsApi }) {
 
       <div>
         <For each={SCOPE_NOTES}>{(note) => <p class="settings-v2-card-description">{note}</p>}</For>
+      </div>
+
+      <div class="settings-v2-card settings-v2-card--wide" data-section="local-cost">
+        <div class="settings-v2-card-head">
+          <div class="settings-v2-card-copy">
+            <h3 class="settings-v2-card-title">Models on servers you host</h3>
+            <p class="settings-v2-card-description">{COST}</p>
+            <p class="settings-v2-card-description">
+              Dollar caps skip a model on this computer, or on a private server on your Vector Local list, that has no
+              price set, so a cap does not stop its run for being unpriced. A server with a price in your config is
+              capped like any other.
+            </p>
+          </div>
+        </div>
       </div>
 
       <div class="settings-v2-section-grid">

@@ -61,11 +61,32 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
       )
       if ((yield* RequestPrincipal).kind !== "owner") Provider.withoutTrainingFreeModels(providers)
       const selectable = new Set(Object.keys(connected).filter((id) => !!providers[id]))
+      // The app hides Fast for these, offers them for Vector Local's roles and labels a research cap in steps for the
+      // ones with no per-token price, so it never works out where a model's requests go a second time.
+      const hosted = yield* Effect.forEach(
+        Object.values(connected).flatMap((item) => Object.values(item.models)),
+        (model) =>
+          provider.line(model).pipe(
+            Effect.map((line) =>
+              line?.hosted
+                ? [
+                    {
+                      providerID: model.providerID,
+                      modelID: model.id,
+                      origin: line.origin,
+                      local: line.local && model.cost.input === 0 && model.cost.output === 0,
+                    },
+                  ]
+                : [],
+            ),
+          ),
+      )
       return {
         all: Object.values(providers).map(Provider.toClientInfo),
         default: Provider.defaultModelIDs(providers),
         connected: [...selectable],
         unavailable: yield* provider.unavailable(),
+        hosted: hosted.flat(),
       }
     })
 

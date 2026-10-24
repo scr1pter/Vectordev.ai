@@ -188,6 +188,7 @@ export const hasPending = Effect.fn("SessionInput.hasPending")(function* (
   return row !== undefined
 })
 
+// The prompt's agent is part of what is compared, so a retry that names another agent conflicts with the admitted one.
 export const equivalent = (
   input: Admitted,
   expected: {
@@ -248,7 +249,36 @@ export const promoteSteers = Effect.fn("SessionInput.promoteSteers")(function* (
   sessionID: SessionSchema.ID,
   cutoff: number,
 ) {
-  const rows = yield* db
+  return yield* publish(db, events, sessionID, yield* pendingSteers(db, sessionID, cutoff))
+})
+
+export const promoteNextQueued = Effect.fn("SessionInput.promoteNextQueued")(function* (
+  db: DatabaseService,
+  events: EventV2.Interface,
+  sessionID: SessionSchema.ID,
+) {
+  const row = yield* nextQueued(db, sessionID)
+  return row === undefined ? false : yield* publish(db, events, sessionID, [row]).pipe(Effect.as(true))
+})
+
+/**
+ * The inputs a boundary of this delivery would promote, in the order it promotes them, without promoting any: the
+ * oldest queued input for a queue boundary, then every steer admitted up to `cutoff`. The runner reads the agent the
+ * newest of them names before it promotes them, so the turn they start runs under that agent.
+ */
+export const promotable = Effect.fn("SessionInput.promotable")(function* (
+  db: DatabaseService,
+  sessionID: SessionSchema.ID,
+  delivery: Delivery,
+  cutoff: number,
+) {
+  const queued = delivery === "queue" ? yield* nextQueued(db, sessionID) : undefined
+  const steers = yield* pendingSteers(db, sessionID, cutoff)
+  return [...(queued ? [queued] : []), ...steers].map(fromRow)
+})
+
+const pendingSteers = (db: DatabaseService, sessionID: SessionSchema.ID, cutoff: number) =>
+  db
     .select()
     .from(SessionInputTable)
     .where(
@@ -262,15 +292,9 @@ export const promoteSteers = Effect.fn("SessionInput.promoteSteers")(function* (
     .orderBy(asc(SessionInputTable.admitted_seq))
     .all()
     .pipe(Effect.orDie)
-  return yield* publish(db, events, sessionID, rows)
-})
 
-export const promoteNextQueued = Effect.fn("SessionInput.promoteNextQueued")(function* (
-  db: DatabaseService,
-  events: EventV2.Interface,
-  sessionID: SessionSchema.ID,
-) {
-  const row = yield* db
+const nextQueued = (db: DatabaseService, sessionID: SessionSchema.ID) =>
+  db
     .select()
     .from(SessionInputTable)
     .where(
@@ -284,5 +308,3 @@ export const promoteNextQueued = Effect.fn("SessionInput.promoteNextQueued")(fun
     .limit(1)
     .get()
     .pipe(Effect.orDie)
-  return row === undefined ? false : yield* publish(db, events, sessionID, [row]).pipe(Effect.as(true))
-})

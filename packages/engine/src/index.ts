@@ -1,6 +1,7 @@
+import "@vectordevai/core/local-mode/backstop"
 import yargs from "yargs"
 import { hideBin } from "yargs/helpers"
-import { RunCommand } from "./cli/cmd/run"
+import { RunCommand, runLocal } from "./cli/cmd/run"
 import { GenerateCommand } from "./cli/cmd/generate"
 import { ProvidersCommand } from "./cli/cmd/providers"
 import { AgentCommand } from "./cli/cmd/agent"
@@ -35,6 +36,7 @@ import { VectorLoginCommand, VectorLogoutCommand, VectorWhoamiCommand } from "./
 import { OrgCommand } from "./cli/cmd/org"
 import { TrustCommand } from "./cli/cmd/trust"
 import { MemoryCommand } from "./cli/cmd/memory"
+import { LocalCommand } from "./cli/cmd/local"
 import { Heap } from "./cli/heap"
 import { disposeRuntimes } from "./effect/runtime-cleanup"
 import { assertSecurityEnvironment } from "@vectordevai/core/flag/security"
@@ -68,8 +70,9 @@ function show(out: string) {
   process.stderr.write(out)
 }
 
-// Commands that must stay reachable without an account.
-const openCommands = new Set(["login", "logout", "whoami", "org", "completion", "uninstall", "upgrade"])
+// Commands that must stay reachable without an account. `vector local` sets Vector Local up on a computer that may
+// reach no vectordev.ai at all, so every `vector local` command is open; `vector run --local` is not.
+const openCommands = new Set(["login", "logout", "whoami", "org", "completion", "uninstall", "upgrade", "local"])
 
 const cli = yargs(args)
   .parserConfiguration({ "populate--": true })
@@ -105,6 +108,11 @@ const cli = yargs(args)
     process.env.AGENT = "1"
     process.env.VECTOR = "1"
     process.env.VECTOR_PID = String(process.pid)
+
+    // `vector run --local` is on Vector Local from here, before the account check below could reach vectordev.ai, with
+    // the server it attaches to, if any, on the model server list for the run.
+    if (opts.local === true && String(opts._?.[0] ?? "") === "run")
+      await runLocal(typeof opts.attach === "string" ? opts.attach : undefined)
 
     if (isVectorCli && !opts.help && !opts.version) {
       const command = String(opts._?.[0] ?? "")
@@ -145,6 +153,7 @@ const cli = yargs(args)
   .command(DbCommand)
   .command(TrustCommand)
   .command(MemoryCommand)
+  .command(LocalCommand)
   .fail((msg, err) => {
     if (msg) UI.error(msg)
     if (

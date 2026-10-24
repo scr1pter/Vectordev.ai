@@ -31,12 +31,14 @@ export const ERROR_STREAK = 3
 // Finished runs kept for snapshot(); the oldest is dropped first.
 export const LAST_RUNS = 200
 
-// The order matters: a free model with a catalog price is still free, and an OAuth plan with a catalog price is
-// billed by the plan, not per token.
-export function costKindOf(input: { free: boolean; listed: boolean; oauthPlan: boolean }): CostKind {
+// The order matters: a free model with a catalog price is still free, an OAuth plan with a catalog price is billed by
+// the plan, not per token, and a local server with a configured price is priced at it. `local` is a model server on
+// this computer or a listed private address; a company endpoint on the internet without a price stays unknown.
+export function costKindOf(input: { free: boolean; listed: boolean; oauthPlan: boolean; local?: boolean }): CostKind {
   if (input.free) return "free"
   if (input.oauthPlan) return "plan"
   if (input.listed) return "priced"
+  if (input.local) return "local"
   return "unknown"
 }
 
@@ -81,6 +83,9 @@ export type Run = {
   readonly loops: ReadonlyMap<SessionID, Loop>
   // Off for a root that polices its own loops; see ignoreLoops.
   readonly loopRules: boolean
+  // Set while the budget is begin()'s fallback, which no one has armed over since, with every budget tighten() has
+  // held it to: what refall() may move to another fallback. Unset once the owner arms a budget of their own.
+  readonly fallback?: { readonly tightened?: RunBudget.Info }
 }
 
 export type Step = {
@@ -189,7 +194,7 @@ export function stopMessage(reason: RunBudget.StopReason, run: Run, detail: Stop
   if (reason === "predicted")
     return `Stopped before the next step: ${formatUsd(run.spentUsd)} spent of a ${cap} cap, and the next step was estimated at ${formatRange(detail.estimate ?? { lowUsd: 0, highUsd: 0 })} at catalog list prices.`
   if (reason === "unpriced")
-    return `Stopped after ${run.unpricedSteps} unpriced steps: this model has no catalog price, so Vector cannot count its spend against your ${cap} cap.`
+    return `Stopped after ${run.unpricedSteps} unpriced steps: Vector has no per-token price for this model, so it cannot count what they cost against your ${cap} cap. Without a dollar cap, step and loop limits still apply.`
   if (reason === "steps")
     return `Step limit reached: ${run.steps} of ${run.budget.steps ?? run.steps} steps used for this run.`
   const tool = detail.loop?.tool ?? "a tool"
@@ -221,8 +226,8 @@ function stop(run: Run, verdict: Stop & Verdict) {
   return { run: { ...run, stopped: { reason: verdict.reason, message: verdict.message } }, verdict }
 }
 
-// Step and dollar limits. Dollars are checked only with a dollar cap and a priced or unpriced model: plan and free
-// models are not billed per token. The next step is predicted from this step's context, like Vectorscope does. A
+// Step and dollar limits. Dollars are checked only with a dollar cap and a priced or unpriced model: plan, free and
+// local models are not billed per token, so only the step and loop limits stop them. The next step is predicted from this step's context, like Vectorscope does. A
 // final answer that reaches a limit still stops the run, so no other session of it starts another step, but the
 // answer itself stands: callers end a turn early only for a step that continues.
 function checkLimits(run: Run, step: Step, sessionID: SessionID): Verdict {
@@ -342,7 +347,17 @@ export interface Interface {
   // armed budget does, and one armed only this way is held to begin()'s `fallback` too.
   readonly tighten: (sessionID: SessionID, budget: RunBudget.Info) => Effect.Effect<void>
   // Starts a run for a root session with the armed budget, else `fallback`. A no-op while the run is active.
-  readonly begin: (rootID: SessionID, fallback?: RunBudget.Info) => Effect.Effect<void>
+  // `carried` is a stopped run the new one carries on from, in place of `fallback`: the new run keeps its budget, which
+  // stays the owner's when the owner armed it, so replaceFallback() moves it only when it was a fallback too.
+  readonly begin: (
+    rootID: SessionID,
+    fallback?: RunBudget.Info,
+    carried?: Pick<Run, "budget" | "fallback">,
+  ) => Effect.Effect<void>
+  // Moves the active run of `sessionID`'s root from begin()'s fallback to `fallback`, held to every budget tighten()
+  // gave it, such as research's default caps moving from Focused's to Deep's. A run the owner armed a budget for keeps
+  // that budget, and a root with no run going is left alone.
+  readonly replaceFallback: (sessionID: SessionID, fallback: RunBudget.Info) => Effect.Effect<void>
   // Turns the loop rules off for a session that polices itself, such as a Vectorscope specialist: it has its own
   // step, cost and time limits, never edits files (so nothing would ever reset the loop window), and must account for
   // every stop it gets. Spend, step and cap checks still apply, in its own run or the run it is linked to.
@@ -475,9 +490,13 @@ const layer = Layer.effect(
           if (!ledger || key === undefined)
             return { ...current, armed: new Map(current.armed).set(rootID, { budget, tighten: false }) }
           const warned = ledger.run.warned && ledger.run.budget.usd === budget.usd
+          // The owner's own budget: no fallback moves it again.
           return {
             ...current,
-            ledgers: new Map(current.ledgers).set(key, { ...ledger, run: { ...ledger.run, budget, warned } }),
+            ledgers: new Map(current.ledgers).set(key, {
+              ...ledger,
+              run: { ...ledger.run, budget, warned, fallback: undefined },
+            }),
           }
         })
       }),
@@ -489,9 +508,13 @@ const layer = Layer.effect(
           if (ledger && key !== undefined) {
             const next = tighter(ledger.run.budget, budget)
             const warned = ledger.run.warned && ledger.run.budget.usd === next.usd
+            const fallback = ledger.run.fallback && { tightened: tighter(ledger.run.fallback.tightened, budget) }
             return {
               ...current,
-              ledgers: new Map(current.ledgers).set(key, { ...ledger, run: { ...ledger.run, budget: next, warned } }),
+              ledgers: new Map(current.ledgers).set(key, {
+                ...ledger,
+                run: { ...ledger.run, budget: next, warned, fallback },
+              }),
             }
           }
           const held = current.armed.get(rootID)
@@ -504,13 +527,22 @@ const layer = Layer.effect(
           }
         })
       }),
-      begin: Effect.fn("SpendGuard.begin")(function* (rootID, fallback) {
+      begin: Effect.fn("SpendGuard.begin")(function* (rootID, fallback, carried) {
         yield* Ref.update(state, (current) => {
           if (current.active.has(rootID)) return current
           const armed = new Map(current.armed)
           armed.delete(rootID)
           const held = current.armed.get(rootID)
-          const budget = held ? (held.tighten ? tighter(fallback, held.budget) : held.budget) : (fallback ?? {})
+          const base = carried ? carried.budget : fallback
+          const budget = held ? (held.tighten ? tighter(base, held.budget) : held.budget) : (base ?? {})
+          // What replaceFallback() may move: begin()'s fallback, or the carried run's budget when that was one, held to
+          // every budget tighten() gave either. A budget the owner armed, for this run or the one it carries on from,
+          // stays.
+          const movable = held && !held.tighten ? undefined : carried ? carried.fallback : {}
+          const moves =
+            movable && held
+              ? { tightened: movable.tightened ? tighter(movable.tightened, held.budget) : held.budget }
+              : movable
           const bindings = new Map(current.bindings)
           current.roots.forEach((owner, childID) => {
             if (owner === rootID && !bindings.has(childID))
@@ -526,8 +558,25 @@ const layer = Layer.effect(
               kind: "run",
               id: `run:${current.next}`,
               lineage: current.next,
-              run: start(rootID, budget, !current.quiet.has(rootID)),
+              run: {
+                ...start(rootID, budget, !current.quiet.has(rootID)),
+                ...(moves ? { fallback: moves } : {}),
+              },
             }),
+          }
+        })
+      }),
+      replaceFallback: Effect.fn("SpendGuard.replaceFallback")(function* (sessionID, fallback) {
+        yield* Ref.update(state, (current) => {
+          const key = current.active.get(rootIn(current, sessionID))
+          const ledger = key === undefined ? undefined : current.ledgers.get(key)
+          if (!ledger || key === undefined || !ledger.run.fallback) return current
+          const tightened = ledger.run.fallback.tightened
+          const budget = tightened ? tighter(fallback, tightened) : fallback
+          const warned = ledger.run.warned && ledger.run.budget.usd === budget.usd
+          return {
+            ...current,
+            ledgers: new Map(current.ledgers).set(key, { ...ledger, run: { ...ledger.run, budget, warned } }),
           }
         })
       }),

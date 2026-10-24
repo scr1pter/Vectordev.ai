@@ -30,3 +30,45 @@ jobs:
 
       - name: Build website
         run: bun --cwd packages/web build
+
+  # Vector Local with Web access None where the machine really has no network. Every file runs in a network namespace
+  # with nothing but loopback: no route, no resolver and no proxy, so a part of Vector that still needed the network
+  # fails here. The fake model server and the fake web are on 127.0.0.1.
+  air-gap:
+    name: Air gap (Vector Local, no network)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up Bun
+        uses: ./.github/actions/setup-bun
+
+      # Installed while the network is still there: ripgrep for the tests that search files, and bubblewrap for the
+      # shell sandbox that Web access None requires on Linux. Ubuntu 24.04 limits the unprivileged user namespaces
+      # bubblewrap needs, so this runner lifts that limit, and the check after it proves bubblewrap works.
+      - name: Install ripgrep and bubblewrap
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ripgrep bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bwrap --unshare-net --ro-bind / / true
+
+      - name: Run the Vector Local tests with no network
+        working-directory: packages/engine
+        run: |
+          set -euo pipefail
+          for file in \
+            test/local-mode/air-gap.test.ts \
+            test/tool/shell-sandbox-local.test.ts \
+            test/tool/research-offline.test.ts \
+            test/local-mode/local-run.test.ts
+          do
+            echo "::group::$file"
+            sudo unshare --net -- sh -c \
+              'ip link set lo up && exec sudo -E -u "$1" env PATH="$2" GITHUB_ACTIONS=false bun test --timeout 30000 "$3"' \
+              sh "$USER" "$PATH" "$file"
+            echo "::endgroup::"
+          done

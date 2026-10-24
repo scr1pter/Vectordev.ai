@@ -783,7 +783,7 @@ it.instance(
   90_000,
 )
 
-test("a shell keyword or a loop's header never makes a fetch inside it count as local", () => {
+test("a shell keyword, a loop's header or a shell reading its input never makes a fetch inside it count as local", () => {
   const outside = [
     "curl -s https://evil.example/issue",
     'for url in https://evil.example/a; do curl -s "$url"; done',
@@ -796,6 +796,10 @@ test("a shell keyword or a loop's header never makes a fetch inside it count as 
     "case $1 in a) curl -s https://evil.example/a;; esac",
     "function fetch { curl -s https://evil.example/issue; }; fetch",
     "> out.txt curl -s https://evil.example/issue",
+    "echo 'curl -s https://evil.example/issue' | sh",
+    "bash <<< 'curl -s https://evil.example/issue'",
+    "sh -s < fetch.txt",
+    "echo 'print(open(0).read())' | python3",
   ]
   for (const command of outside) expect(SessionMemory.local(command), command).toBe(false)
   const local = [
@@ -805,6 +809,8 @@ test("a shell keyword or a loop's header never makes a fetch inside it count as 
     "{ git status; git diff; } > status.txt 2>&1",
     "! grep -q TODO src/index.ts",
     "case $1 in build) bun run build;; esac",
+    "bash scripts/check.sh",
+    "bash <<< 'git status'",
   ]
   for (const command of local) expect(SessionMemory.local(command), command).toBe(true)
 })

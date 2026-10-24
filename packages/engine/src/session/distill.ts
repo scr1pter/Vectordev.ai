@@ -148,6 +148,8 @@ const layer = Layer.effect(
           signIn?.type === "oauth" &&
           providerCredentialAllowed(model.providerID, signIn, Boolean(model.api.npm || model.api.url)),
         listed: model.cost.input > 0 || model.cost.output > 0,
+        // A server on this computer, or a private one on the model server list, has no per-token price.
+        local: (yield* provider.line(model))?.local ?? false,
       })
       return {
         type: "plan" as const,

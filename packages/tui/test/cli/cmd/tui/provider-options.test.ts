@@ -10,6 +10,14 @@ describe("providerOptions", () => {
     })
   })
 
+  test("offers the model servers on this computer for Vector Local, before Other", () => {
+    expect(providerOptions([{ id: "openai", name: "OpenAI" }]).at(-2)).toMatchObject({
+      type: "local",
+      title: "Models on this computer (Vector Local)",
+      category: "Providers",
+    })
+  })
+
   test("offers OpenAI by API key: Vector's own Sign in with ChatGPT is off", () => {
     expect(providerOptions([{ id: "openai", name: "OpenAI" }])[0]?.description).toBe("(API key)")
   })
@@ -28,7 +36,15 @@ describe("providerOptions", () => {
         { id: "mistral", name: "Mistral" },
         { id: "amazon-bedrock", name: "AWS Bedrock" },
       ]).map((option) => option.value),
-    ).toEqual(["openai", "anthropic", "amazon-bedrock", "mistral", "zai", "__vector_custom_provider__"])
+    ).toEqual([
+      "openai",
+      "anthropic",
+      "amazon-bedrock",
+      "mistral",
+      "zai",
+      "__vector_local_servers__",
+      "__vector_custom_provider__",
+    ])
   })
 
   test("includes configured custom providers without colliding with Other", () => {
@@ -46,7 +62,7 @@ describe("providerOptions", () => {
         { id: "github-copilot-enterprise", name: "Copilot Enterprise", source: "config" },
         { id: "openai", name: "OpenAI", source: "env" },
       ]).map((provider) => provider.value),
-    ).toEqual(["openai", "__vector_custom_provider__"])
+    ).toEqual(["openai", "__vector_local_servers__", "__vector_custom_provider__"])
   })
 
   test("normalizes and validates custom provider ids", () => {
@@ -66,7 +82,7 @@ describe("providerOptions", () => {
         { id: "github-copilot", name: "Approved plugin", options: { vectorOAuthPlugin: "a".repeat(64) } },
         { id: "github-copilot-enterprise", name: "Unapproved plugin", options: { vectorOAuthPlugin: "yes" } },
       ]).map((option) => option.value),
-    ).toEqual(["github-copilot", "__vector_custom_provider__"])
+    ).toEqual(["github-copilot", "__vector_local_servers__", "__vector_custom_provider__"])
     expect(normalizeCustomProviderID("github-copilot")).toBeUndefined()
   })
 })

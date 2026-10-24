@@ -23,7 +23,6 @@ import { Parameters as Skill } from "../../src/tool/skill"
 import { BatchParameters, Parameters as Task } from "../../src/tool/task"
 import { Parameters as Todo } from "../../src/tool/todo"
 import { Parameters as WebFetch } from "../../src/tool/webfetch"
-import { Parameters as WebSearch } from "../../src/tool/websearch"
 import { Parameters as Write } from "../../src/tool/write"
 
 const parse = <S extends Schema.Decoder<unknown>>(schema: S, input: unknown): S["Type"] =>
@@ -50,7 +49,6 @@ describe("tool parameters", () => {
     test("task", () => expect(toJsonSchema(BatchParameters)).toMatchSnapshot())
     test("todo", () => expect(toJsonSchema(Todo)).toMatchSnapshot())
     test("webfetch", () => expect(toJsonSchema(WebFetch)).toMatchSnapshot())
-    test("websearch", () => expect(toJsonSchema(WebSearch)).toMatchSnapshot())
     test("write", () => expect(toJsonSchema(Write)).toMatchSnapshot())
 
     test("inlines named child schemas for provider compatibility", () => {
@@ -283,12 +281,6 @@ describe("tool parameters", () => {
         url: "https://example.com",
         format: "markdown",
       })
-    })
-  })
-
-  describe("websearch", () => {
-    test("accepts query", () => {
-      expect(parse(WebSearch, { query: "vector" }).query).toBe("vector")
     })
   })
 

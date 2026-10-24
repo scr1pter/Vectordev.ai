@@ -22,13 +22,37 @@ export const TrustStatus = Schema.Struct({
   approvable: Schema.Boolean,
 }).annotate({ identifier: "ProjectTrustStatus" })
 
+/**
+ * A change to a key a company lock keeps (Config.lockedIn): nothing was written. `keys` names each one, top-level or as
+ * `local.<key>`.
+ */
+export class ConfigLockedError extends Schema.ErrorClass<ConfigLockedError>("ConfigLocked")(
+  {
+    name: Schema.Literal("ConfigLocked"),
+    data: Schema.Struct({
+      keys: Schema.Array(Schema.String),
+      message: Schema.String,
+    }),
+  },
+  { httpApiStatus: 403 },
+) {}
+
+/** Config as GET returns it, with the keys a company lock keeps, which a change cannot set. */
+export const ConfigWithLocks = Schema.Struct({
+  ...ConfigV1.Info.fields,
+  locked: Schema.Array(Schema.String).annotate({
+    description:
+      "The config keys your company's policy sets and locks, such as local, share and autoupdate. A change to one fails with ConfigLocked. Empty without a company lock.",
+  }),
+}).annotate({ identifier: "ConfigWithLocks" })
+
 export const ConfigApi = HttpApi.make("config")
   .add(
     HttpApiGroup.make("config")
       .add(
         HttpApiEndpoint.get("get", root, {
           query: WorkspaceRoutingQuery,
-          success: described(ConfigV1.Info, "Get config info"),
+          success: described(ConfigWithLocks, "Get config info"),
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "config.get",
@@ -40,12 +64,13 @@ export const ConfigApi = HttpApi.make("config")
           query: WorkspaceRoutingQuery,
           payload: ConfigV1.Info,
           success: described(ConfigV1.Info, "Successfully updated config"),
-          error: HttpApiError.BadRequest,
+          error: [HttpApiError.BadRequest, ConfigLockedError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "config.update",
             summary: "Update configuration",
-            description: "Update Vector configuration settings and preferences.",
+            description:
+              "Update Vector configuration settings and preferences. Under a company lock, a change to a key the company keeps fails with ConfigLocked.",
           }),
         ),
         HttpApiEndpoint.get("trust", `${root}/trust`, {

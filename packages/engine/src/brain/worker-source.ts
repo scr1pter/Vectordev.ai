@@ -14,11 +14,18 @@ export const node = makeGlobalNode({
   layer: Layer.succeed(
     BrainWorker.Source,
     BrainWorker.Source.of({
-      load: Effect.promise(() =>
-        // @ts-expect-error - generated at build time
-        import("brain-worker.gen.ts").then((module) => module.default as string).catch(() => undefined),
-      ),
+      load: Effect.promise(() => (bundled.source ??= read())),
     }),
   ),
   deps: [],
 })
+
+// The module is in this build or it is not, so it is imported once per process. Under `bun test` every import of a
+// module that is not there leaves a directory open, and the engine's suite builds this layer for each of its many
+// instances: from source it ran the suite out of file descriptors (EMFILE) before it finished.
+const bundled: { source?: Promise<string | undefined> } = {}
+
+function read(): Promise<string | undefined> {
+  // @ts-expect-error - generated at build time
+  return import("brain-worker.gen.ts").then((module) => module.default as string).catch(() => undefined)
+}

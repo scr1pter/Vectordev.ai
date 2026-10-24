@@ -159,6 +159,8 @@ export interface Interface {
     sessionID: SessionID
     auto: boolean
     overflow?: boolean
+    /** What the summary must keep besides the conversation, such as a research run's digest. */
+    context?: readonly string[]
   }) => Effect.Effect<"continue" | "stop">
   readonly create: (input: {
     sessionID: SessionID
@@ -323,6 +325,7 @@ const layer = Layer.effect(
       sessionID: SessionID
       auto: boolean
       overflow?: boolean
+      context?: readonly string[]
     }) {
       const parent = input.messages.findLast((m) => m.info.id === input.parentID)
       if (!parent || parent.info.role !== "user") {
@@ -385,7 +388,10 @@ const layer = Layer.effect(
         { sessionID: input.sessionID },
         { context: [], prompt: undefined },
       )
-      const nextPrompt = compacting.prompt ?? buildPrompt({ previousSummary, context: compacting.context })
+      // The caller's context (a research run's digest) goes with a plugin's own prompt too.
+      const nextPrompt = compacting.prompt
+        ? [compacting.prompt, ...(input.context ?? [])].join("\n\n")
+        : buildPrompt({ previousSummary, context: [...compacting.context, ...(input.context ?? [])] })
       const msgs = structuredClone(selected.head)
       yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
       const modelMessages = yield* MessageV2.toModelMessagesEffect(msgs, model, {

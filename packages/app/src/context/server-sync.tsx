@@ -485,7 +485,10 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
       // it landed, so it is dropped first.
       const configKey = queryOptionsApi.globalConfig().queryKey
       void queryClient.cancelQueries({ queryKey: configKey, exact: true })
-      queryClient.setQueryData(configKey, result.data)
+      // Updates return Config; retain the managed locks from GET until the refetch answers.
+      queryClient.setQueryData(configKey, (previous) =>
+        result.data ? { ...result.data, locked: previous?.locked ?? [] } : previous,
+      )
       bootstrap.refetch()
       // Invalidate all provider queries so newly configured custom providers
       // appear immediately in the available provider list across all directories.

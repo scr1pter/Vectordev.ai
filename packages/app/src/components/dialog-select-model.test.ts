@@ -36,6 +36,8 @@ import {
   freeModelTrainingLabel,
 } from "@vectordevai/core/free-model-choice"
 import { FREE_MODEL_TRAINING_QUESTION } from "../utils/free-model-policy-notice"
+import { offInLocalProviders } from "../features/local/local-model"
+import { OFF_IN_LOCAL, providerUnavailable } from "@vectordevai/schema/provider-unavailable"
 
 const DAY = 86_400_000
 const NOW = Date.UTC(2026, 8, 11)
@@ -875,5 +877,29 @@ describe("provider headers open and close their models", () => {
       store.set([...store.keys()][0], value)
       expect([...readOpenSections(() => storage)]).toEqual(value.startsWith("[") ? ["free"] : [])
     }
+  })
+})
+
+describe("Off in Vector Local", () => {
+  // The engine lists a provider Vector Local keeps off as unavailable, with why; the picker's collapsed group shows it
+  // under the models instead of letting it vanish.
+  test("the group lists each provider kept off, with the engine's reason and nothing else", () => {
+    const off = offInLocalProviders([
+      providerUnavailable("openai", "off-in-local"),
+      { id: "vector", reason: "off-in-local", message: `vector: off in Vector Local. ${OFF_IN_LOCAL.vector}` },
+      { id: "ollama", reason: "off-in-local", message: `ollama: off in Vector Local. ${OFF_IN_LOCAL.ollama}` },
+      providerUnavailable("anthropic", "no-models"),
+      providerUnavailable("xai", "sign-in-paused"),
+    ])
+    expect(off).toEqual([
+      { id: "ollama", why: OFF_IN_LOCAL.ollama },
+      { id: "openai", why: OFF_IN_LOCAL.listed },
+      { id: "vector", why: OFF_IN_LOCAL.vector },
+    ])
+  })
+
+  test("with Vector Local off, or nothing kept off, the group is empty and the picker shows none", () => {
+    expect(offInLocalProviders(undefined)).toEqual([])
+    expect(offInLocalProviders([providerUnavailable("anthropic", "disabled")])).toEqual([])
   })
 })

@@ -6,6 +6,11 @@ import { ShareNext } from "./share-next"
 import { PublicSession } from "@vectordevai/schema/public-session"
 import { PublicSessionShare } from "@vectordevai/core/public-session-share"
 import { Config } from "@/config/config"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import { LocalSources } from "@vectordevai/core/local-mode/sources"
+
+const SHARE_SOURCE = LocalSources.get("share")!
 
 export interface Interface {
   readonly create: (input?: Session.CreateInput) => Effect.Effect<Session.Info>
@@ -38,10 +43,12 @@ const layer = Layer.effect(
     const create = Effect.fn("SessionShare.create")(function* (input?: Session.CreateInput) {
       const result = yield* session.create(input)
       const cfg = yield* config.get()
-      // A helper session is Vector's own work, never something to publish on the user's behalf.
+      // A helper session is Vector's own work, never something to publish on the user's behalf. Vector Local blocks
+      // share links unless the user allowed them, so nothing is shared automatically then.
       if (
         !result.internal &&
         cfg.share !== "disabled" &&
+        !LocalPolicy.blocks(Egress.policy(), SHARE_SOURCE) &&
         (cfg.share === "auto" || cfg.autoshare || ["1", "true"].includes(process.env.VECTOR_AUTO_SHARE ?? ""))
       )
         yield* publicSharing

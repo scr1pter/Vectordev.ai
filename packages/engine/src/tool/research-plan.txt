@@ -1,0 +1,9 @@
+Plans a Deep research run and asks the user to approve it on a plan card. Call it first: nothing is searched or read before the user approves the plan.
+
+- question: the research question, restated in one or two sentences.
+- subquestions: 1 to 8 sub-questions that together answer it.
+- scope: web, web+brain (the web and this repository's brain), or brain (the brain and the repository's files only).
+- depth: focused (you research, with at most 2 researchers for independent parts) or deep (up to 4 researchers and a judge that checks the citations).
+- prefer_domains, avoid_domains, format, time_window: optional. The user's own preferred and avoided sites are added in code.
+
+The user answers Start, Start deep or Cancel, or replies in their own words. A reply is a steer: revise the plan and call research_plan again. When a sub-question is answered or dropped, call research_plan with the same question and sub-questions and only the new status: that never asks the user again.
