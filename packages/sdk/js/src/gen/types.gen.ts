@@ -3139,6 +3139,7 @@ export type EgressRule =
   | "private-destination"
   | "web-port"
   | "proxy-environment"
+  | "window-rule"
 
 export type EgressCarried = {
   personal: number

@@ -2164,7 +2164,7 @@ export class Egress extends HeyApiClient {
   /**
    * Add events to the network log
    *
-   * Requests the desktop app's own windows made or blocked, which its main process decides, added to this Vector's network log while Vector Local is on.
+   * Requests the desktop app's own windows made or blocked, which its main process decides and records while it applies Vector Local, added to this Vector's network log whatever this Vector's own Vector Local setting is.
    */
   public report<ThrowOnError extends boolean = false>(options?: Options<LocalEgressReportData, ThrowOnError>) {
     return (options?.client ?? this.client).post<LocalEgressReportResponses, LocalEgressReportErrors, ThrowOnError>({

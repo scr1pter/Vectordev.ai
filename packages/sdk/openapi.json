@@ -5963,7 +5963,7 @@
             }
           }
         },
-        "description": "Requests the desktop app's own windows made or blocked, which its main process decides, added to this Vector's network log while Vector Local is on.",
+        "description": "Requests the desktop app's own windows made or blocked, which its main process decides and records while it applies Vector Local, added to this Vector's network log whatever this Vector's own Vector Local setting is.",
         "summary": "Add events to the network log",
         "requestBody": {
           "content": {
@@ -34710,7 +34710,8 @@
           "resolved-outside",
           "private-destination",
           "web-port",
-          "proxy-environment"
+          "proxy-environment",
+          "window-rule"
         ]
       },
       "EgressCarried": {
