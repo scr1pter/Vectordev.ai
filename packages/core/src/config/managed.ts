@@ -11,7 +11,8 @@ import path from "path"
 // found by absolute path, never through PATH, and no variable can point it at another folder, so whatever starts
 // Vector (a nested vector the agent runs included) can neither forge company policy nor hide it. Everything here is
 // synchronous: Vector Local resolves its policy from these sources once, at process start, before any startup fetch,
-// and the config loader reads the same sources so the two always agree.
+// and the config loader reads the same sources so the two always agree. The desktop's main process reads them here
+// too (LocalStartup.policy and LocalStartup.ca), so it trusts the same company policy its engine does.
 
 const MANAGED_PLIST_DOMAINS = ["ai.vector.managed"]
 const MANAGED_PREFERENCES = "/Library/Managed Preferences"
@@ -144,10 +145,13 @@ export function directories() {
  * The system's managed folders. On Windows that is C:\ProgramData\vector, plus the folder the ProgramData variable
  * names when it differs: the variable is the user's to change, but a file there still has to pass the access check.
  */
-export function systemDirectories(platform = process.platform) {
+export function systemDirectories(
+  platform = process.platform,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+) {
   if (platform === "darwin") return ["/Library/Application Support/vector"]
   if (platform !== "win32") return ["/etc/vector"]
-  const named = process.env.ProgramData?.trim()
+  const named = env.ProgramData?.trim()
   const folders = [path.win32.join("C:\\ProgramData", "vector"), ...(named ? [path.win32.join(named, "vector")] : [])]
   return folders.filter(
     (folder, index) => folders.findIndex((other) => other.toLowerCase() === folder.toLowerCase()) === index,
@@ -341,7 +345,12 @@ function registry(): Policy | Ignored | undefined {
   }
 }
 
-function check(file: string, options: TrustOptions): Verdict | undefined {
+/**
+ * Why a managed file cannot be trusted and what that means (`untrusted`: left out; `unreadable`: it may hold company
+ * policy, so Vector Local stays on with Web access None), or undefined when only an administrator could have changed
+ * it, or it does not exist.
+ */
+export function check(file: string, options: TrustOptions = {}): Verdict | undefined {
   if (!existsSync(file)) return undefined
   // The file system can still refuse (a folder above the file that Vector may not search) or change underneath it (a
   // file removed mid-check). A file Vector cannot check is one it cannot trust, and it may hold company policy.

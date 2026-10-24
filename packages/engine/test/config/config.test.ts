@@ -6,7 +6,7 @@ import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option } from "effect"
 import { NamedError } from "@vectordevai/core/util/error"
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { Config } from "@/config/config"
-import { ConfigManaged } from "@/config/managed"
+import { ConfigManaged } from "@vectordevai/core/config/managed"
 import { ConfigParse } from "../../src/config/parse"
 import { Npm } from "@vectordevai/core/npm"
 

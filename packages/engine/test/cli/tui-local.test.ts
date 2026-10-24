@@ -21,7 +21,7 @@ describe("the terminal UI under Vector Local", () => {
     const config = path.join(dir.path, "config", "vector")
     mkdirSync(config, { recursive: true })
     writeFileSync(path.join(config, "vector.json"), JSON.stringify({ local: { enabled: false } }))
-    const managed = `const { ConfigManaged } = await import(${at(path.join(SOURCE, "config/managed.ts"))})
+    const managed = `const { ConfigManaged } = await import(${at(path.join(import.meta.dir, "../../../core/src/config/managed.ts"))})
 ConfigManaged.useTestDirectory(process.env.MANAGED)`
     const engine = path.join(dir.path, "engine.ts")
     writeFileSync(

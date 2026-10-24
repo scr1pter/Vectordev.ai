@@ -9,7 +9,7 @@ import { FSUtil } from "@vectordevai/core/fs-util"
 import { Npm } from "@vectordevai/core/npm"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { Config } from "@/config/config"
-import { ConfigManaged } from "@/config/managed"
+import { ConfigManaged } from "@vectordevai/core/config/managed"
 import { Auth } from "../../src/auth"
 import { Env } from "../../src/env"
 import { AuthTest } from "../fake/auth"
@@ -486,7 +486,7 @@ describe("the test managed folder", () => {
         process.execPath,
         "--eval",
         `
-        const { ConfigManaged } = await import(${url("../../src/config/managed.ts")})
+        const { ConfigManaged } = await import(${url("../../../core/src/config/managed.ts")})
         const { Config } = await import(${url("../../src/config/config.ts")})
         process.stdout.write(JSON.stringify({ directories: ConfigManaged.directories(), files: ConfigManaged.read().files, policy: Config.local() }) + "\\n")
         process.exit(0)

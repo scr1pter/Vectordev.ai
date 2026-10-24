@@ -67,7 +67,7 @@ process.env["VECTOR_TEST_HOME"] = testHome
 // where the folder is.
 const testManagedConfigDir = path.join(dir, "managed")
 process.env["VECTOR_TEST_MANAGED_CONFIG_DIR"] = testManagedConfigDir
-const { ConfigManaged } = await import("../src/config/managed")
+const { ConfigManaged } = await import("@vectordevai/core/config/managed")
 ConfigManaged.useTestDirectory(testManagedConfigDir)
 
 // Write the cache version file to prevent global/index.ts from clearing the cache

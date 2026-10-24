@@ -191,7 +191,7 @@ describe("resolved at start", () => {
     const result = await run(
       `
       await import(${url("../../../core/src/local-mode/backstop.ts")})
-      const { ConfigManaged } = await import(${url("../../src/config/managed.ts")})
+      const { ConfigManaged } = await import(${url("../../../core/src/config/managed.ts")})
       ConfigManaged.useTestDirectory(${JSON.stringify(managed)})
       const { untrustedChildEnvironment } = await import(${url("../../../core/src/child-environment.ts")})
       const { Egress } = await import(${url("../../../core/src/local-mode/egress.ts")})
@@ -237,7 +237,7 @@ describe("resolved at start", () => {
       const { Egress } = await import(${url("../../../core/src/local-mode/egress.ts")})
       const inference = { source: "local-inference", url: ${JSON.stringify(`${GPU_BOX}/v1/chat/completions`)} }
       const before = { pending: Egress.policy().pending, decision: Egress.decide(inference).decision }
-      const { ConfigManaged } = await import(${url("../../src/config/managed.ts")})
+      const { ConfigManaged } = await import(${url("../../../core/src/config/managed.ts")})
       ConfigManaged.useTestDirectory(${JSON.stringify(managed)})
       const { Config } = await import(${CONFIG})
       const after = {

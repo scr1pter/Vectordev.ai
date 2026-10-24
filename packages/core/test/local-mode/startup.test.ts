@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import fs from "node:fs"
 import path from "node:path"
+import { ConfigManaged } from "../../src/config/managed"
+import { LocalPolicy } from "../../src/local-mode/policy"
 import { LocalStartup } from "../../src/local-mode/startup"
 import { tmpdir } from "../fixture/tmpdir"
 
@@ -16,6 +18,16 @@ const folders = (root: string) => ({
 const write = (file: string, text: string) => {
   fs.mkdirSync(path.dirname(file), { recursive: true })
   fs.writeFileSync(file, text)
+}
+// A test cannot make files only root or Administrators own, so the user running it may own the managed folder's files
+// here; no one else may write them still (ConfigManaged.check).
+const trusted = { trust: { user: true } }
+const COMPANY = {
+  lock: true,
+  web: "network",
+  endpoints: ["https://gpu.corp.example.com"],
+  allow: [{ source: "usage", reason: "Counts", added_at: 1, added_by: "app" }],
+  updates: { url: "https://mirror.corp.example.com/vector/" },
 }
 
 describe("LocalStartup.enabled", () => {
@@ -133,31 +145,69 @@ describe("LocalStartup.policy", () => {
     expect(LocalStartup.policy({ ...input, env })).toMatchObject({ enabled: true, web: "none" })
   })
 
-  test("lets a company's file, an override and the confirmed block only turn it on and tighten Web access", async () => {
+  test("reads a company's file as the engine's config does: its lists, its lock and its mirror", async () => {
+    await using dir = await tmpdir()
+    const input = { ...folders(dir.path), ...trusted }
+    write(
+      path.join(input.config, "vector.json"),
+      JSON.stringify({ local: { web: "ask", endpoints: ["http://127.0.0.1:1"] } }),
+    )
+    const company = { ...COMPANY, user_may: ["web"] }
+    write(path.join(input.managed[0]!, "vector.json"), JSON.stringify({ local: company }))
+    // The pure function the engine resolves, with the same blocks.
+    const engine = LocalPolicy.resolve({
+      managed: company as never,
+      global: { web: "ask", endpoints: ["http://127.0.0.1:1"] },
+      env: {},
+    })
+    const desktop = LocalStartup.policy({ ...input, env: {} })
+    expect(desktop).toEqual(engine)
+    expect(desktop).toMatchObject({
+      enabled: true,
+      lock: true,
+      web: "network",
+      endpoints: [{ origin: "https://gpu.corp.example.com", from: "managed" }],
+      allow: [{ source: "usage" }],
+      updates: { url: "https://mirror.corp.example.com/vector/" },
+    })
+  })
+
+  test("leaves out a company file a standard user could have written, as the engine's config does", async () => {
     await using dir = await tmpdir()
     const input = folders(dir.path)
     write(path.join(input.config, "vector.json"), JSON.stringify({ local: { web: "ask" } }))
     const company = path.join(input.managed[0]!, "vector.json")
+    write(company, JSON.stringify({ local: COMPANY }))
+    // The user running the test owns it: in C:\ProgramData any user may create such a file.
+    const planted = LocalStartup.policy({ ...input, env: {} })
+    expect(planted).toMatchObject({ enabled: false, lock: false, endpoints: [], allow: [] })
+    expect(planted.updates).toBeUndefined()
+    expect(planted.warnings.some((warning) => warning.startsWith(ConfigManaged.UNTRUSTED))).toBe(true)
+    // One another user could change is left out too, whoever owns it.
+    if (process.platform !== "win32") {
+      fs.chmodSync(company, 0o664)
+      expect(LocalStartup.policy({ ...input, ...trusted, env: {} })).toMatchObject({ enabled: false, lock: false })
+      fs.chmodSync(company, 0o644)
+    }
+    expect(LocalStartup.policy({ ...input, ...trusted, env: {} })).toMatchObject({ enabled: true, lock: true })
+  })
+
+  test("lets an override and the confirmed block only turn it on and tighten Web access", async () => {
+    await using dir = await tmpdir()
+    const input = folders(dir.path)
+    write(path.join(input.config, "vector.json"), JSON.stringify({ local: { web: "ask" } }))
+    const override = path.join(dir.path, "override.json")
     write(
-      company,
-      JSON.stringify({
-        local: {
-          lock: true,
-          web: "network",
-          endpoints: ["http://10.0.0.5:8000"],
-          allow: [{ source: "usage", reason: "Counts", added_at: 1, added_by: "app" }],
-        },
-      }),
+      override,
+      JSON.stringify({ local: { enabled: true, web: "network", endpoints: ["http://10.0.0.5:8000"], lock: true } }),
     )
-    // Its owner is not checked here, so what it would let through does not apply.
-    expect(LocalStartup.policy({ ...input, env: {} })).toMatchObject({
+    // What it would let through, or lock, does not apply.
+    expect(LocalStartup.policy({ ...input, env: { VECTOR_AGENT_CONFIG: override } })).toMatchObject({
       enabled: true,
       web: "network",
       lock: false,
       endpoints: [],
-      allow: [],
     })
-    fs.rmSync(company)
     expect(
       LocalStartup.policy({ ...input, env: { VECTOR_CONFIG_CONTENT: `{"local":{"enabled":true}}` } }),
     ).toMatchObject({ enabled: true, web: "ask" })
@@ -167,7 +217,7 @@ describe("LocalStartup.policy", () => {
 
   test("turns it on with Web access None for a company policy file it cannot read, as config does", async () => {
     await using dir = await tmpdir()
-    const input = folders(dir.path)
+    const input = { ...folders(dir.path), ...trusted }
     write(path.join(input.config, "vector.json"), JSON.stringify({ local: { enabled: false } }))
     // A folder where the company's file belongs: the file system refuses to read it, as it refuses a file without
     // permission, whoever runs the test.
@@ -198,21 +248,28 @@ describe("LocalStartup.policy", () => {
 })
 
 describe("LocalStartup.managed", () => {
-  test("is whether a company policy file is in a managed folder", async () => {
+  test("is whether company policy an administrator alone could have written is on this computer", async () => {
     await using dir = await tmpdir()
-    const input = folders(dir.path)
+    const input = { ...folders(dir.path), ...trusted }
     expect(LocalStartup.managed({ ...input, env: {} })).toBe(false)
     write(path.join(input.config, "vector.json"), JSON.stringify({ local: { enabled: true } }))
     expect(LocalStartup.managed({ ...input, env: {} })).toBe(false)
-    write(path.join(input.managed[0]!, "vector.json"), JSON.stringify({ share: "disabled" }))
+    const company = path.join(input.managed[0]!, "vector.json")
+    write(company, JSON.stringify({ share: "disabled" }))
     expect(LocalStartup.managed({ ...input, env: {} })).toBe(true)
+    // A file any user could have made, such as a "{}" in C:\ProgramData\vector, is not company policy.
+    expect(LocalStartup.managed({ ...folders(dir.path), env: {} })).toBe(false)
+    if (process.platform !== "win32") {
+      fs.chmodSync(company, 0o666)
+      expect(LocalStartup.managed({ ...input, env: {} })).toBe(false)
+    }
   })
 })
 
 describe("LocalStartup.ca", () => {
   test("names the company's certificate files, then the user's, read from the folder of the file that names them", async () => {
     await using dir = await tmpdir()
-    const input = folders(dir.path)
+    const input = { ...folders(dir.path), ...trusted }
     expect(LocalStartup.ca({ ...input, env: {} })).toEqual([])
     write(path.join(input.managed[0]!, "vector.json"), JSON.stringify({ local: { ca: { files: ["corp-root.pem"] } } }))
     write(
@@ -231,7 +288,7 @@ describe("LocalStartup.ca", () => {
 
   test("reads only the company's files under a lock, and none from the environment or a block it cannot decode", async () => {
     await using dir = await tmpdir()
-    const input = folders(dir.path)
+    const input = { ...folders(dir.path), ...trusted }
     const user = path.join(dir.path, "user.pem")
     const corp = path.join(dir.path, "corp.pem")
     write(path.join(input.config, "vector.json"), JSON.stringify({ local: { ca: { files: [user] } } }))
@@ -242,5 +299,26 @@ describe("LocalStartup.ca", () => {
     expect(LocalStartup.ca({ ...input, env })).toEqual([user])
     write(path.join(input.managed[0]!, "vector.json"), JSON.stringify({ local: { lock: true, ca: { files: [corp] } } }))
     expect(LocalStartup.ca({ ...input, env })).toEqual([corp])
+  })
+
+  test("takes none from a managed file a standard user could have written, which drops none of the user's either", async () => {
+    await using dir = await tmpdir()
+    const input = folders(dir.path)
+    const user = path.join(dir.path, "user.pem")
+    write(path.join(input.config, "vector.json"), JSON.stringify({ local: { ca: { files: [user] } } }))
+    const company = path.join(input.managed[0]!, "vector.json")
+    // A file the user running Vector owns, as anyone can create one in C:\ProgramData\vector.
+    write(company, JSON.stringify({ local: { lock: true, ca: { files: ["evil.pem"] } } }))
+    expect(LocalStartup.ca({ ...input, env: {} })).toEqual([user])
+    // One another user could change, though only an administrator may own the folder's files.
+    if (process.platform !== "win32") {
+      fs.chmodSync(company, 0o664)
+      expect(LocalStartup.ca({ ...input, ...trusted, env: {} })).toEqual([user])
+      fs.chmodSync(path.dirname(company), 0o777)
+      fs.chmodSync(company, 0o644)
+      expect(LocalStartup.ca({ ...input, ...trusted, env: {} })).toEqual([user])
+      fs.chmodSync(path.dirname(company), 0o755)
+    }
+    expect(LocalStartup.ca({ ...input, ...trusted, env: {} })).toEqual([path.join(input.managed[0]!, "evil.pem")])
   })
 })

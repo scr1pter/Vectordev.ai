@@ -6,6 +6,7 @@ import path from "node:path"
 import { Option, Schema } from "effect"
 import { xdgConfig, xdgState } from "xdg-basedir"
 import type { LocalMode } from "@vectordevai/schema/local-mode"
+import { ConfigManaged } from "../config/managed"
 import { ConfigLocalV1 } from "../v1/config/local"
 import { LocalPolicy } from "./policy"
 
@@ -17,7 +18,8 @@ import { LocalPolicy } from "./policy"
 // Vector cannot decode and a company policy file it cannot read, which config keeps on too. Config decides which of
 // them apply. The Windows policy key
 // is not read here, since reading it runs a program; config reads it as it loads. A process whose config never
-// resolves the policy (the desktop's main process) resolves it from the same sources with `policy` instead.
+// resolves the policy (the desktop's main process) resolves it from the same sources with `policy` instead, and reads
+// company policy there as config does (ConfigManaged): only what an administrator alone could have written.
 
 const MANAGED_FILES = ["vector.json", "vector.jsonc"]
 const GLOBAL_FILES = ["config.json", "vector.json", "vector.jsonc"]
@@ -33,8 +35,16 @@ const FAIL_CLOSED: ConfigLocalV1.Info = { enabled: true, web: "none" }
 export type Input = {
   readonly env?: Readonly<Record<string, string | undefined>>
   readonly platform?: NodeJS.Platform
-  /** The managed folders: the system's own unless a test names others. */
+  /**
+   * The managed folders: the system's own, with the macOS profile and the Windows policy key, unless a test names
+   * others (whose files alone are then read).
+   */
   readonly managed?: readonly string[]
+  /**
+   * How the files in the managed folders a test names are checked (ConfigManaged.check). A test cannot create files
+   * only root or Administrators own, so `user` lets the user running it own them; no one else may write them still.
+   */
+  readonly trust?: ConfigManaged.TrustOptions
   /** The folder of the macOS MDM profiles. */
   readonly preferences?: string
   /**
@@ -62,59 +72,113 @@ export function enabled(input: Input = {}) {
 
 /**
  * Vector Local's policy from the same sources, for a process whose config never resolves it: the desktop's main
- * process, until it reads the company's policy the way the engine does. The user's own config (the global folder
- * `config`, and the desktop's folder when VECTOR_CLIENT is desktop) and the environment resolve it as the engine
- * resolves them. A company policy file, whose owner is not checked here, the overrides and the block the owner last let
- * apply can only turn it on and make Web access stricter, never let more through; a block Vector cannot decode, and a
- * company policy file it cannot read, turn it on with Web access None, as config does. The macOS profile is not read,
- * since converting it runs a program.
+ * process. Company policy and the user's own config (the global folder `config`, and the desktop's folder when
+ * VECTOR_CLIENT is desktop) and the environment resolve it as the engine resolves them (LocalPolicy.resolve). Company
+ * policy is read as the engine's config reads it: a file a standard user could have written is left out, with the
+ * warning the engine gives, and one Vector cannot read or check, like a block it cannot decode, turns Vector Local on
+ * with Web access None. The overrides and the block the owner last let apply can only turn it on and make Web access
+ * stricter, never let more through.
  */
 export function policy(input: Input = {}): LocalMode.Policy {
   const env = input.env ?? process.env
   const files = locations(input)
   const users = files.user.map((file) => block(text(file)))
+  const company = companyPolicy(input)
+  const blocks = company.blocks.map((item) => item.found)
   const resolved = LocalPolicy.resolve({
     env,
+    managed: blocks.includes("undecodable")
+      ? FAIL_CLOSED
+      : blocks.filter(decoded).reduce<ConfigLocalV1.Info | undefined>(merge, undefined),
     global: users.includes("undecodable")
       ? FAIL_CLOSED
       : users.filter(decoded).reduce<ConfigLocalV1.Info | undefined>(merge, undefined),
   })
+  const warned = { ...resolved, warnings: [...new Set([...resolved.warnings, ...company.warnings])] }
   const floors = [
-    ...files.managed.map(managedBlock),
     ...files.overrides.map((file) => block(text(file))),
     block(env.VECTOR_CONFIG_CONTENT),
     ...confirmed(files.state),
   ].filter(turnsOn)
-  if (floors.length === 0) return resolved
+  if (floors.length === 0) return warned
   return {
-    ...resolved,
+    ...warned,
     enabled: true,
     web: floors.reduce<LocalMode.Web>(
       (web, floor) => LocalPolicy.stricter(web, floor === "undecodable" ? "none" : floor.web),
-      resolved.web,
+      warned.web,
     ),
   }
 }
 
-/** Whether a company policy file is in one of the managed folders, readable or not. */
+/**
+ * Whether company policy is on this computer: a managed file only an administrator could have written (readable or
+ * not), the macOS profile or the Windows policy key. A file a standard user could have written is not one.
+ */
 export function managed(input: Input = {}) {
-  return locations(input).managed.some((file) => existsSync(file))
+  return companyPolicy(input).blocks.length > 0
 }
 
 /**
  * The certificate files `local.ca.files` names, for the desktop's main process and its engine to add to the system and
- * default certificates: the company policy's, then the user's own config's unless the company locks Vector Local. A
- * relative path is read from the folder of the file that names it. The overrides and the environment name none, since
- * a certificate trusts more rather than less.
+ * default certificates: company policy's, then the user's own config's unless the company locks Vector Local. Company
+ * policy counts only where an administrator alone could have written it, as the engine's config reads it, so a file a
+ * standard user planted in a managed folder neither adds a certificate nor drops the user's own. A relative path is
+ * read from the folder of the file that names it (the managed folder for the macOS profile and the Windows policy
+ * key). The overrides and the environment name none, since a certificate trusts more rather than less.
  */
 export function ca(input: Input = {}) {
   const files = locations(input)
-  const named = (file: string, found: ConfigLocalV1.Info | "undecodable" | undefined) =>
-    decoded(found) ? (found.ca?.files ?? []).map((item) => path.resolve(path.dirname(file), item)) : []
-  const company = files.managed.map((file) => ({ file, found: managedBlock(file) }))
+  const named = (folder: string | undefined, found: ConfigLocalV1.Info | "undecodable" | undefined) =>
+    decoded(found)
+      ? (found.ca?.files ?? []).flatMap((item) =>
+          path.isAbsolute(item) ? [item] : folder ? [path.resolve(folder, item)] : [],
+        )
+      : []
+  const company = companyPolicy(input).blocks
   const lock = company.some((item) => decoded(item.found) && item.found.lock === true)
-  const user = lock ? [] : files.user.map((file) => ({ file, found: block(text(file)) }))
-  return [...new Set([...company, ...user].flatMap((item) => named(item.file, item.found)))]
+  const user = lock ? [] : files.user.map((file) => ({ folder: path.dirname(file), found: block(text(file)) }))
+  return [...new Set([...company, ...user].flatMap((item) => named(item.folder, item.found)))]
+}
+
+// Company policy as the engine's config reads it (ConfigManaged.read): the managed files only an administrator could
+// have written, then the macOS profile and the Windows policy key. A file a standard user could have written is left
+// out; one Vector cannot read, or cannot check, may hold company policy and counts as a block it cannot decode. With
+// managed folders a test names, their files alone, checked as `trust` says.
+function companyPolicy(input: Input) {
+  const read = input.managed
+    ? {
+        ...inspect(
+          input.managed.flatMap((folder) => MANAGED_FILES.map((file) => path.join(folder, file))),
+          input.trust ?? {},
+        ),
+        policies: [],
+      }
+    : ConfigManaged.read()
+  const folder = (input.managed ?? ConfigManaged.directories())[0]
+  return {
+    blocks: [
+      ...read.files.map((file) => ({ folder: path.dirname(file), found: managedBlock(file) })),
+      ...read.policies.map((item) => ({ folder, found: block(item.text) })),
+      ...read.ignored
+        .filter((item) => item.kind === "unreadable")
+        .map(() => ({ folder, found: "undecodable" as const })),
+    ],
+    warnings: read.ignored.map((item) =>
+      item.kind === "untrusted" ? `${ConfigManaged.UNTRUSTED} ${item.reason}` : item.reason,
+    ),
+  }
+}
+
+// The managed files a test names that exist, checked as ConfigManaged.read checks the system's.
+function inspect(candidates: readonly string[], trust: ConfigManaged.TrustOptions) {
+  const checked = candidates
+    .filter((file) => existsSync(file))
+    .map((file) => ({ file, verdict: ConfigManaged.check(file, trust) }))
+  return {
+    files: checked.filter((item) => item.verdict === undefined).map((item) => item.file),
+    ignored: checked.flatMap((item) => (item.verdict ? [{ source: item.file, ...item.verdict }] : [])),
+  }
 }
 
 // The files each source is read from: the managed folders, the user's own config, and the overrides that may only
@@ -130,8 +194,8 @@ function locations(input: Input) {
     : []
   const desktop = env.VECTOR_CLIENT === "desktop"
   return {
-    managed: (input.managed ?? managedDirectories(input.platform ?? process.platform, env)).flatMap((folder) =>
-      MANAGED_FILES.map((file) => path.join(folder, file)),
+    managed: (input.managed ?? ConfigManaged.systemDirectories(input.platform ?? process.platform, env)).flatMap(
+      (folder) => MANAGED_FILES.map((file) => path.join(folder, file)),
     ),
     user: [...(config ? GLOBAL_FILES.map((file) => path.join(config, file)) : []), ...(desktop ? directory : [])],
     overrides: [
@@ -140,15 +204,6 @@ function locations(input: Input) {
     ],
     state: input.state ?? (xdgState ? path.join(xdgState, app) : undefined),
   }
-}
-
-// The system's managed folders, as config reads them: on Windows also the one the ProgramData variable names, which
-// can only add a file to read here.
-function managedDirectories(platform: NodeJS.Platform, env: Readonly<Record<string, string | undefined>>) {
-  if (platform === "darwin") return ["/Library/Application Support/vector"]
-  if (platform !== "win32") return ["/etc/vector"]
-  const named = env.ProgramData?.trim()
-  return [path.win32.join("C:\\ProgramData", "vector"), ...(named ? [path.win32.join(named, "vector")] : [])]
 }
 
 // One config text's local block: undefined when it has none, and "undecodable" for one Vector cannot decode or a text
@@ -178,11 +233,25 @@ function decoded(found: ConfigLocalV1.Info | "undecodable" | undefined): found i
   return found !== undefined && found !== "undecodable"
 }
 
-// The user's blocks merged in the order config merges their files: a later file's keys win, and web_domains merges.
+// Blocks merged in the order config merges their files, as config merges them (remeda's mergeDeep): a later file's
+// keys win, objects merge key by key, and a later list replaces an earlier one.
 function merge(merged: ConfigLocalV1.Info | undefined, next: ConfigLocalV1.Info): ConfigLocalV1.Info {
   if (!merged) return next
-  const domains = merged.web_domains || next.web_domains ? { ...merged.web_domains, ...next.web_domains } : undefined
-  return { ...merged, ...next, ...(domains ? { web_domains: domains } : {}) }
+  return deepMerge(merged, next) as ConfigLocalV1.Info
+}
+
+function deepMerge(left: unknown, right: unknown): unknown {
+  if (!isObject(left) || !isObject(right)) return right
+  return Object.fromEntries(
+    [...new Set([...Object.keys(left), ...Object.keys(right)])].map((key) => [
+      key,
+      key in right ? deepMerge(left[key], right[key]) : left[key],
+    ]),
+  )
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 // JSON with comments and trailing commas, as Vector's config files may be written, as plain JSON: strings are kept as
