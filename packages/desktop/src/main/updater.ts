@@ -141,15 +141,15 @@ export function setupAutoUpdater(input: { stop: () => Promise<void>; relaunch: (
     during: (origins, run) =>
       duringUpdateCheck((partition, options) => session.fromPartition(partition, options), origins, run),
   })
+  // A check the person started, or undefined when they cancelled Vector Local's question or it refused the check. An
+  // installation without in-app updates checks nothing, so there is nothing to ask about.
+  const checked = () => (UPDATER_ENABLED ? local.checked(() => controller.check()) : controller.check())
   return {
     ...controller,
     start: () => (local.automatic() ? controller.start() : Promise.resolve(controller.getState())),
     poll: () => (local.automatic() ? controller.poll() : Promise.resolve(controller.getState())),
-    check: async () => {
-      // An installation without in-app updates checks nothing, so there is nothing to ask about.
-      if (!UPDATER_ENABLED || (await local.manual())) return local.run(() => controller.check())
-      return controller.getState()
-    },
+    checked,
+    check: async () => (await checked()) ?? controller.getState(),
   }
 }
 
@@ -162,7 +162,9 @@ function updateFeed() {
 }
 
 export async function showUpdaterDialog(controller: ReturnType<typeof setupAutoUpdater>, alertOnFail: boolean) {
-  const state = await controller.check()
+  // A check the person cancelled shows nothing, not the state an earlier check left.
+  const state = await controller.checked()
+  if (!state) return
   if (state.status === "error") {
     if (!alertOnFail) return
     await dialog.showMessageBox({

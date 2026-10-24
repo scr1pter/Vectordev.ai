@@ -4,12 +4,14 @@ import { EventEmitter } from "node:events"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { getCACertificates } from "node:tls"
+import tls, { getCACertificates } from "node:tls"
 import type { LocalMode } from "@vectordevai/schema/local-mode"
 import { Egress } from "@vectordevai/core/local-mode/egress"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import { LocalStartup } from "@vectordevai/core/local-mode/startup"
+import { NetworkGuard } from "../../../core/test/lib/network-guard"
 import { createEgressFilter } from "./egress-filter"
-import { companyCertificates } from "./local-certificates"
+import { companyCertificates, trustCompanyCertificates } from "./local-certificates"
 import {
   answeredByEngine,
   connectDesktopLocal,
@@ -21,9 +23,9 @@ import {
   forwardEgress,
   installChromiumLocal,
   policyMismatch,
+  releaseStartupHold,
   startFirstRun,
   stricterPolicy,
-  trustCompanyCertificates,
   usageCheckinAllowed,
   watchCompanyCertificates,
   watchFirstRun,
@@ -40,6 +42,83 @@ const folder = () => {
   return dir
 }
 const settle = () => new Promise((resolve) => setTimeout(resolve, 5))
+// A root and a leaf it signed for `host`, made with openssl for one test: the leaf's key never leaves the test's folder.
+const authority = (dir: string, name: string, host: string) => {
+  const file = (suffix: string) => path.join(dir, `${name}-${suffix}`)
+  writeFileSync(
+    file("root.cnf"),
+    `[req]\ndistinguished_name = dn\nprompt = no\n[dn]\nCN = Vector test ${name} root\n[ca]\nbasicConstraints = critical,CA:true\nkeyUsage = critical,keyCertSign,cRLSign\nsubjectKeyIdentifier = hash\n`,
+  )
+  writeFileSync(file("leaf.cnf"), `[req]\ndistinguished_name = dn\nprompt = no\n[dn]\nCN = ${host}\n`)
+  writeFileSync(
+    file("leaf.ext"),
+    `basicConstraints = CA:false\nkeyUsage = digitalSignature,keyEncipherment\nextendedKeyUsage = serverAuth\nsubjectAltName = DNS:${host}\n`,
+  )
+  const run = (...args: string[]) => {
+    const result = Bun.spawnSync(["openssl", ...args], { stderr: "pipe" })
+    if (result.exitCode !== 0) throw new Error(`openssl ${args[0]} failed: ${result.stderr.toString()}`)
+  }
+  run(
+    "req",
+    "-x509",
+    "-newkey",
+    "rsa:2048",
+    "-nodes",
+    "-days",
+    "2",
+    "-config",
+    file("root.cnf"),
+    "-extensions",
+    "ca",
+    "-keyout",
+    file("root.key"),
+    "-out",
+    file("root.pem"),
+  )
+  run(
+    "req",
+    "-new",
+    "-newkey",
+    "rsa:2048",
+    "-nodes",
+    "-config",
+    file("leaf.cnf"),
+    "-keyout",
+    file("leaf.key"),
+    "-out",
+    file("leaf.csr"),
+  )
+  run(
+    "x509",
+    "-req",
+    "-in",
+    file("leaf.csr"),
+    "-CA",
+    file("root.pem"),
+    "-CAkey",
+    file("root.key"),
+    "-set_serial",
+    "2",
+    "-days",
+    "2",
+    "-extfile",
+    file("leaf.ext"),
+    "-out",
+    file("leaf.pem"),
+  )
+  return {
+    root: readFileSync(file("root.pem"), "utf8"),
+    leaf: readFileSync(file("leaf.pem"), "utf8"),
+    key: readFileSync(file("leaf.key"), "utf8"),
+  }
+}
+// The user running a test owns the managed folder's files it writes, which no one else may change (ConfigManaged).
+const trusted = { trust: { user: true } }
+// An engine event stream that says nothing, so no test opens the engine's own.
+const silent = () => (async function* () {})()
+
+// Any connection off this computer throws: these tests reach only fakes and servers on 127.0.0.1.
+NetworkGuard.use()
 
 afterEach(() => {
   Egress.configure(LocalPolicy.OFF)
@@ -56,6 +135,9 @@ describe("Chromium under Vector Local", () => {
       registerPreloadScript(script: { type: "frame" | "service-worker"; id?: string; filePath: string }) {
         this.preloads.push(script)
         return script.id ?? "preload"
+      },
+      unregisterPreloadScript(id: string) {
+        this.preloads = this.preloads.filter((script) => script.id !== id)
       },
     })
     return {
@@ -123,6 +205,35 @@ describe("Chromium under Vector Local", () => {
     const later = { listener: false, webRequest: { onBeforeRequest: () => void (later.listener = true) } }
     app.emit("session-created", later)
     expect(later.listener).toBe(true)
+  })
+
+  test("applies Vector Local turned on while the app runs to what is already open, and lets go once it is off", () => {
+    const local = { current: LocalPolicy.OFF }
+    const policies: string[] = []
+    const open = { setWebRTCIPHandlingPolicy: (value: string) => void policies.push(value) }
+    const made = sessions()
+    const chromium = installChromiumLocal({
+      app: new EventEmitter() as never,
+      defaultSession: made.defaultSession,
+      fromPartition: made.fromPartition,
+      // The main window, opened before Vector Local was turned on.
+      webContents: () => [open],
+      directory: folder(),
+      filter: createEgressFilter({ policy: () => local.current, record: () => undefined }),
+      policy: () => local.current,
+    })
+    const agent = made.made.get("persist:vector-browser")!
+    expect([policies, agent.preloads]).toEqual([[], []])
+    local.current = on()
+    chromium.apply()
+    expect(policies).toEqual(["disable_non_proxied_udp"])
+    expect(agent.preloads.map((script) => script.id)).toEqual(["vector-local-no-peer-connections"])
+    // Applying again registers nothing twice.
+    chromium.apply()
+    expect(agent.preloads).toHaveLength(1)
+    local.current = LocalPolicy.OFF
+    chromium.apply()
+    expect(agent.preloads).toEqual([])
   })
 
   test("writes no preload with Vector Local off", () => {
@@ -205,7 +316,7 @@ describe("the first-run hold", () => {
     }
     const userData = folder()
     // No company policy file on this computer, whatever the machine running the test has.
-    const folders = { config: path.join(userData, "config"), managed: [path.join(userData, "managed")] }
+    const folders = { config: path.join(userData, "config"), managed: [path.join(userData, "managed")], ...trusted }
     const start = () => startFirstRun({ userData, store, reported: false, folders })
     const hold = start()
     const gate = createUpdateGate({
@@ -234,6 +345,30 @@ describe("the first-run hold", () => {
     mkdirSync(folders.managed[0]!, { recursive: true })
     writeFileSync(path.join(folders.managed[0]!, "vector.json"), JSON.stringify({ share: "disabled" }))
     expect(start().held()).toBe(false)
+    // One a standard user could have written, such as a "{}" anyone may create in C:\ProgramData\vector, is not one.
+    const planted = { config: folders.config, managed: folders.managed }
+    expect(startFirstRun({ userData, store, reported: false, folders: planted }).held()).toBe(true)
+  })
+
+  test("lets the engine's held startup fetches go once the person answers, trying again while it cannot answer", async () => {
+    const engine = { url: "http://127.0.0.1:4096", password: "secret" }
+    const calls: string[] = []
+    const answers = [503, 0, 200]
+    const released = await releaseStartupHold(
+      engine,
+      async (input, init) => {
+        calls.push(`${init?.method} ${new URL(input).pathname} ${new Headers(init?.headers).get("authorization")}`)
+        const status = answers.shift()!
+        if (status === 0) throw new TypeError("connection refused")
+        return new Response(status === 200 ? "true" : "starting", { status })
+      },
+      5,
+      1,
+    )
+    expect(released).toBe(true)
+    expect(calls).toEqual(Array(3).fill(`POST /local/startup/release Basic ${btoa("vector:secret")}`))
+    // An engine that never answers is given up on after the tries it was given.
+    expect(await releaseStartupHold(engine, async () => new Response("down", { status: 503 }), 2, 1)).toBe(false)
   })
 
   test("reads the answer from the engine: a model connected, Vector Local on, or a Vector sign-in", async () => {
@@ -277,6 +412,50 @@ describe("company certificate authorities", () => {
     expect(verifies("company-leaf")).toBe(true)
   })
 
+  test.skipIf(!Bun.which("openssl"))(
+    "let a TLS connection reach a company host and still a public one: added to the list, never in its place",
+    async () => {
+      const dir = folder()
+      const public_ = authority(dir, "public", "public.web.test")
+      const company = authority(dir, "company", "intranet.corp.test")
+      const servers = [public_, company].map((item) =>
+        Bun.serve({
+          hostname: "127.0.0.1",
+          port: 0,
+          tls: { cert: item.leaf, key: item.key },
+          fetch: () => new Response("ok"),
+        }),
+      )
+      try {
+        const handshake = (index: number, ca: readonly string[]) =>
+          new Promise<boolean>((resolve) => {
+            const socket = tls.connect({
+              host: "127.0.0.1",
+              port: servers[index]!.port,
+              servername: index === 0 ? "public.web.test" : "intranet.corp.test",
+              ca: [...ca],
+            })
+            socket.once("secureConnect", () => {
+              resolve(socket.authorized)
+              socket.destroy()
+            })
+            socket.once("error", () => resolve(false))
+          })
+        // The public root stands in for the certificates Node starts with; the company's file is the policy's.
+        const file = path.join(dir, "corp.pem")
+        writeFileSync(file, company.root)
+        const trusted = companyCertificates([public_.root], [file])
+        expect(await handshake(0, trusted.certificates)).toBe(true)
+        expect(await handshake(1, trusted.certificates)).toBe(true)
+        // Without the company's root its host fails, and a list that replaced the defaults would fail the public one.
+        expect(await handshake(1, [public_.root])).toBe(false)
+        expect(await handshake(0, [company.root])).toBe(false)
+      } finally {
+        servers.forEach((server) => server.stop(true))
+      }
+    },
+  )
+
   test("leave out what is not a certificate authority, and say why", () => {
     const dir = folder()
     const leaf = path.join(dir, "leaf.pem")
@@ -292,7 +471,8 @@ describe("company certificate authorities", () => {
     ])
   })
 
-  test("are trusted in desktop main with every default certificate kept, and a change is noticed", async () => {
+  test("are trusted in desktop main and its engine with every default certificate kept, and a change is noticed", async () => {
+    // The engine sidecar trusts them through the same function (sidecar.ts, useSystemCertificates).
     const dir = folder()
     const config = path.join(dir, "config")
     const corp = path.join(dir, "corp.pem")
@@ -383,11 +563,12 @@ describe("the app and its engine", () => {
       engine,
       log: () => undefined,
       fetch: (input, init) => serving(engineLocal.current)(input, init),
+      events: silent,
       interval: 60_000,
     })
     await connection.compared
     expect(desktopLocalStatus().mismatch).toBe(
-      "The app and its engine read Vector Local differently: Vector Local is off in the app and on in its engine. The app uses the stricter of the two until they agree, which usually takes a restart of Vector.",
+      "The app and its engine read Vector Local differently: Vector Local is off in the app and on in its engine. The app uses the stricter of the two until they agree.",
     )
     expect(Egress.policy()).toMatchObject({ enabled: true, web: "none" })
     expect(desktopLocalStatus()).toMatchObject({ enabled: true, web: "none" })
@@ -398,12 +579,121 @@ describe("the app and its engine", () => {
     connection.stop()
   })
 
+  test("agree on a company policy with model servers, a lock and an update mirror", async () => {
+    const dir = folder()
+    const managed = path.join(dir, "managed")
+    const company = {
+      lock: true,
+      web: "network" as const,
+      endpoints: ["https://gpu.corp.example.com"],
+      updates: { url: "https://mirror.corp.example.com/vector/" },
+    }
+    mkdirSync(managed, { recursive: true })
+    writeFileSync(path.join(managed, "vector.json"), JSON.stringify({ local: company }))
+    const desktop = LocalStartup.policy({ config: path.join(dir, "config"), managed: [managed], ...trusted, env: {} })
+    const engine = LocalPolicy.resolve({ managed: company, env: {} })
+    expect(policyMismatch(desktop, engine)).toBeUndefined()
+    // So the company's mirror stays allowed in the app: automatic checks reach it.
+    Egress.configure(LocalPolicy.OFF)
+    const connection = connectDesktopLocal({
+      engine: { url: "http://127.0.0.1:4096", password: "secret" },
+      log: () => undefined,
+      own: () => desktop,
+      fetch: (input, init) => serving(engine)(input, init),
+      events: silent,
+      interval: 60_000,
+    })
+    await connection.compared
+    connection.stop()
+    expect(desktopLocalStatus().mismatch).toBeUndefined()
+    expect(Egress.policy().updates).toEqual(company.updates)
+    const gate = createUpdateGate({
+      feed: () => "https://mirror.corp.example.com/vector/latest-mac.yml",
+      held: () => false,
+      ask: async () => false,
+      tell: async () => undefined,
+      during: (_origins, run) => run(),
+    })
+    expect(gate.automatic()).toBe(true)
+  })
+
+  test("follows Vector Local turned on in the app as soon as the engine says so, reading its own folders again", async () => {
+    Egress.configure(LocalPolicy.OFF)
+    const desktopLocal = { current: LocalPolicy.OFF }
+    const engineLocal = { current: LocalPolicy.OFF }
+    const events = { push: undefined as ((type: string) => void) | undefined }
+    const stream = (signal: AbortSignal) =>
+      (async function* () {
+        const queue: string[] = []
+        const wake = { resolve: undefined as (() => void) | undefined }
+        events.push = (type) => {
+          queue.push(type)
+          wake.resolve?.()
+        }
+        while (!signal.aborted) {
+          if (queue.length === 0) await new Promise<void>((resolve) => (wake.resolve = resolve))
+          const type = queue.shift()
+          if (type) yield { payload: { type } }
+        }
+      })()
+    const changed: LocalMode.Policy[] = []
+    const connection = connectDesktopLocal({
+      engine,
+      log: () => undefined,
+      own: () => desktopLocal.current,
+      fetch: (input, init) => serving(engineLocal.current)(input, init),
+      events: stream,
+      changed: (policy) => void changed.push(policy),
+      // No half-minute poll in this test: only the event.
+      interval: 600_000,
+    })
+    await connection.compared
+    while (!events.push) await settle()
+    expect(changed).toEqual([])
+    // Settings turns Vector Local on: the engine writes the user's config and says local.updated.
+    desktopLocal.current = on()
+    engineLocal.current = on()
+    events.push("server.heartbeat")
+    events.push("local.updated")
+    while (changed.length === 0) await settle()
+    expect(changed.at(-1)).toMatchObject({ enabled: true })
+    expect(Egress.policy().enabled).toBe(true)
+    // Both read it on, so there is nothing to tell the person; only DNS prefetching waits for a restart.
+    expect(desktopLocalStatus()).toMatchObject({ enabled: true, restartNeeded: true })
+    expect(desktopLocalStatus().mismatch).toBeUndefined()
+    connection.stop()
+  })
+
+  test("says nothing when the only difference is a change the engine holds for the owner", async () => {
+    Egress.configure(LocalPolicy.OFF)
+    // The user's file lists a new model server; the engine holds it until the owner confirms.
+    const file = on({ endpoints: ["http://127.0.0.1:11434", "http://gpu.lan:8000"] })
+    const effect = on()
+    const connection = connectDesktopLocal({
+      engine,
+      log: () => undefined,
+      own: () => file,
+      fetch: async (input) =>
+        new URL(input).pathname === "/local"
+          ? Response.json({ policy: effect, held: { proposed: file, changes: ["adds gpu.lan"] } })
+          : new Response("ok"),
+      events: silent,
+      interval: 60_000,
+    })
+    await connection.compared
+    connection.stop()
+    expect(desktopLocalStatus().mismatch).toBeUndefined()
+    // The engine's stricter policy is the one in effect until then.
+    expect(Egress.policy().endpoints.map((item) => item.origin)).toEqual(["http://127.0.0.1:11434"])
+  })
+
   test("keeps the app's own policy when the engine cannot say", async () => {
     Egress.configure(on())
     const connection = connectDesktopLocal({
       engine,
       log: () => undefined,
       fetch: async () => new Response("not found", { status: 404 }),
+      events: silent,
       interval: 60_000,
     })
     await connection.compared
@@ -513,6 +803,15 @@ describe("the updater under Vector Local", () => {
     expect(await local.gate.run(async () => "checked")).toBe("checked")
     expect(local.granted).toEqual([[FEED]])
     expect(await gate(on(), false).gate.manual()).toBe(false)
+  })
+
+  test("a check the person cancels shows nothing, not the state an earlier check left", async () => {
+    const cancelled = gate(on(), false)
+    expect(await cancelled.gate.checked(async () => ({ status: "up-to-date" }))).toBeUndefined()
+    expect(cancelled.granted).toEqual([])
+    const confirmed = gate(on())
+    expect(await confirmed.gate.checked(async () => ({ status: "up-to-date" }))).toEqual({ status: "up-to-date" })
+    expect(confirmed.granted).toEqual([[FEED]])
   })
 
   test("says why with Web access None, and checks a company mirror on its own", async () => {

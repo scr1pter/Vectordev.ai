@@ -1,10 +1,30 @@
 import { X509Certificate } from "node:crypto"
 import { readFileSync } from "node:fs"
+import tls from "node:tls"
+import { LocalStartup } from "@vectordevai/core/local-mode/startup"
+import { desktopLocalFolders } from "./local-policy"
 
 // A company's certificate authorities (Vector Local's `ca.files`, plan section 4.9), for desktop main and the engine
-// sidecar. They are added to the certificates Node already trusts (its bundled list and the system's), never in their
-// place, so public sites keep working behind a company's TLS inspection. Chromium uses the system's store instead, so
-// Vector's windows trust what the system trusts.
+// sidecar, which both trust them through `trustCompanyCertificates`. They are added to the certificates Node already
+// trusts (its bundled list and the system's), never in their place, so public sites keep working behind a company's
+// TLS inspection. Only company policy an administrator alone could have written names them, and the user's own config
+// unless the company locks Vector Local (LocalStartup.ca). Chromium uses the system's store instead, so Vector's
+// windows trust what the system trusts.
+
+/**
+ * The certificates Node trusts in this process: its bundled list and the system's, with the certificate authorities
+ * Vector Local names (`local.ca.files`) added after them. `apply` is Node's setDefaultCACertificates.
+ */
+export function trustCompanyCertificates(
+  userData: string,
+  apply: (certificates: string[]) => void = (certificates) => tls.setDefaultCACertificates(certificates),
+  folders: LocalStartup.Input = desktopLocalFolders(userData),
+) {
+  const base = [...new Set([...tls.getCACertificates("default"), ...tls.getCACertificates("system")])]
+  const trusted = companyCertificates(base, LocalStartup.ca(folders))
+  apply(trusted.certificates)
+  return trusted
+}
 
 const BLOCK = /-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/g
 

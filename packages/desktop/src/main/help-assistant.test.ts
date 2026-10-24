@@ -1,7 +1,12 @@
 import { afterEach, expect, test } from "bun:test"
 import { Egress } from "@vectordevai/core/local-mode/egress"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import { NetworkGuard } from "../../../core/test/lib/network-guard"
 import { askHelpAssistant } from "./help-assistant"
+
+// Any connection off this computer throws, so a help request Vector Local let through would fail here, not reach
+// vectordev.ai.
+const guard = NetworkGuard.use()
 
 afterEach(() => {
   Egress.configure(LocalPolicy.OFF)
@@ -16,4 +21,5 @@ test("answers that the help assistant is off with Vector Local on, before anythi
   expect(Egress.events({ blocked: true }).map((event) => `${event.source} ${event.origin}`)).toEqual([
     "help-assistant https://vectordev.ai",
   ])
+  expect(guard.outside()).toEqual([])
 })

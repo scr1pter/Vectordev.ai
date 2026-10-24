@@ -1,5 +1,6 @@
 import type { LocalMode } from "@vectordevai/schema/local-mode"
 import { Egress } from "@vectordevai/core/local-mode/egress"
+import { EgressAttribution } from "@vectordevai/core/local-mode/attribution"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import type { CallbackResponse, OnBeforeRequestListenerDetails, Session, WebContents } from "electron"
 
@@ -10,6 +11,7 @@ import type { CallbackResponse, OnBeforeRequestListenerDetails, Session, WebCont
 // browsers) registers a step here, which runs after Vector Local's own decision and only when that decision lets the
 // request go. `decideChromium` is that decision, as a pure function of the address, the kind of session and the policy
 // in effect. With Vector Local off it lets everything through and logs nothing, and the steps run as they would alone.
+// What Chromium sends that no webRequest listener sees is listed in the registry (LocalSources, chromium-network).
 
 /** What a Chromium session is for, which says what Vector Local lets it reach. */
 export type Kind = "app" | "agent-browser" | "research-browser" | "updates" | "billing" | "other"
@@ -20,7 +22,7 @@ export type Decision = LocalPolicy.Verdict & { readonly source: string; readonly
 /** A listener as Electron's onBeforeRequest takes it, so a window's own listener registers here unchanged. */
 export type Step = (details: OnBeforeRequestListenerDetails, callback: (response: CallbackResponse) => void) => void
 
-export type Target = Pick<Session, "webRequest"> & Partial<Pick<Session, "setSpellCheckerEnabled">>
+export type Target = Pick<Session, "webRequest"> & Partial<Pick<Session, "setSpellCheckerDictionaryDownloadURL">>
 
 // The renderer's own scheme (windows.ts, rendererProtocol), which serves the app's files from disk.
 const APP_SCHEME = "oc:"
@@ -44,15 +46,21 @@ const WEB_KINDS = new Set<Kind>(["agent-browser", "research-browser"])
 const SEEN_LIMIT = 256
 const STAY = "This stays on this computer."
 const PRIVATE_REASON = "Research browsers never reach this computer, your network or a cloud metadata address."
+// What the app's own code sends (its requests and WebSockets), as against what a page it shows loads.
+const APP_REQUESTS = new Set(["xhr", "webSocket"])
+// Where Chromium looks for spellcheck dictionaries under Vector Local on Windows and Linux: a port Chromium never
+// connects to, on this computer, so no dictionary is downloaded and spellcheck keeps the ones already on disk.
+const NO_DICTIONARIES = "http://127.0.0.1:9/"
 
 /**
  * Whether Vector Local lets a Chromium session of `kind` load `url`. Vector's own windows reach this computer, its
- * files and pages, the Vector servers on your network and the model servers on the list; what the app itself fetches
- * from the internet (release notes, crash reports, the dictation model) is decided as the registry source it is. The
- * agent's browser and the research browsers follow Web access, and a research browser never reaches this computer or
- * your network. The updater's session checks for updates only as `updates` allows, or for an origin the user just
- * asked to check (`granted`). Anything else is a request no part of Vector labelled, which reaches only this computer
- * and the list.
+ * files and pages, and the model servers on the list; on your network they reach the Vector servers they connect to
+ * as Web access lets them: with None, only what the app's own code sends there (`resource` xhr or webSocket), never
+ * what a page it shows loads, such as an image in a reply. What the app itself fetches from the internet (release
+ * notes, crash reports, the dictation model) is decided as the registry source it is. The agent's browser and the
+ * research browsers follow Web access, and a research browser never reaches this computer or your network. The
+ * updater's session checks for updates only as `updates` allows, or for an origin the user just asked to check
+ * (`granted`). Anything else is a request no part of Vector labelled, which reaches only this computer and the list.
  */
 export function decideChromium(input: {
   readonly url: string
@@ -60,6 +68,8 @@ export function decideChromium(input: {
   readonly policy: LocalMode.Policy
   /** Origins this session may reach for now, such as the update feed of a check the user asked for. */
   readonly granted?: Pick<ReadonlySet<string>, "has">
+  /** What Chromium says the request is for (webRequest's resourceType). */
+  readonly resource?: string
 }): Decision {
   const labelled = label(input.kind, input.url)
   const decision = (
@@ -96,21 +106,32 @@ export function decideChromium(input: {
       class: LocalPolicy.classify(input.policy, web),
       reason: "You asked Vector to check for updates.",
     })
-  // The app's windows talk to the Vector servers you connect them to: this computer's, WSL's and a build box's.
-  if (labelled.source === "unlabelled" && input.kind === "app" && place === "your-network")
+  // The app's windows talk to the Vector servers you connect them to: this computer's, WSL's and a build box's. With
+  // Web access None, a reply the app shows still cannot make it load anything on your network.
+  if (labelled.source === "unlabelled" && input.kind === "app" && place === "your-network") {
+    if (input.policy.web !== "none" || APP_REQUESTS.has(input.resource ?? ""))
+      return decision({
+        decision: "allow",
+        rule: "private-remote",
+        class: LocalPolicy.classify(input.policy, web),
+        reason: "Vector's windows reach the Vector servers they connect to on your network.",
+      })
     return decision({
-      decision: "allow",
-      rule: "private-remote",
+      decision: "block",
+      rule: "web-none",
       class: LocalPolicy.classify(input.policy, web),
-      reason: "Vector's windows reach Vector servers on this computer and your network.",
+      reason:
+        "Web access is None, so Vector's windows reach your network only for the Vector servers they connect to, not for what a page loads.",
     })
+  }
   return decision(LocalPolicy.decide(input.policy, { purpose: labelled.purpose, url: web, source: labelled.source }))
 }
 
 /**
  * The dispatcher for every Chromium session: Vector Local's decision first, then the steps windows registered, in the
  * order they registered. Decisions are logged through `record` while Vector Local is on, one line per host per page
- * for what a page loads, and never for what stays on this computer.
+ * for what a page loads, and never for what stays on this computer, each attributed to the session whose browser made
+ * it (`attribute`), so a research or agent browser's pages count in that session's counters.
  */
 export function createEgressFilter(deps: {
   readonly policy: () => LocalMode.Policy
@@ -119,8 +140,23 @@ export function createEgressFilter(deps: {
 }) {
   type State = { kind: Kind; steps: Step[]; granted: Map<string, number> }
   const sessions = new WeakMap<Target, State>()
+  // Every session the dispatcher is on, for what a change of policy applies to all of them. Sessions live as long as
+  // the app: Electron frees none.
+  const prepared = new Set<Target>()
+  // Sessions whose spellcheck dictionaries Vector Local pointed at this computer; that holds until Vector restarts.
+  const offline = new WeakSet<Target>()
   // The page each web contents is on, counted up at each main-frame request, and the hosts logged for it.
   const pages = new Map<number, { page: number; requests: Set<number>; seen: Set<string> }>()
+  // Who each browser's requests are for, by web contents.
+  const owners = new Map<number, EgressAttribution.Info>()
+
+  // Chromium downloads spellcheck dictionaries from Google on Windows and Linux (macOS uses its own spellchecker).
+  const dictionaries = (target: Target) => {
+    const platform = deps.platform ?? process.platform
+    if (offline.has(target) || !deps.policy().enabled || (platform !== "win32" && platform !== "linux")) return
+    target.setSpellCheckerDictionaryDownloadURL?.(NO_DICTIONARIES)
+    offline.add(target)
+  }
 
   const state = (target: Target, kind?: Kind) => {
     const known = sessions.get(target)
@@ -130,11 +166,9 @@ export function createEgressFilter(deps: {
     }
     const created: State = { kind: kind ?? "other", steps: [], granted: new Map() }
     sessions.set(target, created)
+    prepared.add(target)
     target.webRequest.onBeforeRequest((details, callback) => dispatch(created, details, callback))
-    const policy = deps.policy()
-    // Chromium downloads spellcheck dictionaries from Google on Windows and Linux (macOS uses its own spellchecker).
-    const platform = deps.platform ?? process.platform
-    if (policy.enabled && (platform === "win32" || platform === "linux")) target.setSpellCheckerEnabled?.(false)
+    dictionaries(target)
     return created
   }
 
@@ -149,6 +183,7 @@ export function createEgressFilter(deps: {
       kind: session.kind,
       policy,
       granted: session.granted,
+      resource: details.resourceType,
     })
     if (policy.enabled) log(session.kind, details, decided)
     if (decided.decision !== "allow") return callback({ cancel: true })
@@ -189,14 +224,17 @@ export function createEgressFilter(deps: {
     const key = `${origin} ${decided.decision}`
     if (!fresh && current.seen.has(key)) return
     current.seen.add(key)
-    deps.record(
-      {
-        source: decided.source,
-        url: details.url,
-        method: details.method,
-        ...(WEB_KINDS.has(kind) ? { resource: fresh ? ("page" as const) : ("subresource" as const) } : {}),
-      },
-      decided,
+    // Electron's callback runs in no session's scope, so the browser's own session is named here.
+    EgressAttribution.run(owners.get(contents) ?? {}, () =>
+      deps.record(
+        {
+          source: decided.source,
+          url: details.url,
+          method: details.method,
+          ...(WEB_KINDS.has(kind) ? { resource: fresh ? ("page" as const) : ("subresource" as const) } : {}),
+        },
+        decided,
+      ),
     )
   }
 
@@ -230,13 +268,32 @@ export function createEgressFilter(deps: {
       )
     },
     /**
-     * Keeps a web contents' WebRTC to the proxy, under Vector Local: peer connections cannot reach the network around
-     * the session's own proxy (none for the app and the agent's browser, the research proxy for research browsers).
+     * Attributes what a browser's web contents loads to the session it browses for, in the network log and the
+     * counters. Returns the function that stops, for when the browser closes.
+     */
+    attribute(contentsID: number, info: EgressAttribution.Info) {
+      owners.set(contentsID, info)
+      return () => {
+        if (owners.get(contentsID) === info) owners.delete(contentsID)
+      }
+    },
+    /**
+     * Under Vector Local, turns WebRTC's UDP off in a web contents. WebRTC can then use TCP only, through the session's
+     * proxy when it has one (the research proxy, for research browsers). Vector's windows and the agent's browser have
+     * no proxy, so there its TCP connects directly: the agent's browser also loses RTCPeerConnection in every frame
+     * (local-mode.ts), and Vector's windows run only the app.
      */
     protect(contents: Pick<WebContents, "setWebRTCIPHandlingPolicy">) {
       if (!deps.policy().enabled) return false
       contents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp")
       return true
+    },
+    /**
+     * After the policy changed: points every session's spellcheck dictionaries at this computer once Vector Local is
+     * on. Turning Vector Local off leaves them there until Vector restarts; dictionaries already on disk still work.
+     */
+    refresh() {
+      prepared.forEach(dictionaries)
     },
   }
 }

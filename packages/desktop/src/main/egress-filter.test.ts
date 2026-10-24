@@ -1,10 +1,16 @@
-import { describe, expect, mock, test } from "bun:test"
+import { afterEach, describe, expect, mock, test } from "bun:test"
 import { tmpdir } from "node:os"
 import type { LocalMode } from "@vectordevai/schema/local-mode"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import type { CallbackResponse, OnBeforeRequestListenerDetails } from "electron"
+import { NetworkGuard } from "../../../core/test/lib/network-guard"
 import { billingStep } from "./billing-navigation"
 import { createEgressFilter, decideChromium, type Kind, type Step } from "./egress-filter"
+
+// Any connection off this computer throws: these tests decide requests, they never send one.
+NetworkGuard.use()
+afterEach(() => void Egress.configure(LocalPolicy.OFF))
 
 // The billing window's own step comes from billing-window.ts, which reaches Electron's windows and the app's log.
 const electron = { app: { getPath: () => tmpdir(), isPackaged: false }, shell: { openExternal: async () => {} } }
@@ -33,8 +39,10 @@ describe("decideChromium", () => {
     ["app", "devtools://devtools/bundled/inspector.html", NONE, "allow", "loopback", "unlabelled"],
     ["app", "http://127.0.0.1:4096/global/health", NONE, "allow", "listed", "unlabelled"],
     ["app", "ws://localhost:4096/pty", NONE, "allow", "listed", "unlabelled"],
-    ["app", "http://build-box.lan:4096/global/health", NONE, "allow", "private-remote", "unlabelled"],
+    ["app", "http://build-box.lan:4096/global/health", NETWORK, "allow", "private-remote", "unlabelled"],
     ["app", "http://192.168.1.20:4096/session", ASK, "allow", "private-remote", "unlabelled"],
+    // With Web access None, only what the app's own code sends reaches your network (the next test).
+    ["app", "http://build-box.lan:4096/global/health", NONE, "block", "web-none", "unlabelled"],
     // What the app fetches from the internet is decided as the registry source it is.
     ["app", "https://vectordev.ai/changelog.json", ASK, "block", "vector-service", "release-notes"],
     ["app", "https://vectordev.ai/favicon-96x96-v3.png", ASK, "block", "vector-service", "site-assets"],
@@ -115,6 +123,22 @@ describe("decideChromium", () => {
     })
   })
 
+  test("with Web access None, lets the app's own requests reach a Vector server on your network, and no page's", () => {
+    const decide = (url: string, resource: string, local = NONE) =>
+      decideChromium({ url, kind: "app", policy: local, resource }).decision
+    // The app's own client talks to the server it connects to: its requests, its event stream and its terminal.
+    expect(decide("http://build-box.lan:4096/session", "xhr")).toBe("allow")
+    expect(decide("ws://build-box.lan:4096/pty/1/connect", "webSocket")).toBe("allow")
+    // A reply the app shows cannot make it load anything there: an image, a frame, a page, a font.
+    for (const resource of ["image", "media", "subFrame", "mainFrame", "font", "stylesheet", "ping", "other"])
+      expect([resource, decide("http://exfil.lan/?d=secret", resource)]).toEqual([resource, "block"])
+    expect(decide("https://box.tail1234.ts.net/?d=secret", "image")).toBe("block")
+    // This computer, and Web access that lets your network through, are as before.
+    expect(decide("http://127.0.0.1:4096/file?path=a.png", "image")).toBe("allow")
+    expect(decide("http://exfil.lan/a.png", "image", NETWORK)).toBe("allow")
+    expect(decide("http://exfil.lan/a.png", "image", ASK)).toBe("allow")
+  })
+
   test("lets the updater reach a feed the user just asked to check, and nothing else", () => {
     const granted = new Set([new URL(FEED).origin])
     expect(decideChromium({ url: FEED, kind: "updates", policy: ASK, granted })).toMatchObject({
@@ -152,15 +176,15 @@ const fakeSession = () => {
   const session = {
     listener: undefined as Step | undefined,
     replaced: 0,
-    spellcheck: undefined as boolean | undefined,
+    dictionaries: undefined as string | undefined,
     webRequest: {
       onBeforeRequest: (listener: Step | null) => {
         if (session.listener) session.replaced++
         session.listener = listener ?? undefined
       },
     },
-    setSpellCheckerEnabled: (enabled: boolean) => {
-      session.spellcheck = enabled
+    setSpellCheckerDictionaryDownloadURL: (url: string) => {
+      session.dictionaries = url
     },
   }
   return session
@@ -355,19 +379,60 @@ describe("the Chromium dispatcher", () => {
     expect(await send(session, details(FEED, "other"))).toEqual({ cancel: true })
   })
 
-  test("turns off Chromium's spellcheck downloads on Windows and Linux with Vector Local on", () => {
-    const expectations: [NodeJS.Platform, LocalMode.Policy, boolean | undefined][] = [
-      ["win32", ASK, false],
-      ["linux", ASK, false],
+  test("keeps Chromium's spellcheck dictionaries on this computer on Windows and Linux with Vector Local on", () => {
+    const expectations: [NodeJS.Platform, LocalMode.Policy, string | undefined][] = [
+      ["win32", ASK, "http://127.0.0.1:9/"],
+      ["linux", ASK, "http://127.0.0.1:9/"],
       ["darwin", ASK, undefined],
       ["win32", OFF, undefined],
     ]
-    for (const [platform, local, spellcheck] of expectations) {
+    for (const [platform, local, dictionaries] of expectations) {
       const { filter } = filterWith(() => local, platform)
       const session = fakeSession()
       filter.prepare(session)
-      expect(session.spellcheck).toBe(spellcheck)
+      expect([platform, local.enabled, session.dictionaries]).toEqual([platform, local.enabled, dictionaries])
     }
+  })
+
+  test("points every session it is on at this computer's dictionaries once Vector Local is turned on", () => {
+    const local = { current: OFF }
+    const { filter } = filterWith(() => local.current, "win32")
+    const first = fakeSession()
+    const second = fakeSession()
+    filter.prepare(first, "app")
+    filter.prepare(second, "agent-browser")
+    expect([first.dictionaries, second.dictionaries]).toEqual([undefined, undefined])
+    local.current = ASK
+    filter.refresh()
+    expect([first.dictionaries, second.dictionaries]).toEqual(["http://127.0.0.1:9/", "http://127.0.0.1:9/"])
+  })
+
+  test("counts a research browser's page in its run's counters, and an agent browser's in its session's", async () => {
+    Egress.configure(ASK)
+    const filter = createEgressFilter({
+      policy: Egress.policy,
+      record: (request, verdict) => void Egress.record(request, verdict),
+    })
+    const research = fakeSession()
+    const agent = fakeSession()
+    filter.prepare(research, "research-browser")
+    filter.prepare(agent, "agent-browser")
+    const stop = filter.attribute(21, { sessionID: "ses_researcher", rootID: "ses_lead", agent: "researcher" })
+    filter.attribute(22, { sessionID: "ses_build" })
+    await send(research, details("https://paper.example.org/abstract", "mainFrame", { webContentsId: 21 }))
+    await send(research, details("https://cdn.example.net/app.js", "script", { webContentsId: 21 }))
+    await send(agent, details("https://docs.example.org/", "mainFrame", { webContentsId: 22 }))
+    expect(Egress.summary("ses_lead")).toMatchObject({ requests: 2, pages: 1 })
+    expect(Egress.summary("ses_build")).toMatchObject({ requests: 1, pages: 1 })
+    expect(Egress.events().find((event) => event.origin === "https://paper.example.org")).toMatchObject({
+      session_id: "ses_researcher",
+      root_session_id: "ses_lead",
+      resource: "page",
+    })
+    // A closed browser's next web contents with the same ID is no longer the run's.
+    stop()
+    await send(research, details("https://other.example.org/", "mainFrame", { webContentsId: 21 }))
+    expect(Egress.summary("ses_lead").pages).toBe(1)
   })
 
   test("keeps WebRTC to the proxy on a web contents with Vector Local on", () => {

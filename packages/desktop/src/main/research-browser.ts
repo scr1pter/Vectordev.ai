@@ -275,6 +275,8 @@ type Browser = {
   readonly view: WebContentsView
   readonly contents: WebContents
   readonly contentsID: number
+  /** Stops attributing what this browser loads to its agent's session (the Vector Local dispatcher's log). */
+  readonly unattribute: () => void
   queue: Promise<unknown>
   closing: AbortController
   closed: boolean
@@ -444,9 +446,12 @@ async function open(key: string, input: ResearchInput, run: Run): Promise<Browse
     harden(partition)
     hardened.add(partition)
   }
-  const proxy = await startResearchProxy({
-    attribution: { sessionID: input.sessionID, ...(input.rootID ? { rootID: input.rootID } : {}), agent: input.agent },
-  }).catch(async (error: unknown) => {
+  const attribution = {
+    sessionID: input.sessionID,
+    ...(input.rootID ? { rootID: input.rootID } : {}),
+    agent: input.agent,
+  }
+  const proxy = await startResearchProxy({ attribution }).catch(async (error: unknown) => {
     await pool.release(slot)
     return { error: error instanceof Error ? error.message : String(error) }
   })
@@ -497,6 +502,8 @@ async function open(key: string, input: ResearchInput, run: Run): Promise<Browse
     view,
     contents,
     contentsID: contents.id,
+    // The pages it opens count in its run's counters, as its proxy's connections do.
+    unattribute: egressFilter.attribute(contents.id, attribution),
     queue: Promise.resolve(),
     closing: new AbortController(),
     closed: false,
@@ -1138,6 +1145,7 @@ async function closeBrowser(browser: Browser) {
   browser.closing.abort()
   browsers.delete(browser.key)
   byContents.delete(browser.contentsID)
+  browser.unattribute()
   browser.run.browsers.delete(browser.sessionID)
   const contents = browser.contents
   if (host.window && !host.window.isDestroyed()) host.window.contentView.removeChildView(browser.view)

@@ -1,20 +1,12 @@
 import "@vectordevai/core/local-mode/backstop"
 import * as http from "node:http"
-import * as tls from "node:tls"
 import { join } from "node:path"
 import { mkdirSync } from "node:fs"
-import { LocalStartup } from "@vectordevai/core/local-mode/startup"
 import { VECTOR_AGENT_RUNTIME_ENV } from "./agent-runtime"
-import { companyCertificates } from "./local-certificates"
-import { desktopLocalFolders } from "./local-policy"
+import { trustCompanyCertificates } from "./local-certificates"
 
 type NodeHttpWithEnvProxy = typeof http & {
   setGlobalProxyFromEnv: () => void
-}
-
-type NodeTlsWithSystemCertificates = typeof tls & {
-  getCACertificates: (type: "default" | "system") => string[]
-  setDefaultCACertificates: (certificates: string[]) => void
 }
 
 type StartCommand = {
@@ -133,16 +125,12 @@ function ensureLoopbackNoProxy() {
   upsert("no_proxy")
 }
 
-// Node's and the system's certificates, with the company's certificate authorities (Vector Local's ca.files) after
-// them, as desktop main trusts them. They are read once, here: desktop main asks to restart Vector when they change.
+// Node's and the system's certificates, with the certificate authorities Vector Local names (ca.files) after them,
+// as desktop main trusts them (trustCompanyCertificates). They are read once, here: desktop main asks to restart
+// Vector when they change.
 function useSystemCertificates(userDataPath: string) {
   try {
-    const nodeTls = tls as NodeTlsWithSystemCertificates
-    const trusted = companyCertificates(
-      [...new Set([...nodeTls.getCACertificates("default"), ...nodeTls.getCACertificates("system")])],
-      LocalStartup.ca(desktopLocalFolders(userDataPath)),
-    )
-    nodeTls.setDefaultCACertificates(trusted.certificates)
+    const trusted = trustCompanyCertificates(userDataPath)
     trusted.problems.forEach((problem) => console.warn("company certificate skipped", problem))
   } catch (error) {
     console.warn("failed to load system certificates", error)

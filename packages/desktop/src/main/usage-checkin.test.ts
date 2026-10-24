@@ -1,5 +1,9 @@
 import { afterEach, expect, test } from "bun:test"
+import { NetworkGuard } from "../../../core/test/lib/network-guard"
 import { createUsageCheckin, usageCheckinEndpoint } from "./usage-checkin"
+
+// Any connection off this computer throws: the check-in only ever reaches the fake server on 127.0.0.1 here.
+NetworkGuard.use()
 
 const DAY = 24 * 60 * 60 * 1000
 const TODAY = Date.UTC(2026, 9, 9, 15, 30)

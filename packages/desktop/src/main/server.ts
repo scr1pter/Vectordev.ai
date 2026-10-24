@@ -25,6 +25,11 @@ const SIDECAR_STOP_TIMEOUT = 6_000
 
 type SpawnLocalServerOptions = {
   userDataPath: string
+  /**
+   * A first run's hold: the engine starts with the fetches Vector makes for itself at start held (StartupHold), until
+   * desktop main lets them go once the person has chosen how to run models.
+   */
+  startupHold?: boolean
   onStdout?: (message: string) => void
   onStderr?: (message: string) => void
   onExit?: (code: number) => void
@@ -93,7 +98,7 @@ export async function spawnLocalServer(
   const environment = sidecarEnvironment(process.env)
   const child = utilityProcess.fork(sidecar, [], {
     cwd: process.cwd(),
-    env: createSidecarEnv(environment.launch),
+    env: { ...createSidecarEnv(environment.launch), ...(options.startupHold ? { VECTOR_STARTUP_HOLD: "1" } : {}) },
     serviceName: SIDECAR_SERVICE_NAME,
     stdio: "pipe",
   })

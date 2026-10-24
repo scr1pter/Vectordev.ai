@@ -48,12 +48,14 @@ import {
   connectDesktopLocal,
   installChromiumLocal,
   LOCAL_STORE,
+  releaseStartupHold,
   startDesktopLocal,
   startFirstRun,
   usageCheckinAllowed,
   watchCompanyCertificates,
   watchFirstRun,
 } from "./local-mode"
+import { readDesktopLocal } from "./local-policy"
 import { Egress } from "@vectordevai/core/local-mode/egress"
 import { cleanupStoreFiles, removeLegacyAccessFiles } from "./store-cleanup"
 import { startBrowserBridge, stopBrowserBridge } from "./browser-bridge"
@@ -363,7 +365,7 @@ const main = Effect.gen(function* () {
 
   yield* Effect.promise(() => app.whenReady())
   // Before any window or partition loads anything: one Vector Local dispatcher on every Chromium session.
-  installChromiumLocal({
+  const chromium = installChromiumLocal({
     app,
     defaultSession: session.defaultSession,
     fromPartition: (partition, options) => session.fromPartition(partition, options),
@@ -494,17 +496,14 @@ const main = Effect.gen(function* () {
     useEnvProxy()
 
     logger.log("spawning sidecar", { url })
-    // An engine started during the first run's hold loads the model catalog it has and refreshes it at the next start.
-    const holdCatalog = firstRun.held() && process.env.VECTOR_DISABLE_MODELS_FETCH === undefined
-    if (holdCatalog) process.env.VECTOR_DISABLE_MODELS_FETCH = "1"
     const { listener, health } = yield* Effect.promise(() =>
       spawnLocalServer(hostname, port, password, {
         userDataPath: app.getPath("userData"),
+        // During the first run's hold the engine holds the fetches it makes for itself at start, until the answer.
+        startupHold: firstRun.held(),
         onStdout: (message) => writeLog("server", "stdout", { message }),
         onStderr: (message) => writeLog("server", "stderr", { message }, "warn"),
         onExit: (code) => writeLog("utility", "sidecar exited", { code }, "warn"),
-      }).finally(() => {
-        if (holdCatalog) delete process.env.VECTOR_DISABLE_MODELS_FETCH
       }),
     )
     server = listener
@@ -524,15 +523,24 @@ const main = Effect.gen(function* () {
     )
 
     // The engine's Vector Local against the app's, and the app's own requests into the engine's network log.
-    const local = connectDesktopLocal({ engine: { url, password }, log: (message, data) => logger.log(message, data) })
+    // A change to Vector Local applies here as soon as the engine says so (local.updated), Chromium included.
+    const local = connectDesktopLocal({
+      engine: { url, password },
+      own: () => readDesktopLocal(app.getPath("userData")),
+      changed: () => chromium.apply(),
+      log: (message, data) => logger.log(message, data),
+    })
     app.once("will-quit", () => local.stop())
     if (firstRun.held()) {
       const stop = watchFirstRun(firstRun, {
         answered: () => answeredByEngine({ url, password }, () => vectorAccount.status().authenticated),
       })
       app.once("will-quit", stop)
+      // The engine's own startup fetches (the model catalog's refresh, the free models and plans catalogs, the provider
+      // policy) load as soon as the person has answered, in this engine.
+      void firstRun.answered().then(() => releaseStartupHold({ url, password }))
     }
-    // The engine trusts the company's certificate authorities from its start, so a change takes a restart.
+    // The engine trusts the certificate authorities Vector Local names from its start, so a change takes a restart.
     const stopCertificates = watchCompanyCertificates({
       userData: app.getPath("userData"),
       changed: () => void askToRestartForCertificates(relaunch),
@@ -649,15 +657,15 @@ const main = Effect.gen(function* () {
   }
 })
 
-// The company's certificate authorities changed while Vector runs: its engine trusts them once it restarts, which
-// stops what agents are running, so the person chooses when.
+// The certificate authorities company policy or the user's config names changed while Vector runs: its engine trusts
+// them once it restarts, which stops what agents are running, so the person chooses when.
 async function askToRestartForCertificates(relaunch: () => void) {
   const answer = await dialog.showMessageBox({
     type: "question",
     title: "Vector Local",
-    message: "Your company's certificates changed",
+    message: "Vector's certificate authorities changed",
     detail:
-      "Vector's engine uses certificate authorities from the start, so it needs a restart to trust the new ones. Restarting stops what agents are running now.",
+      "Vector's engine reads the certificate authorities your company's policy or your config names when it starts, so it needs a restart to trust the new ones. Restarting stops what agents are running now.",
     buttons: ["Restart Vector", "Later"],
     defaultId: 1,
     cancelId: 1,

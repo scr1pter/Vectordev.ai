@@ -1,14 +1,15 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import tls from "node:tls"
 import type { App, CommandLine, Session, WebContents } from "electron"
 import { Option, Schema } from "effect"
 import { LocalMode } from "@vectordevai/schema/local-mode"
+import { LocalEvent } from "@vectordevai/schema/local-event"
 import { Egress } from "@vectordevai/core/local-mode/egress"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import { LocalStartup } from "@vectordevai/core/local-mode/startup"
 import { decideChromium, egressFilter, type EgressFilter, type Target } from "./egress-filter"
-import { companyCertificates } from "./local-certificates"
+import { engineEventSource } from "./keep-awake"
+import { companyCertificates, trustCompanyCertificates } from "./local-certificates"
 import { desktopLocalFolders, resolveDesktopLocal } from "./local-policy"
 
 // Vector Local in the desktop app (plan sections 4.2, 4.3.6, 4.7 and 4.9). Desktop main resolves the policy before
@@ -16,12 +17,16 @@ import { desktopLocalFolders, resolveDesktopLocal } from "./local-policy"
 // - Chromium: one dispatcher per session (egress-filter.ts), WebRTC kept to the proxy, no DNS prefetching, no
 //   spellcheck downloads on Windows and Linux, and no WebRTC peer connections in the agent's browser;
 // - the company's certificate authorities are added to the certificates desktop main and its engine trust;
-// - once the engine runs, desktop main compares its policy with the engine's (GET /local), and when they differ it
-//   uses the stricter of the two and says so; and it sends what its own windows and requests did to the engine's
-//   network log (POST /local/egress/report), so "What Vector sent" lists the desktop's requests too;
+// - once the engine runs, desktop main compares its policy with the engine's (GET /local) as soon as the engine says
+//   Vector Local changed (its local.updated event) and every half minute, reading its own folders again each time,
+//   and when they differ it uses the stricter of the two and says so; a change applies to Chromium at once where it
+//   can (WebRTC, spellcheck dictionaries, the agent browser's peer connections), and DNS prefetching, which only a
+//   start sets, says a restart is needed; and it sends what its own windows and requests did to the engine's network
+//   log (POST /local/egress/report), so "What Vector sent" lists the desktop's requests too;
 // - on the first run, with no company policy and no model connected, the requests Vector makes for itself at start
-//   (the usage check-in, the update check, the dictation model's pre-warm, release notes and the model catalog's
-//   refresh) wait until the person has chosen how to run models, with no timeout;
+//   (the usage check-in, the update check, the dictation model's pre-warm, release notes, and in the engine the model
+//   catalog's refresh, the free models and plans catalogs and the provider policy) wait until the person has chosen
+//   how to run models, with no timeout, and go then;
 // - the services desktop main reaches (usage, updates, the help assistant) ask Vector Local before they connect.
 
 const AGENT_BROWSER = "persist:vector-browser"
@@ -32,6 +37,9 @@ const REPORT_BATCH = 500
 const REPORT_LIMIT = 2_000
 const RETRY = 5_000
 const RECHECK = 30_000
+const EVENTS_RETRY = 1_000
+const EVENTS_RETRY_MAX = 30_000
+const RELEASE_TRIES = 4
 const FIRST_RUN_CHECK = 15_000
 const CERTIFICATES_CHECK = 60_000
 const ANSWERED = "firstRunAnswered"
@@ -54,6 +62,11 @@ export type DesktopLocalStatus = {
   readonly held: boolean
   /** The app and its engine read Vector Local differently; the app uses the stricter of the two. */
   readonly mismatch?: string
+  /**
+   * Vector Local was turned on after the app started, and Chromium still looks up the names pages link to before
+   * anyone opens them until Vector restarts (DNS prefetching is set only at start). Everything else already applies.
+   */
+  readonly restartNeeded: boolean
   /** Whether the app's windows may fetch each of these from the internet now: allow, ask (once) or block. */
   readonly sources: Readonly<Record<keyof typeof RENDERER, LocalMode.Decision>>
 }
@@ -61,7 +74,10 @@ export type DesktopLocalStatus = {
 export type Engine = { readonly url: string; readonly password: string }
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>
 
-const state: { mismatch?: string; hold: FirstRunHold } = { hold: createFirstRunHold(false) }
+const state: { mismatch?: string; hold: FirstRunHold; prefetchOff: boolean } = {
+  hold: createFirstRunHold(false),
+  prefetchOff: false,
+}
 
 /**
  * Before app.whenReady, once preferAppEnv has set the desktop's folders: resolves Vector Local's policy, trusts the
@@ -73,7 +89,9 @@ export function startDesktopLocal(input: {
   readonly log: (message: string, data?: unknown) => void
 }) {
   const policy = resolveDesktopLocal(input.userData)
-  // Chromium may still look up a name a page names, before the request the dispatcher would refuse.
+  // Chromium may still look up a name a page names, before the request the dispatcher would refuse. Only a start sets
+  // this, so turning Vector Local on later says a restart is needed (DesktopLocalStatus.restartNeeded).
+  state.prefetchOff = policy.enabled
   if (policy.enabled) input.commandLine.appendSwitch("dns-prefetch-disable")
   policy.warnings.forEach((warning) => input.log("vector local", { warning }))
   // Node's own certificate lists are read through OpenSSL and the system's store, either of which can fail on a
@@ -89,21 +107,6 @@ export function startDesktopLocal(input: {
   trusted?.problems.forEach((problem) => input.log("company certificate skipped", { problem }))
   if (trusted?.added.length) input.log("company certificates trusted", { count: trusted.added.length })
   return policy
-}
-
-/**
- * The certificates Node trusts in this process: its bundled list and the system's, with the company's certificate
- * authorities (`local.ca.files`) added after them.
- */
-export function trustCompanyCertificates(
-  userData: string,
-  apply: (certificates: string[]) => void = (certificates) => tls.setDefaultCACertificates(certificates),
-  folders: LocalStartup.Input = desktopLocalFolders(userData),
-) {
-  const base = [...new Set([...tls.getCACertificates("default"), ...tls.getCACertificates("system")])]
-  const trusted = companyCertificates(base, LocalStartup.ca(folders))
-  apply(trusted.certificates)
-  return trusted
 }
 
 /**
@@ -133,8 +136,9 @@ export function watchCompanyCertificates(input: {
 
 /**
  * Once the app is ready: the dispatcher on the default session and every session Electron makes, the kinds of the
- * sessions Vector knows, WebRTC kept to the proxy on every web contents, and, with Vector Local on, no WebRTC peer
- * connections in the agent's browser.
+ * sessions Vector knows, WebRTC kept off UDP on every web contents, and, with Vector Local on, no WebRTC peer
+ * connections in the agent's browser. Returns `apply`, which brings all of it in line with the policy in effect after
+ * it changed: every open web contents, every session's spellcheck dictionaries, and the agent browser's preload.
  */
 export function installChromiumLocal(deps: {
   readonly app: Pick<App, "on">
@@ -154,17 +158,30 @@ export function installChromiumLocal(deps: {
   filter.prepare(agent, "agent-browser")
   filter.prepare(deps.fromPartition(UPDATER, UPDATER_OPTIONS), "updates")
   deps.app.on("web-contents-created", (_event, contents) => filter.protect(contents))
-  deps.webContents().forEach((contents) => filter.protect(contents))
-  if (policy().enabled && agent.registerPreloadScript) denyPeerConnections(agent as PreloadTarget, deps.directory)
+  const preload: { id?: string } = {}
+  const apply = () => {
+    deps.webContents().forEach((contents) => filter.protect(contents))
+    filter.refresh()
+    if (!agent.registerPreloadScript) return
+    const on = policy().enabled
+    if (on && !preload.id) preload.id = denyPeerConnections(agent as PreloadTarget, deps.directory)
+    if (on || !preload.id) return
+    // A page loaded while Vector Local was on keeps the preload until it loads again.
+    agent.unregisterPreloadScript?.(preload.id)
+    preload.id = undefined
+  }
+  apply()
+  return { apply }
 }
 
-type PreloadTarget = Pick<Session, "registerPreloadScript">
+type PreloadTarget = Pick<Session, "registerPreloadScript" | "unregisterPreloadScript">
 
 // Before a page's own scripts, in the page's world: no WebRTC peer connections, whose traffic no webRequest listener
-// sees. A sandboxed preload with context isolation reaches the page's world through executeInMainWorld; one without
-// isolation already runs there. Electron runs a session's preloads in each page's main frame, so a frame a page's own
-// script makes still has RTCPeerConnection (the Electron smoke reports it); the IP handling policy holds that one to
-// no proxy at all.
+// sees, and which in a session with no proxy (the agent's browser) would connect over TCP directly, around Web access.
+// A sandboxed preload with context isolation reaches the page's world through executeInMainWorld; one without
+// isolation already runs there. Electron runs a session's preloads in the main frame only, unless the web contents
+// sets nodeIntegrationInSubFrames, as the agent's browser does (AGENT_BROWSER_PREFERENCES, browser-agent.ts): then
+// they run in every frame a page makes too, still sandboxed and without Node. The Electron smoke checks both.
 const PEER_CONNECTIONS_OFF = `"use strict"
 // Vector Local: the agent's browser makes no WebRTC peer connections. Written by Vector (local-mode.ts).
 const off = () => {
@@ -176,7 +193,7 @@ try { require("electron").contextBridge.executeInMainWorld({ func: off }) } catc
 `
 
 /** Registers the preload that turns WebRTC peer connections off in the pages of `target`. */
-export function denyPeerConnections(target: PreloadTarget, directory: string) {
+export function denyPeerConnections(target: Pick<Session, "registerPreloadScript">, directory: string) {
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   const filePath = join(directory, "no-peer-connections.js")
   writeFileSync(filePath, PEER_CONNECTIONS_OFF, { mode: 0o600 })
@@ -207,7 +224,7 @@ export function policyMismatch(desktop: LocalMode.Policy, engine: LocalMode.Poli
   if (differences.length === 0) return undefined
   return {
     differences,
-    message: `The app and its engine read Vector Local differently: ${differences.join("; ")}. The app uses the stricter of the two until they agree, which usually takes a restart of Vector.`,
+    message: `The app and its engine read Vector Local differently: ${differences.join("; ")}. The app uses the stricter of the two until they agree.`,
     stricter: stricterPolicy(desktop, engine),
   }
 }
@@ -248,31 +265,59 @@ const same = (left: readonly string[], right: readonly string[]) =>
   left.length === right.length && [...left].sort().join("\n") === [...right].sort().join("\n")
 
 /**
- * Once the engine answers: compares its policy with this process's every half minute (Vector Local turned on in the
- * app applies here at once, as the stricter policy), and sends this process's network log lines to the engine's log.
- * Returns how to stop both.
+ * Once the engine answers: compares its policy with this process's own, read again from the desktop's folders each
+ * time (`own`), as soon as the engine says Vector Local changed (its local.updated event, `events`) and every half
+ * minute, uses the stricter of the two, and tells `changed` the policy in effect each time it changes. Turning Vector
+ * Local on or off in the app therefore applies here within moments. A change to the user's config that would loosen
+ * Vector Local waits for the owner in the engine (`held`); this process reads the file as it is, which is no
+ * disagreement: the engine's stricter policy applies until the owner lets the change apply. It also sends this
+ * process's network log lines to the engine's log. Returns how to stop.
  */
 export function connectDesktopLocal(input: {
   readonly engine: Engine
   readonly log: (message: string, data?: unknown) => void
+  /** This process's own policy, from its folders. Without it, the policy in effect when it connected. */
+  readonly own?: () => LocalMode.Policy
+  /** The engine's event stream; without it, the engine's own /global/event. */
+  readonly events?: (signal: AbortSignal) => AsyncIterable<{ readonly payload: { readonly type: string } }>
+  /** The policy in effect, each time it changes. */
+  readonly changed?: (policy: LocalMode.Policy) => void
   readonly fetch?: Fetch
   readonly interval?: number
+  /** The first wait before the event stream reconnects; it doubles up to 30 seconds. */
+  readonly retry?: number
 }) {
   const fetch = input.fetch ?? globalThis.fetch
-  const own = Egress.policy()
+  const start = Egress.policy()
+  const own = input.own ?? (() => start)
   const compare = async () => {
-    const engine = await readEnginePolicy(input.engine, fetch)
+    const engine = await readEngineStatus(input.engine, fetch)
     if (!engine) return
-    const mismatch = policyMismatch(own, engine)
-    if (mismatch?.message === state.mismatch) return
-    input.log("vector local", { mismatch: mismatch?.message ?? "none" })
-    state.mismatch = mismatch?.message
-    // What started with this process (DNS prefetching, the agent browser's peer connections) changes at the next start.
-    Egress.configure(mismatch?.stricter ?? own)
+    const mine = own()
+    const mismatch = policyMismatch(mine, engine.policy)
+    const waiting = mismatch && engine.held && policyMismatch(mine, engine.held.proposed) === undefined
+    const message = waiting ? undefined : mismatch?.message
+    if (message !== state.mismatch) {
+      input.log("vector local", { mismatch: message ?? "none" })
+      state.mismatch = message
+    }
+    const next = mismatch?.stricter ?? mine
+    if (JSON.stringify(next) === JSON.stringify(Egress.policy())) return
+    const applied = Egress.configure(next)
+    input.changed?.(applied)
   }
   const first = compare()
   const timer = setInterval(() => void compare(), input.interval ?? RECHECK)
   timer.unref?.()
+  const stopping = new AbortController()
+  void watchEngineLocal({
+    events:
+      input.events ??
+      engineEventSource({ url: input.engine.url, username: "vector", password: input.engine.password }).events,
+    compare,
+    signal: stopping.signal,
+    retry: input.retry ?? EVENTS_RETRY,
+  })
   const forward = forwardEgress({
     // What this process logged before its engine answered, then each line as it is logged.
     initial: Egress.events(),
@@ -297,12 +342,49 @@ export function connectDesktopLocal(input: {
     compare,
     stop() {
       clearInterval(timer)
+      stopping.abort()
       forward.stop()
     },
   }
 }
 
-async function readEnginePolicy(engine: Engine, fetch: Fetch) {
+// Compares at each local.updated event, and again after each reconnect, for what changed while the stream was down.
+async function watchEngineLocal(input: {
+  readonly events: (signal: AbortSignal) => AsyncIterable<{ readonly payload: { readonly type: string } }>
+  readonly compare: () => Promise<void>
+  readonly signal: AbortSignal
+  readonly retry: number
+  readonly delay?: number
+}): Promise<void> {
+  const heard = { any: false }
+  try {
+    for await (const event of input.events(input.signal)) {
+      heard.any = true
+      if (event.payload.type === LocalEvent.Updated.type) await input.compare().catch(() => undefined)
+    }
+  } catch {
+    // The stream dropped: the engine restarted, or the connection did. It is opened again below.
+  }
+  if (input.signal.aborted) return
+  const delay = heard.any ? input.retry : Math.min((input.delay ?? input.retry / 2) * 2, EVENTS_RETRY_MAX)
+  const waited = await new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => resolve(true), delay)
+    timer.unref?.()
+    input.signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer)
+        resolve(false)
+      },
+      { once: true },
+    )
+  })
+  if (!waited) return
+  await input.compare().catch(() => undefined)
+  return watchEngineLocal({ ...input, delay })
+}
+
+async function readEngineStatus(engine: Engine, fetch: Fetch) {
   const response = await fetch(new URL("/local", engine.url).href, {
     headers: authorization(engine),
     signal: AbortSignal.timeout(10_000),
@@ -312,11 +394,35 @@ async function readEnginePolicy(engine: Engine, fetch: Fetch) {
     return undefined
   }
   return Option.getOrUndefined(Schema.decodeUnknownOption(EngineStatus)(await response.json().catch(() => undefined)))
-    ?.policy
 }
 
-// The part of GET /local's answer the comparison reads.
-const EngineStatus = Schema.Struct({ policy: LocalMode.Policy })
+// The part of GET /local's answer the comparison reads: the policy in effect, and a change held for the owner.
+const EngineStatus = Schema.Struct({
+  policy: LocalMode.Policy,
+  held: Schema.optional(Schema.Struct({ proposed: LocalMode.Policy })),
+})
+
+/**
+ * Tells the engine the person has chosen how to run models, so the fetches it held at start load now
+ * (POST /local/startup/release), trying again a few times while it cannot answer. Resolves whether the engine took it.
+ */
+export async function releaseStartupHold(
+  engine: Engine,
+  fetch: Fetch = globalThis.fetch,
+  tries = RELEASE_TRIES,
+  wait = RETRY,
+): Promise<boolean> {
+  const response = await fetch(new URL("/local/startup/release", engine.url).href, {
+    method: "POST",
+    headers: authorization(engine),
+    signal: AbortSignal.timeout(10_000),
+  }).catch(() => undefined)
+  await response?.body?.cancel().catch(() => undefined)
+  if (response?.ok) return true
+  if (tries <= 1) return false
+  await new Promise((resolve) => setTimeout(resolve, wait))
+  return releaseStartupHold(engine, fetch, tries - 1, wait)
+}
 
 function authorization(engine: Engine) {
   return { authorization: `Basic ${Buffer.from(`vector:${engine.password}`).toString("base64")}` }
@@ -530,6 +636,14 @@ export function createUpdateGate(deps: {
       if (!policy().enabled || !feed) return run()
       return deps.during([feed], run)
     },
+    /**
+     * A check the person started: asks first as `manual` does, then runs it as `run` does. Resolves undefined when
+     * they cancelled or Vector Local refused it, so no stale "You're up to date" shows.
+     */
+    async checked<T>(run: () => Promise<T>): Promise<T | undefined> {
+      if (!(await this.manual())) return undefined
+      return this.run(run)
+    },
   }
 }
 
@@ -554,6 +668,7 @@ export function desktopLocalStatus(): DesktopLocalStatus {
     lock: policy.lock,
     held: state.hold.held(),
     ...(state.mismatch ? { mismatch: state.mismatch } : {}),
+    restartNeeded: policy.enabled && !state.prefetchOff,
     sources: {
       "release-notes": decide(RENDERER["release-notes"]),
       "site-assets": decide(RENDERER["site-assets"]),

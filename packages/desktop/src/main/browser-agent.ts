@@ -27,6 +27,7 @@ import { AsyncLocalStorage } from "node:async_hooks"
 
 import type { BrowserAgentInput, BrowserAgentPageEvent, BrowserAutomationRun } from "../preload/types"
 import { redactText } from "./security-redaction"
+import { egressFilter } from "./egress-filter"
 
 type BrowserAgentLog = { level: string; message: string; location?: string }
 type BrowserAgentActionLog = { label: string; ok: boolean; error?: string; result?: unknown; at: string }
@@ -69,6 +70,19 @@ const coveredWindows = new WeakSet<BrowserWindow>()
 const hardenedSessions = new WeakSet<Electron.Session>()
 
 const PARTITION = "persist:vector-browser"
+/**
+ * The agent browser's page preferences. The session's preloads run in every frame, sandboxed and without Node, so
+ * Vector Local's no-peer-connections preload (local-mode.ts) reaches a frame a page makes as well as the page.
+ */
+export const AGENT_BROWSER_PREFERENCES = {
+  contextIsolation: true,
+  nodeIntegration: false,
+  nodeIntegrationInSubFrames: true,
+  sandbox: true,
+  webSecurity: true,
+} as const
+// A browser context the engine's browser tool opened is named by its session (tool/browser.ts, contextId).
+const SESSION_ID = /^ses_[0-9A-Za-z]+$/
 export const DOWNLOADS_OFF = "Downloads are off in the agent browser."
 // Commands that only place or show the panel's view. They never wait behind a page command, so resizing or opening
 // a dialog stays immediate while the agent waits on a page.
@@ -419,17 +433,15 @@ function ensureBrowserView() {
   if (context.view && !context.view.webContents.isDestroyed()) return context.view
   const partition = session.fromPartition(PARTITION)
   hardenSession(partition)
-  context.view = new WebContentsView({
-    webPreferences: {
-      session: partition,
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      webSecurity: true,
-    },
-  })
+  context.view = new WebContentsView({ webPreferences: { session: partition, ...AGENT_BROWSER_PREFERENCES } })
   context.view.setBackgroundColor("#18181a")
-  wireView(context, context.view.webContents)
+  // What its pages load counts in the session the agent browses for, in Vector Local's network log.
+  const contents = context.view.webContents
+  if (SESSION_ID.test(context.id)) {
+    const stop = egressFilter.attribute(contents.id, { sessionID: context.id })
+    contents.on("destroyed", stop)
+  }
+  wireView(context, contents)
   pushAction("Controlled browser launched")
   return context.view
 }
