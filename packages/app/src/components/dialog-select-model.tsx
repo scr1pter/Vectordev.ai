@@ -1,4 +1,4 @@
-import { freeModelSource, freeModelTrainingLabel } from "@vectordevai/core/free-model-choice"
+import { freeModelRegionLabel, freeModelSource, freeModelTrainingLabel } from "@vectordevai/core/free-model-choice"
 import { Popover as Kobalte } from "@kobalte/core/popover"
 import {
   Component,
@@ -178,6 +178,8 @@ function ModelRow(props: { item: ModelItem; section: ModelSection; now: number }
     if (source) parts.push({ slot: "model-row-source", text: source })
     const training = freeModelTrainingLabel(props.item)
     if (training) parts.push({ slot: "model-row-training", text: training })
+    const region = freeModelRegionLabel(props.item)
+    if (region) parts.push({ slot: "model-row-region", text: region })
     const context = contextLabel(props.item.limit?.context)
     if (context) parts.push({ slot: "model-row-context", text: context })
     return parts

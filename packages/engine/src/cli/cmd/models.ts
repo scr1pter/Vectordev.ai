@@ -7,6 +7,7 @@ import {
   freeModelName,
   freeModelSource,
   freeModelTrainingLabel,
+  freeModelRegionLabel,
   freeModelChoices,
 } from "@vectordevai/core/free-model-choice"
 import { FreeModels } from "@vectordevai/core/free-models"
@@ -83,7 +84,7 @@ export const ModelsCommand = effectCmd({
       UI.println(FREE_MODELS_TITLE)
       free.forEach((model) =>
         UI.println(
-          `  ${freeModelName(model)} — ${[freeModelSource(model), freeModelTrainingLabel(model)].filter(Boolean).join(" · ")} (${model.providerID}/${model.id})`,
+          `  ${freeModelName(model)} — ${[freeModelSource(model), freeModelTrainingLabel(model), freeModelRegionLabel(model)].filter(Boolean).join(" · ")} (${model.providerID}/${model.id})`,
         ),
       )
       if (free.some(freeModelMayTrain) && !(yield* Effect.promise(() => consent.trainingConsent())))

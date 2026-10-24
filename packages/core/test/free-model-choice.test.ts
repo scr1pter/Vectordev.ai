@@ -9,6 +9,7 @@ import {
   freeModelCatalogName,
   freeModelMayTrain,
   freeModelTrainingLabel,
+  freeModelRegionLabel,
   freeModelName,
   freeModelSource,
   freeModelChoices,
@@ -16,7 +17,7 @@ import {
   FREE_MODEL_TRAINING_CONSENT_REQUIRED,
   FREE_MODEL_TRAINING_REFUSED_TERMINAL,
   FREE_MODEL_UNLISTED,
-  FREE_MODEL_UNREVIEWED_BLOCKED,
+  FREE_MODEL_EXPIRED,
   FREE_ROUTER_NAME,
   FREE_MODELS_OWN_KEYS,
   FREE_MODELS_OWN_KEYS_TERMINAL,
@@ -46,12 +47,33 @@ describe("free model presentation", () => {
     expect(freeModelSource(own)).toBe("Your OpenRouter account")
     expect(freeModelSource(shared)).toBe("Provided by Vector")
   })
+  test("lists models whose providers don't train before those that may, each with its shared copy first", () => {
+    const copies = (id: string, dataPolicy: "no-training" | "may-train") =>
+      (["openrouter", "shared"] as const).map((source) => ({ id, name: id, freeModel: { source, dataPolicy } }))
+    const [ownTraining, sharedTraining] = copies("maker/trains:free", "may-train")
+    const [ownPrivate, sharedPrivate] = copies("maker/private:free", "no-training")
+    // The free router, which picks one of them at random, comes last.
+    const [ownRouter, sharedRouter] = copies("openrouter/free", "may-train")
+    expect(freeModelChoices([sharedRouter, ownTraining, ownRouter, sharedTraining, ownPrivate, sharedPrivate])).toEqual(
+      [sharedPrivate, ownPrivate, sharedTraining, ownTraining, sharedRouter, ownRouter],
+    )
+  })
   test("price and free-looking names cannot enable the section when metadata is absent", () => {
     const ordinary = { id: shared.id, name: "Maker Coder (free)", cost: { input: 0, output: 0 } }
     expect(freeModelSource(ordinary)).toBeUndefined()
     expect(freeModelChoices([ordinary])).toEqual([ordinary])
     expect(freeModelName(ordinary)).toBe("Maker Coder")
   })
+})
+
+test("Gemma's US only tag follows each verified free copy and does not enable a free-looking model", () => {
+  for (const id of ["google/gemma-4-26b-a4b-it:free", "google/gemma-4-31b-it:free"]) {
+    for (const source of ["shared", "openrouter"] as const)
+      expect(freeModelRegionLabel({ id, freeModel: { source } })).toBe("US only")
+    expect(freeModelRegionLabel({ id })).toBeUndefined()
+  }
+  expect(freeModelRegionLabel({ id: "google/gemma-4-31b-it", freeModel: { source: "shared" } })).toBeUndefined()
+  expect(freeModelRegionLabel({ id: "cohere/north-mini-code:free", freeModel: { source: "shared" } })).toBeUndefined()
 })
 
 test("quota notices accept only typed limits and never repeat upstream text", () => {
@@ -160,7 +182,7 @@ test("what Vector says about the included models never names OpenRouter", () => 
     FREE_MODEL_TRAINING_CONSENT_REQUIRED,
     FREE_MODEL_TRAINING_OWNER_ONLY,
     FREE_MODEL_UNLISTED,
-    FREE_MODEL_UNREVIEWED_BLOCKED,
+    FREE_MODEL_EXPIRED,
     FREE_ROUTER_NAME,
     freeModelSource({ id: "maker/a:free", freeModel: { source: "shared" } }) ?? "",
     ...(["user_daily", "user_minute", "shared_daily", "upstream", "balance"] as const).map((reason) =>

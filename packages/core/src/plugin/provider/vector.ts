@@ -21,7 +21,7 @@ export const VectorPlugin = define({
         const owned = openrouter ? yield* freeModels.forKey(openrouter) : []
         if (openrouter) catalog.provider.update("openrouter", () => {})
         // OpenRouter models that run on free endpoints, zero-price ones and its free router included, return below
-        // only as reviewed free models.
+        // only as the free models the catalogs list.
         removeOpenRouterFree(catalog)
         // Vector's provider is the shared allowance, so it needs a Vector sign-in; an OpenRouter key of the user's
         // own lists that account's copies under OpenRouter instead.

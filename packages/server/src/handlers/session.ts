@@ -595,7 +595,7 @@ const refuseTrainingFreeModel = Effect.fn("SessionHandler.refuseTrainingFreeMode
   )
   const policies = [
     ...(shared.enabled ? shared.models : []).filter((item) => item.id === model.id).map(freeModelDataPolicy),
-    ...located.flatMap((item) => (item?.freeModel ? [item.freeModel.dataPolicy ?? "unreviewed"] : [])),
+    ...located.flatMap((item) => (item?.freeModel ? [item.freeModel.dataPolicy ?? "may-train"] : [])),
   ]
   if (!policies.length || policies.some((policy) => policy !== "no-training"))
     return yield* new ForbiddenError({ message: FREE_MODEL_TRAINING_OWNER_ONLY })

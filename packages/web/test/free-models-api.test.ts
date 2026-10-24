@@ -15,7 +15,12 @@ import {
 import { handleFreeModelsChat } from "../../../api/_lib/free-models-chat"
 import modelsHandler from "../../../api/free-models/models"
 import refreshHandler from "../../../api/free-models/refresh"
-import { FREE_ROUTER_RETENTION, MAY_TRAIN_RETENTION, type FreeModelInfo } from "../../schema/src/free-model"
+import {
+  FREE_ROUTER_RETENTION,
+  MAY_TRAIN_RETENTION,
+  UNREVIEWED_RETENTION,
+  type FreeModelInfo,
+} from "../../schema/src/free-model"
 
 // This integration suite executes the production Lua against real Redis/Valkey.
 // CI may supply VECTOR_TEST_REDIS_URL; local runs supply the two executable paths.
@@ -54,13 +59,16 @@ async function redis(command: readonly (string | number)[]): Promise<unknown> {
   return JSON.parse(output)
 }
 
-// Every free model on OpenRouter's public /models and per-model /endpoints, captured on 17 October 2026.
-// /models/user is simulated as an account that allows every model unless a test narrows it.
-const fixture: {
-  capturedAt: number
-  models: { id: string }[]
-  endpoints: Record<string, Record<string, unknown>[]>
-} = await Bun.file(new URL("../../core/test/fixture/free-model-public-2026-10-17.json", import.meta.url)).json()
+// Every free model on OpenRouter's public /models and per-model /endpoints, captured on 17 October 2026 and on
+// 24 October 2026 (06:26 UTC). /models/user is simulated as an account that allows every model unless a test narrows
+// it.
+type Capture = { capturedAt: number; models: { id: string }[]; endpoints: Record<string, Record<string, unknown>[]> }
+const fixture: Capture = await Bun.file(
+  new URL("../../core/test/fixture/free-model-public-2026-10-17.json", import.meta.url),
+).json()
+const today: Capture = await Bun.file(
+  new URL("../../core/test/fixture/free-model-public-2026-10-24.json", import.meta.url),
+).json()
 const catalogModels: FreeModelInfo[] = [
   {
     id: "cohere/north-mini-code:free",
@@ -91,6 +99,8 @@ const catalogModels: FreeModelInfo[] = [
     ],
   },
 ]
+// The two no-training models as a refresh of either capture stores them: Dots' free preview ends on 31 December 2026.
+const curated: FreeModelInfo[] = [catalogModels[0], { ...catalogModels[1], expiresAt: Date.parse("2026-12-31") }]
 // Poolside's free endpoint may train on prompts.
 const laguna: FreeModelInfo = {
   id: "poolside/laguna-s-2.1:free",
@@ -312,40 +322,49 @@ describe("curated free catalog", () => {
     expect((await chat()).status).toBe(503)
     expect(chats).toHaveLength(0)
   })
-  test("curates every reviewed free model of 17 October 2026, each with its data policy, into real KV", async () => {
+  test("curates every free model of 17 October 2026, each with its data policy, into real KV", async () => {
     const catalog = await refreshFreeModelCatalog(fetcher, fixture.capturedAt)
     // No-training models first, then the ones whose providers may train, and OpenRouter's Free Models Router last.
-    // NVIDIA's trial endpoints never appear, and Gemma is offered through the user's own account only. Xing4.0 moved
-    // to the shared allowance on 17 October 2026, when the owner decided every free model belongs there unless its
-    // terms bar it.
+    // NVIDIA's appear since the owner's decision of 23 October 2026, except Nemotron 3 Ultra, whose one endpoint was
+    // down all that day. Gemma is included with its reviewed no-training policy.
     expect(
       catalog.models.map((model) => `${model.id}:${model.providers.map((provider) => provider.dataPolicy).join()}`),
     ).toEqual([
       "cohere/north-mini-code:free:no-training",
       "dots-studio/dots-3-note-preview:free:no-training",
+      "google/gemma-4-26b-a4b-it:free:no-training",
+      "google/gemma-4-31b-it:free:no-training",
       "xingchen-agi/xing4.0-29b-a4b:free:no-training",
       "liquid/lfm-2.5-2.6b:free:may-train",
+      "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free:may-train",
+      "nvidia/nemotron-3-super-120b-a12b:free:may-train",
+      "nvidia/nemotron-3.5-lightning:free:may-train",
+      "nvidia/nemotron-3.5-super-vl:free:may-train",
       "poolside/laguna-s-2.1:free:may-train",
       "poolside/laguna-xs-2.1:free:may-train",
       "thinkingmachines/inkling-small:free:may-train",
       "thinkingmachines/inkling:free:may-train",
       "openrouter/free:may-train",
     ])
-    expect(catalog.models.slice(0, 2)).toEqual(catalogModels)
-    expect(catalog.models.find((model) => model.id === laguna.id)).toEqual(laguna)
+    expect(catalog.models.slice(0, 2)).toEqual(curated)
+    expect(catalog.models.find((model) => model.id === laguna.id)).toEqual({
+      ...laguna,
+      expiresAt: Date.parse("2026-10-31"),
+    })
     // A client that discloses may-train models gets them all; any other client gets the no-training ones only.
     expect(await currentFreeModelCatalog(fetcher, fixture.capturedAt + 1000, { disclosure: true })).toEqual(catalog)
     expect((await currentFreeModelCatalog(fetcher, fixture.capturedAt + 1000)).models.map((model) => model.id)).toEqual(
-      catalog.models.slice(0, 3).map((model) => model.id),
+      catalog.models.slice(0, 5).map((model) => model.id),
     )
     expect(Number(await redis(["TTL", FREE_MODELS_CATALOG_KEY]))).toBeGreaterThan(54 * 3600 - 60)
     expect(FREE_MODELS_CATALOG_KEY).toBe("vector:free-models:catalog:v4:policy")
-    // Only reviewed, offered candidates get an endpoint lookup; barred, personal-only and per-item priced models never
-    // do, and the Free Models Router, which lists no endpoints of its own, is judged by its listing.
+    // Every offered candidate gets an endpoint lookup; tool-less models never do, and the Free Models
+    // Router, which lists no endpoints of its own, is judged by its listing.
     const lookups = state.catalogReads.slice(2)
-    expect(lookups.filter((path) => /nvidia|lyria|gemma|openrouter\/free/.test(path))).toEqual([])
+    expect(lookups.filter((path) => /lyria|openrouter\/free|content-safety/.test(path))).toEqual([])
     expect(lookups).toContain("/api/v1/models/xingchen-agi/xing4.0-29b-a4b:free/endpoints")
-    expect(lookups).toHaveLength(8)
+    expect(lookups).toContain("/api/v1/models/nvidia/nemotron-3-ultra-550b-a55b:free/endpoints")
+    expect(lookups).toHaveLength(15)
     expect(JSON.stringify(catalog)).not.toMatch(/zero data retention|ZDR/i)
   })
   test("an account whose privacy settings hide may-train models publishes a no-training catalog", async () => {
@@ -353,7 +372,7 @@ describe("curated free catalog", () => {
     const noTraining = ["cohere/north-mini-code:free", "dots-studio/dots-3-note-preview:free"]
     state.userModels = noTraining
     const catalog = await refreshFreeModelCatalog(fetcher, fixture.capturedAt)
-    expect(catalog).toEqual({ enabled: true, updatedAt: fixture.capturedAt, models: catalogModels })
+    expect(catalog).toEqual({ enabled: true, updatedAt: fixture.capturedAt, models: curated })
     state.userModels = []
     expect(await refreshFreeModelCatalog(fetcher, fixture.capturedAt)).toMatchObject({ enabled: false, models: [] })
   })
@@ -397,10 +416,8 @@ describe("curated free catalog", () => {
       { name: "no tools", model: { supported_parameters: ["tool_choice"] } },
       { name: "expiring", model: { expiration_date: new Date(fixture.capturedAt + 86400000).toISOString() } },
       { name: "hidden from the account", hidden: true },
-      { name: "offline", endpoint: { status: -1 } },
+      { name: "down all day", endpoint: { status: -1, uptime_last_1d: 0 } },
       { name: "priced endpoint", endpoint: { pricing: { prompt: "0", completion: "0", request: "0.01" } } },
-      { name: "unreviewed provider", endpoint: { provider_name: "Unknown", tag: "unknown" } },
-      { name: "provider not reviewed for it", endpoint: { provider_name: "AtlasCloud", tag: "atlas-cloud/fp8" } },
     ]
     for (const scenario of scenarios) {
       Object.assign(state, initial())
@@ -417,18 +434,82 @@ describe("curated free catalog", () => {
       expect(state.catalogReads.includes(`/api/v1/models/${cohere}/endpoints`)).toBe(!!scenario.endpoint)
     }
   })
-  test("never serves unreviewed models or barred authors on the shared allowance, nor looks up their endpoints", async () => {
-    state.models = state.models.filter((item) => catalogModels.some((model) => model.id === item.id))
-    state.models.push(
-      synthetic("cohere/north-code-next:free"),
-      synthetic("google/north-mini-code:free"),
-      synthetic("nvidia/north-mini-code:free"),
-    )
+  test("serves models and providers Vector has not reviewed, and NVIDIA's, as ones that may train", async () => {
+    // Owner, 23 October 2026: new free models appear on the next refresh, labelled until Vector reviews them.
+    const cohere = "cohere/north-mini-code:free"
+    const lightning = "nvidia/nemotron-3.5-lightning:free"
+    const [endpoint] = fixture.endpoints[cohere]
+    state.models = [
+      ...state.models.filter((item) => [...catalogModels.map((model) => model.id), lightning].includes(item.id)),
+      synthetic("acme/new-coder:free"),
+    ]
+    state.endpoints["acme/new-coder:free"] = [
+      { ...endpoint, model_id: "acme/new-coder:free", provider_name: "Acme", tag: "acme/fp8" },
+    ]
+    // Cohere's model served by a second provider nobody reviewed: that endpoint may train, so the whole model may.
+    state.endpoints[cohere] = [endpoint, { ...endpoint, provider_name: "AtlasCloud", tag: "atlas-cloud/fp8" }]
     state.userModels = state.models.map((item) => item.id)
     const catalog = await refreshFreeModelCatalog(fetcher, fixture.capturedAt)
-    expect(catalog.models).toEqual(catalogModels)
+    expect(
+      catalog.models.map((model) => [model.id, model.providers.map((item) => `${item.id}:${item.dataPolicy}`)]),
+    ).toEqual([
+      ["dots-studio/dots-3-note-preview:free", ["atlas-cloud/fp8:no-training"]],
+      [cohere, ["cohere:no-training", "atlas-cloud/fp8:may-train"]],
+      ["acme/new-coder:free", ["acme/fp8:may-train"]],
+      [lightning, ["nvidia/nvfp4:may-train"]],
+    ])
+    expect(catalog.models[1].providers[1].retention).toBe(UNREVIEWED_RETENTION)
+    expect(catalog.models[2].providers[0].retention).toBe(UNREVIEWED_RETENTION)
+    expect(catalog.models[3].providers[0].retention).toBe(MAY_TRAIN_RETENTION)
     expect(catalog.models.every((item) => !item.name.endsWith("(free)"))).toBe(true)
-    expect(state.catalogReads.filter((path) => /north-code-next|google|nvidia/.test(path))).toEqual([])
+    // An older client never sees them; a current one does, and the stored catalog passes the serving checks.
+    expect((await currentFreeModelCatalog(fetcher, fixture.capturedAt + 1000)).models.map((item) => item.id)).toEqual([
+      "dots-studio/dots-3-note-preview:free",
+    ])
+    expect(await currentFreeModelCatalog(fetcher, fixture.capturedAt + 1000, { disclosure: true })).toEqual(catalog)
+  })
+  test("serves every free model OpenRouter listed on 24 October 2026 except those without tools or a working endpoint", async () => {
+    Object.assign(state, {
+      models: [...today.models],
+      endpoints: { ...today.endpoints },
+      userModels: today.models.map((item) => item.id),
+    })
+    const catalog = await refreshFreeModelCatalog(fetcher, today.capturedAt)
+    expect(
+      catalog.models.map((model) => `${model.id}:${model.providers.map((provider) => provider.dataPolicy).join()}`),
+    ).toEqual([
+      "cohere/north-mini-code:free:no-training",
+      "dots-studio/dots-3-note-preview:free:no-training",
+      "google/gemma-4-26b-a4b-it:free:no-training",
+      "google/gemma-4-31b-it:free:no-training",
+      "xingchen-agi/xing4.0-29b-a4b:free:no-training",
+      "liquid/lfm-2.5-2.6b:free:may-train",
+      "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free:may-train",
+      "nvidia/nemotron-3-ultra-550b-a55b:free:may-train",
+      "nvidia/nemotron-3.5-lightning:free:may-train",
+      "nvidia/nemotron-3.5-super-vl:free:may-train",
+      "poolside/laguna-s-2.1:free:may-train",
+      "poolside/laguna-xs-2.1:free:may-train",
+      "recursive/flint-v1.0:free:may-train",
+      "thinkingmachines/inkling-small:free:may-train",
+      "thinkingmachines/inkling:free:may-train",
+      "openrouter/free:may-train",
+    ])
+    // The other four of the 20 zero-price IDs: three models without tools (Lyria's two music previews, NVIDIA's
+    // content-safety classifier), and Nemotron 3
+    // Super, whose one endpoint served nothing all day.
+    expect(
+      today.models.map((item) => item.id).filter((id) => !catalog.models.some((model) => model.id === id)),
+    ).toEqual([
+      "nvidia/nemotron-3.5-content-safety:free",
+      "google/lyria-3-pro-preview",
+      "google/lyria-3-clip-preview",
+      "nvidia/nemotron-3-super-120b-a12b:free",
+    ])
+    // 1.99.108 and CLI 1.99.99 receive only the five no-training models.
+    expect((await currentFreeModelCatalog(fetcher, today.capturedAt + 1000)).models.map((item) => item.id)).toEqual(
+      catalog.models.slice(0, 5).map((model) => model.id),
+    )
   })
   test("one unreadable endpoint list drops only that model and the rest still publish", async () => {
     const dots = "dots-studio/dots-3-note-preview:free"
@@ -502,10 +583,12 @@ describe("curated free catalog", () => {
       { providers: [{ id: "cohere", name: "Cohere", retention: "" }] },
       { providers: [{ id: "cohere", name: "Cohere", retention: "", dataPolicy: "may-train" }] },
       { providers: [{ id: "atlas-cloud/fp8", name: "AtlasCloud", retention: "", dataPolicy: "no-training" }] },
+      // A model Vector has not reviewed, or NVIDIA's, can never be stored as no-training.
       { id: "cohere/north-code-next:free" },
       { id: "nvidia/nemotron-3.5-super-vl:free" },
       { maxOutputTokens: -1 },
       { id: "cohere/paid" },
+      { expiresAt: "2026-10-31" },
     ]) {
       await redis([
         "SET",
@@ -905,7 +988,7 @@ describe("free models that may train on prompts", () => {
     expect(chats[1].body.models).not.toContain(laguna.id)
   })
 
-  test("OpenRouter's free router goes out only after acceptance, naming no providers and asking to skip NVIDIA", async () => {
+  test("OpenRouter's free router goes out only after acceptance, naming no providers and skipping none", async () => {
     await store([...catalogModels, router])
     // 1.99.108 never sees it, and is refused it; a current client is refused it until the user accepts.
     expect((await chat(prompt(router.id))).status).toBe(403)
@@ -916,9 +999,57 @@ describe("free models that may train on prompts", () => {
     expect(chats[0].body.provider).toEqual({
       data_collection: "allow",
       require_parameters: true,
-      ignore: ["nvidia"],
       max_price: { prompt: 0, completion: 0, request: 0, image: 0 },
     })
+  })
+
+  test("a model Vector has not reviewed is labelled, asks first, and then goes out allowing data collection", async () => {
+    const newCoder: FreeModelInfo = {
+      id: "acme/new-coder:free",
+      name: "Acme: New Coder",
+      contextLength: 262144,
+      maxOutputTokens: 32768,
+      providers: [{ id: "acme/fp8", name: "Acme", retention: UNREVIEWED_RETENTION, dataPolicy: "may-train" }],
+    }
+    await store([...catalogModels, newCoder])
+    expect((await (await fetch(state.origin + "/models")).json()).models).toEqual(catalogModels)
+    const refused = await chat(prompt(newCoder.id))
+    expect(refused.status).toBe(403)
+    expect((await refused.json()).error.code).toBe("FREE_MODELS_DISCLOSURE_REQUIRED")
+    const unaccepted = await chat(prompt(newCoder.id), account(), disclosure)
+    expect((await unaccepted.json()).error.code).toBe("FREE_MODELS_CONSENT_REQUIRED")
+    expect(chats).toHaveLength(0)
+    // "deny" would leave it no endpoint to answer from; the price ceiling stays zero.
+    expect((await chat(prompt(newCoder.id), account(), consented)).status).toBe(200)
+    expect(chats[0].body.models).toEqual([newCoder.id])
+    expect(chats[0].body.provider).toEqual({
+      data_collection: "allow",
+      require_parameters: true,
+      only: ["acme/fp8"],
+      max_price: { prompt: 0, completion: 0, request: 0, image: 0 },
+    })
+  })
+
+  test("a model whose free endpoints have ended is no longer listed, and a request for it says so", async () => {
+    // A catalog kept while refreshes fail can outlive a model's last free day.
+    await store([...catalogModels, { ...laguna, expiresAt: Date.now() - 1000 }])
+    for (const query of ["", "?disclosure=may-train-v1"])
+      expect((await (await fetch(state.origin + "/models" + query)).json()).models).toEqual(catalogModels)
+    const refused = await chat(prompt(laguna.id), account(), consented)
+    expect(refused.status).toBe(400)
+    expect((await refused.json()).error).toEqual({
+      code: "FREE_MODELS_REQUEST_INVALID",
+      message: "That free model is no longer available. Choose another model from Free models inside of Vector.",
+    })
+    expect(chats).toHaveLength(0)
+    // Until then it is listed and answers.
+    await store([...catalogModels, { ...laguna, expiresAt: Date.now() + 86400000 }])
+    expect(
+      (await (await fetch(state.origin + "/models?disclosure=may-train-v1")).json()).models.map(
+        (model: FreeModelInfo) => model.id,
+      ),
+    ).toContain(laguna.id)
+    expect((await chat(prompt(laguna.id), account(), consented)).status).toBe(200)
   })
 
   test("the default per-minute cap lets one agent prompt make several tool steps", async () => {

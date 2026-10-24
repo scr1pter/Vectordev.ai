@@ -254,8 +254,8 @@ test("OpenRouter's free router is offered to the owner with the label, never to 
       const v2 = await h.send(`/api/session/${guest}/prompt`, h.guest, { prompt: { text: "hello" }, resume: false })
       expect(v2.status).toBe(403)
       expect(((await v2.json()) as { message: string }).message).toBe(FREE_MODEL_TRAINING_OWNER_ONLY)
-      // The owner, who accepted, reaches the shared allowance with the router: zero price, no providers named, NVIDIA
-      // asked to be skipped, and the acceptance sent.
+      // The owner, who accepted, reaches Vector's free service with the router: zero price, no providers named or
+      // skipped (no author is barred since 23 October 2026), and the acceptance sent.
       const own = await newSession(h, h.owner)
       await h.send(`/session/${own}/message`, h.owner, {
         model: { providerID: "vector", modelID: router.id },
@@ -264,15 +264,15 @@ test("OpenRouter's free router is offered to the owner with the label, never to 
       const sent = h.outbound.filter((item) => item.model === router.id)
       expect(sent.length).toBeGreaterThan(0)
       expect(sent.every((item) => item.url === FreeModels.SHARED_CHAT_URL && item.consent === "accepted")).toBe(true)
-      for (const item of sent)
-        expect(JSON.parse(item.text)).toMatchObject({
+      for (const item of sent) {
+        const body = JSON.parse(item.text)
+        expect(body).toMatchObject({
           models: [router.id],
-          provider: {
-            data_collection: "allow",
-            ignore: ["nvidia"],
-            max_price: { prompt: 0, completion: 0, request: 0, image: 0 },
-          },
+          provider: { data_collection: "allow", max_price: { prompt: 0, completion: 0, request: 0, image: 0 } },
         })
+        expect(body.provider).not.toHaveProperty("ignore")
+        expect(body.provider).not.toHaveProperty("only")
+      }
       expect(h.outbound.filter((item) => item.text.includes("guest secret"))).toEqual([])
     },
     { models: [cohere, router] },

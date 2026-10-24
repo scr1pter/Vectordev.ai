@@ -6,7 +6,7 @@ const endpointsPath = (url: string) => /\/models\/(.+)\/endpoints$/.exec(url)?.[
 // Every free OpenRouter model and endpoint, captured from the public API on 17 October 2026.
 const fixture = await Bun.file(new URL("./fixture/free-model-public-2026-10-17.json", import.meta.url)).json()
 
-test("a personal account gets every free model its settings allow, each with its data policy, NVIDIA excepted", async () => {
+test("a personal account gets every free model its settings allow, each with its data policy, NVIDIA's included", async () => {
   const requests: string[] = []
   const client = FreeModels.createClient({
     now: () => fixture.capturedAt,
@@ -24,26 +24,28 @@ test("a personal account gets every free model its settings allow, each with its
   ).toEqual([
     ["thinkingmachines/inkling-small:free", ["thinkingmachines/nvfp4:may-train"]],
     ["thinkingmachines/inkling:free", ["thinkingmachines/nvfp4:may-train"]],
+    ["nvidia/nemotron-3.5-lightning:free", ["nvidia/nvfp4:may-train"]],
+    ["nvidia/nemotron-3.5-super-vl:free", ["nvidia:may-train"]],
     ["dots-studio/dots-3-note-preview:free", ["atlas-cloud/fp8:no-training"]],
-    // Kept off the shared allowance (personalOnlyFreeModel), but offered on the user's own account.
+    // Gemma is offered on both Vector and personal accounts, with a US only tag.
     ["google/gemma-4-26b-a4b-it:free", ["google-ai-studio:no-training"]],
     ["google/gemma-4-31b-it:free", ["google-ai-studio:no-training"]],
+    ["nvidia/nemotron-3-super-120b-a12b:free", ["nvidia:may-train"]],
     ["poolside/laguna-s-2.1:free", ["poolside/fp4:may-train"]],
     ["poolside/laguna-xs-2.1:free", ["poolside/fp8:may-train"]],
     ["xingchen-agi/xing4.0-29b-a4b:free", ["phala:no-training"]],
     ["cohere/north-mini-code:free", ["cohere:no-training"]],
+    ["nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", ["nvidia:may-train"]],
     // OpenRouter's Free Models Router, which picks a free model at random, so it is labelled as one that may train.
     ["openrouter/free", ["openrouter:may-train"]],
     ["liquid/lfm-2.5-2.6b:free", ["liquid/fp8:may-train"]],
   ])
-  // NVIDIA's trial endpoints are barred and never looked up; neither are per-item priced models, nor the free router,
-  // which has no endpoint list of its own.
-  expect(
-    requests
-      .slice(1)
-      .map(endpointsPath)
-      .filter((id) => /^(?:nvidia|openrouter|google\/lyria)/.test(id ?? "")),
-  ).toEqual([])
+  // Nemotron 3 Ultra's one endpoint was down and served nothing that day, so it is left out. Models without tools
+  // (NVIDIA's content-safety classifier, Google's Lyria previews) are never looked up, nor is the free router, which
+  // has no endpoint list of its own. NVIDIA's other models are, since the owner's decision of 23 October 2026.
+  const looked = requests.slice(1).map(endpointsPath)
+  expect(looked.filter((id) => /^(?:openrouter|google\/lyria)|content-safety/.test(id ?? ""))).toEqual([])
+  expect(looked.filter((id) => id?.startsWith("nvidia/")).length).toBe(5)
 })
 
 test("an account whose privacy settings hide may-train models gets the no-training ones only", async () => {
@@ -144,7 +146,7 @@ test("personal discovery validates live endpoints without the shared service and
   expect(requests).toHaveLength(2)
 })
 
-test("an unreviewed free model or provider is offered on a personal account, disclosed as one that may train", async () => {
+test("an unreviewed free model or provider is offered on a personal account as one that may train", async () => {
   const client = FreeModels.createClient({
     request: async (url) => {
       if (url.endsWith("/models/user")) return Response.json({ data: [model("maker/new:free"), model(reviewed)] })
@@ -160,14 +162,14 @@ test("an unreviewed free model or provider is offered on a personal account, dis
   expect(models.map((item) => [item.id, item.providers])).toEqual([
     [
       "cohere/north-mini-code:free",
-      [{ id: "poolside/fp8", name: "Poolside", retention: UNREVIEWED_RETENTION, dataPolicy: "unreviewed" }],
+      [{ id: "poolside/fp8", name: "Poolside", retention: UNREVIEWED_RETENTION, dataPolicy: "may-train" }],
     ],
-    ["maker/new:free", [{ id: "maker", name: "Maker", retention: UNREVIEWED_RETENTION, dataPolicy: "unreviewed" }]],
+    ["maker/new:free", [{ id: "maker", name: "Maker", retention: UNREVIEWED_RETENTION, dataPolicy: "may-train" }]],
   ])
   expect(MAY_TRAIN_RETENTION).toContain("train")
 })
 
-test("personal discovery checks free IDs, prices, tools, expiry and barred authors before endpoint lookup", async () => {
+test("personal discovery checks free IDs, prices, tools and expiry before endpoint lookup", async () => {
   const requests: string[] = []
   const client = FreeModels.createClient({
     now: () => Date.UTC(2026, 9, 2),
@@ -181,7 +183,6 @@ test("personal discovery checks free IDs, prices, tools, expiry and barred autho
             model("openrouter/auto:free"),
             { ...model("dots-studio/dots-3-note-preview:free"), expiration_date: "2026-10-01" },
             { ...model("maker/no-tools:free"), supported_parameters: ["tool_choice"] },
-            model("nvidia/nemotron-3-super-120b-a12b:free"),
           ],
         })
       return Response.json({ data: { endpoints: [endpoint] } })
@@ -194,7 +195,7 @@ test("personal discovery checks free IDs, prices, tools, expiry and barred autho
   ])
 })
 
-test("personal discovery skips models within a week of expiry", async () => {
+test("personal discovery skips models within a day of expiry", async () => {
   const requests: string[] = []
   const client = FreeModels.createClient({
     now: () => Date.UTC(2026, 9, 15),
@@ -202,7 +203,10 @@ test("personal discovery skips models within a week of expiry", async () => {
       requests.push(url)
       if (url.endsWith("/models/user"))
         return Response.json({
-          data: [model(reviewed), { ...model("dots-studio/dots-3-note-preview:free"), expiration_date: "2026-10-20" }],
+          data: [
+            model(reviewed),
+            { ...model("dots-studio/dots-3-note-preview:free"), expiration_date: "2026-10-16T00:00:00Z" },
+          ],
         })
       return Response.json({ data: { endpoints: [endpoint] } })
     },
