@@ -14,7 +14,11 @@ const page = source.replace(
 const markup = page.slice(0, page.indexOf("<style"))
 const section = (pattern: RegExp) => markup.match(pattern)?.[0] ?? ""
 const milestone = (title: string) =>
-  section(new RegExp(`<div class="ip-milestone[^"]*">\\s*<span class="ip-stage[^"]*">[^<]+</span>\\s*<h3>${title}</h3>\\s*<p>[^<]*</p>`))
+  section(
+    new RegExp(
+      `<div class="ip-milestone[^"]*">\\s*<span class="ip-stage[^"]*">[^<]+</span>\\s*<h3>${title}</h3>\\s*<p>[^<]*</p>`,
+    ),
+  )
 
 // The page quotes one benchmark: the integrated HTTP cells of the checked-in efficiency archive, Vector on the Messages
 // API against Claude Code, priced at the same rates.
@@ -37,7 +41,10 @@ const scenarios = Array.from(new Set(summary.cells.map((item) => item.scenario))
     ),
 )
 const saving = (scenario: string, session: number) =>
-  Math.round((1 - (cell("vector", scenario, session)?.costUsd ?? 0) / (cell("claude-code", scenario, session)?.costUsd ?? 1)) * 100)
+  Math.round(
+    (1 - (cell("vector", scenario, session)?.costUsd ?? 0) / (cell("claude-code", scenario, session)?.costUsd ?? 1)) *
+      100,
+  )
 const range = (session: number) => {
   const savings = scenarios.map((scenario) => saving(scenario, session))
   if (Math.min(...savings) === Math.max(...savings)) return `${savings[0]}%`
@@ -48,7 +55,7 @@ test("the one-pager stays one page", () => {
   // Visible words outside the collapsed sources list. The page is read in a couple of minutes; grow it only by
   // cutting something else. The owner added the markets section on 19 October 2026.
   const text = markup
-    .slice(markup.indexOf("<div class=\"ip-page\">"))
+    .slice(markup.indexOf('<div class="ip-page">'))
     .replace(/<details[\s\S]*?<\/details>/g, "")
     .replace(/<[^>]+>/g, " ")
   expect(text.split(/\s+/).filter((word) => /\w/.test(word)).length).toBeLessThan(880)
@@ -93,7 +100,21 @@ test("the investor page counts the built-in subagents that ship and describes Ve
   const subagents = agents
     .filter((agent) => agent.includes('mode: "subagent"'))
     .map((agent) => agent.slice(0, agent.indexOf('"')))
-  const words = ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve"]
+  const words = [
+    "Zero",
+    "One",
+    "Two",
+    "Three",
+    "Four",
+    "Five",
+    "Six",
+    "Seven",
+    "Eight",
+    "Nine",
+    "Ten",
+    "Eleven",
+    "Twelve",
+  ]
   expect(milestone("Subagent system")).toContain(`${words[subagents.length]} built-in subagents`)
   ;["explore", "migration"].forEach((name) => expect(subagents).toContain(name))
   expect(milestone("Subagent system")).toContain("from explore to migration")
@@ -103,7 +124,9 @@ test("the investor page counts the built-in subagents that ship and describes Ve
 
 test("every technology carries its status, and only the shipped ones say Today", () => {
   const items = Array.from(
-    markup.matchAll(/<div class="ip-milestone[^"]*">\s*<span class="ip-stage[^"]*">([^<]+)<\/span>\s*<h3>([^<]+)<\/h3>/g),
+    markup.matchAll(
+      /<div class="ip-milestone[^"]*">\s*<span class="ip-stage[^"]*">([^<]+)<\/span>\s*<h3>([^<]+)<\/h3>/g,
+    ),
     (match) => [match[2], match[1]],
   )
   expect(items.length).toBe(markup.match(/<div class="ip-milestone/g)?.length)
@@ -118,7 +141,9 @@ test("every technology carries its status, and only the shipped ones say Today",
     "Vector Codium": "Built in, not on sale",
   })
   // The software factory inside Vector Cloud is a plan, and many more cloud services are an intent.
-  expect(milestone("Vector Cloud")).toContain("The software factory, issue to reviewed preview in the cloud, is planned.")
+  expect(milestone("Vector Cloud")).toContain(
+    "The software factory, issue to reviewed preview in the cloud, is planned.",
+  )
   expect(markup).toContain("many more cloud services of its own (intent)")
   expect(markup).not.toMatch(/next release/i)
 })
@@ -132,13 +157,17 @@ test("Vector Brain names desktop 1.99.110 and keeps the owner's description", as
   expect(source).toContain('<span class="ip-stage">{brainRelease.stage}</span>')
   expect(page).not.toContain("{missing")
   const brain = milestone("Vector Brain")
-  expect(brain).toContain(Bun.semver.order(publishedDesktopVersion, "1.99.110") < 0 ? "Coming in 1.99.110" : "Desktop 1.99.110")
+  expect(brain).toContain(
+    Bun.semver.order(publishedDesktopVersion, "1.99.110") < 0 ? "Coming in 1.99.110" : "Desktop 1.99.110",
+  )
   expect(brain).not.toContain("In development")
   expect(markup).not.toContain("in development for desktop 1.99.110")
   expect(brain).toContain(
     "A local graph of each repository's rules, decisions, lessons and failures, plus the PDFs and docs a team feeds it, turned from unstructured text into structured knowledge linked to the code.",
   )
-  expect(brain).toContain("Offline RAG gives each task only the facts it needs, and the agent adds to the graph as it works.")
+  expect(brain).toContain(
+    "Offline RAG gives each task only the facts it needs, and the agent adds to the graph as it works.",
+  )
 })
 
 test("the investor page gives Vector Velocity one status, one size, 550B parameters, and no active size, base or provider", () => {
@@ -146,7 +175,9 @@ test("the investor page gives Vector Velocity one status, one size, 550B paramet
   expect(velocity).toContain("A 550B-parameter model built for Vector's own loop")
   expect(velocity).toContain("designed to cost significantly less to run than other very large coding models")
   expect(velocity).toContain("No weights or benchmarks yet")
-  expect(velocity).not.toMatch(/\b(?:built on|based on|base model|fine-tun\w*|distill\w*)\b|\bGPUs?\b|\bcompute\b|credits|Nebius/i)
+  expect(velocity).not.toMatch(
+    /\b(?:built on|based on|base model|fine-tun\w*|distill\w*)\b|\bGPUs?\b|\bcompute\b|credits|Nebius/i,
+  )
   expect(markup).not.toMatch(
     /\bactive (?:per token|param\w*)|parameters active|\bactivated\b|under \d+B|\d+B (?:active|per token|for every token)|parameters (?:per|for every) token|total parameters|\d+B total|billion parameters/i,
   )
@@ -154,11 +185,17 @@ test("the investor page gives Vector Velocity one status, one size, 550B paramet
   expect(markup).not.toMatch(/Velocity (is|costs|runs) (significantly )?(cheaper|less)/i)
 })
 
+// The README may leave Vector Velocity out (the owner keeps it to a line since 24 October 2026); where it names the
+// model, it gives the investor page's status and size and no active size.
 test("the README gives Vector Velocity the investor page's status and size, and no active size", async () => {
-  const readme = (await Bun.file(path.join(root, "README.md")).text()).match(/\*\*Vector Velocity\*\*[^\n]*/)?.[0] ?? ""
+  const text = await Bun.file(path.join(root, "README.md")).text()
+  const readme = text.match(/\*\*Vector Velocity\*\*[^\n]*/)?.[0]
+  if (readme === undefined) return expect(text).not.toMatch(/Velocity|\d+B-parameter/)
   expect(readme).toContain("**Vector Velocity** (In development): Vector's own 550B-parameter model")
   expect(readme).toContain("there are no weights or benchmarks yet")
-  expect(readme).not.toMatch(/Planned|No work on it has started|active|under \d+B|\d+B\+|\d+ billion|total parameters|\d+B total/i)
+  expect(readme).not.toMatch(
+    /Planned|No work on it has started|active|under \d+B|\d+B\+|\d+ billion|total parameters|\d+B total/i,
+  )
 })
 
 test("the brain is labelled wherever the page opens with it", () => {
@@ -180,7 +217,9 @@ test("the brain is labelled wherever the page opens with it", () => {
 // agent is only begun in this tree: the brain reaches the coding agent and a Thorough request's subagents, desktop
 // Vectorscope reviews get none of it yet, and Deep research is not on main, so the card says In development.
 test("the investor page says whose prompts and data they are, and labels memory in every agent as in development", async () => {
-  expect(await Bun.file(path.join(root, "packages/core/src/brain/database.ts")).text()).toContain("BrainPaths.directory(Global.Path.data)")
+  expect(await Bun.file(path.join(root, "packages/core/src/brain/database.ts")).text()).toContain(
+    "BrainPaths.directory(Global.Path.data)",
+  )
   expect(markup).toContain(
     "Your prompts, your data, your Vector. The brain lives on your computer, and you choose who runs the model for each request.",
   )
