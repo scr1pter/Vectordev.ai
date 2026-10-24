@@ -3,16 +3,17 @@ import { mkdirSync, rmSync, writeFileSync } from "fs"
 import { mkdtemp, rm } from "fs/promises"
 import os from "os"
 import path from "path"
-import { Egress } from "@vectordevai/core/local-mode/egress"
-import { LocalCA } from "@vectordevai/core/local-mode/ca"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
 
 // The terminal's Vector runs on Bun, which cannot add a company's certificate authority to what every connection
 // trusts, so each request through Egress.fetch (every labelled request, and every model call the provider makes) carries
-// it. The company's policy names the file; the server is on 127.0.0.1 with a certificate made for the test.
+// it. The company's policy names the file; the server is on 127.0.0.1 with a certificate made for the test. Vector reads
+// the company's authorities once per process, at the first request that asks, and an earlier test file's request in
+// this run would already have read them without the policy, so the request is made by a process of its own.
 
 const guard = NetworkGuard.use()
 const managedDirectory = process.env.VECTOR_TEST_MANAGED_CONFIG_DIR!
+const CORE = path.join(import.meta.dir, "../../../core/src")
 const cleanup: (() => Promise<void>)[] = []
 
 afterAll(async () => {
@@ -64,7 +65,28 @@ test("a request through Egress.fetch trusts the certificate authority the compan
   mkdirSync(managedDirectory, { recursive: true })
   writeFileSync(path.join(managedDirectory, "vector.json"), JSON.stringify({ local: { ca: { files: [certificate] } } }))
 
-  // Read once, at the first request that asks.
-  expect(LocalCA.company().added).toHaveLength(1)
-  expect(await (await Egress.fetch("local-inference", url)).text()).toBe("company")
+  const script = path.join(folder, "request.ts")
+  await Bun.write(
+    script,
+    `const { ConfigManaged } = await import(${JSON.stringify(path.join(CORE, "config/managed.ts"))})
+ConfigManaged.useTestDirectory(process.env.MANAGED)
+const { LocalCA } = await import(${JSON.stringify(path.join(CORE, "local-mode/ca.ts"))})
+const { Egress } = await import(${JSON.stringify(path.join(CORE, "local-mode/egress.ts"))})
+// Read once, at the first request that asks.
+const added = LocalCA.company().added.length
+console.log(JSON.stringify({ added, body: await (await Egress.fetch("local-inference", process.env.URL)).text() }))
+`,
+  )
+  const child = Bun.spawn([process.execPath, script], {
+    env: { PATH: process.env.PATH, HOME: folder, MANAGED: managedDirectory, URL: url },
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  expect(code, stderr).toBe(0)
+  expect(JSON.parse(stdout.trim().split("\n").at(-1)!)).toEqual({ added: 1, body: "company" })
 })
