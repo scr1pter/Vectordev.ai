@@ -3420,7 +3420,7 @@ describe("SessionRunnerLLM", () => {
           code: "VECTOR_FREE_MODELS_LIMIT",
           reason: "user_daily",
           resetAt: 1900000000000,
-          message: "The daily free allowance is exhausted.",
+          message: "You've run out of free tokens for today.",
         },
       })
       const failure = new LLMError({ module: "test", method: "stream", reason })

@@ -50,7 +50,7 @@ export function freeModelLimit(reason: FreeModelLimitReason, resetAt: number): F
     reason,
     resetAt,
     // Clients from 1.99.109 write their own notice from reason and resetAt; this is for any other reader.
-    message: `${freeModelsLimitTitle({ reason, resetAt })}. They are expected to be available again at ${RESET.format(resetAt)}. Until then, use a model from a provider you've connected with your own key.`,
+    message: `${freeModelsLimitTitle({ reason, resetAt })}. More free tokens are available at ${RESET.format(resetAt)}. Until then, use a model from a provider you've connected with your own key.`,
   }
 }
 

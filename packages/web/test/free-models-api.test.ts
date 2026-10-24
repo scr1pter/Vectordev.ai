@@ -636,6 +636,9 @@ describe("shared free inference", () => {
     const error = JSON.parse(results.find((result) => result.status === 429)!.body).error
     expect(error).toMatchObject({ type: "free_models_limit", reason: "user_daily" })
     expect(error.resetAt).toBeGreaterThan(Date.now())
+    // Owner, 23 October 2026: free tokens ran out, never an allowance shared with other people.
+    expect(error.message).toStartWith("You've run out of free tokens for today. More free tokens are available at")
+    expect(error.message).not.toMatch(/allowance|\bshared\b|\bpool(?:ed)?\b/i)
   })
   test("a minute-capped account makes no further upstream control-plane requests", async () => {
     process.env.FREE_MODELS_MINUTE_PER_USER = "1"
@@ -674,7 +677,11 @@ describe("shared free inference", () => {
     state.remaining = 0
     const limited = await chat()
     expect(limited.status).toBe(429)
-    expect((await limited.json()).error.reason).toBe("shared_daily")
+    const overall = (await limited.json()).error
+    expect(overall.reason).toBe("shared_daily")
+    // The overall daily limit never says the user used the free tokens up, nor that they are shared.
+    expect(overall.message).toStartWith("Free tokens have run out for today. More free tokens are available at")
+    expect(overall.message).not.toMatch(/allowance|\bshared\b|\bpool(?:ed)?\b/i)
     state.remaining = 50
     state.keyInvalid = true
     expect((await chat()).status).toBe(503)
