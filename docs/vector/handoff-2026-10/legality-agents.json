@@ -306,7 +306,7 @@
   "verdict": "not-allowed",
   "label": "research:google",
   "conditions": [
-   "Never add, bundle or list a provider or plugin that uses Gemini CLI's or Antigravity's OAuth client, tokens or quotas. This covers Vector's own engine, pi, Kilo, Cline, OpenCode upstream-derived plugins and the plugin catalog.",
+   "Never add, bundle or list a provider or plugin that uses Gemini CLI's or Antigravity's OAuth client, tokens or quotas. This covers Vector's own engine, pi, Kilo, Cline, upstream-derived plugins and the plugin catalog.",
    "Keep the CI guard that fails if code references ~/.gemini, oauth_creds.json, ~/.antigravity or similar credential paths.",
    "For Gemini models outside the vendor CLIs, use the user's own Gemini API or Vertex AI key, under the Gemini API or Google Cloud terms."
   ],
@@ -508,7 +508,7 @@
   "verdict": "not-allowed",
   "label": "verify:google:Rule across all agents: Google sign-in (Gemini",
   "conditions": [
-   "Never add, bundle or list any provider, plugin or runtime (Vector's engine, pi, Kilo, Cline, OpenCode upstream-derived auth plugins, the plugin catalog) that uses Gemini CLI's or Antigravity's OAuth client ID, tokens, keyring entries, local session databases or quotas, or calls their backends (for example the Code Assist service) directly.",
+   "Never add, bundle or list any provider, plugin or runtime (Vector's engine, pi, Kilo, Cline, upstream-derived auth plugins, the plugin catalog) that uses Gemini CLI's or Antigravity's OAuth client ID, tokens, keyring entries, local session databases or quotas, or calls their backends (for example the Code Assist service) directly.",
    "Keep the existing CI guard in /Users/Krishna/.cache/vector-main/packages/desktop/src/main/external-agent-credentials.test.ts that fails on ~/.gemini, oauth_creds.json, ~/.antigravity and similar credential paths, and extend it to ~/.gemini/antigravity-cli and the OS keyring entries agy uses.",
    "Do not add a chat-tier (agy -p / stream-json) integration of Antigravity CLI for personal Google accounts (free, Google AI Plus, Pro, Ultra). If one is ever added, limit it to a user's own Gemini API key or a Gemini Enterprise / Google Cloud sign-in, which Google documents for headless use.",
    "For the current terminal-tier Antigravity CLI entry, either limit it to API key or Gemini Enterprise accounts, or show a clear note that Google says wrapping agy in third-party apps is not supported on consumer plans and may risk suspension. Ask Google in writing (antigravity-support@google.com or the Antigravity forum) whether an interactive agy session in an embedded terminal is acceptable.",
