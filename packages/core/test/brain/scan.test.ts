@@ -3,6 +3,10 @@ import { BrainLexical } from "@vectordevai/core/brain/lexical"
 import { BrainParse } from "@vectordevai/core/brain/parse"
 import { BrainScan } from "@vectordevai/core/brain/scan"
 
+// The values `secrets` finds in a text, as the text writes them.
+const values = (text: string, reading?: BrainScan.Reading) =>
+  BrainScan.secrets(text, {}, reading).map((found) => found.value)
+
 describe("BrainScan", () => {
   test("redacts credentials and leaves paths, hashes and prose alone", () => {
     const cases = [
@@ -38,6 +42,14 @@ describe("BrainScan", () => {
       const started = performance.now()
       BrainScan.redact(text, {})
       BrainScan.credential(text)
+      expect(performance.now() - started, unit).toBeLessThan(1_000)
+    }
+    // A private key's header before a long run of the marks a key's lines may sit between: "+ + + …" took 9 seconds.
+    for (const unit of ["+ ", " ", "\\n ", "> "]) {
+      const text = `-----BEGIN ${"PRIVATE"} KEY-----${unit.repeat(Math.floor(48_000 / unit.length))}${"A".repeat(20)}.`
+      const started = performance.now()
+      BrainScan.redact(text, {})
+      BrainScan.secrets(text, {})
       expect(performance.now() - started, unit).toBeLessThan(1_000)
     }
   })
@@ -101,6 +113,8 @@ describe("BrainScan", () => {
       "The commit 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b fixed the build.",
       "Use bypass: true only in the local fixture.",
       "The token is short-lived",
+      // A template slot left open names no value: the value ends at its first space.
+      "Guests join with ?auth_token=<base64 guest:secret> in the link.",
     ]
     for (const text of talk) {
       expect(BrainScan.redact(text, {}).text).toBe(text)
@@ -171,7 +185,7 @@ describe("BrainScan", () => {
       ["A [redacted] B password is Tr0ub4dor&3x", ["Tr0ub4dor&3x"]],
       ["Nothing secret here.", []],
     ] as const
-    for (const [text, values] of cases) expect(BrainScan.secrets(text, {}), text).toEqual([...values])
+    for (const [text, found] of cases) expect(values(text), text).toEqual([...found])
   })
 
   test("secrets gives the password of an address and a login pair and each line of a private key, not the rest", () => {
@@ -188,10 +202,22 @@ describe("BrainScan", () => {
       // A key in JSON or an environment file, its line breaks escaped.
       [`{ "private_key": "${begin}\\n${lines[0]}\\n${lines[1]}\\n${end}\\n" }`, lines],
       [`${begin}${lines[0]}${end}`, [lines[0]]],
-      // A key cut short still gives its lines, and none of the prose after it.
+      // A key cut short still gives its lines, and none of the prose after it, however long its words.
       [`deploy key:\n${begin}\n${lines[0]}\n${lines[1]}\nthen we deploy on node18 to us-east-1.`, lines],
+      [
+        `\`\`\`\n${begin}\n${lines[0]}\n...\n\`\`\`\n\nThe server serves api/v1/users/list and signs with sha256WithRSAEncryption.`,
+        [lines[0]],
+      ],
+      // A key quoted, commented, joined in code, or on one line with spaces for its line breaks.
+      [`> ${begin}\n> ${lines[0]}\n> ${end}`, [lines[0]]],
+      [`# ${begin}\n# ${lines[0]}\n# ${lines[1]}`, lines],
+      [`const key = "${begin}\\n" +\n  "${lines[0]}\\n" +\n  "${lines[1]}\\n" +\n  "${end}"`, lines],
+      [`${begin} ${lines[0]} ${lines[1]} ${end}`, lines],
     ] as const
-    for (const [text, values] of cases) expect(BrainScan.secrets(text, {}), text).toEqual([...values])
+    for (const [text, found] of cases) expect(values(text), text).toEqual([...found])
+    expect(BrainScan.redact(`${begin}\n${lines[0]}\n...\n\nThe server serves api/v1/users/list.`, {}).text).toBe(
+      "[redacted]\n...\n\nThe server serves api/v1/users/list.",
+    )
     // A header named in prose has no body, and an address's password that stands for one is none.
     const none = [
       `Paste the key, which starts with \`${begin.replace("PRIVATE", "OPENSSH PRIVATE")}\`, into the secret.\n\nWe hash with sha256 and deploy to us-east-1.`,
@@ -203,12 +229,12 @@ describe("BrainScan", () => {
       "url: postgres://app:{{db_password}}@db/app",
     ]
     for (const text of none) {
-      expect(BrainScan.secrets(text, {}), text).toEqual([])
+      expect(values(text), text).toEqual([])
       expect(BrainScan.redact(text, {}).text, text).toBe(text)
     }
   })
 
-  test("secrets without prose leaves what only the words around a value give away", () => {
+  test("secrets read as code leaves what only the words around a value give away, but for a password's", () => {
     const prose = [
       ["Add your OpenAI credentials and choose a model such as gpt-4o-2024-08-06.", "gpt-4o-2024-08-06"],
       ["Sign in with your Anthropic account to use claude-sonnet-4-5 by default.", "claude-sonnet-4-5"],
@@ -217,8 +243,8 @@ describe("BrainScan", () => {
       ["Use 'blue velvet sky' as the wifi password.", "blue velvet sky"],
     ] as const
     for (const [text, value] of prose) {
-      expect(BrainScan.secrets(text, {}), text).toEqual([value])
-      expect(BrainScan.secrets(text, {}, false), text).toEqual([])
+      expect(values(text), text).toEqual([value])
+      expect(values(text, { code: true }), text).toEqual([])
     }
     // A shape, an assignment, an address's password and a login pair give their values away without prose.
     const coded = [
@@ -230,8 +256,50 @@ describe("BrainScan", () => {
         `token ${"ghp_"}${"aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789"}`,
         [`${"ghp_"}${"aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789"}`],
       ],
+      // An AWS credential scope is no login pair: of it, only the access key ID is a secret.
+      [
+        `Authorization: AWS4-HMAC-SHA256 Credential=${"AKIA"}${"IOSFODNN7EXAMPLE"}/20130524/us-east-1/s3/aws4_request, SignedHeaders=host`,
+        [`${"AKIA"}${"IOSFODNN7EXAMPLE"}`],
+      ],
+      // Of the words around a value, only "the password is X" gives one away in code.
+      ["The staging admin password is Tr0ub4dor&3x, rotate it monthly.", ["Tr0ub4dor&3x"]],
+      ["Your one-time password is x7Kq9vR2pz.", ["x7Kq9vR2pz"]],
+      ["The password is sha256-hashed before it is stored.", []],
+      ["The password is stored in Vault.", []],
     ] as const
-    for (const [text, values] of coded) expect(BrainScan.secrets(text, {}, false), text).toEqual([...values])
+    for (const [text, found] of coded) expect(values(text, { code: true }), text).toEqual([...found])
+  })
+
+  test("without digits, a word only digits break up is no password beside a login word, and a symbol still makes one", () => {
+    const ids = [
+      "Login fails on the macos-14-arm64 runner.",
+      "Sign in with ethereum secp256k1.",
+      "Credentials for gpt-4o-2024-08-06 work.",
+    ]
+    for (const text of ids) {
+      expect(BrainScan.credential(text), text).toBe(true)
+      expect(BrainScan.credential(text, { digits: false }), text).toBe(false)
+      expect(BrainScan.named(text, {}, { digits: false }).redacted, text).toBe(false)
+    }
+    const passwords = [
+      "Log in to staging as admin with Tr0ub4dor&3x.",
+      "Staging login: admin / hunter2hunter2",
+      "The door code is 8842-1937-2210.",
+    ]
+    for (const text of passwords) {
+      expect(BrainScan.credential(text, { digits: false }), text).toBe(true)
+      expect(BrainScan.named(text, {}, { digits: false }).redacted, text).toBe(true)
+    }
+    // `secrets` marks a value only that weakest sign gave away, and no other: a symbol, a login pair or a token's shape.
+    const github = `${"ghp_"}${"aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789"}`
+    expect(BrainScan.secrets("Lesson: login tests flake on macos-14-arm64 runners.", {})).toEqual([
+      { value: "macos-14-arm64", weak: true },
+    ])
+    expect(BrainScan.secrets(`Log in as admin with Tr0ub4dor&3x, or with ${github} on x9yy8zz7.`, {})).toEqual([
+      { value: github, weak: false },
+      { value: "Tr0ub4dor&3x", weak: false },
+      { value: "x9yy8zz7", weak: true },
+    ])
   })
 
   test("named redacts what a shape, a name or a word beside it gives away, and leaves bare checksums and IDs", () => {
@@ -282,7 +350,9 @@ describe("BrainScan", () => {
 describe("BrainLexical", () => {
   test("splits identifiers and paths into words and drops filler", () => {
     const terms = BrainLexical.terms("The sessionPrompt tests in packages/engine/test fail when you run them")
-    expect([...terms.keys()]).toEqual(expect.arrayContaining(["sessionprompt", "session", "prompt", "engine", "test", "fail"]))
+    expect([...terms.keys()]).toEqual(
+      expect.arrayContaining(["sessionprompt", "session", "prompt", "engine", "test", "fail"]),
+    )
     expect(terms.has("the")).toBe(false)
     expect(terms.has("when")).toBe(false)
   })
@@ -300,7 +370,7 @@ describe("BrainLexical", () => {
 describe("BrainParse", () => {
   test("reads rules with their scope and marks review-only lines", () => {
     const items = BrainParse.rules(
-      "# Rules\n\n- Money is integer cents.\n- Keep handlers thin (applies to src/routes/**, api/**)\n- Code review: do not flag \"x\" in a.ts; it was reviewed and is not a problem.\n\nA paragraph rule\nthat wraps.\n",
+      '# Rules\n\n- Money is integer cents.\n- Keep handlers thin (applies to src/routes/**, api/**)\n- Code review: do not flag "x" in a.ts; it was reviewed and is not a problem.\n\nA paragraph rule\nthat wraps.\n',
     )
     expect(items.map((item) => [item.kind, item.paths])).toEqual([
       ["rule", []],
@@ -312,13 +382,17 @@ describe("BrainParse", () => {
   })
 
   test("keeps a fenced example with the bullet that introduces it", () => {
-    const items = BrainParse.memory("- Run checks like this:\n  ```sh\n  bun test\n\n  bun typecheck\n  ```\n- Second\n")
+    const items = BrainParse.memory(
+      "- Run checks like this:\n  ```sh\n  bun test\n\n  bun typecheck\n  ```\n- Second\n",
+    )
     expect(items).toHaveLength(2)
     expect(items[0]!.text).toContain("bun typecheck")
   })
 
   test("guesses what a legacy BRAIN.md section holds from its heading", () => {
-    const items = BrainParse.brain("## Decisions\n- Chose SQLite.\n\n## Architecture\n- Engine runs in a utility process.\n\n## Gotchas\n- Tests need isolate.\n")
+    const items = BrainParse.brain(
+      "## Decisions\n- Chose SQLite.\n\n## Architecture\n- Engine runs in a utility process.\n\n## Gotchas\n- Tests need isolate.\n",
+    )
     expect(items.map((item) => item.kind)).toEqual(["decision", "fact", "lesson"])
   })
 
@@ -326,7 +400,12 @@ describe("BrainParse", () => {
     const items = BrainParse.failures(
       JSON.stringify({
         records: [
-          { signature: "a", checkLabel: "Unit tests", occurrences: 2, repair: { files: ["x.ts"], description: "Fixed x." } },
+          {
+            signature: "a",
+            checkLabel: "Unit tests",
+            occurrences: 2,
+            repair: { files: ["x.ts"], description: "Fixed x." },
+          },
           { signature: "b", checkLabel: "Lint", occurrences: 1, flakyPasses: 1 },
           { signature: "c", checkLabel: "Build", occurrences: 4 },
         ],

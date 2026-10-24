@@ -14,7 +14,7 @@ import { ResearchWords } from "./words"
 // 1. a secret: a password, key or token that BrainScan finds by its shape, its name or a word beside it, or a value
 //    BrainScan finds in the private context ("S3cretPassw0rd" from DB_PASSWORD=S3cretPassw0rd), whole: in the private
 //    facts by its shape, its name or the words around it, and in the work only by its shape, an assignment, an
-//    address's password or a login pair;
+//    address's password, a login pair or "the password is X";
 // 2. a run of RUN_WORDS words in a row that the private facts hold, or of WORK_RUN_WORDS that the work holds, not all
 //    of them common words;
 // 3. an email address, or a phone, card or account number (9 or more digits), from the private facts;
@@ -27,10 +27,12 @@ import { ResearchWords } from "./words"
 //    home folders the private facts name; repository text names none.
 // The user's typing clears any of 2 to 5, a public source of this run clears 2 and 3 (`strict` keeps a public source
 // from clearing a number), and a search result on a host clears a host that only its labels made look internal.
-// Nothing clears a secret. Nothing else is refused: names of people and companies, identifiers, checksums and IDs the
-// private context does not hold, public host names, the standard names and addresses of Docker, Kubernetes, cloud
-// metadata, emulators and home networks, and numbers other than those of 3 (dates, versions, years, quarters, ports,
-// amounts) all go out.
+// Nothing clears a secret, except one that only a word whose letters digits break up, in a sentence of the private
+// facts about credentials, gave away ("claude-sonnet-4-5" of "sign in with Google, then route to claude-sonnet-4-5"):
+// the user's typing or a public source that holds it whole clears that. Nothing else is refused: names of people and
+// companies, identifiers, checksums and IDs the private context does not hold, public host names, the standard names
+// and addresses of Docker, Kubernetes, cloud metadata, emulators and home networks, and numbers other than those of 3
+// (dates, versions, years, quarters, ports, amounts) all go out.
 //
 // Its scope is copying, so some private text goes out by design: a copy shorter than RUN_WORDS words or made only of
 // common words ("my wife is pregnant and due next month"), and a password that is one plain word ("swordfish"), since
@@ -155,9 +157,11 @@ const KEYLIKE = /^(?=[^\s()[\]{}<>=;,\\]{6,}$)(?=.*\p{L})(?=.*\d)/u
 // digits are one run, and a licence key ("VK7JG-NPHTM-C97JM-9MPGT-3V66T").
 const AFTER_PASSWORD = /\b(?:passwords?|passwd|passphrase|passcode|pwd|pw)\b[\s:=,-]{1,3}(?![$%<{])([^\s"'`,;]+)/gi
 const LICENCE = /(?<![\w-])[a-z0-9]{5}(?:-[a-z0-9]{5}){4}(?![\w-])/gi
-// A hashing scheme given as a password's value ("passwords - argon2id", "PASSWORD_HASHER=pbkdf2_sha256",
-// "password = bcrypt2b") says how passwords are kept, not what one is.
-const SCHEME = /^(?:argon2|bcrypt|scrypt|yescrypt|pbkdf2|blake[23]|md5|(?:hmac[-_]?)?sha-?\d)[\w-]*$/
+// A hashing scheme given as a password's value ("passwords - argon2id", "password hashing = pbkdf2_sha256",
+// "password = bcrypt2b") says how passwords are kept, not what one is. Only a scheme's own spellings count, so a
+// password that starts with one ("sha1lover99", "md5_Hunter2024", "bcryptFan2024") is still a password.
+const SCHEME =
+  /^(?:argon2(?:id|i|d)?|bcrypt(?:2[abxy])?|scrypt|yescrypt|pbkdf2(?:[-_]?(?:with)?[-_]?hmac)?(?:[-_]?sha-?\d+)?|md5(?:crypt)?|(?:hmac[-_]?)?sha-?\d+(?:[-_]\d+)?(?:crypt)?|blake(?:2[bs]?|3))(?:[-_](?:hashed|based))?$/
 // Quotes, brackets and punctuation around a value that are not part of it.
 const EDGE = /^["'`\u201c\u2018([{<]+|["'`\u201d\u2019)\]}>,.;:!?]+$/gu
 // What a reader reads past: accents and other combining marks once NFKD has split them off, and invisible characters.
@@ -174,10 +178,17 @@ const DIGIT = /\p{Nd}/gu
 // group has one digit or they read as an address (22.04.4, 130.0.6723.91, 10.0.19045), a decimal or an arXiv ID when
 // there are two (2410.12345), and a number otherwise. DOIs and ISBNs are public identifiers. A run of more than
 // MAX_GROUPS groups is a list, each group a number of its own. A date with a valid month and day (2025-10-20,
-// 2025/10/20, 21/10/2025, 10.21.2025) is a number of its own before any of that, so an hour or a count after it
-// ("2025-10-20 14:30", "2025-11-03 9 people") is not one number with it; 123-45-1987 and 4417 1999 2001 9113 are no date.
-const YEAR_FIRST = /(?<!\d)(?:19|20)\d\d([-/.])(\d{1,2})\1(\d{1,2})(?!\d)/g
-const YEAR_LAST = /(?<!\d)(\d{1,2})([-/.])(\d{1,2})\2(?:19|20)\d\d(?!\d)/g
+// 2025/10/20, 21/10/2025, 10.21.2025, Dec 12 2025, 20251020) is a number of its own before any of that, so an hour or a
+// count after it ("2025-10-20 14:30", "2025-11-03 9 people", "Dec 12 2025 1400") is not one number with it;
+// 123-45-1987 and 4417 1999 2001 9113 are no date. Nor is a date-shaped part of a longer number: groups joined to it by
+// its own separator ("2019-12-31-0042-7781", "4532-12-10-2019-9113") keep it in the number, and so do groups before a
+// compact date ("110105 19491231 002X"), while one written apart from it, as a range is ("2025-10-06/2025-10-17"),
+// does not.
+const YEAR_FIRST = /(?<!\d)(?=\d{4}([-/.]))(?<!\d\1)(?:19|20)\d\d\1(\d{1,2})\1(\d{1,2})(?!\1?\d)/g
+const YEAR_LAST = /(?<!\d)(?=\d{1,2}([-/.]))(?<!\d\1)(\d{1,2})\1(\d{1,2})\1(?:19|20)\d\d(?!\1?\d)/g
+const MONTH_NAMED =
+  /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(?:19|20)\d\d(?!\d)/g
+const COMPACT_DATE = /(?<!\d[\s./_\u2010-\u2015\u2212()-]?)(?:19|20)\d\d(\d\d)(\d\d)(?!\d)/gu
 const DOTTED = /(?<![\d.])\d+(?:\.\d+)+/g
 const DOTTED_PHONE = /^(?:1\.)?\d{3}\.\d{3}\.\d{4}$/
 const PUBLIC_ID = /\b10\.\d{4,9}\/\S+|\bisbn(?:-1[03])?[\s:]*\d[\d -]{8,16}[\dx]?/gi
@@ -249,8 +260,11 @@ export function names(_texts: readonly string[]): string[] {
 // user name; `address` reads its path for a home folder and the working tree itself.
 function inspect(text: string, context: Context, query: boolean): Result {
   // A long run of letters and digits alone is as often a checksum or an ID as a key, so it counts only when the private
-  // context holds it.
-  if (BrainScan.credential(text) || BrainScan.named(text).redacted) return refused("secret", "a password, key or token")
+  // context holds it. A query names models, runners and curves beside "login" or "credentials" far more often than it
+  // gives a password, so a word only digits break up is no password there; a symbol among its letters still makes one.
+  const reading = { digits: false }
+  if (BrainScan.credential(text, reading) || BrainScan.named(text, process.env, reading).redacted)
+    return refused("secret", "a password, key or token")
   const known = prepare(context)
   const lower = fold(text)
   if (known.secrets.some((secret) => whole(lower, secret))) return refused("secret", "a password, key or token")
@@ -312,10 +326,14 @@ function build(context: Context) {
   const typedUsers = new Set(typed.flatMap((text) => [...usersOf(text), ...segmentsOf(text)]))
   return {
     secrets: [
-      ...new Set([
-        ...context.private.flatMap((text) => secretsOf(text, true)),
-        ...(context.work ?? []).flatMap((text) => secretsOf(text, false)),
-      ]),
+      ...new Set(
+        [
+          ...context.private.flatMap((text) => secretsOf(text, true)),
+          ...(context.work ?? []).flatMap((text) => secretsOf(text, false)),
+        ]
+          .filter((found) => !found.weak || ![...typed, ...shown].some((text) => whole(text, found.value)))
+          .map((found) => found.value),
+      ),
     ],
     facts: joined(facts),
     work: joined(work),
@@ -390,23 +408,29 @@ function holds(token: string, host: string) {
 }
 
 // The secrets of a private text as a query may copy them, folded (rule 1): each value BrainScan finds, whole, and each
-// licence key. BrainScan gives the password of an address or a login pair, not the user name and host around it
-// ("Tr0ub4dor&3x" of "admin / Tr0ub4dor&3x"), and a private key line by line. The private facts are prose, so the words
-// around a value may give it away there ("the wifi password is correcthorse42", "password correcthorse42"), and a
-// passphrase of 3 or more words counts. The work is code, documentation and command output, which name algorithms,
-// models and machines beside the word "password" or "credentials" far more often than they give one, so only a value
-// that its shape, an assignment, an address or a login pair gives away counts there, and a phrase given to a
+// licence key, with whether only the weakest sign gave it away (BrainScan.Found). BrainScan gives the password of an
+// address or a login pair, not the user name and host around it ("Tr0ub4dor&3x" of "admin / Tr0ub4dor&3x"), and a
+// private key line by line. The private facts are prose, so the words around a value may
+// give it away there ("the wifi password is correcthorse42", "password correcthorse42"), and a passphrase of 3 or more
+// words counts. The work is code, documentation and command output, which name algorithms, models and machines beside
+// the word "password" or "credentials" far more often than they give one, so only a value that its shape, an
+// assignment, an address, a login pair or "the password is X" gives away counts there, and a phrase given to a
 // secret-sounding name is as often an interface's copy ("Enter your password").
 function secretsOf(text: string, facts: boolean) {
   return [
-    ...BrainScan.secrets(text, {}, facts),
-    ...(text.match(LICENCE) ?? []),
-    ...(facts ? [...text.matchAll(AFTER_PASSWORD)].map((match) => match[1]!) : []),
+    ...BrainScan.secrets(text, {}, { code: !facts }),
+    ...(text.match(LICENCE) ?? []).map((value) => ({ value, weak: false })),
+    ...(facts ? [...text.matchAll(AFTER_PASSWORD)].map((match) => ({ value: match[1]!, weak: false })) : []),
   ]
-    .map(fold)
-    .flatMap((value) => [value, value.replace(EDGE, "")])
-    .filter((value) => !SCHEME.test(value.replace(EDGE, "")))
-    .filter((value) => KEYLIKE.test(value) || (facts && value.length >= 6 && value.split(/\s+/).length >= 3))
+    .flatMap((found) => {
+      const value = fold(found.value)
+      return [value, value.replace(EDGE, "")].map((each) => ({ value: each, weak: found.weak }))
+    })
+    .filter((found) => !SCHEME.test(found.value.replace(EDGE, "")))
+    .filter(
+      (found) =>
+        KEYLIKE.test(found.value) || (facts && found.value.length >= 6 && found.value.split(/\s+/).length >= 3),
+    )
 }
 
 // Whether a folded text holds a value whole, not inside a longer word or number.
@@ -421,9 +445,11 @@ function whole(lower: string, value: string): boolean {
 function numbersOf(text: string) {
   const plain = text
     .replace(YEAR_FIRST, (date, _, month: string, day: string) => (calendar(month, day) ? " ; " : date))
-    .replace(YEAR_LAST, (date, first: string, _, second: string) =>
+    .replace(YEAR_LAST, (date, _, first: string, second: string) =>
       calendar(first, second) || calendar(second, first) ? " ; " : date,
     )
+    .replace(MONTH_NAMED, (date, day: string) => (calendar("1", day) ? " ; " : date))
+    .replace(COMPACT_DATE, (date, month: string, day: string) => (calendar(month, day) ? " ; " : date))
     .replace(PUBLIC_ID, " ; ")
     .replace(DOTTED, (run) => {
       if (DOTTED_PHONE.test(run)) return run

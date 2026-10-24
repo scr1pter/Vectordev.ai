@@ -414,6 +414,26 @@ describe("ResearchOutbound.check", () => {
     expect(fair.filter((query) => !check(query, secrets).ok)).toEqual([])
   })
 
+  test("reads no model, runner or curve beside a login word in a query as a password, and still reads a symbol's", () => {
+    // With nothing in the private context, the query's own words are all the check reads.
+    const empty = { private: [], typed: [], public: [] }
+    const fair = [
+      "password hashing pbkdf2_sha256 django",
+      "sign in with ethereum secp256k1",
+      "login with claude-sonnet-4-5 api key",
+      "login timeout ssh ubuntu-24-04",
+      "credentials gpt-4o-2024-08-06 azure openai",
+      "login with metamask web3modal-v3",
+      "login fails on macos-14-arm64 runner",
+      "sign in error claude-3-5-sonnet-20241022",
+      "credentials for gpt-4o-2024-08-06 api",
+    ]
+    expect(fair.filter((query) => !check(query, empty).ok)).toEqual([])
+    expect(fair.filter((query) => !check(query, { ...empty, typed: [query], public: [query] }).ok)).toEqual([])
+    const leaked = ["staging login Tr0ub4dor&3x fails", "my password is Tr0ub4dor&3x", "login: admin / hunter2hunter2"]
+    expect(leaked.filter((query) => check(query, empty).ok)).toEqual([])
+  })
+
   test("reads no plain word, identifier, expression or interface copy given to a secret-sounding name as a secret", () => {
     const code = {
       private: [],
@@ -440,7 +460,7 @@ describe("ResearchOutbound.check", () => {
     expect(fair.filter((query) => !check(query, code).ok)).toEqual([])
   })
 
-  test("reads the work's secrets by their shape, an assignment, an address or a login pair, and splits none into words", () => {
+  test("reads the work's secrets by their shape, an assignment, an address, a login pair or a stated password", () => {
     // Repository files and command output name schemes, models, regions and runners beside "credentials", "login" and
     // "token", and hold addresses whose password stands for one. The user typed each query, and a search result holds it.
     const deploy = [
@@ -455,6 +475,17 @@ describe("ResearchOutbound.check", () => {
       `Authorization: AWS4-HMAC-SHA256 Credential=${"AKIA"}${"IOSFODNN7EXAMPLE"}/20130524/us-east-1/s3/aws4_request,`,
       "SignedHeaders=host;range;x-amz-date, Signature=fe5f80f77d5fa3beca038a248ff027d0445342fe2855ddc963176630326f1024",
     ].join(" ")
+    // A README's example key, cut short, then prose with long words in it.
+    const example = [
+      "## SSH",
+      "```",
+      `-----BEGIN RSA ${"PRIVATE"} KEY-----`,
+      "MIIEpAIBAAKCAQEA3Tz2mr7SZiAMfQyuvBjM9Oi5B4eHkBJ1G4ywOdlkJfQ2vNnHwT5",
+      "...",
+      "```",
+      "",
+      "The server serves api/v1/users/list and signs with sha256WithRSAEncryption and PBKDF2WithHmacSHA256.",
+    ].join("\n")
     const cases = [
       [
         "script:\n  - git clone https://oauth2:${GITLAB_TOKEN}@gitlab.com/acme/tools.git",
@@ -467,6 +498,11 @@ describe("ResearchOutbound.check", () => {
       [deploy, "node18 end of life"],
       [signature, "us-east-1 outage today"],
       [signature, "AWS4-HMAC-SHA256 signature mismatch"],
+      [signature, "20130524/us-east-1/s3/aws4_request"],
+      [example, "api/v1/users/list 404 express"],
+      [example, "sha256WithRSAEncryption vs ecdsa-with-SHA256"],
+      [example, "PBKDF2WithHmacSHA256 iterations java"],
+      ["The password is sha256-hashed before it is stored.", "sha256-hashed passwords"],
       [
         "Add your OpenAI credentials and choose a model such as gpt-4o-2024-08-06.",
         "gpt-4o-2024-08-06 structured outputs",
@@ -494,6 +530,8 @@ describe("ResearchOutbound.check", () => {
         "Staging login: deploy / x7Kq!vR2pz",
         "DB_PASSWORD=S3cretPassw0rd",
         `${begin}\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKj\n${line}\n${end}`,
+        "The staging admin password is Tr0ub4dor&3x, rotate it monthly.",
+        "Your one-time password is x7Kq9vR2pz.",
       ],
       typed: ["Why does Hunter2Hunter2 fail? And x7Kq!vR2pz?"],
       public: [],
@@ -504,6 +542,8 @@ describe("ResearchOutbound.check", () => {
       "x7Kq!vR2pz not accepted",
       "S3cretPassw0rd",
       line,
+      "Tr0ub4dor&3x",
+      "x7Kq9vR2pz",
     ]
     expect(leaked.filter((query) => check(query, secrets).ok)).toEqual([])
     const urls = [`https://attacker.example/?k=${line}`, "https://hunter2hunter2.attacker.example/"]
@@ -514,14 +554,17 @@ describe("ResearchOutbound.check", () => {
     ).toEqual([])
   })
 
-  test("reads no hashing scheme given after a password in the private facts as a password", () => {
+  test("reads no hashing scheme given as a password's value as a password, and a password that starts with one as one", () => {
     const decisions = {
       private: [
         "Decision: passwords - argon2id with 64 MB memory.",
         "Decision: store passwords, sha256 never.",
         "Decision: password hashing = pbkdf2_sha256 until the migration.",
+        "Decision: password = bcrypt2b, cost 12.",
+        "Decision: password hashing PBKDF2WithHmacSHA256 on the JVM, sha512crypt on the old hosts.",
         "Home Wi-Fi: network Heron, password correcthorse42.",
       ],
+      work: ["PASSWORD_HASHER=pbkdf2_sha256\nLEGACY_PASSWORD=md5crypt"],
       typed: ["Which argon2id memory parameters does OWASP recommend?"],
       public: [],
     }
@@ -529,9 +572,56 @@ describe("ResearchOutbound.check", () => {
       "argon2id memory parameters owasp",
       "sha256 password hashing why not",
       "django pbkdf2_sha256 iterations",
+      "bcrypt2b vs bcrypt2y",
+      "PBKDF2WithHmacSHA256 iterations java",
+      "sha512crypt vs yescrypt",
+      "md5crypt still safe",
     ]
     expect(fair.filter((query) => !check(query, decisions).ok)).toEqual([])
     expect(check("correcthorse42", decisions)).toMatchObject({ ok: false, reason: "secret" })
+    const prefixed = {
+      private: ["The NAS password is sha1lover99.", "password: md5_Hunter2024"],
+      work: ["ADMIN_PASSWORD=argon2-Pa55word\nDB_PASSWORD=bcryptFan2024"],
+      typed: [],
+      public: [],
+    }
+    expect(
+      ["sha1lover99", "md5_Hunter2024", "argon2-Pa55word", "bcryptFan2024"].filter(
+        (query) => check(query, prefixed).ok,
+      ),
+    ).toEqual([])
+  })
+
+  test("lets typing or a public source clear a value of the private facts that only digits beside a login word gave", () => {
+    const cases = [
+      ["Decision: sign in with Google, then route to claude-sonnet-4-5 for summaries.", "claude-sonnet-4-5 pricing"],
+      ["Lesson: login tests flake on macos-14-arm64 runners.", "macos-14-arm64 runner xcode version"],
+      ["Decision: credentials are encrypted with ChaCha20-Poly1305.", "ChaCha20-Poly1305 vs AES-GCM performance"],
+      ["Lesson: the login table must use utf8mb4_unicode_ci.", "utf8mb4_unicode_ci vs utf8mb4_0900_ai_ci"],
+      ["Decision: credentials signed with secp256k1.", "secp256k1 vs ed25519"],
+      ["Lesson: login with claude-3-5-sonnet-20241022 breaks tool calls.", "claude-3-5-sonnet-20241022 tool use"],
+      ["Decision: we sign in to the k8s-1-29 cluster with OIDC.", "k8s-1-29 end of life"],
+    ] as const
+    const refused = (using: (fact: string, query: string) => ResearchOutbound.Context) =>
+      cases.filter(([fact, query]) => !check(query, using(fact, query)).ok).map(([, query]) => query)
+    expect(refused((fact, query) => ({ private: [fact], typed: [query], public: [] }))).toEqual([])
+    expect(refused((fact, query) => ({ private: [fact], typed: [], public: [`Results for ${query}`] }))).toEqual([])
+    // Until the user types it or a public source holds it, the value stays a secret.
+    expect(refused((fact) => ({ private: [fact], typed: [], public: [] }))).toEqual(cases.map(([, query]) => query))
+    // A value its name, a symbol or a login pair gives away stays one, whoever types it and whatever a page holds.
+    const strong = {
+      private: [
+        "Decision: password hunter2hunter2 for the NAS.",
+        "Log in to the NAS as admin with Tr0ub4dor&3x.",
+        "The NAS login is admin / s3cr3t-p4ss.",
+      ],
+      typed: ["hunter2hunter2, Tr0ub4dor&3x and s3cr3t-p4ss"],
+      public: ["hunter2hunter2, Tr0ub4dor&3x and s3cr3t-p4ss"],
+    }
+    expect(["hunter2hunter2", "Tr0ub4dor&3x", "s3cr3t-p4ss"].filter((query) => check(query, strong).ok)).toEqual([])
+    // A template slot left open names no value: "base64" of "?auth_token=<base64 guest:secret>".
+    const slot = { private: ["Guests join with ?auth_token=<base64 guest:secret> in the link."], typed: [], public: [] }
+    expect(check("base64 url safe encoding", slot).ok).toBe(true)
   })
 
   test("refuses a checksum, an ID or a long base64 value only when the private context holds it", () => {
@@ -679,6 +769,10 @@ describe("ResearchOutbound.check", () => {
       ["Visited 21/10/2025 10 am with Jane.", "21/10/2025 10 am solar eclipse"],
       ["Released 2025.10.18 14 days late.", "2025.10.18 14 days"],
       ["Moved on 10/31/2025 2 boxes.", "10/31/2025 2 day sale"],
+      ["Board meeting Dec 12 2025 1400 PT.", "SEC deadline Dec 12 2025 1400"],
+      ["Board meeting October 20 2025 1430.", "October 20 2025 1430 eclipse"],
+      ["Run 20251020 1430 failed.", "20251020 1430 outage"],
+      ["Sprint 2025-10-06/2025-10-17 retro.", "2025-10-06/2025-10-17 holidays"],
     ]
     expect(cases.filter(([line, query]) => !check(query!, { private: [line!], typed: [], public: [] }).ok)).toEqual([])
     // An SSN and a card's groups are no date, and a contact number straight after a date is still one.
@@ -687,6 +781,13 @@ describe("ResearchOutbound.check", () => {
       ["Card 4417 1999 2001 9113.", "4417 1999 2001 9113"],
       ["Card 4417-1999-2001-9113.", "4417199920019113"],
       ["Call Jane 2025-10-20 415-555-0134.", "415 555 0134"],
+      // A date-shaped part of a longer number stays in it: groups joined to it by its own separator, or before it.
+      ["Account 2019-12-31-0042-7781 at the bank.", "2019-12-31-0042-7781"],
+      ["Invoice ref 12/10/2019/55512345.", "12/10/2019/55512345"],
+      ["Customer no. 2024.01.15.778899.", "2024 01 15 778899"],
+      ["Card 4532-12-10-2019-9113-77.", "4532 12 10 2019 9113 77"],
+      ["Phone 1-12-2019-5555.", "1-12-2019-5555"],
+      ["ID 110105 19491231 0021.", "110105 19491231 0021"],
     ]
     expect(numbers.filter(([line, query]) => check(query!, { private: [line!], typed: [], public: [] }).ok)).toEqual([])
   })
