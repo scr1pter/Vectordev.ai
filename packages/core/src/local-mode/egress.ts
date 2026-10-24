@@ -465,9 +465,12 @@ export function notices(listener: (event: LocalMode.Event) => void) {
   }
 }
 
-/** Records an event made elsewhere, such as the desktop's own windows, while Vector Local is on. */
+/**
+ * Records an event made elsewhere, such as the desktop's own windows. The desktop records them only while it applies
+ * Vector Local, so they are kept whatever this process's own policy says: in memory, and in the log file while it is
+ * open here.
+ */
 export function report(event: LocalMode.Event) {
-  if (!state.policy.enabled) return
   remember(event, false)
   post({ kind: "event", event, notify: false, agent: undefined })
 }

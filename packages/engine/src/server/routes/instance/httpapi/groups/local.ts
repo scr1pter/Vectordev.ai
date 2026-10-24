@@ -261,7 +261,7 @@ export const LocalApi = HttpApi.make("local")
             identifier: "local.egress.report",
             summary: "Add events to the network log",
             description:
-              "Requests the desktop app's own windows made or blocked, which its main process decides, added to this Vector's network log while Vector Local is on.",
+              "Requests the desktop app's own windows made or blocked, which its main process decides and records while it applies Vector Local, added to this Vector's network log whatever this Vector's own Vector Local setting is.",
           }),
         ),
         HttpApiEndpoint.post("detect", `${root}/detect`, {

@@ -89,10 +89,11 @@ export const localHandlers = HttpApiBuilder.group(InstanceHttpApi, "local", (han
       return true
     })
 
+    // The desktop records what its windows did only while it applies Vector Local, which it may while this Vector reads
+    // it off (the two disagree, and the desktop uses the stricter), so its lines are kept whatever this policy says.
     const egressReport = Effect.fn("LocalHttpApi.egressReport")(function* (ctx: {
       payload: { events: readonly LocalMode.Event[] }
     }) {
-      if (!Egress.policy().enabled) return 0
       ctx.payload.events.forEach((event) => Egress.report(event))
       return ctx.payload.events.length
     })
