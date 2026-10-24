@@ -198,7 +198,7 @@ export const Plugin = define({
       // user's and repository's rules once every transform has run (AgentV2.researchPermissions), so it gets none here.
       draft.update(AgentV2.researchID, (item) => {
         item.description =
-          "Deep research (in development). Researches a question across the web and this repository's files, then writes a report where each claim cites a quote found in its source. Makes no code changes."
+          "Deep research (preview). Researches a question across the web and this repository's files, then writes a report where each claim cites a quote found in its source. Makes no code changes."
         item.system = PROMPT_RESEARCH
         item.mode = "all"
       })

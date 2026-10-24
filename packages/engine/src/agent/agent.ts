@@ -562,11 +562,11 @@ const layer = Layer.effect(
           },
           // Deep research (section 5.3). The lead is a primary agent and a subagent build may hand a research question
           // to; it makes no code changes. The app's agent picker leaves it out by name (context/local.tsx): the Mode
-          // menu will pick it.
+          // menu picks it.
           [RESEARCH]: {
             name: RESEARCH,
             description:
-              "Deep research (in development). Researches a question across the web and this repository's brain, then writes a report where each claim cites a quote found in its source. Makes no code changes.",
+              "Deep research (preview). Researches a question across the web and this repository's brain, then writes a report where each claim cites a quote found in its source. Makes no code changes.",
             permission: researchAgent(RESEARCH, user),
             prompt: PROMPT_RESEARCH,
             options: {},

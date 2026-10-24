@@ -122,7 +122,7 @@ it.instance("by default the run's first read asks, a private address asks, and s
     expect(research.mode).toBe("all")
     expect(researcher.mode).toBe("subagent")
     // Its sizing, judge, app surfaces and research browsers are still being built, and it is selectable.
-    expect(research.description).toStartWith("Deep research (in development).")
+    expect(research.description).toStartWith("Deep research (preview).")
   }),
 )
 
