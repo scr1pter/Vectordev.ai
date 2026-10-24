@@ -185,8 +185,8 @@ describe("the shell sandbox under Vector Local's Web access None", () => {
       const dir = yield* tmpdirScoped()
       yield* local("ask")
       const tool = yield* shell().pipe(provideInstance(dir))
-      const result = yield* tool.execute({ command: "echo as before" }, context()).pipe(provideInstance(dir))
-      expect(result.output).toBe("as before\n")
+      const result = yield* tool.execute({ command: 'echo "as before"' }, context()).pipe(provideInstance(dir))
+      expect(result.output).toBe(process.platform === "win32" ? "as before\r\n" : "as before\n")
       expect(result.metadata.sandbox).toBeUndefined()
     }),
   )
