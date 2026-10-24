@@ -11,6 +11,10 @@ import type { LocalMode } from "@vectordevai/schema/local-mode"
 // mirror must use https, unless it is on this computer. The policy is read when the app starts, so a new mirror applies
 // at the next start, and Vector Local lets automatic checks through to the mirror alone (LocalPolicy's "mirror" rule).
 
+// Vector's own feed may name installers on Vector's download host rather than beside the feed, so a check Vector Local
+// lets run may reach that host too. A company mirror serves its own installers and gets no such host.
+export const VECTOR_DOWNLOADS = "https://downloads.vectordev.ai"
+
 export type Feed = {
   readonly url: string
   /** Whether it is the company's mirror rather than the feed the app was built with. */

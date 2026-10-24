@@ -798,6 +798,8 @@ export function createUpdateGate(deps: {
   readonly tell: (notice: { readonly message: string; readonly detail: string }) => Promise<void>
   /** Runs `run` while the updater's session may reach `origins`. */
   readonly during: <T>(origins: readonly string[], run: () => Promise<T>) => Promise<T>
+  /** Where the feed's installers may live besides the feed itself, such as Vector's download host. */
+  readonly downloads?: () => readonly string[]
   readonly policy?: () => LocalMode.Policy
   readonly held?: () => boolean
 }) {
@@ -830,7 +832,7 @@ export function createUpdateGate(deps: {
     run<T>(run: () => Promise<T>) {
       const feed = deps.feed()
       if (!policy().enabled || !feed) return run()
-      return deps.during([feed], run)
+      return deps.during([feed, ...(deps.downloads?.() ?? [])], run)
     },
     /**
      * A check the person started: asks first as `manual` does, then runs it as `run` does. Resolves undefined when

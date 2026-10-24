@@ -11,7 +11,7 @@ import { getLogger } from "./logging"
 import { getStore } from "./store"
 import { setAppQuitting } from "./windows"
 import { prepareMacUpdateInstaller, recordUpdateFailure, takeUpdateFailure } from "./mac-update-installer"
-import { updateFeed } from "./update-feed"
+import { updateFeed, VECTOR_DOWNLOADS } from "./update-feed"
 
 const { autoUpdater } = pkg
 const key = "ready"
@@ -125,6 +125,7 @@ export function setupAutoUpdater(input: { stop: () => Promise<void>; relaunch: (
   // the first run's hold keeps automatic checks back until the person has chosen how to run models.
   const local = createUpdateGate({
     feed: () => feed?.url,
+    downloads: () => (feed?.mirror ? [] : [VECTOR_DOWNLOADS]),
     ask: async (question) =>
       (
         await dialog.showMessageBox({

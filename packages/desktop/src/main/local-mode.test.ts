@@ -12,6 +12,7 @@ import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import { LocalStartup } from "@vectordevai/core/local-mode/startup"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
 import { createEgressFilter } from "./egress-filter"
+import { VECTOR_DOWNLOADS } from "./update-feed"
 import { companyCertificates, trustCompanyCertificates } from "./local-certificates"
 import {
   answeredByEngine,
@@ -1155,6 +1156,28 @@ describe("the updater under Vector Local", () => {
     })
     expect(mirror.automatic()).toBe(true)
     expect(await mirror.manual()).toBe(true)
+  })
+
+  test("lets a check reach Vector's download host as well as the feed, and a mirror only itself", async () => {
+    const granted: string[][] = []
+    const updater = (feed: string, downloads: readonly string[]) =>
+      createUpdateGate({
+        feed: () => feed,
+        downloads: () => downloads,
+        policy: () => on(),
+        held: () => false,
+        ask: async () => true,
+        tell: async () => undefined,
+        during: (origins, run) => {
+          granted.push([...origins])
+          return run()
+        },
+      })
+    expect(await updater(FEED, [VECTOR_DOWNLOADS]).checked(async () => "checked")).toBe("checked")
+    expect(await updater("https://mirror.corp.test/vector/latest-mac.yml", []).run(async () => "checked")).toBe(
+      "checked",
+    )
+    expect(granted).toEqual([[FEED, VECTOR_DOWNLOADS], ["https://mirror.corp.test/vector/latest-mac.yml"]])
   })
 })
 
