@@ -12,6 +12,7 @@
 
 import { builtinModules } from "node:module"
 import path from "node:path"
+import { browserInputPath } from "../src/browser-bundle-path"
 
 const ROOT = path.resolve(import.meta.dir, "../../..")
 const RUNTIME = new Set([...builtinModules, "bun"].flatMap((name) => [name, `node:${name}`]))
@@ -84,8 +85,7 @@ async function walk(start: string[]) {
       ],
     })
     if (result.logs.length > 0) fail(result.logs.map(String).join("\n"))
-    // The metafile names each input relative to the working directory.
-    const files = Object.keys(result.metafile?.inputs ?? {}).map((file) => path.resolve(file))
+    const files = Object.keys(result.metafile?.inputs ?? {}).map((file) => browserInputPath(file))
     files.forEach((file) => modules.add(relative(file)))
     const started = await Promise.all(
       files

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtemp, realpath, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
+import { browserInputPath } from "./browser-bundle-path"
 
 // Nothing the browser bundles may import a Node or Bun module (script/browser-imports.ts says why). The walk runs in
 // a process of its own, away from the test runner's module resolution.
@@ -9,6 +10,17 @@ import path from "node:path"
 const ROOT = path.resolve(import.meta.dir, "../../..")
 
 describe("the app's browser bundle", () => {
+  test("resolves cross-drive Bun input paths without prefixing the checkout drive", () => {
+    const directory = "D:\\a\\Vectordev.ai\\Vectordev.ai\\packages\\app"
+    expect(browserInputPath("../../../../../../C:/Users/runner/Temp/worker #1%20.ts", directory, path.win32)).toBe(
+      "C:\\Users\\runner\\Temp\\worker #1%20.ts",
+    )
+    expect(browserInputPath("..\\..\\C:\\Temp\\worker.ts", directory, path.win32)).toBe("C:\\Temp\\worker.ts")
+    expect(browserInputPath("src/entry.tsx", directory, path.win32)).toBe(`${directory}\\src\\entry.tsx`)
+    expect(browserInputPath("C:/Temp/worker.ts", directory, path.win32)).toBe("C:\\Temp\\worker.ts")
+    expect(browserInputPath("../../C:/worker.ts", "/repo/packages/app", path.posix)).toBe("/repo/C:/worker.ts")
+  })
+
   test("imports no Node or Bun module, through any package", async () => {
     const result = await walk()
     // The walk reaches both pages, core and the workers, so an empty list means something.
