@@ -59,7 +59,7 @@ import { ErrorPage } from "./pages/error"
 import { LaunchAttach, LaunchReadyProbe, LaunchSettingsMirror } from "@/features/launch/launch-handoff"
 import { LaunchYield, yieldLaunchScreen } from "@/features/launch/launch-yield"
 import { useCheckServerHealth } from "./utils/server-health"
-import { desktopLocal } from "./utils/desktop-local"
+import { afterFirstRun } from "./utils/desktop-local"
 import { legacySessionServer, requireServerKey, sessionHref } from "./utils/session-route"
 
 import { SessionPage, TargetSessionRouteContent } from "@/pages/session"
@@ -769,15 +769,13 @@ export function AppInterface(props: {
     onCleanup(() => clearTimeout(timer.current))
     const warm = () =>
       void import("@/services/local-transcription").then((mod) => mod.warmupLocalTranscription()).catch(() => undefined)
-    const idle = () => {
-      if (typeof globalThis.requestIdleCallback === "function") globalThis.requestIdleCallback(warm, { timeout: 5000 })
-      else timer.current = setTimeout(warm, 2500)
-    }
-    const whenAnswered = async () => {
-      if (!(await desktopLocal())?.held) return idle()
-      timer.current = setTimeout(() => void whenAnswered(), 15_000)
-    }
-    void whenAnswered()
+    onCleanup(
+      afterFirstRun(() => {
+        if (typeof globalThis.requestIdleCallback === "function")
+          globalThis.requestIdleCallback(warm, { timeout: 5000 })
+        else timer.current = setTimeout(warm, 2500)
+      }),
+    )
   })
 
   // The visual new layout lives in the router root so it remains mounted across
