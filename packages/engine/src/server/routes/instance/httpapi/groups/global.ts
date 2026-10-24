@@ -6,6 +6,7 @@ import "@vectordevai/core/account"
 import "@/server/event"
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
+import { ConfigLockedError, ConfigWithLocks } from "./config"
 import { described } from "./metadata"
 
 const GlobalHealth = Schema.Struct({
@@ -92,7 +93,7 @@ export const GlobalApi = HttpApi.make("global").add(
         }),
       ),
       HttpApiEndpoint.get("configGet", GlobalPaths.config, {
-        success: described(ConfigV1.Info, "Get global config info"),
+        success: described(ConfigWithLocks, "Get global config info"),
       }).annotateMerge(
         OpenApi.annotations({
           identifier: "global.config.get",
@@ -103,12 +104,13 @@ export const GlobalApi = HttpApi.make("global").add(
       HttpApiEndpoint.patch("configUpdate", GlobalPaths.config, {
         payload: ConfigV1.Info,
         success: described(ConfigV1.Info, "Successfully updated global config"),
-        error: HttpApiError.BadRequest,
+        error: [HttpApiError.BadRequest, ConfigLockedError],
       }).annotateMerge(
         OpenApi.annotations({
           identifier: "global.config.update",
           summary: "Update global configuration",
-          description: "Update global Vector configuration settings and preferences.",
+          description:
+            "Update global Vector configuration settings and preferences. Under a company lock, a change to a key the company keeps fails with ConfigLocked; the parts of Vector Local the company leaves to you still change.",
         }),
       ),
       HttpApiEndpoint.post("dispose", GlobalPaths.dispose, {

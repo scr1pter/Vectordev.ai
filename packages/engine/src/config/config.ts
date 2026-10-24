@@ -582,6 +582,18 @@ const LOCAL_FAIL_CLOSED: ConfigLocalV1.Info = { enabled: true, web: "none" }
 const LOCAL_WEB_LABELS: Record<LocalMode.Web, string> = { ask: "Ask", network: "Your network only", none: "None" }
 const LocalConfirmed = Schema.Struct({ local: Schema.NullOr(ConfigLocalV1.Info) })
 const LOCAL_OFF = "turns Vector Local off"
+// What a company lock always keeps (lockedKeys). autoshare is share's old switch, which would otherwise set it.
+const LOCKED_ALWAYS = ["local", "share", "autoshare", "autoupdate"]
+// The parts of the user's local block that only record what Vector found about the servers on the list.
+const LOCAL_RECORDS = ["pins", "checked"]
+// The top-level config keys, which are what `locked_keys` may name.
+const CONFIG_KEYS = new Set(Object.keys(ConfigV1.Info.fields))
+// Keys that set what a locked key sets, so they are locked with it: a mode becomes an agent, and tools become
+// permissions.
+const LOCKED_WITH: Record<string, readonly string[]> = { agent: ["mode"], permission: ["tools"] }
+// Ollama on Windows answers only on 127.0.0.1, which an engine in WSL's default (NAT) networking cannot reach.
+const WSL_GUIDANCE =
+  "Ollama on Windows listens on 127.0.0.1 only. Use WSL mirrored networking, or run Ollama inside WSL. Setting OLLAMA_HOST=0.0.0.0 exposes it to your whole network."
 
 type LocalBlock = {
   readonly source: string
@@ -645,6 +657,53 @@ const localState: {
 /** The Vector Local policy in effect for this process. Nothing else may be read for Vector Local's settings. */
 export function local() {
   return localState.policy
+}
+
+/**
+ * The config keys a company lock keeps (`lock: true` in the managed `local` block): Vector Local's block, public
+ * sharing and its old switch, automatic updates, and the top-level keys the company names in `locked_keys`. Their
+ * values come from company policy alone: when config loads, every other source's are left out, so a list the company
+ * sets replaces the user's rather than adding to it, and a key the company locks without setting keeps its default. A
+ * change that sets one fails with ConfigLocked (lockedIn). Empty without a lock.
+ */
+export function lockedKeys(policy: LocalMode.Policy = local()): string[] {
+  if (!policy.lock) return []
+  const named = policy.locked_keys.filter((key) => CONFIG_KEYS.has(key))
+  return [...new Set([...LOCKED_ALWAYS, ...named, ...named.flatMap((key) => LOCKED_WITH[key] ?? [])])]
+}
+
+/**
+ * The keys of `patch` that a company lock keeps, as ConfigLocked lists them, or none. A top-level key is named as it
+ * is; a part of the user's own local block as `local.<key>`. Under a lock the user's local block may still change
+ * where the company's `user_may` leaves it to the user (Web access only to a stricter setting), add sites to deny, and
+ * keep the identity pins and check results of the servers on the list. A repository's local block never applies, so
+ * under a lock `scope: "repository"` refuses any.
+ */
+export function lockedIn(patch: Info, scope: "global" | "repository", policy: LocalMode.Policy = local()) {
+  const locked = lockedKeys(policy)
+  if (locked.length === 0) return []
+  const values = patch as Record<string, unknown>
+  const top = Object.keys(values).filter((key) => key !== "local" && locked.includes(key) && values[key] !== undefined)
+  const block = patch.local
+  if (!block) return top
+  if (scope === "repository") return [...top, "local"]
+  const keys = block as Record<string, unknown>
+  return [
+    ...top,
+    ...Object.keys(keys)
+      .filter((key) => keys[key] !== undefined && !userMayWrite(policy, key, block))
+      .map((key) => `local.${key}`),
+  ]
+}
+
+// Whether a lock leaves `key` of the user's local block to the user, as `block` would set it.
+function userMayWrite(policy: LocalMode.Policy, key: string, block: ConfigLocalV1.Info) {
+  if (LOCAL_RECORDS.includes(key)) return true
+  const userMay = policy.user_may as readonly string[]
+  if (key === "web") return userMay.includes("web") && LocalPolicy.stricter(policy.web, block.web) === block.web
+  // A site the user never wants reached only tightens, so denying one is always the user's.
+  if (key === "web_domains") return userMay.includes("web_domains") || !block.web_domains?.allow?.length
+  return userMay.includes(key)
 }
 
 /** The edit to the user's config that would loosen Vector Local and waits for the owner, if there is one. */
@@ -1080,9 +1139,11 @@ function readLocalSources() {
     ...managed.ignored.filter((item) => item.kind === "unreadable").map((item) => item.source),
     ...unreadFile(managedBlocks).map((item) => item.source),
   ]
+  // The company's blocks merge as config merges files: a later source's list replaces an earlier one's.
+  const company =
+    undecodable(managedBlocks) || managedUnread.length > 0 ? LOCAL_FAIL_CLOSED : mergeLocalBlocks(managedBlocks)
   return {
-    managed:
-      undecodable(managedBlocks) || managedUnread.length > 0 ? LOCAL_FAIL_CLOSED : mergeLocalBlocks(managedBlocks),
+    managed: company,
     user: undecodable(userBlocks) ? LOCAL_FAIL_CLOSED : mergeLocalBlocks(userBlocks),
     failed: undecodable(userBlocks),
     // While a user file cannot be read, the block in effect stays the one to compare with.
@@ -1110,6 +1171,14 @@ function readLocalSources() {
         ? [
             `Vector Local stays on with Web access None until Vector can read ${managedUnread.join(", ")}, which may hold your company's policy.`,
           ]
+        : []),
+      ...(company?.lock === true
+        ? (company.locked_keys ?? [])
+            .filter((key) => !CONFIG_KEYS.has(key))
+            .map(
+              (key) =>
+                `Ignored ${key} in your company's locked_keys: Vector locks top-level config keys only, such as model or provider.`,
+            )
         : []),
     ],
   }
@@ -1217,9 +1286,19 @@ function resolveLocal(sources: ReturnType<typeof readLocalSources>, inputs: Loca
   // agent marker. Under it anything could have set it, so it may still turn Local on and tighten Web access but adds
   // no model server.
   const forged = agentMarked() ? resolved.endpoints.filter((item) => item.from === "environment") : []
+  const endpoints = resolved.endpoints.filter((item) => !forged.includes(item))
+  // The desktop says how WSL networks an engine it starts there. In NAT mode this computer's loopback inside WSL is not
+  // Windows', so a server Windows runs on 127.0.0.1 is out of reach.
+  const wsl =
+    process.env.VECTOR_LOCAL_WSL_NETWORK === "nat" &&
+    resolved.enabled &&
+    endpoints.some((item) => {
+      const origin = LocalPolicy.origin(item.origin)
+      return origin !== undefined && LocalPolicy.loopback(new URL(origin).hostname)
+    })
   return {
     ...resolved,
-    endpoints: resolved.endpoints.filter((item) => !forged.includes(item)),
+    endpoints,
     warnings: [
       ...new Set([
         ...sources.warnings,
@@ -1229,6 +1308,7 @@ function resolveLocal(sources: ReturnType<typeof readLocalSources>, inputs: Loca
               "Ignored the model servers in VECTOR_LOCAL_POLICY: an agent or Vector's own terminal started this Vector, so it cannot add one.",
             ]
           : []),
+        ...(wsl ? [WSL_GUIDANCE] : []),
       ]),
     ],
   }
@@ -1832,11 +1912,18 @@ const layer = Layer.effect(
         const startOverrides = new Set(["VECTOR_CONFIG_CONTENT", ...localConfig.overrides])
         const localDirectory = localConfig.desktop ?? Global.Path.config
         let repositoryLocal = false
+        // Under a company lock only company policy sets the keys it keeps: every other source's values for them are
+        // left out here, so the company's lists replace the user's and the repository's instead of adding to them.
+        const locked = lockedKeys().filter((key) => key !== "local")
+        const companyFiles = new Set(managed.files)
 
         const merge = (source: string, input: Info, kind?: ConfigPlugin.Scope) => {
           const scope = kind ?? (projectContains(source) ? "local" : "global")
           const projectSource = scope === "local" && source !== "VECTOR_CONFIG_CONTENT"
-          const next = input.local === undefined ? input : omit(input, ["local"])
+          const values = input as Record<string, unknown>
+          const kept = companyFiles.has(source) ? [] : locked.filter((key) => values[key] !== undefined)
+          const dropped = [...(input.local === undefined ? [] : ["local"]), ...kept]
+          const next = dropped.length === 0 ? input : (omit(input, dropped as (keyof Info)[]) as Info)
           if (projectSource && next.budget?.run) ignoredRunBudgets.push(source)
           const safe = projectSource ? projectExecutableConfig(next, trusted, result) : next
           if (projectSource) projectGrants ||= grantsPermission(safe)
@@ -1861,7 +1948,11 @@ const layer = Layer.effect(
                   : Effect.logWarning(
                       `Ignored the local block in ${source}: Vector Local is read only from your user config in ${localDirectory} and from your company's policy.`,
                     )
-          return ignored.pipe(Effect.andThen(mergePluginOrigins(source, safe.plugin, scope)))
+          const lockedOut =
+            kept.length === 0
+              ? Effect.void
+              : Effect.logWarning(`Your company's policy sets ${kept.join(", ")}, so ${source} does not.`)
+          return ignored.pipe(Effect.andThen(lockedOut), Effect.andThen(mergePluginOrigins(source, safe.plugin, scope)))
         }
 
         for (const [key, value] of Object.entries(auth)) {
@@ -1986,18 +2077,23 @@ const layer = Layer.effect(
             )).some(Boolean)
           if (runtimeFiles) yield* ensureGitignore(dir, writeRoot(dir)).pipe(Effect.orDie)
 
-          result.command = mergeDeep(result.command ?? {}, yield* Effect.promise(() => ConfigCommand.load(runtimeDir)))
+          // A folder's commands, agents and plugins are its config too, so a company lock on them leaves them out.
+          if (!locked.includes("command"))
+            result.command = mergeDeep(
+              result.command ?? {},
+              yield* Effect.promise(() => ConfigCommand.load(runtimeDir)),
+            )
           const agents = mergeDeep(
-            yield* Effect.promise(() => ConfigAgent.load(runtimeDir)),
-            yield* Effect.promise(() => ConfigAgent.loadMode(runtimeDir)),
+            locked.includes("agent") ? {} : yield* Effect.promise(() => ConfigAgent.load(runtimeDir)),
+            locked.includes("mode") ? {} : yield* Effect.promise(() => ConfigAgent.loadMode(runtimeDir)),
           )
           if (local) projectGrants ||= grantsPermission({ agent: agents })
           else userPermissions = mergeConfigConcatArrays(userPermissions, { agent: agents })
           result.agent = mergeDeep(result.agent ?? {}, agents)
           // Auto-discovered plugins under `.vector/plugin(s)` are already local files, so ConfigPlugin.load
           // returns normalized Specs and we only need to attach origin metadata here.
-          const list = yield* Effect.promise(() => ConfigPlugin.load(runtimeDir))
-          yield* mergePluginOrigins(dir, list)
+          if (!locked.includes("plugin"))
+            yield* mergePluginOrigins(dir, yield* Effect.promise(() => ConfigPlugin.load(runtimeDir)))
         }
 
         if (!Flag.VECTOR_DISABLE_PROJECT_CONFIG) {
@@ -2057,7 +2153,7 @@ const layer = Layer.effect(
           })
         }
 
-        if (Flag.VECTOR_PERMISSION) {
+        if (Flag.VECTOR_PERMISSION && !locked.includes("permission")) {
           try {
             const permission = JSON.parse(Flag.VECTOR_PERMISSION)
             result.permission = mergeDeep(result.permission ?? {}, permission)
