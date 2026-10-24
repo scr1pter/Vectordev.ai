@@ -67,7 +67,11 @@ export function DialogAllowSource(props: {
       <DialogHeader>
         <DialogTitleGroup
           title={`Allow ${name()}?`}
-          description="Vector Local blocks this while it is on. Allowing it lets these requests through."
+          description={
+            props.source.local === "ask-once"
+              ? "Vector Local asks before each of these while it is on. Allowing it lets them through."
+              : "Vector Local blocks this while it is on. Allowing it lets these requests through."
+          }
         />
       </DialogHeader>
       <DialogBody class="vector-local-dialog__body">

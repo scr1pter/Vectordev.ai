@@ -1,5 +1,6 @@
 import { createMemo, For, onCleanup, onMount, Show } from "solid-js"
 import { useDialog } from "@vectordevai/ui/context/dialog"
+import { OffInLocal } from "@/features/local/off-in-local"
 import "./onboarding.css"
 
 // The ambient sky both onboarding surfaces share: purple hues drifting on a
@@ -354,6 +355,8 @@ export function OnboardingProgress(props: {
                             Run Vector's AI features on model servers you or your company host, such as Ollama or vLLM.
                             Vector finds the servers on this computer and checks each model with its tools.
                           </div>
+                          {/* With Vector Local on, free models are off; the step above still offers them, so say so. */}
+                          <OffInLocal source="vector-free-models" named />
                         </div>
                         <button
                           type="button"

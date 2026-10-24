@@ -431,6 +431,19 @@ test("the setup wizard goes from Models you host to a first Local session on the
   })
 })
 
+test("Getting started says free models are off while Vector Local is on, beside Models you host", async ({ page }) => {
+  await setup(page, { onboarding: true, policy: policy({ enabled: true, web: "ask" }) })
+  await page.goto("/")
+  const card = page.locator('[data-component="onboarding-models-you-host"]')
+  await expect(card).toBeVisible({ timeout: 30_000 })
+  const off = card.locator('[data-component="local-off"][data-source="vector-free-models"]')
+  await expect(off).toContainText("Off in Vector Local")
+  await expect(off).toContainText("Free models provided by Vector")
+  await expect(off.getByRole("button", { name: "Allow…" })).toHaveCount(0)
+  await off.getByRole("button", { name: "Why" }).click()
+  await expect(off).toContainText("It cannot be allowed while Vector Local is on.")
+})
+
 test("the model picker keeps what Vector Local turned off in a collapsed group that says why", async ({ page }) => {
   await setup(page, {
     added: true,

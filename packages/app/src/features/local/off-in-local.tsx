@@ -16,6 +16,8 @@ export function OffInLocal(props: {
   /** The status the caller already reads; without it the label reads Vector Local itself. */
   status?: LocalStatus
   client?: VectorClient
+  /** Shows the source's name, for a label that does not sit beside the feature it names. */
+  named?: boolean
   onChanged?: (status?: LocalStatus) => void
 }) {
   const reader = props.status ? undefined : useLocalStatus()
@@ -33,6 +35,7 @@ export function OffInLocal(props: {
           item={entry()}
           status={status()!}
           client={client()}
+          named={props.named}
           onChanged={(next) => {
             reader?.refresh()
             props.onChanged?.(next)
