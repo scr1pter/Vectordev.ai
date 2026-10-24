@@ -46,6 +46,8 @@ const WEB_KINDS = new Set<Kind>(["agent-browser", "research-browser"])
 const SEEN_LIMIT = 256
 const STAY = "This stays on this computer."
 const PRIVATE_REASON = "Research browsers never reach this computer, your network or a cloud metadata address."
+const WINDOW_RULE =
+  "This window's own rule stopped it before it left, such as a research browser's navigation rule or the billing window handing its return to the app."
 // What the app's own code sends (its requests and WebSockets), as against what a page it shows loads.
 const APP_REQUESTS = new Set(["xhr", "webSocket"])
 // Where Chromium looks for spellcheck dictionaries under Vector Local on Windows and Linux: a port Chromium never
@@ -99,6 +101,10 @@ export function decideChromium(input: {
   const place = LocalPolicy.hostClass(web.hostname)
   if (input.kind === "research-browser" && place !== "internet")
     return decision({ decision: "block", rule: "private-destination", class: place, reason: PRIVATE_REASON })
+  // Until the policy is read, only this computer and the app's own schemes are reachable, as everywhere else: not the
+  // Vector servers on your network, nor a feed the user asked to check.
+  if (input.policy.pending)
+    return decision(LocalPolicy.decide(input.policy, { purpose: labelled.purpose, url: web, source: labelled.source }))
   if (input.granted?.has(web.origin))
     return decision({
       decision: "allow",
@@ -129,9 +135,11 @@ export function decideChromium(input: {
 
 /**
  * The dispatcher for every Chromium session: Vector Local's decision first, then the steps windows registered, in the
- * order they registered. Decisions are logged through `record` while Vector Local is on, one line per host per page
- * for what a page loads, and never for what stays on this computer, each attributed to the session whose browser made
- * it (`attribute`), so a research or agent browser's pages count in that session's counters.
+ * order they registered. Each request is logged through `record` while Vector Local is on, once its outcome is known:
+ * a request a window's step cancels or redirects never leaves, so it is logged as blocked by that window's rule
+ * (`window-rule`), never as a page loaded. One line per host per page for what a page loads, and never for what stays
+ * on this computer, each attributed to the session whose browser made it (`attribute`), so a research or agent
+ * browser's pages count in that session's counters.
  */
 export function createEgressFilter(deps: {
   readonly policy: () => LocalMode.Policy
@@ -185,19 +193,23 @@ export function createEgressFilter(deps: {
       granted: session.granted,
       resource: details.resourceType,
     })
-    if (policy.enabled) log(session.kind, details, decided)
-    if (decided.decision !== "allow") return callback({ cancel: true })
+    const settle = (response: CallbackResponse, outcome: Decision) => {
+      if (policy.enabled) log(session.kind, details, outcome)
+      callback(response)
+    }
+    if (decided.decision !== "allow") return settle({ cancel: true }, decided)
+    const stopped: Decision = { ...decided, decision: "block", rule: "window-rule", reason: WINDOW_RULE }
     // Electron holds a request until its listener answers, so a step that throws cancels it rather than hanging it.
     const run = (index: number): void => {
       const step = session.steps[index]
-      if (!step) return callback({})
+      if (!step) return settle({}, decided)
       try {
         step(details, (response) => {
-          if (response.cancel || response.redirectURL) return callback(response)
+          if (response.cancel || response.redirectURL) return settle(response, stopped)
           run(index + 1)
         })
       } catch {
-        callback({ cancel: true })
+        settle({ cancel: true }, stopped)
       }
     }
     run(0)
@@ -207,10 +219,11 @@ export function createEgressFilter(deps: {
     const contents = details.webContentsId ?? -1
     const known = pages.get(contents)
     const main = details.resourceType === "mainFrame"
-    // A new main-frame request is a new page; a redirect hop of it is the same page reaching another host.
+    // A new main-frame request is a new page; a redirect hop of it is the same page reaching another host. One that
+    // never left is a page refused, and what the page already open loads still counts for that page.
     const fresh = main && !known?.requests.has(details.id)
     const current =
-      !known || fresh
+      !known || (fresh && decided.decision === "allow")
         ? { page: (known?.page ?? 0) + 1, requests: new Set([details.id]), seen: new Set<string>() }
         : known
     if (current !== known) {

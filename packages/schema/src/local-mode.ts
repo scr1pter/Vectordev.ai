@@ -84,6 +84,9 @@ export const Rule = Schema.Literals([
   "web-port",
   // A request for this computer or the user's network that the proxy environment would still send through a proxy.
   "proxy-environment",
+  // A desktop window's own rule stopped a request Vector Local let through, before it left: a research browser's
+  // navigation rule, or the billing window handing its return to the app.
+  "window-rule",
 ]).annotate({ identifier: "EgressRule" })
 export type Rule = typeof Rule.Type
 

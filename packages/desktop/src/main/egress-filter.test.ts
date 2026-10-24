@@ -123,6 +123,23 @@ describe("decideChromium", () => {
     })
   })
 
+  test("until the policy is read, reaches this computer and the app's own files only", () => {
+    const pending = LocalPolicy.PENDING
+    const decide = (url: string, kind: Kind, resource?: string, granted?: Set<string>) => {
+      const decided = decideChromium({ url, kind, policy: pending, resource, granted })
+      return `${decided.decision} ${decided.rule}`
+    }
+    expect(decide("oc://renderer/index.html", "app")).toBe("allow loopback")
+    expect(decide("http://127.0.0.1:4096/global/health", "app", "xhr")).toBe("allow pending")
+    expect(decide("http://build-box.lan:4096/session", "app", "xhr")).toBe("block pending")
+    expect(decide("http://192.168.1.20:4096/session", "app", "webSocket")).toBe("block pending")
+    expect(decide(FEED, "updates", "other", new Set([new URL(FEED).origin]))).toBe("block pending")
+    expect(decide("https://example.org/", "agent-browser", "mainFrame")).toBe("block pending")
+    expect(decide("http://localhost:5173/", "agent-browser", "mainFrame")).toBe("allow pending")
+    // A research browser still never reaches this computer.
+    expect(decide("http://127.0.0.1:4096/session", "research-browser", "mainFrame")).toBe("block private-destination")
+  })
+
   test("with Web access None, lets the app's own requests reach a Vector server on your network, and no page's", () => {
     const decide = (url: string, resource: string, local = NONE) =>
       decideChromium({ url, kind: "app", policy: local, resource }).decision
@@ -367,6 +384,34 @@ describe("the Chromium dispatcher", () => {
       { source: "crash-reports", origin: "https://o12.ingest.us.sentry.io", decision: "block" },
       { source: "release-notes", origin: "https://vectordev.ai", decision: "block" },
     ])
+  })
+
+  test("logs a request a window's step stops as blocked by that window's rule, never as a page", async () => {
+    Egress.configure(ASK)
+    const filter = createEgressFilter({
+      policy: Egress.policy,
+      record: (request, verdict) => void Egress.record(request, verdict),
+    })
+    const research = fakeSession()
+    // The research browsers' navigation rule refuses a page outside the run's addresses, as research-navigation does.
+    filter.register(
+      research,
+      (request, callback) =>
+        callback(request.resourceType === "mainFrame" && request.url.includes("outside") ? { cancel: true } : {}),
+      { kind: "research-browser" },
+    )
+    filter.attribute(31, { sessionID: "ses_navigator", rootID: "ses_navigation" })
+    const at = { webContentsId: 31 }
+    expect(await send(research, details("https://journal.example.org/abstract", "mainFrame", at))).toEqual({})
+    expect(await send(research, details("https://outside.example.net/", "mainFrame", at))).toEqual({ cancel: true })
+    // What the page already open loads is still that page's.
+    await send(research, details("https://figures.example.com/figure.png", "image", at))
+    expect(Egress.summary("ses_navigation")).toMatchObject({ pages: 1, hosts: 1, blocked: { "research-browser": 1 } })
+    const refused = Egress.events().find((event) => event.origin === "https://outside.example.net")
+    expect(refused).toMatchObject({ decision: "block", rule: "window-rule", resource: "page" })
+    expect(Egress.events().find((event) => event.origin === "https://figures.example.com")?.resource).toBe(
+      "subresource",
+    )
   })
 
   test("lets a session reach an origin only while a check the user asked for runs", async () => {
