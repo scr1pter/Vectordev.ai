@@ -34,6 +34,7 @@ import {
   type RunExternalAgentInput,
   type ExternalAgentRunResult,
 } from "./external-agents"
+import { ExternalAgent } from "@vectordevai/schema/external-agent"
 import { markTeamMessagesDelivered, pendingTeamMessages, postTeamMessage, teamForWorkspace } from "./agent-teams"
 import { formatDelivery, formatHandoff, type TeamMessage } from "./agent-team-model"
 import { priorFor, recordValidationRun } from "./failure-memory"
@@ -332,13 +333,7 @@ const now = () => new Date().toISOString()
 const RUNTIME_DEFAULT_MODEL = "Runtime default"
 const workspaceRoot = () => join(app.getPath("userData"), WORKSPACE_DIRECTORY_NAME)
 const runtimeLabel = (runtime: ParallelWorkspaceRuntime) =>
-  runtime === "claude-code"
-    ? "Claude Code"
-    : runtime === "codex"
-      ? "Codex"
-      : runtime === "cursor"
-        ? "Cursor Agent"
-        : "Vector"
+  runtime === "vector" ? "Vector" : (ExternalAgent.find(runtime)?.name ?? "Vector")
 
 const cache = createStoreCache<ParallelWorkspaceRecord>()
 
@@ -353,10 +348,7 @@ function readRecords(): ParallelWorkspaceRecord[] {
         (item): ParallelWorkspaceRecord => ({
           ...item,
           revision: item.revision ?? 0,
-          runtime:
-            item.runtime === "claude-code" || item.runtime === "codex" || item.runtime === "cursor"
-              ? item.runtime
-              : "vector",
+          runtime: ExternalAgent.isChatId(item.runtime) ? item.runtime : "vector",
         }),
       )
     const compacted = records.map(compactClosedParallelWorkspace)
@@ -1545,6 +1537,8 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
   let isolatedPath = join(workspaceDir, "workspace")
   const taskDifficulty = classifyTaskDifficulty(input.taskPrompt)
   const runtime = input.runtime ?? "vector"
+  // A terminal-only agent opens in the built-in terminal instead; only a chat runtime can run here.
+  if (runtime !== "vector" && !ExternalAgent.isChatId(runtime)) throw new Error("Choose a runtime Vector can run here.")
   // A Vector-runtime agent is measured by the engine, so it shows no guess.
   const estimatedCost = runtime === "vector" ? "" : "Reported by runtime when available"
   const name = input.name?.trim() || `Agent ${activeInScope.length + 1}`

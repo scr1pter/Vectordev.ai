@@ -7,6 +7,7 @@ import { dirname, isAbsolute, join, normalize, relative, sep } from "node:path"
 import { StringDecoder } from "node:string_decoder"
 import type { AgentChat } from "./parallel-workspace-turns"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
+import { ExternalAgent } from "@vectordevai/schema/external-agent"
 
 import {
   fallbackBinDirectories,
@@ -20,49 +21,19 @@ import {
 // Detection + handoff plumbing for external coding agents/editors Vector can
 // host or hand a task off to. Read-only probing (no shell:true, fixed
 // binaries) so this never executes anything the user didn't already install.
+// Which agents exist, and every command they take, comes from the one catalog
+// in @vectordevai/schema/external-agent that the app reads too. Nothing here
+// reads an agent's credential files or the keychain: sign-in state only ever
+// comes from the agent's own status command.
 
-export type ExternalAgentId = "claude-code" | "codex" | "cursor" | "vscode"
-export type CodingAgentRuntime = "claude-code" | "codex" | "cursor"
+export type ExternalAgentId = ExternalAgent.Id | "vscode"
+export type CodingAgentRuntime = ExternalAgent.ChatId
 
-export type ExternalAgentStatus = {
-  id: ExternalAgentId
-  name: string
-  cli: string
-  installed: boolean
-  version?: string
-  path?: string
-  // undefined means "could not tell", never "signed out": a picker that claims
-  // a working CLI is signed out is worse than one that stays quiet.
-  signedIn?: boolean
-}
+// signedIn undefined means "could not tell", never "signed out": a picker that
+// claims a working CLI is signed out is worse than one that stays quiet.
+export type ExternalAgentStatus = ExternalAgent.Detection & { id: ExternalAgentId }
 
-type ExternalAgentCandidate = { id: ExternalAgentId; name: string; cli: string }
-
-const CANDIDATES: ExternalAgentCandidate[] = [
-  { id: "claude-code", name: "Claude Code", cli: "claude" },
-  { id: "codex", name: "Codex CLI", cli: "codex" },
-  { id: "cursor", name: "Cursor Agent", cli: "cursor-agent" },
-  { id: "vscode", name: "VS Code", cli: "code" },
-]
-
-// Mirrors packages/app/src/features/agents/external-runtimes.ts, which the
-// renderer shows as setup steps. The app package does not export that module to
-// the main process, so the two lists have to be kept in sync by hand.
-const RUNTIME_SETUP: Record<CodingAgentRuntime, { label: string; cli: string; install: string; signIn: string }> = {
-  "claude-code": {
-    label: "Claude Code",
-    cli: "claude",
-    install: "npm install -g @anthropic-ai/claude-code",
-    signIn: "claude",
-  },
-  codex: { label: "Codex", cli: "codex", install: "npm install -g @openai/codex", signIn: "codex" },
-  cursor: {
-    label: "Cursor Agent",
-    cli: "cursor-agent",
-    install: "curl https://cursor.com/install -fsS | bash",
-    signIn: "cursor-agent login",
-  },
-}
+const VSCODE = { id: "vscode", name: "VS Code", cli: "code" } as const
 
 export type AgentEnvironment = Record<string, string | undefined>
 
@@ -216,18 +187,6 @@ function firstLine(text: string): string | undefined {
     .find(Boolean)
 }
 
-// The question detection could not answer before: a CLI can be installed, report
-// a version, and still refuse every run because nobody signed in — which is
-// exactly what a green "Installed" tile promised and then failed to deliver.
-// These probes are local and quick; none reaches a model. Cursor's status
-// command uses the same logged-in / not-logged-in vocabulary and is verified
-// by its headless CLI.
-const AUTH_PROBE: Partial<Record<ExternalAgentId, string[]>> = {
-  "claude-code": ["auth", "status"],
-  codex: ["login", "status"],
-  cursor: ["status"],
-}
-
 // `claude auth status` prints JSON; `codex login status` prints a sentence. The
 // negative test runs first because "not logged in" contains "logged in".
 const LOGGED_IN_FLAG = /"loggedIn"\s*:\s*(true|false)/i
@@ -240,34 +199,349 @@ export function signedInFromProbe(output: string) {
   return undefined
 }
 
-async function detectOne(candidate: ExternalAgentCandidate): Promise<ExternalAgentStatus> {
-  const path = await resolveAgentPath(candidate.cli)
-  if (!path) return { id: candidate.id, name: candidate.name, cli: candidate.cli, installed: false }
-  // Node-based CLIs are shims that need their own runtime on PATH, so the
-  // version probe gets the same environment the real run will get.
-  const result = await runCli(path, ["--version"], 5_000, agentEnvironment())
+// `kilo auth list` names providers and ends on a total such as "2 credentials".
+// Only the total is read. A zero next to keys taken from the environment is
+// still a working setup, so that case stays unknown rather than signed out.
+export function signedInFromCredentialCount(output: string) {
+  const total = /\b(\d+)\s+credentials?\b/i.exec(output)
+  if (!total) return undefined
+  if (Number(total[1]) > 0) return true
+  return /\benvironment\b/i.test(output) ? undefined : false
+}
+
+export type AgentLookup = { env?: AgentEnvironment; platform?: NodeJS.Platform }
+
+// The first of the agent's binaries that is on this machine and is really this
+// agent: a generic name such as Cursor's `agent` must also print Cursor's own
+// version, and a same-named unrelated tool is skipped. The version comes from
+// the same environment the real run gets, since Node-based CLIs are shims that
+// need their own runtime on PATH.
+export async function findAgentBinary(agent: ExternalAgent.Agent, lookup: AgentLookup = {}, readVersion = false) {
+  const env = lookup.env ?? agentEnvironment()
+  for (const binary of agent.binaries) {
+    const path = await resolveAgentPath(binary.name, env, lookup.platform)
+    if (!path) continue
+    // A run only needs the path; the version is spawned for detection and for a name that needs confirming.
+    if (!readVersion && !binary.version && !binary.notVersion) return { binary, path, version: undefined }
+    const result = await runCli(path, ["--version"], 5_000, env)
+    const output = `${result.stdout}\n${result.stderr}`
+    if (binary.version && (result.failed || !new RegExp(binary.version).test(output))) continue
+    if (binary.notVersion && new RegExp(binary.notVersion, "i").test(output)) continue
+    const version = result.failed ? undefined : (firstLine(result.stdout) ?? firstLine(result.stderr))
+    return { binary, path, version }
+  }
+  return undefined
+}
+
+// A CLI can be installed, report a version, and still refuse every run because
+// nobody signed in. Only an agent that documents a local status command is
+// probed; that probe never reaches a model, and it is parsed even when it exits
+// non-zero, since a signed-out CLI may report that with a failing exit code.
+async function detectAgent(agent: ExternalAgent.Agent, lookup: AgentLookup): Promise<ExternalAgentStatus> {
+  const base = { id: agent.id as ExternalAgent.Id, name: agent.name, cli: agent.binaries[0]!.name, tier: agent.tier }
+  const found = await findAgentBinary(agent, lookup, true)
+  if (!found) return { ...base, state: "not-installed", installed: false }
+  const probe = agent.statusProbe
+  const auth = probe ? await runCli(found.path, [...probe.args], 5_000, lookup.env ?? agentEnvironment()) : undefined
+  const output = auth ? `${auth.stdout}\n${auth.stderr}` : ""
+  const signedIn = !probe
+    ? undefined
+    : probe.read === "logged-in"
+      ? signedInFromProbe(output)
+      : signedInFromCredentialCount(output)
+  return {
+    ...base,
+    cli: found.binary.name,
+    state: signedIn === undefined ? "unknown" : signedIn ? "ready" : "signed-out",
+    installed: true,
+    version: found.version,
+    path: found.path,
+    signedIn,
+  }
+}
+
+async function detectEditor(lookup: AgentLookup): Promise<ExternalAgentStatus> {
+  const env = lookup.env ?? agentEnvironment()
+  const path = await resolveAgentPath(VSCODE.cli, env, lookup.platform)
+  if (!path) return { ...VSCODE, tier: "editor", state: "not-installed", installed: false }
+  const result = await runCli(path, ["--version"], 5_000, env)
   const version = result.failed ? undefined : (firstLine(result.stdout) ?? firstLine(result.stderr))
-  const probe = AUTH_PROBE[candidate.id]
-  // Parsed even when the probe exits non-zero: a signed-out CLI is entitled to
-  // report that with a failing exit code.
-  const auth = probe ? await runCli(path, probe, 5_000, agentEnvironment()) : undefined
-  const signedIn = auth ? signedInFromProbe(`${auth.stdout}\n${auth.stderr}`) : undefined
-  return { id: candidate.id, name: candidate.name, cli: candidate.cli, installed: true, version, path, signedIn }
+  return { ...VSCODE, tier: "editor", state: "ready", installed: true, version, path }
 }
 
 // Detection touches the filesystem and spawns a `--version` probe per candidate;
 // cache the result briefly so a re-render (or several) doesn't repeat the work.
+// `refresh` is the re-check after an install or sign-in: it probes the login
+// shell again (an installer may have changed PATH) and skips the cache. An
+// injected environment (the test seam) is never cached.
 const CACHE_TTL_MS = 60_000
 let cache: { at: number; result: ExternalAgentStatus[] } | undefined
 
-export async function detectExternalAgents(): Promise<ExternalAgentStatus[]> {
-  if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.result
+export async function detectExternalAgents(
+  options: { refresh?: boolean } & AgentLookup = {},
+): Promise<ExternalAgentStatus[]> {
+  if (!options.env && !options.refresh && cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.result
+  const lookup = {
+    env: options.env ?? (options.refresh ? refreshAgentEnvironment() : undefined),
+    platform: options.platform,
+  }
   // One candidate that cannot be probed must not hide the others.
-  const result = await Promise.all(
-    CANDIDATES.map((candidate) => detectOne(candidate).catch(() => ({ ...candidate, installed: false }))),
-  )
-  cache = { at: Date.now(), result }
+  const result = await Promise.all([
+    ...ExternalAgent.catalog.map((agent) =>
+      detectAgent(agent, lookup).catch(
+        (): ExternalAgentStatus => ({
+          id: agent.id,
+          name: agent.name,
+          cli: agent.binaries[0].name,
+          tier: agent.tier,
+          state: "not-installed",
+          installed: false,
+        }),
+      ),
+    ),
+    detectEditor(lookup).catch(
+      (): ExternalAgentStatus => ({ ...VSCODE, tier: "editor", state: "not-installed", installed: false }),
+    ),
+  ])
+  if (!options.env) cache = { at: Date.now(), result }
   return result
+}
+
+export function catalogPlatform(platform: NodeJS.Platform): ExternalAgent.Platform {
+  return platform === "win32" || platform === "darwin" ? platform : "linux"
+}
+
+function requireAgent(id: unknown) {
+  const agent = typeof id === "string" ? ExternalAgent.find(id) : undefined
+  if (!agent) throw new Error("Choose an agent from the list.")
+  return agent
+}
+
+// Live model lists ask the installed CLI (Cursor's needs its sign-in and the
+// network), so each answer is kept for ten minutes and a failure for one, and
+// two pickers opening at once share one spawn. A failure falls back to the
+// catalog's list with the reason, so the picker always has its rows.
+const MODELS_TTL_MS = 10 * 60_000
+const MODELS_FAILURE_TTL_MS = 60_000
+const modelCache = new Map<string, { expires: number; list: Promise<ExternalAgent.ModelList> }>()
+
+export async function listAgentModels(
+  id: unknown,
+  options: { refresh?: boolean; timeoutMs?: number } & AgentLookup = {},
+): Promise<ExternalAgent.ModelList> {
+  const agent = requireAgent(id)
+  const models = agent.models
+  if (models.kind === "none") return { id: agent.id, source: "none", models: [] }
+  if (models.kind === "fixed") return { id: agent.id, source: "catalog", models: models.models }
+  const cached = modelCache.get(agent.id)
+  if (!options.env && !options.refresh && cached && cached.expires > Date.now()) return cached.list
+  const list = (async (): Promise<ExternalAgent.ModelList> => {
+    const fallback = { id: agent.id, source: "catalog" as const, models: models.fallback }
+    const env = options.env ?? agentEnvironment()
+    const found = await findAgentBinary(agent, { env, platform: options.platform })
+    if (!found) return { ...fallback, error: `${agent.name} is not installed.` }
+    const result = await runCli(
+      found.path,
+      [...models.args],
+      options.timeoutMs ?? 15_000,
+      untrustedChildEnvironment(env, { NO_COLOR: "1", FORCE_COLOR: "0" }),
+    )
+    const listed = result.failed ? [] : modelsFromOutput(result.stdout, models.read)
+    if (listed.length) return { id: agent.id, source: "live", models: listed }
+    return { ...fallback, error: `${agent.name} did not list its models, so Vector shows its own list.` }
+  })()
+  if (options.env) return list
+  modelCache.set(agent.id, { expires: Date.now() + MODELS_TTL_MS, list })
+  void list.then(
+    (value) => {
+      if (value.source !== "live") modelCache.set(agent.id, { expires: Date.now() + MODELS_FAILURE_TTL_MS, list })
+    },
+    () => modelCache.delete(agent.id),
+  )
+  return list
+}
+
+const ANSI_PATTERN = /\u001b\[[0-9;?]*[ -/]*[@-~]/g
+// "<id>" or "<id> - <name>", optionally followed by Cursor's "(current, default)".
+const MODEL_LINE_PATTERN =
+  /^\s*(?:[-*•]\s+)?(\S+?)(?:\s+-\s+(.+?))?(?:\s+\((?:current|default)(?:,\s*(?:current|default))*\))?\s*$/
+
+// A model list a CLI printed, as plain rows: JSON (an array, or an object with
+// `models` or `data`) when asked for, otherwise one model per line. Only values
+// externalModelValue would pass on survive, and a bare word needs a digit, dash,
+// dot or slash so a heading such as "Models" is never read as a model.
+export function modelsFromOutput(output: string, read: "lines" | "json-or-lines") {
+  const text = output.replace(ANSI_PATTERN, "")
+  const parsed = read === "json-or-lines" ? modelsFromJson(text) : undefined
+  const rows =
+    parsed ??
+    text.split(/\r?\n/).flatMap((line) => {
+      const match = MODEL_LINE_PATTERN.exec(line)
+      if (!match?.[1]) return []
+      if (!match[2] && !/[\d./-]/.test(match[1])) return []
+      return [{ id: match[1], name: match[2]?.trim() || match[1] }]
+    })
+  const valid = rows.filter((row) => MODEL_VALUE_PATTERN.test(row.id) && !/[.:]$/.test(row.id))
+  return [...new Map(valid.map((row) => [row.id, row])).values()].slice(0, 500)
+}
+
+function modelsFromJson(text: string) {
+  const trimmed = text.trim()
+  if (!trimmed.startsWith("[") && !trimmed.startsWith("{")) return undefined
+  const value = jsonValue(trimmed)
+  const items = Array.isArray(value) ? value : [object(value).models, object(value).data].find(Array.isArray)
+  if (!Array.isArray(items)) return undefined
+  return items.flatMap((item) => {
+    if (typeof item === "string") return [{ id: item, name: item }]
+    const id = textAt(item, ["id", "slug", "model"])
+    return id ? [{ id, name: textAt(item, ["display_name", "displayName", "name"]) ?? id }] : []
+  })
+}
+
+function jsonValue(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
+  }
+}
+
+// Everything the built-in terminal runs goes through one visible shell: sh on
+// macOS and Linux, PowerShell on Windows. When the command ends, the terminal
+// stays open on its exit status until the user presses Enter, so an installer's
+// or a sign-in's last words are never lost. Only PATH is passed: the engine's
+// terminal already starts from a filtered environment, and Vector's login-shell
+// PATH is what makes a just-installed CLI and its Node runtime findable. Windows
+// has no login-shell PATH to add, and a second PATH beside its own Path would
+// make the variable ambiguous, so nothing is passed there.
+export function terminalLaunch(input: {
+  title: string
+  display: string
+  line: string
+  cwd: string
+  env: AgentEnvironment
+  platform: ExternalAgent.Platform
+}): ExternalAgent.TerminalLaunch {
+  const env: Record<string, string> = input.platform !== "win32" && input.env.PATH ? { PATH: input.env.PATH } : {}
+  if (input.platform === "win32") {
+    const script = [
+      input.line,
+      "$code = $LASTEXITCODE",
+      "Write-Host ''",
+      "Read-Host 'Finished. Press Enter to close this terminal' | Out-Null",
+      "exit $code",
+    ].join("\n")
+    return {
+      title: input.title,
+      display: input.display,
+      command: "powershell.exe",
+      args: ["-NoProfile", "-Command", script],
+      cwd: input.cwd,
+      env,
+    }
+  }
+  const script = [
+    input.line,
+    "status=$?",
+    "printf '\\n'",
+    `if [ "$status" -eq 0 ]; then printf '%s' 'Finished. Press Enter to close this terminal.'; else printf 'Exited with code %s. Press Enter to close this terminal.' "$status"; fi`,
+    "read -r _",
+    'exit "$status"',
+  ].join("\n")
+  // The engine's terminal appends -l when it starts sh; after -c's script that only names $0, which the script ignores.
+  return { title: input.title, display: input.display, command: "/bin/sh", args: ["-c", script], cwd: input.cwd, env }
+}
+
+// A resolved binary and its arguments as one shell line, every word quoted, so
+// a path with spaces or a model id reaches the CLI as itself.
+export function commandLine(path: string, args: readonly string[], platform: ExternalAgent.Platform) {
+  if (platform === "win32") return `& ${[path, ...args].map((word) => `'${word.replace(/'/g, "''")}'`).join(" ")}`
+  return [path, ...args].map((word) => `'${word.replace(/'/g, `'\\''`)}'`).join(" ")
+}
+
+// Installs and sign-ins run in an empty folder of Vector's own, never in a
+// repository: an installer may download a script into its working directory,
+// and an agent opened only to sign in has no business reading the user's files.
+async function setupDirectory() {
+  const { app } = await import("electron")
+  const directory = join(app.getPath("userData"), "external-agent-setup")
+  await mkdir(directory, { recursive: true })
+  return directory
+}
+
+// The official install commands for this platform and the agent's own sign-in,
+// each ready for the built-in terminal. Nothing here runs anything: the app
+// shows the command, and only the user's "Run in terminal" starts it.
+export async function agentCommands(
+  id: unknown,
+  options: { directory?: string } & AgentLookup = {},
+): Promise<ExternalAgent.Commands> {
+  const agent = requireAgent(id)
+  const platform = catalogPlatform(options.platform ?? process.platform)
+  const env = options.env ?? agentEnvironment()
+  const cwd = options.directory ?? (await setupDirectory())
+  const found = await findAgentBinary(agent, { env, platform: options.platform })
+  const display = found ? ExternalAgent.signInCommand(agent, found.binary.name) : undefined
+  return {
+    id: agent.id,
+    platform,
+    docsUrl: agent.docsUrl,
+    install: ExternalAgent.installFor(agent, platform).map((option) => ({
+      ...option,
+      launch: terminalLaunch({
+        title: `Install ${agent.name}`,
+        display: option.command,
+        line: option.command,
+        cwd,
+        env,
+        platform,
+      }),
+    })),
+    signIn:
+      found && display
+        ? {
+            display,
+            interactive: agent.signIn.interactive,
+            hint: agent.signIn.hint,
+            launch: terminalLaunch({
+              title: `Sign in to ${agent.name}`,
+              display,
+              line: commandLine(found.path, agent.signIn.args, platform),
+              cwd,
+              env,
+              platform,
+            }),
+          }
+        : undefined,
+  }
+}
+
+export type TerminalAgentInput = { id: string; projectPath: string; model?: string }
+
+// A terminal-tier run: the same isolated checkout a chat run gets, with the
+// agent's own screen opened in it, on the chosen model where it has a flag.
+export async function launchAgentTerminal(
+  input: TerminalAgentInput,
+  options: { prepare?: (projectPath: string) => Promise<PrepareWorkspaceResult> } & AgentLookup = {},
+): Promise<ExternalAgent.TerminalAgentLaunch> {
+  const agent = requireAgent(input?.id)
+  const args = ExternalAgent.interactiveArguments(agent, externalModelValue(input.model))
+  const platform = catalogPlatform(options.platform ?? process.platform)
+  const env = options.env ?? agentEnvironment()
+  const found = await findAgentBinary(agent, { env, platform: options.platform })
+  if (!found) throw new Error(`${agent.name} is not installed, or Vector can't find it.`)
+  const workspace = await (options.prepare ?? prepareWorkspace)(input.projectPath)
+  return {
+    workspace,
+    launch: terminalLaunch({
+      title: agent.name,
+      display: [found.binary.name, ...args].join(" "),
+      line: commandLine(found.path, args, platform),
+      cwd: workspace.path,
+      env,
+      platform,
+    }),
+  }
 }
 
 export type OpenInEditorApp = "cursor" | "vscode"
@@ -470,13 +744,22 @@ function redactAgentOutput(value: string) {
   return value.replace(SECRET_VALUE_PATTERN, "$1[redacted]").replace(BEARER_PATTERN, "$1[redacted]")
 }
 
-// Resume argv is not the fresh argv plus a flag: `codex exec resume` rejects
-// --sandbox and -C outright, so each runtime branches before its fresh form.
-// With promptOnStdin the prompt is left out of argv for the caller to write to
-// stdin: `claude -p` with no prompt argument, and codex's `-` prompt, read it
-// from there. Cursor has no such form, so it always takes the prompt in argv.
-// `model` goes to each CLI's own flag, always before the prompt or session id
-// that ends the argv; without it the CLI runs the model it is set to use.
+// The catalog entry for a runtime Vector runs in its own chat. A terminal-only
+// agent never reaches a headless spawn, whatever the renderer sent.
+export function chatAgent(runtime: string) {
+  const agent = ExternalAgent.find(runtime)
+  if (!agent) throw new Error(`"${runtime.slice(0, 40)}" is not an agent Vector can run.`)
+  if (agent.tier !== "chat" || !agent.headless) throw new Error(`${agent.name} runs in Vector's terminal only.`)
+  return agent
+}
+
+// The headless argv comes from the catalog, where each runtime's resume form is
+// its own template: `codex exec resume` rejects --sandbox and -C outright. With
+// promptOnStdin the prompt is left out of argv for the caller to write to stdin:
+// `claude -p` with no prompt argument, and codex's `-` prompt, read it from
+// there. `model` goes to each CLI's own flag, always before the prompt or
+// session id that ends the argv; without it the CLI runs the model it is set to
+// use. externalModelValue keeps quotes out of the TOML codex resume is given.
 export function runtimeArguments(
   runtime: CodingAgentRuntime,
   cwd: string,
@@ -485,87 +768,13 @@ export function runtimeArguments(
   promptOnStdin = false,
   model?: string,
 ) {
-  const claudePrompt = promptOnStdin ? [] : [prompt]
-  const codexPrompt = promptOnStdin ? "-" : prompt
-  const modelFlag = model ? ["--model", model] : []
-  if (runtime === "claude-code" && resumeSessionId) {
-    // The id must be the immediately-following argv element: --resume takes an
-    // OPTIONAL value, so any gap lets it swallow the prompt and open the
-    // interactive picker instead of running headless.
-    return [
-      "--resume",
-      resumeSessionId,
-      "-p",
-      ...claudePrompt,
-      "--output-format",
-      "stream-json",
-      "--verbose",
-      "--include-partial-messages",
-      "--permission-mode",
-      "acceptEdits",
-      ...modelFlag,
-    ]
-  }
-  if (runtime === "claude-code") {
-    return [
-      "-p",
-      ...claudePrompt,
-      "--output-format",
-      "stream-json",
-      "--verbose",
-      "--include-partial-messages",
-      "--permission-mode",
-      "acceptEdits",
-      ...modelFlag,
-    ]
-  }
-  if (runtime === "codex" && resumeSessionId) {
-    // Options must precede SESSION_ID, and resume takes neither --sandbox nor
-    // -C. The inner quotes are literal TOML for -c; spawn's cwd covers -C. The
-    // model rides the same -c override the sandbox already proves resume
-    // accepts; externalModelValue keeps quotes out of it.
-    return [
-      "exec",
-      "resume",
-      "--json",
-      "--skip-git-repo-check",
-      "-c",
-      'sandbox_mode="workspace-write"',
-      ...(model ? ["-c", `model="${model}"`] : []),
-      resumeSessionId,
-      codexPrompt,
-    ]
-  }
-  if (runtime === "codex") {
-    return [
-      "exec",
-      "--json",
-      "--sandbox",
-      "workspace-write",
-      "--skip-git-repo-check",
-      ...modelFlag,
-      "-C",
-      cwd,
-      codexPrompt,
-    ]
-  }
-  // Cursor's partial mode emits indistinguishable deltas AND aggregate text
-  // envelopes. Complete-block stream-json stays live at tool/retry boundaries
-  // without guessing whether repeated text is a delta or a duplicate aggregate.
-  if (resumeSessionId) {
-    return [
-      "--resume",
-      resumeSessionId,
-      "-p",
-      "--trust",
-      "--force",
-      "--output-format",
-      "stream-json",
-      ...modelFlag,
-      prompt,
-    ]
-  }
-  return ["-p", "--trust", "--force", "--output-format", "stream-json", ...modelFlag, prompt]
+  return ExternalAgent.headlessArguments(chatAgent(runtime), {
+    prompt,
+    cwd,
+    model,
+    session: resumeSessionId,
+    promptOnStdin,
+  })
 }
 
 // What a model value may look like before it reaches a CLI: a name, alias or
@@ -926,7 +1135,8 @@ export function agentOutcome(
   output: string[],
   model?: string,
 ): AgentOutcome {
-  const setup = RUNTIME_SETUP[runtime]
+  const agent = chatAgent(runtime)
+  const setup = { label: agent.name, signIn: ExternalAgent.signInCommand(agent) }
   const reported = output
     .map((line) => {
       const event = parseAgentJson(line)
@@ -1021,19 +1231,22 @@ function trackAgent(child: ChildProcessWithoutNullStreams) {
 }
 
 export async function runExternalCodingAgent(input: RunExternalAgentInput): Promise<ExternalAgentRunResult> {
-  const setup = RUNTIME_SETUP[input.runtime]
+  const agent = chatAgent(input.runtime)
+  const setup = { label: agent.name }
   const env = input.env ?? agentEnvironment()
-  const path = await resolveAgentPath(setup.cli, env)
-  if (!path) {
+  const found = await findAgentBinary(agent, { env })
+  if (!found) {
+    const install = ExternalAgent.installFor(agent, catalogPlatform(process.platform))[0]?.command
     throw new Error(
-      `${setup.label} is not installed, or Vector can't find it. Install it with \`${setup.install}\`, then sign in with \`${setup.signIn}\`.`,
+      `${agent.name} is not installed, or Vector can't find it. ${install ? `Install it with \`${install}\`, then sign` : "Install it, then sign"} in with \`${ExternalAgent.signInCommand(agent)}\`.`,
     )
   }
+  const path = found.path
 
   // cmd.exe ends a command line at the first line feed, even inside quotes, and npm's shim re-reads %* the same way.
   // Through claude.cmd or codex.cmd the prompt, which always spans lines, would arrive cut to its first line and every
-  // flag after it would be lost, so those two read it from stdin there.
-  const promptOnStdin = runsThroughCmd(path) && input.runtime !== "cursor"
+  // flag after it would be lost, so a runtime with a stdin form reads it from there.
+  const promptOnStdin = runsThroughCmd(path) && Boolean(agent.headless?.stdinPrompt)
   const model = externalModelValue(input.model)
   return new Promise((resolve, reject) => {
     const launch = shimmedCommand(

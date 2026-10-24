@@ -137,11 +137,15 @@ import {
   type GitlabCreateRepoInput,
 } from "./gitlab-auth"
 import {
+  agentCommands,
   detectExternalAgents,
+  launchAgentTerminal,
+  listAgentModels,
   openInEditor,
   prepareWorkspace,
   refreshAgentEnvironment,
   type OpenInEditorInput,
+  type TerminalAgentInput,
 } from "./external-agents"
 import {
   createParallelWorkspace,
@@ -582,7 +586,14 @@ export function registerIpcHandlers(deps: Deps) {
   handle("gitlab-repos-list", () => listGitlabRepos())
   handle("gitlab-repos-create", (_event: IpcMainInvokeEvent, input: GitlabCreateRepoInput) => createGitlabRepo(input))
   handle("gitlab-push-oauth", (_event: IpcMainInvokeEvent, input: GitlabOauthPushInput) => pushToGitlab(input))
-  handle("external-agents-detect", () => detectExternalAgents())
+  handle("external-agents-detect", (_event, options?: { refresh?: boolean }) =>
+    detectExternalAgents({ refresh: options?.refresh === true }),
+  )
+  handle("external-agents-models", (_event, id: string, options?: { refresh?: boolean }) =>
+    listAgentModels(id, { refresh: options?.refresh === true }),
+  )
+  handle("external-agents-commands", (_event, id: string) => agentCommands(id))
+  handle("external-agents-launch-terminal", (_event, input: TerminalAgentInput) => launchAgentTerminal(input))
   handle("external-agents-open-editor", (_event: IpcMainInvokeEvent, input: OpenInEditorInput) => openInEditor(input))
   handle("external-agents-prepare-workspace", (_event: IpcMainInvokeEvent, projectPath: string) =>
     prepareWorkspace(projectPath),

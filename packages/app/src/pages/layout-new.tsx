@@ -68,6 +68,7 @@ import { agentCostLabel, type TeamConversation } from "@/features/agents/agent-d
 import { ExternalRuntimeSetupPanel } from "@/features/agents/external-runtime-setup"
 import {
   externalRuntimeReady,
+  EXTERNAL_RUNTIME_IDS,
   externalRuntimeSetup,
   isExternalRuntime,
   type ExternalRuntime,
@@ -1444,16 +1445,17 @@ export default function NewLayout(props: ParentProps) {
     parallelRuntime() === "vector" ? parallelModelOptions().length > 0 : externalReady(parallelRuntime())
 
   const readyComparisonRuntimes = () =>
-    (["vector", "claude-code", "codex", "cursor"] as ParallelAgentRuntime[]).filter((runtime) =>
+    (["vector", ...EXTERNAL_RUNTIME_IDS] as ParallelAgentRuntime[]).filter((runtime) =>
       runtime === "vector" ? parallelModelOptions().length > 0 : externalReady(runtime),
     )
 
   // Runtimes the picker keeps visible but cannot launch, with the reason. A
   // runtime that is simply hidden is why this feature read as broken.
   const blockedRuntimes = () =>
-    (["claude-code", "codex", "cursor"] as ExternalRuntime[])
-      .filter((runtime) => !externalReady(runtime))
-      .map((runtime) => ({ runtime, setup: externalRuntimeSetup(runtime) }))
+    EXTERNAL_RUNTIME_IDS.filter((runtime) => !externalReady(runtime)).map((runtime) => ({
+      runtime,
+      setup: externalRuntimeSetup(runtime),
+    }))
 
   // Who the collaboration graph is drawn over: teammates already in the picked
   // team, plus the agents this launch is about to add. Names come from the
@@ -4365,7 +4367,7 @@ export default function NewLayout(props: ParentProps) {
                     </span>
                   </div>
                   <div class="grid grid-cols-4 gap-1.5">
-                    <For each={["vector", "claude-code", "codex", "cursor"] as ParallelAgentRuntime[]}>
+                    <For each={["vector", ...EXTERNAL_RUNTIME_IDS] as ParallelAgentRuntime[]}>
                       {(runtime) => {
                         const status = () => externalRuntimeStatus(runtime)
                         const ready = () =>

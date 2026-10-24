@@ -1,9 +1,13 @@
-// Setup details for the third-party coding agents Vector can run as a workspace
-// engine. Vector shells out to the user's own CLI, so these are the exact
-// commands that make each runtime available — a picker that only says "Setup
-// needed" leaves the user with nowhere to go.
+import { ExternalAgent } from "@vectordevai/schema/external-agent"
 
-export type ExternalRuntime = "claude-code" | "codex" | "cursor"
+// Setup details for the third-party coding agents Vector can run as a workspace
+// engine, derived from the one catalog in @vectordevai/schema/external-agent that
+// desktop detection reads too. Vector shells out to the user's own CLI, so these
+// are the commands that make each runtime available — a picker that only says
+// "Setup needed" leaves the user with nowhere to go.
+
+/** A runtime Vector can run in its own chat view: the catalog's "chat" tier. */
+export type ExternalRuntime = ExternalAgent.ChatId
 
 export type ExternalRuntimeStatus = {
   installed: boolean
@@ -23,38 +27,34 @@ export type ExternalRuntimeSetup = {
   docsUrl: string
 }
 
-export const EXTERNAL_RUNTIMES: Record<ExternalRuntime, ExternalRuntimeSetup> = {
-  "claude-code": {
-    id: "claude-code",
-    label: "Claude Code",
-    cli: "claude",
-    installCommand: "npm install -g @anthropic-ai/claude-code",
-    signInCommand: "claude",
-    note: "Runs Claude Code in the workspace using your existing Claude subscription or API key.",
-    docsUrl: "https://docs.claude.com/en/docs/claude-code/overview",
-  },
-  codex: {
-    id: "codex",
-    label: "Codex",
-    cli: "codex",
-    installCommand: "npm install -g @openai/codex",
-    signInCommand: "codex",
-    note: "Runs the Codex CLI in the workspace using your existing ChatGPT or OpenAI account.",
-    docsUrl: "https://developers.openai.com/codex/cli",
-  },
-  cursor: {
-    id: "cursor",
-    label: "Cursor Agent",
-    cli: "cursor-agent",
-    installCommand: "curl https://cursor.com/install -fsS | bash",
-    signInCommand: "cursor-agent login",
-    note: "Runs Cursor's agent in the workspace using your existing Cursor account.",
-    docsUrl: "https://cursor.com/docs/cli/overview",
-  },
+// The platform the app runs on, for picking that platform's official install command.
+export function browserPlatform(agent = globalThis.navigator?.userAgent ?? ""): ExternalAgent.Platform {
+  if (/Windows/i.test(agent)) return "win32"
+  if (/Mac OS X|Macintosh/i.test(agent)) return "darwin"
+  return "linux"
 }
 
+export const EXTERNAL_RUNTIMES = Object.fromEntries(
+  ExternalAgent.chatIds.map((id) => {
+    const agent = ExternalAgent.find(id)!
+    const setup: ExternalRuntimeSetup = {
+      id,
+      label: agent.name,
+      cli: agent.binaries[0]!.name,
+      installCommand: ExternalAgent.installFor(agent, browserPlatform())[0]?.command ?? "",
+      signInCommand: ExternalAgent.signInCommand(agent),
+      note: `Runs your installed ${agent.name} in an isolated copy of the repository. Vector never reads its sign-in.`,
+      docsUrl: agent.docsUrl,
+    }
+    return [id, setup]
+  }),
+) as Record<ExternalRuntime, ExternalRuntimeSetup>
+
+/** The runtimes in the catalog's order, which is the order every picker lists them in. */
+export const EXTERNAL_RUNTIME_IDS: readonly ExternalRuntime[] = ExternalAgent.chatIds
+
 export function isExternalRuntime(value: string): value is ExternalRuntime {
-  return value === "claude-code" || value === "codex" || value === "cursor"
+  return ExternalAgent.isChatId(value)
 }
 
 export function externalRuntimeSetup(runtime: string): ExternalRuntimeSetup | undefined {
