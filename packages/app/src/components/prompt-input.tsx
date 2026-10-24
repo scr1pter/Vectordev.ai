@@ -84,7 +84,7 @@ import { DictationIndicator } from "@/components/dictation-indicator"
 import { ImagePreview } from "@vectordevai/ui/image-preview"
 import type { ReferenceInfo } from "@vectordevai/sdk/v2/client"
 import { modelVariantDescription, modelVariantLabel, visibleModelVariants } from "@/context/model-variant"
-import { modelDisplayName } from "@/utils/provider-brand"
+import { pickerModelName } from "@/utils/provider-brand"
 import { freeModelTrainingLabel } from "@vectordevai/core/free-model-choice"
 import { detectParallelIntent } from "@/features/delegation/delegation"
 import { holdsHandoff } from "@/utils/composer-handoff"
@@ -1930,9 +1930,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     return "Ask anything, / for commands, @ for context..."
   }
 
+  // The picker's own name for the model, so the copy of a free model on the user's own account keeps its "(free)" here
+  // too and never reads as Vector's copy.
   const currentModelName = () => {
     const current = props.controls.model.selection.current()
-    return current ? modelDisplayName(current) : language.t("dialog.model.select.title")
+    return current ? pickerModelName(current) : language.t("dialog.model.select.title")
   }
 
   // The chip's tooltip repeats the picker's "May train on your prompts" label for the selected model.

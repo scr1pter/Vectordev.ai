@@ -24,7 +24,7 @@ function sections(runtime: ExternalRuntime, current?: string, recent: string[] =
     currentKey: key(current ?? RUNTIME_DEFAULT_MODEL),
     recentKeys: recent.map(key),
     now: Date.now(),
-    keepOrder: true,
+    fixed: true,
   }).map((section) => ({ label: section.label, ids: section.items.map((item) => item.id) }))
 }
 
@@ -59,7 +59,7 @@ describe("external runtime models", () => {
       { label: "Codex", ids: EXTERNAL_RUNTIME_MODELS.codex.models.map((model) => model.id) },
     ])
     // With nothing current above it, the default leads the runtime's own section.
-    const listed = buildModelSections({ models: externalRuntimeModels("cursor"), now: Date.now(), keepOrder: true })
+    const listed = buildModelSections({ models: externalRuntimeModels("cursor"), now: Date.now(), fixed: true })
     expect(listed.map((section) => section.label)).toEqual(["Cursor CLI"])
     expect(listed[0].items.map((item) => item.id)).toEqual([
       RUNTIME_DEFAULT_MODEL,
@@ -68,6 +68,8 @@ describe("external runtime models", () => {
   })
 
   test("recently used models lead, and are not repeated in the runtime's section", () => {
+    // Unlike a provider of Vector's, the runtime's list never closes and shows no count, so a repeat would only show
+    // the same row twice.
     const [recent, runtime] = sections("claude-code", "opus", ["opus", "sonnet", RUNTIME_DEFAULT_MODEL])
     expect(recent).toEqual({ label: "Recently used", ids: ["opus", "sonnet", RUNTIME_DEFAULT_MODEL] })
     expect(runtime.label).toBe("Claude Code")
