@@ -2,6 +2,7 @@ import {
   For,
   Match,
   Show,
+  Suspense,
   Switch,
   createEffect,
   createMemo,
@@ -5149,11 +5150,19 @@ export function SessionSidePanel(props: {
                     <Tabs.Content value="sources" class="flex flex-col h-full overflow-hidden contain-strict">
                       <Show when={reviewOpen() && activeTab() === "sources" && params.id}>
                         {(id) => (
-                          <ResearchSourcesTab
-                            sessionID={id()}
-                            request={sourcesRequest()}
-                            onOpenInBrowser={openInBrowser}
-                          />
+                          <Suspense
+                            fallback={
+                              <div role="status" class="p-4 text-13-regular text-text-weak">
+                                Reading sources…
+                              </div>
+                            }
+                          >
+                            <ResearchSourcesTab
+                              sessionID={id()}
+                              request={sourcesRequest()}
+                              onOpenInBrowser={openInBrowser}
+                            />
+                          </Suspense>
                         )}
                       </Show>
                     </Tabs.Content>

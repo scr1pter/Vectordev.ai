@@ -1,4 +1,4 @@
-import { Show, createMemo, createResource, createSignal } from "solid-js"
+import { Show, Suspense, createMemo, createResource, createSignal } from "solid-js"
 import { Dynamic } from "solid-js/web"
 import { Markdown } from "@vectordevai/session-ui/markdown"
 import { ToolRegistry, type ToolComponent, type ToolProps } from "@vectordevai/session-ui/message-part"
@@ -32,7 +32,12 @@ export function registerResearchReportCard() {
   const plain = ToolRegistry.render("research_report")
   ToolRegistry.register({
     name: "research_report",
-    render: (props) => <ResearchReportCard {...props} plain={plain} />,
+    // A pending report must not hide the chat: that can remove its virtual row and restart the same fetch.
+    render: (props) => (
+      <Suspense fallback={plain ? <Dynamic component={plain} {...props} /> : undefined}>
+        <ResearchReportCard {...props} plain={plain} />
+      </Suspense>
+    ),
   })
 }
 

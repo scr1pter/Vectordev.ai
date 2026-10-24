@@ -197,9 +197,10 @@ async function setup(
     guest?: boolean
     path?: string
     research?: boolean
+    detailReady?: Promise<void>
   } = {},
 ) {
-  const sent = { prompts: [] as Record<string, any>[], replies: [] as unknown[], kept: 0 }
+  const sent = { prompts: [] as Record<string, any>[], replies: [] as unknown[], kept: 0, details: 0 }
   await mockVectorServer(page, {
     directory,
     project: { id: projectID, worktree: directory, vcs: "git", name: "Deep research" },
@@ -220,18 +221,20 @@ async function setup(
     /\/memory\/research(?:\?|$)/,
     owner({ runs: [{ run, sources: 1, notes: 1, bytes: 4200 }], bytes: 4200, limit: 1e9, retain: 30 }),
   )
-  await page.route(
-    new RegExp(`/memory/research/${runID}(?:\\?|$)`),
-    owner({
-      run,
-      sources: [source],
-      notes: [note],
-      queries: ["heat pump field trial savings cold climate"],
-      report,
-      bytes: 4200,
-      guest: false,
-    }),
-  )
+  const detail = owner({
+    run,
+    sources: [source],
+    notes: [note],
+    queries: ["heat pump field trial savings cold climate"],
+    report,
+    bytes: 4200,
+    guest: false,
+  })
+  await page.route(new RegExp(`/memory/research/${runID}(?:\\?|$)`), async (route) => {
+    sent.details += 1
+    await input.detailReady
+    return detail(route)
+  })
   await page.route(
     new RegExp(`/memory/research/${runID}/sources/S1(?:\\?|$)`),
     owner({
@@ -474,6 +477,40 @@ test("a plan card that searches nothing says why, with the engine's reason alone
   await planCard.getByRole("button", { name: "Why", exact: true }).click()
   await expect(planCard).toContainText(reason)
   await expect(planCard).not.toContainText("open this repository there to search")
+})
+
+test("a pending research report keeps the session visible without repeatedly fetching it", async ({ page }) => {
+  const ready = Promise.withResolvers<void>()
+  try {
+    const sent = await setup(page, { messages: [user, assistant(finished)], detailReady: ready.promise })
+    await expect.poll(() => sent.details).toBe(1)
+    await expect(page.locator('[data-component="session-composer"]')).toBeVisible()
+    await expect(page.getByRole("button", { name: /^Research report / })).toBeVisible()
+    ready.resolve()
+    await expect(page.locator('[data-component="research-report"]')).toBeVisible()
+    expect(sent.details).toBe(1)
+  } finally {
+    ready.resolve()
+  }
+})
+
+test("a pending Sources pane keeps the session visible", async ({ page }) => {
+  const ready = Promise.withResolvers<void>()
+  try {
+    const sent = await setup(page, { messages: [user, assistant(finished.slice(0, -1))], detailReady: ready.promise })
+    await page.evaluate((detail) => window.dispatchEvent(new CustomEvent("vector:open-research-sources", { detail })), {
+      sessionID,
+      runID,
+    })
+    await expect(page.getByRole("status").filter({ hasText: "Reading sources…" })).toBeVisible()
+    await expect(page.locator('[data-component="session-composer"]')).toBeVisible()
+    await expect.poll(() => sent.details).toBe(1)
+    ready.resolve()
+    await expect(page.locator('[data-component="research-sources"]')).toContainText("1 search so far")
+    expect(sent.details).toBe(1)
+  } finally {
+    ready.resolve()
+  }
 })
 
 test("the report card cites with chips that show their quote and open the source at that passage", async ({ page }) => {
