@@ -619,7 +619,7 @@ describe("usage summary", () => {
     })
   }
 
-  test("shows the owner the summary, uncached", async () => {
+  test("shows the owner everyone's summary but their own use, uncached", async () => {
     const storage = backend(person(OWNER))
     const result = await invoke((request, response) => handleUsageSummary(request, response, storage.fetcher), {
       method: "GET",
@@ -635,7 +635,7 @@ describe("usage summary", () => {
     expect(storage.calls[1]).toMatchObject({
       method: "POST",
       headers: { apikey: "fixture-service-role", authorization: "Bearer fixture-service-role" },
-      body: { request: {} },
+      body: { request: { excludeEmails: [OWNER] } },
     })
   })
 
@@ -792,7 +792,7 @@ describe("usage summary", () => {
     expect(result.body).toEqual({ shared: { expiresAt: "2026-10-24T09:00:00Z" }, summary: shareableSummary(summary) })
     expect(storage.calls.map((call) => [call.url, call.body])).toEqual([
       [`${SUPABASE}/rest/v1/rpc/vector_usage_share_open`, { request: { tokenHash: hash } }],
-      [`${SUPABASE}/rest/v1/rpc/vector_usage_summary`, { request: {} }],
+      [`${SUPABASE}/rest/v1/rpc/vector_usage_summary`, { request: { excludeEmails: [OWNER] } }],
     ])
     expect(JSON.stringify(storage.calls)).not.toContain(TOKEN)
   })
