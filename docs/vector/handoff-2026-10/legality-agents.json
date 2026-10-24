@@ -1,0 +1,775 @@
+[
+ {
+  "agent": "Kilo Code CLI (kilo)",
+  "vendor": "Kilo (Kilo Code Inc., now part of Anaconda, Inc.)",
+  "verdict": "allowed-with-conditions",
+  "label": "research:open-source",
+  "conditions": [
+   "Show the Kilo logo only as Kilo's own, unmodified file taken from Kilo's open-source repository, always with the Kilo name beside it. Use it only to show compatibility, never in Vector's own branding, and never with wording that suggests an official Kilo product, a partnership or an endorsement. In marketing, use wording like 'Works with Kilo'.",
+   "Do not put 'Kilo' in any Vector product or feature name. If the name has to appear, use the '[Your Product Name] for Kilo' form the ecosystem page asks for.",
+   "Treat the ecosystem page's maintenance expectations as binding while the Kilo name or logo is shown. Check compatibility with current Kilo versions at least monthly, say which Kilo versions are supported, answer critical bug and security reports, and remove the name or logo if Kilo asks or if the integration stops working.",
+   "Install only through Kilo's own channels (npm @kilocode/cli, kilo.ai/cli/install, the Kilo-Org Homebrew tap), started by the user. Do not bundle or redistribute Kilo binaries without a separate review: the Terms ban copying, redistribution and 'service bureau' use unless the licence allows it.",
+   "Do not interfere with or get around any Kilo feature or access control (Terms 5(C)(viii)). For example, never add --auto or relax Kilo's permission or approval settings unless the user explicitly chooses it, and never get around Kilo's credits, usage limits or org routing.",
+   "Never share, pool or route one user's Kilo account, plan or credits to anyone else. Individual plans belong to a single natural person, org seats are named and cannot be shared, and each person may hold only one account (Terms 3(C), 4(I)).",
+   "Keep the status and model probes ('kilo auth list' credential count, 'kilo models') local, small and tied to a user action. Do not repeatedly query or scrape Kilo's services, and never read Kilo's credential stores.",
+   "Tell users that Kilo's own Terms (with Anaconda, Inc.) apply when they use Kilo, including telemetry that is on by default and Kilo's broad, perpetual licence to Customer Data sent to its Services.",
+   "If Kilo is ever moved to the chat tier, use only Kilo's documented headless flags (kilo run --format json, -s, -m) and keep Kilo's permission behaviour intact."
+  ],
+  "summary": "This is a careful reading of the terms, not legal advice. The CLI is MIT-licensed. Kilo's Terms say an open-source licence takes precedence over them where the two conflict, and they expressly let you use Kilo's software to make the Services available to end users. Nothing in the 30 Sept 2026 Terms bans running the user's own installed CLI from another app, under the user's own account. Kilo's ecosystem branding page goes further than most vendors: it allows the logos from Kilo's open-source repositories to be used to show compatibility, as long as the use does not suggest an official Kilo product. Vector's Kilo logo has the same artwork as the repository's kilo-logo.svg (identical paths and colours, only minified). The remaining risks are small: the broad 'automatic device' and 'circumvent features' clauses, the per-person plan rule, and the fact that Anaconda now owns Kilo and could change the brand rules."
+ },
+ {
+  "agent": "Cline CLI (cline)",
+  "vendor": "Cline Bot Inc.",
+  "verdict": "unclear",
+  "label": "research:open-source",
+  "conditions": [
+   "Do not show Cline's logo, bot icon, wordmark or other brand assets. The brand page grants third parties no permission, ToS 4.2 grants no licence to logos, and Apache-2.0 section 6 excludes trademarks. Keep the neutral 'CL' letters unless Cline gives written permission.",
+   "Use the name 'Cline' only to identify the agent factually. Avoid any wording or layout that could imply a partnership, endorsement or sponsorship ('official', 'partner', 'powered by Cline'), in line with the last restriction in ToS 2.2, and keep the footnote saying the names belong to their owners.",
+   "Do not use anything from Cline sessions (Cline's UI text, prompts, event streams, metadata) to train or develop Vector's models, the Vector brain or other agents. ToS 2.2 bans using content available via the Service for ML or AI training or development. The safest course is to exclude Cline runs from any learning or training pipeline.",
+   "Do not include Cline in Vector's published benchmarks or competitive comparisons without Cline's consent; ToS 2.2 bans benchmarking and competitive analysis.",
+   "Keep Cline in the terminal tier, running its own unaltered UI. Before re-rendering Cline's --json output in Vector's chat view (chat tier), get written confirmation from Cline (support@cline.bot or notice@cline.bot), because 'display the Service in competition with us' is ambiguous.",
+   "Keep every run started by the user, on the user's own install and account. Keep passing --auto-approve false explicitly. Never get around ClinePass usage windows or other limits, never buy, sell or transfer API keys, and never share or route one user's account to another person.",
+   "Install only through Cline's official npm package (npm i -g cline) and do not bundle or redistribute it.",
+   "Tell users that Cline's own Terms and telemetry (on by default) apply to their use of Cline."
+  ],
+  "summary": "This is a careful reading of the terms, not legal advice. The CLI is Apache-2.0, and Cline's docs actively invite running it inside other tools: ACP clients such as Zed, JetBrains, Neovim and Emacs, and ClinePass models 'from your own scripts, apps, or automation'. That supports what Vector does, which is launch the user's own installed CLI, in its own terminal, under the user's own account. However, the Terms (last modified 25 Sept 2025) ban users from using the Service 'in competition with us', from enabling a third party to do so, and from implying endorsement or affiliation without written consent. Vector is itself a paid AI coding product, so these clauses can plausibly be read against hosting Cline inside it. The brand page offers assets but gives third parties no permission, so the neutral 'CL' badge is correct. Running Cline in the terminal tier is probably low risk, but the documents do not settle it; written confirmation from Cline would."
+ },
+ {
+  "agent": "goose",
+  "vendor": "Agentic AI Foundation (goose is a Series of LF Projects, LLC; originally Block, Inc.)",
+  "verdict": "allowed-with-conditions",
+  "label": "research:open-source",
+  "conditions": [
+   "Do not use the goose logo anywhere (app, website, marketing) without written permission from LF Projects (trademarks@lfprojects.org). Keep the neutral badge.",
+   "Use the name 'goose' only for true factual statements, such as listing the agent or saying Vector works with it. Never put it in a Vector product or feature name, domain or logo; never display it more prominently than Vector's own name; and never imply endorsement by LF Projects, AAIF or Block.",
+   "Add a specific trademark notice, not only the generic footnote, for example: 'goose is a trademark of LF Projects, LLC.' Place it in the launcher fine print and on any marketing page. On a marketing page's first mention, write goose\u2122.",
+   "Phrase compatibility claims in the forms the policy endorses ('Vector, compatible with goose\u2122' or 'for use with goose\u2122'), never 'goose by Vector' or 'goose \u2013 Vector', and keep them accurate.",
+   "Do not alter, abbreviate or display the mark in parts. The 'GO' two-letter badge could be read strictly as an abbreviation; consider a generic agent icon instead, or keep the badge clearly neutral and always beside the full name.",
+   "When naming the Agentic AI Foundation as the steward, follow AAIF's brand rules: do not use the AAIF logo without checking with AAIF, do not imply sponsorship, and credit the trademark owner.",
+   "Install only from the official goose channels (the GitHub releases script, block-goose-cli on Homebrew, the official PowerShell script) and do not bundle goose. If Vector ever redistributes it, keep the Apache-2.0 licence and copyright notices and mark any changes.",
+   "Tell users that the terms of whichever model provider they configure in goose apply, especially subscription-based providers (ChatGPT Codex, Claude ACP, Cursor Agent, GitHub Copilot). Those are governed by the other vendors' terms."
+  ],
+  "summary": "This is a careful reading of the terms, not legal advice. goose is Apache-2.0 software with no account or service terms of its own, so running the user's own installed goose CLI in Vector's terminal raises no licence problem. The open question is trademarks. The governance file says goose is a Series of LF Projects, LLC and that LF Projects' policies govern its trademarks; 'Goose' is listed among LF Projects' marks. That policy allows fair use of word marks for true factual statements, bans implying endorsement, asks for a trademark notice, and requires written permission to use a logo on websites or in commercial or marketing materials. Vector's name-plus-letters listing with no logo fits these rules. A specific trademark notice and careful marketing wording would bring it fully in line."
+ },
+ {
+  "agent": "Cursor Agent CLI (cursor-agent / agent)",
+  "vendor": "Anysphere, Inc. (Cursor)",
+  "verdict": "allowed-with-conditions",
+  "label": "research:cursor-github",
+  "conditions": [
+   "Start a Cursor run only when the signed-in user clicks for their own task. No schedules, no background fan-out, no automatic retry loops, no runs set off by other people. Never try to get around Cursor's rate limits or usage metering (AUP).",
+   "Run only the user's own unmodified CLI, using its documented commands and flags (login, status, models, -p, --output-format stream-json, --model, --resume, --force, --trust). Never call Cursor's backend directly, never reverse engineer or scrape it, and never pull tokens out of the CLI's local store (ToS 1.5(i), (vi), (viii); AUP).",
+   "Never read, copy, store, proxy or pool Cursor credentials or API keys. Sign-in stays with `agent login` (browser flow) or the user's own CURSOR_API_KEY.",
+   "Never charge for, bundle or resell Cursor access. Codium credits must not be sold or shown as paying for Cursor usage (ToS 1.5(iii); AUP bars reselling; the pricing page says Cursor authorises no resellers).",
+   "Stop invited guests and other people from prompting or watching-and-driving a Cursor run signed in to the owner's account. The AUP makes the account holder answerable for anyone they let use it, and the README says guests 'can still use your terminal and agents'.",
+   "In the chat view, label every Cursor Agent message as coming from Cursor. Never present Cursor's output as Vector's or as Vector's models' (the AUP bans services that appear to be yours when they are in fact Anysphere's).",
+   "Never use Cursor transcripts, Suggestions or session data seen in Vector to train, fine-tune, distill or evaluate Vector's own models (Velocity, Codium), and never build datasets from them (ToS 1.5(v); AUP bars harvesting Suggestions and competing models/AI services).",
+   "If Vector publishes benchmarks that include Cursor, publish everything needed to replicate them (ToS 1.5(vii)).",
+   "Keep the visible notice that Vector runs Cursor with --force, and keep runs inside the isolated worktree. --force is Cursor's auto-execution mode, and ToS 1.7 puts all of its risk on the user, so the user has to know it is on.",
+   "Logo: use the cube only as downloaded from cursor.com/brand, unaltered, beside the name, smaller than Vector's own branding, with the 'names and logos belong to their owners' footnote, and with no hint of partnership or endorsement. Call the company 'Cursor', never 'Cursor AI' or 'Cursor Code'. Take the logo down if Anysphere asks.",
+   "Before the commercial launch, ask Cursor (hi@cursor.com) in writing whether the chat-tier headless integration is fine under the AUP's automated-access bullet. Keep the terminal tier, where the person types into the interactive CLI, as the fallback."
+  ],
+  "summary": "Cursor's terms bind the user, not Vector. Vector's own risk is mainly helping a user breach them, plus trademark use. The Terms of Service (updated 3 Sep 2026) give the user a limited right to use the Service, and the Service includes Anysphere's 'related software'. Nothing in the Terms forbids third-party front-ends. Cursor's own docs point print mode at scripts and automation, and say its ACP mode is 'intended for building custom clients and integrations'. That is close to what Vector's chat tier does. The real problem is the Acceptable Use Policy (updated 11 Aug 2026): it lists 'Accessing the Service through automated or non-human means, whether through a bot, script, or otherwise' with no exception. Read literally, that covers Vector starting `agent -p` from its own code, and it would also cover the CI use Cursor's own docs recommend. The bullet sits under 'Not complying with laws or regulations', which suggests a narrower aim, but the text is ambiguous and Cursor could enforce it. For the logo, cursor.com/brand offers the assets for download but shows no licence terms, so showing the unmodified cube is ordinary use of a public brand kit to name the product, not a written permission."
+ },
+ {
+  "agent": "GitHub Copilot CLI (copilot)",
+  "vendor": "GitHub, Inc. (Microsoft)",
+  "verdict": "allowed-with-conditions",
+  "label": "research:cursor-github",
+  "conditions": [
+   "Launch only the user's own installed, unmodified copilot binary. Never call Copilot's model endpoints directly, proxy them, or copy their API. Unofficial reverse-engineered Copilot proxies are what draw abuse warnings.",
+   "Leave sign-in to the CLI's own /login, or to tokens the user sets in their own environment. Never read, store, forward or pool GitHub OAuth tokens or COPILOT_GITHUB_TOKEN/GH_TOKEN/GITHUB_TOKEN, and never share tokens to raise rate limits (ToS Section H, which covers use 'through a third party product').",
+   "One person per login: invited guests and teammates must not be able to type into, start, or resume a Copilot CLI session signed in to the owner's GitHub account (ToS B.3). The README says guests 'can still use your terminal and agents', so this needs an explicit block or check.",
+   "Never charge for, bundle or resell Copilot access, and never present Codium credits as covering Copilot usage. Without GitHub's written permission the AUP bans reselling or exploiting access (AUP 6).",
+   "Runs start only from the user's own action. No fan-out, schedules or automatic retry loops that could count as 'excessive automated bulk activity' (AUP 4). Make clear that each prompt spends the user's own Copilot AI credits.",
+   "Respect organisation and enterprise policy. If an admin has disabled Copilot CLI or certain models, never work around it, for example by switching accounts or tokens. Keep the existing organisation note.",
+   "If Copilot moves to the chat tier, use only documented flags (-p, --output-format json, --model, --allow-tool, --resume). Grant the narrowest tools, as GitHub recommends; the schema's write plus shell(git:*) fits. Keep the worktree isolation. If ACP is used, remember it is a public preview covered by the Beta Previews terms (ToS K): no warranty, may change.",
+   "Naming and branding: call it 'GitHub Copilot CLI' in plain text with the neutral CP badge. Don't use the Invertocat, any Copilot icon, or GitHub's look and feel without written permission (ToS G.1\u2013G.2; brand page; licence 3 allows marks only to identify the Software). Make no 'partnered with' or 'official' claims.",
+   "If Vector ever bundles the CLI instead of showing the install command, meet every condition of licence section 2. Ship it unmodified, inside an app with material functionality beyond it, never on its own, with the licence and notices included, and with Vector licensed separately.",
+   "Install commands and links must stay the official ones from GitHub's install page (npm @github/copilot, brew --cask copilot-cli, gh.io/copilot-install, winget GitHub.Copilot). They currently match."
+  ],
+  "summary": "GitHub expects the CLI to be run by other software. The Copilot CLI licence (last changed 9 Sep 2026) grants a licence to install and run the CLI, and even to redistribute unmodified copies inside another application. GitHub's docs describe programmatic `-p` use for scripts, CI/CD and automation. They also say ACP lets people use Copilot CLI in third-party tools, and the generally available Copilot SDK invites embedding it in apps using the user's stored CLI login. Vector's current terminal-tier use (the user's own interactive CLI in a terminal, signed in with /login) is the least contentious way to do this. The limits come from the GitHub Terms of Service (effective 27 Apr 2026), which say a login may be used by only one person and that API rules apply even through third-party products. The Acceptable Use Policies ban reselling or exploiting access without written permission and ban excessive automated bulk activity. GitHub's logos need written permission. Individual Copilot use is governed by ToS Section J; Business and Enterprise use by the Generative AI Services Terms (March 2026) or Microsoft's Product Terms. Organisations must switch the CLI on."
+ },
+ {
+  "agent": "Codex CLI, chat tier: Vector runs `codex exec --json` (with --model and `exec resume`) against the user's own Codex CLI, which the user signed in with their ChatGPT plan",
+  "vendor": "OpenAI",
+  "verdict": "risky",
+  "label": "research:openai",
+  "conditions": [
+   "Before launching this commercially with ChatGPT sign-in, get written confirmation from OpenAI, through the Sign in with ChatGPT interest form (openai.com/form/sign-in-with-chatgpt-interest/) or OpenAI partnerships. Until then, consider making API-key sign-in the default for the chat tier, or labelling ChatGPT-plan use as unsupported by OpenAI.",
+   "Never put Codex behind a paywall: running the user's Codex must not require a Codium plan or any paid Vector upgrade. This mirrors the no-charge rule in OpenAI's Sign in with ChatGPT Terms.",
+   "Run Codex only on the user's own machine and only when that user starts it. Never run a ChatGPT-signed-in Codex in Vector Cloud, on hosted or remote runners, or on behalf of another person. Multiplayer, Follow and invite guests must never be able to trigger the host's Codex.",
+   "Never read, copy, sync, upload or log ~/.codex/auth.json or keyring entries. Never inject tokens through the environment, and never point CODEX_HOME at a Vector-managed location.",
+   "Launch the unmodified CLI and leave Codex's own originator and user-agent alone. Do not patch the binary or pretend to be another client.",
+   "Respect plan limits. On a usage-limit error, stop and show OpenAI's message: no automatic retry loops, no account rotation, no help switching between several accounts.",
+   "Keep the sandbox at workspace-write, never danger-full-access. Do not use --ignore-user-config, --ignore-rules or -c overrides that would defeat a workspace admin's requirements, such as forced_login_method or a forced workspace ID.",
+   "No scheduled, background or automatic Codex runs (for example Vectorscope or subagents dispatching to Codex) unless the user has expressly turned that feature on.",
+   "Do not use Codex prompts, outputs, transcripts, trajectories or user ratings of them to train, tune, rank or select data for Vector's own models (Velocity). The Usage Policies effective 20 Nov 2026 forbid this, and the Terms of Use ban using Output to build competing models.",
+   "Do not market this as a partnership with OpenAI or as 'use your ChatGPT plan in Vector' unless OpenAI approves it.",
+   "Keep API-key sign-in available as the path OpenAI documents for programmatic use."
+  ],
+  "summary": "The commands Vector uses are documented by OpenAI. Its docs say codex exec is the way to run Codex from scripts, that it reuses the CLI's saved sign-in, and that --json, --model and resume are supported. The Codex SDK page also invites people to build Codex into their own applications, and no line in the Terms of Use stops a user scripting their own CLI. But OpenAI's current documents treat third-party products that run on a user's ChatGPT plan as needing permission. The app-server docs say Codex's own authentication was never allowed for commercial or hosted services and send such apps to the Sign in with ChatGPT partner waitlist. The plan-usage docs cover only open-source and locally hosted apps, the auth docs point programmatic CLI use at API keys, and OpenAI's Codex lead said on 7 Sep 2026 that only pure open-source clients and partners are approved; commercial CLI wrappers such as Conductor and Kilo Code are now listed as formal partners. Vector is a paid, now closed-source app whose chat view works as a Codex client running on the user's plan, and no OpenAI text says whether launching the unmodified CLI escapes that restriction, so treating it as allowed would be guessing in Vector's favour."
+ },
+ {
+  "agent": "Codex CLI, chat tier signed in with the user's own OpenAI API key (`codex exec --json`)",
+  "vendor": "OpenAI",
+  "verdict": "allowed-with-conditions",
+  "label": "research:openai",
+  "conditions": [
+   "The user enters the key through Codex's own flow (for example `codex login --with-api-key`) or their own environment. Vector never stores, logs, transmits or pastes the key, and never puts it on a command line or in a long-lived environment shared with untrusted code.",
+   "Each user's key is used only for that user's own runs, never pooled, shared or used for other users.",
+   "If Vector ever supplies its own API key or sells model access to users, that is a separate arrangement under the Services Agreement. It could make Vector a model-access intermediary needing OpenAI approval.",
+   "The same rule applies: no Codex outputs used to train, tune or select data for Vector's own models.",
+   "Keep the documented sandbox (workspace-write) and do not bypass workspace admin requirements."
+  ],
+  "summary": "When the user signs Codex in with their own OpenAI API key, running it from codex exec is the programmatic use OpenAI recommends. OpenAI's Services Agreement also expressly lets API customers build the API into applications offered to end users. Usage is billed to the user's API organisation at API rates and is governed by the Services Agreement and Usage Policies, not ChatGPT plan rules. The commercial-app concern from the ChatGPT-plan case therefore largely falls away."
+ },
+ {
+  "agent": "Codex CLI, terminal tier, plus install commands, the `codex login` sign-in step, and the name and badge in the launcher",
+  "vendor": "OpenAI",
+  "verdict": "allowed-with-conditions",
+  "label": "research:openai",
+  "conditions": [
+   "Do not drive the TUI automatically. No injected keystrokes to run it headlessly, and no scraping its screen to feed Vector features. Either would move it into the chat-tier analysis.",
+   "Start it only when the user asks, visibly, on the user's machine.",
+   "Show install commands exactly as OpenAI publishes them, with the source link, and run them only when the user clicks.",
+   "If Vector ever bundles or redistributes the Codex binary, include the Apache-2.0 LICENSE and NOTICE (Copyright 2025 OpenAI) and mark any changes.",
+   "Do not use OpenAI's Blossom logo or Codex artwork without permission. Never say 'partnered with', 'worked with' or 'collaborated with' OpenAI, and never put 'GPT' in Vector product names.",
+   "Probe sign-in only through `codex login status` output; never read auth.json or the keychain."
+  ],
+  "summary": "Running the interactive Codex CLI in Vector's built-in terminal is the user using OpenAI's own client. OpenAI's Help Center says outright that Codex CLI can be run in another IDE's terminal. Showing OpenAI's official install commands, and running `codex login` for the user to finish, keeps authentication inside OpenAI's own flow. Codex CLI is licensed under Apache-2.0, which allows use and redistribution but grants no trademark rights beyond describing where the work comes from. OpenAI's brand guidelines allow factual references but forbid implying a partnership or using its logos without permission, and Vector's neutral 'CX' badge with an ownership footnote fits that."
+ },
+ {
+  "agent": "Vector's own built-in 'Sign in with ChatGPT' (engine provider using the Codex CLI's OAuth client ID). This is separate from the CLI launcher, but it is in the OpenAI group and contradicts the brief.",
+  "vendor": "OpenAI",
+  "verdict": "not-allowed",
+  "label": "research:openai",
+  "conditions": [
+   "Before the commercial launch, turn it off with the existing remote switch (vectordev.ai/policy/providers.json) and remove it in the next release, unless OpenAI issues Vector its own registration through the Sign in with ChatGPT program.",
+   "Until then, offer ChatGPT-plan access only through the user's own installed Codex CLI (subject to the risky verdict above) or through the user's own API key.",
+   "If OpenAI grants a registration, follow the SIWC Terms: Vector's own name, OpenAI's supported flow, tokens stored only locally under the user's control, plan use free of any Vector charge, and no pooling or reselling."
+  ],
+  "summary": "The brief says Vector never offers its own login for the vendor. But main at 183f51119 (23 Oct 2026) sets CHATGPT_SIGN_IN = true in packages/core/src/provider-policy.ts. The engine (packages/engine/src/plugin/openai/codex.ts) uses the Codex CLI's public client ID with originator 'vector' to sign users in at auth.openai.com and call chatgpt.com/backend-api/codex directly. OpenAI's documents reject exactly this for commercial apps. Codex's own authentication was never allowed for commercial or hosted services, third-party plan use must go through Sign in with ChatGPT with the app's own registration (paid apps via the interest form), the SIWC Terms forbid impersonating another application, and OpenAI's Codex lead said non-OSS, non-partner clients are not approved. The repo's own docs/vector/owner-actions/chatgpt.md records that OpenAI has not authorized this and that the owner accepted the risk in writing on 10 Oct 2026. Accepting the risk does not make it permitted."
+ },
+ {
+  "agent": "Claude Code: chat tier (claude -p headless, events shown in Vector's chat view, user's own Pro/Max login)",
+  "vendor": "Anthropic",
+  "verdict": "allowed-with-conditions",
+  "label": "research:anthropic",
+  "conditions": [
+   "Have Vector, the company, accept Anthropic's Commercial Terms (for example by holding a Claude Console organization) and keep a record. The legal page makes this a condition for running Claude Code inside a product.",
+   "Launch only the user's own installed, unmodified claude binary. Never bundle, patch or re-wrap it, never spoof its client identity or headers, and never call Anthropic's endpoints yourself with the user's login.",
+   "Never read, copy, store, log, proxy or inject claude.ai credentials, OAuth tokens (including CLAUDE_CODE_OAUTH_TOKEN or setup-token output) or keychain entries. Keep the guard in /Users/Krishna/.cache/vector-main/packages/desktop/src/main/external-agent-credentials.test.ts.",
+   "Do not remove, disable or restrict any of Claude Code's sign-in methods. The user's ANTHROPIC_API_KEY or cloud-provider variables currently pass through unchanged (/Users/Krishna/.cache/vector-main/packages/core/src/child-environment.ts); keep it that way. Tell users that in -p mode Claude Code always uses an ANTHROPIC_API_KEY found in their environment, so those runs are billed to that key.",
+   "Never pay for, include, meter, resell or market Claude access. Codium credits and Vector plans must not include or unlock Claude Code use, and 'use your Claude subscription in Vector' must not be sold as a paid feature.",
+   "One login serves only its owner's runs on the owner's machine. No guest, teammate, multiplayer or Follow session, Cloud or remote web client, schedule or swarm may trigger a Claude Code run on someone else's subscription.",
+   "Keep runs started by the user. Vector currently re-runs Claude Code automatically for up to 1-2 repair passes after a failed check (parallel-workspaces.ts around line 2112). Make this visible, bounded and possible to switch off. Keep Claude Code out of automatically orchestrated swarms (workers default to Vector's own runtime today) and out of scheduled agents.",
+   "Stop presenting Claude Code as Vector's own agent. The prompt brief in /Users/Krishna/.cache/vector-main/packages/desktop/src/main/parallel-workspaces.ts (lines ~707-710) opens with \"You are Vector's Parallel Workspace engineering agent\" (or 'Vector's ... worker inside an automatically orchestrated engineering swarm'). Send the user's prompt plus only neutral repository context, so the run stays the user's own Claude Code use and does not read as a Vector agent built on the Agent SDK.",
+   "Use only documented flags (-p, --output-format stream-json, --resume, --model, --permission-mode). If Anthropic makes --bare (which ignores subscription logins) the default for -p, as its docs say it will, do not work around it by undocumented means. Use a documented option, or fall back to the terminal tier.",
+   "Keep use within ordinary, individual limits. There is currently no cap on parallel launches (parallel-workspaces.ts line ~266), so consider a sensible limit on concurrent Claude Code runs per user.",
+   "Pass Claude Code's own usage-limit, extra-usage and sign-in messages through to the user unaltered.",
+   "Before marketing Claude subscription support, ask Anthropic for written confirmation. The legal page invites questions about permitted sign-in methods through its sales contact."
+  ],
+  "summary": "This is a careful reading of Anthropic's terms, not legal advice. Anthropic's Claude Code legal page (modified 5 Oct 2026) covers this case directly. A product may run Claude Code if the binary is unmodified, no built-in sign-in method is removed or restricted, the product never pays for, resells or intermediates Claude usage, and each end user signs in with their own credentials. The page also says its credential rules do not stop an end user signing in to the unmodified binary with their own subscription, even where a platform hosts Claude Code. The help centre (7 Oct 2026) adds that claude -p and third-party apps still draw on subscription limits. What Anthropic forbids is something else: offering claude.ai login inside your own app; collecting, storing or intermediating claude.ai credentials or session tokens; routing requests through other people's plans; or misrepresenting the client. As described, Vector does none of these. One conflict remains. The Agent SDK overview (21 Sep 2026) says third-party developers may not offer claude.ai login or rate limits for their products without prior approval, and Anthropic calls claude -p 'the Agent SDK via the CLI'. A Vector chat view driven by claude -p is therefore in a grey zone, and Vector's own prompt framing makes it worse (see conditions). The likelier real-world risks are Anthropic billing this use as extra usage, or a technical change (bare mode becoming the -p default), rather than a clear breach."
+ },
+ {
+  "agent": "Claude Code: terminal tier (interactive claude in Vector's built-in terminal)",
+  "vendor": "Anthropic",
+  "verdict": "allowed",
+  "label": "research:anthropic",
+  "conditions": [
+   "Launch the unmodified binary visibly, exactly as the user would. Do not script keystrokes or inject prompts into the interactive session automatically.",
+   "Do not persist, sync, upload or send to telemetry any terminal output from Claude Code sessions, especially login URLs, codes or account details, beyond what the user's own terminal history would hold.",
+   "Only the local user may type into it: no guest, Follow or remote viewer gets input to a terminal running the host's Claude Code.",
+   "Pass the --model choice only through Claude Code's documented flag."
+  ],
+  "summary": "Running the user's own installed Claude Code interactively in a terminal is the ordinary use Anthropic's plans are designed for, and Vector's built-in terminal is just where it runs. Anthropic documents Pro and Max plans as covering Claude Code in the terminal and in third-party IDEs, including VS Code forks. A secondary source (Zed) says running the official CLI in another app's terminal uses normal subscription limits. Nothing here involves Vector offering login, handling credentials or routing traffic. This is a reading of the terms, not legal advice."
+ },
+ {
+  "agent": "Claude Code: install command and sign-in flow (official install command, claude auth login and claude auth status in Vector's terminal)",
+  "vendor": "Anthropic",
+  "verdict": "allowed-with-conditions",
+  "label": "research:anthropic",
+  "conditions": [
+   "Label the button as running Claude Code's own sign-in (for example 'Sign in to Claude Code: runs claude auth login'). Never 'Sign in with Claude' for Vector, and never link a Claude account to a Vector account.",
+   "Never use or offer claude setup-token, and never capture, display-and-store or forward any OAuth token, login code or callback.",
+   "Treat the output of claude auth status (JSON that can carry account details) as transient: read only the logged-in yes/no, and never store or upload email or organization data.",
+   "Do not mirror, cache, bundle or modify Anthropic's installer or binary. Show only the official commands and URLs on Anthropic domains (claude.ai, code.claude.com), and run them only when the user clicks.",
+   "Do not pre-fill sign-in flags such as --email or --console from Vector's own account data without the user's explicit choice."
+  ],
+  "summary": "Showing Anthropic's own install command with a link to code.claude.com, and running it only when the user clicks, is not redistribution: Vector never ships the binary. Claude Code's licence is proprietary ('All rights reserved', use subject to the Commercial Terms), so redistribution would need permission. Running Claude Code's own claude auth login, with sign-in completing in Anthropic's browser flow and credentials stored by Claude Code in the keychain, fits the legal page's rule that sign-in must complete through Anthropic's own flow. The prohibited case is a third party offering claude.ai login in its own app, or collecting, storing or intermediating the resulting credentials or tokens. Vector's flow stays on the right side of that as long as the UI makes clear the user is signing in to Claude Code, not linking Claude to Vector."
+ },
+ {
+  "agent": "Claude Code: name, badge and model names in Vector's launcher",
+  "vendor": "Anthropic",
+  "verdict": "allowed-with-conditions",
+  "label": "research:anthropic",
+  "conditions": [
+   "Use 'Claude Code' only as plain-text identification of the agent the user runs. Never use it in Vector feature names, plan names, page titles, ads or SEO, or in a way that implies partnership or endorsement.",
+   "Use no Anthropic or Claude logos, spark mark or Claude Code ASCII art, and do not style the chat view to mimic Claude Code's interface.",
+   "Add an explicit line saying Vector is not affiliated with or endorsed by Anthropic, next to the existing footnote in /Users/Krishna/.cache/vector-main/packages/app/src/features/agents/dialog-host-locally.tsx (line ~255).",
+   "Keep model names in the picker accurate and plain text (for example the curated list in /Users/Krishna/.cache/vector-main/packages/schema/src/external-agent.ts), and remove any id that Claude Code no longer accepts."
+  ],
+  "summary": "The legal page lets a product state accurately, in plain text, that it runs Claude Code. It bars using the Claude Code or Anthropic names or logos in your own product, feature or company names or logo, or in any way that suggests Anthropic built, endorses or partners with you. Any other use needs written permission under the Trademark Guidelines (effective 1 Aug 2024), which allow the marks only as Anthropic specifically permits. Vector's plain-text 'Claude Code' label, its neutral 'CC' letter badge (tone #c4ad86, not an Anthropic logo) and the 'names and logos belong to their owners' footnote fit within this. Anthropic's Agent SDK branding rules also require the product to keep its own branding and not look like Claude Code."
+ },
+ {
+  "agent": "Muse Code",
+  "vendor": "Meta (Meta Platforms, Inc. / Meta Platforms Ireland Ltd; dev.meta.ai)",
+  "verdict": "allowed-with-conditions",
+  "label": "research:meta-moonshot",
+  "conditions": [
+   "Launch only the user's own installed, unmodified `muse` binary, installed with Meta's own installer. Never bundle, mirror, patch, wrap or redistribute the binary (Terms \u00a71 and \u00a710.1(xiv)).",
+   "Never read, copy, export or reuse the Muse Code subscription credential, a browser sign-in session or META_API_KEY outside the `muse` process. Never point any other client or model at the subscription credential (\u00a73.2: it may not be used to reach the Services outside the coding harness or to get around plan limits or billing).",
+   "Each run uses only the signed-in user's own account on their own machine. Never route a user's Muse Code access to anyone else, through a shared team setup or a proxy (\u00a73.1 and \u00a710.1(i)).",
+   "Leave Muse Code's own steps and notices in place: workspace trust, sign-in, approvals, sandbox and the Contributor-mode notice shown at first launch. Never auto-answer, hide or strip them (\u00a710.1(iii) and (xii), and the AUP rule against circumventing limits).",
+   "Show Vector's Contributor-mode note before the first run, and say more than it does now: if the code is confidential (private, employer-owned or under contract), turn Contributor mode off in /settings on that computer first. The setting is saved per computer and only applies going forward (\u00a73.3, \u00a76).",
+   "Never inject Vector's own memory of the user, personal data or secrets into Muse Code runs, whether through files written into the worktree, rules, skills or MCP. \u00a76 forbids sending personal or sensitive information to Contributor Services.",
+   "Vector's own team should not run Muse Code on Vector's private repository while Contributor mode is on.",
+   "If Muse Code ever moves to the chat tier through `muse exec --json`, use only documented flags. Never silently pass `--contributor-mode on` or set MUSE_CONTRIBUTOR_MODE: that choice must be the user's. Show the user any notices the CLI emits.",
+   "Never use Muse Code outputs or run logs to train, fine-tune or distil Vector's own models, including Velocity (\u00a710.1(ix)).",
+   "Never publish Muse Code benchmarks to promote Vector without Meta's written authorisation (\u00a710.1(xi)).",
+   "Identify the agent by name in plain text only. Show no Meta or Muse logo until Meta approves it in writing, use no wording that suggests partnership or endorsement, and keep the footnote saying the names belong to their owners. Because of \u00a77, consider asking Meta for written confirmation of the listing.",
+   "Do not put the Muse Code launcher behind Vector's paid plans, and do not market Muse Code access as part of what Vector sells. Do not block or pin the CLI's own updates (\u00a711)."
+  ],
+  "summary": "This is a careful reading of Meta's terms, not legal advice. Meta's own rule about subscription credentials (Model API Terms \u00a73.2, updated 9 Oct 2026, and the Subscriptions page saying \"This credential is for use with Muse Code only\") is met when Vector starts the user's own unmodified `muse` binary and never touches the credential, because the credential then stays inside the coding harness. Meta's own Muse Code SDK docs expect desktop apps and editors to drive the `muse` binary using the user's existing sign-in, and the docs say subscriptions work with headless `muse exec`, so the launch model is within what Meta documents. Three things need care. First, the downloaded CLI is under a personal, object-code-only licence that forbids redistributing or modifying it (\u00a71, \u00a710.1(xiv)). Second, Contributor mode is on by default, so Meta trains on prompts, code and files, and the Terms forbid sending confidential code such as an employer's or a private repository to Contributor Services. Third, \u00a77 says that, in connection with the Services, neither party may use the other's names or marks. That binds the user, and it would bind Vector the company if Vector's team accepts Meta's terms on Vector's behalf. Whether a plain-text 'Muse Code' entry in a launcher counts as such use is unclear. No Muse-specific brand guidelines exist, and Meta's general brand page says all use of the Meta logo needs approval."
+ },
+ {
+  "agent": "Kimi Code CLI",
+  "vendor": "Moonshot AI (NOVASCENT PRIVATE LIMITED, Singapore, for kimi.ai; Beijing Moonshot Technology Co., Ltd for kimi.com)",
+  "verdict": "allowed-with-conditions",
+  "label": "research:meta-moonshot",
+  "conditions": [
+   "Keep Kimi Code in the terminal tier, run interactively by the user, or drive it over ACP only while a human is in a live session. Do not run `kimi -p` on a membership login for background, scheduled, batch, Vectorscope, subagent or CI work (Community Guidelines: personal interactive use only).",
+   "If Kimi Code ever moves to a chat tier, prefer the documented ACP surface over `kimi -p`, which Moonshot describes for scripts and CI. Treat it as a grey area until Moonshot confirms that a user-typed prompt sent through a GUI counts as interactive.",
+   "Never change Kimi Code's client identity. Launch the unmodified CLI, set no User-Agent or identity-related environment variables, and never proxy its traffic through Vector (membership guide; Community Guidelines).",
+   "Never read, copy or store Kimi OAuth tokens or Kimi Code Console API keys. Each run uses only the signed-in user's own account. No shared accounts and no reverse proxies (Terms \u00a71 and \u00a72(i); Community Guidelines).",
+   "Do not sell, bundle or market Kimi Code access as part of Vector's paid plans. Keep the launcher available whatever the user's Vector plan, and never present Vector credits as Kimi usage ('Don't resell Kimi Code's capabilities as a service').",
+   "Use no Kimi logo or other brand assets: the logo licence is editorial, media and non-commercial only. Keep the 'KM' letters and plain-text name, use no wording that implies endorsement, and keep the footnote saying the names belong to their owners.",
+   "Add a data note like the one for Muse Code: under the Terms, Moonshot may train on prompts and code unless the user opts out by emailing Moonshot. Do not inject Vector's own memory of the user or other personal data into Kimi runs.",
+   "Never use Kimi Code outputs to train or improve Vector's own models, including Velocity (international Terms \u00a72(j); PRC Terms \u00a74(7)).",
+   "Show the current official install commands (the code.kimi.com script and `npm install -g @moonshot-ai/kimi-code`) linked to the current getting-started page. Either drop Homebrew or label it as mentioned only in the archived legacy README; the formula is maintained by the Homebrew community.",
+   "Vector's own team should not use a Kimi membership login in automated e2e or CI tests. Use a pay-as-you-go Kimi Platform key, which Moonshot directs product integrations to, or test by hand."
+  ],
+  "summary": "This is a careful reading of Moonshot's terms, not legal advice. The Kimi Code CLI is open source under the MIT licence (Copyright 2026 Moonshot AI). Moonshot says membership benefits work in its own clients and in third-party tools, and its docs list a third-party desktop orchestrator (Paseo) that drives `kimi acp` with the user's existing login. Starting the user's own CLI interactively in a terminal is therefore within what Moonshot describes. The binding limits are in the Kimi Code Community Guidelines. Subscriptions are for personal interactive use only. Members may not use non-interactive automation such as scripted batch runs, resell Kimi Code's capabilities as a service, or spoof the client identity (the membership guide says changing the User-Agent may get benefits suspended). The international Terms (effective 13 Aug 2026) separately forbid bots, scripts and automated workflows without written consent, and they let Moonshot train on content unless the user opts out by email. The Kimi logo is licensed only for editorial, media and non-commercial uses."
+ },
+ {
+  "agent": "Gemini CLI (chat tier headless, plus interactive terminal)",
+  "vendor": "Google",
+  "verdict": "allowed-with-conditions",
+  "label": "research:google",
+  "conditions": [
+   "Launch only the user's own installed, unmodified `gemini` binary. Never read, copy, refresh or reuse anything under ~/.gemini, including oauth_creds.json, and never reuse Gemini CLI's OAuth client ID. Never call the Code Assist backend (cloudcode-pa) yourself. Keep the existing guard test (external-agent-credentials.test.ts) that blocks this.",
+   "No other runtime inside Vector may offer 'Gemini CLI OAuth', 'Google sign-in via Gemini CLI' or 'Antigravity OAuth' as a model provider: not Vector's own engine, not pi, Kilo or Cline, and no plugin in Vector's catalog. Gemini models in Vector's own engine should use API keys only. Google names this case as grounds for suspension.",
+   "Do not help users get around quotas: no automatic retry storms, no rotating several Google accounts, no fan-out built to get around the per-user daily limits. Google's reinstatement form makes users confirm that bypassing system measures or circumventing usage limits is prohibited.",
+   "Keep every run started by the user. Never let another person use one user's Google sign-in or API key: no Vector Cloud relay, no multiplayer or invite guests driving the host's Gemini CLI, no server-side runs for others.",
+   "Do not disguise the client. Do not set GEMINI_CLI_SURFACE, SURFACE or TERM_PROGRAM to an official surface such as vscode or zed. Leave them unset, or set an honest value such as 'vector'.",
+   "Use only documented flags (-p, --output-format stream-json, --resume, -m, --approval-mode). Keep the current behaviour where headless runs deny any action that would still ask, and never turn on --yolo or full auto-approve unless the user chooses it. Gemini API terms say agentic use must not bypass requests for human confirmation.",
+   "Fix the in-app wording to match Google's notice. Google switched off Login with Google for Code Assist for individuals (free), Google AI Pro and Google AI Ultra. 'Work accounts' means a Gemini Code Assist Standard or Enterprise licence, not every Workspace account; no new ones have been sold since 9 Oct 2026, and renewals end on 31 Jan 2027 (annual) and 31 Dec 2027 (monthly). For API keys, Google only promised paid Gemini and Gemini Enterprise Agent Platform keys.",
+   "Branding: refer to it in plain text ('works with Gemini CLI'), keep the neutral GE badge, and add no Gemini logo without Google-approved artwork. Never suggest a partnership or endorsement. Keep the footnote that names and logos belong to their owners.",
+   "If Vector ever bundles or redistributes Gemini CLI instead of showing Google's install command, keep the Apache-2.0 LICENSE and NOTICE files. Today's 'show the vendor command and run it in the visible terminal on click' approach avoids redistribution.",
+   "Users who sign in with an API key are bound by the Gemini API Additional Terms: 18 or older, for professional or business use, and only Paid Services in the EEA, Switzerland and the UK. Do not market the Gemini launcher to under-18s, for example through the student tier."
+  ],
+  "summary": "Gemini CLI is Apache-2.0 software, so the licence lets anyone run it, including from a commercial app. Google's own docs present headless mode as a way to build tools (\"AI wrapper\" scripts). They also describe ACP mode as \"for IDE and other developer tool integrations\", and Google lists Gemini CLI in the public ACP agent registry used by Zed and JetBrains. Google's ban warning is aimed at third-party software that reaches the services behind Gemini CLI directly by harvesting or piggybacking on Gemini CLI's OAuth sign-in. On 27 Feb 2026 Google narrowed the FAQ from \"to access Gemini CLI\" to exactly that OAuth wording, which supports the reading that launching the user's own unmodified CLI, which signs in by itself, is outside the ban. Google has never said in writing that commercial launchers are fine, and a maintainer did not answer a direct question about ACP wrappers. Since 18 June 2026, Google sign-in in Gemini CLI works only with a Gemini Code Assist Standard or Enterprise licence (none sold since 9 Oct 2026) or with API keys. This is a careful reading of the terms, not legal advice."
+ },
+ {
+  "agent": "Antigravity CLI (agy), terminal tier: interactive in Vector's built-in terminal",
+  "vendor": "Google",
+  "verdict": "unclear",
+  "label": "research:google",
+  "conditions": [
+   "Run agy only as a plain interactive process in the visible terminal, started by the user. Do not type into it on the user's behalf, scrape its screen into Vector's chat view, or send it automated prompts. Each of these moves toward the 'in connection with products not provided by us' reading.",
+   "Never read, migrate, copy or use agy's keyring tokens or its files under ~/.gemini/antigravity-cli. Never offer 'Antigravity OAuth' to any other agent or plugin in Vector.",
+   "Do not patch, wrap, repackage or redistribute the agy binary; it is proprietary and nothing grants redistribution. Only show Google's install script and run it when the user clicks, as now.",
+   "Do not let multiplayer, Follow or invite guests type into, or watch live, a terminal running another user's agy. That would expose one person's Antigravity account and quota to others.",
+   "No quota workarounds: no account rotation and no scripted re-runs to get around Antigravity's 5-hour or weekly limits.",
+   "Keep the neutral AG badge and plain-text name, and no Antigravity logo without Google approval. Never suggest a partnership; keep the footnote.",
+   "Tell users what Google requires: Antigravity is 18+ and only in listed countries, personal accounts are under Google's consumer terms, and Workspace or Gemini Enterprise users are under their admin's terms instead.",
+   "Before marketing Antigravity support prominently, ask Google for written confirmation via the Antigravity forum or antigravity-support@google.com, and keep the answer on file."
+  ],
+  "summary": "Antigravity CLI is proprietary, with no open-source licence. The ACP registry entry for Google's Antigravity agent lists 'proprietary' and points to the terms, so the only permission comes from the Google Antigravity Additional Terms plus the Google Terms of Service. Those terms count \"using the Service in connection with products not provided by us\" as abuse, and say using third-party software to access the Service (e.g. OpenClaw with Antigravity OAuth) breaches the Agreement and may get Antigravity and/or Gemini CLI accounts suspended. Read literally, the first sentence would cover running agy in any non-Google terminal, and Google itself puts Antigravity inside Zed, JetBrains, Visual Studio and Xcode, though through its own extensions. So it probably targets harnesses that use Antigravity credentials or quotas directly, as Google's 27 Feb 2026 maintainer post says. Vector running the unmodified agy in a visible terminal, signing in itself, is the case closest to the user opening a terminal, so practical risk looks low. But the text has no carve-out, and Google has not answered a public question about exactly this (July to October 2026)."
+ },
+ {
+  "agent": "Antigravity CLI (agy) driven headless (agy -p --output-format stream-json) into Vector's chat view (not shipped today)",
+  "vendor": "Google",
+  "verdict": "risky",
+  "label": "research:google",
+  "conditions": [
+   "Do not ship headless agy for personal Google accounts until Google confirms in writing that it is allowed.",
+   "If it is ever added, limit it to Gemini Enterprise (admin terms) or API-key sign-in and say so in the UI. Alternatively, integrate through Google's own published Antigravity ACP server or the Antigravity SDK with the user's API key.",
+   "All conditions for interactive agy still apply: no token access, no binary changes or redistribution, no shared sessions, no quota workarounds, neutral branding."
+  ],
+  "summary": "Google documents agy's headless mode for cases where 'you need the agent's output in a program', with stream-json, resume and stdin streaming. So the CLI is technically meant to be driven by programs, for example in CI. But a commercial third-party app that takes over the conversation and shows Antigravity's output in its own chat UI, on a personal Free, Pro or Ultra subscription, fits the terms' 'in connection with products not provided by us' language far more naturally than a plain terminal does. Google's stated route for third-party and programmatic use is API keys or Enterprise: the Gemini CLI FAQ recommends Vertex AI or AI Studio keys, and the Antigravity SDK quickstart uses GEMINI_API_KEY. The public question about this exact pattern (agy --print from a third-party developer tool) has no Google answer. Vector currently does not run agy headless, which is the safer position."
+ },
+ {
+  "agent": "Rule across all agents: Google sign-in (Gemini CLI or Antigravity OAuth) used by any non-Google tool",
+  "vendor": "Google",
+  "verdict": "not-allowed",
+  "label": "research:google",
+  "conditions": [
+   "Never add, bundle or list a provider or plugin that uses Gemini CLI's or Antigravity's OAuth client, tokens or quotas. This covers Vector's own engine, pi, Kilo, Cline, OpenCode-derived plugins and the plugin catalog.",
+   "Keep the CI guard that fails if code references ~/.gemini, oauth_creds.json, ~/.antigravity or similar credential paths.",
+   "For Gemini models outside the vendor CLIs, use the user's own Gemini API or Vertex AI key, under the Gemini API or Google Cloud terms."
+  ],
+  "summary": "This is the one point where Google's terms are clear. Using third-party software to harvest or piggyback on Gemini CLI's OAuth, or to use Antigravity OAuth (Google's example is OpenClaw), breaches the terms. Google says it may suspend or terminate accounts, and the 27 Feb 2026 maintainer post shows it has done so at scale. The Google APIs terms also say credentials identify your own API client and must not be used by other clients. Vector's current design (only launching the vendor's CLI, never touching credentials) stays clear of this. The risk is another runtime or plugin inside Vector adding a 'sign in with Google' provider that reuses these credentials."
+ },
+ {
+  "agent": "Cline CLI (cline)",
+  "vendor": "Cline Bot Inc.",
+  "verdict": "allowed-with-conditions",
+  "label": "verify:open-source:Cline CLI (cline)",
+  "conditions": [
+   "Keep the neutral 'CL' letters and do not show Cline's logo, bot icon, wordmark or app icons without written permission. The brand page offers downloads but grants third parties no rights, ToS 4.2 reserves logos and grants no licence, and Apache-2.0 section 6 excludes trademarks.",
+   "Use the name 'Cline' only to identify the agent factually. Never call it 'official', 'partner', 'powered by Cline' or anything else that suggests a relationship. ToS 2.2 bans referring to Cline in a way that implies endorsement, affiliation or sponsorship. Keep the footnote saying names belong to their owners, and say that Vector is not affiliated with Cline Bot Inc.",
+   "Every run must stay started by the user, on the user's own install and the user's own Cline account, ClinePass or provider key. Never route one user's account or subscription to someone else (ToS 7.3(c): no letting anyone else use your Subscription). Never supply a Vector-owned key through CLINE_API_KEY. Never buy, sell or transfer API keys (ToS 2.2).",
+   "Never read, copy or store the credentials that 'cline auth' saves, and never call Cline's hosted API directly with the user's token. Reach Cline only through its own CLI. ToS 2.2 bans reaching the Service by means Cline has not provided, and bypassing access limits such as ClinePass's 5-hour, weekly and monthly usage windows.",
+   "Install only by showing Cline's official 'npm i -g cline' command and running it when the user clicks. Do not bundle, fork or ship a modified Cline. If Vector ever bundles it, it must meet Apache-2.0 section 4: include the LICENSE and NOTICE files and mark any changes.",
+   "Keep passing '--auto-approve false' explicitly, because the CLI defaults to true. If Cline moves to the chat tier, use the documented integration route, 'cline --acp' (auto-approve defaults to false there) or the documented --json NDJSON output. Do not rely on undocumented fields. Written confirmation from Cline (support@cline.bot) would remove the remaining doubt about the 'in competition' clause, but the docs do not strictly require it.",
+   "Do not use Cline-generated content (prompts, event streams, UI text, metadata) to train or develop Vector's own models such as Velocity, or to build competing features. ToS 2.2 bans using Service content for ML or AI training or development. Keep Cline runs out of any training or evaluation dataset.",
+   "Do not publish benchmarks or competitive comparisons of Cline, and do not run them with a Cline account, without Cline's consent (ToS 2.2 bans benchmarking and competitive analysis).",
+   "Tell users that Cline's own Terms and Privacy Policy apply to their use of Cline. Also tell them that Cline's telemetry is on by default in the CLI and can be turned off with telemetryOptOut in ~/.cline/data/settings/global-settings.json."
+  ],
+  "summary": "This is a careful reading of the terms, not legal advice. I think the earlier \"unclear\" verdict is slightly too harsh for what Vector does today. Vector shows Cline in the terminal tier only, launching the user's own Apache-2.0 CLI in Vector's terminal under the user's own account. Cline's own docs invite third-party hosts: ACP clients such as JetBrains AI Assistant and Zed (both commercial AI products), --json headless mode for scripts, and an SDK for building Cline into your own products. The Terms (last modified 25 Sept 2025) ban using or displaying the Service \"in competition with us\", but that clause binds the user, not Vector, which never accepts Cline's Terms. Read alongside Cline's own third-party-client docs, it is unlikely to cover a user simply running Cline in another app's terminal. The real risks are narrower: logos, implied endorsement, training on Cline content, benchmarking, and sharing subscriptions or keys. Vector's current setup already avoids them."
+ },
+ {
+  "agent": "Qwen Code: the CLI itself, used with a pay-as-you-go Model Studio or QwenCloud key, a third-party provider key (OpenRouter, DeepSeek and others) or a local model",
+  "vendor": "Alibaba / Qwen (QwenLM)",
+  "verdict": "allowed-with-conditions",
+  "label": "research:qwen-jetbrains",
+  "conditions": [
+   "Keep launching the user's own installed, unmodified CLI. If Vector ever bundles or mirrors Qwen Code, it must comply with Apache-2.0: ship the LICENSE and any NOTICE, and mark any changes.",
+   "Use the name 'Qwen Code' only to identify the tool (Apache-2.0 section 6 grants no trademark rights beyond describing origin). Keep the neutral 'QW' badge rather than Qwen or Alibaba logos, keep the footnote saying names belong to their owners, and do not suggest that Alibaba endorses or partners with Vector.",
+   "Do not describe Qwen Code as free or claim any free Qwen quota. The Qwen OAuth free tier ended on 2026-04-15.",
+   "Never read, copy or store the user's Qwen settings.json or API keys, and never set environment variables that change Qwen Code's endpoint, key or identifying headers.",
+   "Do not use Qwen outputs or run transcripts to train or improve Vector's own models (Velocity, Codium). The Model Studio Service Agreement (China version, section 4.6) bars using models or their outputs to develop competing products.",
+   "Do not resell or meter access to Qwen models through Vector. Each user brings their own account.",
+   "When the user picks a third-party provider inside Qwen Code (OpenRouter, DeepSeek and so on), that provider's terms apply. Vector should not represent those as covered."
+  ],
+  "summary": "The CLI is Apache-2.0, so anyone may use it, including commercially. The user installs it from Qwen's official commands (Vector's npm, Homebrew and standalone-script commands match the official README), and Vector does not ship or change it. The Qwen team actively invites what Vector does: the official README describes headless `qwen -p` for scripts, CI/CD and batch jobs, ships official SDKs for building on top of Qwen Code, and lists third-party GUIs that wrap it. The Qwen Code ToS page says the governing terms depend on the auth method; with your own key, 'your chosen API provider's' terms apply, and Qwen Code adds no rule about which front end runs it. I found no term that stops a third-party app from launching the user's own unmodified CLI with a pay-as-you-go key. The free Qwen OAuth tier was discontinued on 15 April 2026 and can no longer be selected in /auth, so Vector should not present Qwen Code as free. This is a careful reading of the terms, not legal advice."
+ },
+ {
+  "agent": "Qwen Code with an Alibaba Cloud Coding Plan or Token Plan subscription key (sk-sp- keys, Model Studio or QwenCloud)",
+  "vendor": "Alibaba Cloud (Model Studio / Bailian)",
+  "verdict": "unclear",
+  "label": "research:qwen-jetbrains",
+  "conditions": [
+   "Each headless Qwen turn must come from a prompt the user typed. Do not run Qwen from Vectorscope, background or parallel subagents, auto-continue loops, retries that resend prompts, schedules, or any batch fan-out. Alibaba names those patterns ('automated scripts', 'batch calling') as violations.",
+   "Give Qwen users a terminal-tier option (interactive `qwen` in Vector's terminal), and tell them that Alibaba limits Coding Plan and Token Plan keys to interactive use. Do not detect the plan by reading the user's key or settings.",
+   "Do not market Vector as a way to use an Alibaba Coding Plan or Token Plan, and do not say that Alibaba allows it. At most, link Alibaba's own rules.",
+   "Never let anyone else drive a user's Qwen session. Multiplayer, Follow, invite-guest or Vector Cloud sharing must not let another person type into, or start runs on, a session backed by someone's plan key. The plans are 'for the exclusive use of the subscriber', one key per subscription, with no sharing.",
+   "Never log, display, sync or upload the plan key, including in terminal scrollback, crash reports or shared transcripts. Alibaba may disable a key automatically once it is publicly exposed.",
+   "Keep the CLI unmodified, and do not override its endpoint, base URL or user-agent. Alibaba appears to detect unsupported clients ('Only available for Coding Agents' error), and spoofing would be circumvention.",
+   "Do not promise privacy for Qwen runs. Token Plan Personal says model inputs and outputs are used for service improvement and model optimisation."
+  ],
+  "summary": "Alibaba's subscription plans name Qwen Code as a supported tool. But they limit the plan key to interactive use and bar automated scripts, application backends and 'other non-interactive scenarios'. The 'More tools' page also lists 'custom applications' among the uses outside the permitted scope. Vector's terminal tier would plainly be interactive. Qwen, however, is in Vector's chat tier, which runs `qwen -p --output-format stream-json`, and Qwen's own docs describe that mode as for scripting, automation and CI/CD. On substance, a person types every turn and watches the result, and Vector never touches the key or calls the API itself; the call still comes from Qwen Code, which is a listed tool. Alibaba also lists OpenClaw-type agents as permitted, so the test does not seem to be whether a human approves each step. Read literally, though, 'non-interactive' could cover any headless run, and Alibaba has said nothing about CLI print or headless mode. The penalty Alibaba names is suspending the user's subscription or revoking or banning their key, so the main risk falls on Vector's users rather than on Vector, which is not a party to the plan. Because the wording is ambiguous, I am not reading it in Vector's favour."
+ },
+ {
+  "agent": "Junie CLI (terminal tier; JetBrains Account sign-in on a JetBrains AI subscription, or the user's own BYOK provider)",
+  "vendor": "JetBrains s.r.o.",
+  "verdict": "allowed-with-conditions",
+  "label": "research:qwen-jetbrains",
+  "conditions": [
+   "Do not bundle, mirror, repackage or modify the Junie binary. It is 'All rights reserved', and the terms grant no redistribution right. Keep sending users to JetBrains' own install command and docs.",
+   "Keep Junie in the terminal tier unless this is reviewed again. Headless Junie needs the user's JUNIE_API_KEY passed as --auth, which would mean Vector handling a credential. A future chat-tier integration should go through JetBrains' documented ACP mode (`junie --acp true`), with Junie doing its own sign-in, and should be checked again first.",
+   "Never read, copy, store or pass the user's JetBrains Account session, Junie API key or BYOK keys. Do not persist or upload terminal scrollback that could contain them. The AI terms make the user responsible for keeping access tokens confidential.",
+   "Never let another person use a user's Junie session through multiplayer, Follow, invite guests or Vector Cloud. The terms bar giving anyone else access to JetBrains AI ('resell or otherwise provide ... access ... to any third party') and bar unauthorised access.",
+   "Runs stay user-started, with no automated or unreasonable volume. The JetBrains Acceptable Use Policy bars using automated systems 'in an unreasonable way' and exceeding documented usage limits.",
+   "Do not use Junie outputs or transcripts to train or improve Vector's own models. The AUP section 3.3(d) bars using AI-powered Products to develop competing AI models.",
+   "Do not copy Junie's source code, UI elements or documentation into Vector. The Platform Terms 3(g)(vi) exception covers only independent and interoperating products that reproduce no protectable elements.",
+   "Do not pass the EAP or nightly channel flags (--eap, --nightly, --channel) for the user. EAP builds fall under the separate Junie EAP Terms.",
+   "Keep the neutral 'JU' badge and the ownership footnote, and do not imply that JetBrains endorses or partners with Vector. If Vector ever shows a JetBrains or Junie logo, follow the JetBrains Brand Assets rules: link back to JetBrains and use the 'is a trademark of JetBrains s.r.o.' attribution."
+  ],
+  "summary": "Junie CLI is proprietary ('\u00a9 JetBrains s.r.o. All rights reserved'), and its LICENSE.md says use is governed by the JetBrains AI Terms of Service. Vector never redistributes it: the user installs it with JetBrains' own command (Vector's sh and PowerShell commands match the Junie CLI docs page), signs in on Junie's own welcome screen, and runs it interactively in Vector's terminal. That is the same as running it in any other terminal emulator, and nothing I read limits which terminal hosts the CLI. The JetBrains AI terms bind the user, and their restrictions (no reselling or giving access to third parties, no bypassing security or fees, keeping tokens confidential) fit Vector's design. JetBrains itself supports third-party hosts: Junie has an ACP mode for any ACP-compatible editor, plus a GitHub Action and GitLab CI integration. The newer JetBrains AI Platform Terms (v3.0) bar competing products that reproduce JetBrains' protectable elements, but expressly exclude tools that 'integrate with, extend, or interoperate' with JetBrains Services, and independent products in the same category. Vector's own commercial status therefore does not by itself break these terms. This is a careful reading, not legal advice."
+ },
+ {
+  "agent": "Factory Droid",
+  "vendor": "Factory (The San Francisco AI Factory, Inc.)",
+  "verdict": "allowed-with-conditions",
+  "label": "research:credits",
+  "conditions": [
+   "Launch only the copy of droid the user installed with Factory's own command. Never bundle, mirror, redistribute, patch or wrap the binary: the CLI is proprietary and the terms forbid copying, distributing and making derivative works.",
+   "Use only documented commands and flags (droid, droid exec, --output-format, --auto, -s/--session-id, -m). If Droid ever moves to the chat tier, use a documented machine interface (--output-format acp, or stream-jsonrpc as documented for custom integrations, or the Apache-2.0 SDK). Do not build the parser from undocumented stream-json fields found by inspecting output, which comes close to the reverse-engineering clause.",
+   "Vector staff using their own Factory accounts must not use Droid to build Vector, must not benchmark or compare Droid, and must not publish competitive analysis of it. The terms forbid all three, so Vector's published benchmarks and cost comparisons must leave Droid out unless Factory agrees in writing.",
+   "One person per Factory account. A multiplayer, Follow or invite guest must not be able to type into, or drive, another user's Droid terminal or session. No time-sharing, service-bureau use or running Droid for anyone other than the signed-in user.",
+   "Never read, copy or pass FACTORY_API_KEY, browser-login tokens or ~/.factory credentials. Sign-in stays inside Droid's own browser flow.",
+   "Show the name 'Factory Droid' as plain text only. No Factory rotor mark, wordmark or DROID wordmark: the brand guidelines give third parties no licence to use them. Keep the owners footnote, and imply no partnership or endorsement.",
+   "If a chat-tier run ever uses --auto low, show the user that it lets Droid edit files and run non-destructive commands without asking. Factory's terms say commands need explicit customer approval, so the autonomy level should be the user's visible choice.",
+   "Show install commands exactly as Factory publishes them, linked to docs.factory.com, and run them only when the user clicks."
+  ],
+  "summary": "Factory's Individual Plans terms (last update 14 July 2026) license Droid for the customer's own internal use, used only as the documentation describes. They forbid copying, distributing, modifying or reverse engineering the software, using it for the benefit of a third party, and using it in competition with Factory, including benchmarking. Factory's own docs say Droid runs in any editor's integrated terminal, and they document third-party front-ends (JetBrains, Zed over ACP), headless exec for scripts, and an SDK for product integrations. So Vector's terminal-tier launch of the user's own, unmodified CLI matches a use Factory itself describes. These terms bind each Factory account holder, so they bind the end user and also Vector staff whenever they use Droid. The CLI is proprietary (its npm package is marked UNLICENSED), so Vector must never ship or patch it."
+ },
+ {
+  "agent": "Amp",
+  "vendor": "Amp Frontier Corporation (CLI licence file still names Sourcegraph Inc.)",
+  "verdict": "allowed-with-conditions",
+  "label": "research:credits",
+  "conditions": [
+   "Never bundle or redistribute the Amp CLI. Its licence reserves all rights and makes use subject to Amp's terms, so the user installs it with Amp's own command.",
+   "One human per Amp account: never let a multiplayer, Follow or invite guest, or a Vector Cloud teammate, send prompts into another user's Amp terminal or thread, and never pool or share Amp sessions between Vector users.",
+   "Keep free usage inside Amp. Never use a user's Amp account, and especially not free credits, as a backend for Vector's own features (Vector's agent, Vectorscope, summaries, helpers) through amp -x or the SDK.",
+   "Every run must be started by the user. No scheduled runs, automatic fan-out or loops that could look like 'automatic or excessive bulk activity', and never create Amp accounts automatically.",
+   "Never read the token `amp login` stores, or AMP_API_KEY / sgamp_ access tokens. If a chat-tier execute mode is ever added, the user sets their own access token as Amp's docs describe.",
+   "Do not call Amp 'free' or mention 'Amp Free' or ads in Vector's UI. Link to Amp's own pricing page, because the free tier is shrinking and the ads have ended.",
+   "Do not promote Amp's 'Claude Code mode' or linking a Claude or ChatGPT subscription through Amp inside Vector. That is Amp's own arrangement under those providers' terms.",
+   "Show the name 'Amp' as plain text only. No Amp logo or app icon: the press kit offers files for press but no licence for product UI. Keep the owners footnote and imply no partnership.",
+   "Keep the existing notice that Amp runs tools without asking, and keep it in the terminal tier until Vector can show tool calls, since Amp's docs say approval is off by default."
+  ],
+  "summary": "Amp's licence terms grant each user a limited, non-transferable, non-sublicensable licence, governed by an Acceptable Use Policy (last updated 10 September 2026). That policy limits each account to one human, bans bot-created accounts and bulk automation, and says free usage may be used only through Amp products, not as a generic model backend. Nothing found prohibits launching the user's own Amp CLI from another app. Amp documents streaming JSON 'for programmatic integrations', an SDK for use from your own programs, and editor connections, and its AUP even anticipates Amp being used alongside other products. Vector's terminal-tier launch is therefore essentially the user running Amp themselves. The CLI is proprietary ('All rights reserved'). The ad-supported Amp Free tier no longer exists: ads ended on 30 March 2026, and the free daily allowance was cut back from 23 May 2026."
+ },
+ {
+  "agent": "pi",
+  "vendor": "Earendil Inc. & contributors (repo moved from badlogic/pi-mono to earendil-works/pi)",
+  "verdict": "allowed-with-conditions",
+  "label": "research:credits",
+  "conditions": [
+   "If Vector ever bundles, vendors or redistributes pi or any part of it, include the MIT copyright and permission notice. Launching the user's own install needs no notice.",
+   "Show the name 'pi' as plain text and attribute it to Earendil. No pi logo or badge: the press kit offers brand files for press coverage, and MIT grants no trademark rights. Keep the owners footnote.",
+   "Leave the provider choice entirely to the user inside pi's own /login. Vector must not pre-select, recommend or advertise any provider sign-in, especially subscription OAuth logins whose providers bar third-party tools.",
+   "Never read, copy or pass pi's auth.json, OAuth tokens or provider API keys.",
+   "Keep the documented safety posture: --exclude-tools bash,powershell in the chat tier, the isolated worktree, and the existing notice. pi's security docs say it does not ask before tool calls.",
+   "Install commands must match pi's README exactly, which they do today, and run only on the user's click."
+  ],
+  "summary": "pi is open source under the MIT licence (copyright 2025 Mario Zechner, repo now earendil-works/pi). MIT allows use, copying, modification and distribution, including commercially. There is no pi terms of service or acceptable use policy, because pi is a local tool. The rules on model use come from whichever provider the user connects. pi's own docs describe the print, JSON and RPC modes for scripts and applications, so Vector's `pi --mode json` chat run is a documented use. pi's docs warn that it does not ask before tool calls, and Vector already removes the shell tools in chat. The real legal exposure is the provider sign-ins pi offers, above all Claude Pro/Max (see the separate item)."
+ },
+ {
+  "agent": "pi: Claude Pro/Max sign-in (rule)",
+  "vendor": "Earendil (pi) / Anthropic (provider terms)",
+  "verdict": "risky",
+  "label": "research:credits",
+  "conditions": [
+   "Never mention, recommend, document, demo, screenshot or market pi as a way to use a Claude Pro or Max subscription: not in the launcher, onboarding, docs, site, changelog, investor material or support replies.",
+   "Keep the sign-in hint neutral (the current 'Type /login inside pi to connect a provider.' is fine). Add a short terms note on the pi card: Anthropic does not allow Claude subscription sign-in in third-party tools, so connect Anthropic with an API key, or use Claude Code itself for a Claude subscription.",
+   "Keep pi's model list in Vector empty or neutral. Do not surface Claude-subscription models for pi, and do not pass Claude model IDs in a way that suggests a subscription.",
+   "Never read pi's auth.json or detect, copy, refresh or pass Anthropic OAuth tokens. Never automate pi's /login or choose the 'Anthropic (Claude Pro/Max)' option for the user.",
+   "Keep Vector's own rule: no Claude.ai login anywhere in Vector. Claude subscription use goes only through the unmodified Claude Code binary, which Anthropic's legal page expressly allows.",
+   "Watch for Anthropic enforcement or clarification. If Anthropic says harnesses launched by third-party apps are covered, be ready to show a warning, or remove pi's chat tier, rather than carry that traffic."
+  ],
+  "summary": "pi's /login includes a provider named 'Anthropic (Claude Pro/Max)'. It uses Claude Code's own OAuth client ID (stored base64-encoded in the source) with a 'user:sessions:claude_code' scope, and pi's own commit history calls it 'Claude Code's OAuth client'. Anthropic's Claude Code legal page says OAuth is meant for Claude Code and Anthropic's native apps. It also says Anthropic does not permit third-party developers to offer Claude.ai login in their own apps, or to route requests through Free, Pro or Max plan credentials on behalf of users, and that it may enforce this without notice. That makes the feature a problem for Earendil and a risk to the user's Anthropic account. Vector neither offers that login nor touches the credential. But when a user signs pi into Claude Pro/Max and runs it from Vector's chat view, a commercial third-party app sits in that request path, and Anthropic could treat that as routing requests through plan credentials. Vector must not promote it, and should actively steer users away from it."
+ },
+ {
+  "agent": "Vector's built-in 'Sign in with ChatGPT' (engine provider using the Codex CLI's OAuth client ID)",
+  "vendor": "OpenAI",
+  "verdict": "not-allowed",
+  "label": "verify:openai:Vector's own built-in 'Sign in with ChatGPT' (",
+  "conditions": [
+   "Ask the owner, as chatgpt.md requires, to flip the existing remote switch (packages/web/public/policy/providers.json to { \"chatgptSignIn\": false }) now rather than at commercial launch, because releases v1.99.106 to v1.99.110 already ship it on. Then set CHATGPT_SIGN_IN = false, or remove the Codex CLI client ID, in the next release.",
+   "Stop using and refreshing tokens already issued to the Codex CLI client (the switch already pauses them), and tell affected users to reconnect with an API key or their own Codex CLI.",
+   "Until OpenAI issues Vector its own registration, offer ChatGPT-plan access only by launching the user's own installed, unmodified Codex CLI (judged separately), or through the user's own OpenAI API key.",
+   "Apply through OpenAI's Sign in with ChatGPT interest form (openai.com/form/sign-in-with-chatgpt-interest/). The docs send paid or remotely hosted apps there, and the Codex lead says non-open-source, non-partner clients must contact OpenAI.",
+   "If OpenAI grants a registration, use it exactly as documented. That means Vector's own name and client ID with no codex_cli_simplified_flow parameter, the supported authorize and token endpoints, and inference only at api.openai.com/v1/responses, never chatgpt.com/backend-api.",
+   "Under any registration: store tokens only locally under the user's control and never sync them to Vector Cloud. Never charge for, or require a paid Codium plan to use, ChatGPT-plan access. Do not pool, resell or share plan usage. Get express consent before any background use.",
+   "Make sure an invited multiplayer guest, or anyone else, can never trigger requests on the owner's ChatGPT plan. Right now the guest provider filter (packages/engine/src/server/routes/instance/httpapi/handlers/provider.ts, withoutTrainingFreeModels) only removes free models that may train on prompts.",
+   "Use the ChatGPT and OpenAI names only as OpenAI allows, and do not suggest OpenAI endorses Vector."
+  ],
+  "summary": "I agree with the other researcher: \"not-allowed\" is the right verdict, and the case against it is if anything stronger than they made it. The facts check out. On main (183f51119), CHATGPT_SIGN_IN = true and CHATGPT_CLIENT_ID = CODEX_CLI_CLIENT_ID. The engine (packages/engine/src/plugin/openai/codex.ts) runs OAuth at auth.openai.com with the Codex CLI's client and its codex_cli_simplified_flow parameter, then calls chatgpt.com/backend-api/codex directly. Release tags v1.99.106 to v1.99.110 all contain the re-enable commit 35a79ba5f, and vectordev.ai/policy/providers.json is still true, so this is live for users today, not only a pre-launch issue.\n\nThere are two ways to read it, and both lose. If this counts as Sign in with ChatGPT, the SIWC Terms (29 Sep 2026) bind any app that integrates it. They require the app's own name during sign-in, no impersonating another application, and tokens only through OpenAI's supported flow, and borrowing Codex's registration breaks all three. If it does not count as SIWC, Vector has no authorisation at all. In that case it is using another product's private client and private backend, which OpenAI's own docs say is closed even to app-server integrations for commercial use.\n\nThe current SIWC developer docs also close the open-source route. Open-source apps must register their own client dynamically under their own name, paid or remotely hosted apps must apply through the interest form, and apps must not call ChatGPT's backend-api. The Codex lead's 7 Sep 2026 post (not a policy document) says only pure open-source clients and partners are supported. Vector is commercial and its repo has been private since 19 Oct.\n\nThis is a breach of contract and platform terms, not a clear criminal matter. The realistic consequences are that OpenAI blocks the client, suspends users' accounts under its Terms of Use, or sends a demand to stop. The owner's written acceptance of the risk (docs/vector/owner-actions/chatgpt.md) does not change what the terms say. One new risk the brief does not mention: from reading the code (not tested), invited multiplayer guests seem to be offered the owner's providers. If so, a guest's prompts could be served from the owner's ChatGPT plan, which the SIWC Terms forbid."
+ },
+ {
+  "agent": "Codex CLI (chat tier: codex exec --json, --model, exec resume, signed in with the user's ChatGPT plan)",
+  "vendor": "OpenAI",
+  "verdict": "unclear",
+  "label": "verify:openai:Codex CLI, chat tier: Vector runs `codex exec",
+  "conditions": [
+   "Do not market this as approved by OpenAI or as a partnership: no 'partnered with', 'worked with' or 'use your ChatGPT plan in Vector' wording, as OpenAI's brand guidelines say. Before the commercial launch, ask OpenAI for written confirmation through the Sign in with ChatGPT interest form (openai.com/form/sign-in-with-chatgpt-interest/) or partnercomms@openai.com. Until then, label ChatGPT-plan use in the chat tier as the user's own Codex CLI under OpenAI's terms, not a feature OpenAI has approved for Vector.",
+   "Keep API-key sign-in available and easy to find, because it is the path OpenAI's auth docs recommend for programmatic CLI use. The terminal tier, where the user runs codex interactively, needs no change.",
+   "Never put Codex behind a paywall. Running the user's Codex must not require a Codium plan or any paid Vector upgrade. This mirrors the no-charge rule in OpenAI's Sign in with ChatGPT Terms (29 Sep 2026).",
+   "Run it only on the user's own machine and only when that user starts it. Never run a Codex signed in with ChatGPT in Vector Cloud or on hosted or remote runners. Never let multiplayer, Follow or invite guests trigger the host's Codex: the Terms of Use say an account may not be made available to anyone else, and the Sign in with ChatGPT Terms say another user's activity must not trigger requests.",
+   "Never read, copy, sync, upload or log ~/.codex/auth.json or keyring entries. Do not inject ChatGPT tokens through the environment, do not point CODEX_HOME at a location Vector manages, and do not use cli_auth_credentials_store to move credentials into Vector.",
+   "Launch the unmodified CLI and leave its originator and user-agent alone. Do not set CODEX_INTERNAL_ORIGINATOR_OVERRIDE to pose as another client, and do not patch, bundle or redistribute the binary. If you ever bundle it, comply with Apache-2.0, including the LICENSE and NOTICE files.",
+   "Respect plan limits. On a usage-limit error, stop and show OpenAI's message. No automatic retry loops, no account rotation, and no help for switching between several accounts.",
+   "Do not defeat workspace admin controls such as forced_login_method or forced_chatgpt_workspace_id. Keep the default sandbox at workspace-write and never default to danger-full-access or flags that bypass approvals.",
+   "No scheduled, background or automatic Codex runs (for example Vectorscope or subagents dispatching to Codex) unless the user has expressly turned that on.",
+   "Do not use Codex prompts, outputs, transcripts, trajectories or user ratings of them to train, tune, rank, filter or select data for Vector's own models (Velocity). The Terms of Use ban using Output to develop competing models. The Usage Policies effective 20 Nov 2026 spell this out for outputs from product use.",
+   "Separately, and more urgently: turn off, or replace with a client ID that OpenAI issues to Vector, the ChatGPT Pro/Plus sign-in in Vector's own engine. It uses the Codex CLI's OAuth client ID with originator 'vector' and stores tokens in Vector. Keep that feature fully separate from the Codex CLI integration so it does not undermine this item.",
+   "In the launcher, name Codex in plain text only. Use no OpenAI logo without permission, and put no 'GPT' in Vector product names."
+  ],
+  "summary": "No OpenAI document forbids this setup, and OpenAI's own Codex TypeScript SDK does the same thing. It starts the user's codex CLI, reads the JSONL events from exec, and is offered as a way to put Codex inside apps. The CLI's Apache-2.0 licence also lets anyone run it. On the other side, OpenAI's current docs say Codex app-server sign-in was never allowed for commercial or hosted services, send paid apps to the Sign in with ChatGPT interest form, and say only participating commercial apps may use a ChatGPT plan. A paid Vector app whose chat view runs on the user's plan is close to that in substance, and no OpenAI text says whether launching the unmodified CLI that the user signed in to falls outside it. So I rate this item unclear rather than risky. The earlier review read some sources too broadly: Tibo's 7 Sep post was about a hosted iMessage agent using Sign in with ChatGPT, and Kilo Code does not wrap the Codex CLI. It also missed the SDK. Still, its conditions are sound, and it was right not to call this allowed. The bigger problem is outside this item: Vector's own engine currently ships a ChatGPT Pro/Plus sign-in that uses the Codex CLI's OAuth client ID and stores the tokens itself. That contradicts the premise that Vector never offers its own login for the vendor, and it is the practice OpenAI's documents most clearly reject for a commercial app. This is a careful reading of the terms, not legal advice."
+ },
+ {
+  "agent": "Antigravity CLI (agy), terminal tier: interactive in Vector's built-in terminal",
+  "vendor": "Google",
+  "verdict": "unclear",
+  "label": "verify:google:Antigravity CLI (agy), terminal tier: interact",
+  "conditions": [
+   "Keep agy terminal-only for personal (consumer) Google accounts. Do not move it to the chat tier (agy -p, --output-format json or stream-json, --input-format stream-json), do not connect Google's ACP server for it, and do not drive it programmatically: Google's FAQ says wrapping agy inside third-party coding agents or applications is not supported on consumer plans. Update the comment in /Users/Krishna/.cache/vector-main/packages/schema/src/external-agent.ts (lines 557-559): the stated reason, an agy -p hang, may already be fixed (changelog, 2 Sep 2026). The real blocker is now Google's policy.",
+   "In the terminal, Vector only starts plain `agy` with no arguments, in the folder or worktree the user chose, when the user clicks. Do not pass an initial prompt (agy \"prompt\" or -i) written by Vector, inject keystrokes, read or scrape its output into Vector's chat view, or let Vector's own agents, Vectorscope, subagents or schedules call agy as a tool.",
+   "If Vector ever offers a programmatic agy mode, limit it to users who signed agy in with a Gemini API key or Gemini Enterprise (auth types gemini-api-key, oauth-business or agent-platform), the routes Google recommends for third-party coding agents. Get Google's written confirmation first, because the Additional Terms carve-out names only the Gemini Enterprise API key, not AI Studio keys. Have the user state their auth type rather than reading agy's files.",
+   "Never read, copy, migrate or use agy's keyring or keychain entries or anything under ~/.gemini/antigravity-cli. Never offer Antigravity OAuth, tokens or quota to any other agent, plugin or model route in Vector.",
+   "Do not bundle, patch, wrap, mirror or redistribute the agy binary or Google's ACP server. Both are proprietary, and the Google Terms of Service software licence is personal and non-assignable. Only show Google's own install command and source link, and run it visibly when the user clicks.",
+   "Multiplayer, Follow and invite guests must not type into a terminal running another person's agy, and Vector should not relay that terminal live to other users. That would put one person's personal Antigravity account and quota in front of others through a non-Google product.",
+   "No account rotation, no quota or rate-limit workarounds, and no scripted re-runs to get around the 5-hour or weekly limits. The FAQ names automated account rotation explicitly.",
+   "Branding: keep the plain-text name 'Antigravity CLI', the neutral AG badge and the ownership footnote. Use no Google or Antigravity logo without approved artwork from Google's brand permissions process. Do not make the name the most prominent element, and never suggest endorsement, partnership or official support.",
+   "Tell users what Google requires before first launch: users must be 18 or older and in a listed country. Personal accounts fall under the Google Terms of Service plus the Antigravity Additional Terms; Workspace and Gemini Enterprise users fall under their admin's terms. Google may record Interactions (including repository content) and use them for training, with human review, unless the user opts out in settings. The user alone is responsible for what the agent does, and their accounts carry the suspension risk.",
+   "Before promoting Antigravity support in marketing, ask Google for written confirmation that launching the unmodified interactive agy from a third-party desktop app's terminal is allowed (antigravity-support@google.com or the Antigravity forum), and keep the answer on file. Re-check the Antigravity terms and FAQ before each release (both changed in Jul to Oct 2026), and keep a remote switch that can hide the Antigravity entry if Google tightens the terms."
+  ],
+  "summary": "The other researcher's 'unclear' fits the narrow case Vector ships today, but they missed a newer primary source that makes Google's position firmer. Between 7 and 13 Oct 2026, Google added an FAQ entry saying agy headless mode (agy -p) is meant for direct scripting and CI. The same entry says wrapping agy inside third-party coding agents or applications, or automating account rotation, is not supported on consumer plans. Another FAQ entry calls using third-party software with an Antigravity login a violation of the terms, and points third-party agents to Gemini Enterprise or Google AI Studio API keys. Together with the Additional Terms clause that treats use 'in connection with products not provided by us' as abuse, this means any chat-tier, ACP or programmatic agy integration for personal accounts should be treated as off-limits, and Google's 2 Sep 2026 fix for piped-output hangs must not become the reason to promote it. The case of a user typing into the unmodified agy in Vector's terminal is still not addressed directly: Google's changelog supports agy inside other programs' terminals (VS Code terminals, tmux, WezTerm, Kitty, Ghostty), so this is the closest thing to ordinary use, but Vector is itself a commercial third-party coding app with an agy launcher, so the broad wording could reach it. Practical risk looks low to moderate; most of it falls on users (suspension of their Antigravity and Gemini CLI accounts, permanent on a second violation), with a remote argument against Vector under the Google Terms of Service ban on 'providing services that encourage others to violate these terms'."
+ },
+ {
+  "agent": "Rule across all agents: Google sign-in (Gemini CLI or Antigravity OAuth) used by any non-Google tool",
+  "vendor": "Google",
+  "verdict": "not-allowed",
+  "label": "verify:google:Rule across all agents: Google sign-in (Gemini",
+  "conditions": [
+   "Never add, bundle or list any provider, plugin or runtime (Vector's engine, pi, Kilo, Cline, OpenCode-derived auth plugins, the plugin catalog) that uses Gemini CLI's or Antigravity's OAuth client ID, tokens, keyring entries, local session databases or quotas, or calls their backends (for example the Code Assist service) directly.",
+   "Keep the existing CI guard in /Users/Krishna/.cache/vector-main/packages/desktop/src/main/external-agent-credentials.test.ts that fails on ~/.gemini, oauth_creds.json, ~/.antigravity and similar credential paths, and extend it to ~/.gemini/antigravity-cli and the OS keyring entries agy uses.",
+   "Do not add a chat-tier (agy -p / stream-json) integration of Antigravity CLI for personal Google accounts (free, Google AI Plus, Pro, Ultra). If one is ever added, limit it to a user's own Gemini API key or a Gemini Enterprise / Google Cloud sign-in, which Google documents for headless use.",
+   "For the current terminal-tier Antigravity CLI entry, either limit it to API key or Gemini Enterprise accounts, or show a clear note that Google says wrapping agy in third-party apps is not supported on consumer plans and may risk suspension. Ask Google in writing (antigravity-support@google.com or the Antigravity forum) whether an interactive agy session in an embedded terminal is acceptable.",
+   "Never automate account switching, account rotation or multiple Google accounts for any Google agent. Google's FAQ names this specifically.",
+   "Keep Gemini CLI labelled for work accounts (Code Assist Standard or Enterprise, under Google Cloud terms and the admin's policies) and API keys. Do not prompt or encourage personal Google sign-in for it.",
+   "For Gemini models outside the vendor CLIs, use only the user's own Gemini API key or Vertex AI / Gemini Enterprise credentials under the Gemini API or Google Cloud terms. Google's FAQs name this as the supported path for third-party coding agents."
+  ],
+  "summary": "I agree with not-allowed for the conduct the rule names: a non-Google tool that reuses, harvests or proxies the OAuth sign-in, tokens or quotas of Gemini CLI or Antigravity, or calls their backend directly. Google's Gemini CLI terms page and FAQ, Section 6 of the Antigravity Additional Terms and the Antigravity FAQ all call this a breach that can lead to suspension or termination. The February 2026 bans show Google enforces it across Antigravity, Gemini CLI and Code Assist together. The other researcher was too lenient on one point. A newer Antigravity FAQ entry (no date shown, read 23 Oct 2026) says Google does not support wrapping agy, including its headless mode, inside third-party coding agents or apps on consumer plans, and Google's own SDK allows programmatic access only with an API key, Gemini Enterprise or local models, so Vector's Antigravity CLI entry with a personal Google sign-in is exposed even though Vector never touches credentials. The verdict would be too harsh if read to cover Gemini CLI: Google documents headless mode for building wrapper tools and lists Gemini CLI in the ACP registry for JetBrains, Zed and other editors, and since 18 June 2026 Gemini CLI no longer serves personal Google accounts, so Vector's 'Work or API accounts' Gemini entry is on firmer ground. This is a careful reading of the terms, not legal advice."
+ },
+ {
+  "agent": "Antigravity CLI (agy) driven headless (agy -p --output-format stream-json) into Vector's chat view (not shipped today)",
+  "vendor": "Google",
+  "verdict": "not-allowed",
+  "label": "verify:google:Antigravity CLI (agy) driven headless (agy -p",
+  "conditions": [
+   "Do not ship headless agy for consumer Google sign-ins (Free, Google AI Plus, Pro, Ultra). Google's FAQ says wrapping agy in third-party applications is not supported on these plans, and Section 6 lets Google suspend the user's Antigravity and Gemini CLI accounts.",
+   "If headless agy is ever added, run it only when agy is in Gemini API key mode (the user's own GEMINI_API_KEY with modelProvider set to 'gemini') or signed in to Gemini Enterprise (Google Cloud SSO, ADC or a Gemini Enterprise API key). Check the mode without reading any token or keychain entry, refuse to start on a consumer login, and say in the UI why.",
+   "For AI Studio API keys, tell users what the Gemini API terms say: the service is for developer or business use, not consumer use; anyone making an API client available to users in the EEA, Switzerland or the UK must use a paid, billing-enabled key; and on unpaid keys, Google may use prompts and code to improve its products, with human review.",
+   "Treat Google's official ACP adapter as a possible consumer-account route, but get written confirmation first. Google LLC publishes antigravity-acp 1.4.3 in the ACP registry, and Google's docs show it in Zed and JetBrains with personal sign-in. Google's forum replies call ACP-compatible editors a supported surface, but no official page names a client like Vector.",
+   "Keep the conditions that apply to interactive agy too: the user starts every run, Vector never reads, copies or forwards OAuth tokens, it does not modify or redistribute the agy binary, it does not switch or rotate between accounts, it is never a shared, multi-user or remote service, it runs no unattended loops or quota workarounds, and it keeps the neutral AG letter badge with the note that the names belong to their owners (no Antigravity logo without permission).",
+   "Do not rebuild the chat view by parsing agy's interactive terminal output instead. Google's forum replies treat any orchestration or relaying of a consumer agy session through a third-party app as the same prohibited wrapping."
+  ],
+  "summary": "The earlier 'risky' verdict is too lenient for personal Google accounts, because it missed a FAQ entry Google added between 7 and 9 October 2026 that answers this exact question. The entry says agy headless mode is for direct scripting and CI, and that wrapping agy inside third-party coding agents or applications is not supported on consumer plans. Section 6 of the Antigravity terms backs this up: it calls use 'in connection with products not provided by us' abuse, calls third-party software that accesses the Service a breach, and lets Google suspend the user's Antigravity and Gemini CLI accounts. That covers Vector's chat view on a Free, Plus, Pro or Ultra login. On 19 October 2026 a forum responder citing the FAQ was asked about Vector's exact design (a paid desktop app running the unmodified CLI, never touching tokens) and said no: users' accounts could be suspended, and the app should use API keys or Gemini Enterprise. Earlier 'yes' answers from a staff-flagged moderator (30 September, 7 October) came before the FAQ change and were called superseded on 16 October. The route Google itself recommends is agy run with the user's own Gemini API key or a Gemini Enterprise sign-in, so a version limited to those is defensible. This is a careful reading of the terms, not legal advice."
+ },
+ {
+  "agent": "Claude Code",
+  "vendor": "Anthropic",
+  "verdict": "unclear",
+  "label": "research:trademarks",
+  "conditions": [
+   "Keep the letter badge. Show no Claude or Anthropic logo, mascot, Claude Code ASCII art or Anthropic brand colours, and don't make Vector's chat view imitate Claude Code's interface.",
+   "Either get written confirmation from Anthropic (marketing@anthropic.com or sales) that 'Claude Code' may name the user's installed CLI in the launcher, or switch the label to a form the SDK guidance allows, such as 'Claude' in a list headed Agents, with secondary text such as 'runs your installed claude command'.",
+   "Never put 'Claude' or 'Claude Code' in the name of a Vector product, feature, plan or badge, and never show it more prominently than Vector's own brand in the app or in marketing.",
+   "Add an explicit line saying Vector is not affiliated with, endorsed by or sponsored by Anthropic. Never describe Anthropic as a partner.",
+   "Show only Claude model names that exist, spelled exactly as Anthropic publishes them."
+  ],
+  "summary": "Under US law, naming Claude Code in plain text next to a neutral letter badge follows the standard nominative fair use pattern. The product can't be named any other way, only the name is used, and nothing suggests sponsorship (the three-part test in Toyota v. Tabari). Anthropic's own documents do not permit it as written, though. Its trademark guidelines (effective 1 Aug 2024) require Anthropic to approve beforehand any material that uses its marks. Section 12 of the Consumer Terms (effective 8 Oct 2025) bars users from using Anthropic's name or marks with other products without written permission. That clause binds anyone on a consumer Claude plan, possibly including Vector's owner. The most specific rule is the Agent SDK branding guidance: it forbids labelling a product 'Claude Code' and prefers 'Claude Agent', or 'Claude' inside a menu already labelled Agents. Vector does not use the SDK; no dependency was found in the repo. But Anthropic's docs present running `claude -p` as a subprocess as the other route to the same agent loop, so Anthropic could read the guidance as covering Vector. A GitHub issue asking exactly this was closed by a bot in March 2026 with no answer."
+ },
+ {
+  "agent": "Codex",
+  "vendor": "OpenAI",
+  "verdict": "allowed-with-conditions",
+  "label": "research:trademarks",
+  "conditions": [
+   "Show no OpenAI Blossom, wordmark or Codex icon unless partnercomms@openai.com gives permission.",
+   "Never use 'Codex', 'GPT', 'ChatGPT' or an OpenAI model name in a Vector product, feature, plan or app name.",
+   "Use only real OpenAI model names, spelled exactly as OpenAI publishes them. The guidelines' examples discourage raw API ids as user-facing names.",
+   "Where Codex output appears in Vector's chat view, state clearly that Vector is developed independently and is not affiliated with, endorsed by or sponsored by OpenAI, so the view is not mistaken for an OpenAI product.",
+   "Never say Vector 'partnered with', 'worked with' or 'collaborated with' OpenAI.",
+   "Keep Vector's own app-store and site descriptions, taglines and hero screenshots Vector-branded. If a screenshot shows the Codex row, keep Vector's brand dominant and add the disclaimer, or ask OpenAI first."
+  ],
+  "summary": "OpenAI's brand guidelines let developers truthfully identify the OpenAI technology they use. They also require the app's name, logo, description, tagline and screenshots to be free of OpenAI brands, and forbid model names or 'GPT' in product names. Partnership wording such as 'partnered with' or 'worked with' is not allowed, and model names must be precise. If a product closely resembles an OpenAI product, users must be told clearly that it is independent and not affiliated. OpenAI's Terms of Use (effective 1 Jan 2026) make any use of its name and logo subject to those guidelines. Listing 'Codex' in text with a neutral badge to show which installed CLI will run is a truthful identification and fits nominative fair use, and no OpenAI logo is shown. The tension is in marketing: read strictly, the 'free of OpenAI's brands' rule catches Vector's own descriptions and screenshots that feature Codex."
+ },
+ {
+  "agent": "Cursor (listed in Vector as 'Cursor Agent')",
+  "vendor": "Anysphere (Cursor)",
+  "verdict": "unclear",
+  "label": "research:trademarks",
+  "conditions": [
+   "Before shipping the logo, get written OK from Cursor (or find a licence in the brand-asset package). Otherwise switch Cursor back to letters, like the other agents.",
+   "If the logo stays: use Cursor's file unaltered, at the same size and treatment as the other badges, never more prominent than Vector's brand, and always next to the name.",
+   "Rename the entry 'Cursor CLI' (or just 'Cursor'), in line with Cursor's docs and its naming rule.",
+   "Show no Cursor brand colours or visual styling elsewhere in the integration, and imply no partnership.",
+   "Add an explicit not-affiliated line, beyond the current 'Names and logos belong to their owners'."
+  ],
+  "summary": "Using the name 'Cursor' in text is fine under nominative fair use. Cursor's brand page asks only that it be called 'Cursor', not 'Cursor AI' or 'Cursor Code', and offers downloadable logos, including the cube on its own. It states no licence and no rules for third parties. Cursor's Terms (updated 3 Sep 2026) disclaim implied licences, although that clause is about the Service. Showing Cursor's logo therefore rests on fair use alone, and US nominative fair use favours the bare name: in Tabari the court said the dealer could make its point without Lexus's 'visual trappings', and that those cues could suggest affiliation. Showing only Cursor's and Kilo's logos while every other agent gets letters also makes Cursor stand out in the list, which slightly raises the risk that it looks like a relationship. Vector's label 'Cursor Agent' also does not match Cursor's docs, which call the product 'Cursor CLI'."
+ },
+ {
+  "agent": "GitHub Copilot CLI",
+  "vendor": "GitHub (Microsoft)",
+  "verdict": "allowed-with-conditions",
+  "label": "research:trademarks",
+  "conditions": [
+   "Show no Invertocat, Octocat, Copilot icon or 'GitHub Copilot' lockup.",
+   "Spell the name exactly 'GitHub Copilot CLI' (one word, capital G and H) and keep it in plain text.",
+   "Don't present Vector as GitHub, endorsed by GitHub, or a GitHub or Microsoft partner. Keep the names less prominent than Vector's own.",
+   "Consider adding the trademark footnote Microsoft suggests ('GitHub and GitHub Copilot are trademarks of GitHub, Inc.', or the Microsoft-group wording) alongside a not-affiliated line."
+  ],
+  "summary": "GitHub's brand page allows a permitted GitHub logo to tell people that a project integrates with GitHub, as long as it is less prominent than your own brand, unaltered, and doesn't suggest you are GitHub or that GitHub endorses you. For everything else it requires prior written permission, and its legal note claims no use of any kind is allowed without it. That claim goes further than trademark law, but GitHub's Terms (effective 27 Apr 2026, s.G.2) make the guidelines binding on anyone who uses GitHub's marks, and Vector almost certainly has GitHub accounts. Since 2025 Copilot has no standalone logo for anyone to use. Microsoft's guidelines, which matter because Copilot is also a Microsoft mark, expressly allow truthful, unaltered, less prominent references in text, and forbid Microsoft logos and icons without a licence. A plain-text name with a neutral 'CP' badge fits both GitHub's integration allowance and Microsoft's rules."
+ },
+ {
+  "agent": "Gemini CLI, Antigravity CLI",
+  "vendor": "Google",
+  "verdict": "allowed-with-conditions",
+  "label": "research:trademarks",
+  "conditions": [
+   "Show no Google 'G', Gemini spark or Antigravity marks unless approved through Google's Brand Permissions process.",
+   "Write the names in plain text exactly as Google writes them, and never put Gemini or Antigravity into a Vector product or feature name.",
+   "Imply no relationship with Google or endorsement by it, and add a not-affiliated line.",
+   "Keep the factual notes accurate. The Gemini CLI repo says Antigravity CLI replaced it on 18 June 2026."
+  ],
+  "summary": "Google's brand guidance lets anyone refer to Google or its products in plain text in an informational context without asking, provided they follow its trademark rules. Logos and other 'Brand Features' need Google's approval, and any approved use must carry a trademark notice. The proper-usage rules say: no display that implies a relationship with Google, never fold Google marks into your own product names, set the mark apart from surrounding text, and spell it exactly as on Google's Trademark List. Google's Terms (effective 30 Jul 2026) send anyone wanting to use its branding or logos to Brand Permissions. Gemini CLI is Apache-2.0, which grants no trademark rights, and the Antigravity terms have no brand clause. Plain-text names with letter badges fit Google's 'go for it' category, but the examples Google gives are books, articles and websites, not a commercial app's interface."
+ },
+ {
+  "agent": "Muse Code",
+  "vendor": "Meta",
+  "verdict": "allowed-with-conditions",
+  "label": "research:trademarks",
+  "conditions": [
+   "Show no Meta or Muse logo unless approved through Meta's Brand Review process.",
+   "Use the name only, in plain text, and never as part of a Vector name, feature, domain or handle.",
+   "Imply no partnership, sponsorship or endorsement, and add a not-affiliated line.",
+   "Keep the Contributor-mode data note accurate and sourced. It is factual, not branding, but inaccuracy would undercut fair use."
+  ],
+  "summary": "Meta's brand page says its trademarks may be used only as its guidelines provide or with Meta's permission. Every use of the Meta logo needs approval, and Meta marks may never form part of another company, product or domain name. For text, the page says only to follow its guidance, giving examples such as 'Built with Llama', so referring to a Meta product in text is clearly contemplated. Meta's open-source trademark policy expressly allows nominative use of the name only, with no logo and nothing suggesting sponsorship, but it covers only Meta's open-source marks. Listing Muse Code in plain text with a neutral 'MC' badge and no logo fits nominative fair use and Meta's stated approach. Vector's own note correctly says a logo would need Meta's approval."
+ },
+ {
+  "agent": "Kilo Code (CLI)",
+  "vendor": "Kilo",
+  "verdict": "allowed-with-conditions",
+  "label": "research:trademarks",
+  "conditions": [
+   "Use only the logo file from Kilo's repository, unaltered, to show compatibility. Never suggest Vector or the integration is an official Kilo product.",
+   "Name the product accurately: the CLI is 'Kilo CLI' (command `kilo`), while 'Kilo Code' is Kilo's name for its VS Code and JetBrains extensions. Use 'Kilo' or 'Kilo CLI'.",
+   "To be safe, meet the maintenance expectations: recheck the integration against current Kilo releases about monthly, and state supported versions and limits.",
+   "Remove the Kilo name or logo promptly if Kilo asks.",
+   "Keep the not-affiliated wording in the footnote."
+  ],
+  "summary": "Kilo is the only vendor in this group whose page expressly lets third parties use its logos. Its ecosystem guidelines welcome developers to use any logo from Kilo's open-source repositories to show association or compatibility (as in 'Works with Kilo'), provided it doesn't suggest an official Kilo product. Vector's kilo.svg matches the repository file (black square with a #FAF74F mark), and the code records that permission. The same page sets a '[Your Product Name] for Kilo' naming format, which doesn't apply because Vector doesn't use Kilo in its own name. It also sets maintenance expectations (check compatibility monthly, state supported versions) for community projects using the Kilo name, and Kilo may ask a project to drop the name. The MIT licence covers copyright in the code, not the Kilo marks."
+ },
+ {
+  "agent": "Cline",
+  "vendor": "Cline Bot Inc.",
+  "verdict": "allowed-with-conditions",
+  "label": "research:trademarks",
+  "conditions": [
+   "Show no Cline bot icon or wordmark unless Cline gives written permission.",
+   "Don't describe Cline as a partner, or describe the integration as official or supported by Cline.",
+   "Add an explicit not-affiliated line so the listing cannot reasonably suggest a relationship."
+  ],
+  "summary": "Cline's brand page publishes logos, icons and avatars but sets no rules for third parties. Its Terms (last modified 25 Sep 2025) prohibit users, without prior written consent, from identifying or referring to Cline in a way that could reasonably imply a relationship. They also prohibit any use of Cline's IP that the Terms don't expressly permit. These bind Vector only to the extent Vector or its team are Cline users, and the relationship clause concerns implying a connection, not merely naming. A plain-text 'Cline' entry with a neutral 'CL' badge, plus a clear not-affiliated line, fits nominative fair use and doesn't imply a relationship."
+ },
+ {
+  "agent": "goose",
+  "vendor": "Agentic AI Foundation (Linux Foundation)",
+  "verdict": "allowed-with-conditions",
+  "label": "research:trademarks",
+  "conditions": [
+   "Show no goose or AAIF logo without written permission. Vector's code already records this.",
+   "Add a trademark notice and a not-affiliated line covering goose, at the first or most prominent place it appears (the footnote can do this).",
+   "Keep the name lowercase 'goose', as the project writes it, and never in a Vector product name.",
+   "Imply no AAIF or Linux Foundation sponsorship or endorsement."
+  ],
+  "summary": "The goose repository says goose is part of the Agentic AI Foundation at the Linux Foundation. The Linux Foundation's trademark policy allows fair use of word marks to make true factual statements. It still asks for a trademark notice on the first or most prominent use, and requires written permission before any LF logo appears on websites or marketing. The policy also says a mark must not be part of your product name, must not be more prominent than your own name, and must not imply endorsement. The AAIF brand page adds similar rules for AAIF's own marks, with a sample not-affiliated statement. Vector's plain-text 'goose' with a 'GO' letter badge and no logo fits both, apart from the missing trademark notice."
+ },
+ {
+  "agent": "Junie CLI",
+  "vendor": "JetBrains",
+  "verdict": "allowed-with-conditions",
+  "label": "research:trademarks",
+  "conditions": [
+   "Add a JetBrains-specific attribution, for example 'Junie is a trademark of JetBrains s.r.o.', and link to www.jetbrains.com, such as from the docs link or the footnote.",
+   "Spell 'Junie' and 'JetBrains' exactly as JetBrains does.",
+   "Keep the badge clearly Vector's own. JetBrains forbids imitating its brand assets, and its product icons are traditionally letter-based tiles, so the 'JU' tile should not look like a JetBrains icon.",
+   "If Vector ever shows the logo, use JetBrains' downloaded file unaltered, with the product-logo attribution.",
+   "Imply no JetBrains approval, endorsement or partnership."
+  ],
+  "summary": "JetBrains has the most explicit permission of any vendor here. Its brand guidelines welcome references to its products, including built-in integrations, with examples like '[Product] works with IntelliJ IDEA'. They grant a limited licence to anyone who follows the guidelines, and Junie appears among the downloadable product logos and icons. In return they ask a lot: every use of JetBrains Brand Assets, which by definition include names and trademarks, should link back to jetbrains.com and carry an attribution clearly marking them as JetBrains' property. Exact spelling is required, and JetBrains marks may not be more prominent than your own, imitated, or used in your own product names. The guidelines say that using JetBrains Brand Assets means accepting them, and they are governed by Czech law. A plain-text 'Junie CLI' row with a 'JU' badge is permitted in substance, but Vector's generic footnote probably falls short of JetBrains' attribution request."
+ },
+ {
+  "agent": "Kimi Code",
+  "vendor": "Moonshot AI",
+  "verdict": "allowed-with-conditions",
+  "label": "research:trademarks",
+  "conditions": [
+   "Show no Kimi or Moonshot logo in Vector without Moonshot's written consent.",
+   "Use only the plain-text name 'Kimi Code'. Imply no endorsement or affiliation, and add a not-affiliated line.",
+   "Don't use 'Kimi' in any Vector product, feature or plan name."
+  ],
+  "summary": "Moonshot's Kimi logo usage terms license Kimi logos, trademarks and brand assets only for editorial, media and non-commercial promotional use. They forbid altering the logo and forbid implying endorsement or affiliation without written consent. Vector is commercial, so the licence doesn't cover showing a Kimi logo, and Vector correctly shows letters instead. The terms don't separate the name from the logo, so their 'trademarks' wording could be read to reach commercial text references too. For the plain-text name, Vector relies on nominative fair use, not on Moonshot's licence."
+ },
+ {
+  "agent": "Factory Droid, Amp, Qwen Code, pi (general rule)",
+  "vendor": "Factory, Amp Frontier Corporation, Alibaba (Qwen), Earendil",
+  "verdict": "allowed-with-conditions",
+  "label": "research:trademarks",
+  "conditions": [
+   "Show no vendor logos unless the vendor gives written permission.",
+   "Use exact product names, including the company name where it matters: 'Factory Droid', not 'Droid' alone, since DROID is a mark owned by another company.",
+   "Write names in plain text, never more prominent than Vector's own brand, and never in a Vector product, feature, plan or domain name.",
+   "Change the footnote from 'Names and logos belong to their owners' to an explicit statement, for example: 'Product names are trademarks of their respective owners; Vector is not affiliated with, endorsed by or sponsored by them.'",
+   "Keep every factual note (billing, data use, tool behaviour) accurate and sourced. A misleading claim next to a vendor's name undermines fair use."
+  ],
+  "summary": "No brand or trademark-usage page was found for these four vendors. What exists: Factory's terms (updated 15 Oct 2026) say the agreement gives neither party rights to the other's name or logo. Amp's terms say its marks belong to Amp. Qwen Code is Apache-2.0, whose s.6 grants no trademark rights. pi is MIT with no trademark policy. With no permission granted, the only basis is US nominative fair use: the product can't be identified without the name, only the name is used, and nothing suggests sponsorship. Plain-text names, neutral letter badges and no logos fit that test well. The EU and UK reach a similar result through an 'honest practices' test (EU Trade Mark Regulation Art. 14(1)(c) and (2)), which fails if the use suggests a commercial connection or takes unfair advantage of the mark."
+ },
+ {
+  "agent": "Qwen Code with an Alibaba Cloud Coding Plan or Token Plan subscription key (sk-sp- keys, Model Studio or QwenCloud)",
+  "vendor": "Alibaba Cloud (Model Studio / Bailian, QwenCloud)",
+  "verdict": "allowed-with-conditions",
+  "label": "verify:qwen-jetbrains:Qwen Code with an Alibaba Cloud Coding",
+  "conditions": [
+   "Each headless Qwen turn must come from a prompt the user typed and sent, with one run per send. Never run Qwen from Vectorscope, background or parallel subagents, auto-continue loops, schedules, batch fan-out, or a re-send that Vector starts itself. The CLI's own internal retry on an overloaded error is fine.",
+   "Run Qwen only on the user's own machine. QwenCloud Token Plan Personal is meant for a single device per user, so never move a plan-key session to Vector Cloud, a hosted runner or a remote sandbox.",
+   "Nobody else may drive a user's Qwen session. Multiplayer, Follow, invite guests and Cloud sharing must not let another person type into it or start runs on it, because the plans are for the subscriber's exclusive use with one key per subscriber or seat.",
+   "Never read, log, display, sync or upload the key, including in scrollback, crash reports and shared transcripts. Leave all auth to Qwen Code's own /auth or settings. An exposed key may be disabled automatically.",
+   "Keep the CLI unmodified. Do not override its base URL, endpoint, user agent or headers. If Alibaba returns 'Only available for Coding Agents', show the error to the user and point them to the terminal tier rather than working around it.",
+   "Offer Qwen in the terminal tier too, with a one-line note that links Alibaba's own pages and says plan keys are for interactive use in coding tools. Do not detect the plan by reading the user's key or settings. Consider driving the chat tier through `qwen --acp`, the editor-integration mode Qwen documents for Zed, which fits 'interactive client' better than a mode Qwen describes as for scripting.",
+   "Do not market Vector as a way to use an Alibaba Coding Plan or Token Plan, and do not say Alibaba approves of it.",
+   "Do not promise privacy for Qwen runs. Model Studio's Token Plan Personal uses inputs and outputs for service improvement and model optimisation, and QwenCloud Token Plan inference involves cross-border data transfer.",
+   "Re-read these pages before launch and on each release. Most of them carry no date, and the plans change often: the weekly quota was removed on 22 Sept 2026, and QwenCloud's Coding Plan pages now redirect to Token Plan."
+  ],
+  "summary": "I think the earlier 'unclear' verdict is a little too harsh, though most of its conditions are right. Alibaba bans using a plan key for automation scripts, custom application backends and non-interactive batch calls; the Chinese Coding Plan text bans that use 'in the form of API calls'. The Token Plan Personal terms say outright that calls a user starts interactively inside a tool are normal use. Qwen Code is a listed tool, and Vector's chat tier runs one unmodified `qwen -p` turn for each prompt the user types, on the user's own device and key, without Vector ever calling the API. Alibaba's own Qwen team docs (updated 22 Oct 2026) go further than Vector does: they recommend Coding Plan auth for headless and CI setups, and they document third-party hosts such as Zed running the CLI programmatically (`qwen --acp`). Some risk remains, because the English Coding Plan page (11 Oct 2026) also bans 'other non-interactive scenarios', Qwen calls -p mode a tool for scripting and automation, and Alibaba enforces automatically with suspensions or key bans that land on Vector's users. So the use looks permitted only while Vector stays a human-driven chat front end."
+ },
+ {
+  "agent": "pi: Claude Pro/Max sign-in (rule)",
+  "vendor": "Earendil (pi) / Anthropic (provider terms)",
+  "verdict": "not-allowed",
+  "label": "verify:credits:pi: Claude Pro/Max sign-in (rule)",
+  "conditions": [
+   "Never mention, recommend, document, demo, screenshot or market pi as a way to use a Claude Pro or Max subscription. That covers the launcher, onboarding, docs, site, changelog, investor material and support replies.",
+   "Never read pi's auth.json. Never copy, refresh or pass Anthropic OAuth tokens. Never run 'pi auth print-bearer-token', 'pi auth print-api-key' or 'pi auth check --credentials'. Never automate pi's /login or pick the 'Anthropic (Claude Pro/Max)' option for the user.",
+   "Add Vector's own terms note to the pi card, since pi's own extra-usage warning is interactive-only and does not reach the --mode json chat tier. Suggested wording: 'Anthropic's terms restrict Claude Pro/Max sign-in in third-party tools, and Vector doesn't support it for pi. Connect Anthropic in pi with an API key, or use Claude Code for your Claude subscription.' Keep the sign-in hint neutral ('Type /login inside pi to connect a provider.').",
+   "Do not knowingly carry Anthropic subscription traffic in pi's chat tier. Before a chat-tier run, or when pi's event stream shows provider 'anthropic', check with pi's own 'pi auth check --provider anthropic --json --no-refresh' (never with --credentials). It reports only status and authType. If authType is 'oauth', do not start or continue the Anthropic run in Vector's chat view. Show the note and offer an API key, or Claude Code for the subscription.",
+   "Drop the ANTHROPIC_OAUTH_TOKEN variable name from the environment Vector passes to pi in the chat tier, without reading its value. pi treats any sk-ant-oat token as subscription auth and sends Claude Code's identity with it.",
+   "Keep pi's model list in Vector empty or neutral. Never surface Claude-subscription models for pi, and never imply that pi gives access to a Claude plan.",
+   "Keep Vector's own rule: no Claude.ai login anywhere in Vector. Claude subscription use goes only through the unmodified Claude Code binary, which the legal page expressly allows.",
+   "In the terminal tier, Vector should act as a plain terminal and add no shortcut, preset or promotion for this route. pi shows its own extra-usage warning there.",
+   "Re-check before each release, and sooner if any of these happen: pi stops sending Claude Code's identity, Anthropic names pi as an approved usage-credits tool, or Anthropic clarifies how it treats launchers of third-party harnesses. Loosen or tighten the conditions to match."
+  ],
+  "summary": "\"Risky\" was too lenient. The earlier review missed two primary sources. pi's request code (main, updated 23 Oct 2026) drops pi's own client identity when it holds a Claude subscription token and presents itself as Claude Code. It sends a claude-cli user-agent, x-app: cli, Claude Code beta flags, a 'You are Claude Code' system prompt and Claude Code tool names, under a comment that reads 'Stealth mode'. Anthropic's current help article on Claude login prohibits third-party tools that misrepresent their identity to Anthropic's servers or route third-party traffic against subscription limits. The Claude Code legal page also bars third parties from offering Claude.ai login. So pi's 'Anthropic (Claude Pro/Max)' route breaks Anthropic's stated rules, and Vector must not support it, promote it or knowingly carry it in its chat view. Vector's own legal exposure stays low and indirect if it follows the conditions below, because it never touches the credential and is not a party to the user's Consumer Terms. This verdict covers only this route. pi with an API key or another provider is a separate question. There is one more reason to act: pi's own warning that Anthropic bills this usage as extra usage appears only in interactive mode, so users of Vector's headless chat tier never see it. Not legal advice."
+ },
+ {
+  "agent": "Claude Code",
+  "vendor": "Anthropic",
+  "verdict": "allowed-with-conditions",
+  "label": "verify:trademarks:Claude Code",
+  "conditions": [
+   "Have the company accept Anthropic's Commercial Terms, for example by opening a Claude Console organisation in Vector's name. The legal page makes this a condition of running Claude Code in your products.",
+   "Launch only the user's own installed, unmodified claude binary, and never bundle or patch a copy.",
+   "Never remove or restrict a built-in sign-in method. That rules out forcing --bare, writing forceLoginMethod, stripping or injecting ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN or CLAUDE_CODE_OAUTH_TOKEN, and pointing ANTHROPIC_BASE_URL at a Vector server.",
+   "Never read, store or pass on Claude credentials, keychain entries or setup-token output. Sign-in must finish in Anthropic's own flow.",
+   "Never pay for, resell, bundle or intermediate Claude usage. Codium credits must not buy Claude Code runs, and Claude Code must not run on any Vector or Vector Cloud host.",
+   "Never let one person's login serve another person. In multiplayer, invite-guest, Follow or shared sessions, a guest must not be able to prompt or resume the host's Claude Code run.",
+   "Never use the user's Claude Code login for Vector's own features: Vectorscope, titles, summaries, brain indexing, helper subagents, and scheduled or background jobs. Every run must start from an explicit user action, and Vector should avoid fanning out many parallel runs by default.",
+   "Do not change how Claude Code identifies itself to Anthropic. That means no spoofed client headers or entrypoint variables.",
+   "Use 'Claude Code' only as plain text that names the user's installed CLI, for example 'runs your installed claude command'. Never put it in the name of a Vector product, feature, plan or mode.",
+   "Show no Anthropic or Claude logo, spark, mascot, ASCII art or brand colours, and don't imitate Claude Code's interface. Keep the CC badge neutral; slate is safer than the warm sand tone #c4ad86.",
+   "Add a line saying Vector is not affiliated with, endorsed by or sponsored by Anthropic, because the current footnote does not say this. Never call Anthropic a partner.",
+   "Say that Claude Code usage is billed by Anthropic under the user's own plan. Never present it as included in Vector's plans or as free.",
+   "Show only model names Anthropic publishes. All twelve entries in CLAUDE_MODELS match its models page as of 23 Oct 2026.",
+   "Re-check the terms before each release and keep a remote off-switch. If --bare becomes the default for -p, fall back to the terminal tier and never extract tokens as a workaround."
+  ],
+  "summary": "The first review missed the most relevant document, the Legal and compliance page in the Claude Code docs. It lets a product run Claude Code when three things hold: the binary is unmodified, its sign-in methods are left intact, and each end user signs in with their own subscription or key and is billed by Anthropic directly. The same page says nothing stops an end user signing in to the unmodified binary with their own subscription. It also lets a product say, accurately and in plain text, that it runs Claude Code, as long as the name stays out of the product's own names and logos and nothing implies endorsement. Vector fits these rules, and Anthropic's Help Center (update of 7 Oct 2026) says claude -p and third-party apps still work within subscription limits, so the earlier verdict of 'unclear' is too harsh. Three risks remain: running Claude Code in a product is tied to accepting the Commercial Terms; Anthropic calls claude -p 'the Agent SDK via the CLI', and its SDK branding rule forbids the label 'Claude Code'; and the Usage Policy taking effect on 12 Nov 2026 bans services that route requests through consumer subscriptions or misrepresent the client. This is a reading of the terms, not legal advice."
+ },
+ {
+  "agent": "Cursor Agent (Cursor CLI, binary agent / cursor-agent)",
+  "vendor": "Anysphere (Cursor)",
+  "verdict": "allowed-with-conditions",
+  "label": "verify:trademarks:Cursor (listed in Vector as 'Cursor Agent'",
+  "conditions": [
+   "Only run the official, unmodified Cursor binary, using its documented flags and commands: -p, --output-format stream-json, --model, --resume, --trust, --force, login, status, models. Never call Cursor's private endpoints. Never extract or reuse the user's Cursor tokens. Never route Cursor models into Vector's own agent or proxy. A forum reply that appears to be from Cursor staff says third-party providers that call private endpoints breach ToS section 1.5.",
+   "Start every Cursor run from a specific action by the user, on that user's own Cursor account. Vectorscope, background subagents, schedules and other Vector automation must not start Cursor runs unless the user asks. This keeps Vector as far as possible from the AUP's automated-access bullet.",
+   "Never resell, share or pool Cursor access. Never let one user's Cursor account serve another user or a guest, including in multiplayer and Follow sessions. ToS section 1.5(iii) forbids renting, leasing or selling the Service, and the AUP forbids reselling Inputs or Suggestions and dodging billing or rate limits.",
+   "Never use Cursor's outputs (code, transcripts, events) to train, fine-tune or evaluate Vector's own models, such as Velocity or Codium. ToS section 1.5(v) and the AUP forbid building a competing model from the Service or its Suggestions. Keep Cursor transcripts on the user's machine, or at least out of every training pipeline.",
+   "Before the user's first Cursor run, say clearly that --force and --trust let Cursor change files and run commands without asking. Keep those runs in the isolated worktree. Under ToS section 1.7, the user takes on the risk of auto-executed code.",
+   "Label Cursor runs as Cursor in Vector's chat view. Cursor's work must not look like Vector's own service, and Vector's service must not look like Anysphere's. The AUP forbids services that appear to come from Anysphere when they do not, and the reverse.",
+   "Logo: the safest choice is letters, like the other agents. If the cube stays, use Cursor's own file unaltered, at the same size and treatment as every other badge, always beside the name, and never more prominent than Vector's own brand. Use no Cursor colours or styling anywhere else. Do not use the logo on the landing page, in ads or in store listings without Cursor's written permission. Remove it promptly if Anysphere asks.",
+   "Change the footnote to say explicitly that Vector is not affiliated with or endorsed by Anysphere or any of the other vendors, in addition to saying that names and logos belong to their owners.",
+   "Naming: 'Cursor Agent' (from Cursor's own launch post) and 'Cursor CLI' (from the current docs) are both acceptable. Never use 'Cursor AI' or 'Cursor Code'. Do not advertise a partnership or a feature like 'Cursor built in'. A plain-text 'works with Cursor CLI' is fine.",
+   "Recommended before a paid commercial launch: ask Cursor in writing (support or sales) to confirm two things. First, that a desktop app starting the user's own Cursor CLI in print mode at the user's request is within the 11 Aug 2026 AUP. Second, that showing the cube in a list of compatible agents is acceptable. Keep the reply on file."
+  ],
+  "summary": "My reading of the terms is that Vector's way of running Cursor is allowed, under conditions. Vector runs the user's own unmodified Cursor CLI, signed in to the user's own account, with flags Cursor documents. Cursor's docs say print mode is for 'scripts, CI pipelines, or automation' and that ACP is for 'building custom clients and integrations'. Cursor's own blog promotes running the CLI inside JetBrains IDEs on the user's Cursor account. Forum replies, apparently from Cursor staff, describe resale of Cursor itself as the thing the ToS forbids, not apps that use it. The other researcher was too harsh on the logo and the name, and missed the biggest textual risk. Cursor's AUP (11 Aug 2026), which forms part of the ToS and wins any conflict, bans access 'through automated or non-human means, whether through a bot, script, or otherwise' with no exception. That clashes with Cursor's own headless docs and is most likely aimed at unauthorized bots, but Cursor has not resolved the clash in writing. The logo has no licence and rests on nominative fair use. The risk is modest and mostly a removal request, because Cursor offers the cube as a separate download and Vector shows it unaltered, badge-sized and beside the name. The name 'Cursor Agent' is acceptable: Cursor titled its own launch post 'Cursor Agent CLI', and its brand rule bans only 'Cursor AI' and 'Cursor Code'."
+ }
+]
