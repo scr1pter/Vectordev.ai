@@ -181,18 +181,24 @@ const layer = Layer.effectDiscard(
                 {
                   http,
                   // Vector Local's Web access decides each hop as it is sent (research-reader); the reader itself
-                  // refuses a private destination research found, and a metadata address whoever asks.
+                  // refuses a private destination research found, and a metadata address whoever asks. Only the
+                  // lead is asked about an address the user typed on their own computer or network, as in the V1
+                  // tool: any other agent's read of one is refused before anything is sent.
                   authorize: () => Effect.void,
-                  authorizePrivate: (url) =>
-                    permission.assert({
-                      action: "private_network",
-                      resources: [new URL(url).origin],
-                      save: [new URL(url).origin],
-                      metadata: { url, tool: name },
-                      sessionID: context.sessionID,
-                      agent: context.agent,
-                      source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
-                    }),
+                  ...(lead
+                    ? {
+                        authorizePrivate: (url: string) =>
+                          permission.assert({
+                            action: "private_network",
+                            resources: [new URL(url).origin],
+                            save: [new URL(url).origin],
+                            metadata: { url, tool: name },
+                            sessionID: context.sessionID,
+                            agent: context.agent,
+                            source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
+                          }),
+                      }
+                    : {}),
                   limiter: research.limiter(runID),
                   ...(robots ? { robots } : {}),
                   ...(research.network.resolver ? { resolver: research.network.resolver } : {}),
@@ -204,6 +210,8 @@ const layer = Layer.effectDiscard(
                   () => new ToolFailure({ message: `${checked.url} was not read: reaching it was not approved.` }),
                 ),
               )
+              if (!lead && page.reason === ResearchReader.PRIVATE_ASK)
+                return { text: ResearchSource.LEAD_ONLY, metadata: { runID, url: checked.url } }
               return answer(
                 yield* ResearchSource.keep({
                   store,

@@ -164,21 +164,30 @@ export const ResearchReadTool = Tool.define<
                   {
                     http,
                     // Vector Local's Web access decides each hop as it is sent (research-reader); the reader itself
-                    // refuses a private destination research found, and a metadata address whoever asks.
+                    // refuses a private destination research found, and a metadata address whoever asks. Only the
+                    // lead is asked about an address the user typed on their own computer or network: a researcher
+                    // carries no private context (sections 6.4 and 6.4a), so without the question its read of one is
+                    // refused before anything is sent.
                     authorize: () => Effect.void,
-                    authorizePrivate: (url) =>
-                      ctx.ask({
-                        permission: "private_network",
-                        patterns: [new URL(url).origin],
-                        always: [new URL(url).origin],
-                        metadata: { url, tool: "research_read" },
-                      }),
+                    ...(lead
+                      ? {
+                          authorizePrivate: (url: string) =>
+                            ctx.ask({
+                              permission: "private_network",
+                              patterns: [new URL(url).origin],
+                              always: [new URL(url).origin],
+                              metadata: { url, tool: "research_read" },
+                            }),
+                        }
+                      : {}),
                     limiter: research.limiter(runID),
                     ...(yield* research.robots().pipe(Effect.map((robots) => (robots ? { robots } : {})))),
                     ...(research.network.resolver ? { resolver: research.network.resolver } : {}),
                     ...(research.network.publicNames ? { publicNames: research.network.publicNames } : {}),
                   },
                 ).pipe(EgressHttpClient.labelled("research-reader"))
+          if (!lead && fetched?.reason === ResearchReader.PRIVATE_ASK)
+            return { title: "Not read", output: ResearchSource.LEAD_ONLY, metadata: { runID, url: checked.url } }
           // A page built by script is read in the agent's own research browser, when the desktop app has one. A
           // private page is never rendered there: research browsers reach the public web only.
           const rendered =

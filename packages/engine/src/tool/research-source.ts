@@ -16,6 +16,7 @@ export const MAX_LINKS = ResearchSource.MAX_LINKS
 export const OUTBOUND = ResearchSource.OUTBOUND
 export const SCOPE = ResearchSource.SCOPE
 export const HIDDEN = ResearchSource.HIDDEN
+export const LEAD_ONLY = ResearchSource.LEAD_ONLY
 export const hidden = ResearchSource.hidden
 export const shown = ResearchSource.shown
 

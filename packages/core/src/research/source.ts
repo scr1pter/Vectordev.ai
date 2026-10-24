@@ -47,6 +47,8 @@ export const OUTBOUND =
 export const SCOPE = "This research's scope is the brain and the repository's files, so it reads no web pages."
 export const HIDDEN =
   "That source is for the research lead only: it was read in the user's own signed-in browser, or it is on their computer or network. Researchers read public pages; read a public address instead."
+export const LEAD_ONLY =
+  "That address is for the research lead only: it is on the user's own computer or network. Researchers read public pages; read a public address instead."
 
 /**
  * Whether a saved source is kept from the agent asking (sections 5.6a and 6.4a): a researcher, a web worker, sees no

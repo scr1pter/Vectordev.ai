@@ -1,6 +1,8 @@
 import { afterAll, expect } from "bun:test"
+import { rm } from "node:fs/promises"
 import path from "node:path"
-import { Effect } from "effect"
+import { Effect, Fiber } from "effect"
+import { Brain } from "@vectordevai/core/brain/brain"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { Egress } from "@vectordevai/core/local-mode/egress"
 import { Global } from "@vectordevai/core/global"
@@ -16,6 +18,7 @@ import { RENDER } from "../../src/tool/research-read"
 import { ResearchRun } from "../../src/tool/research-run"
 import { ResearchSource } from "../../src/tool/research-source"
 import { FakeBridge } from "../lib/fake-bridge"
+import { reply } from "../lib/llm-server"
 import { calls, output, plan, runtime, send, setup } from "../lib/research"
 import { lines, pdf } from "../../../core/test/brain/fixture/pdf"
 import { FakeWeb } from "../../../core/test/lib/fake-web"
@@ -419,15 +422,19 @@ it.instance(
 )
 
 it.instance(
-  "a researcher's typing is checked against what it read itself, and its sub-question exempts nothing",
+  "a researcher reads no private address the user typed, its typing is checked against the run's private context, and its sub-question exempts nothing",
   () =>
     Effect.gen(function* () {
       const test = yield* setup(web)
       const sessions = yield* Session.Service
+      const brain = yield* Brain.Service
+      const memory = brain.files().memory
+      yield* Effect.addFinalizer(() => Effect.promise(() => rm(memory, { force: true })))
       const lead = yield* sessions.create({ title: "Research", permission: allow })
       bridge.answer(desktop())
       yield* approve
-      // On this computer, so on the user's own network: what it says is private context of the run.
+      // On this computer, so on the user's own network. The user typed it, but only the lead reads it: a researcher
+      // carries no private context.
       const notes = web.direct("planner", "/")
       yield* test.llm.tool("research_plan", plan({ depth: "deep" }))
       // Nothing private names Zephyr yet, so the lead's sub-question passes its check.
@@ -437,7 +444,9 @@ it.instance(
         subagent_type: "researcher",
         background: false,
       })
-      yield* test.llm.toolMatch(researcher, "research_read", { url: notes })
+      // The researcher's first step waits until the user has written to their MEMORY.md (below).
+      const written = Promise.withResolvers<void>()
+      yield* test.llm.pushMatch(researcher, reply().wait(written.promise).tool("research_read", { url: notes }))
       yield* test.llm.toolMatch(researcher, "research_browser", { action: "open", url: ARTICLE })
       // Zephyr is in the researcher's own sub-question, which the lead wrote and the user did not type.
       yield* test.llm.toolMatch(researcher, "research_browser", {
@@ -453,14 +462,24 @@ it.instance(
       })
       yield* test.llm.textMatch(researcher, "Found it.")
       yield* test.llm.text("Done.")
-      yield* send({
+      const fetched = web.count("planner", "/")
+      const running = yield* send({
         sessionID: lead.id,
         agent: "research",
         text: `Research how heat pumps are sized for Hooli, from ${notes} and ${ARTICLE}.`,
-      })
+      }).pipe(Effect.forkScoped)
+      // Once the researcher works, the lead's check of its sub-question is done. The user then writes the Zephyr
+      // planner into their MEMORY.md, which makes it private context of the run from here on.
+      while (!(yield* test.llm.hits).some(researcher)) yield* Effect.sleep(10)
+      yield* Effect.promise(() => Bun.write(memory, "The Zephyr planner is the sizing tool our installers use.\n"))
+      written.resolve()
+      yield* Fiber.join(running)
       const [child] = yield* sessions.children(lead.id)
       const [read] = yield* calls(child!.id, "research_read")
-      expect(read?.state.status === "completed" ? read.state.metadata.private : undefined).toBe(true)
+      expect(output(read)).toBe(ResearchSource.LEAD_ONLY)
+      expect(read?.state.status === "completed" ? read.state.metadata.private : undefined).toBeUndefined()
+      // Refused before anything was sent to it.
+      expect(web.count("planner", "/")).toBe(fetched)
       const typed = yield* calls(child!.id, "research_browser")
       expect(output(typed[1])).toBe(ResearchBrowser.TYPED)
       expect(output(typed[2])).toContain("Typed into ref_1.")
