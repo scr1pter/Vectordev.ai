@@ -350,7 +350,7 @@ export const ABOUT = {
     "Vector learns from what you type: the formats and kinds of data you like, what you mean by words you use, and how you like things done. Each item shows the words it came from. Undo, edit, forget or turn off any kind.",
   sensitive: "Vector tries not to keep sensitive personal details.",
   storage:
-    "Your brain is a file on this computer (brain.db). You can see, change, export or erase everything in it. With Vector Local on, which the CLI offers today, its contents go only to the model servers you list, and the network log shows which requests carried them.",
+    "Your brain is a file on this computer (brain.db). You can see, change, export or erase everything in it. With Vector Local on, its contents go only to the model servers you list, and the network log shows which requests carried them.",
   agents:
     "Every agent uses what Vector has learned about you: coding, subagents, the Vectorscope reviews you run in Vector and Deep research. Sessions with invited guests, and free models that may train on your prompts, get none of it. Reviews and research see how you work, not facts about you.",
   erase:
