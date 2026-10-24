@@ -669,8 +669,8 @@ const main = Effect.gen(function* () {
   }
 })
 
-// The certificate authorities company policy or the user's config names changed while Vector runs: its engine trusts
-// them once it restarts, which stops what agents are running, so the person chooses when.
+// A certificate authority the user's own config names applies only once its owner trusts it (local-certificates.ts):
+// anything that can write the config, an agent's shell command included, could have added it.
 async function askToTrustCertificates(waiting: readonly WaitingAuthority[]) {
   const named = waiting.map((item) => `${item.subject} (${item.file})`).join("; ")
   const one = waiting.length === 1
@@ -688,6 +688,8 @@ async function askToTrustCertificates(waiting: readonly WaitingAuthority[]) {
   return answer.response === 0
 }
 
+// The certificate authorities company policy or the user's config names changed while Vector runs: its engine trusts
+// them once it restarts, which stops what agents are running, so the person chooses when.
 async function askToRestartForCertificates(relaunch: () => void) {
   const answer = await dialog.showMessageBox({
     type: "question",

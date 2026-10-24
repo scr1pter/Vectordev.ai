@@ -14,9 +14,9 @@ import { desktopLocalFolders, resolveDesktopLocal } from "./local-policy"
 
 // Vector Local in the desktop app (plan sections 4.2, 4.3.6, 4.7 and 4.9). Desktop main resolves the policy before
 // app.whenReady from the folders its engine reads (local-policy.ts), and from then on:
-// - Chromium: one dispatcher per session (egress-filter.ts), WebRTC kept to the proxy, no DNS prefetching, no QUIC
-//   (so no WebTransport), no spellcheck downloads on Windows and Linux, and no WebRTC peer connections or WebTransport
-//   in the agent's browser;
+// - Chromium: one dispatcher per session (egress-filter.ts), WebRTC kept to the proxy, no DNS prefetching, no QUIC,
+//   no spellcheck downloads on Windows and Linux, and no WebRTC peer connections or WebTransport in the agent's
+//   browser;
 // - the company's certificate authorities are added to the certificates desktop main and its engine trust;
 // - once the engine runs, desktop main compares its policy with the engine's (GET /local) as soon as the engine says
 //   Vector Local changed (its local.updated event) and every half minute, reading its own folders again each time,
@@ -45,8 +45,9 @@ const FIRST_RUN_CHECK = 15_000
 const CERTIFICATES_CHECK = 60_000
 // Chromium's switches under Vector Local, which only a start sets. Name prefetching may look up a name a page links to
 // before the request the dispatcher would refuse. QUIC carries WebTransport, whose connections no webRequest listener
-// sees: in a session with no proxy (the agent's browser, Vector's windows) a page could reach the internet with it
-// whatever Web access says. Without QUIC, Chromium uses HTTP/2 and HTTP/1.1, which the dispatcher decides.
+// sees, so it is off as one more layer; nothing here checks that Chromium opens no WebTransport without it, which is
+// why the agent's browser loses WebTransport itself (guardAgentContents). Web requests fall back to HTTP/2 and
+// HTTP/1.1, which the dispatcher decides as before.
 const LOCAL_SWITCHES = ["dns-prefetch-disable", "disable-quic"]
 const ANSWERED = "firstRunAnswered"
 // A start held for the first run's question, which a start that left state behind (ranBefore) still holds for.
