@@ -195,8 +195,8 @@ export const Summary = Schema.Struct({
   helper_requests: NonNegativeInt,
   // Model calls by origin.
   model_calls: Schema.Record(Schema.String, NonNegativeInt),
-  // Web pages read (what a page loaded is not a page), and the hosts reached for web purposes, what pages loaded
-  // included.
+  // Web pages read (what a page loaded is not a page), and the other hosts reached for web purposes: the hosts what
+  // the pages loaded came from, the pages' own hosts left out ("6 pages, 41 other hosts they loaded").
   pages: NonNegativeInt,
   hosts: NonNegativeInt,
   searches: NonNegativeInt,

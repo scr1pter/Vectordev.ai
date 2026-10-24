@@ -10,6 +10,7 @@ import { applyRemoteProviderPolicy } from "./provider-policy"
 import { Egress } from "./local-mode/egress"
 import { LocalPolicy } from "./local-mode/policy"
 import { LocalSources } from "./local-mode/sources"
+import { StartupHold } from "./startup-hold"
 
 const LOCAL_SOURCE = LocalSources.get("provider-policy")!
 
@@ -90,11 +91,14 @@ export function createClient(input: {
 const client = createClient({
   file: path.join(Global.Path.cache, "provider-policy.json"),
   apply: applyRemoteProviderPolicy,
-  // Operators who turn off Vector's metadata fetches follow the release default.
-  disabled: () => Flag.VECTOR_DISABLE_MODELS_FETCH,
+  // Operators who turn off Vector's metadata fetches follow the release default, and so does a desktop first run
+  // until the person has chosen how to run models (StartupHold), when the switch is read.
+  disabled: () => Flag.VECTOR_DISABLE_MODELS_FETCH || StartupHold.held(),
   offline: () => LocalPolicy.blocks(Egress.policy(), LOCAL_SOURCE),
   request: (url, init) => Egress.fetch(LOCAL_SOURCE.id, url, init),
 })
+
+StartupHold.onRelease(() => void client.check())
 
 export const restore = client.restore
 export const check = client.check

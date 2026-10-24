@@ -77,6 +77,7 @@ describe("server authentication", () => {
       ["POST", "/local/servers"],
       ["POST", "/local/check"],
       ["POST", "/local/grant"],
+      ["POST", "/local/startup/release"],
       ["GET", "/local/recommend"],
       ["HEAD", "/local"],
     ])

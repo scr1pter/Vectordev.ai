@@ -159,7 +159,8 @@ describe("Egress.decide", () => {
       helper_requests: 3,
       model_calls: { [MODEL]: 2 },
       pages: 1,
-      hosts: 1,
+      // The page's own host is not another host it loaded.
+      hosts: 0,
       searches: 0,
       carried,
       blocked: { "model-catalog": 1 },
@@ -189,9 +190,10 @@ describe("Egress.decide", () => {
       page("https://docs.example.org/guide")
     })
     const summary = Egress.summary("ses_browse")
+    // "2 pages, 2 other hosts they loaded": the pages' own hosts are not among the others.
     expect({ pages: summary.pages, hosts: summary.hosts, requests: summary.requests }).toEqual({
       pages: 2,
-      hosts: 4,
+      hosts: 2,
       requests: 5,
     })
     expect(Egress.events({ session: "ses_browse" }).map((event) => event.resource)).toEqual([

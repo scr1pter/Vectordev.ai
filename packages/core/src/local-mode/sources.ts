@@ -662,7 +662,7 @@ export const SOURCES: readonly Source[] = [
       "packages/desktop/src/main/egress-filter.ts",
       "packages/engine/src/tool/research-browser.ts",
     ],
-    note: "Goes through Vector's research proxy, which never reaches this computer, your network or a cloud metadata address. Each address an agent opens follows Web access as it is now; the pages' own requests follow it as it was set when the app started",
+    note: "Goes through Vector's research proxy, which never reaches this computer, your network or a cloud metadata address. Each address an agent opens, and each request its pages make, follows Web access as it is now",
   },
   {
     id: "external-agents",
@@ -685,6 +685,17 @@ export const SOURCES: readonly Source[] = [
     where: ["engine", "desktop"],
     callSites: ["packages/core/src/local-mode/guard.ts", "packages/desktop/src/main/egress-filter.ts"],
     note: "Reaches only this computer and the model servers on your list; anything else the guard sees is blocked and logged with the code that made it. That covers Vector's worker threads: the threads of a process share one policy and one log, so the blocks of the terminal UI's main thread and of its workers are in the engine's log. The brain's reader is sealed instead: it refuses every connection off this computer and logs none, since it makes none of its own. Worker threads are covered under Bun when started through the global Worker or the worker_threads module, and under Node when their first import is the guard, as the brain's reader's is. The guard does not see Bun.fetch, a fetch, WebSocket or Bun.connect kept from before it started, Bun.SQL or Bun.RedisClient, or under Bun the ws package, whose one use in Vector (the OpenAI WebSocket transport) decides each model call itself, pooled sockets included, and the undici package, whose fetch is Bun.fetch there, so the GitHub requests of vector github are not seen. A request for a model server on your list on this computer or your network goes direct: one the proxy settings would still send to a proxy is refused, with a note to add its host to NO_PROXY. A listed server with an internet name may go through your company's proxy. The terminal UI's syntax highlighting downloads grammars from github.com in a worker thread, so with Vector Local on, including when it is turned on while the terminal UI runs, those downloads are blocked and logged",
+  },
+  {
+    id: "chromium-network",
+    purpose: "unknown",
+    hosts: [],
+    sends: "Name lookups, early connections and certificate checks for the hosts the app's windows and browsers name",
+    why: "Chromium makes these itself for the pages it shows, below the layer where Vector decides each request",
+    local: "not-covered",
+    where: ["desktop"],
+    callSites: ["packages/desktop/src/main/egress-filter.ts", "packages/desktop/src/main/local-mode.ts"],
+    note: "Vector decides and logs every request Chromium makes for its windows, the agent's browser, the research browsers and the updater. Some traffic happens below that and is not in the network log. Chromium may look up a name a page links to, and open a connection to a host a page names, before the request Vector refuses: Vector Local turns that name prefetching off when Vector starts, so after Vector Local is turned on it stops only once Vector restarts. With Vector Local on, WebRTC uses no UDP. Its TCP goes through a research browser's proxy, the agent's browser has no WebRTC in any frame, and Vector's own windows run only the app. The operating system checks the certificates of the sites the windows load (revocation lists and OCSP on macOS and Windows). On Windows and Linux, Vector Local points Chromium's spellcheck dictionary downloads at this computer",
   },
   {
     id: "agent-programs",

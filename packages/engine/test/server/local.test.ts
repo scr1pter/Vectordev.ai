@@ -9,6 +9,7 @@ import { Egress } from "@vectordevai/core/local-mode/egress"
 import { ModelSlots } from "@vectordevai/core/local-mode/model-slots"
 import type { LocalProbe } from "@vectordevai/core/local-mode/probe"
 import { LocalSources } from "@vectordevai/core/local-mode/sources"
+import { StartupHold } from "@vectordevai/core/startup-hold"
 import type { LocalMode } from "@vectordevai/schema/local-mode"
 import { Config } from "../../src/config/config"
 import type { LocalSettings } from "../../src/config/local-settings"
@@ -182,6 +183,7 @@ describe("the Local API", () => {
       ["POST", "/local/servers", { url: "http://127.0.0.1:9" }],
       ["POST", "/local/check", {}],
       ["POST", "/local/grant", { source: "embedding-model" }],
+      ["POST", "/local/startup/release"],
       ["GET", "/local/recommend"],
     ]
     for (const [method, route, body] of routes) {
@@ -861,6 +863,23 @@ describe("the Local API", () => {
     expect(never.data.code).toBe("invalid")
     const missing = await json<Refusal>(await send("POST", "/local/grant", { source: "no-such-source" }))
     expect(missing.data.code).toBe("not-found")
+  })
+
+  test("a desktop first run's held startup fetches go once the owner lets them, and a guest cannot", async () => {
+    StartupHold.useTestHold(true)
+    try {
+      const released: string[] = []
+      StartupHold.onRelease(() => void released.push("released"))
+      expect((await send("POST", "/local/startup/release", undefined, guest)).status).toBe(403)
+      expect(StartupHold.held()).toBe(true)
+      expect(await json<boolean>(await send("POST", "/local/startup/release"))).toBe(true)
+      expect(StartupHold.held()).toBe(false)
+      expect(released).toEqual(["released"])
+      // Once is enough: a second answer holds nothing.
+      expect(await json<boolean>(await send("POST", "/local/startup/release"))).toBe(false)
+    } finally {
+      StartupHold.useTestHold(false)
+    }
   })
 
   test("model suggestions name dated examples with their label", async () => {

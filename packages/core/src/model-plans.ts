@@ -9,6 +9,7 @@ import { Egress } from "./local-mode/egress"
 import { Flag } from "./flag/flag"
 import { Global } from "./global"
 import { ModelPlanStatus } from "./model-plan-status"
+import { StartupHold } from "./startup-hold"
 
 export const PROVIDER_ID = ModelPlanStatus.PROVIDER_ID
 export const PROVIDER_NAME = "Vector Codium"
@@ -166,8 +167,10 @@ export const node = makeGlobalNode({
   layer: Layer.sync(Service, () => {
     const client = createClient({
       file: path.join(Global.Path.cache, "codium-models.json"),
-      // Vector Local keeps Vector Codium off, so its plans are not read either.
-      disabled: () => Flag.VECTOR_DISABLE_MODELS_FETCH || Egress.policy().enabled,
+      // Vector Local keeps Vector Codium off, so its plans are not read either. A desktop first run's hold
+      // (StartupHold) keeps them back until the person has chosen how to run models; nothing is kept while it holds,
+      // so the next read after it reaches vectordev.ai.
+      disabled: () => Flag.VECTOR_DISABLE_MODELS_FETCH || Egress.policy().enabled || StartupHold.held(),
       request: (url, init) => Egress.fetch("plans-catalog", url, init),
     })
     return Service.of({

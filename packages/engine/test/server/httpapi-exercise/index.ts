@@ -701,6 +701,10 @@ const scenarios: Scenario[] = [
       },
       "status",
     ),
+  http.protected
+    .post("/local/startup/release", "local.startup.release")
+    .at((ctx) => ({ path: "/local/startup/release", headers: ctx.headers() }))
+    .json(200, (body) => check(body === false, "a Vector that started without the first run's hold holds nothing")),
   http.protected.get("/local/recommend", "local.recommend").json(200, (body) => {
     object(body)
     check(typeof body.label === "string", "model suggestions should carry their dated label")

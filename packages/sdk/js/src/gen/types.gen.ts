@@ -12782,6 +12782,38 @@ export type LocalGrantResponses = {
 
 export type LocalGrantResponse = LocalGrantResponses[keyof LocalGrantResponses]
 
+export type LocalStartupReleaseData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/local/startup/release"
+}
+
+export type LocalStartupReleaseErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type LocalStartupReleaseError = LocalStartupReleaseErrors[keyof LocalStartupReleaseErrors]
+
+export type LocalStartupReleaseResponses = {
+  /**
+   * Whether this Vector was holding them
+   */
+  200: boolean
+}
+
+export type LocalStartupReleaseResponse = LocalStartupReleaseResponses[keyof LocalStartupReleaseResponses]
+
 export type LocalRecommendData = {
   body?: never
   path?: never
