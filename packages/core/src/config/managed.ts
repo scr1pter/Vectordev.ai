@@ -133,16 +133,19 @@ export type TrustOptions = {
   readonly user?: boolean
 }
 
-// The test managed folder, which only test/preload.ts sets. No environment variable can: one would let whatever
+// The test managed folder, chosen explicitly by the test harness. No environment variable can: one would let whatever
 // starts Vector swap the company's policy for a folder it owns, or drop the MDM profile and the policy key.
-const testing: { directory?: string } = {}
+const testing: { directory?: string; acl?: AclReader } = {}
 
 /**
  * Tests only: read company policy from `directory`, let the user running Vector own the files there, and leave this
- * computer's own MDM profile and policy key out, so a test never reads the machine's real company policy.
+ * computer's own MDM profile and policy key out, so a test never reads the machine's real company policy. Policy
+ * semantics fixtures may supply their own Windows ACL reader; omitting it or clearing the directory restores the
+ * real reader. Nothing in the process environment can choose either override.
  */
-export function useTestDirectory(directory: string | undefined) {
+export function useTestDirectory(directory: string | undefined, acl?: AclReader) {
   testing.directory = directory
+  testing.acl = directory === undefined ? undefined : acl
 }
 
 /** The folders that hold managed vector.json and vector.jsonc. */
@@ -174,7 +177,7 @@ export function read(): Read {
   const checked = directories()
     .flatMap((directory) => MANAGED_FILES.map((file) => path.join(directory, file)))
     .filter((file) => existsSync(file))
-    .map((file) => ({ file, verdict: check(file, { user }) }))
+    .map((file) => ({ file, verdict: check(file, { user, ...(user && testing.acl ? { acl: testing.acl } : {}) }) }))
   const policies = user ? [] : systemPolicies()
   return {
     files: checked.filter((item) => item.verdict === undefined).map((item) => item.file),
@@ -427,7 +430,7 @@ function ancestors(target: string): string[] {
   return [target, ...ancestors(parent)]
 }
 
-const aclCache = new Map<string, ReturnType<AclReader>>()
+const aclCache = new WeakMap<AclReader, Map<string, ReturnType<AclReader>>>()
 
 function windowsCheck(file: string, reader: AclReader, user: boolean): Verdict | undefined {
   const folder = path.dirname(file)
@@ -448,20 +451,21 @@ function windowsCheck(file: string, reader: AclReader, user: boolean): Verdict |
     .find((verdict) => verdict !== undefined)
 }
 
-// PowerShell takes a moment to start, so a verdict is kept until the folder or the file changes; changing an access
-// rule updates a file's change time too.
+// PowerShell takes a moment to start, so a complete read is kept until a path changes. Failed or partial reads stay
+// fail-closed for this check but are read again next time, just like a failed macOS access list lookup.
 function cachedAcl(reader: AclReader, paths: readonly string[]) {
-  if (reader !== powershellAcl) return reader(paths)
+  const known = aclCache.get(reader) ?? new Map<string, ReturnType<AclReader>>()
+  aclCache.set(reader, known)
   const key = paths
     .map((target) => {
       const stat = statSync(target)
       return `${target}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`
     })
     .join("|")
-  const cached = aclCache.get(key)
+  const cached = known.get(key)
   if (cached) return cached
   const result = reader(paths)
-  aclCache.set(key, result)
+  if (paths.every((target) => result.entries[target] !== undefined)) known.set(key, result)
   return result
 }
 

@@ -30,7 +30,9 @@ import { NetworkGuard } from "../../../core/test/lib/network-guard"
 import { ModelSlots } from "@vectordevai/core/local-mode/model-slots"
 import { Global } from "@vectordevai/core/global"
 import { Config } from "@/config/config"
+import { ConfigManaged } from "@vectordevai/core/config/managed"
 import { mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { useManagedPolicyFixture } from "../fixture/managed-policy"
 
 // What a model on a server someone hosts must hold, end to end against the fake model server on 127.0.0.1: the
 // agent's fixed prompt plus headroom, measured for that agent on that model. The strict guard checks nothing leaves.
@@ -571,13 +573,24 @@ const serverList = <A, E, R>(
           JSON.stringify({ local: { endpoints: input.managed } }),
         )
       }
-      apply()
+      return input.managed ? useManagedPolicyFixture(managedDirectory) : undefined
     }),
-    body,
     () =>
+      Effect.gen(function* () {
+        apply()
+        if (input.managed)
+          expect(ConfigManaged.read()).toEqual({
+            files: [path.join(managedDirectory, "vector.json")],
+            policies: [],
+            ignored: [],
+          })
+        return yield* body()
+      }),
+    (restore) =>
       Effect.sync(() => {
         rmSync(globalFile, { force: true })
         rmSync(managedDirectory, { recursive: true, force: true })
+        restore?.()
         apply()
         rmSync(Config.localConfirmedFile(), { force: true })
       }),

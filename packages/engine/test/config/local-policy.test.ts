@@ -22,6 +22,7 @@ import { NpmTest } from "../fake/npm"
 import { testEffect } from "../lib/effect"
 import { tmpdir } from "../fixture/fixture"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
+import { useManagedPolicyFixture } from "../fixture/managed-policy"
 
 // Vector Local's policy as the engine resolves it: once, from the user's own config and the company's policy, with
 // the environment and the config overrides only tightening it, and a loosening edit held until the owner confirms.
@@ -30,6 +31,7 @@ const guard = NetworkGuard.use()
 
 const globalFile = path.join(Global.Path.config, "vector.json")
 const managedDirectory = process.env.VECTOR_TEST_MANAGED_CONFIG_DIR!
+const managedFixture: { restore?: () => void } = {}
 const engineDirectory = path.resolve(import.meta.dir, "../..")
 const ENVIRONMENT = [
   "VECTOR_AGENT_SESSION",
@@ -71,6 +73,8 @@ const it = testEffect(
 )
 
 afterEach(() => {
+  managedFixture.restore?.()
+  managedFixture.restore = undefined
   ENVIRONMENT.forEach((key) => {
     if (saved[key] === undefined) delete process.env[key]
     else process.env[key] = saved[key]
@@ -92,6 +96,7 @@ function writeGlobal(local: object | undefined) {
 function writeManaged(config: object) {
   mkdirSync(managedDirectory, { recursive: true })
   writeFileSync(path.join(managedDirectory, "vector.json"), JSON.stringify(config))
+  managedFixture.restore ??= useManagedPolicyFixture(managedDirectory)
 }
 
 // A folder's watch on macOS can miss a write made just as it starts, so a test that edits a file the watcher reads

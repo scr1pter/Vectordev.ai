@@ -77,6 +77,7 @@ import { reply, TestLLMServer } from "../lib/llm-server"
 import { FakeWeb } from "../../../core/test/lib/fake-web"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
 import { LocalServers } from "../../../core/test/fixture/local-servers/serve"
+import { useManagedPolicyFixture } from "../fixture/managed-policy"
 
 // Vector Local in the engine, end to end, with nothing leaving this computer: the strict network guard throws on any
 // connection that is not to loopback, and the model server is the fake one on 127.0.0.1. The main run lists it in the
@@ -109,16 +110,18 @@ function withLocal<A, E, R>(
     Effect.sync(() => {
       mkdirSync(path.dirname(file), { recursive: true })
       writeFileSync(file, JSON.stringify({ local: block }))
-      apply()
+      return where === "managed" ? useManagedPolicyFixture(path.dirname(file)) : undefined
     }),
     () =>
       Effect.gen(function* () {
+        apply()
         if (where === "managed") expect(ConfigManaged.read()).toEqual({ files: [file], policies: [], ignored: [] })
         return yield* body()
       }),
-    () =>
+    (restore) =>
       Effect.sync(() => {
         rmSync(file, { force: true })
+        restore?.()
         apply()
         rmSync(Config.localConfirmedFile(), { force: true })
       }),
@@ -1878,8 +1881,14 @@ describe("Vector's own installs under Vector Local", () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "vector-lsp-local-"))
     const ran = path.join(dir, "ran.txt")
     // A `go` that only notes it ran, as the only program on PATH, so no real installer can start.
-    await Bun.write(path.join(dir, "bin", "go"), `#!/bin/sh\necho "$@" >> "${ran}"\nexit 1\n`)
-    await chmod(path.join(dir, "bin", "go"), 0o755)
+    const binary = path.join(dir, "bin", process.platform === "win32" ? "go.cmd" : "go")
+    await Bun.write(
+      binary,
+      process.platform === "win32"
+        ? '@echo off\r\n>>"%~dp0..\\ran.txt" echo %*\r\nexit /b 1\r\n'
+        : `#!/bin/sh\necho "$@" >> "${ran}"\nexit 1\n`,
+    )
+    if (process.platform !== "win32") await chmod(binary, 0o755)
     const flags = await Effect.runPromise(RuntimeFlags.Service.pipe(Effect.provide(RuntimeFlags.layer())))
     const allowed = { source: "lsp-install", reason: "Code intelligence", added_at: 1, added_by: "app" as const }
     const PATH = process.env.PATH
