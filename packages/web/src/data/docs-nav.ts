@@ -128,8 +128,7 @@ export const docsNav: DocGroup[] = [
       {
         id: "local",
         title: "Vector Local",
-        blurb:
-          "In development: run Vector's AI features on model servers you or your company host, with a log of what Vector sent.",
+        blurb: `${release111.since} run Vector's AI features on model servers you or your company host, with a log of what Vector sent.`,
       },
       {
         id: "cloud-services",

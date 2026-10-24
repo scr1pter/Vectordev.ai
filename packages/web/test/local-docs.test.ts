@@ -7,6 +7,7 @@ import { ConfigManaged } from "@vectordevai/core/config/managed"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import { docsNav } from "../src/data/docs-nav"
+import { release111 } from "../src/data/vector-releases"
 import { pruneVectorSite } from "../../../script/prune-vector-site.mjs"
 
 // The Vector Local page (/docs/local) and the admin samples it shows: the samples are read as Vector reads company
@@ -22,12 +23,15 @@ afterEach(async () => {
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })))
 })
 
-test("Vector Local has a page of its own, labelled as in development", () => {
+test("Vector Local has a page of its own, labelled with the release that brings it", () => {
   const features = docsNav.find((group) => group.label === "Features")?.links ?? []
   expect(features.find((link) => link.id === "local")).toMatchObject({ title: "Vector Local" })
-  expect(features.find((link) => link.id === "local")?.blurb).toStartWith("In development:")
+  expect(features.find((link) => link.id === "local")?.blurb).toStartWith(release111.since)
   expect(page).toContain('<DocsPage id="local">')
-  expect(text).toContain("In development: Vector Local is not in the current download.")
+  expect(text).toContain("{release111.since} Vector Local is in the desktop app and the engine it starts.")
+  // The terminal's commands and WSL wait for a CLI release, and the page says so.
+  expect(text).toContain("come with the next CLI release")
+  expect(text).toContain("Windows WSL servers get Vector Local once a later desktop release requires that CLI.")
 })
 
 test("the page says Vector Local is a policy, not a firewall, and keeps to the copy rules", () => {
