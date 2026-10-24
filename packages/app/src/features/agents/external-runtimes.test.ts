@@ -1,34 +1,28 @@
 import { describe, expect, test } from "bun:test"
+import { ExternalAgent } from "@vectordevai/schema/external-agent"
 import {
+  EXTERNAL_RUNTIME_IDS,
   EXTERNAL_RUNTIMES,
   externalRuntimeReady,
   externalRuntimeSetup,
   isExternalRuntime,
-  setupSteps,
 } from "./external-runtimes"
 
 describe("external runtimes", () => {
-  test("covers exactly the three runtimes Vector can drive", () => {
-    expect(Object.keys(EXTERNAL_RUNTIMES).sort()).toEqual(["claude-code", "codex", "cursor"])
+  test("covers the catalog's chat agents, in its order, and no terminal-only one", () => {
+    const chat = ExternalAgent.catalog.filter((agent) => agent.tier === "chat").map((agent) => agent.id)
+    expect(EXTERNAL_RUNTIME_IDS).toEqual(chat)
+    expect(Object.keys(EXTERNAL_RUNTIMES).sort()).toEqual([...chat].sort())
+    expect(EXTERNAL_RUNTIME_IDS).toEqual(expect.arrayContaining(["claude-code", "codex", "cursor"]))
+    for (const agent of ExternalAgent.catalog.filter((entry) => entry.tier === "terminal"))
+      expect(isExternalRuntime(agent.id)).toBe(false)
   })
 
-  test("every runtime has a real install command and docs link", () => {
-    for (const setup of Object.values(EXTERNAL_RUNTIMES)) {
-      expect(setup.installCommand.length).toBeGreaterThan(5)
-      expect(setup.docsUrl.startsWith("https://")).toBe(true)
-      expect(setup.cli).toBeTruthy()
-    }
+  test("each runtime is labelled with the catalog's name", () => {
+    for (const id of EXTERNAL_RUNTIME_IDS) expect(EXTERNAL_RUNTIMES[id].label).toBe(ExternalAgent.find(id)!.name)
   })
 
-  test("the cli name matches what the desktop detector probes for", () => {
-    // These strings must stay in step with CANDIDATES in main/external-agents.ts,
-    // otherwise the picker reports "Setup needed" for an installed runtime.
-    expect(EXTERNAL_RUNTIMES["claude-code"].cli).toBe("claude")
-    expect(EXTERNAL_RUNTIMES.codex.cli).toBe("codex")
-    expect(EXTERNAL_RUNTIMES.cursor.cli).toBe("cursor-agent")
-  })
-
-  test("isExternalRuntime accepts only the three, never vector", () => {
+  test("isExternalRuntime accepts the chat agents, never vector", () => {
     expect(isExternalRuntime("codex")).toBe(true)
     expect(isExternalRuntime("vector")).toBe(false)
     expect(isExternalRuntime("nonsense")).toBe(false)
@@ -37,12 +31,6 @@ describe("external runtimes", () => {
   test("externalRuntimeSetup returns undefined for vector", () => {
     expect(externalRuntimeSetup("vector")).toBeUndefined()
     expect(externalRuntimeSetup("cursor")?.label).toBe("Cursor Agent")
-  })
-
-  test("setup steps lead with install and include sign-in", () => {
-    const steps = setupSteps("claude-code")
-    expect(steps[0]!.label).toBe("Install")
-    expect(steps.map((step) => step.label)).toContain("Sign in")
   })
 
   test("an installed but explicitly signed-out runtime is not ready", () => {

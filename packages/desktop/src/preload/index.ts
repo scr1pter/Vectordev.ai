@@ -368,7 +368,10 @@ const api: ElectronAPI = {
     remove: (id) => ipcRenderer.invoke("scheduled-agents-remove", id),
   },
   externalAgents: {
-    detect: () => ipcRenderer.invoke("external-agents-detect"),
+    detect: (options) => ipcRenderer.invoke("external-agents-detect", options),
+    models: (id, options) => ipcRenderer.invoke("external-agents-models", id, options),
+    commands: (id) => ipcRenderer.invoke("external-agents-commands", id),
+    launchTerminal: (input) => ipcRenderer.invoke("external-agents-launch-terminal", input),
     openInEditor: (input) => ipcRenderer.invoke("external-agents-open-editor", input),
     prepareWorkspace: (projectPath) => ipcRenderer.invoke("external-agents-prepare-workspace", projectPath),
   },

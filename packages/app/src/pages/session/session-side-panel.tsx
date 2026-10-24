@@ -135,6 +135,7 @@ import { resolveBrowserAddress, selectUnambiguousPreviewUrl } from "@/utils/brow
 import { boundInlineCompletionContext, sanitizeInlineCompletion } from "@/utils/codespace-ai"
 import { notifyWorkspaceFileSaved } from "@/utils/workspace-file-saved"
 import { announceWorkspaceMode } from "@/utils/workspace-mode"
+import type { ExternalAgent } from "@vectordevai/schema/external-agent"
 
 const DialogSelectFile = lazy(() =>
   import("@/components/dialog-select-file").then((module) => ({ default: module.DialogSelectFile })),
@@ -153,7 +154,7 @@ type CodespaceLiveWorkspace = {
   revision?: number
   name: string
   taskPrompt: string
-  runtime: "vector" | "claude-code" | "codex" | "cursor"
+  runtime: "vector" | ExternalAgent.ChatId
   sourcePath: string
   isolatedPath: string
   parentSessionId?: string

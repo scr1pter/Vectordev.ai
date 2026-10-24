@@ -21,6 +21,15 @@ export type LocalPTY = {
   cursor?: number
 }
 
+/** A command to run in a new terminal tab, in the shape desktop prepares it (ExternalAgent.TerminalLaunch). */
+export type TerminalCommand = {
+  title: string
+  command: string
+  args: readonly string[]
+  cwd?: string
+  env?: Record<string, string>
+}
+
 const WORKSPACE_KEY = "__workspace__"
 const MAX_TERMINAL_SESSIONS = 20
 
@@ -287,6 +296,36 @@ function createWorkspaceTerminalSession(
           console.error("Failed to create terminal", error)
         })
     },
+    /** Opens a prepared command (an install, a sign-in or an agent's own screen, from desktop) as a new tab and makes
+        it the active one, so whatever it asks for is visible. `onExit` fires once, when that process ends. */
+    async run(command: TerminalCommand, onExit?: (exitCode: number) => void) {
+      const titleNumber = pickNextTerminalNumber()
+      const created = await sdk.client.pty
+        .create({
+          title: command.title,
+          command: command.command,
+          args: [...command.args],
+          cwd: command.cwd,
+          env: command.env,
+        })
+        .catch((error: unknown) => {
+          console.error("Failed to start terminal command", error)
+          return undefined
+        })
+      const info = created?.data
+      if (!info?.id) return undefined
+      const id = info.id
+      if (onExit) {
+        const stop = sdk.event.on("pty.exited", (event: { properties: { id: string; exitCode?: number } }) => {
+          if (event.properties.id !== id) return
+          stop()
+          onExit(event.properties.exitCode ?? 0)
+        })
+      }
+      setStore("all", store.all.length, { id, title: info.title ?? command.title, titleNumber })
+      setStore("active", id)
+      return id
+    },
     update(pty: Partial<LocalPTY> & { id: string }) {
       update(sdk.client, pty)
     },
@@ -443,6 +482,7 @@ export const { use: useTerminal, provider: TerminalProvider } = createSimpleCont
       all: () => workspace().all(),
       active: () => workspace().active(),
       new: () => workspace().new(),
+      run: (command: TerminalCommand, onExit?: (exitCode: number) => void) => workspace().run(command, onExit),
       update: (pty: Partial<LocalPTY> & { id: string }) => workspace().update(pty),
       trim: (id: string) => workspace().trim(id),
       trimAll: () => workspace().trimAll(),

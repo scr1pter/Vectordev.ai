@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test"
+import { expect, test, type Page } from "@playwright/test"
 import { base64Encode } from "@vectordevai/core/util/encode"
 import { mockVectorServer } from "../utils/mock-server"
 
@@ -110,7 +110,7 @@ for (const runtime of runtimes) {
       `/parallel-workspaces/${workspaceId}?${new URLSearchParams({ project: directory, parentSession: parentSessionId })}`,
     )
     const composer = page.locator("[data-agent-chat-composer]")
-    const chip = composer.getByRole("button", { name: `${runtime.label} model: Default model`, exact: true })
+    const chip = composer.getByRole("button", { name: `${runtime.label} model: Agent default`, exact: true })
     await expect(chip).toBeVisible()
 
     await chip.click()
@@ -198,10 +198,10 @@ test("the agent launcher picks the model a new Claude Code agent starts on", asy
   const launcher = page.getByRole("dialog", { name: "New isolated agent" })
   await expect(launcher).toBeVisible()
   // Vector's own runtime picks its model from the providers; the CLI model control is for the external runtimes.
-  await expect(launcher.getByRole("button", { name: /model: Default model$/ })).toHaveCount(0)
+  await expect(launcher.getByRole("button", { name: /model: Agent default$/ })).toHaveCount(0)
 
-  await launcher.getByRole("button", { name: /^Claude Code/ }).click()
-  const control = launcher.getByRole("button", { name: "Claude Code model: Default model", exact: true })
+  await chooseInHostLocally(page, "Claude Code")
+  const control = launcher.getByRole("button", { name: "Claude Code model: Agent default", exact: true })
   await expect(control).toBeVisible()
   await control.click()
   await page
@@ -330,7 +330,7 @@ test("a model Claude Code refused is not a new agent's start model until it is p
   await page.getByRole("button", { name: "New workspace", exact: true }).click()
   const launcher = page.getByRole("dialog", { name: "New isolated agent" })
   await expect(launcher).toBeVisible()
-  await launcher.getByRole("button", { name: /^Claude Code/ }).click()
+  await chooseInHostLocally(page, "Claude Code")
 
   // The refused model left Recently used, so the launcher starts on the pick before it.
   const control = launcher.getByRole("button", { name: "Claude Code model: Sonnet (latest)", exact: true })
@@ -360,3 +360,12 @@ test("a model Claude Code refused is not a new agent's start model until it is p
     )
     .toEqual([["claude-code", "claude-fable-5-1"]])
 })
+
+// The agent launcher's coding agents live in Host locally: open it, open the agent, and use it for this launch.
+async function chooseInHostLocally(page: Page, name: string) {
+  await page.locator("[data-vector-host-locally-tile]").click()
+  const host = page.getByRole("dialog", { name: "Coding agents" })
+  await host.getByRole("button", { name: new RegExp(`^${name},`) }).click()
+  await host.getByRole("button", { name: `Use ${name}`, exact: true }).click()
+  await expect(host).toHaveCount(0)
+}

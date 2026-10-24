@@ -48,7 +48,9 @@ import type {
   OpenInEditorInput,
   OpenInEditorResult,
   PrepareWorkspaceResult,
+  TerminalAgentInput,
 } from "../main/external-agents"
+import type { ExternalAgent } from "@vectordevai/schema/external-agent"
 import type { AgentTaskPreparation } from "../main/context-budget"
 import type { VoiceSpeechResult } from "../main/voice-synthesis"
 import type {
@@ -513,7 +515,7 @@ export type ParallelWorkspaceRecord = {
   revision?: number
   name: string
   taskPrompt: string
-  runtime: "vector" | "claude-code" | "codex" | "cursor"
+  runtime: "vector" | ExternalAgent.ChatId
   provider: string
   model: string
   sourcePath: string
@@ -572,7 +574,7 @@ export type CreateParallelWorkspaceInput = {
   engineParentSessionId?: string
   name?: string
   taskPrompt: string
-  runtime?: "vector" | "claude-code" | "codex" | "cursor"
+  runtime?: "vector" | ExternalAgent.ChatId
   provider?: string
   model?: string
   runtimeModel?: string
@@ -981,7 +983,13 @@ export type ElectronAPI = {
     remove: (id: string) => Promise<ScheduledAgentRecord[]>
   }
   externalAgents: {
-    detect: () => Promise<ExternalAgentStatus[]>
+    /** `refresh` re-probes the login shell and skips the 60-second detection cache, after an install or sign-in. */
+    detect: (options?: { refresh?: boolean }) => Promise<ExternalAgentStatus[]>
+    models: (id: string, options?: { refresh?: boolean }) => Promise<ExternalAgent.ModelList>
+    /** The official install commands for this platform and the agent's sign-in, ready for the built-in terminal. */
+    commands: (id: string) => Promise<ExternalAgent.Commands>
+    /** Prepares the isolated workspace and returns the agent's own screen to open in the built-in terminal there. */
+    launchTerminal: (input: TerminalAgentInput) => Promise<ExternalAgent.TerminalAgentLaunch>
     openInEditor: (input: OpenInEditorInput) => Promise<OpenInEditorResult>
     prepareWorkspace: (projectPath: string) => Promise<PrepareWorkspaceResult>
   }

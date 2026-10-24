@@ -56,6 +56,7 @@ import DirectoryLayout, { DirectoryDataProvider } from "@/pages/directory-layout
 import LegacyLayout from "@/pages/layout"
 import NewLayout from "@/pages/layout-new"
 import { ErrorPage } from "./pages/error"
+import type { ExternalAgent } from "@vectordevai/schema/external-agent"
 import { LaunchAttach, LaunchReadyProbe, LaunchSettingsMirror } from "@/features/launch/launch-handoff"
 import { LaunchYield, yieldLaunchScreen } from "@/features/launch/launch-yield"
 import { useCheckServerHealth } from "./utils/server-health"
@@ -214,7 +215,7 @@ type ParallelWorkspaceRecord = {
   id: string
   name: string
   taskPrompt: string
-  runtime: "vector" | "claude-code" | "codex" | "cursor"
+  runtime: "vector" | ExternalAgent.ChatId
   provider: string
   model: string
   sourcePath: string
@@ -278,7 +279,7 @@ type CreateParallelWorkspaceInput = {
   parentSessionId?: string
   name?: string
   taskPrompt: string
-  runtime?: "vector" | "claude-code" | "codex" | "cursor"
+  runtime?: "vector" | ExternalAgent.ChatId
   provider?: string
   model?: string
   agent?: string

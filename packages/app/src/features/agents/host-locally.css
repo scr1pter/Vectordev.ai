@@ -1,0 +1,653 @@
+/* ---- Host locally ----------------------------------------------------------
+   The coding-agent launcher shares the model picker's anatomy: a search field,
+   a quiet section label, then 40px rows with a mark gutter, the name, and a
+   status pill on the right edge. One neutral fill marks the keyboard/pointer
+   row. Vendors' marks are their own files or neutral letters; no brand colour
+   is ever drawn around them. Theme tokens and hairlines only. */
+
+/* Badge: neutral letters, or the vendor's own file on a quiet tile. */
+[data-component="agent-badge"] {
+  --agent-tone: #9a96a6;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  overflow: hidden;
+  color: color-mix(in oklab, var(--agent-tone) 70%, var(--vx-text));
+  background: color-mix(in oklab, var(--agent-tone) 15%, var(--vx-surface-raised));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--agent-tone) 24%, transparent);
+  font-family: var(--vx-font);
+  font-size: 9.5px;
+  font-weight: 620;
+  line-height: 1;
+  letter-spacing: 0.03em;
+  user-select: none;
+}
+[data-component="agent-badge"][data-size="large"] {
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  font-size: 13px;
+}
+[data-component="agent-badge"][data-kind="official"] {
+  background: color-mix(in srgb, var(--vx-text) 7%, var(--vx-surface-raised));
+  box-shadow: inset 0 0 0 1px var(--vx-line);
+}
+[data-component="agent-badge"] img {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+}
+[data-component="agent-badge"][data-size="large"] img {
+  width: 24px;
+  height: 24px;
+}
+[data-component="agent-badge"][data-tone="slate"] {
+  --agent-tone: #9a96a6;
+}
+[data-component="agent-badge"][data-tone="sand"] {
+  --agent-tone: #c4ad86;
+}
+[data-component="agent-badge"][data-tone="teal"] {
+  --agent-tone: #6fb2aa;
+}
+[data-component="agent-badge"][data-tone="sky"] {
+  --agent-tone: #7ea9d2;
+}
+[data-component="agent-badge"][data-tone="indigo"] {
+  --agent-tone: #9196dc;
+}
+[data-component="agent-badge"][data-tone="plum"] {
+  --agent-tone: #b38fc9;
+}
+[data-component="agent-badge"][data-tone="rose"] {
+  --agent-tone: #c98e9b;
+}
+[data-component="agent-badge"][data-tone="amber"] {
+  --agent-tone: #cfa760;
+}
+[data-component="agent-badge"][data-tone="olive"] {
+  --agent-tone: #a6ab72;
+}
+[data-component="agent-badge"][data-tone="moss"] {
+  --agent-tone: #84ad88;
+}
+
+/* Status pill: a colour AND a dot shape per state, so it survives for viewers
+   who cannot separate the hues. */
+[data-component="agent-status"] {
+  --agent-status: var(--vx-text-muted);
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  color: var(--vx-text-muted);
+  background: color-mix(in srgb, var(--vx-text) 5%, transparent);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+[data-component="agent-status"] [data-slot="agent-status-dot"] {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--agent-status);
+}
+[data-component="agent-status"][data-state="ready"] {
+  --agent-status: var(--vx-green);
+  color: color-mix(in oklab, var(--vx-green) 78%, var(--vx-text));
+  background: color-mix(in oklab, var(--vx-green) 12%, transparent);
+}
+[data-component="agent-status"][data-state="signed-out"] {
+  --agent-status: var(--vx-amber);
+  color: color-mix(in oklab, var(--vx-amber) 80%, var(--vx-text));
+  background: color-mix(in oklab, var(--vx-amber) 12%, transparent);
+}
+[data-component="agent-status"][data-state="checking"] [data-slot="agent-status-dot"] {
+  background: var(--vx-purple-bright);
+  animation: vx-dot-pulse 1.4s var(--vx-ease) infinite;
+}
+[data-component="agent-status"][data-state="not-installed"] [data-slot="agent-status-dot"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.25px var(--vx-text-muted);
+}
+[data-component="agent-status"][data-state="unknown"] [data-slot="agent-status-dot"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.25px var(--vx-blue);
+}
+
+/* ---- The dialog -------------------------------------------------------- */
+
+/* Size comes from DialogV2 size="large" on [data-slot="dialog-container"]; the
+   content must not set its own width, or it is clipped. */
+[data-slot="dialog-container"]:has(.vector-host-locally-dialog) {
+  height: min(560px, calc(100vh - 64px)) !important;
+  border: 1px solid var(--vx-line-strong);
+  border-radius: 16px !important;
+  background: var(--vx-canvas) !important;
+}
+
+.vector-host-locally-dialog [data-slot="dialog-header"] {
+  align-items: center !important;
+  gap: 6px;
+}
+
+.vector-host-locally-dialog [data-slot="host-back"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin: -2px 2px -2px -6px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--vx-text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+.vector-host-locally-dialog [data-slot="host-back"]:hover {
+  color: var(--vx-text);
+  background: color-mix(in srgb, var(--vx-text) 6%, transparent);
+}
+
+.vector-host-locally-dialog [data-slot="host-search"] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 6px 0 11px;
+  border: 1px solid var(--vx-line);
+  border-radius: 12px;
+  color: var(--vx-text-muted);
+  background: color-mix(in srgb, var(--vx-text) 3%, transparent);
+}
+.vector-host-locally-dialog [data-slot="host-search"] input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  border: 0;
+  outline: 0;
+  color: var(--vx-text);
+  background: transparent;
+  font-size: 13px;
+}
+.vector-host-locally-dialog [data-slot="host-search"] input::placeholder {
+  color: var(--vx-text-muted);
+}
+html[data-vector-focus-indicators] .vector-host-locally-dialog [data-slot="host-search"] input:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.vector-host-locally-dialog [data-slot="host-icon-button"] {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--vx-text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+.vector-host-locally-dialog [data-slot="host-icon-button"]:hover:not(:disabled) {
+  color: var(--vx-text);
+  background: color-mix(in srgb, var(--vx-text) 6%, transparent);
+}
+.vector-host-locally-dialog [data-slot="host-icon-button"]:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.vector-host-locally-dialog [data-slot="host-icon-button"][data-busy] svg {
+  animation: host-locally-spin 1s linear infinite;
+}
+@keyframes host-locally-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.vector-host-locally-dialog [data-slot="host-section"] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 10px;
+  color: var(--vx-text-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+.vector-host-locally-dialog [data-slot="host-section"] > span + span {
+  margin-left: auto;
+  font-weight: 400;
+}
+
+.vector-host-locally-dialog [data-slot="host-row"] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--vx-text);
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  scroll-margin-block: 28px;
+  transition: background-color 120ms ease;
+}
+.vector-host-locally-dialog [data-slot="host-row"][data-active] {
+  background: color-mix(in srgb, var(--vx-text) 6%, transparent);
+}
+.vector-host-locally-dialog [data-slot="host-row-name"] {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 460;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vector-host-locally-dialog [data-slot="host-row"][aria-current="true"] [data-slot="host-row-name"] {
+  font-weight: 560;
+}
+.vector-host-locally-dialog [data-slot="host-row-vendor"] {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--vx-text-muted);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vector-host-locally-dialog [data-slot="host-row-end"] {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.vector-host-locally-dialog [data-slot="host-row-check"] {
+  display: inline-flex;
+  color: var(--vx-purple-bright);
+}
+
+/* Small factual tags: "Work or API accounts", "Terminal". */
+.vector-host-locally-dialog [data-slot="host-tag"] {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 5px;
+  color: var(--vx-text-subtle);
+  background: color-mix(in srgb, var(--vx-text) 5%, transparent);
+  box-shadow: inset 0 0 0 1px var(--vx-line);
+  font-size: 10.5px;
+  font-weight: 450;
+  white-space: nowrap;
+}
+
+.vector-host-locally-dialog [data-slot="host-empty"] {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 10px;
+  color: var(--vx-text-muted);
+  font-size: 13px;
+}
+
+.vector-host-locally-dialog [data-slot="host-notice"] {
+  margin: 0 10px 6px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  color: var(--vx-text-subtle);
+  background: color-mix(in srgb, var(--vx-text) 4%, transparent);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.vector-host-locally-dialog [data-slot="host-footnote"] {
+  padding: 10px 20px 12px;
+  border-top: 1px solid var(--vx-line);
+  color: var(--vx-text-muted);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+/* ---- Detail ---- */
+.vector-host-locally-dialog [data-slot="host-detail"] {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 2px 20px 18px;
+}
+.vector-host-locally-dialog [data-slot="host-detail-head"] {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.vector-host-locally-dialog [data-slot="host-detail-title"] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+  color: var(--vx-text);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.vector-host-locally-dialog [data-slot="host-detail-sub"] {
+  margin-top: 3px;
+  color: var(--vx-text-muted);
+  font-size: 12px;
+}
+.vector-host-locally-dialog [data-slot="host-detail-sub"] code {
+  font-family: var(--vx-mono);
+  font-size: 11px;
+}
+.vector-host-locally-dialog [data-slot="host-copy"] {
+  margin: 0;
+  color: var(--vx-text-subtle);
+  font-size: 12.5px;
+  line-height: 19px;
+}
+.vector-host-locally-dialog [data-slot="host-block"] {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.vector-host-locally-dialog [data-slot="host-label"] {
+  color: var(--vx-text-muted);
+  font-size: 11px;
+  font-weight: 520;
+}
+.vector-host-locally-dialog [data-slot="host-hint"] {
+  margin: 0;
+  color: var(--vx-text-muted);
+  font-size: 11.5px;
+  line-height: 17px;
+}
+.vector-host-locally-dialog [data-slot="host-hint"][data-tone="error"] {
+  color: var(--vx-red);
+}
+
+.vector-host-locally-dialog [data-slot="host-options"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.vector-host-locally-dialog [data-slot="host-options"] button {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--vx-text-muted);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--vx-line);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.vector-host-locally-dialog [data-slot="host-options"] button:hover {
+  color: var(--vx-text);
+}
+.vector-host-locally-dialog [data-slot="host-options"] button[aria-pressed="true"] {
+  color: var(--vx-text);
+  background: color-mix(in srgb, var(--vx-text) 7%, transparent);
+  box-shadow: inset 0 0 0 1px var(--vx-line-strong);
+}
+
+.vector-host-locally-dialog [data-slot="host-command"] {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--vx-line);
+  border-radius: 10px;
+  color: var(--vx-text);
+  background: color-mix(in srgb, var(--vx-canvas) 80%, #000 20%);
+  font-family: var(--vx-mono);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
+.vector-host-locally-dialog [data-slot="host-command"]::before {
+  flex: none;
+  color: var(--vx-text-muted);
+  content: "$";
+}
+.vector-host-locally-dialog [data-slot="host-command"][data-shell="powershell"]::before {
+  content: ">";
+}
+
+.vector-host-locally-dialog :is([data-slot="host-model"], .host-model-trigger) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  height: 34px;
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--vx-line);
+  border-radius: 10px;
+  color: var(--vx-text);
+  background: color-mix(in srgb, var(--vx-text) 3%, transparent);
+  font-family: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.vector-host-locally-dialog :is([data-slot="host-model"], .host-model-trigger):hover:not(:disabled) {
+  border-color: var(--vx-line-strong);
+}
+.vector-host-locally-dialog :is([data-slot="host-model"], .host-model-trigger):disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.vector-host-locally-dialog [data-slot="host-model-list"] {
+  display: flex;
+  flex-direction: column;
+  max-height: 216px;
+  margin-top: -4px;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--vx-line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--vx-canvas) 85%, #000 15%);
+}
+.vector-host-locally-dialog [data-slot="host-model-option"] {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  padding: 0 8px 0 10px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--vx-text);
+  background: transparent;
+  font-family: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.vector-host-locally-dialog [data-slot="host-model-option"]:hover,
+.vector-host-locally-dialog [data-slot="host-model-option"]:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--vx-text) 6%, transparent);
+}
+.vector-host-locally-dialog [data-slot="host-model-option"] code {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  color: var(--vx-text-muted);
+  font-family: var(--vx-mono);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vector-host-locally-dialog [data-slot="host-model-check"] {
+  display: inline-flex;
+  flex: none;
+  width: 16px;
+  color: var(--vx-purple-bright);
+  visibility: hidden;
+}
+.vector-host-locally-dialog [data-slot="host-model-option"][aria-checked="true"] {
+  font-weight: 540;
+}
+.vector-host-locally-dialog [data-slot="host-model-option"][aria-checked="true"] [data-slot="host-model-check"] {
+  visibility: visible;
+}
+
+.vector-host-locally-dialog [data-slot="host-input"] {
+  width: 100%;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--vx-line);
+  border-radius: 10px;
+  outline: 0;
+  color: var(--vx-text);
+  background: color-mix(in srgb, var(--vx-text) 3%, transparent);
+  font-family: var(--vx-mono);
+  font-size: 12px;
+}
+.vector-host-locally-dialog [data-slot="host-input"]::placeholder {
+  color: var(--vx-text-muted);
+  font-family: var(--vx-font);
+}
+.vector-host-locally-dialog [data-slot="host-input"]:focus {
+  border-color: color-mix(in oklab, var(--vx-purple) 55%, var(--vx-line));
+}
+
+.vector-host-locally-dialog [data-slot="host-notes"] {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--vx-text) 3.5%, transparent);
+  list-style: none;
+}
+.vector-host-locally-dialog [data-slot="host-notes"] li {
+  display: flex;
+  gap: 8px;
+  color: var(--vx-text-subtle);
+  font-size: 12px;
+  line-height: 18px;
+}
+.vector-host-locally-dialog [data-slot="host-notes"] li > span:first-child {
+  flex: none;
+  width: 64px;
+  color: var(--vx-text-muted);
+  font-size: 11px;
+  font-weight: 520;
+  line-height: 18px;
+}
+.vector-host-locally-dialog [data-slot="host-notes"] li[data-kind="data"] > span:first-child {
+  color: var(--vx-amber);
+}
+
+.vector-host-locally-dialog [data-slot="host-link"] {
+  color: var(--vx-text-subtle);
+  text-decoration: underline;
+  text-decoration-color: var(--vx-line-strong);
+  text-underline-offset: 2px;
+  word-break: break-all;
+}
+.vector-host-locally-dialog [data-slot="host-link"]:hover {
+  color: var(--vx-text);
+}
+
+.vector-host-locally-dialog [data-slot="host-terminal"] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--vx-line-strong);
+  border-radius: 10px;
+  background: #191515;
+}
+.vector-host-locally-dialog [data-slot="host-terminal-bar"] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--vx-line);
+  color: var(--vx-text-muted);
+  font-size: 11px;
+}
+.vector-host-locally-dialog [data-slot="host-terminal-bar"] > span:last-child {
+  margin-left: auto;
+}
+.vector-host-locally-dialog [data-slot="host-terminal-screen"] {
+  position: relative;
+  height: 230px;
+}
+
+.vector-host-locally-dialog [data-slot="dialog-footer"] {
+  justify-content: space-between !important;
+  margin-top: 0 !important;
+}
+.vector-host-locally-dialog [data-slot="host-actions"] {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* ---- The agent launcher's Host locally tile ----------------------------- */
+
+/* .vx-pick__name is a block (vector-premium.css); the chosen agent's name row
+   lays out its badge, name and "Change" in a line instead. */
+[data-vector-host-locally-tile] .vx-pick__name[data-slot="host-tile-name"] {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+[data-vector-host-locally-tile] [data-slot="host-tile-change"] {
+  flex: none;
+  margin-left: auto;
+  color: var(--vx-text-muted);
+  font-size: 10px;
+  font-weight: 450;
+}
+[data-vector-host-locally-tile] [data-component="agent-badge"] {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  font-size: 8.5px;
+}
+[data-vector-host-locally-tile] [data-component="agent-badge"] img {
+  width: 12px;
+  height: 12px;
+}
+[data-vector-host-locally-tile] [data-component="agent-status"] {
+  gap: 5px;
+  height: 16px;
+  padding: 0 6px;
+  font-size: 9.5px;
+}
+[data-vector-host-locally-tile] [data-component="agent-status"] [data-slot="agent-status-dot"] {
+  width: 5px;
+  height: 5px;
+}

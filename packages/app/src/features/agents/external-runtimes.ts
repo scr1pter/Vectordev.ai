@@ -1,9 +1,12 @@
-// Setup details for the third-party coding agents Vector can run as a workspace
-// engine. Vector shells out to the user's own CLI, so these are the exact
-// commands that make each runtime available — a picker that only says "Setup
-// needed" leaves the user with nowhere to go.
+import { ExternalAgent } from "@vectordevai/schema/external-agent"
 
-export type ExternalRuntime = "claude-code" | "codex" | "cursor"
+// The third-party coding agents Vector can run as a workspace engine in its own
+// chat, derived from the one catalog in @vectordevai/schema/external-agent that
+// desktop detection reads too. Installing and signing in to them, and every
+// terminal-only agent, is Host locally's (dialog-host-locally.tsx).
+
+/** A runtime Vector can run in its own chat view: the catalog's "chat" tier. */
+export type ExternalRuntime = ExternalAgent.ChatId
 
 export type ExternalRuntimeStatus = {
   installed: boolean
@@ -13,48 +16,24 @@ export type ExternalRuntimeStatus = {
   signedIn?: boolean
 }
 
-export type ExternalRuntimeSetup = {
-  id: ExternalRuntime
-  label: string
-  cli: string
-  installCommand: string
-  signInCommand?: string
-  note: string
-  docsUrl: string
+export type ExternalRuntimeSetup = { id: ExternalRuntime; label: string }
+
+// The platform the app runs on, for picking that platform's official install command.
+export function browserPlatform(agent = globalThis.navigator?.userAgent ?? ""): ExternalAgent.Platform {
+  if (/Windows/i.test(agent)) return "win32"
+  if (/Mac OS X|Macintosh/i.test(agent)) return "darwin"
+  return "linux"
 }
 
-export const EXTERNAL_RUNTIMES: Record<ExternalRuntime, ExternalRuntimeSetup> = {
-  "claude-code": {
-    id: "claude-code",
-    label: "Claude Code",
-    cli: "claude",
-    installCommand: "npm install -g @anthropic-ai/claude-code",
-    signInCommand: "claude",
-    note: "Runs Claude Code in the workspace using your existing Claude subscription or API key.",
-    docsUrl: "https://docs.claude.com/en/docs/claude-code/overview",
-  },
-  codex: {
-    id: "codex",
-    label: "Codex",
-    cli: "codex",
-    installCommand: "npm install -g @openai/codex",
-    signInCommand: "codex",
-    note: "Runs the Codex CLI in the workspace using your existing ChatGPT or OpenAI account.",
-    docsUrl: "https://developers.openai.com/codex/cli",
-  },
-  cursor: {
-    id: "cursor",
-    label: "Cursor Agent",
-    cli: "cursor-agent",
-    installCommand: "curl https://cursor.com/install -fsS | bash",
-    signInCommand: "cursor-agent login",
-    note: "Runs Cursor's agent in the workspace using your existing Cursor account.",
-    docsUrl: "https://cursor.com/docs/cli/overview",
-  },
-}
+export const EXTERNAL_RUNTIMES = Object.fromEntries(
+  ExternalAgent.chatIds.map((id) => [id, { id, label: ExternalAgent.find(id)!.name }]),
+) as Record<ExternalRuntime, ExternalRuntimeSetup>
+
+/** The runtimes in the catalog's order, which is the order every picker lists them in. */
+export const EXTERNAL_RUNTIME_IDS: readonly ExternalRuntime[] = ExternalAgent.chatIds
 
 export function isExternalRuntime(value: string): value is ExternalRuntime {
-  return value === "claude-code" || value === "codex" || value === "cursor"
+  return ExternalAgent.isChatId(value)
 }
 
 export function externalRuntimeSetup(runtime: string): ExternalRuntimeSetup | undefined {
@@ -63,14 +42,4 @@ export function externalRuntimeSetup(runtime: string): ExternalRuntimeSetup | un
 
 export function externalRuntimeReady(status: ExternalRuntimeStatus | undefined) {
   return Boolean(status?.installed && status.signedIn !== false)
-}
-
-// Every step a user must complete before the runtime can be selected, in order.
-export function setupSteps(runtime: ExternalRuntime, mode: "install" | "sign-in" = "install") {
-  const setup = EXTERNAL_RUNTIMES[runtime]
-  const signIn = setup.signInCommand ? [{ label: "Sign in", command: setup.signInCommand }] : []
-  // An installed CLI that is merely signed out needs one step, not two: showing
-  // the install command again reads as "reinstall it", which is the wrong fix.
-  if (mode === "sign-in") return signIn
-  return [{ label: "Install", command: setup.installCommand }, ...signIn]
 }

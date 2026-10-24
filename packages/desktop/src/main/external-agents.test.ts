@@ -4,12 +4,19 @@ import { join } from "node:path"
 
 import { afterAll, describe, expect, test } from "bun:test"
 
+import { ExternalAgent } from "@vectordevai/schema/external-agent"
+
 import {
   agentCandidatePaths,
-  createAgentChat,
+  agentCommands,
+  commandLine,
+  launchAgentTerminal,
+  listAgentModels,
+  modelsFromOutput,
+  signedInFromCredentialCount,
+  terminalLaunch,
   agentEnvironment,
   agentOutcome,
-  agentTurnFinished,
   detectExternalAgents,
   executableNames,
   externalModelValue,
@@ -20,10 +27,10 @@ import {
   runsThroughCmd,
   signedInFromProbe,
   runtimeArguments,
-  sessionFromAgentLine,
   shimmedCommand,
   windowsTaskkillArguments,
 } from "./external-agents"
+import { agentTurnFinished, createAgentChat, sessionFromAgentLine } from "./external-agent-events"
 
 // A real executable in a real directory: the bug being guarded is a CLI that
 // exists but is invisible to a GUI-launched app, so nothing here may be faked.
@@ -457,7 +464,8 @@ describe("the event shapes the installed CLIs print today", () => {
     )
     expect(outcome.exitCode).toBe(1)
     expect(outcome.error).toContain("not signed in")
-    expect(outcome.error).toContain("`claude`")
+    // The agent's own login command, which exits when sign-in is done.
+    expect(outcome.error).toContain("`claude auth login`")
   })
 
   test("only each protocol's own final event ends a turn", () => {
@@ -938,7 +946,8 @@ describe("external agent run outcome", () => {
     expect(outcome.exitCode).toBe(1)
     expect(outcome.error).toContain("not signed in")
     expect(outcome.error).toContain("Not logged in · Please run /login")
-    expect(outcome.error).toContain("`claude`")
+    // The agent's own login command, which exits when sign-in is done.
+    expect(outcome.error).toContain("`claude auth login`")
     expect(outcome.error).not.toContain("not installed")
   })
 
@@ -952,7 +961,7 @@ describe("external agent run outcome", () => {
   test("codex sign-in guidance uses the Codex command", () => {
     const outcome = agentOutcome("codex", 1, ['[stderr] {"type":"error","is_error":true,"message":"Not logged in"}'])
 
-    expect(outcome.error).toContain("`codex`")
+    expect(outcome.error).toContain("`codex login`")
   })
 
   test("a clean run stays a success and a plain crash keeps its exit code", () => {
@@ -1192,26 +1201,310 @@ describe("reading sign-in state from an auth probe", () => {
   })
 })
 
-describe("external agent detection on this machine", () => {
-  test("reports Claude Code truthfully without assuming the test host installed it", async () => {
-    const agents = await detectExternalAgents()
-    const claude = agents.find((agent) => agent.id === "claude-code")
+describe("external agent detection through the env seam", () => {
+  // Every agent is looked up in a fake HOME and a PATH of one fake folder. An injected environment never searches the
+  // machine's own folders (/opt/homebrew/bin, /usr/local/bin and the rest), so no real CLI on the test host is ever
+  // spawned and no real account is ever probed. The fakes use shell built-ins only, so they need nothing else on PATH.
+  async function fakeAgents(name: string, scripts: Record<string, string>) {
+    const directory = join(root, "detect", name)
+    await mkdir(directory, { recursive: true })
+    for (const [cli, body] of Object.entries(scripts)) {
+      await writeFile(join(directory, cli), `#!/bin/sh\n${body}\n`)
+      await chmod(join(directory, cli), 0o755)
+    }
+    return { directory, env: { HOME: join(root, "detect", `${name}-home`), PATH: directory } }
+  }
+  // What detection found sits in the fake folder, whatever the test host has installed.
+  const onlyFakes = (agents: Awaited<ReturnType<typeof detectExternalAgents>>, directory: string) => {
+    for (const agent of agents.filter((agent) => agent.path))
+      expect({ id: agent.id, inside: agent.path!.startsWith(`${directory}/`) }).toEqual({ id: agent.id, inside: true })
+  }
 
-    expect(claude).toBeDefined()
-    expect(claude?.installed).toBe(Boolean(claude?.path))
-    if (claude?.version) expect(claude.version.trim().length).toBeGreaterThan(0)
-  }, 60_000)
+  test("an injected environment searches only its own PATH and HOME, never the machine's folders", async () => {
+    const env = { HOME: join(root, "detect", "machine-home"), PATH: join(root, "detect", "machine-path") }
+    for (const platform of ["darwin", "linux"] as const) {
+      const machine = await agentCandidatePaths("codex", env, platform)
+      const injected = await agentCandidatePaths("codex", env, platform, false)
+      expect(machine).toContain("/opt/homebrew/bin/codex")
+      for (const path of injected)
+        expect({ path, inside: path.startsWith(`${env.HOME}/`) || path.startsWith(`${env.PATH}/`) }).toEqual({
+          path,
+          inside: true,
+        })
+      expect(injected).toContain(join(env.HOME, ".local", "bin", "codex"))
+    }
+    expect(await agentCandidatePaths("codex", env, "darwin")).toContain(
+      "/Applications/ChatGPT.app/Contents/Resources/codex",
+    )
+    // Without a HOME of its own, an injected environment has only its PATH.
+    expect(await agentCandidatePaths("codex", { PATH: env.PATH }, "linux", false)).toEqual([join(env.PATH, "codex")])
+  })
 
-  test("reports uninstalled runtimes without throwing", async () => {
-    const agents = await detectExternalAgents()
-
-    expect(agents.map((agent) => agent.id)).toEqual(["claude-code", "codex", "cursor", "vscode"])
+  test("reports every catalog agent in order, then VS Code, without throwing", async () => {
+    const { directory, env } = await fakeAgents("none", {})
+    const agents = await detectExternalAgents({ env, platform: "linux" })
+    onlyFakes(agents, directory)
+    expect(agents.map((agent) => agent.id)).toEqual([...ExternalAgent.catalog.map((agent) => agent.id), "vscode"])
     for (const agent of agents) {
-      if (agent.installed) continue
+      expect(agent).toMatchObject({ installed: false, state: "not-installed" })
       expect(agent.path).toBeUndefined()
       expect(agent.version).toBeUndefined()
     }
-  }, 60_000)
+  })
+
+  test("a status probe decides ready or signed out, and an agent without one stays unknown", async () => {
+    const { directory, env } = await fakeAgents("states", {
+      claude: `case "$1" in --version) echo "2.1.215 (Claude Code)";; auth) echo '{"loggedIn": false, "authMethod": "none"}'; exit 1;; esac`,
+      codex: `case "$1" in --version) echo "codex-cli 0.164.0";; login) echo "Logged in using ChatGPT";; esac`,
+      kilo: `case "$1" in --version) echo "7.8.17";; auth) printf 'Credentials\\n\\n0 credentials\\n';; esac`,
+      // Any call other than --version leaves a mark: Gemini CLI documents no status command, so none may run.
+      gemini: `[ "$1" = "--version" ] && echo "0.65.0" && exit 0; : > "${join(root, "detect", "gemini-probed")}"`,
+    })
+    const agents = await detectExternalAgents({ env, platform: "linux" })
+    onlyFakes(agents, directory)
+    const by = (id: string) => agents.find((agent) => agent.id === id)!
+    expect(by("claude-code")).toMatchObject({ state: "signed-out", signedIn: false, version: "2.1.215 (Claude Code)" })
+    expect(by("claude-code").path).toBe(join(directory, "claude"))
+    expect(by("codex")).toMatchObject({ state: "ready", signedIn: true, tier: "chat" })
+    expect(by("kilo")).toMatchObject({ state: "signed-out", signedIn: false, tier: "terminal" })
+    expect(by("gemini")).toMatchObject({ state: "unknown", installed: true, version: "0.65.0" })
+    expect(by("gemini").signedIn).toBeUndefined()
+    expect(await Bun.file(join(root, "detect", "gemini-probed")).exists()).toBe(false)
+  })
+
+  test("Cursor's generic `agent` counts only with Cursor's own version", async () => {
+    const cursor = await fakeAgents("cursor-agent-name", {
+      agent: `case "$1" in --version) echo "2026.09.02-c22c1a3";; status) echo "✓ Logged in as developer@example.com";; esac`,
+    })
+    expect(
+      (await detectExternalAgents({ env: cursor.env, platform: "linux" })).find((a) => a.id === "cursor"),
+    ).toMatchObject({ state: "ready", cli: "agent", path: join(cursor.directory, "agent") })
+    const other = await fakeAgents("other-agent-name", { agent: `echo "agent 1.4.0"` })
+    expect(
+      (await detectExternalAgents({ env: other.env, platform: "linux" })).find((a) => a.id === "cursor"),
+    ).toMatchObject({ state: "not-installed", installed: false })
+  })
+
+  test("the database migration tool that is also called goose is not the goose agent", async () => {
+    const migrations = await fakeAgents("pressly-goose", { goose: `echo "goose version: v3.24.1"` })
+    expect(
+      (await detectExternalAgents({ env: migrations.env, platform: "linux" })).find((a) => a.id === "goose")?.state,
+    ).toBe("not-installed")
+    const agent = await fakeAgents("block-goose", { goose: `echo "1.9.0"` })
+    expect(
+      (await detectExternalAgents({ env: agent.env, platform: "linux" })).find((a) => a.id === "goose")?.state,
+    ).toBe("unknown")
+  })
+
+  test("a terminal-only agent never reaches a headless spawn", async () => {
+    const { env } = await fakeAgents("terminal-only", { kilo: `echo should-not-run` })
+    await expect(runExternalCodingAgent({ runtime: "kilo" as never, cwd: root, prompt: "x", env })).rejects.toThrow(
+      "runs in Vector's terminal only",
+    )
+  })
+})
+
+describe("reading sign-in state from a credential total", () => {
+  test("only the total is read, and keys from the environment keep it unknown", () => {
+    expect(signedInFromCredentialCount("Credentials\n  Anthropic oauth\n\n1 credentials")).toBe(true)
+    expect(signedInFromCredentialCount("Credentials\n\n0 credentials")).toBe(false)
+    expect(signedInFromCredentialCount("0 credentials\nEnvironment\n  OpenAI\n1 environment variable")).toBeUndefined()
+    expect(signedInFromCredentialCount("")).toBeUndefined()
+    expect(signedInFromCredentialCount("unrelated banner")).toBeUndefined()
+  })
+})
+
+describe("listing an agent's models through the desktop", () => {
+  async function fakeCli(name: string, cli: string, body: string) {
+    const directory = join(root, "models", name)
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, cli), `#!/bin/sh\n${body}\n`)
+    await chmod(join(directory, cli), 0o755)
+    return { HOME: join(root, "models", `${name}-home`), PATH: `${directory}:/usr/bin:/bin` }
+  }
+
+  test("Cursor's own listing becomes rows, without colour codes or its current/default marks", async () => {
+    // The shape cursor-agent 2026.09.02 prints for `agent models`, colour codes included.
+    const env = await fakeCli(
+      "cursor-live",
+      "cursor-agent",
+      `[ "$1" = models ] || exit 2
+printf '\\033[2mAvailable models\\033[22m\\n\\n'
+printf '\\033[32mauto\\033[39m \\033[2m- Auto\\033[22m\\033[2m (current, default)\\033[22m\\n'
+printf '\\033[36mcomposer-2.5\\033[39m \\033[2m- Composer 2.5\\033[22m\\n'
+printf "\\033[36mclaude-opus-4-8[context=1m]\\033[39m \\033[2m- Opus 4.8 1M\\033[22m\\n\\n"
+printf 'Tip: use --model <id> to switch.\\n'`,
+    )
+    expect(await listAgentModels("cursor", { env, platform: "linux" })).toEqual({
+      id: "cursor",
+      source: "live",
+      models: [
+        { id: "auto", name: "Auto" },
+        { id: "composer-2.5", name: "Composer 2.5" },
+        { id: "claude-opus-4-8[context=1m]", name: "Opus 4.8 1M" },
+      ],
+    })
+  })
+
+  test("a failed, silent or slow listing falls back to the catalog's list with the reason", async () => {
+    const failed = await fakeCli("cursor-failed", "cursor-agent", `echo "Not logged in" >&2; exit 1`)
+    const slow = await fakeCli("cursor-slow", "cursor-agent", `sleep 5`)
+    const catalog = ExternalAgent.find("cursor")!.models
+    for (const env of [failed, slow]) {
+      const list = await listAgentModels("cursor", { env, platform: "linux", timeoutMs: 300 })
+      expect(list.source).toBe("catalog")
+      expect(list.models).toEqual(catalog.kind === "live" ? catalog.fallback : [])
+      expect(list.error).toContain("did not list its models")
+    }
+    const missing = await listAgentModels("codex", {
+      env: { HOME: root, PATH: join(root, "nowhere") },
+      platform: "linux",
+    })
+    expect(missing).toMatchObject({ source: "catalog", error: "Codex is not installed." })
+  }, 20_000)
+
+  test("JSON listings are read too, and fixed or absent lists never spawn anything", async () => {
+    const env = await fakeCli(
+      "codex-json",
+      "codex",
+      `echo '{"models":[{"slug":"gpt-5.5","display_name":"GPT-5.5"},{"slug":"--not-a-model"},"gpt-6-sol"]}'`,
+    )
+    expect((await listAgentModels("codex", { env, platform: "linux" })).models).toEqual([
+      { id: "gpt-5.5", name: "GPT-5.5" },
+      { id: "gpt-6-sol", name: "gpt-6-sol" },
+    ])
+    expect(await listAgentModels("gemini", { env })).toMatchObject({
+      source: "catalog",
+      models: [{ id: "auto" }, { id: "pro" }, { id: "flash" }, { id: "flash-lite" }],
+    })
+    expect(await listAgentModels("antigravity", { env })).toEqual({ id: "antigravity", source: "none", models: [] })
+    await expect(listAgentModels("../../etc", { env })).rejects.toThrow("Choose an agent from the list.")
+  })
+
+  test("headings, tips and words without a model's shape are never read as models", () => {
+    expect(
+      modelsFromOutput("Models\nLoading...\nanthropic/claude-sonnet-5\nopenai/gpt-5.5\n--flag\nTip: run it", "lines"),
+    ).toEqual([
+      { id: "anthropic/claude-sonnet-5", name: "anthropic/claude-sonnet-5" },
+      { id: "openai/gpt-5.5", name: "openai/gpt-5.5" },
+    ])
+  })
+})
+
+describe("commands for the built-in terminal", () => {
+  async function fakeCli(name: string, cli: string) {
+    const directory = join(root, "terminal", name)
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, cli), `#!/bin/sh\necho 1.0.0\n`)
+    await chmod(join(directory, cli), 0o755)
+    return { directory, env: { HOME: join(root, "terminal", `${name}-home`), PATH: `${directory}:/usr/bin:/bin` } }
+  }
+
+  test("install shows this platform's official commands, ready to run in an empty setup folder", async () => {
+    const { env } = await fakeCli("none", "unrelated")
+    const commands = await agentCommands("claude-code", { env, platform: "darwin", directory: join(root, "setup") })
+    expect(commands.install.map((option) => option.id)).toEqual(["script", "homebrew"])
+    const script = commands.install[0]!
+    expect(script.command).toBe("curl -fsSL https://claude.ai/install.sh | bash")
+    expect(script.launch).toMatchObject({
+      title: "Install Claude Code",
+      display: script.command,
+      command: "/bin/sh",
+      cwd: join(root, "setup"),
+    })
+    expect(script.launch.args[0]).toBe("-c")
+    expect(script.launch.args[1]!.split("\n")[0]).toBe(script.command)
+    expect(script.launch.env).toEqual({ PATH: env.PATH })
+    // Not installed yet, so there is nothing to sign in with.
+    expect(commands.signIn).toBeUndefined()
+
+    const windows = await agentCommands("claude-code", { env, platform: "win32", directory: join(root, "setup") })
+    expect(windows.install.map((option) => option.id)).toEqual(["powershell", "winget"])
+    expect(windows.install[0]!.launch).toMatchObject({ command: "powershell.exe", env: {} })
+    expect(windows.install[0]!.launch.args.slice(0, 2)).toEqual(["-NoProfile", "-EncodedCommand"])
+    // Base64 carries no quote for the Windows command line to rewrite, so a vendor line with its own nested double
+    // quotes reaches PowerShell as written.
+    const codex = await agentCommands("codex", { env, platform: "win32", directory: join(root, "setup") })
+    const powershell = codex.install.find((option) => option.id === "powershell")!
+    expect(powershell.launch.args[2]).toMatch(/^[A-Za-z0-9+/]+=*$/)
+    const encoded = Buffer.from(powershell.launch.args[2]!, "base64").toString("utf16le").split("\n")
+    expect(encoded[0]).toBe('powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"')
+    expect(encoded.at(-1)).toBe("exit $code")
+  })
+
+  test("sign-in runs the installed command it found, and an interactive one carries its hint", async () => {
+    const claude = await fakeCli("claude", "claude")
+    const signIn = (await agentCommands("claude-code", { env: claude.env, platform: "linux", directory: root })).signIn!
+    expect(signIn).toMatchObject({ display: "claude auth login", interactive: false })
+    expect(signIn.launch.args[1]!.split("\n")[0]).toBe(`'${join(claude.directory, "claude")}' 'auth' 'login'`)
+
+    const copilot = await fakeCli("copilot", "copilot")
+    const interactive = (await agentCommands("copilot", { env: copilot.env, platform: "linux", directory: root }))
+      .signIn!
+    expect(interactive).toMatchObject({
+      display: "copilot",
+      interactive: true,
+      hint: "Type /login inside Copilot CLI, then follow its steps.",
+    })
+  })
+
+  test("the terminal stays open on the command's exit status until Enter", async () => {
+    const launch = terminalLaunch({
+      title: "t",
+      display: "false",
+      line: "false",
+      cwd: root,
+      env: {},
+      platform: "linux",
+    })
+    const child = Bun.spawn([launch.command, ...launch.args], { stdin: "pipe", stdout: "pipe" })
+    child.stdin.write("\n")
+    child.stdin.end()
+    expect(await child.exited).toBe(1)
+    expect(await new Response(child.stdout).text()).toContain("Exited with code 1. Press Enter to close this terminal.")
+  })
+
+  test("every word of a command line reaches the program as itself", async () => {
+    const directory = join(root, "terminal", "it's here")
+    await mkdir(directory, { recursive: true })
+    const path = join(directory, "echo-args")
+    await writeFile(path, `#!/bin/sh\nfor a in "$@"; do printf '[%s]' "$a"; done\n`)
+    await chmod(path, 0o755)
+    const line = commandLine(path, ["--model", "it's [1m]", "$HOME"], "linux")
+    const child = Bun.spawn(["/bin/sh", "-c", line], { stdout: "pipe" })
+    expect(await new Response(child.stdout).text()).toBe("[--model][it's [1m]][$HOME]")
+    expect(commandLine("C:\\Program Files\\x.exe", ["it's"], "win32")).toBe("& 'C:\\Program Files\\x.exe' 'it''s'")
+  })
+
+  test("a terminal-tier launch prepares the isolated workspace and opens the agent there on its model", async () => {
+    const gemini = await fakeCli("gemini", "gemini")
+    const prepared: string[] = []
+    const prepare = async (projectPath: string) => {
+      prepared.push(projectPath)
+      return { path: join(root, "isolated"), isolation: "copy" as const }
+    }
+    const result = await launchAgentTerminal(
+      { id: "gemini", projectPath: "/repo", model: "pro" },
+      { env: gemini.env, platform: "linux", prepare },
+    )
+    expect(prepared).toEqual(["/repo"])
+    expect(result.workspace).toEqual({ path: join(root, "isolated"), isolation: "copy" })
+    expect(result.launch).toMatchObject({ title: "Gemini CLI", display: "gemini -m pro", cwd: join(root, "isolated") })
+    expect(result.launch.args[1]!.split("\n")[0]).toBe(`'${join(gemini.directory, "gemini")}' '-m' 'pro'`)
+
+    // Nothing is prepared for a launch that cannot start.
+    const agy = await fakeCli("agy", "agy")
+    await expect(
+      launchAgentTerminal({ id: "antigravity", projectPath: "/repo", model: "x" }, { env: agy.env, prepare }),
+    ).rejects.toThrow("has no model setting")
+    await expect(
+      launchAgentTerminal({ id: "gemini", projectPath: "/repo", model: "a b" }, { env: gemini.env, prepare }),
+    ).rejects.toThrow("is not a model name")
+    await expect(
+      launchAgentTerminal({ id: "junie", projectPath: "/repo" }, { env: gemini.env, prepare }),
+    ).rejects.toThrow("is not installed")
+    expect(prepared).toEqual(["/repo"])
+  })
 })
 
 describe("choosing the model an external CLI runs", () => {
