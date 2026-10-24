@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Project existing benchmark JSON into a public metric archive; never run benchmarks."""
+"""Export existing Vector benchmark JSON into a public metric archive; never run benchmarks."""
 import argparse
 import collections
 import hashlib
@@ -29,7 +29,22 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def external_run(value):
+    if isinstance(value, list):
+        return any(external_run(item) for item in value)
+    if not isinstance(value, dict):
+        return False
+    runtime = value.get("runtime")
+    if value.get("excludedFromLearning") is True or isinstance(runtime, str) and runtime != "vector":
+        return True
+    return any(external_run(item) for item in value.values())
+
+
 def project(value, key="", depth=0):
+    # Mixed reports may already aggregate the excluded run into their totals. Omit the whole report rather than
+    # retaining those derived measurements after removing just the individual run.
+    if depth == 0 and external_run(value):
+        return OMIT
     if depth > 24 or DENY_KEY.search(key) or key.lower() in DENY_TREE:
         return OMIT
     if isinstance(value, bool):

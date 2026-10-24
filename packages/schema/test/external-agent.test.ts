@@ -279,6 +279,56 @@ describe("the notes the legal review asks for", () => {
   })
 })
 
+describe("the runtime rules the legal review asks for", () => {
+  const forms = (agent: ExternalAgent.Agent) =>
+    [
+      agent.headless?.fresh,
+      agent.headless?.resume,
+      agent.headless?.model,
+      agent.headless?.resumeModel,
+      agent.interactive.args,
+      agent.interactive.model,
+      agent.signIn.args,
+      agent.statusProbe?.args,
+      agent.models.kind === "live" ? agent.models.args : undefined,
+    ]
+      .filter((form): form is readonly string[] => Boolean(form))
+      .flat()
+
+  test("at most four of the user's own agents run at once, and a refusal says why in Vector's words", () => {
+    expect(ExternalAgent.MAX_RUNNING).toBe(4)
+    expect(ExternalAgent.RUN_LIMIT_MESSAGE).toStartWith("4 of your coding agents are already running")
+    expect(ExternalAgent.RUN_LIMIT_MESSAGE).not.toMatch(/\bprojects?\b|\bexactly\b|never exceeds|upgrade|plan\b/i)
+  })
+
+  test("every run of a user's own agent stays out of learning, and so does a record that says so", () => {
+    for (const agent of agents) expect(ExternalAgent.excludedFromLearning({ runtime: agent.id })).toBe(true)
+    // An agent that has since left the catalog reads back as Vector's runtime; its record's own mark still counts.
+    expect(ExternalAgent.excludedFromLearning({ runtime: "vector", excludedFromLearning: true })).toBe(true)
+    expect(ExternalAgent.excludedFromLearning({ runtime: "antigravity" })).toBe(true)
+    expect(ExternalAgent.excludedFromLearning({ runtime: "vector" })).toBe(false)
+  })
+
+  test("Claude Code keeps every sign-in method: no bare mode, no forced login method, no settings override", () => {
+    for (const part of forms(ExternalAgent.find("claude-code")!)) {
+      expect(part).not.toMatch(/^--bare$|^--settings$|^--setting-sources$|forceLoginMethod|apiKeyHelper/i)
+      expect(part).not.toMatch(/ANTHROPIC_|CLAUDE_CODE_OAUTH_TOKEN/)
+    }
+  })
+
+  test("Codex keeps its own home, sign-in and admin rules, and never leaves the sandbox", () => {
+    const parts = forms(ExternalAgent.find("codex")!)
+    for (const part of parts) {
+      expect(part).not.toMatch(/CODEX_HOME|ORIGINATOR|forced_login_method|forced_chatgpt_workspace_id/i)
+      expect(part).not.toMatch(/cli_auth_credentials_store|^--ignore-user-config$|^--ignore-rules$|^--profile$/)
+      expect(part).not.toMatch(/danger-full-access|dangerously-bypass|^--full-auto$|^--yolo$/)
+    }
+    // Every -c override Vector passes is the sandbox or the model, nothing else.
+    const overrides = parts.flatMap((part, index) => (parts[index - 1] === "-c" ? [part] : []))
+    expect(overrides).toEqual(['sandbox_mode="workspace-write"', `model="${ExternalAgent.MODEL}"`])
+  })
+})
+
 describe("external agent command builders", () => {
   const prompt = "Fix the failing test\nand explain why"
   const cwd = "/tmp/vector-run/workspace"

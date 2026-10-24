@@ -23,6 +23,8 @@ export type ParallelWorkspaceTurn = {
   // resuming. The UI says so rather than pretending the agent remembers.
   resumed?: boolean
   cost?: string
+  // What the user's own agent printed about its sign-in, plan or usage beside its reply, kept as it wrote it.
+  notices?: string[]
   messages?: AgentChat["messages"]
   activity?: AgentChat["activity"]
   // Live output for the turn in flight, dropped when the turn settles so a
@@ -60,7 +62,7 @@ export function extendStreamTail(turns: ParallelWorkspaceTurn[] | undefined, id:
 export function settleTurn(
   turns: ParallelWorkspaceTurn[] | undefined,
   id: string,
-  patch: { text?: string; state: ParallelWorkspaceTurn["state"]; cost?: string },
+  patch: { text?: string; state: ParallelWorkspaceTurn["state"]; cost?: string; notices?: string[] },
 ) {
   return (turns ?? []).map((turn) =>
     turn.id === id

@@ -61,6 +61,8 @@ export function addUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
 export type ModelOutcome = {
   id: string
   projectId: string
+  runtime?: string
+  excludedFromLearning?: boolean
   provider?: string
   model?: string
   // Preserve cumulative history without assigning several observed models' work to a single one.
@@ -162,7 +164,8 @@ export function outcomeQualityScore(
   const reliability = completed + unsuccessful ? completed / (completed + unsuccessful) : 1
   // Earlier passing checks cannot reward a failed attempt. Actual failed checks remain negative evidence.
   return (
-    checkPassScore(outcomes.filter((outcome) => outcome.checksPassed !== true || completedOutcome(outcome))) * reliability
+    checkPassScore(outcomes.filter((outcome) => outcome.checksPassed !== true || completedOutcome(outcome))) *
+    reliability
   )
 }
 

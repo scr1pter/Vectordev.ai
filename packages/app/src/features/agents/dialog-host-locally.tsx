@@ -44,6 +44,9 @@ export type HostLocallyProps = {
   detect: (options?: { refresh?: boolean }) => Promise<unknown>
   /** The repository agents start in, and whose session terminal runs the commands. Empty when none is open. */
   directory: () => string
+  /** Why nothing may start, continue or be set up from here, such as a connection to a server elsewhere or as a guest
+      (hostLocallyRefusal). Required, so no caller can leave the check out. */
+  refusal: () => string | undefined
   /** The chat agent the agent launcher is set to, marked in the list. */
   selected: () => string | undefined
   picks: (id: string) => readonly RuntimeModelPick[] | undefined
@@ -202,6 +205,9 @@ function AgentList(props: {
                 computer.
               </p>
             </Show>
+            <Show when={available() && props.context.refusal()}>
+              {(refusal) => <p data-slot="host-notice">{refusal()}</p>}
+            </Show>
             <div data-slot="host-section">
               <span>Host locally</span>
               <span>Your installed command lines</span>
@@ -340,7 +346,7 @@ function AgentDetail(props: { context: HostLocallyProps; row: () => HostRow; onB
     owned?.remove()
   })
   const running = () => Boolean(setup.title && setup.exitCode === undefined && !setup.error)
-  const canRun = () => Boolean(props.context.directory()) && !running()
+  const canRun = () => !props.context.refusal() && Boolean(props.context.directory()) && !running()
 
   // Detection that finds the agent newly installed changes `installed`, which asks desktop for its sign-in again.
   const runSetup = (launch: ExternalAgent.TerminalLaunch) =>
@@ -356,7 +362,7 @@ function AgentDetail(props: { context: HostLocallyProps; row: () => HostRow; onB
   // its vendor limits to interactive use, such as Qwen Code on an Alibaba Coding Plan.
   const start = async (surface: ExternalAgent.Tier) => {
     const current = agent()
-    if (customError()) return
+    if (customError() || props.context.refusal()) return
     const value = chosen(surface)
     props.context.remember(current.id, value)
     if (surface === "chat" && ExternalAgent.isChatId(current.id)) {
@@ -401,8 +407,9 @@ function AgentDetail(props: { context: HostLocallyProps; row: () => HostRow; onB
   const install = () => options().find((item) => item.id === option()) ?? options()[0]
   const signIn = () => commands()?.signIn
   const startable = () => canStart(props.row())
-  const startBlocked = () => (agent().tier === "chat" ? customError() : terminalBlocked())
+  const startBlocked = () => props.context.refusal() ?? (agent().tier === "chat" ? customError() : terminalBlocked())
   const terminalBlocked = () => {
+    if (props.context.refusal()) return props.context.refusal()
     if (customError()) return customError()
     if (running()) return `${setup.title} is still running in this window.`
     if (!api?.launchTerminal) return "Update Vector's desktop app to start this agent from here."
@@ -410,6 +417,7 @@ function AgentDetail(props: { context: HostLocallyProps; row: () => HostRow; onB
     return undefined
   }
   const runBlocked = () => {
+    if (props.context.refusal()) return props.context.refusal()
     if (!props.context.directory()) return "Open a repository first, so Vector's terminal can run it."
     return undefined
   }
@@ -459,6 +467,14 @@ function AgentDetail(props: { context: HostLocallyProps; row: () => HostRow; onB
             </div>
 
             <p data-slot="host-copy">{startCopy(agent())}</p>
+
+            <Show when={api && props.context.refusal()}>
+              {(refusal) => (
+                <p data-slot="host-hint" data-tone="error" data-host-refusal>
+                  {refusal()}
+                </p>
+              )}
+            </Show>
 
             <Show when={props.row().state === "checking"}>
               <p data-slot="host-hint">Checking this computer for {agent().name}…</p>

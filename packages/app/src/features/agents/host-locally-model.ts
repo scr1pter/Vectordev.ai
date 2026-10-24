@@ -76,6 +76,19 @@ export const NOTE_LABEL: Record<ExternalAgent.Note["kind"], string> = {
   info: "Note",
 }
 
+/** Why Host locally starts, prompts and sets up nothing over this connection, or undefined when it may. Its agents run on
+    this computer, signed in to the account of the person using it, so they start only from this computer's own Vector
+    for its owner: never through a server elsewhere (a remote or SSH host, where the agent would run on that machine),
+    and never as a guest of someone's invite, whose agents are theirs. `username` is the one this app connects with;
+    an invite's link always signs its guests in as "guest". */
+export function hostLocallyRefusal(connection: { local: boolean; username?: string }) {
+  if (connection.local && connection.username !== "guest") return undefined
+  return HOST_LOCALLY_ELSEWHERE
+}
+
+export const HOST_LOCALLY_ELSEWHERE =
+  "Coding agents from Host locally run only on this computer, for the person using it. Vector is connected to a server elsewhere or as a guest, so they are off here."
+
 /** The launcher's fine print. Vector names these agents only to say which installed command runs. */
 export const HOST_FOOTNOTE =
   "Vector runs each agent's own command and never reads its credentials. Vector is independent and is not affiliated with, endorsed by or sponsored by these companies. Their names are trademarks of their owners."

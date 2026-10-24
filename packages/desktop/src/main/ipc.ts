@@ -159,6 +159,8 @@ import {
   parallelWorkspaceCloudScopes,
   refreshParallelWorkspace,
   removeParallelWorkspaceRecord,
+  repairParallelWorkspace,
+  runningChatAgents,
   runParallelWorkspace,
   setParallelWorkspaceRuntimeModel,
   stopParallelWorkspace,
@@ -407,6 +409,10 @@ export function registerIpcHandlers(deps: Deps) {
     const engine = await deps.awaitInitialization()
     return followUpParallelWorkspace(id, engine, text)
   })
+  handle("parallel-workspaces-repair", async (_event: IpcMainInvokeEvent, id: string) => {
+    const engine = await deps.awaitInitialization()
+    return repairParallelWorkspace(String(id), engine)
+  })
   handle("parallel-workspaces-set-runtime-model", (_event: IpcMainInvokeEvent, id: string, model?: string) =>
     setParallelWorkspaceRuntimeModel(id, model),
   )
@@ -593,7 +599,9 @@ export function registerIpcHandlers(deps: Deps) {
     listAgentModels(id, { refresh: options?.refresh === true }),
   )
   handle("external-agents-commands", (_event, id: string) => agentCommands(id))
-  handle("external-agents-launch-terminal", (_event, input: TerminalAgentInput) => launchAgentTerminal(input))
+  handle("external-agents-launch-terminal", (_event, input: TerminalAgentInput) =>
+    launchAgentTerminal(input, { chatRunning: runningChatAgents }),
+  )
   handle("external-agents-open-editor", (_event: IpcMainInvokeEvent, input: OpenInEditorInput) => openInEditor(input))
   handle("external-agents-prepare-workspace", (_event: IpcMainInvokeEvent, projectPath: string) =>
     prepareWorkspace(projectPath),

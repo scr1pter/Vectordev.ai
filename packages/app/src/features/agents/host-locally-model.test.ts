@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { existsSync, readdirSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { ExternalAgent } from "@vectordevai/schema/external-agent"
 import {
@@ -7,6 +7,8 @@ import {
   customModelError,
   filterHostRows,
   HOST_FOOTNOTE,
+  HOST_LOCALLY_ELSEWHERE,
+  hostLocallyRefusal,
   hostRows,
   hostState,
   installOptions,
@@ -103,6 +105,32 @@ describe("Host locally rows", () => {
   })
 })
 
+describe("who may start an agent", () => {
+  test("only this computer's own Vector, for its owner: never a server elsewhere or a guest's invite", () => {
+    expect(hostLocallyRefusal({ local: true, username: "vector" })).toBeUndefined()
+    expect(hostLocallyRefusal({ local: true })).toBeUndefined()
+    // A remote or SSH host would run the agent on that machine, and a guest's agents are the person's who invited them.
+    expect(hostLocallyRefusal({ local: false, username: "vector" })).toBe(HOST_LOCALLY_ELSEWHERE)
+    expect(hostLocallyRefusal({ local: true, username: "guest" })).toBe(HOST_LOCALLY_ELSEWHERE)
+    expect(HOST_LOCALLY_ELSEWHERE).toContain("only on this computer")
+  })
+})
+
+describe("never behind a plan", () => {
+  test("the launcher and the agents' views read nothing of Vector's account, plan, credits or pricing", () => {
+    // What decides whether an agent can start is what desktop detected on this computer, and nothing else.
+    expect(canStart({ agent: agent("claude-code"), state: "ready" })).toBe(true)
+    const files = readdirSync(import.meta.dir).filter((name) => /\.(?:ts|tsx)$/.test(name) && !name.includes(".test."))
+    expect(files.length).toBeGreaterThan(10)
+    const tied = files.filter((name) =>
+      /codium|vector-account|billing-window|\bcredits?\b|upgrade|pricing|paywall|useAccount|plan\(\)/i.test(
+        readFileSync(join(import.meta.dir, name), "utf8"),
+      ),
+    )
+    expect(tied).toEqual([])
+  })
+})
+
 describe("badges", () => {
   test("every agent is two letters, and the app ships no vendor's logo or icon file", () => {
     expect(ExternalAgent.catalog.map((entry) => entry.logo.letters)).toEqual([
@@ -164,6 +192,7 @@ describe("copy", () => {
       ...Object.values(STATUS_LABEL),
       ...ExternalAgent.catalog.flatMap((entry) => entry.notes.map((note) => note.text)),
       HOST_FOOTNOTE,
+      HOST_LOCALLY_ELSEWHERE,
     ]
       .join("\n")
       // A company's legal name is quoted as it is registered.

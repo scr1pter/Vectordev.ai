@@ -30,6 +30,8 @@ import { createPullRequest } from "./github"
 import {
   externalModelValue,
   runExternalCodingAgent,
+  runningTerminalAgents,
+  serializeExternalAgentStart,
   type CodingAgentRuntime,
   type RunExternalAgentInput,
   type ExternalAgentRunResult,
@@ -220,6 +222,9 @@ export type ParallelWorkspaceRecord = {
   validationPassed?: boolean
   repairAttempts?: number
   error?: string
+  // Set on every workspace of a user's own coding agent: nothing from it goes into what Vector learns from or
+  // measures (ExternalAgent.excludedFromLearning). Kept on the record so it holds after the agent leaves the catalog.
+  excludedFromLearning?: boolean
 }
 
 export type ParallelWorkspaceEngine = {
@@ -349,6 +354,8 @@ function readRecords(): ParallelWorkspaceRecord[] {
           ...item,
           revision: item.revision ?? 0,
           runtime: ExternalAgent.isChatId(item.runtime) ? item.runtime : "vector",
+          // Read before the runtime above can fall back to Vector's, so an agent's record never starts counting.
+          ...(ExternalAgent.excludedFromLearning(item) ? { excludedFromLearning: true } : {}),
         }),
       )
     const compacted = records.map(compactClosedParallelWorkspace)
@@ -745,6 +752,63 @@ function parallelAgentPrompt(record: ParallelWorkspaceRecord) {
     .join("\n")
 }
 
+// What a user's own coding agent is sent: the user's words first, as typed, then plain facts about the repository
+// and nothing else. It runs as the user's own agent, so Vector gives it no role, persona, working style or completion
+// policy, nothing Vector learned or remembers, and no messages from other agents (Vector's own agent keeps its brief,
+// parallelAgentPrompt).
+export function externalAgentPrompt(record: ParallelWorkspaceRecord, request = record.taskPrompt) {
+  return [request, "", externalRepositoryContext(record)].join("\n")
+}
+
+// A follow-up the agent's CLI could not resume: the user's new words, then what the earlier turns left behind here.
+export function externalContinuationPrompt(record: ParallelWorkspaceRecord, request: string) {
+  return [
+    request,
+    "",
+    "This continues earlier work in this folder, from a conversation that could not be resumed.",
+    `The earlier request was: ${record.taskPrompt}`,
+    record.finalSummary ? `The last reply was:\n${record.finalSummary}` : undefined,
+    record.changedFiles.length
+      ? `Files already changed here:\n${record.changedFiles.map((file) => `- ${file}`).join("\n")}`
+      : "No files have been changed here yet.",
+    "",
+    externalRepositoryContext(record),
+  ]
+    .filter((line) => line !== undefined)
+    .join("\n")
+}
+
+// The message "Try a fix" sends: the failed check's own output, which is what the user asks their agent to look at.
+export function externalRepairRequest(report: WorkspaceValidationReport) {
+  return [
+    "This check failed after the changes in this folder. Please fix what makes it fail, then run it again.",
+    "",
+    report.failureSummary.slice(-6_000),
+  ].join("\n")
+}
+
+const EXTERNAL_RULES_LINE =
+  "This repository's rules are in .vector/RULES.md when that file exists. Read it before making changes."
+
+function externalRepositoryContext(record: ParallelWorkspaceRecord) {
+  const shared = record.isolatedPath === record.sourcePath || teamForWorkspace(record.id)?.topology === "collaborative"
+  return [
+    record.isolatedPath === record.sourcePath
+      ? `This folder is the repository itself (${record.isolatedPath}): changes apply to it directly, and changes already in it may be the user's or another agent's, so keep them.`
+      : `This folder is an isolated copy of the repository (${record.isolatedPath}).`,
+    shared && record.isolatedPath !== record.sourcePath
+      ? "Other agents work in this folder too, so keep changes that are not yours."
+      : "",
+    EXTERNAL_RULES_LINE,
+    formatRulesForPrompt(repoRulesForPrompt(record.sourcePath, record.changedFiles)),
+    record.contextFiles?.length
+      ? `Files that look relevant to this request:\n${record.contextFiles.map((file) => `- ${file}`).join("\n")}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n")
+}
+
 function validationLogLines(report: WorkspaceValidationReport) {
   if (!report.checks.length) return ["No repository checks were detected for this workspace."]
   return report.checks.flatMap((check) => {
@@ -793,11 +857,14 @@ function reviewAction(report: WorkspaceValidationReport) {
 // so the same failure seen from either tree collapses to one signature.
 // `repairDescription` is what the agent said it changed in the pass this run is
 // verifying: a passing check turns it into the known repair for that signature.
-function rememberValidation(
+// Only Vector's own agent's runs are remembered: a user's own coding agent's
+// diff and words stay out of everything Vector learns from.
+export async function rememberValidation(
   record: ParallelWorkspaceRecord,
   report: WorkspaceValidationReport,
   repairDescription = "",
 ) {
+  if (ExternalAgent.excludedFromLearning(record)) return undefined
   return recordValidationRun(record.sourcePath, {
     report,
     changedFiles: record.changedFiles,
@@ -1539,6 +1606,13 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
   const runtime = input.runtime ?? "vector"
   // A terminal-only agent opens in the built-in terminal instead; only a chat runtime can run here.
   if (runtime !== "vector" && !ExternalAgent.isChatId(runtime)) throw new Error("Choose a runtime Vector can run here.")
+  // The user's own agent runs only when that user starts it: never as a worker an orchestrator schedules.
+  if (runtime !== "vector" && (input.swarmRunId || input.swarmTaskId || input.swarmRole))
+    throw new Error(
+      `${runtimeLabel(runtime)} runs only when you start it, so it cannot work in a swarm. Swarms run Vector's own agent.`,
+    )
+  if (runtime !== "vector" && (await ownAgentsRunning()) >= ExternalAgent.MAX_RUNNING)
+    throw new Error(ExternalAgent.RUN_LIMIT_MESSAGE)
   // A Vector-runtime agent is measured by the engine, so it shows no guess.
   const estimatedCost = runtime === "vector" ? "" : "Reported by runtime when available"
   const name = input.name?.trim() || `Agent ${activeInScope.length + 1}`
@@ -1713,8 +1787,10 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
     diff: "",
     baselineHashes,
     taskDifficulty,
-    retryLimit: taskDifficulty === "complex" ? 2 : taskDifficulty === "trivial" ? 0 : 1,
+    // Vector's own agent repairs a failed check by itself; the user's own agent only when the user chooses Try a fix.
+    retryLimit: runtime !== "vector" ? 0 : taskDifficulty === "complex" ? 2 : taskDifficulty === "trivial" ? 0 : 1,
     repairAttempts: 0,
+    ...(runtime !== "vector" ? { excludedFromLearning: true } : {}),
   }
   writeRecords([record, ...readRecords()])
   return record
@@ -1904,9 +1980,19 @@ async function runExternalWorkspacePass(input: {
       }
     })
   }
-  // A CLI that refused the resume FLAGS is not a failed task — the caller
-  // retries without resume rather than reporting a broken agent.
-  if (result.resumeRejected && !result.modelRejected) return result
+  // A rejected resume still spends one user action. Clear it for the next explicit send, without spawning another
+  // process now. Keep the CLI's error intact so the user can decide whether to continue.
+  if (result.resumeRejected && !result.modelRejected) {
+    updateRecord(input.id, (current) => ({
+      ...current,
+      externalSessionId: undefined,
+      turns: (current.turns ?? []).map((turn) => (turn.id === input.turnId ? { ...turn, resumed: false } : turn)),
+      logs: [
+        `${runtimeLabel(current.runtime)} could not resume. Your next message starts a new conversation with a summary of the earlier work.`,
+        ...current.logs,
+      ].slice(0, 120),
+    }))
+  }
   if (result.exitCode !== 0) {
     // agentOutcome already classified this failure — "installed but not signed
     // in", "exited with code N" — and that sentence is the only part the user
@@ -1966,8 +2052,7 @@ async function executeExternalParallelWorkspace(
     ].slice(0, 120),
   }))
   syncBackgroundTask(record, record.lastAction)
-  // Every pass of this turn, repairs included, runs the model the turn
-  // started with; a model picked meanwhile applies from the next turn.
+  // The turn runs the model it started with; a model picked meanwhile applies from the next turn.
   const model = record.runtimeModel
 
   const costs: number[] = []
@@ -1975,29 +2060,10 @@ async function executeExternalParallelWorkspace(
   // closes the migration edge where an older app already stored a false
   // all-files diff before the baseline became available.
   const beforeDiff = (record.isolation === "git-worktree" ? await gitDiff(record) : await fallbackDiff(record)).diff
-  // External CLIs have no send_teammate_message tool — a real `claude -p` run
-  // exposes 28 tools and none of them is it — so they cannot send. They do take
-  // a prompt, so they can still RECEIVE what teammates queued for them, which is
-  // the honest half of the capability rather than silently neither. The pending
-  // messages remain durable until a CLI run succeeds, including across a failed
-  // resolution, spawn, sign-in, or resume attempt.
-  const delivery = pendingTeammateDelivery(record, "")
-  const briefBody = () =>
-    continuationPrompt({
-      missionBrief: parallelAgentPrompt(record),
-      previousSummary: record.finalSummary,
-      changedFiles: record.changedFiles,
-      instruction: followUp ?? "",
-    })
-  // Resumed external CLIs receive only the follow-up text, not the original
-  // mission brief. Repeat the repository-file contract so rules added or
-  // edited between turns still reach Claude Code, Codex, and Cursor.
-  const compose = (body: string) =>
-    [delivery.prompt, followUp && resumeSessionId ? EXTERNAL_RUNTIME_RULES_POLICY : "", body]
-      .filter(Boolean)
-      .join("\n\n")
-
-  const attempt = await runExternalWorkspacePass({
+  // Every prompt is the user's own words and plain repository facts (externalAgentPrompt). Teammates' messages stay
+  // out: an agent another person steers could otherwise reach the user's own agent through them. A resumed CLI
+  // already holds the conversation, so it gets the new words and the rules line, which may have changed since.
+  const firstRun = await runExternalWorkspacePass({
     id,
     record,
     turnId,
@@ -2005,35 +2071,13 @@ async function executeExternalParallelWorkspace(
     resumeSessionId,
     model,
     runner,
-    prompt: followUp ? compose(resumeSessionId ? followUp : briefBody()) : compose(parallelAgentPrompt(record)),
+    prompt: !followUp
+      ? externalAgentPrompt(record)
+      : resumeSessionId
+        ? [followUp, "", EXTERNAL_RULES_LINE].join("\n")
+        : externalContinuationPrompt(record, followUp),
   })
 
-  // The CLI refused the resume flags — a CLI upgrade can retire a flag.
-  // Re-brief once, and forget the id so later turns do not
-  // pay for the same rejection again.
-  const firstRun = attempt.resumeRejected
-    ? await runExternalWorkspacePass({
-        id,
-        record: updateRecord(id, (current) => ({
-          ...current,
-          externalSessionId: undefined,
-          // The turn was opened claiming a resume. The CLI refused it, so the
-          // transcript has to stop claiming the agent remembers anything.
-          turns: (current.turns ?? []).map((turn) => (turn.id === turnId ? { ...turn, resumed: false } : turn)),
-          logs: [
-            `${runtimeLabel(current.runtime)} would not resume the previous conversation, so Vector restarted it with a written summary of the work so far.`,
-            ...current.logs,
-          ].slice(0, 120),
-        })),
-        turnId,
-        controller,
-        model,
-        runner,
-        prompt: compose(briefBody()),
-      })
-    : attempt
-  const team = teamForWorkspace(record.id)
-  if (team && delivery.messageIds.length) markTeamMessagesDelivered(team.id, record.id, delivery.messageIds)
   if (firstRun.actualCost) costs.push(Number(firstRun.actualCost.replace("$", "")))
 
   record = updateRecord(id, (current) => ({
@@ -2042,15 +2086,16 @@ async function executeExternalParallelWorkspace(
       text: firstRun.summary,
       state: "done",
       cost: firstRun.actualCost,
+      notices: firstRun.notices,
     }),
   }))
 
   // External turns are allowed to inspect or answer without editing. The same
   // rule applies to the first mission and to follow-ups: deterministic checks
   // validate an edit, so running a whole repository suite after a read-only
-  // turn can manufacture an unrelated failure and even trigger a repair agent.
-  // Compare the complete review diff from immediately before and after this
-  // turn so an unchanged pre-existing follow-up diff is preserved as well.
+  // turn can manufacture an unrelated failure. Compare the complete review diff
+  // from immediately before and after this turn so an unchanged pre-existing
+  // follow-up diff is preserved as well.
   const answered = await refreshParallelWorkspace(id)
   if (answered.diff === beforeDiff) {
     const measuredCosts = costs.filter(Number.isFinite)
@@ -2092,12 +2137,14 @@ async function executeExternalParallelWorkspace(
   }))
   syncBackgroundTask(record, `${runtimeLabel(record.runtime)} completed. Running deterministic checks.`)
 
-  let refreshed = await refreshParallelWorkspace(id)
-  let validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles, {
+  const refreshed = await refreshParallelWorkspace(id)
+  const validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles, {
     signal: controller.signal,
   })
-  await rememberValidation(refreshed, validation)
+  // Nothing about this run goes into Vector's memory of failed checks: the diff and the account of the work are the
+  // user's own agent's, which stay out of everything Vector learns from (ExternalAgent.excludedFromLearning).
   controller.signal.throwIfAborted()
+  const failed = checksOutcome(validation) === "failed"
   record = updateRecord(id, (current) => ({
     ...current,
     validationReport: validation,
@@ -2109,100 +2156,6 @@ async function executeExternalParallelWorkspace(
   }))
   syncBackgroundTask(record, validationSummary(validation))
 
-  const retryLimit = record.retryLimit ?? (record.taskDifficulty === "complex" ? 2 : 1)
-  for (let attempt = 1; !validation.passed && attempt <= retryLimit && !controller.signal.aborted; attempt += 1) {
-    // What this repository already knows about this exact failure, read after
-    // the run above was recorded so the count and the flakiness verdict include
-    // it. Empty until a signature has been seen before, hence the filter below.
-    const guidance = await priorFor(record.sourcePath, validation, [record.isolatedPath, record.sourcePath])
-    controller.signal.throwIfAborted()
-    const repairTurnId = randomUUID()
-    record = updateRecord(id, (current) => ({
-      ...current,
-      status: "editing",
-      riskLevel: "high",
-      repairAttempts: attempt,
-      turns: appendTurn(
-        appendTurn(current.turns, {
-          id: randomUUID(),
-          role: "vector",
-          text: `A deterministic check failed. Vector returned the exact failure for repair pass ${attempt} of ${retryLimit}.`,
-          at: now(),
-          state: "done",
-        }),
-        { id: repairTurnId, role: "agent", text: "", at: now(), state: "running", resumed: false },
-      ),
-      lastAction: `${runtimeLabel(current.runtime)} is repairing a failed check (${attempt}/${retryLimit})`,
-      lastActivityAt: now(),
-      logs: [
-        ...(guidance ? ["Prior failures in this repository were included in the repair prompt."] : []),
-        `Vector returned the exact failing check to ${runtimeLabel(current.runtime)} for repair pass ${attempt} of ${retryLimit}.`,
-        ...current.logs,
-      ].slice(0, 120),
-    }))
-    syncBackgroundTask(record, record.lastAction)
-    // Deliberately a fresh, non-resumed spawn with the full mission brief: this
-    // is the path verified working end-to-end today, and resume is not worth
-    // changing it in the same change that introduces resume.
-    const repairDelivery = pendingTeammateDelivery(
-      record,
-      [
-        parallelAgentPrompt(record),
-        followUp ? `The user's most recent follow-up request was: ${followUp}` : "",
-        guidance,
-        formatValidationForRepair(validation),
-        `This is repair pass ${attempt} of ${retryLimit}. Diagnose the exact output, make only evidence-backed changes, and rerun the relevant check before finishing.`,
-      ]
-        .filter(Boolean)
-        .join("\n\n"),
-    )
-    const repair = await runExternalWorkspacePass({
-      id,
-      record,
-      turnId: repairTurnId,
-      controller,
-      model,
-      runner,
-      prompt: repairDelivery.prompt,
-    })
-    const repairTeam = teamForWorkspace(record.id)
-    if (repairTeam && repairDelivery.messageIds.length)
-      markTeamMessagesDelivered(repairTeam.id, record.id, repairDelivery.messageIds)
-    if (repair.actualCost) costs.push(Number(repair.actualCost.replace("$", "")))
-    refreshed = await refreshParallelWorkspace(id)
-    validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles, { signal: controller.signal })
-    // The runtime's own account of the repair, so a check that now passes
-    // records what actually fixed it instead of a bare file list.
-    await rememberValidation(refreshed, validation, repair.summary)
-    controller.signal.throwIfAborted()
-    record = updateRecord(id, (current) => ({
-      ...current,
-      status: "testing",
-      validationReport: validation,
-      validationPassed: validation.passed,
-      terminalOutput: [
-        `--- Guardrail repair verification ${attempt}/${retryLimit} ---`,
-        ...validationLogLines(validation),
-        ...current.terminalOutput,
-      ].slice(0, 280),
-      turns: settleTurn(current.turns, repairTurnId, {
-        text: repair.summary,
-        state: "done",
-        cost: repair.actualCost,
-      }),
-      lastAction: validation.passed
-        ? `Repair ${attempt} verified by deterministic checks`
-        : `Repair ${attempt} did not pass validation`,
-      lastActivityAt: now(),
-      logs: [`Repair verification ${attempt}/${retryLimit}: ${validationSummary(validation)}`, ...current.logs].slice(
-        0,
-        120,
-      ),
-    }))
-    syncBackgroundTask(record, record.lastAction)
-  }
-
-  refreshed = await refreshParallelWorkspace(id)
   const measuredCosts = costs.filter(Number.isFinite)
   const totalCost = measuredCosts.reduce((sum, value) => sum + value, 0)
   // The ledger the pre-flight allowance reads. A runtime that reported no cost
@@ -2219,15 +2172,19 @@ async function executeExternalParallelWorkspace(
   })
   controller.signal.throwIfAborted()
   const finalSummary = `${firstRun.summary}\n\nGuardrails: ${validationSummary(validation)}`
+  // A failed check waits for the user: "Try a fix" (repairParallelWorkspace) sends it to the agent as a message of
+  // theirs. Vector never runs the user's agent again on its own.
   const completed = updateRecord(id, (current) => ({
     ...current,
     status: current.changedFilesCount ? "needs review" : "complete",
     progress: 100,
     actualCost: totalCost > 0 ? `$${totalCost.toFixed(4)}` : current.actualCost,
     riskLevel: current.changedFilesCount === 0 ? "low" : validation.passed ? current.riskLevel : "high",
-    lastAction: current.changedFilesCount
-      ? reviewAction(validation)
-      : `${runtimeLabel(current.runtime)} completed with no file changes`,
+    lastAction: failed
+      ? `A check failed. Try a fix sends it to ${runtimeLabel(current.runtime)}.`
+      : current.changedFilesCount
+        ? reviewAction(validation)
+        : `${runtimeLabel(current.runtime)} completed with no file changes`,
     lastActivityAt: now(),
     finalSummary,
     error: validation.passed ? undefined : validation.failureSummary.slice(0, 12_000),
@@ -2697,7 +2654,12 @@ async function spentSoFar(spend: ParallelRunSpend, active: ActiveParallelRun, se
   return Math.max(spend.measured?.spentUsd ?? 0, usageDelta(sessionCost(spend.before), sessionCost(now?.data)) ?? 0)
 }
 
-export async function runParallelWorkspace(
+export function runParallelWorkspace(...args: Parameters<typeof admitParallelWorkspace>) {
+  if (getParallelWorkspace(args[0])?.runtime === "vector") return admitParallelWorkspace(...args)
+  return serializeExternalAgentStart(() => admitParallelWorkspace(...args))
+}
+
+async function admitParallelWorkspace(
   id: string,
   engine: ParallelWorkspaceEngine,
   concurrency?: number,
@@ -2708,6 +2670,25 @@ export async function runParallelWorkspace(
   const current = readRecords().find((record) => record.id === id)
   if (!current) throw new Error("Parallel workspace was not found.")
   if (current.mergeState !== "none") throw new Error("Merged or discarded workspaces cannot be run again.")
+  if (current.runtime === "vector" && current.excludedFromLearning)
+    throw new Error(
+      "This workspace used a coding agent that is no longer available. Start a new workspace with an installed agent.",
+    )
+  // Refused rather than queued, so the user's agent never starts later out of sight. The record says why, and the
+  // user starts it again with a message once one has finished.
+  if (current.runtime !== "vector" && (await ownAgentsRunning()) >= ExternalAgent.MAX_RUNNING) {
+    const refused = updateRecord(id, (record) => ({
+      ...record,
+      status: "stopped",
+      stopReason: ExternalAgent.RUN_LIMIT_MESSAGE,
+      lastAction: ExternalAgent.RUN_LIMIT_MESSAGE,
+      lastActivityAt: now(),
+      error: ExternalAgent.RUN_LIMIT_MESSAGE,
+      logs: [ExternalAgent.RUN_LIMIT_MESSAGE, ...record.logs].slice(0, 120),
+    }))
+    syncBackgroundTask(refused, ExternalAgent.RUN_LIMIT_MESSAGE)
+    throw new Error(ExternalAgent.RUN_LIMIT_MESSAGE)
+  }
 
   // Only an explicit concurrency choice may retune the shared pool; an
   // undefined value must not stomp a swarm that is already draining.
@@ -2737,7 +2718,11 @@ export async function runParallelWorkspace(
 // A follow-up is another pass on the same record, so it goes through the same
 // queue as a run: concurrency, abort, the ledger pre-flight and the restart
 // sweep all keep working with no second code path.
-export async function followUpParallelWorkspace(
+export function followUpParallelWorkspace(...args: Parameters<typeof admitExternalFollowUp>) {
+  return serializeExternalAgentStart(() => admitExternalFollowUp(...args))
+}
+
+async function admitExternalFollowUp(
   id: string,
   engine: ParallelWorkspaceEngine,
   text: string,
@@ -2754,6 +2739,7 @@ export async function followUpParallelWorkspace(
   if (activeRuns.has(id) || queuedRuns.has(id)) {
     throw new Error("This agent is still working. Wait for the current turn to finish, or stop it first.")
   }
+  if ((await ownAgentsRunning()) >= ExternalAgent.MAX_RUNNING) throw new Error(ExternalAgent.RUN_LIMIT_MESSAGE)
   if (!(await stat(current.isolatedPath).catch(() => undefined))) {
     throw new Error(
       "This workspace's isolated folder is gone, so the conversation cannot continue. Run it again to start a new one.",
@@ -2792,6 +2778,33 @@ export async function followUpParallelWorkspace(
   syncBackgroundTask(queued, `Follow-up message queued for ${runtimeLabel(queued.runtime)}.`)
   drainParallelRunQueue()
   return readRecords().find((record) => record.id === id) ?? queued
+}
+
+// "Try a fix": the user's one click that sends a failed check to their own coding agent, once, as a message of theirs
+// that the conversation shows. Vector never runs the user's agent again on a failed check by itself.
+export async function repairParallelWorkspace(
+  id: string,
+  engine: ParallelWorkspaceEngine,
+  dependencies?: { runExternalCodingAgent?: (input: RunExternalAgentInput) => Promise<ExternalAgentRunResult> },
+) {
+  const current = readRecords().find((record) => record.id === id)
+  if (!current) throw new Error("Parallel workspace was not found.")
+  if (current.runtime === "vector") throw new Error("Vector's own agent repairs its failed checks in its own session.")
+  const report = current.validationReport
+  if (!report || checksOutcome(report) !== "failed")
+    throw new Error("No check has failed here, so there is nothing to fix.")
+  return followUpParallelWorkspace(id, engine, externalRepairRequest(report), dependencies)
+}
+
+// The user's own coding agents running in Vector's chat: a turn in progress or one about to start.
+export function runningChatAgents() {
+  const live = new Set([...activeRuns.keys(), ...queuedRuns.keys()])
+  return readRecords().filter((record) => live.has(record.id) && record.runtime !== "vector").length
+}
+
+// With the ones open in a terminal: what ExternalAgent.MAX_RUNNING counts.
+async function ownAgentsRunning() {
+  return runningChatAgents() + (await runningTerminalAgents())
 }
 
 // The model an external agent's CLI runs from its next turn; undefined goes back

@@ -824,6 +824,8 @@ export type ElectronAPI = {
     refresh: (id: string) => Promise<ParallelWorkspaceRecord>
     run: (id: string, concurrency?: number) => Promise<ParallelWorkspaceRecord>
     followUp: (id: string, text: string) => Promise<ParallelWorkspaceRecord>
+    /** Try a fix: sends the failed check to the user's own coding agent, once. */
+    repair: (id: string) => Promise<ParallelWorkspaceRecord>
     /** The external CLI's model from its next turn; undefined goes back to the CLI's default. */
     setRuntimeModel: (id: string, model?: string) => Promise<ParallelWorkspaceRecord>
     stop: (id: string) => Promise<ParallelWorkspaceRecord>

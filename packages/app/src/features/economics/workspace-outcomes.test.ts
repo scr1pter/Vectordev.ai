@@ -49,6 +49,27 @@ const persist = async (record: WorkspaceOutcomeRecord, current: () => boolean) =
 }
 
 describe("workspace outcome recording", () => {
+  test("a user's own coding agent's runs are never measured, and older ones under its name are never read", async () => {
+    const captured: WorkspaceOutcomeRecord[] = []
+    const recorder = createWorkspaceOutcomeRecorder(async (value) => {
+      captured.push(value)
+    })
+    for (const runtime of ["claude-code", "codex", "cursor"])
+      expect(await recorder.observe({ ...workspace(`own-${runtime}`), runtime })).toBe(false)
+    expect(await recorder.observe({ ...workspace("own-marked"), runtime: "vector", excludedFromLearning: true })).toBe(
+      false,
+    )
+    expect(captured).toEqual([])
+    expect(await recorder.observe({ ...workspace("vector-own"), runtime: "vector" })).toBe(true)
+    expect(captured).toHaveLength(1)
+    recorder.dispose()
+
+    // An outcome stored before this rule, with the agent's name as its provider, stays out of every reading.
+    const legacy = { ...workspace("legacy-own"), provider: "Claude Code", model: "Runtime default" }
+    await persist(legacy, () => true)
+    expect(await listOutcomes(legacy.sourcePath)).toEqual([])
+  })
+
   test("unchanged polling and activity-only revisions reuse a successful capture", async () => {
     const record = workspace("unchanged")
     const captured: WorkspaceOutcomeRecord[] = []

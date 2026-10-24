@@ -72,6 +72,24 @@ describe("server authentication", () => {
       expect(ServerAuth.isOwnerOnlyRoute(method!, route!)).toBe(true)
   })
 
+  test("a guest can neither open, list, read, resize nor type into any terminal, a coding agent's included", () => {
+    // A coding agent the owner starts from Host locally runs in one of these terminals, signed in to the owner's own
+    // account, so no terminal route of either API answers a guest.
+    for (const base of ["/pty", "/api/pty"])
+      for (const [method, route] of [
+        ["GET", base],
+        ["POST", base],
+        ["GET", `${base}/shells`],
+        ["GET", `${base}/:ptyID`],
+        ["PUT", `${base}/:ptyID`],
+        ["DELETE", `${base}/:ptyID`],
+        ["GET", `${base}/:ptyID/connect-token`],
+        ["POST", `${base}/:ptyID/connect-token`],
+        ["GET", `${base}/:ptyID/connect`],
+      ])
+        expect(ServerAuth.isOwnerOnlyRoute(method!, route!)).toBe(true)
+  })
+
   test("host commands and permission answers require the server owner", () => {
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/pty")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRoute("GET", "/pty/:ptyID/connect-token")).toBe(true)

@@ -116,6 +116,15 @@ export function ExternalAgentTranscript(props: {
                     />
                   )}
                 </For>
+                <Show when={turn().notices?.length}>
+                  <ul
+                    class="vector-agent-notices"
+                    data-agent-notices
+                    aria-label={`What ${props.runtimeLabel} said about its sign-in or usage`}
+                  >
+                    <For each={turn().notices}>{(notice) => <li>{notice}</li>}</For>
+                  </ul>
+                </Show>
                 <Show when={turn().state === "failed" || turn().state === "stopped"}>
                   <p class="vector-agent-chat-notice" role="status">
                     {turn().state === "stopped"

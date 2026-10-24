@@ -1091,6 +1091,22 @@ export function isChatId(value: unknown): value is ChatId {
   return typeof value === "string" && byId.get(value)?.tier === "chat"
 }
 
+/** How many of the user's own coding agents may run at once, in Vector's chat and in its terminal together, whichever
+    agents they are. Each one runs on that person's own account, so Vector keeps it to what one person runs. */
+export const MAX_RUNNING = 4
+
+/** Why a start was refused at MAX_RUNNING, for every place that refuses one. */
+export const RUN_LIMIT_MESSAGE = `${MAX_RUNNING} of your coding agents are already running, which is as many as Vector runs at once. Let one finish or stop one, then try again.`
+
+/** Whether a run, or the record of one, stays out of everything Vector learns from or measures: training, evaluation
+    and benchmark exports, the model recommendations and the memory of failed checks. Every run of a user's own coding
+    agent does: their vendors' terms bar using these runs to build or evaluate other models. A record says so itself
+    (`excludedFromLearning`), so it stays out even after its agent leaves the catalog; anything not run by Vector's own
+    agent counts too. */
+export function excludedFromLearning(record: { runtime?: unknown; excludedFromLearning?: unknown }) {
+  return record.excludedFromLearning === true || (typeof record.runtime === "string" && record.runtime !== "vector")
+}
+
 export const chatIds = catalog.filter((agent) => agent.tier === "chat").map((agent) => agent.id) as ChatId[]
 
 export function installFor(agent: Agent, platform: Platform) {
