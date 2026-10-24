@@ -1,5 +1,6 @@
 ---
 import DocsPage from "../../layouts/DocsPage.astro"
+import { release111 } from "../../data/vector-releases"
 
 export const prerender = true
 ---
@@ -33,4 +34,25 @@ export const prerender = true
               <p>Take over for sign-in, secrets, payments, destructive changes, and other sensitive actions.</p>
             </article>
           </div>
+
+          <h2 id="reading-pages">Reading a page, and handing it to you</h2>
+          <p>
+            {release111.since} the agent reads a page's main text with its links, lists its links, finds text on it, and
+            sees a short outline of what it can click or type into. When a page needs your sign-in, or a paywall you can
+            get past, the agent hands it to you in Preview: <em>Sign in or get past the paywall yourself in Preview, then
+            press Continue.</em> It then reads the page you reached.
+          </p>
+
+          <h2 id="page-limits">What a page may do</h2>
+          <p>
+            {release111.since} the agent browser grants a page no permission but fullscreen: no camera, microphone,
+            location, notifications, clipboard or devices, and it never asks you on a page's behalf. Downloads are
+            cancelled: <em>Downloads are off in the agent browser.</em> Approving a site with Always allow covers that
+            site, never every site. Everything the agent reads from a page reaches the model fenced as untrusted, with
+            hidden text removed and lines addressed to AI assistants flagged.
+          </p>
+          <p>
+            <a href="/docs/research#research-browsers">Deep research</a> gives each research agent a browser of its own,
+            apart from this one and from each other.
+          </p>
 </DocsPage>
