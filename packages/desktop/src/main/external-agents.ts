@@ -426,6 +426,8 @@ export type ExternalAgentRunResult = {
   actualCost?: string
   sessionId?: string
   resumeRejected?: boolean
+  // The CLI refused the model it was given, as opposed to failing the task.
+  modelRejected?: boolean
   output: string[]
 }
 
@@ -434,6 +436,9 @@ export type RunExternalAgentInput = {
   cwd: string
   prompt: string
   resumeSessionId?: string
+  // The value for the CLI's own model flag. Unset runs the model the CLI is
+  // configured to use, with no flag at all.
+  model?: string
   signal?: AbortSignal
   onEvent?: (event: ExternalAgentEvent) => void
   onChat?: (chat: AgentChat) => void
@@ -470,15 +475,19 @@ function redactAgentOutput(value: string) {
 // With promptOnStdin the prompt is left out of argv for the caller to write to
 // stdin: `claude -p` with no prompt argument, and codex's `-` prompt, read it
 // from there. Cursor has no such form, so it always takes the prompt in argv.
+// `model` goes to each CLI's own flag, always before the prompt or session id
+// that ends the argv; without it the CLI runs the model it is set to use.
 export function runtimeArguments(
   runtime: CodingAgentRuntime,
   cwd: string,
   prompt: string,
   resumeSessionId?: string,
   promptOnStdin = false,
+  model?: string,
 ) {
   const claudePrompt = promptOnStdin ? [] : [prompt]
   const codexPrompt = promptOnStdin ? "-" : prompt
+  const modelFlag = model ? ["--model", model] : []
   if (runtime === "claude-code" && resumeSessionId) {
     // The id must be the immediately-following argv element: --resume takes an
     // OPTIONAL value, so any gap lets it swallow the prompt and open the
@@ -494,6 +503,7 @@ export function runtimeArguments(
       "--include-partial-messages",
       "--permission-mode",
       "acceptEdits",
+      ...modelFlag,
     ]
   }
   if (runtime === "claude-code") {
@@ -506,11 +516,14 @@ export function runtimeArguments(
       "--include-partial-messages",
       "--permission-mode",
       "acceptEdits",
+      ...modelFlag,
     ]
   }
   if (runtime === "codex" && resumeSessionId) {
     // Options must precede SESSION_ID, and resume takes neither --sandbox nor
-    // -C. The inner quotes are literal TOML for -c; spawn's cwd covers -C.
+    // -C. The inner quotes are literal TOML for -c; spawn's cwd covers -C. The
+    // model rides the same -c override the sandbox already proves resume
+    // accepts; externalModelValue keeps quotes out of it.
     return [
       "exec",
       "resume",
@@ -518,20 +531,59 @@ export function runtimeArguments(
       "--skip-git-repo-check",
       "-c",
       'sandbox_mode="workspace-write"',
+      ...(model ? ["-c", `model="${model}"`] : []),
       resumeSessionId,
       codexPrompt,
     ]
   }
   if (runtime === "codex") {
-    return ["exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check", "-C", cwd, codexPrompt]
+    return [
+      "exec",
+      "--json",
+      "--sandbox",
+      "workspace-write",
+      "--skip-git-repo-check",
+      ...modelFlag,
+      "-C",
+      cwd,
+      codexPrompt,
+    ]
   }
   // Cursor's partial mode emits indistinguishable deltas AND aggregate text
   // envelopes. Complete-block stream-json stays live at tool/retry boundaries
   // without guessing whether repeated text is a delta or a duplicate aggregate.
   if (resumeSessionId) {
-    return ["--resume", resumeSessionId, "-p", "--trust", "--force", "--output-format", "stream-json", prompt]
+    return [
+      "--resume",
+      resumeSessionId,
+      "-p",
+      "--trust",
+      "--force",
+      "--output-format",
+      "stream-json",
+      ...modelFlag,
+      prompt,
+    ]
   }
-  return ["-p", "--trust", "--force", "--output-format", "stream-json", prompt]
+  return ["-p", "--trust", "--force", "--output-format", "stream-json", ...modelFlag, prompt]
+}
+
+// What a model value may look like before it reaches a CLI: a name, alias or
+// full id, optionally with Cursor's bracketed parameters
+// (`claude-opus-4-8[context=1m,effort=high]`) or Claude Code's `sonnet[1m]`. A
+// leading dash would read as a flag, a quote would break the TOML Codex is
+// given on resume, and cmd.exe treats `%`, `^` and `&` as syntax.
+const MODEL_VALUE_PATTERN = /^[A-Za-z0-9][\w.:/@-]{0,127}(?:\[[\w.,=-]{1,128}\])?$/
+
+// The model a run passes to its CLI: undefined runs the CLI's own default.
+export function externalModelValue(value: unknown) {
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== "string") throw new Error("Choose a model from the list.")
+  const model = value.trim()
+  if (!model) return undefined
+  if (!MODEL_VALUE_PATTERN.test(model))
+    throw new Error(`"${model.slice(0, 80)}" is not a model name Vector can pass on.`)
+  return model
 }
 
 function object(value: unknown): Record<string, unknown> {
@@ -830,6 +882,18 @@ function costFromAgentLine(line: string) {
 const SIGNED_OUT_PATTERN =
   /not logged ?in|not (?:signed|authenticated)|log ?in required|login required|please run \/?login|run `?[\w-]+ login|unauthorized|\b401\b|invalid api key|no credentials|credentials (?:are )?(?:missing|expired)|(?:token|session) (?:has )?expired/i
 
+// The CLI's own words for a model it will not run: Claude Code's "issue with
+// the selected model ... may not exist", Codex's "model is not supported", or
+// Cursor's "Cannot use this model". Only consulted when Vector passed a model,
+// and only against the error the run already reported, so a task about model
+// validation cannot reset the user's choice.
+const MODEL_REJECTED_PATTERN =
+  /\bmodel\b[^\n]{0,160}?(?:not found|not available|unavailable|unknown|invalid|not supported|unsupported|not exist|no access|not have access|not allowed|not enabled)|(?:unknown|invalid|unsupported|unavailable|cannot use|can't use|no access to)[^\n]{0,60}?\bmodel\b|not_found_error[^\n]{0,80}?\bmodel\b/i
+
+export function modelRejected(model: string | undefined, outcome: AgentOutcome) {
+  return Boolean(model) && outcome.exitCode !== 0 && MODEL_REJECTED_PATTERN.test(outcome.error ?? "")
+}
+
 export type AgentOutcome = { exitCode: number; error?: string }
 
 export type AgentTurnFinish = "success" | "failure"
@@ -853,8 +917,15 @@ export function agentTurnFinished(runtime: CodingAgentRuntime, line: string): Ag
 // The exit code alone does not decide whether a run worked: Claude Code exits 0
 // while reporting {"type":"result","subtype":"success","is_error":true,
 // "result":"Not logged in · Please run /login"}, which used to be recorded as a
-// successful pass that changed nothing.
-export function agentOutcome(runtime: CodingAgentRuntime, exitCode: number, output: string[]): AgentOutcome {
+// successful pass that changed nothing. With a chosen `model`, a CLI that only
+// complains on stderr is quoted: a refused model is reported there, and "exited
+// with code 1" would hide the one sentence that says which model to change.
+export function agentOutcome(
+  runtime: CodingAgentRuntime,
+  exitCode: number,
+  output: string[],
+  model?: string,
+): AgentOutcome {
   const setup = RUNTIME_SETUP[runtime]
   const reported = output
     .map((line) => {
@@ -879,9 +950,18 @@ export function agentOutcome(runtime: CodingAgentRuntime, exitCode: number, outp
       error: `${setup.label} is installed but not signed in${reported ? ` (${reported})` : ""}. Run \`${setup.signIn}\` in a terminal to sign in, then run this again.`,
     }
   }
+  const said = model
+    ? output
+        .filter((line) => line.startsWith("[stderr] "))
+        .map((line) => line.slice("[stderr] ".length).trim())
+        .filter(Boolean)
+        .slice(-3)
+        .join("\n")
+        .slice(-600)
+    : ""
   return {
     exitCode: exitCode === 0 ? 1 : exitCode,
-    error: reported ?? `${setup.label} exited with code ${exitCode}.`,
+    error: reported ?? (said ? `${setup.label}: ${said}` : `${setup.label} exited with code ${exitCode}.`),
   }
 }
 
@@ -954,10 +1034,11 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
   // Through claude.cmd or codex.cmd the prompt, which always spans lines, would arrive cut to its first line and every
   // flag after it would be lost, so those two read it from stdin there.
   const promptOnStdin = runsThroughCmd(path) && input.runtime !== "cursor"
+  const model = externalModelValue(input.model)
   return new Promise((resolve, reject) => {
     const launch = shimmedCommand(
       path,
-      runtimeArguments(input.runtime, input.cwd, input.prompt, input.resumeSessionId, promptOnStdin),
+      runtimeArguments(input.runtime, input.cwd, input.prompt, input.resumeSessionId, promptOnStdin, model),
     )
     // Only Cursor gets here: it has no stdin prompt form, and its Windows install may provide no other entry point than
     // this script, so the error names a way forward that exists rather than a reinstall that might not.
@@ -1092,7 +1173,7 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
       // SIGTERM) says nothing about the turn; the protocol already reported it.
       const exitCode =
         stopReason === "finished" ? (finishedWith === "failure" ? 1 : 0) : (code ?? (input.signal?.aborted ? 130 : 1))
-      const outcome = agentOutcome(input.runtime, exitCode, output)
+      const outcome = agentOutcome(input.runtime, exitCode, output, model)
       resolve({
         exitCode: outcome.exitCode,
         summary: outcome.error ?? summaries.at(-1) ?? `${setup.label} completed the isolated task.`,
@@ -1104,6 +1185,7 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
         sessionId: sessionId ?? input.resumeSessionId,
         resumeRejected:
           Boolean(input.resumeSessionId) && outcome.exitCode !== 0 && RESUME_REJECTED_PATTERN.test(output.join("\n")),
+        modelRejected: modelRejected(model, outcome),
         output,
       })
     })

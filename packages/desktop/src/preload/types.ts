@@ -525,6 +525,10 @@ export type ParallelWorkspaceRecord = {
   baseCommit?: string
   agentSessionId?: string
   externalSessionId?: string
+  /** The external CLI's model flag value for its next turn. Unset runs the CLI's own default. */
+  runtimeModel?: string
+  /** The last model this workspace's CLI refused, and when (ISO). */
+  refusedRuntimeModel?: { model: string; at: string }
   turns?: ParallelWorkspaceTurn[]
   backgroundTaskId?: string
   agent?: string
@@ -571,6 +575,7 @@ export type CreateParallelWorkspaceInput = {
   runtime?: "vector" | "claude-code" | "codex" | "cursor"
   provider?: string
   model?: string
+  runtimeModel?: string
   agent?: string
   swarmRunId?: string
   swarmTaskId?: string
@@ -817,6 +822,8 @@ export type ElectronAPI = {
     refresh: (id: string) => Promise<ParallelWorkspaceRecord>
     run: (id: string, concurrency?: number) => Promise<ParallelWorkspaceRecord>
     followUp: (id: string, text: string) => Promise<ParallelWorkspaceRecord>
+    /** The external CLI's model from its next turn; undefined goes back to the CLI's default. */
+    setRuntimeModel: (id: string, model?: string) => Promise<ParallelWorkspaceRecord>
     stop: (id: string) => Promise<ParallelWorkspaceRecord>
     merge: (id: string, force?: boolean, commit?: { message: string }) => Promise<ParallelWorkspaceRecord>
     mainDiff: (sourcePath: string) => Promise<string>

@@ -156,6 +156,7 @@ import {
   refreshParallelWorkspace,
   removeParallelWorkspaceRecord,
   runParallelWorkspace,
+  setParallelWorkspaceRuntimeModel,
   stopParallelWorkspace,
   type CreateParallelWorkspaceInput,
 } from "./parallel-workspaces"
@@ -402,6 +403,9 @@ export function registerIpcHandlers(deps: Deps) {
     const engine = await deps.awaitInitialization()
     return followUpParallelWorkspace(id, engine, text)
   })
+  handle("parallel-workspaces-set-runtime-model", (_event: IpcMainInvokeEvent, id: string, model?: string) =>
+    setParallelWorkspaceRuntimeModel(id, model),
+  )
   handle("parallel-workspaces-stop", (_event: IpcMainInvokeEvent, id: string) => stopParallelWorkspace(id))
   handle(
     "parallel-workspaces-merge",

@@ -458,6 +458,52 @@
   border-radius: 2px;
   background: #b59adc;
 }
+/* The runtime's model, next to its name: a quiet control in the toolbar's own grey, not another accent. */
+.vector-agent-model-chip {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 220px;
+  height: 26px;
+  align-items: center;
+  gap: 4px;
+  margin-left: -6px;
+  border: 0;
+  border-radius: 7px;
+  padding: 0 6px 0 8px;
+  background: transparent;
+  color: var(--vx-workspace-text-secondary, #a8a8a8);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+.vector-agent-model-chip:hover,
+.vector-agent-model-chip[data-expanded] {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--vx-workspace-text-primary, #e8e8e8);
+}
+.vector-agent-model-chip:focus-visible {
+  outline: 2px solid #c1a3e7;
+  outline-offset: 2px;
+}
+.vector-agent-model-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vector-agent-model-chip svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.35;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.7;
+}
 .vector-agent-composer-hint {
   flex: 1;
   text-align: right;

@@ -11,6 +11,7 @@ import {
   Suspense,
   type ParentProps,
 } from "solid-js"
+import { createStore } from "solid-js/store"
 import { useLocation, useNavigate } from "@solidjs/router"
 import { DebugBar } from "@/components/debug-bar"
 import { Titlebar } from "@/components/titlebar"
@@ -28,6 +29,7 @@ import {
 import { pathKey } from "@/utils/path-key"
 import { listSwarmWorkers } from "@/utils/swarm-workers"
 import { samePolledRecords, sameWorkspaceRevisions } from "@/utils/workspace-revisions"
+import { Persist, persisted } from "@/utils/persist"
 import { modelDisplayName } from "@/utils/provider-brand"
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { decodeRouteSegment, projectPathFromWorkspaceRoute, sessionIDFromRouteValue } from "@/utils/project-route"
@@ -70,6 +72,15 @@ import {
   isExternalRuntime,
   type ExternalRuntime,
 } from "@/features/agents/external-runtimes"
+import {
+  externalRuntimeModelName,
+  externalRuntimeModelState,
+  forgetRefusedRuntimeModel,
+  launchRuntimeModel,
+  rememberRuntimeModel,
+  type RuntimeModelPick,
+  type RuntimeModelRefusal,
+} from "@/features/agents/external-runtime-models"
 import { PullRequests } from "@/features/pull-requests/pull-requests"
 import {
   isInternalProjectPath,
@@ -220,6 +231,10 @@ type ParallelWorkspaceRecord = {
   baseCommit?: string
   agentSessionId?: string
   externalSessionId?: string
+  /** The external CLI's model flag value for its next turn. Unset runs the CLI's own default. */
+  runtimeModel?: string
+  /** The last model this workspace's CLI refused, and when. */
+  refusedRuntimeModel?: RuntimeModelRefusal
   turns?: ExternalAgentTurn[]
   agent?: string
   swarmRunId?: string
@@ -266,6 +281,7 @@ type ParallelWorkspaceApi = {
     runtime?: ParallelAgentRuntime
     provider?: string
     model?: string
+    runtimeModel?: string
     teamId?: string
     sharedPath?: string
     llmJudge?: boolean
@@ -273,6 +289,8 @@ type ParallelWorkspaceApi = {
   refresh: (id: string) => Promise<ParallelWorkspaceRecord>
   run: (id: string, concurrency?: number) => Promise<ParallelWorkspaceRecord>
   followUp: (id: string, text: string) => Promise<ParallelWorkspaceRecord>
+  // Optional: a desktop build from before the model picker has no such channel.
+  setRuntimeModel?: (id: string, model?: string) => Promise<ParallelWorkspaceRecord>
   stop: (id: string) => Promise<ParallelWorkspaceRecord>
   merge: (id: string, force?: boolean, commit?: { message: string }) => Promise<ParallelWorkspaceRecord>
   mainDiff: (sourcePath: string) => Promise<string>
@@ -667,6 +685,39 @@ export default function NewLayout(props: ParentProps) {
       setParallelModel(key.modelID)
     },
   }
+  // The models picked for each external runtime, newest first: the picker lists them under Recently used, and a new
+  // agent of that runtime starts on the first. The model one workspace runs lives on its own record.
+  const [runtimeModels, setRuntimeModels] = persisted(
+    Persist.global("external-agent-models"),
+    createStore<{ picks: Partial<Record<ExternalRuntime, RuntimeModelPick[]>> }>({ picks: {} }),
+  )
+  const rememberRuntimeChoice = (runtime: ExternalRuntime, value: string | undefined) =>
+    setRuntimeModels("picks", runtime, (picks) => rememberRuntimeModel(picks, value))
+  // A model a CLI refused leaves its runtime's Recently used, so no new agent of that runtime starts on it again until
+  // someone picks it. Desktop keeps the refusal on the workspace, so it is caught whenever that workspace is listed,
+  // and a pick made after the refusal is never undone.
+  createEffect(() =>
+    parallelRecords().forEach((record) => {
+      if (!record.refusedRuntimeModel || !isExternalRuntime(record.runtime)) return
+      const picks = runtimeModels.picks[record.runtime]
+      const kept = forgetRefusedRuntimeModel(picks, record.refusedRuntimeModel)
+      if (kept.length !== (picks?.length ?? 0)) setRuntimeModels("picks", record.runtime, kept)
+    }),
+  )
+  const launchExternalRuntime = () => {
+    const runtime = parallelRuntime()
+    return isExternalRuntime(runtime) ? runtime : undefined
+  }
+  // Read only while an external runtime is selected, which is the only time the launcher shows it.
+  const launchModelState = externalRuntimeModelState({
+    runtime: () => launchExternalRuntime() ?? "claude-code",
+    current: () => launchRuntimeModel(runtimeModels.picks[launchExternalRuntime() ?? "claude-code"]),
+    recent: () => runtimeModels.picks[launchExternalRuntime() ?? "claude-code"],
+    set: (value) => {
+      const runtime = launchExternalRuntime()
+      if (runtime) rememberRuntimeChoice(runtime, value)
+    },
+  })
   const parallelModelOptions = createMemo(() =>
     byokProviders.connected().flatMap((provider) =>
       Object.values(provider.models).map((model) => ({
@@ -1970,6 +2021,9 @@ export default function NewLayout(props: ParentProps) {
           runtime,
           provider: runtime === "vector" ? parallelProvider() : undefined,
           model: runtime === "vector" ? parallelModel() : undefined,
+          // Each runtime starts on the model last picked for it (the launcher's Model control shows it for one
+          // runtime), and on its CLI's default until one is.
+          runtimeModel: isExternalRuntime(runtime) ? launchRuntimeModel(runtimeModels.picks[runtime]) : undefined,
           teamId: team?.id,
           // The verified-completion setting is global, so an isolated agent runs
           // under the same policy as a prompt typed into the composer.
@@ -2362,6 +2416,30 @@ export default function NewLayout(props: ParentProps) {
     if (!record) return
     setParallelRecords((records) => records.map((item) => (item.id === id ? record : item)))
     void loadBackgroundTasks()
+  }
+
+  // A model picked in an external agent's composer. Desktop keeps it on the workspace and passes it to the CLI from
+  // the next turn; a turn already running keeps the model it started with.
+  const setWorkspaceRuntimeModel = async (id: string, value: string | undefined) => {
+    const api = parallelApi()
+    if (!api) {
+      reportDesktopOnlyParallel()
+      return
+    }
+    const workspace = parallelRecords().find((record) => record.id === id)
+    if (!workspace || !isExternalRuntime(workspace.runtime)) return
+    if (!api.setRuntimeModel) {
+      setParallelError("Update Vector to choose this agent's model.")
+      return
+    }
+    rememberRuntimeChoice(workspace.runtime, value)
+    setParallelError("")
+    const record = await api.setRuntimeModel(id, value).catch((error: unknown) => {
+      setParallelError(error instanceof Error ? error.message : String(error))
+      return undefined
+    })
+    if (!record) return
+    setParallelRecords((records) => records.map((item) => (item.id === id ? record : item)))
   }
 
   // Destructive/expensive controls confirm inline: the first click arms the
@@ -3447,6 +3525,15 @@ export default function NewLayout(props: ParentProps) {
 
   const renderExternalAgentWorkspace = (recordAccessor: () => ParallelWorkspaceRecord) => {
     const record = () => recordAccessor()
+    // Rendered only for Claude Code, Codex and Cursor workspaces.
+    const runtime = () => record().runtime as ExternalRuntime
+    const modelName = () => externalRuntimeModelName(runtime(), record().runtimeModel)
+    const modelState = externalRuntimeModelState({
+      runtime,
+      current: () => record().runtimeModel,
+      recent: () => runtimeModels.picks[runtime()],
+      set: (value) => void setWorkspaceRuntimeModel(record().id, value),
+    })
     const stats = () => parallelDiffStats(record())
     const copy = () =>
       agentReviewCopy(record().runtime, {
@@ -3486,7 +3573,7 @@ export default function NewLayout(props: ParentProps) {
         statusLabel={parallelStatusLabel(record().status)}
         statusTone={parallelStatusTone(record().status)}
         branchLabel={record().isolation === "git-worktree" ? record().gitBranch || "Git worktree" : "Managed copy"}
-        model={record().model}
+        model={modelName()}
         cost={agentCostLabel({ ...record(), running: isParallelWorkspaceRunning(record()) }) ?? ""}
         running={isParallelWorkspaceRunning(record())}
         changedFiles={record().changedFilesCount}
@@ -3608,6 +3695,8 @@ export default function NewLayout(props: ParentProps) {
           <Show when={record().mergeState === "none"}>
             <ExternalAgentComposer
               runtimeLabel={copy().label}
+              model={modelState}
+              modelLabel={modelName()}
               value={externalAgentFollowUpDraft(followUpDrafts(), record().id)}
               running={isParallelWorkspaceRunning(record())}
               sending={followUpBusy()}
@@ -4351,6 +4440,40 @@ export default function NewLayout(props: ParentProps) {
                       checking={externalAgentsChecking()}
                       onRecheck={detectExternalRuntimes}
                     />
+                  </Show>
+                  <Show
+                    when={!parallelCompareRuntimes() && externalReady(parallelRuntime()) && launchExternalRuntime()}
+                  >
+                    {(runtime) => {
+                      const name = () =>
+                        externalRuntimeModelName(runtime(), launchRuntimeModel(runtimeModels.picks[runtime()]))
+                      return (
+                        <ModelSelectorPopoverV2
+                          model={launchModelState}
+                          fixedCatalog
+                          triggerAs="button"
+                          triggerProps={{
+                            type: "button",
+                            class: "vx-pick mt-2 flex w-full items-center justify-between gap-3",
+                            "aria-label": `${parallelRuntimeLabel(runtime())} model: ${name()}`,
+                          }}
+                        >
+                          <span class="text-[11px] font-semibold">Model</span>
+                          <span class="flex min-w-0 items-center gap-1.5 text-[11px]">
+                            <span class="truncate">{name()}</span>
+                            <svg viewBox="0 0 16 16" class="size-3.5 shrink-0 opacity-70" aria-hidden="true">
+                              <path
+                                d="m4.5 6.5 3.5 3.5 3.5-3.5"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="1.35"
+                                stroke-linecap="round"
+                              />
+                            </svg>
+                          </span>
+                        </ModelSelectorPopoverV2>
+                      )
+                    }}
                   </Show>
                   <Show when={globalThis.window?.api && blockedRuntimes().length}>
                     <div class="vx-card mt-2 px-3 py-2.5">

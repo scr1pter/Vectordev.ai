@@ -28,6 +28,7 @@ import { getStore } from "./store"
 import { createStoreCache } from "./store-cache"
 import { createPullRequest } from "./github"
 import {
+  externalModelValue,
   runExternalCodingAgent,
   type CodingAgentRuntime,
   type RunExternalAgentInput,
@@ -149,6 +150,13 @@ export type ParallelWorkspaceRecord = {
   // session_id. Deliberately not agentSessionId: that field is engine-session
   // identity and drainTeamOutbox matches senders against it.
   externalSessionId?: string
+  // The value an external CLI gets for its model flag on its next turn. Unset
+  // (every record from before the picker) runs the CLI's own default model.
+  runtimeModel?: string
+  // The last model this workspace's CLI refused, and when (ISO). The app drops
+  // it from that runtime's Recently used unless it was picked again after, so a
+  // new agent never starts on a model the CLI will not run.
+  refusedRuntimeModel?: { model: string; at: string }
   backgroundTaskId?: string
   agent?: string
   swarmRunId?: string
@@ -302,6 +310,8 @@ export type CreateParallelWorkspaceInput = {
   runtime?: ParallelWorkspaceRuntime
   provider?: string
   model?: string
+  // The external CLI's model flag value; ignored for a Vector-runtime agent.
+  runtimeModel?: string
   agent?: string
   swarmRunId?: string
   swarmTaskId?: string
@@ -318,6 +328,8 @@ type CommandResult = {
 }
 
 const now = () => new Date().toISOString()
+// What an external agent's `model` reads while its CLI picks the model itself.
+const RUNTIME_DEFAULT_MODEL = "Runtime default"
 const workspaceRoot = () => join(app.getPath("userData"), WORKSPACE_DIRECTORY_NAME)
 const runtimeLabel = (runtime: ParallelWorkspaceRuntime) =>
   runtime === "claude-code"
@@ -1538,7 +1550,9 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
   const name = input.name?.trim() || `Agent ${activeInScope.length + 1}`
   const runtimeName = runtimeLabel(runtime)
   const provider = runtime === "vector" ? input.provider?.trim() || "Current Vector provider" : runtimeName
-  const model = runtime === "vector" ? input.model?.trim() || "Current selected model" : "Runtime default"
+  const runtimeModel = runtime === "vector" ? undefined : externalModelValue(input.runtimeModel)
+  const model =
+    runtime === "vector" ? input.model?.trim() || "Current selected model" : (runtimeModel ?? RUNTIME_DEFAULT_MODEL)
 
   let isolation: ParallelWorkspaceRecord["isolation"] = "copy"
   let gitBranch: string | undefined
@@ -1671,6 +1685,7 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
     runtime,
     provider,
     model,
+    runtimeModel,
     sourcePath: sourceRoot,
     parentSessionId: input.parentSessionId,
     engineParentSessionId: input.engineParentSessionId,
@@ -1800,6 +1815,9 @@ async function runExternalWorkspacePass(input: {
   controller: AbortController
   turnId: string
   resumeSessionId?: string
+  // Read once when the turn starts, so a model picked while it runs waits for
+  // the next turn instead of switching between this turn's passes.
+  model?: string
   runner?: (input: RunExternalAgentInput) => Promise<ExternalAgentRunResult>
 }) {
   input.controller.signal.throwIfAborted()
@@ -1853,6 +1871,7 @@ async function runExternalWorkspacePass(input: {
     cwd: input.record.isolatedPath,
     prompt: input.prompt,
     resumeSessionId: input.resumeSessionId,
+    model: input.model,
     signal: input.controller.signal,
     // Persisted the moment it appears rather than at close: a crash or a user
     // stop mid-turn must still leave a resumable conversation behind.
@@ -1870,9 +1889,30 @@ async function runExternalWorkspacePass(input: {
     },
   }).finally(flush)
   input.controller.signal.throwIfAborted()
+  // A refused model fails the turn with the CLI's own error, and the picker
+  // goes back to the CLI's default, unless the user already chose another.
+  // Retrying on another model would spend on one nobody picked. The refusal is
+  // kept either way, so the app stops starting new agents on that model.
+  const refused = result.modelRejected ? input.model : undefined
+  if (refused && getParallelWorkspace(input.id)) {
+    updateRecord(input.id, (current) => {
+      const refusedRuntimeModel = { model: refused, at: now() }
+      if (current.runtimeModel !== refused) return { ...current, refusedRuntimeModel }
+      return {
+        ...current,
+        refusedRuntimeModel,
+        runtimeModel: undefined,
+        model: RUNTIME_DEFAULT_MODEL,
+        logs: [
+          `${runtimeLabel(current.runtime)} would not run the model "${refused}", so the next turn uses its default model.`,
+          ...current.logs,
+        ].slice(0, 120),
+      }
+    })
+  }
   // A CLI that refused the resume FLAGS is not a failed task — the caller
   // retries without resume rather than reporting a broken agent.
-  if (result.resumeRejected) return result
+  if (result.resumeRejected && !result.modelRejected) return result
   if (result.exitCode !== 0) {
     // agentOutcome already classified this failure — "installed but not signed
     // in", "exited with code N" — and that sentence is the only part the user
@@ -1932,6 +1972,9 @@ async function executeExternalParallelWorkspace(
     ].slice(0, 120),
   }))
   syncBackgroundTask(record, record.lastAction)
+  // Every pass of this turn, repairs included, runs the model the turn
+  // started with; a model picked meanwhile applies from the next turn.
+  const model = record.runtimeModel
 
   const costs: number[] = []
   // Recompute rather than trusting the renderer's last persisted refresh. It
@@ -1966,6 +2009,7 @@ async function executeExternalParallelWorkspace(
     turnId,
     controller,
     resumeSessionId,
+    model,
     runner,
     prompt: followUp ? compose(resumeSessionId ? followUp : briefBody()) : compose(parallelAgentPrompt(record)),
   })
@@ -1989,6 +2033,7 @@ async function executeExternalParallelWorkspace(
         })),
         turnId,
         controller,
+        model,
         runner,
         prompt: compose(briefBody()),
       })
@@ -2122,6 +2167,7 @@ async function executeExternalParallelWorkspace(
       record,
       turnId: repairTurnId,
       controller,
+      model,
       runner,
       prompt: repairDelivery.prompt,
     })
@@ -2752,6 +2798,30 @@ export async function followUpParallelWorkspace(
   syncBackgroundTask(queued, `Follow-up message queued for ${runtimeLabel(queued.runtime)}.`)
   drainParallelRunQueue()
   return readRecords().find((record) => record.id === id) ?? queued
+}
+
+// The model an external agent's CLI runs from its next turn; undefined goes back
+// to the CLI's own default. Each turn is its own CLI process that resumes the
+// conversation by id, so nothing is restarted: a turn in progress keeps the
+// model it started with, and the next spawn passes the new flag.
+export function setParallelWorkspaceRuntimeModel(id: string, value?: string) {
+  const current = readRecords().find((record) => record.id === id)
+  if (!current) throw new Error("Parallel workspace was not found.")
+  if (current.runtime === "vector") throw new Error("Vector agents choose their model in their own chat session.")
+  if (current.mergeState !== "none") throw new Error("Merged or discarded workspaces cannot be continued.")
+  const runtimeModel = externalModelValue(value)
+  if (runtimeModel === current.runtimeModel) return current
+  const updated = updateRecord(id, (record) => ({
+    ...record,
+    runtimeModel,
+    model: runtimeModel ?? RUNTIME_DEFAULT_MODEL,
+    logs: [
+      `${runtimeLabel(record.runtime)} will use ${runtimeModel ? `the model "${runtimeModel}"` : "its default model"} from the next turn.`,
+      ...record.logs,
+    ].slice(0, 120),
+  }))
+  syncBackgroundTask(updated)
+  return updated
 }
 
 export async function stopParallelWorkspace(id: string, reason?: string) {

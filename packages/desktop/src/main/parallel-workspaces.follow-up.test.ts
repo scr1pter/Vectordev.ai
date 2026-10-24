@@ -42,14 +42,16 @@ mock.module("./store", () => ({
 }))
 type StubRunInput = Pick<
   RunExternalAgentInput,
-  "runtime" | "prompt" | "resumeSessionId" | "onChat" | "onEvent" | "signal"
+  "runtime" | "prompt" | "resumeSessionId" | "model" | "onChat" | "onEvent" | "signal"
 >
 type StubRunResult = {
   exitCode: number
   summary: string
   output: string[]
+  error?: string
   actualCost?: string
   resumeRejected?: boolean
+  modelRejected?: boolean
 }
 const runCalls: StubRunInput[] = []
 let runHandler = async (_input: StubRunInput, _index: number): Promise<StubRunResult> => ({
@@ -71,6 +73,7 @@ const {
   listParallelWorkspaces,
   refreshParallelWorkspace,
   runParallelWorkspace,
+  setParallelWorkspaceRuntimeModel,
   stopParallelWorkspace,
 } = await import("./parallel-workspaces")
 const { setDesktopWorkBlocker } = await import("./keep-awake")
@@ -672,6 +675,158 @@ describe("sending a follow-up to an external workspace", () => {
     // The transcript must stop claiming the agent remembers the conversation.
     const agentTurns = (settled.turns ?? []).filter((turn) => turn.role === "agent")
     expect(agentTurns.at(-1)?.resumed).toBe(false)
+  })
+
+  test("the model picked for a workspace reaches its CLI on the next turn", async () => {
+    const seeded = await seed()
+    started.push(seeded.id)
+    const picked = setParallelWorkspaceRuntimeModel(seeded.id, "gpt-5.5")
+    expect(picked.runtimeModel).toBe("gpt-5.5")
+    expect(picked.model).toBe("gpt-5.5")
+
+    await followUpParallelWorkspace(seeded.id, engine, "now add a test", dependencies)
+    const settled = await settle(seeded.id)
+
+    expect(runCalls.map((call) => call.model)).toEqual(["gpt-5.5"])
+    // Remembered on the workspace, not just for one send.
+    expect(settled.runtimeModel).toBe("gpt-5.5")
+  })
+
+  test("a workspace with no model chosen runs its CLI's default, with no flag", async () => {
+    const seeded = await seed()
+    started.push(seeded.id)
+    await followUpParallelWorkspace(seeded.id, engine, "now add a test", dependencies)
+    await settle(seeded.id)
+    expect(runCalls[0]?.model).toBeUndefined()
+  })
+
+  test("a model picked while a turn runs applies from the next turn, never mid-turn", async () => {
+    const seeded = await seed({ runtime: "claude-code" })
+    started.push(seeded.id)
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    runHandler = async (_input, index) => {
+      if (index === 0) await gate
+      return { exitCode: 0, summary: "done", output: [] }
+    }
+
+    await followUpParallelWorkspace(seeded.id, engine, "first", dependencies)
+    for (let attempt = 0; attempt < 100 && runCalls.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    setParallelWorkspaceRuntimeModel(seeded.id, "opus")
+    release()
+    await settle(seeded.id)
+    expect(runCalls.map((call) => call.model)).toEqual([undefined])
+
+    await followUpParallelWorkspace(seeded.id, engine, "second", dependencies)
+    await settle(seeded.id)
+    expect(runCalls.map((call) => call.model)).toEqual([undefined, "opus"])
+  })
+
+  test("every pass of one turn, a re-brief after a refused resume included, keeps the turn's model", async () => {
+    const seeded = await seed({ runtime: "cursor", runtimeModel: "composer-2.5" })
+    started.push(seeded.id)
+    runHandler = async (input, index) =>
+      index === 0 && input.resumeSessionId
+        ? { exitCode: 2, summary: "", output: ["[stderr] error: unexpected argument '--resume'"], resumeRejected: true }
+        : { exitCode: 0, summary: "re-briefed and done", output: [] }
+
+    await followUpParallelWorkspace(seeded.id, engine, "now add a test", dependencies)
+    await settle(seeded.id)
+
+    expect(runCalls.map((call) => call.model)).toEqual(["composer-2.5", "composer-2.5"])
+  })
+
+  test("a model the CLI refuses fails the turn with its own words and goes back to the default", async () => {
+    const seeded = await seed({ runtimeModel: "gpt-nope", model: "gpt-nope" })
+    started.push(seeded.id)
+    const refusal = "The 'gpt-nope' model is not supported when using Codex with a ChatGPT account."
+    runHandler = async () => ({ exitCode: 1, summary: refusal, error: refusal, output: [], modelRejected: true })
+
+    await followUpParallelWorkspace(seeded.id, engine, "now add a test", dependencies)
+    const settled = await settle(seeded.id)
+
+    expect(settled.status).toBe("failed")
+    expect(settled.error).toBe(refusal)
+    expect(settled.turns?.findLast((turn) => turn.role === "agent")?.text).toBe(refusal)
+    expect(settled.runtimeModel).toBeUndefined()
+    expect(settled.model).toBe("Runtime default")
+    // The app reads the refusal to drop the model from Recently used, so no new agent starts on it.
+    expect(settled.refusedRuntimeModel?.model).toBe("gpt-nope")
+    expect(Date.parse(settled.refusedRuntimeModel?.at ?? "")).toBeGreaterThan(Date.parse(seeded.createdAt))
+    // No quiet retry on a model nobody picked.
+    expect(runCalls).toHaveLength(1)
+  })
+
+  test("a refusal after the user picked another model keeps the new pick and still reports the refused one", async () => {
+    const seeded = await seed({ runtime: "claude-code", runtimeModel: "claude-nope", model: "claude-nope" })
+    started.push(seeded.id)
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    const refusal =
+      "There's an issue with the selected model (claude-nope). It may not exist or you may not have access."
+    runHandler = async () => {
+      await gate
+      return { exitCode: 1, summary: refusal, error: refusal, output: [], modelRejected: true }
+    }
+
+    await followUpParallelWorkspace(seeded.id, engine, "now add a test", dependencies)
+    for (let attempt = 0; attempt < 100 && runCalls.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    setParallelWorkspaceRuntimeModel(seeded.id, "sonnet")
+    release()
+    const settled = await settle(seeded.id)
+
+    expect(runCalls.map((call) => call.model)).toEqual(["claude-nope"])
+    expect(settled.runtimeModel).toBe("sonnet")
+    expect(settled.refusedRuntimeModel?.model).toBe("claude-nope")
+  })
+
+  test("a new external workspace starts on the model chosen at launch", async () => {
+    const sourcePath = join(userDataPath, "launch-model")
+    await mkdir(sourcePath, { recursive: true })
+    await writeFile(join(sourcePath, "README.md"), "# Launch\n", "utf8")
+    const created = await createParallelWorkspace({
+      name: "Launch",
+      taskPrompt: "Read README.md.",
+      runtime: "claude-code",
+      runtimeModel: "sonnet",
+      parentSessionId: "session-launch",
+      sourcePath,
+    })
+    expect(created.runtimeModel).toBe("sonnet")
+    expect(created.model).toBe("sonnet")
+    started.push(created.id)
+
+    await runParallelWorkspace(created.id, engine, undefined, dependencies)
+    await settle(created.id)
+    expect(runCalls[0]?.model).toBe("sonnet")
+
+    const fallback = await createParallelWorkspace({
+      name: "Default",
+      taskPrompt: "Read README.md.",
+      runtime: "claude-code",
+      parentSessionId: "session-launch",
+      sourcePath,
+    })
+    expect(fallback.runtimeModel).toBeUndefined()
+    expect(fallback.model).toBe("Runtime default")
+  })
+
+  test("only an external workspace takes a CLI model, and only a plain model name", async () => {
+    const seeded = await seed({ runtimeModel: "gpt-5.5" })
+    expect(() => setParallelWorkspaceRuntimeModel(seeded.id, "--yolo")).toThrow("is not a model name")
+    const cleared = setParallelWorkspaceRuntimeModel(seeded.id, undefined)
+    expect(cleared.runtimeModel).toBeUndefined()
+    expect(cleared.model).toBe("Runtime default")
+
+    const vector = await seed({ runtime: "vector" })
+    expect(() => setParallelWorkspaceRuntimeModel(vector.id, "opus")).toThrow("their own chat session")
+    const merged = await seed({ mergeState: "merged" })
+    expect(() => setParallelWorkspaceRuntimeModel(merged.id, "opus")).toThrow("cannot be continued")
+    expect(() => setParallelWorkspaceRuntimeModel("no-such-workspace", "opus")).toThrow("was not found")
   })
 
   test("a second message while one is in flight is refused instead of being dropped", async () => {
