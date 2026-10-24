@@ -9,7 +9,7 @@
   "homepage": "https://vectordev.ai",
   "author": {
     "name": "Vector",
-    "email": "contact.astr0gpt@gmail.com"
+    "email": "krishnabharadwaj0521@gmail.com"
   },
   "scripts": {
     "test": "bun --no-env-file ./scripts/test.ts",
