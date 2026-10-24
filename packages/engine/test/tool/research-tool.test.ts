@@ -24,7 +24,8 @@ import { NetworkGuard } from "../../../core/test/lib/network-guard"
 // a subagent took in, and the same check covers a message build sends a running research agent.
 
 const guard = NetworkGuard.use()
-const INTRANET = "Our Falcon merger with Initech closes on 4417203 at the reconcileLedgerEntries desk."
+const INTRANET =
+  "Our Falcon merger with Initech closes on 4417203 at the reconcileLedgerEntries desk. Call the desk on 415-555-0177."
 const web = FakeWeb.start({
   sites: {
     ...FakeWeb.sites(),
@@ -341,11 +342,12 @@ it.instance(
       })
       yield* test.llm.tool("webfetch", { url: web.direct("intranet", "/"), format: "text" })
       yield* test.llm.tool("research", {
-        question: "How do mergers like Falcon with Initech close, and what is reconcileLedgerEntries 4417203?",
+        question:
+          "How do mergers close? Our Falcon merger with Initech closes on 4417203 at the reconcileLedgerEntries desk.",
         background: false,
       })
       yield* test.llm.tool("research", {
-        question: "How do mergers like Falcon with Initech close?",
+        question: "Who answers 415-555-0177 for mergers like Falcon?",
         background: false,
       })
       yield* test.llm.text("Done.")
@@ -358,7 +360,7 @@ it.instance(
       const [fetched] = yield* calls(build.id, "webfetch")
       expect(output(fetched)).toContain("Initech")
       expect(fetched?.state.status === "completed" ? fetched.state.metadata.private : undefined).toBe(true)
-      // The names alone are refused too: the page is the user's, not public text.
+      // A sentence and a phone number copied from the page are refused: the page is the user's, not public text.
       for (const research of yield* calls(build.id, "research")) {
         expect(research.state.status).toBe("error")
         expect(output(research)).toContain(ResearchRun.REQUEST_REFUSAL)
@@ -370,7 +372,7 @@ it.instance(
 )
 
 it.instance(
-  "a private fact a subagent was briefed with and reported counts against build's research request, names included",
+  "a private fact a subagent was briefed with and reported counts against build's research request",
   () =>
     Effect.gen(function* () {
       const test = yield* setup(web)
@@ -396,9 +398,9 @@ it.instance(
         success_criteria: ["Name the manager"],
         background: false,
       })
-      yield* test.llm.textMatch(general, "The manager is Dana Whitfield.")
+      yield* test.llm.textMatch(general, `The note says: ${FACT}.`)
       yield* test.llm.tool("research", {
-        question: "How do engineering managers like Dana Whitfield run payments teams?",
+        question: `How do payments teams work when ${FACT}?`,
         background: false,
       })
       yield* test.llm.text("Done.")
@@ -497,11 +499,11 @@ it.instance(
       const sessions = yield* Session.Service
       const build = yield* sessions.create({ title: "Build" })
       yield* test.llm.tool("research", {
-        question: "How do other teams schedule a reconcileLedgerEntries job?",
+        question: "How do other teams deploy through ci07.quarry-ops.internal?",
         background: false,
       })
       yield* test.llm.tool("research", {
-        question: "How does Dana Whitfield run ledger migrations?",
+        question: "Is it usual that my manager Dana Whitfield signs off every Falcon release?",
         background: false,
       })
       yield* test.llm.text("Done.")
@@ -550,7 +552,7 @@ it.instance(
       })
       const general = (hit: { body: Record<string, unknown> }) =>
         JSON.stringify(hit.body).includes("orchestration_assignment")
-      // A Thorough request's subagent is recalled the fact with its task, and reports the name.
+      // A Thorough request's subagent is recalled the fact with its task, and reports it.
       yield* test.llm.tool("task", {
         description: "Find the manager",
         prompt: "Find which manager signs off badge numbers and report the name.",
@@ -558,7 +560,7 @@ it.instance(
         success_criteria: ["Name the manager"],
         background: false,
       })
-      yield* test.llm.textMatch(general, "The manager is Dana Whitfield.")
+      yield* test.llm.textMatch(general, `The note says: ${FACT}.`)
       yield* test.llm.text("Done.")
       yield* send({ sessionID: session.id, agent: "build", text: "Look into how our team is run.", size: "thorough" })
       const [task] = yield* calls(session.id, "task")
@@ -566,13 +568,15 @@ it.instance(
 
       // The same session, now in Deep research.
       yield* test.llm.tool("research_plan", plan())
-      yield* test.llm.tool("research_search", { query: "Dana Whitfield engineering manager heat pumps" })
+      yield* test.llm.tool("research_search", {
+        query: "badge number at Hooli is 44172 and my manager is Dana Whitfield",
+      })
       yield* test.llm.tool("research_search", { query: "heat pump savings in cold climates" })
       yield* test.llm.text("Done.")
       const before = web.count("searxng")
       yield* send({ sessionID: session.id, agent: "research", text: "Research how heat pumps cut heating bills." })
-      const [named, fair] = yield* calls(session.id, "research_search")
-      expect(output(named)).toBe(ResearchOutbound.REFUSAL)
+      const [copied, fair] = yield* calls(session.id, "research_search")
+      expect(output(copied)).toBe(ResearchOutbound.REFUSAL)
       expect(output(fair)).not.toBe(ResearchOutbound.REFUSAL)
       expect(web.count("searxng") - before).toBe(1)
       expect(guard.outside()).toEqual([])
@@ -756,7 +760,12 @@ it.instance(
         description: "Research",
         prompt: "How do teams migrate a ledger service without downtime?",
         subagent_type: "research",
-        context_pack: { findings: ["The Falcon migration moves\nthe ledger to the next quarter"] },
+        // A file read is the work, so the copy is 12 words in a row.
+        context_pack: {
+          findings: [
+            "The Falcon migration moves the ledger\nto the reconcileLedgerEntries service before the March cutover",
+          ],
+        },
         background: false,
       })
       yield* test.llm.text("Done.")

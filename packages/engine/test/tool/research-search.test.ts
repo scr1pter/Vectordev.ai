@@ -24,7 +24,7 @@ import { NetworkGuard } from "../../../core/test/lib/network-guard"
 // leaves. That context counts every memory line the run was given, whatever its scope (a fact the memory tool found, an
 // entry pinned in the digest, one learned beside a private document), and the repository files it read. A refused
 // query is never sent and never counted; the user's own typed words are theirs to send, and only the user's own sites
-// clear a host name. Results join the run's provenance, so research_read may read them.
+// clear a private host name. Results join the run's provenance, so research_read may read them.
 
 const guard = NetworkGuard.use()
 const web = FakeWeb.start({ sites: FakeWeb.sites() })
@@ -43,7 +43,7 @@ const allow = [
 ]
 
 it.instance(
-  "a query carrying a personal fact the run was given, or a token from a file it read, is refused before it is sent",
+  "a query copying a personal fact the run was given, or a file it read, is refused before it is sent",
   () =>
     Effect.gen(function* () {
       const test = yield* setup(web)
@@ -64,11 +64,16 @@ it.instance(
       yield* test.llm.tool("research_plan", plan())
       yield* test.llm.tool("memory", { action: "search", text: "badge manager" })
       yield* test.llm.tool("read", { filePath: path.join(test.dir, "notes", "plan.md") })
-      yield* test.llm.tool("research_search", { query: "Dana Whitfield badge 44172 Hooli" })
-      yield* test.llm.tool("research_search", { query: "reconcileLedgerEntries service migration" })
+      yield* test.llm.tool("research_search", {
+        query: "badge number at Hooli is 44172 and my manager is Dana Whitfield",
+      })
+      // A file read is the work, so a copy of it is 12 words or more.
+      yield* test.llm.tool("research_search", {
+        query: "Falcon migration moves the ledger to the reconcileLedgerEntries service before the March freeze",
+      })
       yield* test.llm.tool("research_search", { query: "heat pump savings near Whitfield cold climate" })
       yield* test.llm.text("Done.")
-      // The user names the house's owner, so that name is theirs to send.
+      // A name alone is not copying, and the user names the house's owner anyway.
       yield* send({
         sessionID: session.id,
         agent: "research",
@@ -135,6 +140,39 @@ it.instance(
 )
 
 it.instance(
+  "the outbound check reads the user's names from the home folder and working tree, and hears the search results' addresses",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web)
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "Research", permission: allow })
+      yield* test.llm.tool("research_plan", plan())
+      yield* test.llm.tool("research_search", { query: "heat pump field study" })
+      yield* test.llm.text("Done.")
+      yield* send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." })
+      const research = yield* ResearchRun.Service
+      const ctx = {
+        sessionID: session.id,
+        messageID: MessageID.make("msg_outbound_context"),
+        agent: "research",
+        abort: AbortSignal.any([]),
+        messages: [],
+        metadata: () => Effect.void,
+        ask: () => Effect.void,
+      }
+      const found = yield* research.current(ctx)
+      if ("refused" in found) throw new Error(found.refused)
+      const context = yield* research.context(ctx, found)
+      // The home folder and the working tree are the paths whose user names local paths are read for, not the
+      // repository's text; a host that only looks internal goes out once a result is on it.
+      expect(context.home).toEqual([Global.Path.home, found.place.root])
+      expect(context.results).toContain(web.url("article", "/"))
+      expect(guard.outside()).toEqual([])
+    }),
+  90_000,
+)
+
+it.instance(
   "nothing is searched before a plan is approved",
   () =>
     Effect.gen(function* () {
@@ -165,7 +203,7 @@ it.instance(
       yield* knowledge.wait(place, added.document.id, "searchable", 10_000)
       const sessions = yield* Session.Service
       const lead = yield* sessions.create({ title: "Research", permission: allow })
-      const copied = "raise the Enterprise heat pump tier"
+      const copied = "raise the Enterprise heat pump tier to forty dollars"
       const researcher = (hit: { body: Record<string, unknown> }) =>
         JSON.stringify(hit.body).includes("research_assignment")
       yield* test.llm.tool("research_plan", plan({ depth: "deep" }))
@@ -208,13 +246,13 @@ it.instance(
       const fs = yield* FSUtil.Service
       yield* fs.writeWithDirs(
         path.join(test.dir, "notes", "hosts.md"),
-        "# Hosts\n\nOur status page is status.acmecorp.com.\n",
+        "# Hosts\n\nOur status page is status.internal.acmecorp.com.\n",
       )
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research", permission: allow })
-      yield* test.llm.tool("research_plan", { ...plan(), prefer_domains: ["acmecorp.com"] })
+      yield* test.llm.tool("research_plan", { ...plan(), prefer_domains: ["status.internal.acmecorp.com"] })
       yield* test.llm.tool("read", { filePath: path.join(test.dir, "notes", "hosts.md") })
-      yield* test.llm.tool("research_search", { query: "outage history", site: "status.acmecorp.com" })
+      yield* test.llm.tool("research_search", { query: "outage history", site: "status.internal.acmecorp.com" })
       yield* test.llm.text("Done.")
       const before = web.hits().filter((hit) => hit.site === "searxng").length
       yield* send({ sessionID: session.id, agent: "research", text: "Research how often status pages report outages." })
@@ -237,7 +275,10 @@ it.instance(
       const prompt = yield* SessionPrompt.Service
       const session = yield* sessions.create({ title: "Research", permission: allow })
       yield* test.llm.tool("research_plan", plan())
-      yield* test.llm.tool("research_search", { query: "reconcileLedgerEntries service migration" })
+      // An attached file is the work, so a copy of it is 12 words or more.
+      yield* test.llm.tool("research_search", {
+        query: "Falcon migration moves the ledger to the reconcileLedgerEntries service before the March freeze",
+      })
       yield* test.llm.tool("research_search", { query: "ledger service migration without downtime" })
       yield* test.llm.text("Done.")
       const before = web.hits().filter((hit) => hit.site === "searxng").length
@@ -260,7 +301,7 @@ it.instance(
 )
 
 it.instance(
-  "text from outside the conversation, such as what was piped in, counts as private, names included",
+  "text from outside the conversation, such as what was piped in, counts as private",
   () =>
     Effect.gen(function* () {
       const test = yield* setup(web)
@@ -268,7 +309,7 @@ it.instance(
       const prompt = yield* SessionPrompt.Service
       const session = yield* sessions.create({ title: "Research", permission: allow })
       yield* test.llm.tool("research_plan", plan())
-      yield* test.llm.tool("research_search", { query: "Initech heat pump contract renewal" })
+      yield* test.llm.tool("research_search", { query: "Initech renews its heat pump contract with us in March" })
       yield* test.llm.text("Done.")
       const before = web.hits().filter((hit) => hit.site === "searxng").length
       yield* prompt.prompt({
@@ -299,7 +340,7 @@ for (const entry of [
   { kind: "fact" as const, private: false },
 ])
   it.instance(
-    `a pinned repository ${entry.kind}${entry.private ? " learned beside a private document" : ""} keeps its host and names out of the lead's searches`,
+    `a pinned repository ${entry.kind}${entry.private ? " learned beside a private document" : ""} keeps its host and its words out of the lead's searches`,
     () =>
       Effect.gen(function* () {
         const test = yield* setup(web)
@@ -320,7 +361,7 @@ for (const entry of [
         const session = yield* sessions.create({ title: "Research", permission: allow })
         yield* test.llm.tool("research_plan", plan())
         yield* test.llm.tool("research_search", { query: "billing07.globex-intra.com heat pump outage" })
-        yield* test.llm.tool("research_search", { query: "Globex heat pump billing outage" })
+        yield* test.llm.tool("research_search", { query: "heat pump billing service for Globex runs on" })
         yield* test.llm.tool("research_search", { query: "heat pump billing outage" })
         yield* test.llm.text("Done.")
         const before = web.hits().filter((hit) => hit.site === "searxng").length
@@ -363,7 +404,7 @@ it.instance(
         JSON.stringify(hit.body).includes("research_assignment")
       yield* test.llm.tool("research_plan", plan({ depth: "deep" }))
       yield* test.llm.tool("memory", { action: "search", text: "heat pump billing renewal" })
-      yield* test.llm.tool("research_search", { query: "Globex heat pump billing alternatives" })
+      yield* test.llm.tool("research_search", { query: "move heat pump billing off Globex before the March renewal" })
       yield* test.llm.tool("task", {
         description: "Billing",
         prompt: "Which heat pump billing vendors do utilities use?",
@@ -371,7 +412,9 @@ it.instance(
         background: false,
       })
       // The researcher never saw the entry, but the run did.
-      yield* test.llm.toolMatch(researcher, "research_search", { query: "Globex competitors heat pump billing" })
+      yield* test.llm.toolMatch(researcher, "research_search", {
+        query: "decided to move heat pump billing off Globex before",
+      })
       yield* test.llm.textMatch(researcher, "Nothing found.")
       yield* test.llm.text("Done.")
       const before = web.hits().filter((hit) => hit.site === "searxng").length
@@ -403,7 +446,9 @@ it.instance(
       const found = yield* research.current(ctx)
       if ("refused" in found) throw new Error(found.refused)
       const context = yield* research.context(ctx, found)
-      expect(ResearchOutbound.check("Globex heat pump billing alternatives", context).ok).toBe(false)
+      expect(ResearchOutbound.check("move heat pump billing off Globex before the March renewal", context).ok).toBe(
+        false,
+      )
       expect(ResearchOutbound.check("heat pump billing alternatives", context).ok).toBe(true)
       expect(guard.outside()).toEqual([])
     }),
@@ -413,7 +458,7 @@ it.instance(
 for (const own of [false, true])
   it.instance(
     own
-      ? "a site the user's own config avoids clears its host name from the outbound check"
+      ? "a site the user's own config avoids clears its host name from the outbound check, though it looks internal"
       : "a site a repository's config avoids, trusted or not, clears no host name from the outbound check",
     () =>
       Effect.gen(function* () {
@@ -428,28 +473,27 @@ for (const own of [false, true])
             ...repositoryConfig(server.url),
             research: {
               search: { provider: "searxng", url: web.url("searxng", "/") },
-              ...(own ? { domains: { avoid: ["victimcorp.com"] } } : {}),
+              ...(own ? { domains: { avoid: ["staging.victimcorp.com"] } } : {}),
             },
           }),
         )
         yield* fs.writeWithDirs(
           path.join(test.dir, "vector.json"),
-          JSON.stringify(own ? {} : { research: { domains: { avoid: ["victimcorp.com"] } } }),
+          JSON.stringify(own ? {} : { research: { domains: { avoid: ["staging.victimcorp.com"] } } }),
         )
         yield* config.invalidate()
-        expect((yield* config.get()).research?.domains?.avoid).toEqual(["victimcorp.com"])
+        expect((yield* config.get()).research?.domains?.avoid).toEqual(["staging.victimcorp.com"])
         expect((yield* config.trust()).trusted).toBe(false)
         yield* fs.writeWithDirs(
           path.join(test.dir, "notes", "hosts.md"),
-          "# Hosts\n\nThe merger data room is at falcon-merger.victimcorp.com.\n",
+          "# Hosts\n\nThe merger data room is at staging.victimcorp.com.\n",
         )
         const sessions = yield* Session.Service
         const session = yield* sessions.create({ title: "Research", permission: allow })
         yield* test.llm.tool("research_plan", plan())
         yield* test.llm.tool("read", { filePath: path.join(test.dir, "notes", "hosts.md") })
-        // The domain clears itself as a host name, never a host under it: falcon-merger.victimcorp.com still carries
-        // the private codename, so the query names the domain alone.
-        yield* test.llm.tool("research_search", { query: "victimcorp.com outage history" })
+        // The host looks internal, so only the user's own avoid list clears it, as a host name.
+        yield* test.llm.tool("research_search", { query: "staging.victimcorp.com outage history" })
         yield* test.llm.text("Done.")
         yield* send({
           sessionID: session.id,
@@ -485,13 +529,13 @@ it.instance(
           })
           if (written.type !== "refused") yield* brain.update(place, written.entry.id, { pinned: true }, "user")
         })
-      yield* own("I prefer fda.gov for drug interaction data")
-      yield* own("Install packages from pkgs.initech.com", "tooling")
+      yield* own("I prefer docs.internal.initech.com for drug interaction data")
+      yield* own("Install packages from pkgs.internal.initech.com", "tooling")
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research", permission: allow })
       yield* test.llm.tool("research_plan", plan())
-      yield* test.llm.tool("research_search", { query: "drug interaction warnings", site: "fda.gov" })
-      yield* test.llm.tool("research_search", { query: "package mirror outages", site: "pkgs.initech.com" })
+      yield* test.llm.tool("research_search", { query: "drug interaction warnings", site: "docs.internal.initech.com" })
+      yield* test.llm.tool("research_search", { query: "package mirror outages", site: "pkgs.internal.initech.com" })
       yield* test.llm.text("Done.")
       yield* send({ sessionID: session.id, agent: "research", text: "Research drug interaction warnings." })
       const [sources, tooling] = yield* calls(session.id, "research_search")

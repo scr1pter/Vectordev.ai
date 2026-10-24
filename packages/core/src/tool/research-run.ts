@@ -320,8 +320,12 @@ const layer = Layer.effect(
           ...prompts.private,
         ].filter(Boolean),
         work: [place().root, ...ambient.work, ...prompts.work, ...taken.flatMap((item) => item.work)].filter(Boolean),
+        // The home folder and the working tree, as on the V1 runner: local paths are read for the user names in them,
+        // and a query may not name the working tree whole.
+        home: [global.home, place().root],
         typed: [],
         public: [...results.flatMap((result) => [result.title, result.snippet]), ...sources.open],
+        results: results.map((result) => result.url),
         // The user's own sites become site: filters.
         domains: [...chosen.prefer, ...chosen.avoid],
       } satisfies ResearchOutbound.Context

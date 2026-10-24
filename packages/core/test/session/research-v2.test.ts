@@ -80,7 +80,7 @@ import { agentHost, host } from "../plugin/host"
 
 // A page of the user's intranet, too long to show whole, and a public page that links into the user's network and to a
 // cloud metadata address.
-const INTRANET = "Internal plan: the Quillfeather rollout keeps budget code 7730192 until spring."
+const INTRANET = "Internal plan: the Quillfeather rollout keeps account number 773019256 until spring."
 const METADATA = "http://169.254.169.254/latest/meta-data/"
 const guard = NetworkGuard.use()
 const web = FakeWeb.start({
@@ -832,7 +832,7 @@ describe("Deep research on the V2 runner", () => {
             depth: "focused",
           }),
         },
-        { events: call("research_search", { query: "reconcileLedgerEntries migration 4417203" }) },
+        { events: call("research_search", { query: NOTES }) },
         { events: call("research_search", { query: "ledger service migration without downtime" }) },
       )
       yield* session.prompt({
@@ -942,10 +942,14 @@ describe("Deep research on the V2 runner", () => {
       // Then the user switches to Deep research.
       turns.push(
         { events: plan("How are heat pump rollouts budgeted?") },
-        { events: call("research_search", { query: "Quillfeather heat pump rollout" }) },
-        { events: call("research_search", { query: "heat pump budget code 7730192" }) },
-        // The read-back's text (the fake read's) names Falcon, which as the work alone would go out.
-        { events: call("research_search", { query: "Falcon heat pump rollout" }) },
+        { events: call("research_search", { query: INTRANET }) },
+        { events: call("research_search", { query: "heat pump account number 773019256" }) },
+        // The saved private page's read-back is private too: this ten-word run is shorter than the work's threshold.
+        {
+          events: call("research_search", {
+            query: "The Falcon migration moves the ledger to the reconcileLedgerEntries",
+          }),
+        },
         { events: call("research_search", { query: "heat pump rollout budgets" }) },
       )
       yield* session.prompt({
@@ -998,8 +1002,16 @@ describe("Deep research on the V2 runner", () => {
       const before = web.count("searxng")
       turns.push(
         { events: plan("How do heat pumps perform in cold climates?") },
-        { events: call("research_search", { query: "Brightwater heat pump study" }) },
-        { events: call("research_search", { query: "Marigold heat pump study" }) },
+        {
+          events: call("research_search", {
+            query: "You review pull requests for Brightwater Analytics before release",
+          }),
+        },
+        {
+          events: call("research_search", {
+            query: "You draft customer replies for Marigold Logistics in a calm voice",
+          }),
+        },
         { events: call("research_search", { query: "Corvid heat pump study" }) },
       )
       yield* session.prompt({ sessionID, prompt: research("Research heat pumps in cold climates."), resume: false })
@@ -1023,15 +1035,15 @@ describe("Deep research on the V2 runner", () => {
         turns.push(
           { events: call("read", {}) },
           { events: plan("How do teams migrate a ledger service?") },
-          // The prompt names release 4417203 too, but a V2 prompt may be another agent's, so it clears nothing.
-          { events: call("research_search", { query: "ledger migration release 4417203" }) },
+          // The prompt quotes the file too, but a V2 prompt may be another agent's, so it clears nothing.
+          { events: call("research_search", { query: NOTES }) },
           { events: call("research_read", { url: web.url("article", "/") }) },
           { events: call("research_read", { url: intranet }) },
         )
         yield* session.prompt({
           sessionID,
           prompt: research(
-            `Research ledger migrations like our release 4417203. Start from ${web.url("article", "/")} and ${intranet}`,
+            `Research ledger migrations. ${NOTES} Start from ${web.url("article", "/")} and ${intranet}`,
           ),
           resume: false,
         })
@@ -1095,7 +1107,9 @@ describe("Deep research on the V2 runner", () => {
       turns.push(
         { events: plan("How are heat pump pilots budgeted?") },
         { events: call("research_read", { source: "S1" }), gate, started },
-        { events: call("research_search", { query: "Kestrelmoor pilot budget" }) },
+        {
+          events: call("research_search", { query: "The Kestrelmoor pilot keeps its budget until the spring review" }),
+        },
         { events: call("research_search", { query: "heat pump pilot budget" }) },
       )
       yield* session.prompt({ sessionID, prompt: research("Research heat pump pilot budgets."), resume: false })
