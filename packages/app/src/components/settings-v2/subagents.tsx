@@ -1,6 +1,5 @@
 import "@/features/background-tasks/background-tasks.css"
-import { For, Show, createEffect, createSignal } from "solid-js"
-import { useQuery } from "@tanstack/solid-query"
+import { For, Show, onCleanup } from "solid-js"
 import { Button } from "@vectordevai/ui/button"
 import { useDialog } from "@vectordevai/ui/context/dialog"
 import { Dialog } from "@vectordevai/ui/dialog"
@@ -10,21 +9,30 @@ import { SUBAGENT_IDENTITIES, SubagentAvatar } from "@/features/agents/identitie
 import { useLanguage } from "@/context/language"
 import { useServerSync } from "@/context/server-sync"
 import { showToast } from "@/utils/toast"
+import { formatServerError } from "@/utils/server-errors"
 import { helperLabel, isInternalSession } from "@/utils/internal-sessions"
-import { generalSubagentsEnabled, generalSubagentsPatch, runningWork, stopWorkDescription } from "./general-subagents"
+import {
+  SPECIALIST_IDS,
+  agentEnabled,
+  createAgentSwitchSaver,
+  runningWork,
+  stopWorkDescription,
+} from "./subagent-switches"
 
 // Vector hands work to two kinds of subagent, and this page explains both.
 // Subagents are the engine's general-purpose `general` agent, which the main
 // agent starts on its own for big tasks, one per independent part, in
 // parallel; small tasks it does itself. Subagent specialists are every other
 // agent, each with one focus; user-defined agents count as specialists too.
-// The page has one control, the General subagents switch, which writes
-// `agent.general.disable` to the connected engine's global config. It reads
-// that config through its own query, so it waits for the saved value instead
+// The page has a switch for General subagents, one for each specialist that
+// ships with Vector and one for all of those specialists at once. Each writes
+// `agent.<id>.disable` to the connected engine's global config, saved
+// together when flipped in quick succession (subagent-switches.ts). The page
+// reads that config from server sync, so it waits for the saved value instead
 // of showing the default, and it asks first when a change would stop running
-// sessions. Specialists have no controls: the engine defines them and routes
-// on their descriptions. No directory store is needed, so the page works
-// where none exists.
+// sessions. Agents the user defined have no switch: they live in the
+// user's own config. No directory store is needed, so the page works where
+// none exists.
 
 const SUBAGENT_FACTS = [
   {
@@ -60,20 +68,17 @@ const LEGEND = [
   { status: "pending", label: "Not started" },
 ] as const
 
-// Saving the switch reloads the engine's state, which stops every running
+// Saving a switch reloads the engine's state, which stops every running
 // session, so the page asks first whenever something is working.
 function DialogStopRunningWork(props: {
   work: ReturnType<typeof runningWork>
+  title: string
   enable: boolean
   onConfirm: () => void
 }) {
   const dialog = useDialog()
   return (
-    <Dialog
-      title={props.enable ? "Turn general subagents on?" : "Turn general subagents off?"}
-      description={stopWorkDescription(props.work)}
-      fit
-    >
+    <Dialog title={props.title} description={stopWorkDescription(props.work)} fit>
       <div class="flex flex-col gap-4 pl-6 pr-2.5 pb-3">
         <div class="flex justify-end gap-2">
           <Button variant="ghost" size="large" onClick={() => dialog.close()}>
@@ -99,45 +104,46 @@ export function SettingsSubagentsV2() {
   const serverSync = useServerSync()
   const language = useLanguage()
   const dialog = useDialog()
-  const specialists = () => Object.values(SUBAGENT_IDENTITIES).filter((identity) => identity.id !== GENERAL_SUBAGENT_ID)
+  const specialists = SPECIALIST_IDS.flatMap((id) => SUBAGENT_IDENTITIES[id] ?? [])
 
-  // The saved value is the engine's global config. This query shares its
-  // cache with server sync, so it refreshes after a save, and unlike
+  // The saved values are the engine's global config, as server sync holds
+  // it: a save writes its result there before it resolves. Unlike
   // serverSync().data.config, which is {} until the config arrives and so
   // reads as "on", it says whether the saved value is actually known.
-  const configQuery = useQuery(() => serverSync().queryOptions.globalConfig())
-  const loaded = () => configQuery.data !== undefined
-  const saved = () => generalSubagentsEnabled(configQuery.data ?? {})
-  // While an update is in flight, and until the refetched config agrees with
-  // it, the switch shows what the user picked instead of flicking back.
-  const [pending, setPending] = createSignal<boolean>()
-  const enabled = () => pending() ?? saved()
-  const saving = () => serverSync().data.reload === "pending"
-  createEffect(() => {
-    const next = pending()
-    if (next !== undefined && loaded() && saved() === next) setPending(undefined)
+  const loaded = () => serverSync().globalConfig() !== undefined
+  const saver = createAgentSwitchSaver({
+    saved: (id) => agentEnabled(serverSync().globalConfig() ?? {}, id),
+    save: (patch) => serverSync().updateConfig(patch),
+    onError: (error, ids) =>
+      showToast({
+        variant: "error",
+        title: "Could not save your change",
+        description: `${switchNames(ids)} ${ids.length === 1 ? "is" : "are"} back to the saved setting. ${formatServerError(error, language.t)}`,
+      }),
   })
-  const save = (next: boolean) => {
-    setPending(next)
-    void serverSync()
-      .updateConfig(generalSubagentsPatch(next))
-      .catch((err: unknown) => {
-        setPending(undefined)
-        showToast({
-          title: language.t("common.requestFailed"),
-          description: err instanceof Error ? err.message : String(err),
-        })
-      })
-  }
-  const setEnabled = (next: boolean) => {
-    if (next === enabled()) return
+  // Closing Settings right after a flip still saves it.
+  onCleanup(() => void saver.flush())
+
+  const anySpecialist = () => SPECIALIST_IDS.some((id) => saver.enabled(id))
+  const flip = (ids: readonly string[], enable: boolean, title: string) => {
+    if (ids.every((id) => saver.enabled(id) === enable)) return
+    const apply = () => saver.pick(Object.fromEntries(ids.map((id) => [id, enable])))
+    // Flipping back before the save goes out saves nothing, so nothing stops.
+    if (ids.every((id) => saver.committed(id) === enable)) return apply()
     const work = runningWork(serverSync().session.data.session_status, (sessionID) => {
       const session = serverSync().session.get(sessionID)
       return isInternalSession(session) ? helperLabel(session?.internal ?? "") : undefined
     })
-    if (work.sessions === 0 && work.helpers.length === 0) return save(next)
-    void dialog.show(() => <DialogStopRunningWork work={work} enable={next} onConfirm={() => save(next)} />)
+    if (work.sessions === 0 && work.helpers.length === 0) return apply()
+    void dialog.show(() => <DialogStopRunningWork work={work} title={title} enable={enable} onConfirm={apply} />)
   }
+  const unknown = () => (
+    <span class="settings-v2-row-description">
+      {serverSync().globalConfigFailed()
+        ? "Could not read this setting. Reopen Settings to try again."
+        : language.t("common.loading")}
+    </span>
+  )
 
   return (
     <section class="settings-v2-page">
@@ -174,18 +180,39 @@ export function SettingsSubagentsV2() {
               </div>
             </div>
             <div class="settings-v2-row-control settings-v2-row-control--compact">
-              <Show
-                when={loaded()}
-                fallback={
-                  <span class="settings-v2-row-description">
-                    {configQuery.isError
-                      ? "Could not read this setting. Reopen Settings to try again."
-                      : language.t("common.loading")}
-                  </span>
-                }
-              >
-                <Switch checked={enabled()} disabled={saving()} onChange={setEnabled} hideLabel>
+              <Show when={loaded()} fallback={unknown()}>
+                <Switch
+                  checked={saver.enabled(GENERAL_SUBAGENT_ID)}
+                  onChange={(next) =>
+                    flip([GENERAL_SUBAGENT_ID], next, `Turn general subagents ${next ? "on" : "off"}?`)
+                  }
+                  hideLabel
+                >
                   General subagents
+                </Switch>
+              </Show>
+            </div>
+          </div>
+          <div class="settings-v2-row-modern">
+            <div class="settings-v2-row-copy">
+              <div class="settings-v2-row-title">Subagent specialists</div>
+              <div class="settings-v2-row-description">
+                Named agents with one focus each, such as Review and Security. Turn this off to keep all of their work
+                in the main agent, or turn them off one at a time under Subagent specialists below. Build, Plan, general
+                subagents, agents you define yourself and Vector's own helpers are not changed. As with General
+                subagents, Vector asks first when something is running.
+              </div>
+            </div>
+            <div class="settings-v2-row-control settings-v2-row-control--compact">
+              <Show when={loaded()} fallback={unknown()}>
+                <Switch
+                  checked={anySpecialist()}
+                  onChange={(next) =>
+                    flip(SPECIALIST_IDS, next, `Turn all subagent specialists ${next ? "on" : "off"}?`)
+                  }
+                  hideLabel
+                >
+                  Subagent specialists
                 </Switch>
               </Show>
             </div>
@@ -195,9 +222,10 @@ export function SettingsSubagentsV2() {
               <div class="settings-v2-row-title">In the terminal</div>
               <div class="settings-v2-row-description">
                 The terminal reads its own config file. To turn subagents off there, set agent.general.disable to true
-                in ~/.config/vector/vector.json {"(%USERPROFILE%\\.config\\vector\\vector.json on Windows)"}. It takes
-                effect the next time you start Vector in the terminal. The same setting in a repository's vector.json
-                turns them off for that repository everywhere, whatever this switch says.
+                in ~/.config/vector/vector.json {"(%USERPROFILE%\\.config\\vector\\vector.json on Windows)"}, or the
+                specialist's own name for a subagent specialist, for example agent.review.disable. It takes effect the
+                next time you start Vector in the terminal. The same settings in a repository's vector.json turn them
+                off for that repository everywhere, whatever these switches say.
               </div>
             </div>
           </div>
@@ -250,33 +278,59 @@ export function SettingsSubagentsV2() {
           </div>
         </div>
         <div class="settings-v2-card-body">
-          <div class="settings-v2-pets-grid">
-            <For each={specialists()}>
-              {(identity) => (
-                <div class="settings-v2-pet">
-                  <SubagentAvatar id={identity.id} size={34} />
-                  <div class="settings-v2-pet-copy">
-                    <div class="settings-v2-pet-name">
-                      {identity.name}
-                      <span class="settings-v2-pet-species">{identity.summary}</span>
-                      <Show when={identity.readOnly}>
-                        <span class="settings-v2-pet-badge">read-only</span>
-                      </Show>
-                    </div>
-                    <div class="settings-v2-pet-role">{identity.detail}</div>
-                    <div class="settings-v2-pet-id">{identity.id}</div>
+          <For each={specialists}>
+            {(identity) => (
+              <div
+                class="settings-v2-row-modern settings-v2-specialist"
+                data-off={loaded() && !saver.enabled(identity.id) ? "" : undefined}
+              >
+                <SubagentAvatar id={identity.id} size={30} />
+                <div class="settings-v2-row-copy">
+                  <div class="settings-v2-pet-name">
+                    {identity.name}
+                    <span class="settings-v2-pet-species">{identity.summary}</span>
+                    <Show when={identity.readOnly}>
+                      <span class="settings-v2-pet-badge">read-only</span>
+                    </Show>
+                    <span class="settings-v2-pet-id">{identity.id}</span>
                   </div>
+                  <div class="settings-v2-row-description">{identity.detail}</div>
                 </div>
-              )}
-            </For>
-          </div>
+                <div class="settings-v2-row-control settings-v2-row-control--compact">
+                  <Show when={loaded()}>
+                    <Switch
+                      checked={saver.enabled(identity.id)}
+                      onChange={(next) =>
+                        flip([identity.id], next, `Turn the ${identity.name} specialist ${next ? "on" : "off"}?`)
+                      }
+                      hideLabel
+                    >
+                      {`${identity.name} specialist`}
+                    </Switch>
+                  </Show>
+                </div>
+              </div>
+            )}
+          </For>
           <p class="settings-v2-row-description">
             Explore, Review, Security and Judge can read your repository and run checks, but cannot edit it. In Plan
-            mode, Vector uses only Explore, Review and Security. Agents you define yourself count as subagent
-            specialists too. All of them keep working when General subagents is off.
+            mode, Vector uses only Explore, Review and Security, and with Judge off it skips the LLM-as-a-judge check. A
+            specialist you turn off leaves the @ list and Vector stops calling it. Specialists keep working when General
+            subagents is off. Agents you define yourself count as subagent specialists too, and these switches leave
+            them alone.
           </p>
         </div>
       </div>
     </section>
   )
+}
+
+// The switches' names for a failed save's message: "General subagents", or a
+// specialist's own name, joined as "Review, Test and Debug".
+function switchNames(ids: readonly string[]) {
+  const names = ids.map((id) =>
+    id === GENERAL_SUBAGENT_ID ? "General subagents" : (SUBAGENT_IDENTITIES[id]?.name ?? id),
+  )
+  if (names.length <= 1) return names.join("")
+  return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`
 }

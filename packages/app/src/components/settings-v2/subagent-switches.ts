@@ -1,0 +1,103 @@
+import type { Config } from "@vectordevai/sdk/v2/client"
+import { createSignal } from "solid-js"
+import { GENERAL_SUBAGENT_ID, SUBAGENT_IDENTITIES } from "@vectordevai/session-ui/subagent-identity"
+
+// Settings → Agents has a switch for General subagents and one for each
+// Subagent specialist that ships with Vector. Each maps to the engine's
+// `agent.<id>.disable` in the global config. The engine removes a disabled
+// agent from its agent list (packages/engine/src/agent/agent.ts), so the task
+// tool can no longer launch it and the @ list no longer offers it. A switch is
+// on unless the global config says exactly `disable: true`.
+export const agentEnabled = (config: Config, id: string) => config.agent?.[id]?.disable !== true
+
+// The specialists the page lists, and the only agents the all-specialists
+// switch changes: never build or plan, never general, never Vector's own
+// helpers and never an agent the user defined.
+export const SPECIALIST_IDS = Object.keys(SUBAGENT_IDENTITIES).filter((id) => id !== GENERAL_SUBAGENT_ID)
+
+// The global config update deep-merges this patch, so other agent entries,
+// user-defined ones included, are kept. Turning a switch back on writes
+// `false` rather than removing the key, because JSON cannot carry `undefined`
+// and the engine treats `false` the same as no key.
+export const agentSwitchPatch = (picks: Record<string, boolean>): Config => ({
+  agent: Object.fromEntries(Object.entries(picks).map(([id, enabled]) => [id, { disable: !enabled }])),
+})
+
+// Every config save makes the engine reload, so switches flipped in quick
+// succession are saved together. A pick waits `delay` for the next one, then
+// the picks go out as one update; picks made while it is in flight go out in
+// one more update once it settles. A pick that matches the saved value is
+// dropped, so flipping a switch off and back on saves nothing. A switch shows
+// its latest pick until the save carrying it settles, so it never flicks back
+// mid-save. `save` must resolve only once `saved` reads the new values (server
+// sync writes the update's result into the config cache before it resolves).
+// A failed save drops the picks it carried, so their switches return to the
+// saved value, and `onError` names them.
+export function createAgentSwitchSaver(input: {
+  saved: (id: string) => boolean
+  save: (patch: Config) => Promise<unknown>
+  onError: (error: unknown, ids: string[]) => void
+  delay?: number
+}) {
+  const [picks, setPicks] = createSignal<Record<string, boolean>>({})
+  const [sending, setSending] = createSignal<Record<string, boolean>>({})
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  const flush = async (): Promise<void> => {
+    clearTimeout(timer)
+    timer = undefined
+    // The save in flight sends these picks when it settles.
+    if (Object.keys(sending()).length > 0) return
+    const batch = Object.fromEntries(Object.entries(picks()).filter((entry) => entry[1] !== input.saved(entry[0])))
+    setPicks({})
+    if (Object.keys(batch).length === 0) return
+    setSending(batch)
+    await input.save(agentSwitchPatch(batch)).catch((error: unknown) => input.onError(error, Object.keys(batch)))
+    setSending({})
+    if (Object.keys(picks()).length > 0) return flush()
+  }
+
+  return {
+    enabled: (id: string) => picks()[id] ?? sending()[id] ?? input.saved(id),
+    // What the engine has, or will have once the save in flight lands. A pick that matches it saves nothing.
+    committed: (id: string) => sending()[id] ?? input.saved(id),
+    pick(next: Record<string, boolean>) {
+      setPicks((current) => ({ ...current, ...next }))
+      clearTimeout(timer)
+      timer = setTimeout(() => void flush(), input.delay ?? 500)
+    },
+    // Saves the waiting picks now, so closing Settings right after a flip keeps it.
+    flush,
+  }
+}
+
+// Saving a switch makes the engine reload its state, which stops every
+// session working at that moment, in every repository, subagents included.
+// The page asks before it does that, and these say how much would stop.
+// Vector's helpers (a Vectorscope review, autocomplete) stop too, but they are
+// in no list the user can open, so they are named instead of counted as
+// sessions. `helperOf` gives the helper's name for a helper session.
+export const runningWork = (
+  status: Record<string, { type: string } | undefined>,
+  helperOf: (sessionID: string) => string | undefined,
+) => {
+  const busy = Object.entries(status).flatMap(([sessionID, item]) =>
+    item !== undefined && item.type !== "idle" ? [sessionID] : [],
+  )
+  const helpers = busy.flatMap((sessionID) => helperOf(sessionID) ?? [])
+  return { sessions: busy.length - helpers.length, helpers: [...new Set(helpers)] }
+}
+
+export const stopWorkDescription = (work: { sessions: number; helpers: readonly string[] }) => {
+  const sessions =
+    work.sessions === 1
+      ? "1 session is working right now."
+      : `${work.sessions} sessions are working right now, subagents included.`
+  const helpers = `${work.helpers.length === 1 ? "One of Vector's helpers is" : "Vector's helpers are"} working ${work.sessions > 0 ? "too" : "right now"} (${work.helpers.join(", ")}).`
+  const stops = work.sessions + work.helpers.length === 1 ? "it" : "all of them"
+  return [
+    ...(work.sessions > 0 ? [sessions] : []),
+    ...(work.helpers.length > 0 ? [helpers] : []),
+    `Changing this setting stops ${stops}, and the new setting applies from your next message.`,
+  ].join(" ")
+}
