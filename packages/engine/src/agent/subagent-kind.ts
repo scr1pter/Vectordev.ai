@@ -11,22 +11,6 @@ export const GENERAL_SUBAGENT = "general"
 /** Other names models use for the general-purpose Subagent; Claude-trained models emit "general-purpose". */
 export const GENERAL_ALIASES = ["general-purpose", "general_purpose", "subagent"] as const
 
-/**
- * The Subagent specialists that ship with Vector (agent.ts). Settings can turn each one off with
- * `agent.<name>.disable`, which removes it from the agent list, so the task tool keeps this list to tell a model that
- * names one that it is turned off rather than unknown.
- */
-export const NATIVE_SPECIALISTS = [
-  "debug",
-  "explore",
-  "judge",
-  "migration",
-  "performance",
-  "review",
-  "security",
-  "test",
-] as const
-
 export type SubagentKind = "subagent" | "specialist"
 
 export const SUBAGENT_LABEL: Record<SubagentKind, string> = {

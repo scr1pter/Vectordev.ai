@@ -12,13 +12,13 @@ import { deriveSubagentSessionPermission } from "../agent/subagent-permissions"
 import { Permission } from "@/permission"
 import {
   GENERAL_SUBAGENT,
-  NATIVE_SPECIALISTS,
   resolveSubagentType,
   subagentKind,
   subagentTitle,
   type SubagentRecord,
   type SubagentUsage,
 } from "../agent/subagent-kind"
+import { isNativeSpecialist } from "@vectordevai/core/agent/specialists"
 import { SubagentLifecycle } from "./subagent-lifecycle"
 import { Truncate } from "./truncate"
 import type { SessionPrompt } from "../session/prompt"
@@ -753,7 +753,7 @@ export const TaskTool = Tool.define(
           .map((item) => item.name)
           .toSorted()
         if (missing) {
-          const reason = (NATIVE_SPECIALISTS as readonly string[]).includes(subagentType)
+          const reason = isNativeSpecialist(subagentType)
             ? `The ${subagentType} Subagent specialist is turned off in Vector settings (agent.${subagentType}.disable).`
             : `Unknown agent type: ${subagentType} is not a valid agent type.`
           return yield* Effect.fail(

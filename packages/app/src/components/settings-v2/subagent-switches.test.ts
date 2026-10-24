@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { Config } from "@vectordevai/sdk/v2/client"
+import { NATIVE_SPECIALISTS } from "@vectordevai/core/agent/specialists"
+import { GENERAL_SUBAGENT_ID, SUBAGENT_IDENTITIES } from "@vectordevai/session-ui/subagent-identity"
 import {
   SPECIALIST_IDS,
   agentEnabled,
@@ -80,17 +82,11 @@ describe("agentEnabled", () => {
 })
 
 describe("SPECIALIST_IDS", () => {
+  // The engine checks NATIVE_SPECIALISTS against the agents it ships, so a specialist added there fails here until it
+  // has an identity, and with it a switch.
   test("are the specialists that ship with Vector, and nothing else", () => {
-    expect(SPECIALIST_IDS.toSorted()).toEqual([
-      "debug",
-      "explore",
-      "judge",
-      "migration",
-      "performance",
-      "review",
-      "security",
-      "test",
-    ])
+    expect(SPECIALIST_IDS.toSorted()).toEqual([...NATIVE_SPECIALISTS])
+    expect(Object.keys(SUBAGENT_IDENTITIES).toSorted()).toEqual([GENERAL_SUBAGENT_ID, ...NATIVE_SPECIALISTS].toSorted())
   })
 })
 
