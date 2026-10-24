@@ -109,9 +109,9 @@ it.instance(
       expect(body).not.toContain("Initech")
       expect(body).not.toContain(DECISION)
       // Nor where the repository is: a folder's name can name a client. The lead is told.
-      expect(body).not.toContain(test.dir)
+      expect(body).not.toContain(JSON.stringify(test.dir).slice(1, -1))
       expect(body).not.toContain("Working directory")
-      expect(bodies[0]).toContain(`Working directory: ${test.dir}`)
+      expect(bodies[0]).toContain(JSON.stringify(`Working directory: ${test.dir}`).slice(1, -1))
       // The researcher was offered its own tools and nothing else: its own research browser among them, never the
       // user's.
       const tools = (JSON.parse(body) as { tools?: { function?: { name?: string } }[] }).tools?.map(
