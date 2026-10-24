@@ -37,10 +37,16 @@ runs:
         # e.g. ./patches/ for standard-openapi
         # https://github.com/oven-sh/bun/issues/28147
         if [ "$RUNNER_OS" = "Windows" ]; then
-          bun install --linker hoisted ${{ inputs.install-flags }}
+          bun install --ignore-scripts --linker hoisted ${{ inputs.install-flags }}
         else
-          bun install ${{ inputs.install-flags }}
+          bun install --ignore-scripts ${{ inputs.install-flags }}
         fi
+      shell: bash
+
+    # Vector loads the parsers' shipped WASM files, so their native node-gyp install hooks are unnecessary.
+    # Keep repository-owned compatibility preparation explicit; jobs that need Electron install it separately.
+    - name: Prepare repository dependencies
+      run: bun run script/prepare-gitlab.ts && bun run --cwd packages/core fix-node-pty
       shell: bash
 
     - name: Save Bun dependencies
