@@ -1059,7 +1059,10 @@ describe("searching in research browsers", () => {
     // Both asked for a check: search is unavailable, and neither page is tried again.
     shown.blocked = new Set(["google", "duckduckgo"])
     const unavailable = await search({ sessionID: "ses_lead", query: "heat pump noise" })
-    expect(unavailable).toMatchObject({ ok: false, error: ResearchSearch.UNAVAILABLE })
+    expect(unavailable).toMatchObject({
+      ok: false,
+      error: ResearchSearch.unavailable([{ engine: "google" }, { engine: "duckduckgo" }]),
+    })
     expect(unavailable.search?.tried.map((item) => item.engine)).toEqual(["google", "duckduckgo"])
     expect(loaded(view)).toHaveLength(4)
     expect(view.webContents.inputs).toEqual([])
@@ -1105,8 +1108,59 @@ describe("searching in research browsers", () => {
       ok: false,
       error: "Give the words to search for.",
     })
+    // With only DuckDuckGo's page let through, and a check on it, the agent is told of DuckDuckGo alone.
+    shown.blocked = new Set(["duckduckgo"])
+    const unavailable = await search({ sessionID: "ses_lead", query: "heat pump noise", engines: ["duckduckgo"] })
+    expect(unavailable).toMatchObject({ ok: false, error: ResearchSearch.unavailable([{ engine: "duckduckgo" }]) })
+    expect(unavailable.error).not.toContain("Google")
+    shown.blocked = new Set()
     await done("ses_lead")
     expect(guard.outside()).toEqual([])
+  })
+
+  test("a result that never commits, a PDF, leaves the search page's guard on until another page commits", async () => {
+    const pdf = web.url("docs", "/report.pdf")
+    const from = { runID: "run_search", sessionID: "ses_lead", provenance: [ARTICLE, pdf] }
+    shown.blocked = new Set(["google", "duckduckgo"])
+    expect(await send({ ...from, command: "research.search", query: "heat pumps" })).toMatchObject({ ok: false })
+    const view = latest()
+    const check = ResearchSearch.page("duckduckgo", { query: "heat pumps" })
+    expect(view.webContents.url).toBe(check)
+    // The PDF is a download, so it is read into memory and the check page stays shown.
+    const opened = await send({ ...from, command: "research.open", url: pdf })
+    expect(opened).toMatchObject({ ok: true, pdf: { url: pdf } })
+    expect(view.webContents.url).toBe(check)
+    for (const command of ["research.observe", "research.click", "research.read", "research.type"] as const)
+      expect(await send({ ...from, command, ref: "ref_1", text: "x" })).toMatchObject({
+        ok: false,
+        error: research.ON_SEARCH,
+      })
+    expect(view.webContents.inputs).toEqual([])
+    // The page is still a search's, so its own navigation to another results page is the search's too: robots.txt,
+    // which no fake site serves for DuckDuckGo, does not decide it.
+    await view.webContents.navigate(`${check}&s=30`)
+    expect(view.webContents.url).toBe(`${check}&s=30`)
+    expect(await send({ ...from, command: "research.observe" })).toMatchObject({ ok: false, error: research.ON_SEARCH })
+    // A result that commits lifts the guard.
+    expect(await send({ ...from, command: "research.open", url: ARTICLE })).toMatchObject({ ok: true })
+    expect((await send({ ...from, command: "research.read" })).read?.title).toBe("Heat pumps")
+    shown.blocked = new Set()
+    await done("ses_lead")
+  }, 30_000)
+
+  test("a page on a search engine's own host is held to the guard, however the browser got there", async () => {
+    // An address the user typed, which the rule lets the agent open.
+    const wall = "https://consent.google.com/ml?continue=https://www.google.com/search"
+    const from = { runID: "run_search", sessionID: "ses_lead", typed: [wall] }
+    expect(await send({ ...from, command: "research.open", url: wall })).toMatchObject({ ok: true })
+    expect(latest().webContents.url).toBe(wall)
+    for (const command of ["research.observe", "research.click", "research.read", "research.press"] as const)
+      expect(await send({ ...from, command, ref: "ref_1", key: "Enter" })).toMatchObject({
+        ok: false,
+        error: research.ON_SEARCH,
+      })
+    expect(latest().webContents.inputs).toEqual([])
+    await done("ses_lead")
   })
 })
 

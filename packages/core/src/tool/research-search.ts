@@ -154,7 +154,7 @@ const layer = Layer.effectDiscard(
               if (!report.ok)
                 return report.search
                   ? {
-                      text: [ResearchSearch.UNAVAILABLE, ...tried].join(" "),
+                      text: [ResearchSearch.unavailable(report.search.tried), ...tried].join(" "),
                       metadata: { runID, query, provider: "browser", unavailable: true },
                     }
                   : { text: report.error ?? BROWSER_DOWN, metadata: { runID, query, provider: "browser" } }

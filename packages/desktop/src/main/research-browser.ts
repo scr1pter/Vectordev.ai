@@ -81,7 +81,9 @@ import { egressFilter } from "./egress-filter"
 // traffic, a consent wall or a page Vector cannot read is never answered or clicked through: the browser loads
 // DuckDuckGo's HTML results page once instead, and when that is no better, search is unavailable for this call. While
 // the browser shows a results page (or a check one led to), the agent may only open, go back, search again or close:
-// nothing on it can be read as a source, clicked or typed into.
+// nothing on it can be read as a source, clicked or typed into. What the browser shows is decided when a page commits,
+// not when its load starts, so a load that never commits (a PDF, which is a download, a 204 answer or a timeout)
+// leaves the guard as it was; and a page on a search engine's own host is held to it whatever led there.
 //
 // Electron keeps one listener per webRequest event per session, and Vector Local's Chromium dispatcher
 // (egress-filter.ts) holds each session's onBeforeRequest: the navigation rule registers there as a step, which runs
@@ -323,13 +325,18 @@ type Browser = {
   actedAt?: number
   /** The page's address as the rule decided it. */
   decided?: string
-  /** The page shown is a results page a search loaded, or a page its load led to on its own. */
+  /** The page shown is a results page a search loaded, or a page its load led to on its own: set when a page commits. */
   search: boolean
+  /** The last main-frame request the rule allowed, and whether it is a search's: what `search` becomes if it commits. */
+  landing?: { readonly url: string; readonly search: boolean }
   status?: number
   /** A load Vector itself started, already decided: the agent's open or back, or a popup the rule allowed. */
   expected?: { readonly url: string; readonly decision: Decision & { readonly allow: true } }
-  /** Main-frame requests in flight, by request ID, so a redirect hop is known as one. */
-  readonly requests: Map<number, { readonly typedHost?: string }>
+  /**
+   * Main-frame requests in flight, by request ID, so a redirect hop is known as one: the host the user typed it on, and
+   * whether it is a search's (a results page, or a navigation a search engine's page made on its own).
+   */
+  readonly requests: Map<number, { readonly typedHost?: string; readonly search: boolean }>
   /** Every request of the page in flight, for waiting until it is quiet. */
   inflight: Set<number>
   /**
@@ -606,7 +613,7 @@ const OFF_SEARCH = new Set<ResearchCommand>([
 
 async function act(browser: Browser, input: ResearchInput): Promise<Partial<Report>> {
   const contents = browser.contents
-  if (browser.search && OFF_SEARCH.has(input.command)) return fail(ON_SEARCH)
+  if (OFF_SEARCH.has(input.command) && onSearch(browser)) return fail(ON_SEARCH)
   switch (input.command) {
     case "research.open": {
       if (!input.url) return fail("Give the address to open.")
@@ -739,6 +746,14 @@ async function act(browser: Browser, input: ResearchInput): Promise<Partial<Repo
   }
 }
 
+// Whether the page shown is a search's, or on a search engine's own host (a check, a consent wall, a results page),
+// however the browser got there.
+function onSearch(browser: Browser) {
+  if (browser.search) return true
+  const shown = browser.contents.isDestroyed() ? "" : browser.contents.getURL()
+  return URL.canParse(shown) && ResearchSearch.own(new URL(shown).hostname)
+}
+
 // Searches on each engine in turn until one answers with a results page; the next is tried only after a check, a
 // consent wall or a page Vector could not read, so DuckDuckGo is tried once at most.
 async function search(
@@ -749,7 +764,12 @@ async function search(
   tried: readonly { readonly engine: ResearchSearch.Engine; readonly reason: string }[],
 ): Promise<Partial<Report>> {
   const engine = engines[0]
-  if (!engine) return { ok: false, error: ResearchSearch.UNAVAILABLE, search: { results: [], tried } }
+  if (!engine)
+    return {
+      ok: false,
+      error: ResearchSearch.unavailable(tried),
+      search: { results: [], tried },
+    }
   const outcome = await searchOn(browser, engine, query, limit)
   if (outcome.kind === "results") return { search: { engine, results: outcome.results, tried } }
   return search(browser, query, limit, engines.slice(1), [...tried, { engine, reason: outcome.reason }])
@@ -807,7 +827,13 @@ function decide(
   browser: Browser,
   url: string,
   kind: Kind,
-  extra: { readonly frame?: "main" | "sub"; readonly method?: string; readonly typedHost?: string } = {},
+  extra: {
+    readonly frame?: "main" | "sub"
+    readonly method?: string
+    readonly typedHost?: string
+    /** For a redirect hop: whether its navigation is a search's, which the page shown says for anything else. */
+    readonly searching?: boolean
+  } = {},
 ) {
   return decideResearchNavigation({
     url,
@@ -823,7 +849,7 @@ function decide(
     ...(browser.actedAt !== undefined ? { actedAt: browser.actedAt } : {}),
     now: Date.now(),
     ...(extra.typedHost ? { typedHost: extra.typedHost } : {}),
-    ...(browser.search ? { searching: true } : {}),
+    ...((extra.searching ?? browser.search) ? { searching: true } : {}),
   })
 }
 
@@ -967,6 +993,11 @@ function wire(browser: Browser) {
     browser.clicked = undefined
     // The browser's first empty page is no page the rule decided.
     if (url === "about:blank" && browser.decided === undefined) return
+    const landed = browser.landing && browser.landing.url === spelled(url) ? browser.landing : undefined
+    browser.landing = undefined
+    // A page that commits with no request the rule saw (one restored from the back-forward cache) is a search's when it
+    // is one of the engines' own pages.
+    browser.search = landed ? landed.search : ResearchSearch.enginePage(url)
     browser.decided = url
     browser.status = code
     // The links of the page before are not on this one.
@@ -1111,6 +1142,7 @@ async function frame(browser: Browser, details: BeforeRequest) {
         frame: main ? "main" : "sub",
         method: details.method,
         ...(prior?.typedHost ? { typedHost: prior.typedHost } : {}),
+        ...(prior ? { searching: prior.search } : {}),
       })
   if (expected) browser.expected = undefined
   // A click's href is spent on the first main-frame navigation after it, allowed or not.
@@ -1130,18 +1162,15 @@ async function frame(browser: Browser, details: BeforeRequest) {
   }
   // A new page: what the last one still had in flight is the network's to cancel, not this page's to wait for.
   browser.inflight = new Set([details.id])
-  const address = new URL(details.url)
-  // A redirect on the host the user typed, or on a results page's own host, is not decided by robots.txt either.
+  // A redirect on the host the user typed is not decided by robots.txt either; a search's redirect only when it leads
+  // to the engine's own pages (the rule's `searching`).
   const typed =
-    prior?.typedHost ??
-    (!decision.robots && (decision.via === "provenance" || decision.via === "search" || decision.via === "same-origin")
-      ? address.hostname
-      : undefined)
-  browser.requests.set(details.id, typed ? { typedHost: typed } : {})
+    prior?.typedHost ?? (!decision.robots && decision.via === "provenance" ? new URL(details.url).hostname : undefined)
   // A results page, a redirect of its load (a check, a consent wall) and the page's own navigations on its origin.
-  browser.search = prior
-    ? browser.search
-    : decision.via === "search" || (decision.via === "same-origin" && browser.search)
+  const search = prior ? prior.search : decision.via === "search" || (decision.via === "same-origin" && browser.search)
+  browser.requests.set(details.id, { ...(typed ? { typedHost: typed } : {}), search })
+  // What the page shown becomes only once this request commits (did-navigate).
+  browser.landing = { url: spelled(details.url), search }
   browser.page = { requests: 0, start: browser.proxy.received(), over: false, cut: false }
   if (decision.join) {
     browser.run.provenance = addLinks(browser.run.provenance, [decision.join], "link")

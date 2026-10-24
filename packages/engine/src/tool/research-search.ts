@@ -193,7 +193,7 @@ export const ResearchSearchTool = Tool.define<
             return report.search
               ? {
                   title: "Search unavailable",
-                  output: [ResearchSearch.UNAVAILABLE, ...tried].join(" "),
+                  output: [ResearchSearch.unavailable(report.search.tried), ...tried].join(" "),
                   metadata: { runID, query, provider: "browser", unavailable: true },
                 }
               : {

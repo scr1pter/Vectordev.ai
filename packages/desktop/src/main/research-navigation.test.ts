@@ -81,6 +81,37 @@ describe("research browser navigation rule", () => {
     })
   })
 
+  test("robots.txt is skipped only for the engine's own pages a search leads to, not for its whole host", () => {
+    const results = ResearchSearch.page("google", { query: "heat pumps" })
+    // A search's redirect to Google's check or consent wall, or to another results page, is the search's.
+    for (const url of [
+      "https://www.google.com/sorry/index?continue=https://www.google.com/search",
+      "https://ipv4.google.com/sorry/index?continue=https://www.google.com/search",
+      "https://consent.google.com/ml?continue=https://www.google.com/search",
+      `${results}&sei=abc`,
+    ])
+      expect(decide({ url, kind: "redirect", searching: true })).toEqual({
+        allow: true,
+        via: "redirect",
+        robots: false,
+      })
+    // Anywhere else on the engine's host, by a redirect or by the page's own navigation, robots.txt decides.
+    for (const url of ["https://www.google.com/preferences?hl=en", "https://www.google.com/url?q=https://a.example/"]) {
+      expect(decide({ url, kind: "redirect", searching: true })).toEqual({ allow: true, via: "redirect", robots: true })
+      expect(decide({ url, current: results, searching: true })).toEqual({
+        allow: true,
+        via: "same-origin",
+        robots: true,
+      })
+    }
+    // Not a search's: the check page is a redirect like any other.
+    expect(decide({ url: "https://www.google.com/sorry/index", kind: "redirect" })).toEqual({
+      allow: true,
+      via: "redirect",
+      robots: true,
+    })
+  })
+
   test("the agent opens only addresses in the run's provenance", () => {
     expect(decide({ url: RESULT, kind: "open" })).toEqual({ allow: true, via: "provenance", robots: true })
     // robots.txt does not apply to an address the user typed, as research_read reads one.

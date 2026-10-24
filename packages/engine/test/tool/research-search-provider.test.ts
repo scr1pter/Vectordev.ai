@@ -214,11 +214,22 @@ it.instance(
           FakeBridge.searched(web, { engine: "duckduckgo", tried: [check] }),
           FakeBridge.research({
             ok: false,
-            error: ResearchSearch.UNAVAILABLE,
+            error: ResearchSearch.unavailable([{ engine: "google" }, { engine: "duckduckgo" }]),
             search: {
               results: [],
               tried: [
                 check,
+                { engine: "duckduckgo", reason: "DuckDuckGo asked for a check that it is not automated traffic." },
+              ],
+            },
+          }),
+          // Only DuckDuckGo's page was tried (Vector Local kept the search off Google), and it asked for a check.
+          FakeBridge.research({
+            ok: false,
+            error: ResearchSearch.unavailable([{ engine: "duckduckgo" }]),
+            search: {
+              results: [],
+              tried: [
                 { engine: "duckduckgo", reason: "DuckDuckGo asked for a check that it is not automated traffic." },
               ],
             },
@@ -231,19 +242,24 @@ it.instance(
         yield* test.llm.tool("research_plan", plan())
         yield* test.llm.tool("research_search", { query: "heat pump field study" })
         yield* test.llm.tool("research_search", { query: "heat pump savings" })
+        yield* test.llm.tool("research_search", { query: "heat pump noise" })
         yield* test.llm.text("Done.")
         yield* send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." }).pipe(
           Effect.ensuring(Effect.sync(() => bridge.answer(FakeBridge.searching(web)))),
         )
-        const [fallback, unavailable] = yield* calls(session.id, "research_search")
+        const [fallback, unavailable, alone] = yield* calls(session.id, "research_search")
         expect(output(fallback)).toContain("3 results from DuckDuckGo")
         expect(output(fallback)).toContain(`${check.reason} Vector searched DuckDuckGo instead.`)
         expect(fallback?.state.status === "completed" ? fallback.state.metadata.engine : undefined).toBe("duckduckgo")
-        expect(output(unavailable)).toContain(ResearchSearch.UNAVAILABLE)
+        expect(output(unavailable)).toContain(
+          ResearchSearch.unavailable([{ engine: "google" }, { engine: "duckduckgo" }]),
+        )
         expect(unavailable?.state.status === "completed" ? unavailable.state.title : "").toBe("Search unavailable")
         expect(unavailable?.state.status === "completed" ? unavailable.state.metadata : {}).toMatchObject({
           unavailable: true,
         })
+        expect(output(alone)).toContain(ResearchSearch.unavailable([{ engine: "duckduckgo" }]))
+        expect(output(alone)).not.toContain("Google")
         expect(guard.outside()).toEqual([])
       }),
     ),

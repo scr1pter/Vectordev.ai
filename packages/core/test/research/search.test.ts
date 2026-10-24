@@ -39,6 +39,44 @@ describe("ResearchSearch.page", () => {
       expect(ResearchSearch.engineOf(url)).toBeUndefined()
   })
 
+  test("the engines' own pages a search may lead to: results pages, Google's check and consent wall, DuckDuckGo's check", () => {
+    for (const url of [
+      ResearchSearch.page("google", { query: "x" }),
+      ResearchSearch.page("duckduckgo", { query: "x" }),
+      "https://www.google.com/sorry/index?continue=https://www.google.com/search%3Fq%3Dx",
+      "https://ipv6.google.com/sorry/index",
+      "https://consent.google.com/ml?continue=https://www.google.com/search",
+      "https://consent.google.co.uk/",
+      "https://duckduckgo.com/anomaly.js",
+    ])
+      expect(ResearchSearch.enginePage(url)).toBe(true)
+    for (const url of [
+      "https://www.google.com/preferences",
+      "https://www.google.com/sorryish",
+      "https://policies.google.com/privacy",
+      "http://www.google.com/sorry/index",
+      "https://www.google.com:8443/sorry/index",
+      "https://sorry.example.com/sorry/index",
+      "https://duckduckgo.com/about",
+      "not an address",
+    ])
+      expect(ResearchSearch.enginePage(url)).toBe(false)
+  })
+
+  test("search unavailable names only the engines tried", () => {
+    expect(ResearchSearch.unavailable([{ engine: "google" }, { engine: "duckduckgo" }])).toStartWith(
+      "Search is unavailable right now: Google and DuckDuckGo answered with a check",
+    )
+    // Vector Local let only DuckDuckGo's page through.
+    const one = ResearchSearch.unavailable([{ engine: "duckduckgo" }])
+    expect(one).toStartWith("Search is unavailable right now: DuckDuckGo answered with a check")
+    expect(one).not.toContain("Google")
+    expect(ResearchSearch.unavailable([])).toStartWith(
+      "Search is unavailable right now: no results page could be loaded.",
+    )
+    expect(one).toContain("say in the report that web search was unavailable")
+  })
+
   test("a site filter is a host name, sent as site:", () => {
     expect(ResearchSearch.site("nature.com")).toBe(true)
     expect(ResearchSearch.site("www.nature.com")).toBe(true)
@@ -85,7 +123,14 @@ describe("ResearchSearch.clean", () => {
   })
 
   test("the engines' own hosts on their country domains are theirs, and other hosts are not", () => {
-    for (const host of ["google.com", "www.google.co.uk", "www.google.com.au", "google.de", "consent.google.com"])
+    for (const host of [
+      "google.com",
+      "www.google.co.uk",
+      "www.google.com.au",
+      "google.de",
+      "consent.google.com",
+      "ipv4.google.com",
+    ])
       expect(ResearchSearch.own(host)).toBe(true)
     for (const host of ["html.duckduckgo.com", "duckduckgo.com"]) expect(ResearchSearch.own(host)).toBe(true)
     for (const host of ["developers.google.com", "scholar.example.com", "notgoogle.com", "google.example.com"])

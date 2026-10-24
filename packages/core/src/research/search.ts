@@ -38,9 +38,18 @@ export const NONE =
 /** No research browser here, so no search. */
 export const NEEDS_DESKTOP =
   "Searching the web needs Vector's browser in the desktop app, which this Vector does not have (the CLI, WSL, a remote server or a headless run). Research will use this repository's brain, its files and the addresses in your message."
-/** Every results page asked for a check or could not be read. */
-export const UNAVAILABLE =
-  "Search is unavailable right now: Google and DuckDuckGo answered with a check for automated traffic, a consent page or a page Vector could not read, and Vector never answers or works around those. Continue with this repository's brain, its files, the addresses in the user's message and the pages already found, and say in the report that web search was unavailable."
+/**
+ * Every results page this search tried asked for a check or could not be read: what the agent is told, naming only the
+ * engines it tried (Vector Local's Web access may have let one of them through).
+ */
+export function unavailable(tried: readonly { readonly engine: Engine }[]) {
+  const names = [...new Set(tried.map((item) => item.engine))].map((engine) => NAMES[engine])
+  const why = names.length
+    ? `${names.join(" and ")} answered with a check for automated traffic, a consent page or a page Vector could not read, and Vector never answers or works around those`
+    : "no results page could be loaded"
+  return `Search is unavailable right now: ${why}. Continue with this repository's brain, its files, the addresses in the user's message and the pages already found, and say in the report that web search was unavailable.`
+}
+
 export const SITE = "The site filter has to be a host name, such as nature.com."
 /** Vector Local's Web access lets neither results page through. */
 export const LOCAL = "Vector Local's Web access keeps research's searches off Google and DuckDuckGo."
@@ -123,6 +132,23 @@ export function engineOf(url: string): Engine | undefined {
 }
 
 /**
+ * Whether an address is a page a search's own load may show: a results page as `page` builds one, Google's check for
+ * automated traffic (/sorry/ on its own hosts), its consent wall, or DuckDuckGo's bot check. Only these skip robots.txt
+ * when a results page reloads itself or redirects; any other address on the engines' hosts is decided as a link is.
+ */
+export function enginePage(url: string) {
+  if (engineOf(url)) return true
+  if (!URL.canParse(url)) return false
+  const address = new URL(url)
+  if (address.protocol !== "https:" || address.port || address.username || address.password) return false
+  const host = address.hostname.toLowerCase()
+  if (/^consent\.google\.(?:com|[a-z]{2}|co\.[a-z]{2}|com\.[a-z]{2})$/.test(host)) return true
+  if (/^(?:(?:www|ipv4|ipv6)\.)?google\.(?:com|[a-z]{2}|co\.[a-z]{2}|com\.[a-z]{2})$/.test(host))
+    return address.pathname === "/sorry" || address.pathname.startsWith("/sorry/")
+  return (host === "duckduckgo.com" || host === "html.duckduckgo.com") && /anomaly/i.test(address.pathname)
+}
+
+/**
  * Results as research keeps them, from whatever page or process read them: http and https addresses only, each page
  * once by its canonical form, never a search engine's own pages, the title and snippet cleaned of hidden characters
  * and cut to length, at most `limit`.
@@ -158,12 +184,17 @@ export function clean(
 }
 
 /**
- * Whether a host is a search engine's own: Google's search pages on any of its country domains, its sign-in, consent,
- * policy and maps hosts, its cache, static and ad hosts, and DuckDuckGo's. A link there is the engine's, not a result.
+ * Whether a host is a search engine's own: Google's search pages on any of its country domains (and the ipv4 and ipv6
+ * hosts its check for automated traffic may use), its sign-in, consent, policy and maps hosts, its cache, static and ad
+ * hosts, and DuckDuckGo's. A link there is the engine's, not a result, and a research browser on one reads nothing.
  */
 export function own(hostname: string) {
   const host = hostname.toLowerCase().replace(/\.$/, "")
-  if (/^(?:(?:www|accounts|consent|policies|maps)\.)?google\.(?:com|[a-z]{2}|co\.[a-z]{2}|com\.[a-z]{2})$/.test(host))
+  if (
+    /^(?:(?:www|accounts|consent|policies|maps|ipv4|ipv6)\.)?google\.(?:com|[a-z]{2}|co\.[a-z]{2}|com\.[a-z]{2})$/.test(
+      host,
+    )
+  )
     return true
   if (/(?:^|\.)(?:googleusercontent|gstatic|googleadservices|googlesyndication|doubleclick)\.(?:com|net)$/.test(host))
     return true

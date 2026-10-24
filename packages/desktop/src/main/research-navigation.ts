@@ -22,8 +22,10 @@ import { ResearchSearch } from "@vectordevai/core/research/search"
 //   refuses a private destination after resolving it, and robots.txt applies off the typed host);
 // - for the agent's research_search only, the search engine's results page Vector itself built for the query
 //   (ResearchSearch.page): browsing the user asked for, as the visible browser's address-bar search is, so robots.txt
-//   does not decide it, a redirect on its own host, or the page's own navigations on its origin (Google's results page
-//   reloads itself by script). The page is no source and joins no provenance.
+//   does not decide it. Nor does it decide the engine's own pages that load leads to, by a redirect or by the page's
+//   own navigation on its origin (Google's results page reloads itself by script): another results page, a check for
+//   automated traffic or a consent wall (ResearchSearch.enginePage). Any other address there is decided by robots.txt
+//   as a link is. The page is no source and joins no provenance.
 // Subframes load without provenance, like images, but only as web pages or about:blank and about:srcdoc. A request
 // in any frame whose method is not GET or HEAD is refused: research browsers only read. A host that names this computer
 // or the user's network is refused here already; the research proxy refuses the rest after resolving each name.
@@ -80,7 +82,10 @@ export type Input = {
   readonly now: number
   /** For a redirect hop: whether the navigation it continues started at an address the user typed, on this host. */
   readonly typedHost?: string
-  /** The page shown is a search engine's results page a search loaded, or one its load led to on its own. */
+  /**
+   * The navigation is a search's: the page shown is a results page a search loaded, or one its load led to on its own,
+   * or, for a redirect hop, the navigation it continues started as one.
+   */
   readonly searching?: boolean
 }
 
@@ -108,8 +113,10 @@ export function decideResearchNavigation(input: Input): Decision {
   if (address.username || address.password) return refuse(CREDENTIALS)
   if (LocalPolicy.hostClass(address.hostname) !== "internet") return refuse(PRIVATE)
   if (input.frame === "sub") return { allow: true, via: "subframe", robots: false }
+  // The engine's own page a search's load or its page led to: a check, a consent wall or another results page.
+  const engine = input.searching === true && ResearchSearch.enginePage(input.url)
   if (input.kind === "redirect")
-    return { allow: true, via: "redirect", robots: !input.typedHost || input.typedHost !== address.hostname }
+    return { allow: true, via: "redirect", robots: !engine && input.typedHost !== address.hostname }
   if (input.kind === "search")
     return ResearchSearch.engineOf(input.url) ? { allow: true, via: "search", robots: false } : refuse(NOT_SEARCH)
   const known = ResearchProvenance.check(input.provenance, input.url)
@@ -121,8 +128,9 @@ export function decideResearchNavigation(input: Input): Decision {
   }
   const acted = input.actedAt !== undefined && input.now - input.actedAt <= ACTED_MS
   const same = input.current !== undefined && origin(input.current) === address.origin
-  // A results page's own navigations on its origin are the search's, which robots.txt does not decide.
-  const own = { allow: true, via: "same-origin", robots: !input.searching } as const
+  // A results page's own navigations on its origin to the engine's own pages are the search's, which robots.txt does
+  // not decide.
+  const own = { allow: true, via: "same-origin", robots: !engine } as const
   if (!acted) return same ? own : refuse(PAGE_STARTED)
   if (known.ok) return { allow: true, via: "provenance", robots }
   const exact = spelled(input.url)
