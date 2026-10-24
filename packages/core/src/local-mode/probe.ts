@@ -664,9 +664,12 @@ function tooSmall(input: CheckInput, context: number | undefined) {
   const about = (Math.ceil(input.required / 1_000) * 1_000).toLocaleString("en-US")
   const role = input.role ?? "Vector's agent"
   const offer = input.server.kind === "ollama" ? OllamaServer.copy(input.model, input.required) : undefined
+  const size = context.toLocaleString("en-US")
+  // "an 8,192-token context", "an 11,000-token context", "a 16,384-token context", as the engine's refusal says it.
+  const article = /^(8|1[18](,|$))/.test(size) ? "an" : "a"
   return {
     result: "context-too-small" as const,
-    message: `${input.model} has a ${context.toLocaleString("en-US")}-token context. ${role} needs about ${about}. Raise the context size or pick another model.`,
+    message: `${input.model} has ${article} ${size}-token context. ${role} needs about ${about}. Raise the context size or pick another model.`,
     offer,
   }
 }

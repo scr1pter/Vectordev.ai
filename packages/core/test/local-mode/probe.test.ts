@@ -663,7 +663,7 @@ describe("Check models", () => {
     const checked = await LocalProbe.check({ server: found, model: "qwen3-coder:30b", tools: TOOLS, required: 19_000 })
     expect(checked).toMatchObject({ result: "context-too-small", requests: 0 })
     expect(checked.message).toBe(
-      "qwen3-coder:30b has a 8,192-token context. Vector's agent needs about 19,000. Raise the context size or pick another model.",
+      "qwen3-coder:30b has an 8,192-token context. Vector's agent needs about 19,000. Raise the context size or pick another model.",
     )
     expect(checked.offer).toEqual({
       from: "qwen3-coder:30b",
