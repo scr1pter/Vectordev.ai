@@ -24,6 +24,7 @@ import {
   documentsSummary,
   forgottenLabel,
   MODEL_DONE,
+  modelBusy,
   needsLook,
   needsLookCount,
   offerModel,
@@ -44,7 +45,7 @@ import {
   warningLabel,
 } from "./memory-documents-model"
 
-type Note = { id: number; tone: "ok" | "error" | "ask"; text: string; retry?: () => void }
+type Note = { id: number; tone: "ok" | "error" | "ask"; text: string; retry?: () => void; download?: boolean }
 
 // Settings > Memory > Documents: the documents Vector keeps for this repository. Files dropped here are read on this
 // computer into sections, passages and typed records; a request gets only the cards that bear on it. Progress is read
@@ -135,7 +136,11 @@ export function SettingsMemoryDocuments(props: {
   }
 
   // Every change goes through the engine; the list is read again after it.
-  const change = async (run: (client: VectorClient) => Promise<{ error?: unknown; data?: unknown }>, done: string) => {
+  const change = async (
+    run: (client: VectorClient) => Promise<{ error?: unknown; data?: unknown }>,
+    done: string,
+    download = false,
+  ) => {
     const client = props.client()
     if (!client) return
     const result = await run(client).catch((cause: unknown) => ({ error: cause, data: undefined }))
@@ -144,7 +149,7 @@ export function SettingsMemoryDocuments(props: {
       note({ tone: "error", text: why.message ?? "Vector could not change this document. Try again in a moment." })
       return
     }
-    note({ tone: "ok", text: done })
+    note({ tone: "ok", text: done, download })
     refresh()
   }
 
@@ -164,6 +169,7 @@ export function SettingsMemoryDocuments(props: {
   }
 
   const shown = () => (list.latest?.documents ?? []).filter((document) => document.status !== "superseded")
+  const visibleNotes = () => notes().filter((item) => !item.download || modelBusy(list.latest?.model))
 
   return (
     <Show
@@ -263,7 +269,11 @@ export function SettingsMemoryDocuments(props: {
                       variant="outline"
                       onClick={() => {
                         setOffer("answered", true)
-                        void change((client) => client.memory.model.update({ memoryModelPayload: { action: "download" } }), MODEL_DONE.download)
+                        void change(
+                          (client) => client.memory.model.update({ memoryModelPayload: { action: "download" } }),
+                          MODEL_DONE.download,
+                          true,
+                        )
                       }}
                     >
                       Download
@@ -286,9 +296,9 @@ export function SettingsMemoryDocuments(props: {
                 )}
               </Show>
 
-              <Show when={notes().length > 0}>
+              <Show when={visibleNotes().length > 0}>
                 <div class="settings-memory-notes" role="status">
-                  <For each={notes()}>
+                  <For each={visibleNotes()}>
                     {(item) => (
                       <div class="settings-memory-note" data-tone={item.tone}>
                         <span>{item.text}</span>

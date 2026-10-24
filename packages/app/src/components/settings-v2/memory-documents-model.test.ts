@@ -65,6 +65,7 @@ import {
   modelLicense,
   modelOffer,
   modelPolling,
+  modelBusy,
   offerModel,
   runsLabel,
   shortSha,
@@ -852,6 +853,17 @@ describe("the search model card", () => {
     expect(offerModel(list({ state: "absent", options }, []), false)).toBeUndefined()
     expect(offerModel(list({ state: "absent", downloads: false, options }), false)).toBeUndefined()
     expect(offerModel(list({ state: "ready", options }), false)).toBeUndefined()
+  })
+
+  test("download notices finish when the model is ready or fails, even while document embedding continues", () => {
+    expect(modelBusy({ state: "downloading" })).toBe(true)
+    expect(modelBusy({ state: "verifying" })).toBe(true)
+    const embedding: MemoryModelStatus = { state: "ready", embedded: { done: 1, total: 4 } }
+    expect(modelPolling(embedding)).toBe(true)
+    expect(modelBusy(embedding)).toBe(false)
+    expect(modelBusy({ state: "failed" })).toBe(false)
+    expect(modelBusy({ state: "absent" })).toBe(false)
+    expect(modelBusy(undefined)).toBe(false)
   })
 
   test("keeps asking while it downloads, checks or embeds, and stops when paused or done", () => {
