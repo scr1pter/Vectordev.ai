@@ -195,13 +195,25 @@ describe("isSessionNotFoundError", () => {
   })
 })
 
-test("free-model quota notifications hide upstream text, say when free models are available again and offer the user's own keys", () => {
+// Owner's wording review, 23 October 2026: a per-minute limit is not free tokens running out.
+test("a per-minute free-model limit says when to try again, never that more free tokens are available", () => {
+  const text = formatServerError({
+    name: "FreeModelsLimitError",
+    data: { reason: "user_minute", resetAt: 1893542400000, message: "raw proxy debug" },
+  })
+  expect(text).toStartWith("Give the free models provided by Vector a moment. Try again at")
+  expect(text).toContain("2030")
+  expect(text).not.toMatch(/more free tokens|raw proxy debug/i)
+})
+
+test("free-model quota notifications hide upstream text, say when more free tokens are available and offer the user's own keys", () => {
   const text = formatServerError({
     name: "FreeModelsLimitError",
     data: { reason: "shared_daily", resetAt: 1893542400000, message: "raw proxy debug" },
   })
-  expect(text).toContain("Free models provided by Vector have reached today's limit")
-  expect(text).toContain("expected to be available again at")
+  expect(text).toStartWith("Free tokens have run out for today. More free tokens are available at")
+  // Owner, 23 October 2026: never an allowance, and never shared with other people.
+  expect(text).not.toMatch(/allowance|\bshared\b|\bpool(?:ed)?\b/i)
   expect(text).toContain("2030")
   // The owner's decision of 17 October 2026: never point to an OpenRouter account of the user's own.
   expect(text).toContain("add your own provider key in Settings → Providers")

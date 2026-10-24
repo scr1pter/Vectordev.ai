@@ -3,7 +3,8 @@ import {
   FREE_MODELS_OWN_KEYS_TERMINAL,
   freeModelsLimitNotice,
   freeModelsLimitTitle,
-  freeModelsResetLabel,
+  freeModelsResetSentence,
+  freeModelsTokensRanOut,
   type FreeModelsLimitNotice,
 } from "@vectordevai/core/free-model-choice"
 import { useSDK } from "../context/sdk"
@@ -17,8 +18,8 @@ import { useTheme } from "../context/theme"
 import { DialogProvider } from "./dialog-provider"
 
 /**
- * Shown when the shared allowance stops a turn: when it is expected to reset, and the user's own provider keys in
- * general. It never asks the user to connect an OpenRouter account (owner decision, 17 October 2026); one already
+ * Shown when a free-model limit stops a turn: when to try again or when more free tokens are available, and the
+ * user's own provider keys in general. It never asks the user to connect an OpenRouter account (owner decision, 17 October 2026); one already
  * connected can still continue the same turn.
  */
 export function DialogFreeModelsLimit(props: { sessionID: string; limit: FreeModelsLimitNotice }) {
@@ -62,9 +63,7 @@ export function DialogFreeModelsLimit(props: { sessionID: string; limit: FreeMod
       locked={busy()}
       footer={
         <box paddingLeft={2} paddingRight={2} paddingBottom={1} gap={1}>
-          <text fg={theme.textMuted}>
-            Free models provided by Vector are expected to be available again at {freeModelsResetLabel(props.limit)}.
-          </text>
+          <text fg={theme.textMuted}>{freeModelsResetSentence(props.limit)}</text>
           <text fg={theme.textMuted}>{FREE_MODELS_OWN_KEYS_TERMINAL}</text>
         </box>
       }
@@ -87,7 +86,9 @@ export function DialogFreeModelsLimit(props: { sessionID: string; limit: FreeMod
             ]
           : []),
         {
-          title: "Wait until free models provided by Vector are available again",
+          title: freeModelsTokensRanOut(props.limit)
+            ? "Wait until more free tokens are available"
+            : "Wait and try again later",
           value: "wait",
           onSelect: () => dialog.clear(),
         },

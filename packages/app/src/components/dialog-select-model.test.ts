@@ -711,6 +711,8 @@ describe("Free models inside of Vector", () => {
       ]),
     ]
     expect(shown.filter((text) => /openrouter/i.test(text))).toEqual([])
+    // Owner, 23 October 2026: nor an allowance, nor shared with other people.
+    expect(shown.filter((text) => /allowance|\bshared\b|\bpool(?:ed)?\b/i.test(text))).toEqual([])
   })
 })
 

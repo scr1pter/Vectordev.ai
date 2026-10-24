@@ -202,10 +202,14 @@ export function freeModelsLimitNotice(error: unknown): FreeModelsLimitNotice | u
   return { reason, resetAt: data.resetAt }
 }
 
+/**
+ * Free models are never called an allowance, shared or pooled (owner, 23 October 2026). The overall daily limit
+ * (`shared_daily`) says only that free tokens ran out, never that the user used them up.
+ */
 export function freeModelsLimitTitle(limit: FreeModelsLimitNotice) {
-  if (limit.reason === "user_daily") return `You've reached today's limit for ${FREE_MODELS_TITLE}`
+  if (limit.reason === "user_daily") return "You've run out of free tokens for today"
   if (limit.reason === "user_minute") return "Give the free models provided by Vector a moment"
-  if (limit.reason === "shared_daily") return "Free models provided by Vector have reached today's limit"
+  if (limit.reason === "shared_daily") return "Free tokens have run out for today"
   return "Free models provided by Vector are temporarily unavailable"
 }
 
@@ -213,10 +217,23 @@ export function freeModelsResetLabel(limit: FreeModelsLimitNotice, locale?: stri
   return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(limit.resetAt)
 }
 
-/** The whole notice: what happened, when the shared allowance is expected to reset, and the user's own keys. */
+/** The whole notice: what happened, when to come back, and the user's own keys. */
 export function freeModelsLimitMessage(
   limit: FreeModelsLimitNotice,
   options: { locale?: string; terminal?: boolean } = {},
 ) {
-  return `${freeModelsLimitTitle(limit)}. They are expected to be available again at ${freeModelsResetLabel(limit, options.locale)}. ${options.terminal ? FREE_MODELS_OWN_KEYS_TERMINAL : FREE_MODELS_OWN_KEYS}`
+  return `${freeModelsLimitTitle(limit)}. ${freeModelsResetSentence(limit, options.locale)} ${options.terminal ? FREE_MODELS_OWN_KEYS_TERMINAL : FREE_MODELS_OWN_KEYS}`
+}
+
+/**
+ * When to come back. Only a daily limit means free tokens ran out, so only it says more are available; a per-minute
+ * limit or an unavailable service says when to try again (owner review, 23 October 2026). The desktop card's
+ * `freeModels.limit.reset` and `freeModels.limit.retry` say the same.
+ */
+export function freeModelsResetSentence(limit: FreeModelsLimitNotice, locale?: string) {
+  return `${freeModelsTokensRanOut(limit) ? "More free tokens are available at" : "Try again at"} ${freeModelsResetLabel(limit, locale)}.`
+}
+
+export function freeModelsTokensRanOut(limit: Pick<FreeModelsLimitNotice, "reason">) {
+  return limit.reason === "user_daily" || limit.reason === "shared_daily"
 }

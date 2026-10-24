@@ -1,9 +1,12 @@
-import { Component, For, Show, createMemo, createSignal } from "solid-js"
+import { Component, For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js"
+import { createStore, reconcile } from "solid-js/store"
 import { Dialog } from "@vectordevai/ui/v2/dialog-v2"
 import { TabsV2 } from "@vectordevai/ui/v2/tabs-v2"
 import { Icon } from "@vectordevai/ui/icon"
 import { useDialog } from "@vectordevai/ui/context/dialog"
 import { usePlatform } from "@/context/platform"
+import type { VectorAccountStatus } from "@/vector-account"
+import { settingsIdentity } from "./account-model"
 import { SettingsAccountV2 } from "./account"
 import { SettingsGeneralV2 } from "./general"
 import { SettingsProvidersV2 } from "./providers"
@@ -61,6 +64,21 @@ export const SettingsWorkspace: Component<SettingsWorkspaceProps> = (props) => {
   )
   const resultCount = createMemo(() => settingsItemCount(groups()))
   const visibleItems = createMemo(() => new Set(groups().flatMap((group) => group.items.map((item) => item.value))))
+  // The header names whoever is signed in to Vector; `failed` holds a photo that would not load.
+  const [header, setHeader] = createStore<{ account: VectorAccountStatus; failed?: string }>({
+    account: { authenticated: false, pending: false },
+  })
+  const identity = createMemo(() => settingsIdentity(header.account, header.failed))
+
+  onMount(() => {
+    const vectorAccount = platform.vectorAccount
+    if (!vectorAccount) return
+    onCleanup(vectorAccount.onChange((next) => setHeader("account", reconcile(next))))
+    void vectorAccount
+      .status()
+      .then((next) => setHeader("account", reconcile(next)))
+      .catch(() => undefined)
+  })
 
   const panel = (item: SettingsTab) => {
     if (item === "account") return <SettingsAccountV2 onUsage={() => setSection("usage")} />
@@ -100,10 +118,35 @@ export const SettingsWorkspace: Component<SettingsWorkspaceProps> = (props) => {
               </Show>
             </div>
 
-            <div class="settings-v2-brand-row">
-              <img src="/vector-logo.png" alt="" class="settings-v2-brand-mark" />
-              <div>
-                <div class="settings-v2-brand-name">Vector</div>
+            <div class="settings-v2-brand-row" data-identity={identity() ? "account" : "vector"}>
+              <Show when={identity()} fallback={<img src="/vector-logo.png" alt="" class="settings-v2-brand-mark" />}>
+                {(person) => (
+                  <Show
+                    when={person().photo}
+                    fallback={
+                      <span class="settings-v2-brand-mark settings-v2-brand-avatar" aria-hidden="true">
+                        {person().initials}
+                      </span>
+                    }
+                  >
+                    {(photo) => (
+                      <img
+                        src={photo()}
+                        alt=""
+                        class="settings-v2-brand-mark settings-v2-brand-avatar"
+                        referrerpolicy="no-referrer"
+                        decoding="async"
+                        draggable={false}
+                        onError={() => setHeader("failed", photo())}
+                      />
+                    )}
+                  </Show>
+                )}
+              </Show>
+              <div class="settings-v2-brand-text">
+                <div class="settings-v2-brand-name" title={identity()?.name}>
+                  {identity()?.name ?? "Vector"}
+                </div>
                 <div class="settings-v2-brand-subtitle">Settings</div>
               </div>
             </div>

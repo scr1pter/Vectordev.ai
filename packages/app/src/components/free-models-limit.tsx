@@ -8,6 +8,7 @@ import { useDialog } from "@vectordevai/ui/context/dialog"
 import {
   freeModelsLimitTitle,
   freeModelsResetLabel,
+  freeModelsTokensRanOut,
   type FreeModelsLimitNotice,
 } from "@vectordevai/core/free-model-choice"
 import { useSDK } from "@/context/sdk"
@@ -16,8 +17,8 @@ import { useLanguage } from "@/context/language"
 import { formatServerError } from "@/utils/server-errors"
 
 /**
- * Shown when the shared allowance stops a turn: when it is expected to reset, and the user's own provider keys in
- * general. It never asks the user to connect an OpenRouter account (owner decision, 17 October 2026); one already
+ * Shown when a free-model limit stops a turn: when to try again or when more free tokens are available, and the
+ * user's own provider keys in general. It never asks the user to connect an OpenRouter account (owner decision, 17 October 2026); one already
  * connected can still continue the same turn.
  */
 export function FreeModelsLimit(props: {
@@ -61,7 +62,11 @@ export function FreeModelsLimit(props: {
     <Card class="error-card" data-free-models-limit="">
       <div class="flex flex-col gap-3">
         <strong>{freeModelsLimitTitle(props.limit)}</strong>
-        <p>{language.t("freeModels.limit.reset", { time: freeModelsResetLabel(props.limit, language.intl()) })}</p>
+        <p>
+          {language.t(freeModelsTokensRanOut(props.limit) ? "freeModels.limit.reset" : "freeModels.limit.retry", {
+            time: freeModelsResetLabel(props.limit, language.intl()),
+          })}
+        </p>
         <p>{language.t("freeModels.limit.ownKeys")}</p>
         <Show when={state.error}>
           <p role="alert">{state.error}</p>

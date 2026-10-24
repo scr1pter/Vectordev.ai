@@ -27,6 +27,9 @@ import {
   freeModelsLimitNotice,
   freeModelsLimitTitle,
   freeModelsResetLabel,
+  freeModelsResetSentence,
+  freeModelsTokensRanOut,
+  type FreeModelsLimitNotice,
 } from "../src/free-model-choice"
 
 describe("free model presentation", () => {
@@ -54,7 +57,7 @@ describe("free model presentation", () => {
 test("quota notices accept only typed limits and never repeat upstream text", () => {
   const data = { reason: "user_daily", resetAt: 1893542400000, message: "private upstream details" }
   const limit = freeModelsLimitNotice({ name: "FreeModelsLimitError", data })!
-  expect(freeModelsLimitTitle(limit)).toBe("You've reached today's limit for Free models inside of Vector")
+  expect(freeModelsLimitTitle(limit)).toBe("You've run out of free tokens for today")
   expect(freeModelsResetLabel(limit, "en-US")).toContain("2030")
   expect(freeModelsLimitNotice({ _tag: "FreeModelsLimitError", ...data })).toEqual(limit)
   expect(freeModelsLimitNotice({ type: "free_models_limit", code: "VECTOR_FREE_MODELS_LIMIT", ...data })).toEqual(limit)
@@ -104,10 +107,12 @@ test("an invited guest whose acceptance the engine refuses is told only the owne
   for (const status of [500, 503, undefined]) expect(freeModelTrainingRefusal(status)).toContain("Try again")
 })
 
-test("limit notices say when free models provided by Vector are available again and offer the user's own keys, never an OpenRouter account", () => {
+test("limit notices say when more free tokens are available and offer the user's own keys, never an OpenRouter account", () => {
   const limit = { reason: "user_daily" as const, resetAt: Date.UTC(2030, 0, 1, 12) }
   const desktop = freeModelsLimitMessage(limit, { locale: "en-US" })
-  expect(desktop).toStartWith(`${freeModelsLimitTitle(limit)}. They are expected to be available again at`)
+  expect(desktop).toStartWith(
+    `You've run out of free tokens for today. More free tokens are available at ${freeModelsResetLabel(limit, "en-US")}.`,
+  )
   expect(desktop).toContain(freeModelsResetLabel(limit, "en-US"))
   expect(desktop).toEndWith(FREE_MODELS_OWN_KEYS)
   expect(freeModelsLimitMessage(limit, { terminal: true })).toEndWith(FREE_MODELS_OWN_KEYS_TERMINAL)
@@ -163,4 +168,63 @@ test("what Vector says about the included models never names OpenRouter", () => 
     ),
   ])
     expect(text).not.toMatch(/openrouter/i)
+})
+
+// Owner, 23 October 2026: nothing tells users free models are an allowance from Vector that they share with others.
+test("the daily limits say free tokens ran out, the overall one without saying the user used them", () => {
+  const notice = (reason: FreeModelsLimitNotice["reason"]) => ({ reason, resetAt: Date.UTC(2030, 0, 1, 12) })
+  expect(freeModelsLimitTitle(notice("user_daily"))).toBe("You've run out of free tokens for today")
+  expect(freeModelsLimitTitle(notice("shared_daily"))).toBe("Free tokens have run out for today")
+  expect(freeModelsLimitTitle(notice("shared_daily"))).not.toMatch(/\byou/i)
+  expect(freeModelsResetSentence(notice("shared_daily"), "en-US")).toBe(
+    `More free tokens are available at ${freeModelsResetLabel(notice("shared_daily"), "en-US")}.`,
+  )
+  expect(freeModelsLimitMessage(notice("shared_daily"), { terminal: true })).toBe(
+    `Free tokens have run out for today. ${freeModelsResetSentence(notice("shared_daily"))} ${FREE_MODELS_OWN_KEYS_TERMINAL}`,
+  )
+})
+
+// Owner's wording review, 23 October 2026: only a daily limit means free tokens ran out.
+test("a per-minute limit or an unavailable service says when to try again, never that more free tokens arrive", () => {
+  for (const reason of ["user_minute", "upstream", "balance"] as const) {
+    const limit = { reason, resetAt: Date.UTC(2030, 0, 1, 12) }
+    expect(freeModelsTokensRanOut(limit)).toBe(false)
+    expect(freeModelsResetSentence(limit, "en-US")).toBe(`Try again at ${freeModelsResetLabel(limit, "en-US")}.`)
+    for (const text of [freeModelsLimitMessage(limit), freeModelsLimitMessage(limit, { terminal: true })]) {
+      expect(text).toContain(`. Try again at ${freeModelsResetLabel(limit)}. `)
+      expect(text).not.toMatch(/more free tokens|run out/i)
+    }
+  }
+  for (const reason of ["user_daily", "shared_daily"] as const) {
+    const limit = { reason, resetAt: Date.UTC(2030, 0, 1, 12) }
+    expect(freeModelsTokensRanOut(limit)).toBe(true)
+    expect(freeModelsResetSentence(limit)).toStartWith("More free tokens are available at ")
+  }
+})
+
+test("no user-visible free-model string calls them an allowance, shared or pooled", async () => {
+  // Every exported string is shown somewhere, so a new one is checked without being added here.
+  const exported = Object.entries(await import("../src/free-model-choice")).flatMap(([name, value]) =>
+    typeof value === "string" ? [{ name, text: value }] : [],
+  )
+  expect(exported.length).toBeGreaterThan(10)
+  const reasons = ["user_daily", "user_minute", "shared_daily", "upstream", "balance"] as const
+  const shown = [
+    ...exported,
+    ...reasons.flatMap((reason) => {
+      const limit = { reason, resetAt: Date.UTC(2030, 0, 1) }
+      return [
+        { name: `title ${reason}`, text: freeModelsLimitTitle(limit) },
+        { name: `message ${reason}`, text: freeModelsLimitMessage(limit) },
+        { name: `terminal ${reason}`, text: freeModelsLimitMessage(limit, { terminal: true }) },
+      ]
+    }),
+    { name: "source shared", text: freeModelSource({ id: "maker/a:free", freeModel: { source: "shared" } }) ?? "" },
+    {
+      name: "source openrouter",
+      text: freeModelSource({ id: "maker/a:free", freeModel: { source: "openrouter" } }) ?? "",
+    },
+    { name: "refusal", text: freeModelTrainingRefusal(500) },
+  ]
+  expect(shown.filter((item) => /allowance|\bshared\b|\bpool(?:ed)?\b/i.test(item.text))).toEqual([])
 })

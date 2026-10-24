@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { errorData, errorFormat, errorMessage } from "../../src/util/error"
+import { FREE_MODELS_OWN_KEYS_TERMINAL } from "@vectordevai/core/free-model-choice"
+import { cliErrorMessage, errorData, errorFormat, errorMessage } from "../../src/util/error"
 
 describe("util.error", () => {
   test("formats native Error instances", () => {
@@ -46,4 +47,28 @@ describe("util.error", () => {
     expect(data.message).toBe("ResolveMessage: Cannot resolve module")
     expect(String(data.formatted)).toContain("ResolveMessage")
   })
+})
+
+// Owner, 23 October 2026: a free-model limit says free tokens ran out, never that an allowance shared with others did.
+test("a free-model limit says free tokens ran out and when more are available, without the upstream text", () => {
+  const limit = (reason: string) => ({
+    name: "FreeModelsLimitError",
+    data: { reason, resetAt: Date.UTC(2030, 0, 1, 12), message: "RAW_UPSTREAM_TEXT" },
+  })
+  expect(cliErrorMessage(limit("user_daily"))).toStartWith(
+    "You've run out of free tokens for today. More free tokens are available at",
+  )
+  expect(cliErrorMessage(limit("shared_daily"))).toStartWith(
+    "Free tokens have run out for today. More free tokens are available at",
+  )
+  // Only a daily limit means free tokens ran out (owner's wording review, 23 October 2026).
+  expect(cliErrorMessage(limit("user_minute"))).toStartWith(
+    "Give the free models provided by Vector a moment. Try again at",
+  )
+  expect(cliErrorMessage(limit("upstream"))).not.toContain("More free tokens")
+  for (const reason of ["user_daily", "user_minute", "shared_daily", "upstream", "balance"]) {
+    const text = cliErrorMessage(limit(reason)) ?? ""
+    expect(text).toEndWith(FREE_MODELS_OWN_KEYS_TERMINAL)
+    expect(text).not.toMatch(/allowance|\bshared\b|\bpool(?:ed)?\b|RAW_UPSTREAM_TEXT/i)
+  }
 })

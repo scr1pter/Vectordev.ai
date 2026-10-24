@@ -38,5 +38,7 @@ test("the home free-models notice holds no disclaimer, only how to start and the
     expect(text).not.toContain(FREE_MODEL_TRAINING_DISCLAIMER)
     expect(text).not.toContain(FREE_MODEL_TRAINING_LABEL)
     expect(text).not.toMatch(/retention|train|log your prompts|keep prompts/i)
+    // Owner, 23 October 2026: never an allowance, and never shared with other people.
+    expect(text).not.toMatch(/allowance|\bshared\b|\bpool(?:ed)?\b/i)
   }
 })
