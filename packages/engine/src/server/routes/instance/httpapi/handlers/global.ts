@@ -95,10 +95,14 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       return Redaction.redactConfig(yield* config.getGlobal())
     })
 
+    // The global config as GET returns it after the save: every global file merged, not only the one the update
+    // wrote, so a client can keep the response as its copy (the app's Settings switches do).
     const configUpdate = Effect.fn("GlobalHttpApi.configUpdate")(function* (ctx) {
       const result = yield* config.updateGlobal(ctx.payload)
       if (result.changed) bridge.fork(disposeAllInstancesAndEmitGlobalDisposed({ swallowErrors: true }))
-      return Redaction.redactConfig(result.info)
+      // An update that wrote nothing keeps the cached config, which may predate an edit made outside Vector.
+      if (!result.changed) yield* config.invalidate()
+      return Redaction.redactConfig(yield* config.getGlobal())
     })
 
     const dispose = Effect.fn("GlobalHttpApi.dispose")(function* () {

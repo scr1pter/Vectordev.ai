@@ -479,9 +479,10 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
   const updateConfigMutation = useMutation(() => ({
     mutationFn: (config: Config) => serverSDK.client.global.config.update({ config }),
     onSuccess: (result) => {
-      // The update returns the saved config, so a switch that saved it reads the new value at once instead of the old
-      // one until the reload below refetches it. A config fetch still in flight started before this save and would
-      // put the old config back when it landed, so it is dropped first.
+      // The update returns the global config as it stands after the save, every global file merged as a fetch would
+      // read it, so a switch that saved it reads the new value at once instead of the old one until the reload below
+      // refetches it. A config fetch still in flight started before this save and would put the old config back when
+      // it landed, so it is dropped first.
       const configKey = queryOptionsApi.globalConfig().queryKey
       void queryClient.cancelQueries({ queryKey: configKey, exact: true })
       queryClient.setQueryData(configKey, result.data)
