@@ -110,6 +110,14 @@ type FilePart = {
 
 const ATTACH_FILE_MAX_BYTES = 10 * 1024 * 1024
 
+// The search services an earlier version's --search named. Research searches the web in each research agent's own
+// browser now, so they read as browser (yargs coerces before it checks choices), and the run says they were ignored.
+const RETIRED_SEARCH = ["searxng", "exa", "parallel"]
+export const RETIRED_SEARCH_NOTICE =
+  "research searches the web in each research agent's own browser in the desktop app, with no search service or key."
+// The retired name this process's --search gave, for the notice: yargs parses one command line per process.
+const retired: { search?: string } = {}
+
 type Inline = {
   icon: string
   title: string
@@ -343,6 +351,12 @@ export const RunCommand = effectCmd({
       .option("search", {
         type: "string",
         choices: ["browser", "none"],
+        // A search service an earlier version took reads as browser, and the run says it was ignored.
+        coerce: (value: string) => {
+          if (!RETIRED_SEARCH.includes(value)) return value
+          retired.search = value
+          return "browser"
+        },
         describe:
           "with --research: browser (the default: each research agent searches the web in its own browser in the desktop app) or none (this repository's brain, its files and the addresses in the message)",
       })
@@ -453,6 +467,7 @@ export const RunCommand = effectCmd({
 
       if (!args.research && (args.depth || args.search || args.scope || args.report))
         die("--depth, --search, --scope and --report need --research")
+      if (retired.search) UI.println(`--search ${retired.search} is ignored: ${RETIRED_SEARCH_NOTICE}`)
       if (args.research && (interactive || args.command)) die("--research cannot be used with --mini or --command")
       if (args.research && args.agent && args.agent !== "research")
         die("--research runs the research agent, so it cannot be used with --agent")

@@ -1119,6 +1119,14 @@
           "type": "integer",
           "maximum": 9007199254740991,
           "description": "Days an unkept research run stays in the brain (default: 30)"
+        },
+        "search": {
+          "type": "object",
+          "description": "@deprecated Research searches the web in each research agent's own browser in the desktop app, with no search service or key; this setting is ignored."
+        },
+        "browser_search": {
+          "type": "boolean",
+          "description": "@deprecated Research always searches in each research agent's own browser in the desktop app; this setting is ignored."
         }
       },
       "additionalProperties": false

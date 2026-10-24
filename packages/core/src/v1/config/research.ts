@@ -11,7 +11,8 @@ import { NonNegativeInt, PositiveInt } from "../../schema"
 //
 // Research searches the web in each research agent's own browser, so there is no search setting. A config file from an
 // earlier version may still hold `search` (a search service and its address) or `browser_search`: they load, and are
-// ignored.
+// dropped. The published JSON Schema still lists them, marked deprecated (RETIRED), so an editor that checks the file
+// against vectordev.ai/config.json does not underline them.
 
 const Strings = Schema.mutable(Schema.Array(Schema.String))
 
@@ -32,6 +33,20 @@ export const Limits = Schema.Struct({
   researchers: Schema.optional(NonNegativeInt.check(Schema.isLessThanOrEqualTo(4))),
 }).annotate({ identifier: "ResearchLimitsConfig" })
 export type Limits = Schema.Schema.Type<typeof Limits>
+
+/** The keys an earlier version's research block took, as the published JSON Schema lists them: loaded, and dropped. */
+export const RETIRED = {
+  search: {
+    type: "object",
+    description:
+      "@deprecated Research searches the web in each research agent's own browser in the desktop app, with no search service or key; this setting is ignored.",
+  },
+  browser_search: {
+    type: "boolean",
+    description:
+      "@deprecated Research always searches in each research agent's own browser in the desktop app; this setting is ignored.",
+  },
+} as const
 
 export const Info = Schema.Struct({
   depth: Schema.optional(Depth).annotate({
