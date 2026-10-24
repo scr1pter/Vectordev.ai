@@ -43,6 +43,7 @@ import { AuthTest } from "../fake/auth"
 import { NpmTest } from "../fake/npm"
 import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
 import { GlobalBus, type GlobalEvent } from "@/bus/global"
+import { useManagedPolicyFixture } from "../fixture/managed-policy"
 
 const unexpectedHttp = HttpClient.make((request) =>
   Effect.die(`unexpected http request: ${request.method} ${request.url}`),
@@ -133,6 +134,7 @@ const clearEffect = (wait = false) =>
 const clear = (wait = false) => Effect.runPromise(clearEffect(wait))
 // Get managed config directory from environment (set in preload.ts)
 const managedConfigDir = process.env.VECTOR_TEST_MANAGED_CONFIG_DIR!
+const managedFixture: { restore?: () => void } = {}
 const originalTestToken = process.env.TEST_TOKEN
 const originalConsoleToken = process.env.VECTOR_CONSOLE_TOKEN
 
@@ -141,6 +143,8 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  managedFixture.restore?.()
+  managedFixture.restore = undefined
   await fs.rm(managedConfigDir, { force: true, recursive: true }).catch(() => {})
   if (originalTestToken === undefined) delete process.env.TEST_TOKEN
   else process.env.TEST_TOKEN = originalTestToken
@@ -150,7 +154,13 @@ afterEach(async () => {
 })
 
 const writeManagedSettingsEffect = (settings: object, filename?: string) =>
-  FSUtil.use.writeWithDirs(path.join(managedConfigDir, filename ?? "vector.json"), JSON.stringify(settings))
+  FSUtil.use.writeWithDirs(path.join(managedConfigDir, filename ?? "vector.json"), JSON.stringify(settings)).pipe(
+    Effect.andThen(
+      Effect.sync(() => {
+        managedFixture.restore ??= useManagedPolicyFixture(managedConfigDir)
+      }),
+    ),
+  )
 
 async function writeConfig(dir: string, config: object, name = "vector.json") {
   await Filesystem.write(path.join(dir, name), JSON.stringify(config))
