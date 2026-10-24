@@ -69,8 +69,10 @@ async function setup(page: Page, approved: boolean) {
 
 test("an older server cannot expose the paused built-in Copilot sign-in", async ({ page }) => {
   await setup(page, false)
-  await expect(page.getByText("GitHub Copilot", { exact: true })).toHaveCount(0)
-  await expect(page.getByText("OpenAI", { exact: true })).toBeVisible()
+  const providers = page.getByRole("dialog", { name: "Connect provider", exact: true })
+  await expect(providers).toBeVisible()
+  await expect(providers.locator('[data-slot="list-item"][data-key="github-copilot"]')).toHaveCount(0)
+  await expect(providers.locator('[data-slot="list-item"][data-key="openai"]')).toBeVisible()
 })
 
 test("a runtime-approved community plugin can complete its supplied OAuth method", async ({ page }) => {
