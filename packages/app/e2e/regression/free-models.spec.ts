@@ -186,7 +186,7 @@ async function openSection(page: Page, label: string) {
 
 const openFreeModels = (page: Page) => openSection(page, "Free models inside of Vector")
 
-test("lists both copies of a free model once each, under Recently used first, and hides the group when OFF", async ({
+test("lists each copy of a free model once, Vector's under Free models inside of Vector, and hides the group when OFF", async ({
   page,
 }, testInfo) => {
   await setup(page, { enabled: true })
@@ -195,23 +195,30 @@ test("lists both copies of a free model once each, under Recently used first, an
   // loaded runner the picker can draw before the current model's row is known.
   await expect(page.locator("[data-model-section]").first()).toHaveAttribute("data-model-section", "recent")
   await openFreeModels(page)
-  // A connected OpenRouter account no longer hides the shared copy, which stays on Vector's shared allowance.
-  const shared = page.locator('[data-option-key="vector:maker/coder:free"]')
+  // A connected OpenRouter account never hides Vector's copy. Rows carry no source caption: Vector's copy is the one
+  // under Free models inside of Vector, and the copy on the user's own account is that provider's, named "(free)".
+  // Only the tooltip says where each runs.
+  const shared = page.locator('[data-model-section="free"] [data-option-key="vector:maker/coder:free"]')
   await expect(shared).toHaveCount(1)
-  await expect(shared).toContainText("Maker Coder")
-  await expect(shared).toContainText("Provided by Vector")
-  const free = page.locator('[data-option-key="openrouter:maker/coder:free"]')
-  await expect(free).toHaveCount(1)
-  await expect(free).toContainText("Maker Coder")
-  await expect(free).toContainText("Your OpenRouter account")
+  await expect(shared.locator('[data-slot="model-row-name"]')).toHaveText("Maker Coder")
+  await expect(shared).toHaveAttribute("title", /Provided by Vector/)
+  await expect(page.locator('[data-model-section="free"] [data-option-key^="openrouter:"]')).toHaveCount(0)
+  const picker = page.locator(".vector-select-model-dialog")
+  for (const text of ["Provided by Vector", "Your OpenRouter account"]) await expect(picker).not.toContainText(text)
   await page.screenshot({ path: testInfo.outputPath("free-model-picker.png") })
+  // Searching opens every section with a match, whichever copy is current: each copy is listed once, in its place.
+  await page.getByRole("searchbox").first().fill("maker")
+  await expect(page.locator('[data-model-section="free"] [data-option-key="vector:maker/coder:free"]')).toHaveCount(1)
+  const own = page.locator('[data-model-section="provider"] [data-option-key="openrouter:maker/coder:free"]')
+  await expect(own).toHaveCount(1)
+  await expect(own.locator('[data-slot="model-row-name"]')).toHaveText("Maker Coder (free)")
+  await expect(own).toHaveAttribute("title", /Your OpenRouter account/)
   await page.keyboard.press("Escape")
   await page.unrouteAll({ behavior: "wait" })
   await setup(page, { enabled: false })
   await page.locator('[data-action="prompt-model"]').filter({ visible: true }).first().click()
-  await expect(
-    page.locator('[data-slot="model-section-name"]').filter({ hasText: "Free models inside of Vector" }),
-  ).toHaveCount(0)
+  await expect(page.locator(".vector-select-model-dialog")).toBeVisible()
+  await expect(page.locator('[data-model-section="free"]')).toHaveCount(0)
   // OpenRouter is now the only section with a header. It still starts closed and opens when clicked.
   const lone = page.locator("button[data-model-section-toggle]").filter({ hasText: "OpenRouter" })
   await expect(page.locator("button[data-model-section-toggle]")).toHaveCount(1)
@@ -286,10 +293,12 @@ test("a selected free model that may train shows only its label, under the compo
   await expect(notice).toHaveText("May train on your prompts")
   await page.screenshot({ path: testInfo.outputPath("free-model-composer-notice.png") })
   await page.locator('[data-action="prompt-model"]').filter({ visible: true }).first().click()
-  await openFreeModels(page)
+  // Search shows both copies, whichever is current: each row is its name, the yellow label and its context size.
+  await page.getByRole("searchbox").first().fill("maker")
   for (const key of ["vector:maker/coder:free", "openrouter:maker/coder:free"]) {
     const row = page.locator(`[data-option-key="${key}"]`)
     await expect(row.locator('[data-slot="model-row-training"]')).toHaveText("May train on your prompts")
+    await expect(row.locator('[data-slot="model-row-context"]')).toHaveText("128K")
     await expect(row).not.toContainText("Vector itself never trains")
   }
   await expect(page.locator('[data-slot="model-row-training-detail"]')).toHaveCount(0)

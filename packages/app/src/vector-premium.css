@@ -2521,84 +2521,245 @@ html[data-vector-navigation-resizing] * {
 
 /* ---- Model pickers ---------------------------------------------------------
    The "Select model" dialog (composer model button, mod+') and the popover
-   (Parallel Workspaces) share one row anatomy: a 16px mark gutter, the model
-   name, an optional "New", and a quiet right-aligned spec line: the context
-   size. The rest is in the row's tooltip. Theme tokens and
-   hairlines only. One neutral fill marks the keyboard/pointer row, Manage
-   models included (data-active); the current model gets a purple check and a
-   heavier name, never a fill of its own. */
+   (an external agent's own CLI models) are one plain list:
+   - Search on top: a magnifier and the field over a hairline, nothing boxed.
+   - Small captions name the sections that never close: Recently used, an
+     external agent's own list, and every section while searching.
+   - Every other section is one row: a monochrome mark, the name, a muted model
+     count and a chevron that turns down while it is open.
+   - One line per model: the name, then on the right the yellow "May train on
+     your prompts" tag where it applies, a muted context size and the check.
+     Only Recently used rows carry a mark, since that section mixes providers;
+     rows under a provider leave the gutter empty, so their names start on the
+     provider's name.
+   - Every row is 34px. The count and context share one right-aligned column
+     and the chevron and check one slot, both always reserved, so opening a
+     section or picking a model never moves anything sideways.
+   - One neutral fill (data-active) marks the pointer or keyboard row, headers
+     included. The check is the only violet. */
+
+:is(.vector-model-popover, .vector-select-model-dialog) {
+  --picker-row: 34px;
+  --picker-pad: 10px;
+  --picker-inset: 4px;
+  --picker-fill: color-mix(in srgb, var(--vx-text) 6%, transparent);
+}
+.vector-select-model-dialog {
+  --picker-inset: 6px;
+}
 
 .vector-model-popover {
   border-radius: 12px;
   border-color: var(--vx-line-strong);
+  background: var(--vx-surface);
+  box-shadow: var(--vx-shadow-float);
 }
 
-/* The dialog's size comes from DialogV2 size="large", which sizes
-   [data-slot="dialog-container"]. Do NOT set a width on .vector-select-model-dialog
-   (it is [data-slot="dialog-content"], inside a container with overflow:hidden):
-   wider content just gets clipped, which is the bug that cut off "Connect
-   provider". Border colour and shadow come from the shared dialog-v2 rule. */
-[data-slot="dialog-container"]:has(.vector-select-model-dialog) {
-  border: 1px solid var(--vx-line-strong);
-  border-radius: 16px !important;
-  background: var(--vx-canvas) !important;
+/* The dialog's size: DialogV2 size="large" sizes [data-slot="dialog-container"],
+   so the width and height are set there. Do NOT set a width on
+   .vector-select-model-dialog (it is [data-slot="dialog-content"], inside a
+   container with overflow:hidden): wider content just gets clipped, which is
+   the bug that once cut off "Connect provider". The fixed height means opening
+   a section scrolls the list instead of resizing the dialog. A flat surface:
+   no violet glow or gradient hairline. */
+[data-component="dialog-v2"]:not([data-variant="settings"])
+  [data-slot="dialog-container"]:has(.vector-select-model-dialog) {
+  width: min(560px, calc(100vw - 32px));
+  height: min(460px, calc(100vh - 96px));
+  border: 1px solid var(--vx-line-strong) !important;
+  border-radius: 14px !important;
+  background: var(--vx-surface) !important;
+}
+[data-component="dialog-v2"]:not([data-variant="settings"])
+  [data-slot="dialog-container"]:has(.vector-select-model-dialog)::before {
+  display: none;
 }
 
-.vector-select-model-dialog [data-component="text-input-v2"] {
-  border-radius: 12px;
-  border-color: var(--vx-line);
-  background: color-mix(in srgb, var(--vx-text) 3%, transparent);
+/* Search. The magnifier sits in the rows' mark gutter: inset + row padding. */
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-picker-search"] {
+  display: flex;
+  flex: none;
+  align-self: stretch;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 calc(var(--picker-inset) + 6px) 0 calc(var(--picker-inset) + var(--picker-pad));
+  border-bottom: 1px solid var(--vx-line);
+  color: var(--vx-text-muted);
 }
-.vector-select-model-dialog [data-component="text-input-v2"]:focus-within {
-  border-color: var(--vx-line);
-  box-shadow: none;
-  outline-color: transparent;
+.vector-select-model-dialog [data-slot="model-picker-search"] {
+  height: 48px;
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-picker-search"] > [data-slot="icon-svg"] {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0 1px;
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-picker-search"] input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--vx-text);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+  appearance: none;
+}
+.vector-select-model-dialog [data-slot="model-picker-search"] input {
+  font-size: 14px;
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-picker-search"] input::placeholder {
+  color: var(--vx-text-muted);
+}
+:is(.vector-model-popover, .vector-select-model-dialog)
+  [data-slot="model-picker-search"]
+  input::-webkit-search-cancel-button {
+  display: none;
+  appearance: none;
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-picker-search-clear"] {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--vx-text-muted);
+  cursor: pointer;
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-picker-search-clear"]:hover {
+  background: var(--picker-fill);
+  color: var(--vx-text);
 }
 
-/* Section label rows: the only divider between sections. */
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-picker-list"] {
+  display: flex;
+  flex-direction: column;
+  padding: var(--picker-inset);
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-model-section] {
+  display: flex;
+  flex-direction: column;
+}
+/* A captioned section ends with a little air before the next one; no line. */
+:is(.vector-model-popover, .vector-select-model-dialog) [data-model-section]:has(> [data-slot="menu-v2-group-label"]) {
+  padding-bottom: 6px;
+}
+
+/* Captions: small muted text on the mark's edge. */
 :is(.vector-model-popover, .vector-select-model-dialog) [data-slot="menu-v2-group-label"] {
-  gap: 8px;
+  display: flex;
+  align-items: center;
   height: 28px;
-  padding: 0 12px;
+  padding: 0 var(--picker-pad);
   color: var(--vx-text-muted);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
 }
-.vector-select-model-dialog [data-slot="menu-v2-group-label"] {
-  padding: 0 10px;
+
+/* Provider rows: they open and close their models. */
+:is(.vector-model-popover, .vector-select-model-dialog) button[data-model-section-toggle] {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: var(--picker-row);
+  padding: 0 var(--picker-pad);
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--vx-text);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-align: left;
+  cursor: pointer;
+  scroll-margin-block: 24px;
+  transition: background-color 100ms ease;
 }
-:is(.vector-model-popover, .vector-select-model-dialog) [data-model-section] + [data-model-section] {
-  margin-top: 4px;
+:is(.vector-model-popover, .vector-select-model-dialog) button[data-model-section-toggle][data-active] {
+  background: var(--picker-fill);
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-section-name"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-section-count"] {
+  flex: none;
+  min-width: 36px;
+  color: var(--vx-text-muted);
+  font-size: 12px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-section-chevron"] {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--vx-text-muted);
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-section-chevron"] svg {
+  width: 14px;
+  height: 14px;
+  transition: transform 120ms ease;
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-section-chevron"]:not([data-expanded]) svg {
+  transform: rotate(-90deg);
 }
 
-/* Rows. Kobalte's pointer highlight is neutralised (--menu-v2-hover) so data-active
-   is the only fill, and the check (--menu-v2-accent) is the only purple besides "New". */
+/* Model rows. Kobalte's pointer highlight is neutralised (--menu-v2-hover) so
+   data-active is the only fill. */
 :is(.vector-model-popover, .vector-select-model-dialog) [data-component="menu-v2-item"] {
   --menu-v2-hover: transparent;
   --menu-v2-accent: var(--vx-purple-bright);
-  scroll-margin-block: 28px;
-  transition: background-color 120ms ease;
-}
-.vector-model-popover [data-component="menu-v2-item"] {
-  border-radius: 6px;
-}
-.vector-select-model-dialog [data-component="menu-v2-item"] {
-  height: 32px;
-  padding: 0 10px;
-  border-radius: 8px;
+  flex: none;
+  gap: 8px;
+  width: 100%;
+  height: var(--picker-row);
+  padding: 0 var(--picker-pad);
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  scroll-margin-block: 24px;
+  transition: background-color 100ms ease;
 }
 :is(.vector-model-popover, .vector-select-model-dialog) [data-component="menu-v2-item"][data-active] {
-  background: color-mix(in srgb, var(--vx-text) 6%, transparent);
+  background: var(--picker-fill);
 }
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="menu-v2-item-content"],
 :is(.vector-model-popover, .vector-select-model-dialog)
   [data-component="menu-v2-item"][data-checked]
   [data-slot="menu-v2-item-content"] {
-  font-weight: 440;
+  gap: 8px;
   color: var(--vx-text);
+  font-size: 13px;
+  font-weight: 440;
+  line-height: 18px;
 }
 
+/* The mark gutter: a provider's mark on its row and in Recently used, empty
+   under a provider so names line up. */
 :is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-row-icon"] {
   display: inline-flex;
   flex: none;
@@ -2606,154 +2767,116 @@ html[data-vector-navigation-resizing] * {
   justify-content: center;
   width: 16px;
   height: 16px;
+  margin-right: 2px;
   color: var(--vx-text-muted);
 }
 :is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-row-icon"] > svg {
   width: 14px;
   height: 14px;
 }
+:is(.vector-model-popover, .vector-select-model-dialog)
+  :is([data-active], button[data-model-section-toggle][aria-expanded="true"])
+  [data-slot="model-row-icon"] {
+  color: var(--vx-text-subtle);
+}
 :is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-row-name"] {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
-  font-weight: 440;
-  color: var(--vx-text);
 }
+/* The current model: a slightly heavier name beside its check. */
 :is(.vector-model-popover, .vector-select-model-dialog) [data-checked] [data-slot="model-row-name"] {
-  font-weight: 530;
+  font-weight: 520;
 }
-:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-row-new"] {
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-row-context"] {
   flex: none;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--vx-purple-bright);
+  min-width: 36px;
+  color: var(--vx-text-muted);
+  font-size: 12px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
 }
-:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-row-spec"] {
+/* "May train on your prompts": a free model whose provider may train on prompts. The tag is
+   all the row says; the one-time acceptance question explains it. The composer shows the same
+   label, as plain yellow text, while such a model is selected. */
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-row-training"] {
   display: inline-flex;
   flex: none;
   align-items: center;
-  margin-left: auto;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--vx-amber) 13%, transparent);
+  color: var(--vx-amber);
   font-size: 11px;
-  font-weight: 400;
-  color: var(--vx-text-muted);
-  font-variant-numeric: tabular-nums;
+  font-weight: 500;
   white-space: nowrap;
 }
-:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-row-sep"] {
-  padding: 0 5px;
-  opacity: 0.6;
-}
-:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-row-context"] {
-  min-width: 34px;
-  text-align: right;
-}
-/* "May train on your prompts": a free model whose provider may train on prompts. The label is
-   all the row says; the one-time acceptance question explains it. The composer shows the same
-   label while such a model is selected. */
-:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-row-training"],
 [data-component="free-model-training-notice"] {
   color: var(--vx-amber);
 }
-.vector-select-model-dialog [data-slot="model-row-check"] {
+/* The check slot is always there, so the context column never moves. */
+:is(.vector-model-popover, .vector-select-model-dialog)
+  :is([data-slot="model-row-check"], [data-slot="menu-v2-item-indicator"]) {
   display: inline-flex;
   flex: none;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   color: var(--vx-purple-bright);
+}
+:is(.vector-model-popover, .vector-select-model-dialog)
+  :is([data-slot="model-row-check"], [data-slot="menu-v2-item-indicator"])
+  > svg {
+  width: 14px;
+  height: 14px;
+}
+.vector-select-model-dialog [data-slot="model-row-check"] {
   visibility: hidden;
 }
 .vector-select-model-dialog [data-checked] > [data-slot="model-row-check"] {
   visibility: visible;
 }
-:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-section-name"] {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* Ends on the rows' spec-line edge: 16px check slot + 8px gap. */
-:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-section-access"] {
+
+/* Connect provider: one plain row over a hairline, its plus in the mark gutter. */
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-picker-footer"] {
+  display: flex;
   flex: none;
-  margin-left: auto;
-  margin-right: 24px;
-  font-weight: 400;
-  color: var(--vx-text-muted);
-  white-space: nowrap;
+  flex-direction: column;
+  align-self: stretch;
+  padding: var(--picker-inset);
+  border-top: 1px solid var(--vx-line);
 }
-/* A provider's header, and the free models' one, opens and closes its rows. The chevron sits
-   in the rows' 16px check slot, so the access caption keeps its edge. */
-:is(.vector-model-popover, .vector-select-model-dialog) button[data-model-section-toggle] {
-  width: 100%;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  font-family: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    background-color 120ms ease,
-    color 120ms ease;
+:is(.vector-model-popover, .vector-select-model-dialog)
+  [data-slot="model-picker-footer"]
+  :is([data-slot="model-row-name"], [data-slot="model-row-icon"]) {
+  color: var(--vx-text-subtle);
 }
-.vector-select-model-dialog button[data-model-section-toggle] {
-  border-radius: 8px;
-}
-:is(.vector-model-popover, .vector-select-model-dialog) button[data-model-section-toggle][data-active] {
-  background: color-mix(in srgb, var(--vx-text) 6%, transparent);
+:is(.vector-model-popover, .vector-select-model-dialog)
+  [data-slot="model-picker-footer"]
+  [data-active]
+  [data-slot="model-row-name"] {
   color: var(--vx-text);
 }
-:is(.vector-model-popover, .vector-select-model-dialog)
-  button[data-model-section-toggle]
-  [data-slot="model-section-access"] {
-  margin-right: 0;
-}
-:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-section-chevron"] {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  margin-left: auto;
-  color: var(--vx-text-muted);
-}
-:is(.vector-model-popover, .vector-select-model-dialog)
-  [data-slot="model-section-access"]
-  ~ [data-slot="model-section-chevron"] {
-  margin-left: 0;
-}
-:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-section-chevron"] svg {
-  transition: transform 120ms ease;
-}
-:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-section-chevron"]:not([data-expanded]) svg {
-  transform: rotate(-90deg);
-}
+
 :is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-picker-empty"] {
   display: flex;
   flex-direction: column;
   justify-content: center;
   gap: 4px;
   min-height: 48px;
-  padding: 0 12px;
+  padding: 0 var(--picker-pad);
   font-size: 13px;
   line-height: 18px;
   color: var(--vx-text-muted);
 }
-.vector-select-model-dialog [data-slot="model-picker-empty"] {
-  padding: 0 10px;
-}
 :is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-picker-empty"] > span + span {
   font-size: 12px;
-}
-
-/* "Connect provider" button: quiet neutral pill */
-.vector-select-model-dialog [data-slot="dialog-header"] [data-component="button-v2"] {
-  border-radius: 999px;
-  border-color: var(--vx-line);
 }
 
 /* Engineering workspace --------------------------------------------------
@@ -2869,8 +2992,8 @@ html[data-vector-navigation-resizing] * {
      off (html[data-vector-glass="false"], index.css).
    - Edge: the model popover's 12px radius and --vx-line-strong border, with
      --vx-shadow-float (no 0.5px white ring, unlike --v2-elevation-floating).
-   - Rows: the Select model dialog's 32px height, 0 10px padding and 8px
-     corners; 8px is concentric with the 12px panel across its 4px padding.
+   - Rows: 32px high, 0 10px padding and 8px corners; 8px is concentric
+     with the 12px panel across its 4px padding.
    - No dividers or border lines: groups are separated by 8px of space and are
      named for assistive tech with role="group". Sub-items indent to the
      parent label's text edge.

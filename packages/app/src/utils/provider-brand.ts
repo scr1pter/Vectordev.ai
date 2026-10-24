@@ -1,7 +1,5 @@
 import {
-  FREE_MODELS_DATA_POLICY,
   FREE_MODELS_TITLE,
-  freeModelMayTrain,
   freeModelName,
   freeModelSource,
   freeModelTrainingLabel,
@@ -127,14 +125,20 @@ export function modelAccess(model: PickerModel): ModelAccess {
   return NO_ACCESS
 }
 
-/** Row captions only earn their place where rows are paid for in more than one way. A
-    section with a single access method does not need that label on every row. */
-export function showRowAccess(models: readonly PickerModel[]) {
-  return new Set(models.map((model) => modelAccess(model).kind)).size > 1
-}
-
 export function modelDisplayName(model: PickerModel) {
   return freeModelName(model)
+}
+
+/** A free model Vector provides, listed under Free models inside of Vector. A copy on the user's own account is that
+    provider's model and is listed with it. */
+const providedByVector = (model: PickerModel) => model.freeModel?.source === "shared"
+
+/** The name a picker row shows. A free model on the user's own account keeps "(free)", since its provider's list can
+    also hold the paid model of the same name and the row carries nothing else to tell them apart. */
+export function pickerModelName(model: PickerModel) {
+  const name = modelDisplayName(model)
+  if (model.freeModel?.source !== "openrouter" || /\(free\)\s*$/i.test(name)) return name
+  return `${name} (free)`
 }
 
 /** "400K", "262K", "1M", "1.5M". Millions round down to one decimal, so the caption never
@@ -219,7 +223,7 @@ export function modelAriaLabel(model: PickerModel, now: number) {
   const access = modelAccess(model)
   const context = contextLabel(model.limit?.context)
   return [
-    modelDisplayName(model),
+    pickerModelName(model),
     brandProviderName(model.provider.id, model.provider.name),
     context ? `${context} context` : "",
     model.capabilities?.reasoning ? "reasoning" : "",
@@ -243,7 +247,7 @@ export function modelTitle(model: PickerModel) {
     .filter(Boolean)
     .join(" · ")
   return [
-    modelDisplayName(model),
+    pickerModelName(model),
     about,
     contextTitle(model.limit?.context),
     releaseTitle(model),
@@ -256,18 +260,14 @@ export function modelTitle(model: PickerModel) {
 
 export type PickerSectionKind = "recent" | "provider" | "free"
 
+/** One section of the picker. Its header shows only the mark, the label and how many models it holds: how a model is
+    paid for, and what its provider may do with prompts, are in each row's tooltip, never on a header. */
 export type PickerSection<T extends PickerModel = PickerModel> = {
   id: string
   kind: PickerSectionKind
   label: string
-  /** The provider whose mark sits on the label row (provider sections only). */
+  /** The provider whose mark sits on the header (provider sections only). */
   providerID?: string
-  /** How every row in the section is paid for, shown once on the label row. */
-  access?: ModelAccess
-  /** What the section's providers may do with request content, shown once on the label row. */
-  policy?: { label: string; title: string }
-  /** Rows carry their own access caption: the section has no shared one and mixes ways of paying. */
-  rowAccess: boolean
   items: T[]
 }
 
@@ -287,20 +287,11 @@ function byRelease(a: PickerModel, b: PickerModel) {
   return collator.compare(a.name, b.name)
 }
 
-function sharedAccess(items: readonly PickerModel[]) {
-  const first = modelAccess(items[0])
-  if (!first.label) return undefined
-  return items.every((item) => modelAccess(item).label === first.label) ? first : undefined
-}
-
-function pickerSection<T extends PickerModel>(section: Omit<PickerSection<T>, "rowAccess">): PickerSection<T> {
-  return { ...section, rowAccess: !section.access && showRowAccess(section.items) }
-}
-
 /** Group connected coding models by provider. Without a search, the recent choices come first, above every provider
-    and above Free models inside of Vector; a model listed there is not repeated below. `keepOrder` keeps the order the
-    models came in within each section, for a hand-ordered list such as an external agent's, which leads with its CLI's
-    default. */
+    and above Free models inside of Vector; a model listed there is not repeated below. Free models inside of Vector
+    holds the free models Vector provides; a copy on the user's own account sits with that provider's other models.
+    `keepOrder` keeps the order the models came in within each section, for a hand-ordered list such as an external
+    agent's, which leads with its CLI's default. */
 export function buildModelSections<T extends PickerModel>(input: {
   models: readonly T[]
   term?: string
@@ -311,7 +302,7 @@ export function buildModelSections<T extends PickerModel>(input: {
   keepOrder?: boolean
 }): PickerSection<T>[] {
   const term = (input.term ?? "").trim().toLowerCase()
-  // Both copies of a free model are listed, the shared one first; each runs where it says.
+  // Both copies of a free model are listed, Vector's first; each runs where its section says.
   const models = freeModelChoices(
     input.models.filter((model) => !isHiddenProvider(model.provider.id, model.provider) && isCodingModel(model)),
   )
@@ -330,36 +321,20 @@ export function buildModelSections<T extends PickerModel>(input: {
       taken.add(key)
     }
     if (recent.length > 0)
-      sections.push(
-        pickerSection({
-          id: "recent",
-          kind: "recent",
-          label: recent.some((model) => history.has(pickerModelKey(model))) ? "Recently used" : "Current model",
-          items: recent,
-        }),
-      )
+      sections.push({
+        id: "recent",
+        kind: "recent",
+        label: recent.some((model) => history.has(pickerModelKey(model))) ? "Recently used" : "Current model",
+        items: recent,
+      })
   }
 
   const free = models.filter(
-    (model) => model.freeModel && !taken.has(pickerModelKey(model)) && matchRank(model, term, input.now) !== undefined,
+    (model) =>
+      providedByVector(model) && !taken.has(pickerModelKey(model)) && matchRank(model, term, input.now) !== undefined,
   )
   if (free.length) {
-    sections.push(
-      pickerSection({
-        id: "free",
-        kind: "free",
-        label: FREE_MODELS_TITLE,
-        // The section names one policy only when every row has it; otherwise each may-train row carries its label.
-        policy: free.some(freeModelMayTrain)
-          ? undefined
-          : { label: "No-training policy", title: FREE_MODELS_DATA_POLICY },
-        items: free.sort(
-          (a, b) =>
-            byRelease(a, b) ||
-            Number(a.freeModel?.source === "openrouter") - Number(b.freeModel?.source === "openrouter"),
-        ),
-      }),
-    )
+    sections.push({ id: "free", kind: "free", label: FREE_MODELS_TITLE, items: free.sort(byRelease) })
     free.forEach((model) => taken.add(pickerModelKey(model)))
   }
 
@@ -392,16 +367,13 @@ export function buildModelSections<T extends PickerModel>(input: {
     items: items.sort(order),
     label: brandProviderName(id, items[0].provider.name),
   })).sort((a, b) => popularity(a.id) - popularity(b.id) || collator.compare(a.label, b.label))
-  const listed = providers.map((provider) =>
-    pickerSection({
-      id: `provider:${provider.id}`,
-      kind: "provider",
-      label: provider.label,
-      providerID: provider.id,
-      access: sharedAccess(provider.items),
-      items: provider.items,
-    }),
-  )
+  const listed: PickerSection<T>[] = providers.map((provider) => ({
+    id: `provider:${provider.id}`,
+    kind: "provider",
+    label: provider.label,
+    providerID: provider.id,
+    items: provider.items,
+  }))
   // Each section's first row is its best match. The sort is stable, so equally good
   // sections keep the order above.
   if (term) listed.sort((a, b) => rank(a.items[0]) - rank(b.items[0]))
@@ -441,6 +413,10 @@ export function pickerSectionViews<T extends PickerModel>(
 }
 
 export const pickerHeaderKey = (section: Pick<PickerSection, "id">) => `section:${section.id}`
+
+/** A header's spoken label: "Anthropic, 3 models". The header shows the count on its own, so it reads the same. */
+export const pickerSectionLabel = (section: Pick<PickerSection, "label" | "items">) =>
+  `${section.label}, ${section.items.length} ${section.items.length === 1 ? "model" : "models"}`
 
 /** Keyboard order, in render order: each header that toggles, then its section's rows when it is open. `headers` maps
     a header's key to its section, so a model key can never be mistaken for one. */
