@@ -117,7 +117,10 @@ export type Context = {
    * its numbers and its runs of 6 words are kept out of queries.
    */
   readonly work?: readonly string[]
-  /** What the user typed in this run's root session. A launching agent's text (a sub-question, a task) is not typed. */
+  /**
+   * What the user typed or pasted in this run's root session. A launching agent's text (a sub-question, a task) is not
+   * typed.
+   */
   readonly typed: readonly string[]
   /** Public text seen in this run: search results and the pages read. */
   readonly public: readonly string[]

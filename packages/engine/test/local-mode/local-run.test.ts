@@ -17,6 +17,7 @@ import { Global } from "@vectordevai/core/global"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { Database } from "@vectordevai/core/database/database"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
+import { BrainSchema } from "@vectordevai/core/brain/schema"
 import { Egress } from "@vectordevai/core/local-mode/egress"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import { LocalProbe } from "@vectordevai/core/local-mode/probe"
@@ -1548,6 +1549,24 @@ describe("the agent's own actions under Vector Local", () => {
       yield* on()
       expect(Exit.isSuccess(yield* read(exfil, history("Read the setup guide.", exfil)))).toBe(false)
       expect(strict()).toHaveLength(1)
+
+      // An address the person pasted into their message is theirs, as one they typed is: it asks as usual. The
+      // composer marks it as pasted only so that Vector learns nothing from it.
+      yield* on()
+      const [person, ...rest] = history("Read the setup guide.")
+      const ask = `Fetch ${exfil} for me`
+      const pasted: SessionV1.WithParts = {
+        ...person!,
+        parts: [
+          {
+            ...(person!.parts[0] as SessionV1.TextPart),
+            text: ask,
+            metadata: { [BrainSchema.PASTED]: [[ask.indexOf(exfil), ask.indexOf(exfil) + exfil.length]] },
+          },
+        ],
+      }
+      expect(Exit.isSuccess(yield* read(exfil, [pasted, ...rest]))).toBe(true)
+      expect(strict()).toEqual([])
 
       // A user name or password the agent put in an address: webfetch refuses it before asking anything, and the
       // browser asks each time, though a result linked the page on a host the conversation reached.

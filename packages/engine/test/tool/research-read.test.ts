@@ -90,6 +90,31 @@ it.instance(
 )
 
 it.instance(
+  "a link the user pasted into the request is theirs, so it reads like one they typed",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web)
+      const sessions = yield* Session.Service
+      yield* answer("once")
+      const session = yield* sessions.create({ title: "Research" })
+      const article = web.url("article", "/")
+      yield* test.llm.tool("research_plan", plan())
+      yield* test.llm.tool("research_read", { url: article })
+      yield* test.llm.text("Done.")
+      // The composer marks the pasted link, so Vector learns nothing from it; where it came from is still the user.
+      const text = `Summarize ${article} for me`
+      const at = text.indexOf(article)
+      yield* send({ sessionID: session.id, agent: "research", text, pasted: [[at, at + article.length]] })
+      const reads = yield* calls(session.id, "research_read")
+      expect(reads.map((read) => read.state.status)).toEqual(["completed"])
+      expect(output(reads[0])).not.toContain(ResearchProvenance.REFUSAL)
+      expect(output(reads[0])).toContain("The study followed 412 homes through two winters.")
+      expect(guard.outside()).toEqual([])
+    }),
+  90_000,
+)
+
+it.instance(
   "the run's first page asks once, the approval is not saved, and a saved source reads again offline",
   () =>
     Effect.gen(function* () {
