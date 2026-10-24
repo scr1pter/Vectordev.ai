@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, mock, test } from "bun:test"
+import { afterAll, afterEach, describe, expect, mock, test } from "bun:test"
 import type { LookupAddress } from "node:dns"
 import http from "node:http"
 import net from "node:net"
@@ -962,6 +962,9 @@ describe("research browsers", () => {
 })
 
 describe("research browsers that misbehave", () => {
+  // Each test's browser is closed whatever the test found, so a failed one cannot hand the next its browser.
+  afterEach(() => close("ses_lead"))
+
   test("a site's NTLM or Negotiate challenge is cancelled before Chromium answers it, whatever asked for it", async () => {
     await send({ command: "research.scroll", sessionID: "ses_lead" })
     const view = latest()
@@ -1031,8 +1034,9 @@ describe("research browsers that misbehave", () => {
         )
         .on("error", () => resolve(state.bytes))
     })
-    // Cut soon after the bound: the check runs a few times a second.
-    expect(received).toBeGreaterThan(research.MAX_PAGE_BYTES)
+    // Cut soon after the bound: the check runs a few times a second. The proxy counts what it hands the client, chunk
+    // framing included, so the cut can come right after the piece that brought the body itself to 40 MB.
+    expect(received).toBeGreaterThanOrEqual(research.MAX_PAGE_BYTES)
     expect(received).toBeLessThan(research.MAX_PAGE_BYTES + 32 * 1024 * 1024)
     expect((await send({ command: "research.scroll", sessionID: "ses_lead" })).refused).toEqual([
       { url: ARTICLE, reason: research.PAGE_CUT },
