@@ -85,12 +85,20 @@ const thrown = (make: () => unknown) => {
 const answer =
   (address: string) => (_hostname: string, options: { all?: boolean }, callback: (...input: unknown[]) => void) =>
     options.all ? callback(null, [{ address, family: 4 }]) : callback(null, address, 4)
-// What a raw client of a proxy on this computer reads back, as a browser would send it.
+// What a raw client of a proxy on this computer reads back, as a browser would send it. The proxy keeps a connection
+// open for the client's next request after an answer whose length it states, as a browser's would be, so the client
+// closes it once that answer has all arrived; a refusal the proxy closes itself.
 const raw = (port: number, text: string) =>
   new Promise<string>((resolve) => {
     const chunks: Buffer[] = []
     const socket = net.connect(port, "127.0.0.1", () => socket.write(text))
-    socket.on("data", (chunk: Buffer) => chunks.push(chunk))
+    socket.on("data", (chunk: Buffer) => {
+      chunks.push(chunk)
+      const received = Buffer.concat(chunks)
+      const end = received.indexOf("\r\n\r\n")
+      const length = /\r\ncontent-length:\s*(\d+)/i.exec(received.subarray(0, end).toString())?.[1]
+      if (end >= 0 && length !== undefined && received.length - end - 4 >= Number(length)) socket.destroy()
+    })
     socket.on("close", () => resolve(Buffer.concat(chunks).toString()))
     socket.on("error", () => resolve(Buffer.concat(chunks).toString()))
   })
