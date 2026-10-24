@@ -2543,6 +2543,11 @@ html[data-vector-navigation-resizing] * {
   --picker-pad: 10px;
   --picker-inset: 4px;
   --picker-fill: color-mix(in srgb, var(--vx-text) 6%, transparent);
+  /* Muted text (counts, context sizes, captions, the placeholder). --vx-text-muted is only
+     4.1:1 on the dark surface; halfway to --vx-text-subtle it is 5.8:1 there and 5.0:1 on a
+     highlighted row (light: 6.5:1 and 5.7:1), so it stays quiet and still reads. Icons keep
+     --vx-text-muted, which clears the 3:1 they need. */
+  --picker-muted: color-mix(in srgb, var(--vx-text-subtle) 50%, var(--vx-text-muted));
 }
 .vector-select-model-dialog {
   --picker-inset: 6px;
@@ -2613,7 +2618,7 @@ html[data-vector-navigation-resizing] * {
   font-size: 14px;
 }
 :is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-picker-search"] input::placeholder {
-  color: var(--vx-text-muted);
+  color: var(--picker-muted);
 }
 :is(.vector-model-popover, .vector-select-model-dialog)
   [data-slot="model-picker-search"]
@@ -2659,7 +2664,7 @@ html[data-vector-navigation-resizing] * {
   align-items: center;
   height: 28px;
   padding: 0 var(--picker-pad);
-  color: var(--vx-text-muted);
+  color: var(--picker-muted);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0;
@@ -2701,7 +2706,7 @@ html[data-vector-navigation-resizing] * {
 :is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-section-count"] {
   flex: none;
   min-width: 36px;
-  color: var(--vx-text-muted);
+  color: var(--picker-muted);
   font-size: 12px;
   font-weight: 400;
   font-variant-numeric: tabular-nums;
@@ -2793,7 +2798,7 @@ html[data-vector-navigation-resizing] * {
 :is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-row-context"] {
   flex: none;
   min-width: 36px;
-  color: var(--vx-text-muted);
+  color: var(--picker-muted);
   font-size: 12px;
   font-weight: 400;
   font-variant-numeric: tabular-nums;

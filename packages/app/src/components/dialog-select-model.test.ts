@@ -10,12 +10,14 @@ import {
   modelAriaLabel,
   modelDisplayName,
   modelTitle,
+  pickerCurrentRow,
   pickerHeaderKey,
   pickerKeyAction,
   pickerKeys,
   pickerModelKey,
   pickerModelName,
   pickerNavigation,
+  pickerRowKey,
   pickerSectionLabel,
   pickerSectionViews,
   readOpenSections,
@@ -349,10 +351,11 @@ describe("buildModelSections", () => {
     expect(pickerKeys(sections).some((key) => key.startsWith("unlisted-"))).toBe(false)
   })
 
-  test("rows run newest first within a provider", () => {
+  test("rows run newest first within a provider, the one in Recently used included", () => {
     const sections = build()
+    expect(keysOf(sections[0].items)).toEqual(["openai:gpt-6-astra"])
     const openai = sections.find((section) => section.id === "provider:openai")
-    expect(keysOf(openai?.items ?? [])).toEqual(["openai:gpt-5.6-sol", "openai:gpt-5.5"])
+    expect(keysOf(openai?.items ?? [])).toEqual(["openai:gpt-6-astra", "openai:gpt-5.6-sol", "openai:gpt-5.5"])
   })
 
   test("a header holds only its name, its provider's mark and its models: no access or policy caption", () => {
@@ -368,24 +371,47 @@ describe("buildModelSections", () => {
     expect(modelAriaLabel(opus, NOW)).toContain("uses your API key")
   })
 
-  test("a header reads its name and how many models it holds, as it shows them", () => {
+  test("a header counts every model of its provider, Recently used included, as the rows it opens", () => {
     const anthropic = build().find((section) => section.id === "provider:anthropic")!
     expect(anthropic.items).toHaveLength(2)
     expect(pickerSectionLabel(anthropic)).toBe("Anthropic, 2 models")
+    // GPT-6 Astra is the current model, in Recently used, and still one of OpenAI's three.
+    const openai = build().find((section) => section.id === "provider:openai")!
+    expect(pickerSectionLabel(openai)).toBe("OpenAI, 3 models")
     expect(pickerSectionLabel({ label: "OpenAI", items: [sol] })).toBe("OpenAI, 1 model")
   })
 
-  test("keys are unique and are exactly the render order, and every model appears once", () => {
+  test("keys are unique and are exactly the render order, and every model appears once under its provider", () => {
     for (const sections of [build(), build("gpt"), build("free"), build("", { recentKeys: [] })]) {
       const walk: string[] = []
-      for (const section of sections) for (const item of section.items) walk.push(pickerModelKey(item))
+      for (const section of sections) for (const item of section.items) walk.push(pickerRowKey(section, item))
       expect(pickerKeys(sections)).toEqual(walk)
       expect(new Set(walk).size).toBe(walk.length)
       expect(sections.every((section) => section.items.length > 0)).toBe(true)
+      const below = sections.filter((section) => section.kind !== "recent").flatMap((section) => keysOf(section.items))
+      expect(new Set(below).size).toBe(below.length)
     }
-    expect(new Set(pickerKeys(build()))).toEqual(
-      new Set(keysOf(models.filter((model) => model.provider.id !== "unlisted-service"))),
-    )
+    const listed = keysOf(models.filter((model) => model.provider.id !== "unlisted-service"))
+    const browse = build()
+    expect(new Set(keysOf(browse.filter((section) => section.kind !== "recent").flatMap((section) => section.items))))
+      .toEqual(new Set(listed))
+    // The top section's rows are the same models again, under keys of their own.
+    expect(pickerKeys(browse).slice(0, 1)).toEqual(["recent:openai:gpt-6-astra"])
+  })
+
+  test("the highlight rests on the current model's row in Recently used, or under its provider without it", () => {
+    const open = new Set(["provider:openai"])
+    const browse = pickerNavigation(pickerSectionViews(build(), open, ""))
+    expect(browse.keys.filter((key) => key.endsWith("openai:gpt-6-astra"))).toEqual([
+      "recent:openai:gpt-6-astra",
+      "openai:gpt-6-astra",
+    ])
+    expect(pickerCurrentRow(browse, pickerModelKey(astra))).toBe("recent:openai:gpt-6-astra")
+    expect(browse.rows.get("openai:gpt-6-astra")).toBe(astra)
+    const searching = pickerNavigation(pickerSectionViews(build("gpt"), open, "gpt"))
+    expect(pickerCurrentRow(searching, pickerModelKey(astra))).toBe("openai:gpt-6-astra")
+    expect(pickerCurrentRow(searching, undefined)).toBeUndefined()
+    expect(pickerCurrentRow(searching, pickerModelKey(opus))).toBeUndefined()
   })
 
   test("the top section holds at most three, skips models that aren't listed, and works without recent", () => {
@@ -546,7 +572,9 @@ test("retired providers are excluded from current, recent, provider and search s
       recentKeys: retired.map(pickerModelKey),
       now: NOW,
     })
-    expect(pickerKeys(sections).some((key) => key.startsWith("unlisted-"))).toBe(false)
+    expect(sections.flatMap((section) => section.items).some((item) => item.provider.id.startsWith("unlisted-"))).toBe(
+      false,
+    )
   }
   for (const item of retired) expect(modelAccess(item).kind).toBe("none")
 })
@@ -564,7 +592,7 @@ test("custom providers remain available in current, recent and searched model ch
           now: NOW,
         }),
       ),
-    ).toEqual([pickerModelKey(custom)])
+    ).toEqual(term ? [pickerModelKey(custom)] : [`recent:${pickerModelKey(custom)}`, pickerModelKey(custom)])
   }
 })
 
@@ -613,15 +641,20 @@ describe("Free models inside of Vector", () => {
         ["Free models inside of Vector", [pickerModelKey(shared)]],
         ["OpenRouter", expect.arrayContaining([pickerModelKey(own), pickerModelKey(paid)])],
       ])
-      // The current one sits in Recently used, on top, and is not repeated below.
+      // The current one sits in Recently used, on top, and stays in its own section too.
       const recent = buildModelSections({
         models,
         now: NOW,
         currentKey: pickerModelKey(shared),
         recentKeys: [pickerModelKey(shared)],
       })
-      expect(recent.map((section) => section.label)).toEqual(["Recently used", "OpenRouter"])
+      expect(recent.map((section) => section.label)).toEqual([
+        "Recently used",
+        "Free models inside of Vector",
+        "OpenRouter",
+      ])
       expect(recent[0].items).toEqual([shared])
+      expect(recent[1].items).toEqual([shared])
     }
     expect(modelDisplayName(own)).toBe("Maker Coder")
     expect(pickerModelName(own)).toBe("Maker Coder (free)")
@@ -728,7 +761,7 @@ describe("Recently used on top", () => {
   const models = [gpt, sonnet, opus, free]
   const popular = ["anthropic", "openai"]
 
-  test("comes first, above every provider and above the free models, and is not repeated below", () => {
+  test("comes first, above every provider and above the free models, which still list its models", () => {
     const sections = buildModelSections({
       models,
       now: NOW,
@@ -736,9 +769,11 @@ describe("Recently used on top", () => {
       currentKey: pickerModelKey(gpt),
       recentKeys: [pickerModelKey(free), pickerModelKey(opus)],
     })
-    expect(sections.map((section) => section.id)).toEqual(["recent", "provider:anthropic"])
+    expect(sections.map((section) => section.id)).toEqual(["recent", "free", "provider:anthropic", "provider:openai"])
     expect(keysOfSection(sections[0])).toEqual([pickerModelKey(gpt), pickerModelKey(free), pickerModelKey(opus)])
-    expect(keysOfSection(sections[1])).toEqual([pickerModelKey(sonnet)])
+    expect(keysOfSection(sections[1])).toEqual([pickerModelKey(free)])
+    expect(keysOfSection(sections[2])).toEqual([pickerModelKey(opus), pickerModelKey(sonnet)])
+    expect(keysOfSection(sections[3])).toEqual([pickerModelKey(gpt)])
     // With models left over, the free models follow the top section and lead the providers.
     const fewer = buildModelSections({ models, now: NOW, popular, currentKey: pickerModelKey(opus) })
     expect(fewer.map((section) => section.id)).toEqual(["recent", "free", "provider:anthropic", "provider:openai"])
@@ -755,7 +790,7 @@ describe("Recently used on top", () => {
       ["provider:openai", true, false],
     ])
     expect(pickerNavigation(views).keys).toEqual([
-      pickerModelKey(opus),
+      pickerRowKey({ kind: "recent" }, opus),
       "section:free",
       "section:provider:anthropic",
       "section:provider:openai",
@@ -829,9 +864,11 @@ describe("provider headers open and close their models", () => {
       ["recent", false, true],
       [anthropic, true, true],
     ])
+    // Claude Opus 5 is in Recently used and under Anthropic, each row with its own key.
     expect(pickerNavigation(pickerSectionViews(only, opened, "")).keys).toEqual([
-      pickerModelKey(opus),
+      "recent:anthropic:claude-opus-5",
       "section:provider:anthropic",
+      pickerModelKey(opus),
       pickerModelKey(sonnet),
     ])
     expect(view(toggleOpenSection(opened, anthropic))).toEqual([

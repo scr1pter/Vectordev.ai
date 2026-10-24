@@ -186,7 +186,7 @@ async function openSection(page: Page, label: string) {
 
 const openFreeModels = (page: Page) => openSection(page, "Free models inside of Vector")
 
-test("lists each copy of a free model once, Vector's under Free models inside of Vector, and hides the group when OFF", async ({
+test("lists each copy of a free model in its own place, Vector's under Free models inside of Vector, and hides the group when OFF", async ({
   page,
 }, testInfo) => {
   await setup(page, { enabled: true })
@@ -315,6 +315,32 @@ test("a no-training free model shows no training notice", async ({ page }) => {
   await openFreeModels(page)
   await expect(page.locator('[data-option-key="vector:maker/coder:free"]')).toBeVisible()
   await expect(page.locator('[data-slot="model-row-training-detail"]')).toHaveCount(0)
+})
+
+test("the composer's model button names each copy as the picker does, the user's own with (free)", async ({ page }) => {
+  await setup(page, { enabled: true })
+  const button = page.locator('[data-action="prompt-model"]').filter({ visible: true }).first()
+  await button.click()
+  await openSection(page, "OpenRouter")
+  const own = page.locator('[data-model-section="provider"] [data-option-key="openrouter:maker/coder:free"]')
+  await expect(own.locator('[data-slot="model-row-name"]')).toHaveText("Maker Coder (free)")
+  await own.click()
+  await expect(page.locator(".vector-select-model-dialog")).toHaveCount(0)
+  await expect(button).toHaveText("Maker Coder (free)")
+  // The chosen copy leads Recently used and stays under OpenRouter, whose count is still all of its models.
+  await button.click()
+  const recent = page.locator('[data-model-section="recent"] [data-option-key="recent:openrouter:maker/coder:free"]')
+  await expect(recent).toHaveAttribute("data-checked", "")
+  await expect(recent.locator('[data-slot="model-row-name"]')).toHaveText("Maker Coder (free)")
+  await expect(own).toHaveAttribute("data-checked", "")
+  const openrouter = page.locator("button[data-model-section-toggle]").filter({ hasText: "OpenRouter" })
+  await expect(openrouter.locator('[data-slot="model-section-count"]')).toHaveText("1")
+  // Vector's copy is the plain name, on its row and on the button.
+  await openFreeModels(page)
+  const shared = page.locator('[data-model-section="free"] [data-option-key="vector:maker/coder:free"]')
+  await expect(shared.locator('[data-slot="model-row-name"]')).toHaveText("Maker Coder")
+  await shared.click()
+  await expect(button).toHaveText("Maker Coder")
 })
 
 test("switching agents preserves the selected free model until an explicit paid model choice", async ({ page }) => {

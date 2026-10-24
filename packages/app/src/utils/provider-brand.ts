@@ -288,10 +288,12 @@ function byRelease(a: PickerModel, b: PickerModel) {
 }
 
 /** Group connected coding models by provider. Without a search, the recent choices come first, above every provider
-    and above Free models inside of Vector; a model listed there is not repeated below. Free models inside of Vector
-    holds the free models Vector provides; a copy on the user's own account sits with that provider's other models.
-    `keepOrder` keeps the order the models came in within each section, for a hand-ordered list such as an external
-    agent's, which leads with its CLI's default. */
+    and above Free models inside of Vector. Every section below lists all of its models, recent ones included, so a
+    header's count is its provider's total and matches the rows it opens. Free models inside of Vector holds the free
+    models Vector provides; a copy on the user's own account sits with that provider's other models.
+    A `fixed` list, a host's own such as an external agent's CLI models, keeps the order its models came in (it leads
+    with its CLI's default) and leaves out what the top section shows: it is always open and has no count, so a
+    repeat would only show the same row twice. */
 export function buildModelSections<T extends PickerModel>(input: {
   models: readonly T[]
   term?: string
@@ -299,7 +301,7 @@ export function buildModelSections<T extends PickerModel>(input: {
   recentKeys?: readonly string[]
   now: number
   popular?: readonly string[]
-  keepOrder?: boolean
+  fixed?: boolean
 }): PickerSection<T>[] {
   const term = (input.term ?? "").trim().toLowerCase()
   // Both copies of a free model are listed, Vector's first; each runs where its section says.
@@ -307,18 +309,15 @@ export function buildModelSections<T extends PickerModel>(input: {
     input.models.filter((model) => !isHiddenProvider(model.provider.id, model.provider) && isCodingModel(model)),
   )
   const sections: PickerSection<T>[] = []
-  const taken = new Set<string>()
+  const recent: T[] = []
   if (!term) {
     const byKey = new Map(models.map((model) => [pickerModelKey(model), model]))
     const history = new Set(input.recentKeys)
-    const recent: T[] = []
     for (const key of [input.currentKey, ...(input.recentKeys ?? [])]) {
       if (recent.length >= RECENT_SECTION_LIMIT) break
-      if (!key || taken.has(key)) continue
-      const model = byKey.get(key)
-      if (!model) continue
+      const model = key ? byKey.get(key) : undefined
+      if (!model || recent.includes(model)) continue
       recent.push(model)
-      taken.add(key)
     }
     if (recent.length > 0)
       sections.push({
@@ -329,6 +328,7 @@ export function buildModelSections<T extends PickerModel>(input: {
       })
   }
 
+  const taken = new Set(input.fixed ? recent.map(pickerModelKey) : [])
   const free = models.filter(
     (model) =>
       providedByVector(model) && !taken.has(pickerModelKey(model)) && matchRank(model, term, input.now) !== undefined,
@@ -355,7 +355,7 @@ export function buildModelSections<T extends PickerModel>(input: {
   // Vector Codium keeps its catalog's order, led by the model it recommends: its models list no release date, so
   // sorting by date and name would put Claude Haiku 5.5, the model that uses credits fastest, first.
   const order = (a: T, b: T) =>
-    rank(a) - rank(b) || (input.keepOrder || a.provider.id === "vector-plan" ? 0 : byRelease(a, b))
+    rank(a) - rank(b) || (input.fixed || a.provider.id === "vector-plan" ? 0 : byRelease(a, b))
 
   const popular = (input.popular ?? []).filter(providerAllowed)
   const popularity = (id: string) => {
@@ -381,9 +381,14 @@ export function buildModelSections<T extends PickerModel>(input: {
   return [...sections, ...listed]
 }
 
+/** A row's key, for keyboard order and the row's data-option-key. A model in the top section is listed again under its
+    provider, so the top section's rows carry their own prefix and no two rows share a key. */
+export const pickerRowKey = (section: Pick<PickerSection, "kind">, model: { id: string; provider: { id: string } }) =>
+  section.kind === "recent" ? `recent:${pickerModelKey(model)}` : pickerModelKey(model)
+
 /** Keyboard order: every row, in render order. */
 export function pickerKeys(sections: readonly PickerSection[]) {
-  return sections.flatMap((section) => section.items.map(pickerModelKey))
+  return sections.flatMap((section) => section.items.map((item) => pickerRowKey(section, item)))
 }
 
 /* ---- Open and closed sections ------------------------------------------------
@@ -419,16 +424,35 @@ export const pickerSectionLabel = (section: Pick<PickerSection, "label" | "items
   `${section.label}, ${section.items.length} ${section.items.length === 1 ? "model" : "models"}`
 
 /** Keyboard order, in render order: each header that toggles, then its section's rows when it is open. `headers` maps
-    a header's key to its section, so a model key can never be mistaken for one. */
-export function pickerNavigation(views: readonly PickerSectionView[]) {
+    a header's key to its section, so a model key can never be mistaken for one, and `rows` maps each visible row's key
+    to its model. */
+export function pickerNavigation<T extends PickerModel>(views: readonly PickerSectionView<T>[]) {
   const headers = new Map(
     views.filter((view) => view.toggle).map((view) => [pickerHeaderKey(view.section), view.section.id]),
   )
+  const rows = new Map(
+    views.flatMap((view) =>
+      view.open ? view.section.items.map((item) => [pickerRowKey(view.section, item), item] as const) : [],
+    ),
+  )
   const keys = views.flatMap((view) => [
     ...(view.toggle ? [pickerHeaderKey(view.section)] : []),
-    ...(view.open ? view.section.items.map(pickerModelKey) : []),
+    ...(view.open ? view.section.items.map((item) => pickerRowKey(view.section, item)) : []),
   ])
-  return { keys, headers }
+  return { keys, headers, rows }
+}
+
+/** The first visible row holding the current model: its row in the top section while that shows, otherwise its row
+    under its provider. */
+export function pickerCurrentRow(
+  navigation: { keys: readonly string[]; rows: ReadonlyMap<string, PickerModel> },
+  currentKey: string | undefined,
+) {
+  if (!currentKey) return undefined
+  return navigation.keys.find((key) => {
+    const item = navigation.rows.get(key)
+    return item !== undefined && pickerModelKey(item) === currentKey
+  })
 }
 
 export type PickerKeyAction = { move: string } | { toggle: string } | { select: string }

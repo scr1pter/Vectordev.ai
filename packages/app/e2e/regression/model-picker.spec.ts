@@ -166,6 +166,26 @@ async function expectEvenRows(picker: Locator) {
 
 const top = async (locator: Locator) => (await locator.boundingBox())?.y
 
+/** WCAG contrast of an element's text on the first opaque background behind it. */
+async function contrast(text: Locator) {
+  const [foreground, background] = await text.evaluate((element) => {
+    const opaque = (value: string) => !/(?:rgba\(.*,\s*0(?:\.\d+)?\)|\/\s*0?\.\d+\)|transparent)$/.test(value)
+    let node: Element | null = element.parentElement
+    while (node && !opaque(getComputedStyle(node).backgroundColor)) node = node.parentElement
+    return [getComputedStyle(element).color, node ? getComputedStyle(node).backgroundColor : "rgb(0, 0, 0)"]
+  })
+  const luminance = (value: string) => {
+    const srgb = value.match(/color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)/)?.slice(1, 4).map(Number)
+    const rgb = value.match(/rgba?\(([\d.]+),? ([\d.]+),? ([\d.]+)/)?.slice(1, 4).map((part) => Number(part) / 255)
+    const channels = srgb ?? rgb
+    if (!channels) throw new Error(`unreadable colour: ${value}`)
+    const [r, g, b] = channels.map((part) => (part <= 0.03928 ? part / 12.92 : ((part + 0.055) / 1.055) ** 2.4))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+  }
+  const [light, dark] = [luminance(foreground), luminance(background)].sort((a, b) => b - a)
+  return (light + 0.05) / (dark + 0.05)
+}
+
 async function shot(page: Page, picker: Locator, path: string) {
   // Let the open animation and any chevron turn settle first.
   await page.waitForTimeout(250)
@@ -196,20 +216,21 @@ test("the composer's picker over several providers, one open, a search and the f
   const recent = dialog.locator('[data-model-section="recent"]')
   await expect(recent.locator('[data-slot="menu-v2-group-label"]')).toHaveText("Recently used")
   await expect(recent.locator('[data-slot="model-row-icon"] svg')).toHaveCount(3)
-  await expect(dialog.locator('[data-option-key="anthropic:claude-opus-5"]')).toHaveAttribute("data-checked", "")
+  // Recently used rows have keys of their own: each model is listed under its provider too.
+  const opus = recent.locator('[data-option-key="recent:anthropic:claude-opus-5"]')
+  await expect(opus).toHaveAttribute("data-checked", "")
+  await expect(opus.locator('[data-slot="model-row-context"]')).toHaveText("1M")
   await expect(
-    dialog.locator('[data-option-key="anthropic:claude-opus-5"] [data-slot="model-row-context"]'),
-  ).toHaveText("1M")
-  await expect(
-    dialog.locator('[data-option-key="vector:poolside/laguna-s-2.1:free"] [data-slot="model-row-training"]'),
+    recent.locator('[data-option-key="recent:vector:poolside/laguna-s-2.1:free"] [data-slot="model-row-training"]'),
   ).toHaveText("May train on your prompts")
-  // Each provider is one closed row: its name and a muted count of its models, nothing else.
+  // Each provider is one closed row: its name and a muted count of all its models, the recent ones included, and
+  // nothing else.
   const providers = dialog.locator("button[data-model-section-toggle]")
   await expect(providers).toHaveCount(5)
   for (const [label, count] of [
-    ["Free models inside of Vector", "1"],
-    ["Anthropic", "2"],
-    ["OpenAI", "2"],
+    ["Free models inside of Vector", "2"],
+    ["Anthropic", "3"],
+    ["OpenAI", "3"],
     ["Google", "2"],
     ["OpenRouter", "2"],
   ]) {
@@ -222,6 +243,13 @@ test("the composer's picker over several providers, one open, a search and the f
   for (const text of ["API key", "New", "Provided by Vector", "No-training policy", "Your OpenRouter account", "2026"])
     await expect(dialog).not.toContainText(text)
   await expect(dialog.locator('[data-option-key="action:connect-provider"]')).toHaveText("Connect provider")
+  // Muted text (a count, a context size, a caption) still reads at 4.5:1 or more on the dialog's surface.
+  for (const muted of [
+    header(dialog, "OpenAI").locator('[data-slot="model-section-count"]'),
+    recent.locator('[data-option-key="recent:openai:gpt-6-astra"] [data-slot="model-row-context"]'),
+    recent.locator('[data-slot="menu-v2-group-label"]'),
+  ])
+    expect(await contrast(muted)).toBeGreaterThanOrEqual(4.5)
   await expectEvenRows(dialog)
   await shot(page, container, testInfo.outputPath("dialog-providers.png"))
 
@@ -230,6 +258,12 @@ test("the composer's picker over several providers, one open, a search and the f
   await header(dialog, "Anthropic").click()
   await expect(header(dialog, "Anthropic")).toHaveAttribute("aria-expanded", "true")
   await expect(dialog.locator('[data-option-key="anthropic:claude-sonnet-5"]')).toBeVisible()
+  // The count is the rows that open: Claude Opus 5 is under Anthropic as well as in Recently used, checked in both.
+  const anthropic = dialog
+    .locator('[data-model-section="provider"]')
+    .filter({ has: page.locator("button[data-model-section-toggle]").filter({ hasText: "Anthropic" }) })
+  await expect(anthropic.locator('[data-component="menu-v2-item"]')).toHaveCount(3)
+  await expect(anthropic.locator('[data-option-key="anthropic:claude-opus-5"]')).toHaveAttribute("data-checked", "")
   expect(await container.boundingBox()).toEqual(before.box)
   expect(await top(header(dialog, "Anthropic"))).toBe(before.header)
   await expect(search).toBeFocused()
@@ -256,12 +290,35 @@ test("the composer's picker over several providers, one open, a search and the f
 
   // The free copy on the user's own OpenRouter account sits with its paid model, named "(free)" to tell them apart.
   await header(dialog, "OpenRouter").click()
-  await expect(
-    dialog.locator('[data-option-key="openrouter:qwen/qwen3-coder:free"] [data-slot="model-row-name"]'),
-  ).toHaveText("Qwen3 Coder (free)")
+  const own = dialog.locator('[data-option-key="openrouter:qwen/qwen3-coder:free"]')
+  await expect(own.locator('[data-slot="model-row-name"]')).toHaveText("Qwen3 Coder (free)")
+  await expect(own).toHaveAttribute("title", /Your OpenRouter account/)
+  await expect(free).toHaveAttribute("title", /Provided by Vector/)
   await expect(
     dialog.locator('[data-model-section="free"] [data-option-key="openrouter:qwen/qwen3-coder:free"]'),
   ).toHaveCount(0)
+
+  // Chosen, the user's own copy keeps "(free)" on the composer's model button, so it never reads as Vector's copy.
+  await own.click()
+  await expect(dialog).toHaveCount(0)
+  const button = page.locator('[data-action="prompt-model"]').filter({ visible: true }).first()
+  await expect(button).toHaveText("Qwen3 Coder (free)")
+  await button.click()
+  const reopened = page.locator(".vector-select-model-dialog")
+  await expect(
+    reopened.locator('[data-option-key="recent:openrouter:qwen/qwen3-coder:free"] [data-slot="model-row-name"]'),
+  ).toHaveText("Qwen3 Coder (free)")
+  await expect(reopened.locator('[data-option-key="recent:openrouter:qwen/qwen3-coder:free"]')).toHaveAttribute(
+    "data-active",
+    "",
+  )
+  await page.keyboard.press("Escape")
+  await expect(reopened).toHaveCount(0)
+  // Vector's copy reads as the plain name. The picker remembers the free models open from before.
+  await button.click()
+  await expect(header(reopened, "Free models inside of Vector")).toHaveAttribute("aria-expanded", "true")
+  await reopened.locator('[data-option-key="vector:qwen/qwen3-coder:free"]').click()
+  await expect(button).toHaveText("Qwen3 Coder")
 })
 
 test("an external agent's own models in the popover", async ({ page }, testInfo) => {
@@ -365,6 +422,9 @@ test("an external agent's own models in the popover", async ({ page }, testInfo)
   )
   await expect(picker.locator("button[data-model-section-toggle]")).toHaveCount(0)
   await expect(picker.getByText("Connect provider")).toHaveCount(0)
+  expect(
+    await contrast(picker.locator('[data-model-section="provider"] [data-slot="menu-v2-group-label"]')),
+  ).toBeGreaterThanOrEqual(4.5)
   await expect(picker.getByRole("searchbox")).toBeFocused()
   await expectEvenRows(picker)
   await shot(page, picker, testInfo.outputPath("runtime-popover.png"))
