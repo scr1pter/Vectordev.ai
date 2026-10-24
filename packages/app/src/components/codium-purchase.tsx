@@ -4,7 +4,7 @@ import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 import { DialogBody, DialogHeader, DialogTitleGroup, DialogV2 } from "@vectordevai/ui/v2/dialog-v2"
 import { For, Match, Show, Switch, createSignal, onCleanup, onMount } from "solid-js"
 import { usePlatform } from "@/context/platform"
-import type { VectorBillingRequest } from "@/vector-account"
+import { codiumChanged, type VectorBillingRequest } from "@/vector-account"
 import {
   billingNotice,
   billingProgress,
@@ -47,11 +47,13 @@ export function createCodiumBilling(refresh: () => unknown, poll = 2_000) {
     setActive(undefined)
     setNotice(billingNotice(request, result))
     await refresh()
+    codiumChanged()
     if (result.outcome !== "completed") return
     for (const _ of [1, 2, 3, 4]) {
       await new Promise((resolve) => setTimeout(resolve, poll))
       if (!life.alive) return
       await refresh()
+      codiumChanged()
     }
   }
   return { active, busy, notice, run }

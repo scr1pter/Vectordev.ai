@@ -1,6 +1,7 @@
+import type { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js"
 import { usePlatform } from "@/context/platform"
-import { accountChip, type VectorAccountStatus } from "../vector-account"
+import { accountChip, onCodiumChange, type VectorAccountStatus } from "../vector-account"
 import { createUpdateRestart } from "./updater-action"
 
 export type WorkspaceNavigationItem = {
@@ -123,8 +124,9 @@ export function WorkspaceNavigation(props: {
   const [localMode, setLocalMode] = createSignal<"agent" | "editor">(props.mode ?? "agent")
   const [helpOpen, setHelpOpen] = createSignal(false)
   const [account, setAccount] = createSignal<VectorAccountStatus>({ authenticated: false, pending: false })
+  const [codium, setCodium] = createSignal<ModelPlanStatus.Status>()
   const mode = () => props.mode ?? localMode()
-  const chip = createMemo(() => accountChip(account()))
+  const chip = createMemo(() => accountChip(account(), codium()))
   // The account chip opens Settings whenever the desktop's account bridge is there, so Update can take the gear's place
   // and Settings stays one click away. Without the bridge the chip is plain text, and the gear stays beside Update.
   const showGear = () => !props.update || !platform.vectorAccount
@@ -149,11 +151,40 @@ export function WorkspaceNavigation(props: {
   onMount(() => {
     const vectorAccount = platform.vectorAccount
     if (!vectorAccount) return
-    onCleanup(vectorAccount.onChange(setAccount))
+    // The plan beside the name is read on launch, on signing in or out, after a billing window and, at most once a
+    // minute, when Vector comes back to the front, which covers a plan bought or changed on vectordev.ai. Only the
+    // latest read counts, so a slow answer about an earlier account never replaces a newer one.
+    const reads = { latest: 0, at: 0 }
+    const readPlan = () => {
+      const read = vectorAccount.codium
+      if (!read) return
+      const current = ++reads.latest
+      reads.at = Date.now()
+      void read()
+        .catch(() => undefined)
+        .then((status) => {
+          if (current === reads.latest) setCodium(status)
+        })
+    }
+    const focused = () => {
+      if (Date.now() - reads.at >= 60_000) readPlan()
+    }
+    onCleanup(
+      vectorAccount.onChange((next) => {
+        // Another account, or none, never shows the last one's plan, even for the moment before it is read.
+        if (next.email !== account().email) setCodium(undefined)
+        setAccount(next)
+        readPlan()
+      }),
+    )
+    onCleanup(onCodiumChange(readPlan))
+    window.addEventListener("focus", focused)
+    onCleanup(() => window.removeEventListener("focus", focused))
     void vectorAccount
       .status()
       .then(setAccount)
       .catch(() => undefined)
+    readPlan()
   })
 
   const selectMode = (next: "agent" | "editor") => {
@@ -832,7 +863,7 @@ export function WorkspaceNavigation(props: {
               data-vector-account-chip
               class="flex min-w-0 items-center gap-2 rounded-[6px] px-1 py-1 text-left transition hover:bg-white/[0.05]"
               title={account().email}
-              aria-label={`Account: ${chip().label}. Open account settings`}
+              aria-label={`Account: ${chip().name}${chip().plan ? `, ${chip().plan} plan` : ""}. Open account settings`}
               onClick={props.onAccount}
             >
               <Show
@@ -856,7 +887,22 @@ export function WorkspaceNavigation(props: {
                   />
                 )}
               </Show>
-              <span class="truncate text-[12.5px] text-[color:var(--vx-workspace-text-primary)]">{chip().label}</span>
+              <span class="flex min-w-0 items-baseline text-[12.5px]">
+                <span class="truncate text-[color:var(--vx-workspace-text-primary)]">{chip().label}</span>
+                <Show when={chip().plan}>
+                  {(plan) => (
+                    <span
+                      data-vector-account-plan
+                      class="shrink-0 whitespace-pre text-[color:var(--vx-workspace-text-secondary)]"
+                    >
+                      <span aria-hidden="true" class="text-[color:var(--vx-workspace-text-tertiary)]">
+                        {" · "}
+                      </span>
+                      {plan()}
+                    </span>
+                  )}
+                </Show>
+              </span>
             </button>
           </Show>
         </Show>

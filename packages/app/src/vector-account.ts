@@ -1,4 +1,5 @@
 import type { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
+import { CodiumPlan } from "@vectordevai/schema/codium-plan"
 
 export type VectorAccountStatus = {
   authenticated: boolean
@@ -56,17 +57,36 @@ export type VectorAccountPlatform = {
 
 /**
  * What the sidebar's account chip shows, as Claude and Codex show it: the photo, else the first letter, beside the
- * name from Google or the account, else the email.
+ * first name from Google or the account, else the email, and then the Codium plan: Free without a subscription, else
+ * the plan's name. The plan is left out until Vector has read it, and when it could not.
  */
-export function accountChip(status: VectorAccountStatus) {
-  const label = status.name || status.email || ""
+export function accountChip(status: VectorAccountStatus, codium?: ModelPlanStatus.Status) {
+  const name = status.name?.trim() || status.email || ""
+  const label = name.split(/\s+/)[0] ?? ""
   return {
     label,
-    initial: label.trim().charAt(0),
+    name,
+    plan: codium?.signedIn && !codium.error ? (codium.plan?.name ?? CodiumPlan.FREE) : undefined,
+    initial: label.charAt(0),
     // Only an inline raster image, so the chip never loads a URL whatever the status carries.
     photo:
       status.avatar && /^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/.test(status.avatar)
         ? status.avatar
         : undefined,
   }
+}
+
+const codiumChanges = new Set<() => void>()
+
+/** Calls `listener` whenever a billing window may have changed the account's Codium plan; returns the unsubscribe. */
+export function onCodiumChange(listener: () => void) {
+  codiumChanges.add(listener)
+  return () => {
+    codiumChanges.delete(listener)
+  }
+}
+
+/** Tells every screen showing the Codium plan to read it again. */
+export function codiumChanged() {
+  codiumChanges.forEach((listener) => listener())
 }
