@@ -7,6 +7,7 @@ import { Config } from "../../src/config/config"
 import { Server } from "../../src/server/server"
 import { resetDatabase } from "../fixture/db"
 import { disposeAllInstances, tmpdir } from "../fixture/fixture"
+import { useManagedPolicyFixture } from "../fixture/managed-policy"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
 
 // A company lock (lock: true in the managed local block, plan section 4.2): the keys it keeps come from company policy
@@ -16,6 +17,7 @@ import { NetworkGuard } from "../../../core/test/lib/network-guard"
 const guard = NetworkGuard.use()
 
 const managedDirectory = process.env.VECTOR_TEST_MANAGED_CONFIG_DIR!
+const managedFixture: { restore?: () => void } = {}
 const GLOBAL_FILES = ["config.json", "vector.json", "vector.jsonc"].map((file) => path.join(Global.Path.config, file))
 const globalFile = path.join(Global.Path.config, "vector.json")
 const ENVIRONMENT = ["VECTOR_LOCAL_WSL_NETWORK", "VECTOR_LOCAL_POLICY", "VECTOR_AGENT_SESSION"] as const
@@ -41,6 +43,8 @@ afterEach(async () => {
   })
   GLOBAL_FILES.forEach((file) => rmSync(file, { force: true }))
   rmSync(managedDirectory, { recursive: true, force: true })
+  managedFixture.restore?.()
+  managedFixture.restore = undefined
   rmSync(Config.localConfirmedFile(), { force: true })
   // Removing the company's policy turns Vector Local off again, which waits for the owner; the owner here says yes.
   Config.refreshLocal()
@@ -53,6 +57,7 @@ afterEach(async () => {
 function writeManaged(config: object, file = "vector.json") {
   mkdirSync(managedDirectory, { recursive: true })
   writeFileSync(path.join(managedDirectory, file), JSON.stringify(config))
+  managedFixture.restore ??= useManagedPolicyFixture(managedDirectory)
 }
 
 // The company's policy as it applies at once, with what the user's own config adds confirmed by the owner.

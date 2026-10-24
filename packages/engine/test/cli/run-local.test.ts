@@ -6,6 +6,7 @@ import { Global } from "@vectordevai/core/global"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import { Config } from "../../src/config/config"
 import { runLocal } from "../../src/cli/cmd/run"
+import { useManagedPolicyFixture } from "../fixture/managed-policy"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
 
 // `vector run --local` adds the VECTOR_LOCAL floor for its own run: Vector Local on, whatever the user's config says,
@@ -15,12 +16,15 @@ import { NetworkGuard } from "../../../core/test/lib/network-guard"
 NetworkGuard.use()
 
 const file = path.join(Global.Path.config, "vector.json")
+const managedFixture: { restore?: () => void } = {}
 
 afterEach(() => {
   delete process.env.VECTOR_LOCAL
   delete process.env.VECTOR_LOCAL_POLICY
   delete process.env[ChildEnvironment.AGENT_MARKER]
   rmSync(path.join(process.env.VECTOR_TEST_MANAGED_CONFIG_DIR!, "vector.json"), { force: true })
+  managedFixture.restore?.()
+  managedFixture.restore = undefined
   rmSync(file, { force: true })
   Config.refreshLocal()
   Config.confirmLocal()
@@ -92,6 +96,7 @@ test("with --attach, a company lock decides the server as one the user lists, an
   const managed = process.env.VECTOR_TEST_MANAGED_CONFIG_DIR!
   mkdirSync(managed, { recursive: true })
   writeFileSync(path.join(managed, "vector.json"), JSON.stringify({ local: { lock: true, user_may: [] } }))
+  managedFixture.restore = useManagedPolicyFixture(managed)
   const locked = await runLocal("http://192.168.1.5:4096")
   expect(locked).toMatchObject({ enabled: true, lock: true, endpoints: [] })
   expect(LocalPolicy.decide(locked, { purpose: "unknown", url: "http://192.168.1.5:4096/" }).decision).toBe("block")

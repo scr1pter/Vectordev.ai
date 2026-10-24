@@ -16,6 +16,7 @@ import type { LocalSettings } from "../../src/config/local-settings"
 import { ServerAuth } from "../../src/server/auth"
 import { Server } from "../../src/server/server"
 import { disposeAllInstances, tmpdir } from "../fixture/fixture"
+import { useManagedPolicyFixture } from "../fixture/managed-policy"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
 import { LocalServers } from "../../../core/test/fixture/local-servers/serve"
 
@@ -541,6 +542,7 @@ describe("the Local API", () => {
     const managed = process.env.VECTOR_TEST_MANAGED_CONFIG_DIR!
     mkdirSync(managed, { recursive: true })
     writeFileSync(path.join(managed, "vector.json"), JSON.stringify({ local: { lock: true, web: "none" } }))
+    const restore = useManagedPolicyFixture(managed)
     try {
       expect(Config.refreshLocal().lock).toBe(true)
       Egress.decide({ source: "model-catalog", url: "https://vectordev.ai/api/models" })
@@ -549,6 +551,7 @@ describe("the Local API", () => {
       expect((await json<LocalMode.Event[]>(await send("GET", "/local/egress"))).length).toBe(1)
     } finally {
       rmSync(managed, { recursive: true, force: true })
+      restore()
       Config.refreshLocal()
     }
   })
@@ -663,6 +666,7 @@ describe("the Local API", () => {
 
     const managed = process.env.VECTOR_TEST_MANAGED_CONFIG_DIR!
     mkdirSync(managed, { recursive: true })
+    const restore = useManagedPolicyFixture(managed)
     try {
       // The company keeps the list, so Vector reads no server it does not list, on the internet or on your network.
       writeFileSync(path.join(managed, "vector.json"), JSON.stringify({ local: { lock: true, user_may: [] } }))
@@ -681,6 +685,7 @@ describe("the Local API", () => {
       expect(elsewhere.message).toContain("servers on your network or the ones it names")
     } finally {
       rmSync(managed, { recursive: true, force: true })
+      restore()
       Config.refreshLocal()
     }
   })

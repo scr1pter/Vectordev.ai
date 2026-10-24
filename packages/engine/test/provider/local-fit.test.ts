@@ -13,6 +13,7 @@ import { Effect } from "effect"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { disposeAllInstances, provideTmpdirInstance } from "../fixture/fixture"
+import { useManagedPolicyFixture } from "../fixture/managed-policy"
 import { testEffect } from "../lib/effect"
 import { Env } from "@/env"
 import { Plugin } from "@/plugin"
@@ -27,8 +28,11 @@ import { NetworkGuard } from "../../../core/test/lib/network-guard"
 // how many requests it is answering at once and holds each reply until the test lets it go. Nothing leaves this
 // computer; the strict guard checks.
 const guard = NetworkGuard.use()
+const managedFixture: { restore?: () => void } = {}
 
 afterEach(async () => {
+  managedFixture.restore?.()
+  managedFixture.restore = undefined
   jest.useRealTimers()
   await disposeAllInstances()
 })
@@ -544,59 +548,65 @@ it.live("a company endpoint on the model server list is fitted like a server som
   ),
 )
 
-it.live("a private server the company lists has no per-token price, and one an edit still held adds is off until confirmed", () => {
-  const globalFile = path.join(Global.Path.config, "vector.json")
-  const managedDirectory = process.env.VECTOR_TEST_MANAGED_CONFIG_DIR!
-  // A repository's config may not point a provider at the user's network, so the user's own config does. Nothing is
-  // sent: only the line is read.
-  const server = (origin: string) => ({
-    name: "Model server",
-    npm: "@ai-sdk/openai-compatible",
-    models: { qwen: { id: "qwen", name: "qwen", tool_call: true, cost: { input: 0, output: 0 } } },
-    options: { apiKey: "test-key", baseURL: `${origin}/v1` },
-  })
-  const providers = { kimi: server("http://10.0.0.5:8000"), held: server("http://10.0.0.9:8000") }
-  return provideTmpdirInstance(
-    () =>
-      Effect.gen(function* () {
-        mkdirSync(managedDirectory, { recursive: true })
-        writeFileSync(
-          path.join(managedDirectory, "vector.json"),
-          JSON.stringify({ local: { endpoints: ["http://10.0.0.5:8000"] } }),
-        )
-        writeFileSync(globalFile, JSON.stringify({ provider: providers, local: { enabled: true } }))
-        Config.refreshLocal()
-        writeFileSync(
-          globalFile,
-          JSON.stringify({ provider: providers, local: { enabled: true, endpoints: ["http://10.0.0.9:8000"] } }),
-        )
-        Config.refreshLocal()
-        expect(Config.localPending()?.changes).toEqual(["adds the model server http://10.0.0.9:8000"])
+it.live(
+  "a private server the company lists has no per-token price, and one an edit still held adds is off until confirmed",
+  () => {
+    const globalFile = path.join(Global.Path.config, "vector.json")
+    const managedDirectory = process.env.VECTOR_TEST_MANAGED_CONFIG_DIR!
+    // A repository's config may not point a provider at the user's network, so the user's own config does. Nothing is
+    // sent: only the line is read.
+    const server = (origin: string) => ({
+      name: "Model server",
+      npm: "@ai-sdk/openai-compatible",
+      models: { qwen: { id: "qwen", name: "qwen", tool_call: true, cost: { input: 0, output: 0 } } },
+      options: { apiKey: "test-key", baseURL: `${origin}/v1` },
+    })
+    const providers = { kimi: server("http://10.0.0.5:8000"), held: server("http://10.0.0.9:8000") }
+    return provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          mkdirSync(managedDirectory, { recursive: true })
+          writeFileSync(
+            path.join(managedDirectory, "vector.json"),
+            JSON.stringify({ local: { endpoints: ["http://10.0.0.5:8000"] } }),
+          )
+          managedFixture.restore = useManagedPolicyFixture(managedDirectory)
+          writeFileSync(globalFile, JSON.stringify({ provider: providers, local: { enabled: true } }))
+          Config.refreshLocal()
+          writeFileSync(
+            globalFile,
+            JSON.stringify({ provider: providers, local: { enabled: true, endpoints: ["http://10.0.0.9:8000"] } }),
+          )
+          Config.refreshLocal()
+          expect(Config.localPending()?.changes).toEqual(["adds the model server http://10.0.0.9:8000"])
 
-        const provider = yield* Provider.Service
-        const line = (providerID: string) =>
-          provider.getModel(ProviderV2.ID.make(providerID), MODEL).pipe(Effect.flatMap((model) => provider.line(model)))
-        expect(yield* line("kimi")).toMatchObject({ hosted: true, local: true })
-        // Until the owner confirms the edit, its server is not on the list in effect, so Vector Local keeps it off.
-        const held = yield* line("held").pipe(Effect.flip)
-        expect(held.unavailable?.reason).toBe("off-in-local")
-        Config.confirmLocal()
-        expect(yield* line("held")).toMatchObject({ hosted: true, local: true })
-        expect(guard.outside()).toEqual([])
-      }).pipe(
-        Effect.ensuring(
-          Effect.sync(() => {
-            rmSync(globalFile, { force: true })
-            rmSync(managedDirectory, { recursive: true, force: true })
-            rmSync(Config.localConfirmedFile(), { force: true })
-            Config.refreshLocal()
-            Config.confirmLocal()
-          }),
+          const provider = yield* Provider.Service
+          const line = (providerID: string) =>
+            provider
+              .getModel(ProviderV2.ID.make(providerID), MODEL)
+              .pipe(Effect.flatMap((model) => provider.line(model)))
+          expect(yield* line("kimi")).toMatchObject({ hosted: true, local: true })
+          // Until the owner confirms the edit, its server is not on the list in effect, so Vector Local keeps it off.
+          const held = yield* line("held").pipe(Effect.flip)
+          expect(held.unavailable?.reason).toBe("off-in-local")
+          Config.confirmLocal()
+          expect(yield* line("held")).toMatchObject({ hosted: true, local: true })
+          expect(guard.outside()).toEqual([])
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              rmSync(globalFile, { force: true })
+              rmSync(managedDirectory, { recursive: true, force: true })
+              rmSync(Config.localConfirmedFile(), { force: true })
+              Config.refreshLocal()
+              Config.confirmLocal()
+            }),
+          ),
         ),
-      ),
-    { trusted: true },
-  )
-})
+      { trusted: true },
+    )
+  },
+)
 
 it.live(
   "a cloud AI service in the model catalog stops being one of the user's model servers once providers load",
