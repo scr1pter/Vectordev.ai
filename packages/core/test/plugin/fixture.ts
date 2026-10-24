@@ -22,8 +22,10 @@ const npmLayer = Layer.succeed(
   Npm.Service,
   Npm.Service.of({
     add: () => Effect.succeed({ directory: "", entrypoint: undefined }),
+    addAs: () => Effect.succeed({ directory: "", entrypoint: undefined }),
     install: () => Effect.void,
     which: () => Effect.succeed(undefined),
+    whichAs: () => Effect.succeed(undefined),
   }),
 )
 

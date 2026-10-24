@@ -3,13 +3,10 @@ import { ExternalAgent } from "../src/external-agent"
 
 const agents: readonly ExternalAgent.Agent[] = ExternalAgent.catalog
 
-// Owner decision: these vendors need written permission first, so they show neutral letters.
-const LETTERS_REQUIRED = ["claude-code", "codex", "muse-code"]
-// The only agents whose official logo may be drawn, and the page that allows it.
-const OFFICIAL_ALLOWED: Record<string, string> = {
-  cursor: "https://cursor.com/brand",
-  kilo: "https://github.com/Kilo-Org/kilocode/blob/main/packages/kilo-console/public/kilo-logo.svg",
-}
+// The tones Vector draws letters in (host-locally.css). None is a vendor's brand colour.
+const TONES = ["slate", "teal", "sky", "indigo", "plum", "rose", "amber", "olive", "moss"]
+// A logo, icon or image file, or a vendor's brand-asset page, named anywhere in an entry.
+const IMAGE = /\.(?:svg|png|jpe?g|gif|webp|ico|avif)\b|\/brand\b|press-?kit|brand-?assets/i
 const CREDENTIAL_FLAG = /^(?:--?api-?key|--apikey|-k|--auth|--token|--key|--credentials?|--password|--bearer)$/i
 
 function onVendorDomain(agent: ExternalAgent.Agent, raw: string) {
@@ -27,7 +24,6 @@ function links(agent: ExternalAgent.Agent) {
   return [
     agent.docsUrl,
     agent.headless?.docsUrl,
-    agent.logo.official?.source,
     ...agent.install.flatMap((option) => [option.docsUrl, ...(option.command.match(/https?:\/\/[^\s'"|)]+/g) ?? [])]),
     ...agent.notes.map((note) => note.source),
   ].filter((link): link is string => Boolean(link))
@@ -44,14 +40,13 @@ function copy(agent: ExternalAgent.Agent) {
 }
 
 describe("external agent catalog", () => {
-  test("lists the sixteen agents in the plan's order", () => {
+  test("lists the fifteen agents in the plan's order", () => {
     expect(agents.map((agent) => agent.id)).toEqual([
       "claude-code",
       "codex",
       "cursor",
       "copilot",
       "gemini",
-      "antigravity",
       "muse-code",
       "kilo",
       "cline",
@@ -69,11 +64,41 @@ describe("external agent catalog", () => {
     // Amp has a reader but stays in the terminal: it does not ask before running tools (owner decision 6).
     expect(ExternalAgent.chatIds).toEqual(["claude-code", "codex", "cursor", "gemini", "pi", "qwen"])
     expect(ExternalAgent.isChatId("gemini")).toBe(true)
-    for (const id of ["copilot", "antigravity", "muse-code", "kilo", "cline", "droid", "amp", "kimi", "goose", "junie"])
+    for (const id of ["copilot", "muse-code", "kilo", "cline", "droid", "amp", "kimi", "goose", "junie"])
       expect(ExternalAgent.isChatId(id)).toBe(false)
     expect(ExternalAgent.isChatId("vector")).toBe(false)
     expect(ExternalAgent.isId("junie")).toBe(true)
     expect(ExternalAgent.isId("vector")).toBe(false)
+    // Removed by the owner (23 October 2026): Google does not support wrapping it in third-party apps.
+    expect(ExternalAgent.isId("antigravity")).toBe(false)
+    expect(agents.some((agent) => agent.binaries.some((binary) => binary.name === "agy"))).toBe(false)
+  })
+
+  test("names each agent as its vendor writes it", () => {
+    expect(Object.fromEntries(agents.map((agent) => [agent.id, agent.name]))).toEqual({
+      "claude-code": "Claude Code",
+      codex: "Codex",
+      cursor: "Cursor CLI",
+      copilot: "GitHub Copilot CLI",
+      gemini: "Gemini CLI",
+      "muse-code": "Muse Code",
+      kilo: "Kilo CLI",
+      cline: "Cline",
+      pi: "pi",
+      droid: "Factory Droid",
+      amp: "Amp",
+      qwen: "Qwen Code",
+      kimi: "Kimi Code",
+      goose: "goose",
+      junie: "Junie",
+    })
+    expect(ExternalAgent.find("junie")!.vendor).toBe("JetBrains")
+    // DROID alone is another company's mark, and Copilot is always GitHub Copilot.
+    for (const text of agents.flatMap(copy)) {
+      expect(text).not.toMatch(/(?<!Factory )\bDroid\b/)
+      expect(text).not.toMatch(/(?<!GitHub )\bCopilot\b/)
+      expect(text).not.toMatch(/Cursor Agent|Kilo Code|Cursor AI|Cursor Code|\bGoose\b/)
+    }
   })
 
   test("every link is https on the vendor's own domain", () => {
@@ -105,25 +130,23 @@ describe("external agent catalog", () => {
     expect(windows("amp")).toEqual([])
   })
 
-  test("logos: letters where permission is pending, official files only where the vendor allows them", () => {
+  test("badges: every agent shows its own two letters in a Vector tone, and no entry names a logo", () => {
     for (const agent of agents) {
+      // Only the letters, the tone and the reason: there is nowhere for a logo file to go.
+      expect(Object.keys(agent.logo).sort()).toEqual(["letters", "reason", "tone"])
       expect(agent.logo.letters).toMatch(/^[A-Z]{2}$/)
-      if (LETTERS_REQUIRED.includes(agent.id)) {
-        expect(agent.logo.show).toBe("letters")
-        expect(agent.logo.official).toBeUndefined()
-      }
-      if (agent.logo.official) expect(OFFICIAL_ALLOWED[agent.id]).toBe(agent.logo.official.source)
-      if (agent.logo.show === "official") expect(agent.logo.official).toBeDefined()
-      if (agent.logo.show === "letters") expect(agent.logo.pending).toBeTruthy()
+      expect(TONES).toContain(agent.logo.tone)
+      expect(agent.logo.reason).toBeTruthy()
+      expect({ id: agent.id, image: IMAGE.test(JSON.stringify(agent)) }).toEqual({ id: agent.id, image: false })
     }
-    expect(agents.filter((agent) => agent.logo.show === "official").map((agent) => agent.id)).toEqual([
-      "cursor",
-      "kilo",
-    ])
+    expect(new Set(agents.map((agent) => agent.logo.letters)).size).toBe(agents.length)
+    // Neutral slate for Claude Code rather than a warm tone that reads as Anthropic's.
+    expect(ExternalAgent.find("claude-code")!.logo.tone).toBe("slate")
   })
 
   test("interface copy follows Vector's wording rules", () => {
-    for (const text of agents.flatMap(copy)) {
+    // A company's legal name is quoted as it is registered: goose's trademark owner is LF Projects, LLC.
+    for (const text of agents.flatMap(copy).map((text) => text.replace("LF Projects, LLC", "LF"))) {
       expect(text).not.toMatch(/\bprojects?\b|\bexactly\b|never exceeds|absolute privacy/i)
       // "Run your installed Claude Code", never "use your <vendor> plan in Vector".
       expect(text).not.toMatch(/\b(?:plan|subscription)s? in Vector\b/i)
@@ -187,11 +210,122 @@ describe("external agent catalog", () => {
   test("Muse Code discloses Contributor mode and Kilo its telemetry, citing the vendor", () => {
     const data = (id: string) => ExternalAgent.find(id)!.notes.filter((note) => note.kind === "data")
     expect(data("muse-code")[0]?.text).toContain("Contributor mode")
+    // Before the first run, and for confidential code: Meta's terms bar it from Contributor Services.
+    expect(data("muse-code")[0]?.text).toContain("confidential")
+    expect(data("muse-code")[0]?.text).toContain("/settings")
+    expect(data("muse-code")[0]?.text).toContain("before the first run")
     expect(data("muse-code")[0]?.source).toStartWith("https://dev.meta.ai/")
     expect(data("kilo")[0]?.text).toContain("telemetry")
     expect(ExternalAgent.find("gemini")!.label).toBe("Work or API accounts")
     for (const id of ["amp", "droid", "kilo", "cline"])
       expect(ExternalAgent.find(id)!.notes.some((note) => note.kind === "billing")).toBe(true)
+  })
+})
+
+describe("the notes the legal review asks for", () => {
+  const notes = (id: string, kind?: ExternalAgent.Note["kind"]) =>
+    ExternalAgent.find(id)!
+      .notes.filter((note) => !kind || note.kind === kind)
+      .map((note) => note.text)
+      .join("\n")
+
+  test("the trademark notices goose's, JetBrains' and GitHub's guidelines ask for", () => {
+    expect(notes("goose", "trademark")).toBe("goose is a trademark of LF Projects, LLC.")
+    expect(notes("junie", "trademark")).toBe("Junie is a trademark of JetBrains s.r.o.")
+    // JetBrains asks for a link back to jetbrains.com with it.
+    expect(ExternalAgent.find("junie")!.notes.find((note) => note.kind === "trademark")?.source).toBe(
+      "https://www.jetbrains.com/",
+    )
+    expect(notes("copilot", "trademark")).toBe("GitHub and GitHub Copilot are trademarks of GitHub, Inc.")
+  })
+
+  test("Cursor CLI says, before the first run, what --force and --trust allow, and where", () => {
+    const text = notes("cursor", "terms")
+    expect(text).toContain("--force and --trust")
+    expect(text).toContain("without asking")
+    expect(text).toContain("isolated copy")
+    // The note matches what actually runs.
+    expect(ExternalAgent.find("cursor")!.headless!.fresh).toEqual(expect.arrayContaining(["--force", "--trust"]))
+  })
+
+  test("Qwen Code is never called free, and plan keys are steered to the terminal", () => {
+    expect(notes("qwen", "billing")).toContain("isn't free")
+    expect(notes("qwen", "terms")).toContain("Coding Plan and Token Plan")
+    expect(notes("qwen", "terms")).toContain("Start in terminal")
+  })
+
+  test("pi steers away from Claude Pro/Max sign-in and is never handed a Claude OAuth token", () => {
+    const pi = ExternalAgent.find("pi")!
+    expect(notes("pi", "terms")).toContain("Anthropic's terms restrict Claude Pro/Max sign-in in third-party tools")
+    expect(notes("pi", "terms")).toContain("connect another provider in pi")
+    expect(pi.headless!.unsetEnv).toEqual(["ANTHROPIC_OAUTH_TOKEN"])
+    // No Claude models are surfaced for pi: the model is the user's own pick inside pi.
+    expect(pi.models).toEqual({ kind: "fixed", models: [] })
+    expect(pi.signIn.hint).toBe("Type /login inside pi to connect a provider.")
+  })
+
+  test("Claude Code says an API key in the environment comes first in chat, and who bills it", () => {
+    const text = notes("claude-code", "billing")
+    expect(text).toContain("ANTHROPIC_API_KEY")
+    expect(text).toContain("billed to that key")
+    expect(text).toContain("not Vector")
+  })
+
+  test("no note implies a partnership, endorsement or support from a vendor", () => {
+    for (const agent of agents)
+      for (const note of agent.notes)
+        expect(note.text).not.toMatch(/partner|endorse|sponsor|official|approved|certified|works with|powered by/i)
+    expect(ExternalAgent.find("codex")!.notes).toEqual([])
+  })
+})
+
+describe("the runtime rules the legal review asks for", () => {
+  const forms = (agent: ExternalAgent.Agent) =>
+    [
+      agent.headless?.fresh,
+      agent.headless?.resume,
+      agent.headless?.model,
+      agent.headless?.resumeModel,
+      agent.interactive.args,
+      agent.interactive.model,
+      agent.signIn.args,
+      agent.statusProbe?.args,
+      agent.models.kind === "live" ? agent.models.args : undefined,
+    ]
+      .filter((form): form is readonly string[] => Boolean(form))
+      .flat()
+
+  test("at most four of the user's own agents run at once, and a refusal says why in Vector's words", () => {
+    expect(ExternalAgent.MAX_RUNNING).toBe(4)
+    expect(ExternalAgent.RUN_LIMIT_MESSAGE).toStartWith("4 of your coding agents are already running")
+    expect(ExternalAgent.RUN_LIMIT_MESSAGE).not.toMatch(/\bprojects?\b|\bexactly\b|never exceeds|upgrade|plan\b/i)
+  })
+
+  test("every run of a user's own agent stays out of learning, and so does a record that says so", () => {
+    for (const agent of agents) expect(ExternalAgent.excludedFromLearning({ runtime: agent.id })).toBe(true)
+    // An agent that has since left the catalog reads back as Vector's runtime; its record's own mark still counts.
+    expect(ExternalAgent.excludedFromLearning({ runtime: "vector", excludedFromLearning: true })).toBe(true)
+    expect(ExternalAgent.excludedFromLearning({ runtime: "antigravity" })).toBe(true)
+    expect(ExternalAgent.excludedFromLearning({ runtime: "vector" })).toBe(false)
+  })
+
+  test("Claude Code keeps every sign-in method: no bare mode, no forced login method, no settings override", () => {
+    for (const part of forms(ExternalAgent.find("claude-code")!)) {
+      expect(part).not.toMatch(/^--bare$|^--settings$|^--setting-sources$|forceLoginMethod|apiKeyHelper/i)
+      expect(part).not.toMatch(/ANTHROPIC_|CLAUDE_CODE_OAUTH_TOKEN/)
+    }
+  })
+
+  test("Codex keeps its own home, sign-in and admin rules, and never leaves the sandbox", () => {
+    const parts = forms(ExternalAgent.find("codex")!)
+    for (const part of parts) {
+      expect(part).not.toMatch(/CODEX_HOME|ORIGINATOR|forced_login_method|forced_chatgpt_workspace_id/i)
+      expect(part).not.toMatch(/cli_auth_credentials_store|^--ignore-user-config$|^--ignore-rules$|^--profile$/)
+      expect(part).not.toMatch(/danger-full-access|dangerously-bypass|^--full-auto$|^--yolo$/)
+    }
+    // Every -c override Vector passes is the sandbox or the model, nothing else.
+    const overrides = parts.flatMap((part, index) => (parts[index - 1] === "-c" ? [part] : []))
+    expect(overrides).toEqual(['sandbox_mode="workspace-write"', `model="${ExternalAgent.MODEL}"`])
   })
 })
 

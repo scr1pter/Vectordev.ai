@@ -9,6 +9,7 @@ import { Config } from "@vectordevai/core/config"
 import { ConfigToolOutput } from "@vectordevai/core/config/tool-output"
 import { SessionV2 } from "@vectordevai/core/session"
 import { ToolOutputStore } from "@vectordevai/core/tool-output-store"
+import { WebFence } from "@vectordevai/core/research/fence"
 import { testEffect } from "./lib/effect"
 import { tmpdir } from "./fixture/tmpdir"
 
@@ -66,6 +67,28 @@ describe("ToolOutputStore", () => {
         expect(yield* fs.readFileString(result.outputPaths[0])).toBe(first + second)
         if (result.output.content[0]?.type !== "text") throw new Error("expected text preview")
         expect(Buffer.byteLength(result.output.content[0].text)).toBeLessThanOrEqual(ToolOutputStore.MAX_BYTES)
+      }),
+    ),
+  )
+
+  it.live("names a saved web page so Grep and Read fence it, and leaves other output's name alone", () =>
+    withStore(({ store, fs }) =>
+      Effect.gen(function* () {
+        const page = WebFence.fenceWebPage({ url: "https://e.example/", tool: "webfetch" }, "heat pump ".repeat(8_000))
+        const web = yield* store.bound({
+          sessionID,
+          toolCallID: "call-web",
+          output: { structured: {}, content: [{ type: "text", text: page }] },
+        })
+        expect(web.outputPaths).toHaveLength(1)
+        expect(WebFence.savedFile(web.outputPaths[0]!)).toBe(true)
+        expect(yield* fs.readFileString(web.outputPaths[0]!)).toBe(page)
+        const plain = yield* store.bound({
+          sessionID,
+          toolCallID: "call-plain",
+          output: { structured: {}, content: [{ type: "text", text: "x".repeat(60_000) }] },
+        })
+        expect(WebFence.savedFile(plain.outputPaths[0]!)).toBe(false)
       }),
     ),
   )

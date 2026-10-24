@@ -44,6 +44,7 @@ import {
   type DeployEvidence,
 } from "./cloud-handoff"
 import { createCloudOverview } from "./cloud-overview"
+import { OffInLocal } from "@/features/local/off-in-local"
 import "./cloud-console.css"
 
 type Notice = { tone: "info" | "success" | "error"; text: string }
@@ -801,6 +802,9 @@ export function CloudConsole(props: {
           </span>
         </div>
       </header>
+      <div class="shrink-0 px-5 empty:hidden" data-component="cloud-off-in-local">
+        <OffInLocal source="vector-cloud" named />
+      </div>
 
       <div class="cloud-shell">
         <aside class="cloud-sidebar">

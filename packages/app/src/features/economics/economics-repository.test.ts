@@ -69,6 +69,45 @@ function makeOutcome(partial: Partial<ModelOutcome> & Pick<ModelOutcome, "id" | 
 }
 
 describe("economics-repository", () => {
+  test("external-agent outcomes cannot enter rankings or exports, including retired stored labels", async () => {
+    const projectId = "/repo/external-exclusion"
+    const vector = makeOutcome({ id: "vector", projectId, runtime: "vector" })
+    await recordOutcome(vector)
+    const key = storage.key(0)!
+    const own = [
+      makeOutcome({ id: "chat", projectId, runtime: "claude-code" }),
+      makeOutcome({ id: "retired", projectId, runtime: "vector", excludedFromLearning: true }),
+      makeOutcome({ id: "legacy", projectId, provider: "Cursor Agent" }),
+      makeOutcome({ id: "old-terminal", projectId, provider: "Antigravity CLI" }),
+    ]
+    // Stored rows from an older build must also be ignored before any consumer can read them.
+    storage.setItem(key, JSON.stringify([vector, ...own]))
+    expect(await listOutcomes(projectId)).toEqual([vector])
+    for (const outcome of own) await recordOutcome(outcome)
+    expect(JSON.parse(storage.getItem(key)!)).toEqual([vector])
+    await recordWorkspaceOutcome(own[0]!, { workspaceRevision: 1 })
+    await recordSessionOutcome({ sessionID: "external", projectId, updatedAt: 1, outcome: own[1] })
+    expect(await listOutcomes(projectId)).toEqual([vector])
+  })
+
+  test("external workspaces cannot be converted into model-learning samples", () => {
+    const record = {
+      id: "external",
+      runtime: "codex",
+      provider: "Codex",
+      model: "Runtime default",
+      sourcePath: "/repo/external-exclusion",
+      createdAt: "2026-01-01T00:00:00Z",
+      lastActivityAt: "2026-01-01T00:00:01Z",
+      changedFilesCount: 1,
+    }
+    expect(outcomesFromWorkspaceRecord(record, "general")).toBeUndefined()
+    expect(
+      outcomesFromWorkspaceRecord({ ...record, runtime: "vector", excludedFromLearning: true }, "general"),
+    ).toBeUndefined()
+    expect(outcomesFromWorkspaceRecord({ ...record, runtime: "vector" }, "general")).toBeDefined()
+  })
+
   test("ordinary and parallel history share complete reply timing through storage and recommendation", async () => {
     const projectId = "/repo/reply-time"
     const messages = (modelID: string, completed?: number) => [

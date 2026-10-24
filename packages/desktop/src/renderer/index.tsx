@@ -278,7 +278,8 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
 
       const notification = new Notification(title, {
         body: description ?? "",
-        icon: "https://vectordev.ai/favicon-96x96-v3.png",
+        // Bundled with the app (app/public), so a notification reaches no server; Vector Local blocks site assets.
+        icon: new URL("/favicon-96x96-v3.png", location.href).href,
       })
       notification.onclick = () => {
         void window.api.showWindow()

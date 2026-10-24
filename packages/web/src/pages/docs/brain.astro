@@ -1,6 +1,7 @@
 ---
 import DocsPage from "../../layouts/DocsPage.astro"
-import { brainBudgetRows, brainCommandRows } from "../../data/docs-content"
+import { brainBudgetRows, brainCommandRows, memoryRoleRows } from "../../data/docs-content"
+import { release111 } from "../../data/vector-releases"
 
 export const prerender = true
 ---
@@ -69,6 +70,32 @@ export const prerender = true
             works</strong> in Settings → Memory, or <code>vector memory learning off</code>.
           </p>
 
+          <h2 id="about-you">Learning about you</h2>
+          <p>
+            {release111.since} Vector learns from what you type: the formats and kinds of data you like, what you mean by
+            words you use, and how you like things done. "When I say ship it, I mean merge and deploy" teaches a term,
+            which comes into a later request only when that request uses the words. "I prefer tables", "always run the
+            tests first" or "never force-push to main" teaches a preference. It reads only your own typed words, never
+            text you paste, quote or put in code, and costs no model call. A short statement in a short message is in use
+            at once; anything longer waits for a second sighting or one click. <em>Vector tries not to keep sensitive
+            personal details:</em> a sentence that tells it about your health, money, religion, politics, relationships,
+            sexuality or gender is dropped.
+          </p>
+          <p>
+            Each item shows under the reply as <em>Learned from what you typed: "…"</em>, with Undo, and under
+            <strong>Settings → Memory → About you</strong>, grouped by kind: Formats, Workflow, What you mean, Tools,
+            Sources and Style. Each item shows the words it came from; edit, undo or forget it, or turn a kind off.
+            <strong>Erase what Vector learned in this session</strong> forgets everything whose only evidence is that
+            session. When your words teach nothing the rules can keep, such as a correction ("no, I meant…"), a small
+            model can suggest what to learn: <strong>Let a model help Vector learn</strong> runs it with Vector Local
+            only (the default), with any model, or never. Its tokens count in that session. Up to 300 entries about you
+            stay in use; past that, tidying archives the ones used least.
+          </p>
+          <p>
+            <em>Erase removes it from the brain and stops Vector using it. The sessions it came from keep their messages
+            until you delete them. A model server you host may keep its own logs.</em>
+          </p>
+
           <h2 id="proven">What proved useful</h2>
           <p>
             A card or memory entry that an answer cited, or that the agent opened, in a run whose checks went from
@@ -80,14 +107,44 @@ export const prerender = true
 
           <h2 id="subagents-and-review">Subagents and Vectorscope</h2>
           <p>
-            A subagent started by a Thorough request begins with up to 200 tokens of the cards and memory that bear on
-            its task, for up to four subagents a request, and none for smaller requests. With the next CLI release, a
+            In desktop 1.99.110, a subagent started by a Thorough request begins with up to 200 tokens of the cards and
+            memory that bear on its task, for up to four subagents a request, and none for smaller requests.
+            {release111.since} every subagent also gets how you work, as <a href="#every-agent">Memory of you in every
+            agent</a> describes. With the next CLI release, a
             <a href="/docs/vectorscope">Vectorscope</a> review you run in the terminal with <code>vector review</code>
             gets the requirements, constraints, contracts and decisions linked to the changed files, with any drift, in
             at most 300 tokens: private documents only when the review model is not a free model labelled <strong>May
             train on your prompts</strong>, never in a
             review posted to a pull request, and never content that waits for your review. Vectorscope reviews in the
             desktop app do not get them yet.
+          </p>
+
+          <h2 id="every-agent">Memory of you in every agent</h2>
+          <p>
+            {release111.since} every agent uses what Vector has learned about you: coding, subagents, the Vectorscope
+            reviews you run in Vector and Deep research. Sessions with invited guests, and free models that may train on
+            your prompts, get none of it. Reviews and research see how you work, not facts about you.
+          </p>
+          <p>
+            <strong>How you work</strong> is your preferences, decisions and lessons, the terms Vector learned and your
+            own <code>RULES.md</code>. <strong>Facts about you</strong> are the facts you or Vector saved about you,
+            <code>MEMORY.md</code>, private documents, and anything learned in a session that read a private document.
+            For a role whose output leaves this computer, a decision or a lesson goes only when it names nothing in
+            particular: no name, address, host, amount, date or long number.
+          </p>
+          <dl class="doc-rows">
+            {memoryRoleRows.map(([term, detail]) => (<div><dt>{term}</dt><dd>{detail}</dd></div>))}
+          </dl>
+          <p>
+            The lines each role gets come out of its own small budget, and a greeting still carries none. Reviews that run
+            in GitHub Actions have no brain, because <code>brain.db</code> is on your computer.
+          </p>
+          <p>
+            Before Vector posts a pull request or a review, or makes a commit, it checks the text against what it knows
+            about you. Text Vector or an agent wrote loses a sentence that repeats it, after you see what goes: post
+            without it, post as is, or cancel. Text you typed or edited is never changed; Vector shows the overlap and
+            asks. When the check cannot run, Vector asks whether to post anyway. Commands the agent runs itself, such as
+            <code>git commit -m</code> or <code>gh pr create</code>, are not checked.
           </p>
 
           <h2 id="settings">Settings → Memory</h2>
@@ -97,6 +154,13 @@ export const prerender = true
             its own, newest first, with Undo. <strong>Tidy and erase</strong> merges duplicates, archives what goes
             unused and erases what Vector learned, leaving the files you wrote alone. <strong>Documents</strong> is
             described in <a href="/docs/documents">Documents and code links</a>.
+          </p>
+          <p>
+            {release111.since} <strong>About you</strong> lists what Vector learned about you, as described above, and
+            <strong>Research</strong> lists this repository's <a href="/docs/research">Deep research</a> runs.
+            <strong>Export and import</strong> saves what Vector keeps as Markdown to read or JSON to bring to another
+            computer, for you, this repository or both. <em>Imported items wait for your approval</em>, and
+            <strong>Approve all</strong> puts them in use in one click.
           </p>
 
           <h2 id="terminal">In the terminal</h2>

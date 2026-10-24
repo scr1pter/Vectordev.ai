@@ -708,6 +708,7 @@ export type SessionsPromptInput = {
         readonly name: string
         readonly source?: { readonly start: number; readonly end: number; readonly text: string }
       }>
+      readonly agent?: string
     }
     readonly delivery?: "steer" | "queue" | null
     readonly resume?: boolean | null
@@ -732,6 +733,7 @@ export type SessionsPromptInput = {
         readonly name: string
         readonly source?: { readonly start: number; readonly end: number; readonly text: string }
       }>
+      readonly agent?: string
     }
     readonly delivery?: "steer" | "queue" | null
     readonly resume?: boolean | null
@@ -756,6 +758,7 @@ export type SessionsPromptInput = {
         readonly name: string
         readonly source?: { readonly start: number; readonly end: number; readonly text: string }
       }>
+      readonly agent?: string
     }
     readonly delivery?: "steer" | "queue" | null
     readonly resume?: boolean | null
@@ -780,6 +783,7 @@ export type SessionsPromptInput = {
         readonly name: string
         readonly source?: { readonly start: number; readonly end: number; readonly text: string }
       }>
+      readonly agent?: string
     }
     readonly delivery?: "steer" | "queue" | null
     readonly resume?: boolean | null
@@ -804,6 +808,7 @@ export type SessionsPromptInput = {
         readonly name: string
         readonly source?: { readonly start: number; readonly end: number; readonly text: string }
       }>
+      readonly agent?: string
     }
     readonly delivery?: "steer" | "queue" | null
     readonly resume?: boolean | null
@@ -834,6 +839,7 @@ export type SessionsPromptOutput = {
         readonly name: string
         readonly source?: { readonly start: number; readonly end: number; readonly text: string }
       }>
+      readonly agent?: string
     }
     readonly delivery: "steer" | "queue"
     readonly timeCreated: number
@@ -858,7 +864,7 @@ export type SessionsSpendOutput = {
     readonly spentUsd: number
     readonly steps: number
     readonly unpricedSteps: number
-    readonly costKind?: "free" | "priced" | "plan" | "unknown"
+    readonly costKind?: "free" | "priced" | "plan" | "local" | "unknown"
   } | null
 }["data"]
 
@@ -934,6 +940,7 @@ export type SessionsContextOutput = {
           readonly name: string
           readonly source?: { readonly start: number; readonly end: number; readonly text: string }
         }>
+        readonly agent?: string
         readonly type: "user"
       }
     | {
@@ -1096,7 +1103,7 @@ export type SessionsHistoryOutput = {
           readonly timestamp: number
           readonly sessionID: string
           readonly usageID: string
-          readonly purpose: "title"
+          readonly purpose: "title" | "memory"
           readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
           readonly cost?: number
           readonly unpriced?: boolean
@@ -1149,6 +1156,7 @@ export type SessionsHistoryOutput = {
                   readonly name: string
                   readonly source?: { readonly start: number; readonly end: number; readonly text: string }
                 }>
+                readonly agent?: string
                 readonly type: "user"
               }
             | {
@@ -1392,6 +1400,7 @@ export type SessionsHistoryOutput = {
               readonly name: string
               readonly source?: { readonly start: number; readonly end: number; readonly text: string }
             }>
+            readonly agent?: string
           }
           readonly delivery: "steer" | "queue"
         }
@@ -1419,6 +1428,7 @@ export type SessionsHistoryOutput = {
               readonly name: string
               readonly source?: { readonly start: number; readonly end: number; readonly text: string }
             }>
+            readonly agent?: string
           }
           readonly delivery: "steer" | "queue"
         }
@@ -1849,7 +1859,7 @@ export type SessionsEventsOutput =
         readonly timestamp: number
         readonly sessionID: string
         readonly usageID: string
-        readonly purpose: "title"
+        readonly purpose: "title" | "memory"
         readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
         readonly cost?: number
         readonly unpriced?: boolean
@@ -1902,6 +1912,7 @@ export type SessionsEventsOutput =
                 readonly name: string
                 readonly source?: { readonly start: number; readonly end: number; readonly text: string }
               }>
+              readonly agent?: string
               readonly type: "user"
             }
           | {
@@ -2145,6 +2156,7 @@ export type SessionsEventsOutput =
             readonly name: string
             readonly source?: { readonly start: number; readonly end: number; readonly text: string }
           }>
+          readonly agent?: string
         }
         readonly delivery: "steer" | "queue"
       }
@@ -2172,6 +2184,7 @@ export type SessionsEventsOutput =
             readonly name: string
             readonly source?: { readonly start: number; readonly end: number; readonly text: string }
           }>
+          readonly agent?: string
         }
         readonly delivery: "steer" | "queue"
       }
@@ -2624,6 +2637,7 @@ export type SessionsMessageOutput = {
           readonly name: string
           readonly source?: { readonly start: number; readonly end: number; readonly text: string }
         }>
+        readonly agent?: string
         readonly type: "user"
       }
     | {
@@ -2818,6 +2832,7 @@ export type MessagesListOutput = {
           readonly name: string
           readonly source?: { readonly start: number; readonly end: number; readonly text: string }
         }>
+        readonly agent?: string
         readonly type: "user"
       }
     | {

@@ -204,6 +204,9 @@ const layer = Layer.effect(
         const plugins = flags.pure ? [] : (cfg.plugin_origins ?? [])
         if (flags.pure && cfg.plugin_origins?.length) {
         }
+        // With Vector Local on, installing an npm plugin is a download the user decides (npm-plugins, Npm.addAs): a
+        // plugin installed earlier loads, and a missing one installs only when allowed. Only the install runs within
+        // the grant to the registry; the plugin's own code never does.
         const loaded = yield* Effect.promise(() =>
           PluginLoader.loadExternal({
             items: plugins,

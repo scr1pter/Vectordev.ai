@@ -14,8 +14,8 @@ import { DialogSelectProvider } from "../dialog-select-provider"
 import { DialogCustomProvider } from "../dialog-custom-provider"
 import { SettingsListV2 } from "./parts/list"
 import { brandProviderName } from "@/utils/provider-brand"
-import { SettingsSearch } from "../settings-search"
 import { SettingsVectorTeams } from "../settings-vector-teams"
+import { OffInLocal } from "@/features/local/off-in-local"
 import "./settings-v2.css"
 
 type ProviderSource = "env" | "api" | "config" | "custom"
@@ -152,6 +152,7 @@ export const SettingsProvidersV2: Component = () => {
       </div>
 
       <div class="settings-v2-tab-body settings-v2-providers">
+        <OffInLocal source={["cloud-inference", "chatgpt-signin", "vector-free-models"]} named />
         <SettingsVectorTeams />
         <div class="settings-v2-section" data-component="connected-providers-section">
           <h3 class="settings-v2-section-title">{language.t("settings.providers.section.connected")}</h3>
@@ -276,9 +277,6 @@ export const SettingsProvidersV2: Component = () => {
           >
             {language.t("dialog.provider.viewAll")}
           </button>
-        </div>
-        <div class="settings-v2-section">
-          <SettingsSearch />
         </div>
       </div>
     </>

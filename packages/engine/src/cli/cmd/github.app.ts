@@ -1,7 +1,14 @@
 import { Octokit } from "@octokit/rest"
 import { z } from "zod"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { githubFetch } from "./github.shared"
 
-export async function githubAppInstallation(request: (url: string, init: RequestInit) => Promise<Response> = fetch) {
+// Whether Vector's GitHub App is installed for the repository, as vectordev.ai answers: a Vector service, so with Vector
+// Local on it is decided as one (vector-account).
+export async function githubAppInstallation(
+  request: (url: string, init: RequestInit) => Promise<Response> = (url, init) =>
+    Egress.fetch("vector-account", url, init),
+) {
   const response = await request("https://vectordev.ai/api/github/installation", {
     redirect: "error",
     signal: AbortSignal.timeout(10_000),
@@ -64,7 +71,7 @@ export async function verifyAppPullRequest(
     head: { repo: { id: number } | null }
   }> = async (repository, pr, token, signal) => {
     const [owner, repo] = repository.split("/")
-    const response = await new Octokit({ auth: token }).rest.pulls.get({
+    const response = await new Octokit({ auth: token, request: { fetch: githubFetch } }).rest.pulls.get({
       owner,
       repo,
       pull_number: pr,

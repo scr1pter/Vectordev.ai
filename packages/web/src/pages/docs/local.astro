@@ -1,0 +1,253 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+import { release111 } from "../../data/vector-releases"
+import policyJson from "../../data/local/vector.json?raw"
+import policyProfile from "../../data/local/ai.vector.managed.mobileconfig?raw"
+
+export const prerender = true
+
+// The admin samples are files of their own (src/data/local), which test/local-docs.test.ts decodes as Vector reads
+// them, so the page cannot show a policy Vector would refuse.
+const registryScript = `$file = "\\\\fileserver\\it\\vector\\vector.json"
+# One line: a policy file holds no line break inside its strings.
+$json = (Get-Content -Raw $file) -replace '\\s*\\r?\\n\\s*', ''
+$key = "HKLM:\\SOFTWARE\\Policies\\Vector"
+New-Item -Path $key -Force | Out-Null
+Set-ItemProperty -Path $key -Name Config -Value $json -Type String`
+---
+
+<DocsPage id="local">
+
+          <p class="note">
+            {release111.since} Vector Local is in the desktop app and the engine it starts. The terminal's
+            <code>vector local</code> commands and <code>vector run --local</code> come with the next CLI release, and
+            Windows WSL servers get Vector Local once a later desktop release requires that CLI.
+          </p>
+          <p>
+            <strong>Vector Local</strong> runs Vector's AI features on model servers you or your company host. With it
+            on, model calls go only to the servers on your list, Vector blocks its own requests to vectordev.ai and to
+            AI services that are not on the list unless you allow one, and a network log, <strong>What Vector
+            sent</strong>, shows what Vector's engine and windows sent or blocked.
+          </p>
+          <p>
+            The agent, subagents, the judge, Vectorscope, Deep research, memory search and the helpers that write titles
+            and summaries all use the servers on your list. Web pages and searches you approve still reach those sites
+            unless you set Web access to None.
+          </p>
+          <p class="note">
+            Vector Local is a policy inside Vector, not a firewall. A person with administrator rights on the computer
+            can remove the policy or run another program. Pair Vector Local with your network controls.
+          </p>
+
+          <h2 id="turn-on">Turning it on</h2>
+          <p>
+            In the desktop app, open <strong>Settings → Vector Local</strong>, or choose <strong>Models you
+            host</strong> in Getting started for a setup that finds your servers, picks a model for each role, checks
+            them and turns Vector Local on. While it is on, the composer shows <strong>Local</strong>, <strong>Local ·
+            your network</strong> or <strong>Local · no web</strong>; opening it shows what the session sent: its model
+            calls by server, the pages and searches it read, the memory its requests carried and what was blocked.
+          </p>
+          <p>
+            In a terminal, <code>vector local on</code> turns it on and <code>vector local status</code> shows what is in
+            effect. <code>vector run --local</code> keeps one run on Vector Local without changing your settings.
+            <code>vector local detect</code> finds the model servers running on this computer, and <code>vector local
+            setup &lt;address&gt;</code> reads a server you name, such as <code>http://10.0.0.5:8000</code>, and puts it
+            on the list. <code>vector local check</code> checks every layer, as <strong>Run a check</strong> does in the
+            app. In the terminal UI, <code>/local</code> opens the same settings.
+          </p>
+          <dl class="doc-rows">
+            <div><dt>Ask</dt><dd>Research and the browser can read the sites you approve.</dd></div>
+            <div><dt>Your network only</dt><dd>Only your network and sites your company lists.</dd></div>
+            <div><dt>None</dt><dd>Vector makes no internet requests. Deep research uses your brain and files.</dd></div>
+          </dl>
+          <p>
+            A change that would loosen Vector Local (turning it off, a looser Web access, a new model server or a newly
+            allowed service) waits for you to confirm it, so an agent cannot loosen it for you: <em>This change would
+            loosen Vector Local. Apply it?</em> A Vector that an agent or Vector's own terminal started cannot loosen it
+            at all.
+          </p>
+
+          <h2 id="servers">Model servers</h2>
+          <p>
+            <strong>Find servers</strong> asks this computer for Ollama, LM Studio, vLLM, llama.cpp and SGLang on their
+            usual ports. It never scans your network: add a server elsewhere by typing its address in <strong>Add
+            server</strong>. Vector reads the server and keeps its identity: the kind of server, its version, the
+            models it serves and, over https, its key. It reads the server again before its first model call, and a
+            server that answers as a different one is held until you confirm it: <em>gpu-box:8000 now answers as a
+            different server. Check it before sending prompts.</em> Updating the server or changing its models counts
+            as a change too, so confirm it after an update or an <code>ollama pull</code>. Each server on the list says
+            where it is and what Vector can tell about it:
+          </p>
+          <ul class="feature-list">
+            <li><strong>Not encrypted</strong><span>Prompts to this server travel in plain text on your network.</span></li>
+            <li><strong>Forwarding</strong><span>This server may pass your prompts or queries on to services it is set up to use, as a LiteLLM proxy or Ollama's cloud models do. Vector can't see past it.</span></li>
+            <li><strong>This computer</strong><span>Another user on this computer could run a server on this port.</span></li>
+          </ul>
+          <p>
+            <strong>Check models</strong> sends each model two or three requests for every role it fills, with that
+            role's real tools, and only when you press it. It finds whether the model calls tools and how much context
+            it was loaded with, and sets the reply limit and how many requests the server takes at once. A server whose
+            count nobody set takes one request at a time, and the titles and summaries Vector writes wait behind your
+            own requests. A role whose model has too small a context is refused with the fix:
+            <em>qwen3-coder:30b has an 8,192-token context. Vector's agent needs about 19,000. Raise the context size or
+            pick another model.</em>
+          </p>
+          <p>
+            Models on this computer, or on a server on your network that is on your list, have no per-token price in
+            Vector. Your hardware and power costs are not counted. Step and loop limits still apply. A server on the
+            internet, a server that passes requests on and Ollama's cloud models stay unpriced, so a dollar cap still
+            stops them. Fast is not offered for a model on a server someone hosts.
+          </p>
+
+          <h2 id="off">Off in Vector Local</h2>
+          <p>
+            Free models provided by Vector and Vector Codium send prompts through vectordev.ai to the services that run
+            them, so they are off in Vector Local, along with cloud providers, Ollama's cloud models, ChatGPT sign-in,
+            share links, automatic update checks, usage counts, crash reports, release notes and the help assistant.
+            Vector does not start Claude Code, Codex or Cursor as outside agents while it is on, because they make their
+            own connections. Each shows <strong>Off in Vector Local</strong> with why, and <strong>Settings → Vector
+            Local</strong> lists them all. Where a service can be allowed, such as GitHub pull requests or a remote MCP
+            server, <strong>Allow</strong> there or <code>vector local allow &lt;source&gt; --reason "…"</code> allows
+            it. A download Vector needs once, such as the memory-search model or a language server, asks first, and
+            <strong>Check for updates</strong> asks each time.
+          </p>
+          <p>
+            On a desktop's first run, Vector holds its own startup requests until you sign in, connect a provider or
+            turn Vector Local on: the model catalog's refresh, the lists of free models and plans, the sign-in options,
+            release notes, the dictation model's preparation, the usage count and the update check.
+          </p>
+
+          <h2 id="not-covered">What Vector Local does not cover</h2>
+          <ul class="feature-list">
+            <li><strong>Sites you approve</strong><span>They receive the requests you approved. That is the point of research.</span></li>
+            <li><strong>Programs the agent starts</strong><span>Shell commands, stdio MCP servers and language servers make their own connections. With Web access None, the shell sandbox blocks the agent's shell commands on macOS and Linux; MCP servers and language servers run outside it, and Windows has no such block.</span></li>
+            <li><strong>Model servers that forward requests</strong><span>A LiteLLM proxy and Ollama's cloud models can pass your prompts on to a cloud service. Vector labels the ones it can recognise.</span></li>
+            <li><strong>Everything outside Vector</strong><span>The operating system, other apps, and the DNS resolver for names Vector is allowed to look up.</span></li>
+            <li><strong>It is a policy inside Vector, not a firewall</strong><span>A person with administrator rights on this computer can change it. Companies should pair it with network controls.</span></li>
+          </ul>
+          <p>
+            With Web access None, the agent's shell commands run in Vector's sandbox. On macOS they can reach servers on
+            this computer only; on Linux, where the sandbox needs bubblewrap (the <code>bwrap</code> command), they reach
+            no network at all, and without bubblewrap Vector does not run them. Either way they can write only in this
+            repository, the working folder, temporary folders and package caches.
+          </p>
+
+          <h2 id="log">What Vector sent</h2>
+          <p>
+            While Vector Local is on, every request Vector decides is logged by origin, never with a path, a query, a
+            header or a body. In the app it is the <strong>Network log</strong> in Settings → Vector Local, and
+            <code>vector local log</code> lists it in a terminal (<code>--blocked</code>, <code>--since 2h</code>,
+            <code>--session</code>). The log is kept for 30 days on this computer unless you or your company set another
+            length. Chromium makes some connections itself, below the layer where Vector decides each request, such as
+            name lookups for the hosts a page names; those are not in the log.
+          </p>
+
+          <h2 id="companies">For companies</h2>
+          <p>
+            Your company's policy is a <code>vector.json</code> that Vector reads before anything else, from a place only
+            an administrator can change. It overrides each person's own settings. A policy file a standard user could
+            have written is left out, and Vector says so: <em>Ignored a policy file that standard users can change.</em>
+            Environment variables can only make it stricter.
+          </p>
+          <dl class="doc-rows">
+            <div><dt>macOS</dt><dd><code>/Library/Application Support/vector/vector.json</code>, owned by root with no group or world write, or a configuration profile for the <code>ai.vector.managed</code> domain delivered by your device management.</dd></div>
+            <div><dt>Linux</dt><dd><code>/etc/vector/vector.json</code>, owned by root with no group or world write.</dd></div>
+            <div><dt>Windows</dt><dd>The <code>Config</code> value (REG_SZ, one line of JSON) under <code>HKLM\SOFTWARE\Policies\Vector</code>, or <code>C:\ProgramData\vector\vector.json</code> when the folder and the file are owned by Administrators or SYSTEM and no other account may change them.</dd></div>
+          </dl>
+          <p>
+            A policy file Vector finds but cannot read or check keeps Vector Local on with Web access None until it is
+            fixed. Vector Local reads the policy files again when they change; the macOS profile, the Windows policy key
+            and the rest of the policy apply when Vector next starts.
+          </p>
+
+          <h3 id="lock">Locking it</h3>
+          <p>
+            With <code>"lock": true</code> in the policy's <code>local</code> block, the company's block is the one that
+            applies: Vector Local stays on, and the app and <code>vector local</code> show <em>Set by your company. Ask
+            your administrator to change it.</em> A lock keeps <code>local</code>, <code>share</code> and
+            <code>autoupdate</code>, and the top-level keys you list in <code>locked_keys</code>, such as
+            <code>model</code> or <code>small_model</code>. Their values come from your policy alone: a person's own
+            values for them and a repository's are left out, so a list in your policy replaces theirs rather than adding
+            to it, and a key you lock without setting keeps its default. Changing one fails with
+            <code>ConfigLocked</code>, and reading the config returns the locked keys as <code>locked</code>.
+          </p>
+          <ul class="feature-list">
+            <li><strong>user_may</strong><span>The parts of <code>local</code> a person may still change: <code>endpoints</code>, <code>allow</code>, <code>web_domains</code> and <code>web</code> (Web access only to a stricter setting). Anyone may add sites to deny.</span></li>
+            <li><strong>endpoint_domains</strong><span>Under a lock, a model server a person adds must be on their own network or match one of these patterns, such as <code>*.corp.example.com</code>. A name they list that says it is on their network, such as <code>gpu.local</code>, must resolve there; your own endpoints are reached wherever they resolve.</span></li>
+            <li><strong>endpoints</strong><span>Your model servers. Only your policy may use a wildcard host (<code>https://*.ml.corp.example.com</code>) or an address range (<code>10.0.0.0/8</code>). A cloud AI service you list yourself, such as a private deployment, is allowed; Vector's own models never are.</span></li>
+            <li><strong>log.retain_days</strong><span>How long the network log is kept. Under a lock, only your policy sets it, and only your policy erases the log.</span></li>
+          </ul>
+
+          <h3 id="certificates">Certificate authorities</h3>
+          <p>
+            <code>local.ca.files</code> names certificate files to trust besides the system's and Vector's own, for a
+            network that inspects TLS. A relative path is read from the folder of the policy that names it. The desktop
+            app and its engine add them to what every connection trusts; the terminal's Vector, which runs on Bun, sends
+            them with its own requests and model calls, after the certificates it already trusts, so public sites keep
+            working. Vector's windows use the system's certificate store, as browsers do, so install the authority there
+            too. Programs Vector runs, such as git, use their own certificate settings.
+            Vector reads the files when it starts, and the app offers to restart when they change. A person's own config
+            may name certificate authorities as well: the desktop app trusts each only once its owner agrees, and the
+            terminal's Vector uses only your policy's, so a person adds their own there with
+            <code>NODE_EXTRA_CA_CERTS</code>.
+          </p>
+
+          <h3 id="updates">Updates from your mirror</h3>
+          <p>
+            <code>local.updates.url</code> points the desktop app at your own update server: a generic feed that serves
+            the same <code>latest.yml</code>, <code>latest-mac.yml</code> and <code>latest-linux.yml</code> files and
+            installers as Vector's own, side by side at that address. Only where updates come from changes. Each
+            download is still checked against the hash in those files, Windows still checks the installer's publisher,
+            and macOS still checks the new app's signature and team. On Linux the hash is the only check, so the mirror
+            must use https, and its address may not carry a user name, a password or a query. With Vector Local on,
+            automatic update checks go to your mirror and nowhere else. The terminal's <code>vector upgrade</code> does
+            not read the mirror yet. Setting <code>"autoupdate": false</code> stops the terminal's own automatic
+            upgrades.
+          </p>
+          <p class="note">
+            <code>local.models_dir</code> and <code>local.catalog_path</code>, for the memory-search and dictation model
+            files and a model catalog of your own, are read in a later release.
+          </p>
+
+          <h3 id="samples">Samples</h3>
+          <p>
+            A policy that keeps Vector Local on with your network only, lists your model servers, lets each person add
+            servers under <code>corp.example.com</code> and make Web access stricter, and sets the model, a certificate
+            authority and the update mirror:
+          </p>
+          <p class="doc-cmd"><code>{policyJson}</code></p>
+          <p>
+            <strong>macOS.</strong> Deliver the same settings as a configuration profile through your device management
+            (in Intune, as a custom configuration profile for macOS). Vector reads the profile's
+            <code>ai.vector.managed</code> payload as it reads <code>vector.json</code>:
+          </p>
+          <p class="doc-cmd"><code>{policyProfile}</code></p>
+          <p>
+            <strong>Windows, Group Policy.</strong> In a Group Policy Object, under Computer Configuration → Preferences →
+            Windows Settings → Registry, add a registry item: action Update, hive <code>HKEY_LOCAL_MACHINE</code>, key
+            path <code>SOFTWARE\Policies\Vector</code>, value name <code>Config</code>, type <code>REG_SZ</code>, and as
+            its data the policy on one line, as plain JSON without comments. Keep the text ASCII; write other characters as
+            <code>\u</code> escapes.
+          </p>
+          <p>
+            <strong>Windows, Intune.</strong> Add a PowerShell platform script that runs as the system, not with the
+            signed-in user's credentials, and writes the value from your policy file:
+          </p>
+          <p class="doc-cmd"><code>{registryScript}</code></p>
+          <p>
+            <strong>Linux.</strong> Install the file as <code>/etc/vector/vector.json</code> with your configuration
+            management, owned by root and mode <code>0644</code>.
+          </p>
+
+          <h2 id="wsl">WSL</h2>
+          <p>
+            An engine the desktop app starts in WSL gets the app's Vector Local as a floor: on, at least as strict a Web
+            access, and the plain addresses of the model servers on the list. It is your own setting there, never a
+            lock, and it carries no allowed services or sites, so put your policy in the distribution's
+            <code>/etc/vector/vector.json</code> too; a wildcard or address-range entry applies only there. In WSL's
+            default networking, a server on this computer is reached from the distribution at the Windows host's
+            address, which Vector lists as well. Ollama on Windows listens on 127.0.0.1 only. Use WSL mirrored
+            networking, or run Ollama inside WSL. Setting <code>OLLAMA_HOST=0.0.0.0</code> exposes it to your whole
+            network.
+          </p>
+</DocsPage>

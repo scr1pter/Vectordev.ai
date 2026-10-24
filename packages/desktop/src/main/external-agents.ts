@@ -1,7 +1,7 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { constants } from "node:fs"
-import { access, cp, mkdir, rm, stat } from "node:fs/promises"
+import { access, cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, isAbsolute, join, relative } from "node:path"
 import { StringDecoder } from "node:string_decoder"
@@ -22,6 +22,7 @@ import {
   workspaceRoots,
   type AgentTurnFinish,
 } from "./external-agent-events"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 
 import {
   fallbackBinDirectories,
@@ -450,6 +451,8 @@ function jsonValue(text: string): unknown {
 // does): a vendor command that nests its own double quotes, such as Codex's
 // `powershell -ExecutionPolicy ByPass -c "irm … | iex"`, then reaches
 // PowerShell as written, whatever quoting the Windows command line applies.
+// An agent's own screen also takes `pidFile`: the shell writes its process id there before the agent starts and
+// removes it once the agent ends, which is how runningTerminalAgents counts the agents open in a terminal.
 export function terminalLaunch(input: {
   title: string
   display: string
@@ -457,16 +460,22 @@ export function terminalLaunch(input: {
   cwd: string
   env: AgentEnvironment
   platform: ExternalAgent.Platform
+  pidFile?: string
 }): ExternalAgent.TerminalLaunch {
   const env: Record<string, string> = input.platform !== "win32" && input.env.PATH ? { PATH: input.env.PATH } : {}
   if (input.platform === "win32") {
+    const marker = input.pidFile && `'${input.pidFile.replace(/'/g, "''")}'`
     const script = [
+      marker ? `Set-Content -LiteralPath ${marker} -Value $PID -NoNewline` : "",
       input.line,
       "$code = $LASTEXITCODE",
+      marker ? `Remove-Item -LiteralPath ${marker} -ErrorAction SilentlyContinue` : "",
       "Write-Host ''",
       "Read-Host 'Finished. Press Enter to close this terminal' | Out-Null",
       "exit $code",
-    ].join("\n")
+    ]
+      .filter(Boolean)
+      .join("\n")
     return {
       title: input.title,
       display: input.display,
@@ -476,14 +485,19 @@ export function terminalLaunch(input: {
       env,
     }
   }
+  const marker = input.pidFile && `'${input.pidFile.replace(/'/g, `'\\''`)}'`
   const script = [
+    marker ? `printf '%s' "$$" > ${marker}` : "",
     input.line,
     "status=$?",
+    marker ? `rm -f ${marker}` : "",
     "printf '\\n'",
     `if [ "$status" -eq 0 ]; then printf '%s' 'Finished. Press Enter to close this terminal.'; else printf 'Exited with code %s. Press Enter to close this terminal.' "$status"; fi`,
     "read -r _",
     'exit "$status"',
-  ].join("\n")
+  ]
+    .filter(Boolean)
+    .join("\n")
   // The engine's terminal appends -l when it starts sh; after -c's script that only names $0, which the script ignores.
   return { title: input.title, display: input.display, command: "/bin/sh", args: ["-c", script], cwd: input.cwd, env }
 }
@@ -556,9 +570,20 @@ export type TerminalAgentInput = { id: string; projectPath: string; model?: stri
 
 // A terminal-tier run: the same isolated checkout a chat run gets, with the
 // agent's own screen opened in it, on the chosen model where it has a flag.
-export async function launchAgentTerminal(
+// `chatRunning` is how many of the user's agents are running in Vector's chat;
+// with the ones open in a terminal they may not pass ExternalAgent.MAX_RUNNING.
+// `runs` is the folder of isolated runs, the test seam for that count.
+export function launchAgentTerminal(...args: Parameters<typeof prepareAgentTerminal>) {
+  return serializeExternalAgentStart(() => prepareAgentTerminal(...args))
+}
+
+async function prepareAgentTerminal(
   input: TerminalAgentInput,
-  options: { prepare?: (projectPath: string) => Promise<PrepareWorkspaceResult> } & AgentLookup = {},
+  options: {
+    prepare?: (projectPath: string) => Promise<PrepareWorkspaceResult>
+    chatRunning?: number | (() => number)
+    runs?: string
+  } & AgentLookup = {},
 ): Promise<ExternalAgent.TerminalAgentLaunch> {
   const agent = requireAgent(input?.id)
   const args = ExternalAgent.interactiveArguments(agent, externalModelValue(input.model))
@@ -566,7 +591,15 @@ export async function launchAgentTerminal(
   const env = options.env ?? agentEnvironment()
   const found = await findAgentBinary(agent, { env: options.env, platform: options.platform })
   if (!found) throw new Error(`${agent.name} is not installed, or Vector can't find it.`)
+  const running = typeof options.chatRunning === "function" ? options.chatRunning() : (options.chatRunning ?? 0)
+  if (running + (await runningTerminalAgents(options.runs)) >= ExternalAgent.MAX_RUNNING)
+    throw new Error(ExternalAgent.RUN_LIMIT_MESSAGE)
   const workspace = await (options.prepare ?? prepareWorkspace)(input.projectPath)
+  // Hold the slot while the renderer opens the terminal. Its shell replaces this short-lived reservation with its PID.
+  await writeFile(
+    join(dirname(workspace.path), TERMINAL_AGENT_MARKER),
+    JSON.stringify({ pendingUntil: Date.now() + 60_000 }),
+  )
   return {
     workspace,
     launch: terminalLaunch({
@@ -576,7 +609,54 @@ export async function launchAgentTerminal(
       cwd: workspace.path,
       env,
       platform,
+      pidFile: join(dirname(workspace.path), TERMINAL_AGENT_MARKER),
     }),
+  }
+}
+
+// Admission is serialized across chat and terminal launches, so simultaneous sends cannot claim the same last slot.
+let agentStarts: Promise<unknown> = Promise.resolve()
+
+export function serializeExternalAgentStart<T>(start: () => Promise<T>): Promise<T> {
+  const next = agentStarts.then(start)
+  agentStarts = next.catch(() => undefined)
+  return next
+}
+
+// Written by the terminal's shell beside an agent's isolated checkout while the agent runs (terminalLaunch).
+const TERMINAL_AGENT_MARKER = "terminal-agent.pid"
+
+// The user's agents open in a terminal right now: every run whose marker names a shell that is still alive. A shell
+// that was closed with the agent still in it never removed its marker, so a dead one is cleared here instead.
+export async function runningTerminalAgents(runs?: string) {
+  const directory = runs ?? (await runsDirectory())
+  const entries = await readdir(directory).catch(() => [] as string[])
+  const live = await Promise.all(
+    entries.map(async (entry) => {
+      const marker = join(directory, entry, TERMINAL_AGENT_MARKER)
+      const value = (await readFile(marker, "utf8").catch(() => "")).trim()
+      const pending = /^\{"pendingUntil":(\d+)\}$/.exec(value)
+      if (pending && Number(pending[1]) > Date.now()) return true
+      const pid = Number(value)
+      if (!Number.isInteger(pid) || pid <= 0) {
+        if (pending) await rm(marker, { force: true }).catch(() => undefined)
+        return false
+      }
+      if (processAlive(pid)) return true
+      await rm(marker, { force: true }).catch(() => undefined)
+      return false
+    }),
+  )
+  return live.filter(Boolean).length
+}
+
+// Signal 0 only asks whether the process exists. EPERM means it does, under another user.
+function processAlive(pid: number) {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM"
   }
 }
 
@@ -656,6 +736,13 @@ const WORKSPACE_EXCLUDED_DIRS = new Set([
 
 const RUNS_DIRECTORY_NAME = "external-agent-runs"
 
+// Imported here so detection and run classification stay testable outside Electron; the runs directory is what in
+// this file needs app.
+async function runsDirectory() {
+  const { app } = await import("electron")
+  return join(app.getPath("userData"), RUNS_DIRECTORY_NAME)
+}
+
 export type PrepareWorkspaceResult = { path: string; isolation: "git-worktree" | "copy" }
 
 function runIn(command: string, args: string[], cwd: string, timeoutMs: number) {
@@ -702,11 +789,8 @@ export async function prepareWorkspace(projectPath: string): Promise<PrepareWork
   const stats = await stat(path).catch(() => undefined)
   if (!stats?.isDirectory()) throw new Error(`"${path}" is not a folder Vector can run an agent in.`)
 
-  // Imported here so detection and run classification stay testable outside
-  // Electron; the runs directory is the only thing in this file that needs app.
-  const { app } = await import("electron")
   const runId = randomUUID()
-  const runRoot = join(app.getPath("userData"), RUNS_DIRECTORY_NAME, runId)
+  const runRoot = join(await runsDirectory(), runId)
   const isolatedPath = join(runRoot, "workspace")
   await mkdir(runRoot, { recursive: true })
 
@@ -738,6 +822,8 @@ export type ExternalAgentRunResult = {
   resumeRejected?: boolean
   // The CLI refused the model it was given, as opposed to failing the task.
   modelRejected?: boolean
+  // What the CLI printed about its sign-in, plan or usage beside a run that worked, as it wrote it.
+  notices?: string[]
   output: string[]
 }
 
@@ -783,6 +869,14 @@ const STDIN_AGENTS = ExternalAgent.chatIds
 
 // The catalog entry for a runtime Vector runs in its own chat. A terminal-only
 // agent never reaches a headless spawn, whatever the renderer sent.
+// The variables an agent's headless run must start without, such as pi's ANTHROPIC_OAUTH_TOKEN. Matched by name only,
+// case-insensitively as Windows names are, so no value is ever read.
+function withoutVariables(env: AgentEnvironment, names: readonly string[] | undefined) {
+  if (!names?.length) return env
+  const unset = new Set(names.map((name) => name.toUpperCase()))
+  return Object.fromEntries(Object.entries(env).filter(([key]) => !unset.has(key.toUpperCase())))
+}
+
 export function chatAgent(runtime: string) {
   const agent = ExternalAgent.find(runtime)
   if (!agent) throw new Error(`"${runtime.slice(0, 40)}" is not an agent Vector can run.`)
@@ -859,14 +953,40 @@ export function modelRejected(model: string | undefined, outcome: AgentOutcome) 
   return Boolean(model) && outcome.exitCode !== 0 && MODEL_REJECTED_PATTERN.test(outcome.error ?? "")
 }
 
-export type AgentOutcome = { exitCode: number; error?: string }
+// What an agent says about the account it runs on: its sign-in, its plan's usage limits, extra usage, quotas, credits
+// and billing. Those words are the user's to read and act on, so Vector passes them on as the agent wrote them and
+// never rewords, shortens or retries around them.
+const ACCOUNT_MESSAGE_PATTERN =
+  /usage limit|limit (?:reached|exceeded|resets?)|rate.?limit|too many requests|quota|extra usage|overage|out of (?:credits|usage|tokens)|\bcredits?\b|billing|payment|upgrade|subscription|\bplan\b|not logged ?in|log ?in|sign(?:ed)? ?(?:in|out)|logged out|unauthori[sz]ed|\b40[12]\b|\b429\b|api key|(?:token|session) (?:has )?expired|set an auth method/i
+
+// The account lines a run printed beside its event stream, as written: the CLI's own notices, such as a usage limit
+// coming up, that its event stream does not carry. At most the last few, so a CLI that repeats one fills nothing.
+export function accountNotices(output: readonly string[]) {
+  return [
+    ...new Set(
+      output
+        .filter((line) => line.startsWith("[stderr] "))
+        .map((line) => line.slice("[stderr] ".length))
+        .filter((line) => ACCOUNT_MESSAGE_PATTERN.test(line)),
+    ),
+  ].slice(-3)
+}
+
+export type AgentOutcome = {
+  exitCode: number
+  error?: string
+  /** Set when the failure is the agent's own word about its sign-in, plan or usage: nothing may run again on it. */
+  account?: true
+}
 
 // The exit code alone does not decide whether a run worked: Claude Code exits 0
 // while reporting {"type":"result","subtype":"success","is_error":true,
 // "result":"Not logged in · Please run /login"}, which used to be recorded as a
-// successful pass that changed nothing. With a chosen `model`, a CLI that only
-// complains on stderr is quoted: a refused model is reported there, and "exited
-// with code 1" would hide the one sentence that says which model to change.
+// successful pass that changed nothing. The agent's own message leads the error
+// as it wrote it, and Vector's sign-in hint follows it as a sentence of its own.
+// With a chosen `model`, a CLI that only complains on stderr is quoted: a
+// refused model is reported there, and "exited with code 1" would hide the one
+// sentence that says which model to change.
 export function agentOutcome(
   runtime: CodingAgentRuntime,
   exitCode: number,
@@ -879,15 +999,15 @@ export function agentOutcome(
   const failed = exitCode !== 0 || Boolean(reported)
   if (!failed) return { exitCode }
 
+  const code = exitCode === 0 ? 1 : exitCode
   const stderr = output.filter((line) => line.startsWith("[stderr] ")).join("\n")
-  const evidence = reported ?? stderr
-  if (SIGNED_OUT_PATTERN.test(evidence)) {
+  const own = reported ?? (accountNotices(output).join("\n") || undefined)
+  const account = own && ACCOUNT_MESSAGE_PATTERN.test(own) ? ({ account: true } as const) : {}
+  if (SIGNED_OUT_PATTERN.test(reported ?? stderr)) {
     // An agent that signs in inside its own screen says where, such as Qwen Code's "Type /auth inside Qwen Code."
     const hint = agent.signIn.hint?.replace(/\.$/, "")
-    return {
-      exitCode: exitCode === 0 ? 1 : exitCode,
-      error: `${setup.label} is installed but not signed in${reported ? ` (${reported})` : ""}. Run \`${setup.signIn}\` in a terminal to sign in${hint ? `. ${hint}` : ""}, then run this again.`,
-    }
+    const advice = `${setup.label} is installed but not signed in. Run \`${setup.signIn}\` in a terminal to sign in${hint ? `. ${hint}` : ""}, then run this again.`
+    return { exitCode: code, error: own ? `${own}\n\n${advice}` : advice, account: true }
   }
   const said = model
     ? output
@@ -899,8 +1019,9 @@ export function agentOutcome(
         .slice(-600)
     : ""
   return {
-    exitCode: exitCode === 0 ? 1 : exitCode,
-    error: reported ?? (said ? `${setup.label}: ${said}` : `${setup.label} exited with code ${exitCode}.`),
+    exitCode: code,
+    error: own ?? (said ? `${setup.label}: ${said}` : `${setup.label} exited with code ${exitCode}.`),
+    ...account,
   }
 }
 
@@ -959,9 +1080,19 @@ function trackAgent(child: ChildProcessWithoutNullStreams) {
   })
 }
 
+/**
+ * Why an external agent does not start while Vector Local is on (its `external-agents` source): the program makes its
+ * own connections, usually to its maker's cloud models, which Vector Local neither sees nor can allow one by one.
+ */
+export function externalAgentOffInLocal(label: string) {
+  return `${label} does not start while Vector Local is on. It makes its own connections, usually to its maker's cloud models, and Vector Local does not see them. Turn Vector Local off in Settings to use it.`
+}
+
 export async function runExternalCodingAgent(input: RunExternalAgentInput): Promise<ExternalAgentRunResult> {
   const agent = chatAgent(input.runtime)
   const setup = { label: agent.name }
+  // Vector Local also holds starts requested outside the launcher.
+  if (Egress.policy().enabled) throw new Error(externalAgentOffInLocal(setup.label))
   const env = input.env ?? agentEnvironment()
   const found = await findAgentBinary(agent, { env: input.env })
   if (!found) {
@@ -995,7 +1126,10 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
     const child = spawn(launch.command, launch.args, {
       cwd: input.cwd,
       detached: process.platform !== "win32",
-      env: untrustedChildEnvironment(env, { NO_COLOR: "1", FORCE_COLOR: "0" }),
+      env: untrustedChildEnvironment(withoutVariables(env, agent.headless?.unsetEnv), {
+        NO_COLOR: "1",
+        FORCE_COLOR: "0",
+      }),
       stdio: ["pipe", "pipe", "pipe"],
       windowsVerbatimArguments: launch.windowsVerbatimArguments,
     })
@@ -1134,9 +1268,15 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
         // a NEW id on resume after a future protocol change, seeding would hide it and
         // every later turn would resume a thread that no longer grows.
         sessionId: sessionId ?? input.resumeSessionId,
+        // A limit or a sign-in the agent reported is never a refused resume: running it again would only spend the
+        // account again on the same answer.
         resumeRejected:
-          Boolean(input.resumeSessionId) && outcome.exitCode !== 0 && RESUME_REJECTED_PATTERN.test(output.join("\n")),
+          Boolean(input.resumeSessionId) &&
+          outcome.exitCode !== 0 &&
+          !outcome.account &&
+          RESUME_REJECTED_PATTERN.test(output.join("\n")),
         modelRejected: modelRejected(model, outcome),
+        ...(outcome.exitCode === 0 && accountNotices(output).length ? { notices: accountNotices(output) } : {}),
         output,
       })
     })

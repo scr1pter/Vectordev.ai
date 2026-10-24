@@ -186,4 +186,28 @@ describe("createSessionTabs", () => {
       dispose()
     })
   })
+
+  test("keeps Deep research's Sources tab beside Preview, never among the file tabs", () => {
+    createRoot((dispose) => {
+      const [state, setState] = createStore({
+        active: "sources" as string | undefined,
+        all: ["sources", "file://src/a.ts"],
+      })
+      const tabs = createMemo(() => ({ active: () => state.active, all: () => state.all }))
+      const result = createSessionTabs({
+        tabs,
+        pathFromTab: (tab) => (tab.startsWith("file://") ? tab.slice("file://".length) : undefined),
+        normalizeTab: (tab) => tab,
+      })
+
+      expect(result.sourcesOpen()).toBe(true)
+      expect(result.activeTab()).toBe("sources")
+      expect(result.openedTabs()).toEqual(["file://src/a.ts"])
+      expect(result.activeFileTab()).toBeUndefined()
+      // Open but not picked, it is where the panel lands once no file tab is left.
+      setState({ active: undefined, all: ["sources"] })
+      expect(result.activeTab()).toBe("sources")
+      dispose()
+    })
+  })
 })

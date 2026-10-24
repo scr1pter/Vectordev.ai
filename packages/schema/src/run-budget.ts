@@ -19,9 +19,12 @@ export const StopReason = Schema.Literals(["cap", "predicted", "unpriced", "step
 })
 export type StopReason = typeof StopReason.Type
 
-// How a model's steps are billed: priced at catalog list rates, free, covered by a subscription plan, or unknown
-// because the catalog has no price. Vectorscope and the run guard share it.
-export const CostKind = Schema.Literals(["free", "priced", "plan", "unknown"]).annotate({ identifier: "CostKind" })
+// How a model's steps are billed: priced at catalog list rates, free, covered by a subscription plan, local (a model
+// server on this computer or a listed private address, with no price configured), or unknown because the catalog
+// has no price. Vectorscope and the run guard share it.
+export const CostKind = Schema.Literals(["free", "priced", "plan", "local", "unknown"]).annotate({
+  identifier: "CostKind",
+})
 export type CostKind = typeof CostKind.Type
 
 // What the run of a root session has spent so far, or what its last finished run spent. `sessionID` is the root.

@@ -5,9 +5,11 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { createHash, randomUUID } from "node:crypto"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import { makeGlobalNode } from "./effect/app-node"
+import { Egress } from "./local-mode/egress"
 import { Flag } from "./flag/flag"
 import { Global } from "./global"
 import { ModelPlanStatus } from "./model-plan-status"
+import { StartupHold } from "./startup-hold"
 
 export const PROVIDER_ID = ModelPlanStatus.PROVIDER_ID
 export const PROVIDER_NAME = "Vector Codium"
@@ -15,6 +17,10 @@ export const API_URL = ModelPlanStatus.API_URL
 export const CATALOG_URL = `${API_URL}/models`
 export const CHAT_URL = `${API_URL}/chat`
 export const PURCHASE_URL = ModelPlanStatus.PURCHASE_URL
+
+// Codium's catalog, status and offers come from vectordev.ai, labelled so Vector Local decides them (blocked unless
+// allowed). Node callers hand it to ModelPlanStatus's requests, which the app also runs in the browser with its own fetch.
+export const plansCatalog = (url: string, init: RequestInit) => Egress.fetch("plans-catalog", url, init)
 
 // No prices: a Codium step spends credits, which Vector counts by tokens and never in dollars that could be added up.
 export const Model = Schema.Struct({
@@ -165,11 +171,16 @@ export const node = makeGlobalNode({
   layer: Layer.sync(Service, () => {
     const client = createClient({
       file: path.join(Global.Path.cache, "codium-models.json"),
-      disabled: () => Flag.VECTOR_DISABLE_MODELS_FETCH,
+      // Vector Local keeps Vector Codium off, so its plans are not read either. A desktop first run's hold
+      // (StartupHold) keeps them back until the person has chosen how to run models; nothing is kept while it holds,
+      // so the next read after it reaches vectordev.ai.
+      disabled: () => Flag.VECTOR_DISABLE_MODELS_FETCH || Egress.policy().enabled || StartupHold.held(),
+      request: plansCatalog,
     })
     return Service.of({
       catalog: (token, options) => Effect.promise(() => client.catalog(token, options)),
-      request: (url, init) => fetch(url, init),
+      // A Codium model call is decided as one: refused while Vector Local is on.
+      request: (url, init) => Egress.fetch("vector-codium", url, init),
     })
   }),
   deps: [],

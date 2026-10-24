@@ -51,3 +51,23 @@ test("the prototype CLI cannot collide with the public CLI package", async () =>
   expect(manifest.name).toBe("@vectordevai/cli-dev")
   expect(await Bun.file(path.join(root, "packages/cli/script/publish.ts")).exists()).toBe(false)
 })
+
+test("the desktop release installs ripgrep before it runs the engine suite", async () => {
+  // test/preload.ts runs the suite under the strict network guard, which refuses Vector's own ripgrep download, so the
+  // tests that search files need rg on PATH, and GitHub's Ubuntu image has none.
+  const workflow = Bun.YAML.parse(await Bun.file(path.join(root, ".github/workflows/vector-desktop-release.yml")).text()) as {
+    jobs: {
+      test: {
+        strategy: { matrix: { include: { name: string; directory: string }[] } }
+        steps: { name: string; if?: string; run?: string }[]
+      }
+    }
+  }
+  const job = workflow.jobs.test
+  const engine = job.strategy.matrix.include.find((entry) => entry.directory === "packages/engine")
+  expect(engine).toBeDefined()
+  const install = job.steps.findIndex((step) => /apt-get install\b.*\bripgrep\b/.test(step.run ?? ""))
+  expect(install).toBeGreaterThan(-1)
+  expect(install).toBeLessThan(job.steps.findIndex((step) => step.name === "Run package tests"))
+  expect([undefined, `matrix.name == '${engine?.name}'`]).toContain(job.steps[install].if)
+})

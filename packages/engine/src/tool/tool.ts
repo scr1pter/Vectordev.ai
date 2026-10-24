@@ -35,6 +35,8 @@ export class InvalidArgumentsError extends Schema.TaggedErrorClass<InvalidArgume
 
 export type Context<M extends Metadata = Metadata> = {
   sessionID: SessionID
+  /** The session that launched this one, when it is a subagent: its user messages are a brief another agent wrote. */
+  parentID?: SessionID
   messageID: MessageID
   agent: string
   abort: AbortSignal
@@ -44,6 +46,11 @@ export type Context<M extends Metadata = Metadata> = {
   ownedPaths?: readonly string[]
   getOwnedPaths?: () => Effect.Effect<readonly string[] | undefined>
   messages: SessionV1.WithParts[]
+  /**
+   * The whole conversation, with what a compaction folded away: the messages the session stored, then this step's.
+   * `messages` is only what the model sees now. Absent, `messages` is all there is.
+   */
+  history?: () => Effect.Effect<SessionV1.WithParts[]>
   metadata(input: { title?: string; metadata?: M }): Effect.Effect<void>
   deniedResources?(input: Pick<PermissionV1.Request, "permission" | "patterns">): Effect.Effect<ReadonlyArray<string>>
   ask(input: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">): Effect.Effect<void>

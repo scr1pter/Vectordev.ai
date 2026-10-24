@@ -1,5 +1,6 @@
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { AppProcess } from "@vectordevai/core/process"
+import { refusal, gitEnvironment } from "@vectordevai/core/git"
 import { Effect, Layer, Context, Stream } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 
@@ -106,12 +107,25 @@ const layer = Layer.effect(
     const encoder = new TextEncoder()
     const stdin = (text: string) => Stream.make(encoder.encode(text))
 
+    // Every git command the engine runs itself goes through here, so with Vector Local on one that connects (a review's
+    // fetch of a pull request, the GitHub handler's fetches and pushes) is decided on each remote it would reach before
+    // git starts, and with Web access None git may use only file remotes.
     const run = Effect.fn("Git.run")(
       function* (args: string[], opts: Options) {
+        const query = (more: string[]) =>
+          appProcess
+            .run(ChildProcess.make("git", more, { cwd: opts.cwd, env: opts.env, extendEnv: true, stdin: "ignore" }))
+            .pipe(
+              Effect.map((result) => (result.exitCode === 0 ? result.stdout.toString("utf8") : "")),
+              Effect.catch(() => Effect.succeed("")),
+            )
+        const refused = yield* refusal([...cfg, ...args], query)
+        if (refused) return { ...fail(new Error(refused)), exitCode: 128 } satisfies Result
+        const local = gitEnvironment()
         const result = yield* appProcess.run(
           ChildProcess.make("git", [...cfg, ...args], {
             cwd: opts.cwd,
-            env: opts.env,
+            env: local ? { ...opts.env, ...local } : opts.env,
             extendEnv: true,
             stdin: opts.stdin ?? "ignore",
             stdout: "pipe",

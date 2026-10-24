@@ -1,0 +1,115 @@
+{
+  "run": {
+    "question": "How much do heat pumps cut heating bills in cold climates?",
+    "plan": {
+      "question": "How much do heat pumps cut heating bills in cold climates?",
+      "subquestions": [
+        "What did field studies measure?",
+        "How large were the savings?"
+      ],
+      "scope": "web",
+      "depth": "focused"
+    },
+    "depth": "focused",
+    "scope": "web",
+    "status": "done",
+    "pages": 2,
+    "searches": 1,
+    "steps": 0,
+    "cost_usd": 0,
+    "kept": false,
+    "report": true
+  },
+  "sources": [
+    {
+      "id": "S1",
+      "url": "http://article.web.test:PORT/",
+      "canonical_url": "http://article.web.test:PORT/",
+      "title": "How heat pumps cut heating bills in cold climates",
+      "site": "web.test",
+      "status": "read",
+      "signals": {
+        "kind": "other",
+        "primary": true,
+        "published": "2026-03-14",
+        "author": "Mara Lindqvist",
+        "data": true,
+        "references": false,
+        "paywalled": false,
+        "addressed_to_ai": false,
+        "corroborated": 0
+      }
+    },
+    {
+      "id": "S2",
+      "url": "http://copy.web.test:PORT/heat-pumps",
+      "canonical_url": "http://copy.web.test:PORT/heat-pumps",
+      "title": "How heat pumps cut heating bills in cold climates (syndicated)",
+      "site": "web.test",
+      "status": "duplicate",
+      "signals": {
+        "kind": "other",
+        "primary": false,
+        "data": false,
+        "references": false,
+        "paywalled": false,
+        "addressed_to_ai": false,
+        "corroborated": 0,
+        "duplicate_of": "S1"
+      }
+    },
+    {
+      "id": "S3",
+      "url": "http://docs.web.test:PORT/report.pdf",
+      "canonical_url": "http://docs.web.test:PORT/report.pdf",
+      "title": "Heat pump field study",
+      "site": "web.test",
+      "status": "read",
+      "pages": 3,
+      "signals": {
+        "kind": "other",
+        "primary": false,
+        "data": false,
+        "references": false,
+        "paywalled": false,
+        "addressed_to_ai": false,
+        "corroborated": 0
+      }
+    }
+  ],
+  "notes": [
+    {
+      "id": "N1",
+      "subquestion": "What did field studies measure?",
+      "claim": "The study followed 412 homes through two winters.",
+      "source": "S1",
+      "quote": "The study followed 412 homes through two winters.",
+      "stance": "supports",
+      "support": true
+    },
+    {
+      "id": "N2",
+      "subquestion": "How large were the savings?",
+      "claim": "Delivered heating energy fell by 61 percent.",
+      "source": "S3",
+      "quote": "Delivered heating energy fell by 61 percent.",
+      "page": 2,
+      "stance": "supports",
+      "support": true
+    },
+    {
+      "id": "N3",
+      "subquestion": "How large were the savings?",
+      "claim": "Heat pumps pay for themselves within five years.",
+      "source": "S1",
+      "quote": "Median annual saving: 640 euros per home.",
+      "stance": "supports",
+      "support": false
+    }
+  ],
+  "queries": [
+    "heat pump heating bills cold climate field study"
+  ],
+  "report": "# Heat pump savings in cold climates\n\nA field study of 412 homes found that delivered heating energy fell by 61 percent \\[S1\\][^N1] \\[S3 p.2\\][^N2].\n\n## What the field study measured\n\nConfidence: Medium (Vector's estimate)\n\nThe study followed 412 homes through two winters \\[S1\\][^N1].\n\n## How large the savings were\n\nConfidence: Low (Vector's estimate)\n\nDelivered heating energy fell by 61 percent \\[S3 p.2\\][^N2].\n\n## Open questions\n\n- How much less do poorly insulated homes save?\n\n## Sources\n\n| | Source | Site | Status | Signals |\n|---|---|---|---|---|\n| S1 | [How heat pumps cut heating bills in cold climates](http://article.web.test:PORT/) | web.test | Read | Primary source · Published 2026-03-14 · By Mara Lindqvist · Publishes data |\n| S2 | [How heat pumps cut heating bills in cold climates (syndicated)](http://copy.web.test:PORT/heat-pumps) | web.test | Copy | Copy of S1 |\n| S3 | [Heat pump field study](http://docs.web.test:PORT/report.pdf) | web.test | Read |  |\n\n## Method\n\n- Searches: 1\n  - heat pump heating bills cold climate field study\n- Pages read: 2\n- Skipped: 1\n  - S2 web.test: Copy\n- Time: TIME\n\n[^N1]: \"The study followed 412 homes through two winters.\" How heat pumps cut heating bills in cold climates, web.test (S1)\n[^N2]: \"Delivered heating energy fell by 61 percent.\" Heat pump field study, web.test (S3 p.2)\n",
+  "guest": false
+}

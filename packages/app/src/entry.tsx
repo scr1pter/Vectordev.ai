@@ -12,6 +12,7 @@ import { openExternalUrl, safeExternalUrl, secureExternalAnchor } from "@/utils/
 import { consumeInviteCredentials } from "@/utils/server"
 import pkg from "../package.json"
 import { normalizeServerUrl, ServerConnection } from "./context/server"
+import { VECTOR_ICON } from "./pages/layout/helpers"
 
 const DEFAULT_SERVER_URL_KEY = "vector.settings.dat:defaultServerUrl"
 
@@ -79,7 +80,7 @@ const notify: Platform["notify"] = async (title, description, href, options) => 
 
   const notification = new Notification(title, {
     body: description ?? "",
-    icon: "https://vectordev.ai/favicon-96x96-desktop-v4.png?v=desktop-20260712",
+    icon: new URL(VECTOR_ICON, location.href).href,
   })
 
   notification.onclick = () => {

@@ -410,6 +410,11 @@ jobs:
       - name: Install the Electron runtime
         if: matrix.name == 'desktop'
         run: bun packages/desktop/node_modules/electron/install.js
+      # The engine suite runs under the strict network guard, so Vector may not download ripgrep for the tests that
+      # search files: it has to be installed (engine/test/preload.ts), and the Ubuntu runner image has none.
+      - name: Install ripgrep
+        if: matrix.name == 'vector'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ripgrep && rg --version
       - name: Run package tests
         working-directory: ${{ matrix.directory }}
         env:

@@ -13,7 +13,7 @@ import { tmpdir } from "../fixture/fixture"
 const dependencyLayer = (cache: string, add: Npm.Interface["add"]) =>
   LayerNode.compile(ConfigDependencies.node, [
     [Global.node, Global.layerWith({ cache })],
-    [Npm.node, Layer.mock(Npm.Service, { add })],
+    [Npm.node, Layer.mock(Npm.Service, { add, addAs: (_source, pkg, options) => add(pkg, options) })],
   ])
 
 // TUI plugin tests earlier in the same `bun test` process install OpenTUI's runtime plugin, which rewrites every
@@ -80,7 +80,7 @@ async function loadOffline(entry: string, directory: string) {
 
 test("concurrent config consumers prepare one versioned SDK in the shared cache", async () => {
   await using tmp = await tmpdir()
-  const calls: Array<[string, { timeout: number; force?: boolean } | undefined]> = []
+  const calls: Array<[string, Npm.AddOptions | undefined]> = []
   await Effect.gen(function* () {
     const dependencies = yield* ConfigDependencies.Service
     yield* Effect.all([dependencies.prepare(), dependencies.prepare()], { concurrency: "unbounded" })

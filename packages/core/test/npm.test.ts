@@ -2,12 +2,15 @@ import fs from "fs/promises"
 import path from "path"
 import { createServer } from "node:http"
 import { pathToFileURL } from "node:url"
-import { describe, expect, test } from "bun:test"
-import { Effect, Exit, Fiber, Option } from "effect"
+import { afterEach, describe, expect, test } from "bun:test"
+import { Cause, Effect, Exit, Fiber, Option } from "effect"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { Global } from "@vectordevai/core/global"
 import { Npm } from "@vectordevai/core/npm"
 import { tmpdir } from "./fixture/tmpdir"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import type { ConfigLocalV1 } from "@vectordevai/core/v1/config/local"
 
 const win = process.platform === "win32"
 
@@ -176,5 +179,140 @@ describe("Npm.install", () => {
 
     await expect(fs.stat(path.join(tmp.path, "node_modules", "prod-pkg"))).resolves.toBeDefined()
     await expect(fs.stat(path.join(tmp.path, "node_modules", "dev-pkg"))).rejects.toThrow()
+  })
+})
+
+describe("Npm.addAs under Vector Local", () => {
+  afterEach(async () => {
+    Egress.configure(LocalPolicy.OFF)
+    await Egress.erase()
+  })
+  const local = (block: ConfigLocalV1.Info = {}) =>
+    Egress.configure(LocalPolicy.resolve({ global: { enabled: true, ...block } }))
+  const allow = (hosts?: string[]) => ({
+    source: "npm-plugins",
+    reason: "Plugins",
+    added_at: 1,
+    added_by: "app" as const,
+    ...(hosts ? { hosts } : {}),
+  })
+  // A registry on this computer that answers nothing, so an install that starts is seen and fails.
+  const registry = async () => {
+    const requests: string[] = []
+    const server = createServer((request, response) => {
+      requests.push(request.url ?? "")
+      response.writeHead(404).end()
+    })
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+    const address = server.address()
+    if (!address || typeof address === "string") throw new Error("Registry did not listen")
+    return {
+      requests,
+      url: `http://127.0.0.1:${address.port}/`,
+      close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    }
+  }
+  const npmrc = async (cache: string, spec: string, text: string) => {
+    await fs.mkdir(path.join(cache, "packages", Npm.sanitize(spec)), { recursive: true })
+    await Bun.write(path.join(cache, "packages", Npm.sanitize(spec), ".npmrc"), text)
+  }
+  const addAs = (cache: string, spec: string) =>
+    Effect.gen(function* () {
+      const npm = yield* Npm.Service
+      return yield* npm.addAs("npm-plugins", spec)
+    }).pipe(Effect.scoped, Effect.provide(npmLayer(cache)), Effect.runPromiseExit)
+  const refusal = (exit: Exit.Exit<unknown, unknown>) => {
+    if (Exit.isSuccess(exit)) return undefined
+    const error = Cause.squash(exit.cause) as { cause?: unknown }
+    return error.cause instanceof Error ? error.cause.message : String(error)
+  }
+
+  test("loads a copy installed earlier as it is, deciding nothing", async () => {
+    await using tmp = await tmpdir()
+    const cache = path.join(tmp.path, "cache")
+    const installed = path.join(cache, "packages", "cached-plugin@1.0.0", "node_modules", "cached-plugin")
+    await fs.mkdir(installed, { recursive: true })
+    await writePackage(installed, { name: "cached-plugin", main: "index.js" })
+    await Bun.write(path.join(installed, "index.js"), "export {}\n")
+    local()
+    const exit = await addAs(cache, "cached-plugin@1.0.0")
+    expect(Exit.isSuccess(exit) && exit.value.entrypoint).toBeTruthy()
+    expect(Egress.events()).toEqual([])
+  })
+
+  test("starts no installer and no git for a package from a host Vector Local does not allow", async () => {
+    await using tmp = await tmpdir()
+    const cache = path.join(tmp.path, "cache")
+    const fake = await registry()
+    try {
+      // The registry the npm config names is allowed, but the package's own address is on GitHub.
+      const spec = "acme@github:vector/acme"
+      await npmrc(cache, spec, `registry=${fake.url}\n`)
+      local({ allow: [allow([new URL(fake.url).hostname])] })
+      expect(refusal(await addAs(cache, spec))).toBe(
+        `Vector Local did not install ${spec}. Vector asks before it downloads this, once.`,
+      )
+      expect(fake.requests).toEqual([])
+      expect(Egress.events().map((event) => [event.origin, event.decision])).toEqual([
+        [new URL(fake.url).origin, "allow"],
+        ["https://github.com", "ask"],
+      ])
+    } finally {
+      await fake.close()
+    }
+  })
+
+  test("decides a registry package against the registry the npm config names, and Web access None first", async () => {
+    await using tmp = await tmpdir()
+    const cache = path.join(tmp.path, "cache")
+    const spec = "corp-plugin@1.0.0"
+    await npmrc(cache, spec, "registry=https://npm.corp.example.com/\n")
+    local()
+    expect(refusal(await addAs(cache, spec))).toBe(
+      `Vector Local did not install ${spec}. Vector asks before it downloads this, once.`,
+    )
+    expect(Egress.events().map((event) => [event.source, event.origin])).toEqual([
+      ["npm-plugins", "https://npm.corp.example.com"],
+    ])
+    local({ web: "none", allow: [allow()] })
+    expect(refusal(await addAs(cache, spec))).toBe(
+      `Vector Local did not install ${spec}. Web access is set to None, so Vector downloads nothing.`,
+    )
+  })
+
+  test("installs from an allowed registry within its grant", async () => {
+    await using tmp = await tmpdir()
+    const cache = path.join(tmp.path, "cache")
+    const fake = await registry()
+    try {
+      const spec = "allowed-plugin@1.0.0"
+      await npmrc(cache, spec, `registry=${fake.url}\nfetch-retries=0\n`)
+      // A registry on this computer is one Vector Local lets a download reach.
+      local()
+      const exit = await addAs(cache, spec)
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(refusal(exit)).not.toContain("Vector Local did not install")
+      expect(fake.requests).toEqual(["/allowed-plugin"])
+    } finally {
+      await fake.close()
+    }
+  })
+
+  test("which uses a server installed earlier, and installs a missing one only when allowed", async () => {
+    await using tmp = await tmpdir()
+    const cache = path.join(tmp.path, "cache")
+    const bin = path.join(cache, "packages", "lang-server", "node_modules", ".bin")
+    await fs.mkdir(bin, { recursive: true })
+    await Bun.write(path.join(bin, "lang-server"), "#!/bin/sh\n")
+    local()
+    const which = (pkg: string) =>
+      Effect.gen(function* () {
+        const npm = yield* Npm.Service
+        return yield* npm.whichAs("lsp-install", pkg)
+      }).pipe(Effect.scoped, Effect.provide(npmLayer(cache)), Effect.runPromise)
+    expect(await which("lang-server")).toBe(path.join(bin, "lang-server"))
+    await npmrc(cache, "missing-server", "registry=https://registry.npmjs.org/\n")
+    expect(await which("missing-server")).toBeUndefined()
+    expect(Egress.events().map((event) => [event.source, event.decision])).toEqual([["lsp-install", "ask"]])
   })
 })

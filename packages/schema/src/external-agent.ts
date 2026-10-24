@@ -81,6 +81,8 @@ export type Headless = {
   /** How the prompt leaves argv when it goes on stdin: "omit" drops it (and its PROMPT_FLAG), "dash" passes "-".
       Unset: no stdin form. */
   stdinPrompt?: "omit" | "dash"
+  /** Environment variables a headless run starts without, matched by name only: their values are never read. */
+  unsetEnv?: readonly string[]
   parser: Parser
   docsUrl: string
 }
@@ -97,26 +99,19 @@ export type Models =
   | { kind: "fixed"; models: readonly CliModel[] }
   | { kind: "none" }
 
-export type LetterTone = "slate" | "sand" | "teal" | "sky" | "indigo" | "plum" | "rose" | "amber" | "olive" | "moss"
+export type LetterTone = "slate" | "teal" | "sky" | "indigo" | "plum" | "rose" | "amber" | "olive" | "moss"
 
-/** `show` is the switch: an official file is drawn only when it is "official", and only an agent whose vendor allows
-    third parties to show its logo may carry an `official` file at all. Letters are neutral and never brand colours. */
+/** Every agent shows neutral letters in one of Vector's own tones, never a vendor's logo, icon or brand colour: no
+    vendor has granted Vector a licence that fits, and the owner chose letters for all of them (23 October 2026). */
 export type Logo = {
-  show: "letters" | "official"
   letters: string
   tone: LetterTone
-  official?: {
-    /** File names under the app's public agent-logos folder: the mark for light and for dark backgrounds. */
-    light: string
-    dark: string
-    source: string
-    permission: string
-  }
   /** Why letters are shown, for the record; never shown as copy. */
-  pending?: string
+  reason: string
 }
 
-export type Note = { kind: "billing" | "terms" | "data" | "info"; text: string; source?: string }
+/** "trademark" carries the attribution a vendor asks for; its `source` is shown as the link it names. */
+export type Note = { kind: "billing" | "terms" | "data" | "trademark" | "info"; text: string; source?: string }
 
 export type Binary = {
   name: string
@@ -157,7 +152,7 @@ const CLAUDE_HEADLESS = ["--output-format", "stream-json", "--verbose", "--inclu
      this list stands in whenever it fails. Through a ChatGPT sign-in the Codex backend serves the GPT-5 generation
      onward (the rule in packages/engine/src/plugin/openai/codex.ts); the ids are those models from Vector's bundled
      OpenAI catalog.
-   - Cursor Agent (`cursor-agent --model`, checked against 2026.09.02): `agent models` asks Cursor's servers what the
+   - Cursor CLI (`cursor-agent --model`, checked against 2026.09.02): `agent models` asks Cursor's servers what the
      signed-in account may use, so it needs the account and the network. The Composer ids and `gpt-5.5` appear in the
      installed CLI itself, and its `--help` names Claude models by their full id (`claude-opus-4-8`). `auto` lets
      Cursor pick. */
@@ -255,12 +250,16 @@ export const catalog = [
     interactive: { args: [MODEL_FLAG], model: ["--model", MODEL] },
     models: { kind: "fixed", models: CLAUDE_MODELS },
     logo: {
-      show: "letters",
       letters: "CC",
-      tone: "sand",
-      pending: "Letters by the owner's choice (23 Oct 2026): no logo permission will be sought.",
+      tone: "slate",
+      reason: "Letters by the owner's choice (23 Oct 2026): no logo permission will be sought.",
     },
-    notes: [],
+    notes: [
+      {
+        kind: "billing",
+        text: "Anthropic bills it on your own plan or API key, not Vector. In Vector's chat, an ANTHROPIC_API_KEY set in your environment is used before your subscription, so those runs are billed to that key.",
+      },
+    ],
     docsUrl: "https://code.claude.com/docs/en/overview",
     domains: ["claude.ai", "code.claude.com", "docs.claude.com"],
   },
@@ -327,10 +326,9 @@ export const catalog = [
     interactive: { args: [MODEL_FLAG], model: ["--model", MODEL] },
     models: { kind: "live", args: ["debug", "models"], read: "json-or-lines", fallback: CODEX_MODELS },
     logo: {
-      show: "letters",
       letters: "CX",
       tone: "slate",
-      pending: "Letters by the owner's choice (23 Oct 2026): no logo permission will be sought.",
+      reason: "Letters by the owner's choice (23 Oct 2026): no logo permission will be sought.",
     },
     notes: [],
     docsUrl: "https://developers.openai.com/codex/cli",
@@ -338,7 +336,7 @@ export const catalog = [
   },
   {
     id: "cursor",
-    name: "Cursor Agent",
+    name: "Cursor CLI",
     vendor: "Anysphere",
     // `cursor-agent` first, as before; `agent` is Cursor's newer name but generic, so it only counts with Cursor's
     // own date-and-commit version (2026.09.02-c22c1a3).
@@ -375,20 +373,15 @@ export const catalog = [
     interactive: { args: [MODEL_FLAG], model: ["--model", MODEL] },
     models: { kind: "live", args: ["models"], read: "lines", fallback: CURSOR_MODELS },
     logo: {
-      show: "official",
       letters: "CU",
       tone: "slate",
-      official: {
-        light: "cursor-light.svg",
-        dark: "cursor-dark.svg",
-        source: "https://cursor.com/brand",
-        permission: "The owner chose Cursor's 2D cube from its brand page, unchanged and labelled Cursor.",
-      },
+      reason: "Cursor's brand page offers its files with no licence for third parties, so letters, as for every agent.",
     },
     notes: [
       {
         kind: "terms",
-        text: "Runs with Cursor's --force flag in the isolated copy, so it can change files and run commands there without asking.",
+        text: "In Vector's chat, Cursor CLI runs with --force and --trust, which let it change files and run commands without asking. It does that only in the isolated copy of the repository.",
+        source: "https://cursor.com/docs/cli/overview",
       },
     ],
     docsUrl: "https://cursor.com/docs/cli/overview",
@@ -430,7 +423,7 @@ export const catalog = [
         docsUrl: "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli",
       },
     ],
-    signIn: { args: [], interactive: true, hint: "Type /login inside Copilot CLI, then follow its steps." },
+    signIn: { args: [], interactive: true, hint: "Type /login inside GitHub Copilot CLI, then follow its steps." },
     // Stays in the terminal: GitHub documents that --output-format json prints JSONL, but not the events in it.
     headless: {
       fresh: [
@@ -451,12 +444,14 @@ export const catalog = [
     interactive: { args: [MODEL_FLAG], model: ["--model", MODEL] },
     models: { kind: "fixed", models: [] },
     logo: {
-      show: "letters",
       letters: "CP",
       tone: "indigo",
-      pending: "GitHub's brand page gives no Copilot mark to third parties.",
+      reason: "GitHub's brand page gives no Copilot mark to third parties.",
     },
-    notes: [{ kind: "terms", text: "If you get Copilot through an organisation, it has to allow Copilot CLI." }],
+    notes: [
+      { kind: "terms", text: "If you get GitHub Copilot through an organisation, it has to allow GitHub Copilot CLI." },
+      { kind: "trademark", text: "GitHub and GitHub Copilot are trademarks of GitHub, Inc." },
+    ],
     docsUrl: "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli",
     domains: ["docs.github.com", "gh.io", "github.com/github"],
   },
@@ -516,52 +511,19 @@ export const catalog = [
       ],
     },
     logo: {
-      show: "letters",
       letters: "GE",
       tone: "sky",
-      pending: "Google's brand kit does not address third parties.",
+      reason: "Google's brand kit does not address third parties.",
     },
     notes: [
       {
         kind: "terms",
-        text: "Google replaced Gemini CLI with Antigravity CLI for free and Google One accounts on 18 June 2026. Gemini CLI still works with work accounts and API keys.",
+        text: "Since 18 June 2026, Gemini CLI signs in with Google only on a Gemini Code Assist Standard or Enterprise licence. Otherwise it needs a Gemini API key.",
         source: "https://github.com/google-gemini/gemini-cli",
       },
     ],
     docsUrl: "https://github.com/google-gemini/gemini-cli",
     domains: ["geminicli.com", "github.com/google-gemini"],
-  },
-  {
-    id: "antigravity",
-    name: "Antigravity CLI",
-    vendor: "Google",
-    binaries: [{ name: "agy" }],
-    tier: "terminal",
-    install: [
-      {
-        id: "script",
-        label: "Install script",
-        platforms: ["darwin", "linux"],
-        command: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
-        docsUrl: "https://antigravity.google/docs/getting-started?tab=cli",
-      },
-      {
-        id: "powershell",
-        label: "PowerShell",
-        platforms: ["win32"],
-        command: "irm https://antigravity.google/cli/install.ps1 | iex",
-        docsUrl: "https://antigravity.google/docs/getting-started?tab=cli",
-      },
-    ],
-    signIn: { args: [], interactive: true, hint: "Antigravity CLI asks you to sign in the first time it starts." },
-    // `agy -p` is reported to hang with no output when it is not attached to a real terminal, so it has no headless
-    // form here until that is fixed.
-    interactive: { args: [] },
-    models: { kind: "none" },
-    logo: { show: "letters", letters: "AG", tone: "teal", pending: "No third-party logo permission found." },
-    notes: [{ kind: "info", text: "Runs in Vector's terminal only for now." }],
-    docsUrl: "https://antigravity.google/docs/getting-started?tab=cli",
-    domains: ["antigravity.google"],
   },
   {
     id: "muse-code",
@@ -600,11 +562,11 @@ export const catalog = [
     },
     interactive: { args: [] },
     models: { kind: "none" },
-    logo: { show: "letters", letters: "MC", tone: "plum", pending: "Meta's approval is needed first." },
+    logo: { letters: "MC", tone: "plum", reason: "Meta's approval is needed first." },
     notes: [
       {
         kind: "data",
-        text: "Muse Code subscriptions start in Contributor mode, which lets Meta use your content to train its models. You can turn it off in Muse Code's settings.",
+        text: "Muse Code subscriptions start in Contributor mode, which lets Meta train its models on your prompts, code and files. If the code is confidential, such as a private or employer's repository, type /settings in Muse Code and turn Contributor mode off before the first run. The setting applies from then on, on this computer only.",
         source: "https://dev.meta.ai/docs/pricing-rate-limits",
       },
     ],
@@ -613,7 +575,7 @@ export const catalog = [
   },
   {
     id: "kilo",
-    name: "Kilo Code",
+    name: "Kilo CLI",
     vendor: "Kilo",
     binaries: [{ name: "kilo" }],
     tier: "terminal",
@@ -655,16 +617,10 @@ export const catalog = [
     interactive: { args: [MODEL_FLAG], model: ["-m", MODEL] },
     models: { kind: "live", args: ["models"], read: "lines", fallback: [] },
     logo: {
-      show: "official",
       letters: "KI",
       tone: "amber",
-      official: {
-        light: "kilo.svg",
-        dark: "kilo.svg",
-        source: "https://github.com/Kilo-Org/kilocode/blob/main/packages/kilo-console/public/kilo-logo.svg",
-        permission:
-          "kilo.ai/docs/contributing/ecosystem lets developers use the logos in Kilo's open-source repositories to show compatibility, without implying an official Kilo product.",
-      },
+      reason:
+        "Kilo's ecosystem page ties logo use to maintenance duties, so letters, as for every agent (owner, 23 Oct 2026).",
     },
     notes: [
       {
@@ -706,10 +662,9 @@ export const catalog = [
     interactive: { args: [MODEL_FLAG], model: ["-m", MODEL] },
     models: { kind: "fixed", models: [] },
     logo: {
-      show: "letters",
       letters: "CL",
       tone: "moss",
-      pending: "Cline's brand page does not address third parties.",
+      reason: "Cline's brand page does not address third parties.",
     },
     notes: [
       {
@@ -760,14 +715,21 @@ export const catalog = [
       fresh: ["--mode", "json", "--exclude-tools", "bash,powershell", MODEL_FLAG, "--", PROMPT],
       resume: ["--mode", "json", "--session", SESSION, "--exclude-tools", "bash,powershell", MODEL_FLAG, "--", PROMPT],
       model: ["--model", MODEL],
+      // pi treats an sk-ant-oat token as a Claude Pro/Max sign-in and sends it as Claude Code, which Anthropic's terms
+      // do not allow from a third-party tool, so Vector's chat never hands it one.
+      unsetEnv: ["ANTHROPIC_OAUTH_TOKEN"],
       parser: "pi",
       docsUrl: "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/json.md",
     },
     interactive: { args: [MODEL_FLAG], model: ["--model", MODEL] },
     models: { kind: "fixed", models: [] },
-    logo: { show: "letters", letters: "PI", tone: "rose", pending: "No logo permission found in the repository." },
+    logo: { letters: "PI", tone: "rose", reason: "No logo permission found in the repository." },
     notes: [
       { kind: "billing", text: "Runs on the provider you connect with /login inside pi." },
+      {
+        kind: "terms",
+        text: "Anthropic's terms restrict Claude Pro/Max sign-in in third-party tools, so connect another provider in pi, or Anthropic with an API key. Vector's chat leaves ANTHROPIC_OAUTH_TOKEN out of pi's environment.",
+      },
       {
         kind: "terms",
         text: "In Vector's chat, pi runs without its shell tools, so it can read and edit files in the isolated copy but not run commands.",
@@ -813,7 +775,11 @@ export const catalog = [
         docsUrl: "https://docs.factory.com/cli/getting-started/quickstart",
       },
     ],
-    signIn: { args: [], interactive: true, hint: "Droid asks you to sign in through your browser when it starts." },
+    signIn: {
+      args: [],
+      interactive: true,
+      hint: "Factory Droid asks you to sign in through your browser when it starts.",
+    },
     // --auto low is Factory's "safe edits" level: file edits and non-destructive commands. Stays in the terminal:
     // Factory names the stream-json events (system, message, tool_call, tool_result, completion) but documents only
     // one of their fields.
@@ -824,10 +790,10 @@ export const catalog = [
       parser: "droid",
       docsUrl: "https://docs.factory.com/reference/cli-reference",
     },
-    // Droid's own screen takes no model flag; the model is picked inside it. `exec -m` above stays for chat.
+    // Factory Droid's own screen takes no model flag; the model is picked inside it. `exec -m` above stays for chat.
     interactive: { args: [] },
     models: { kind: "none" },
-    logo: { show: "letters", letters: "DR", tone: "olive", pending: "No third-party logo permission found." },
+    logo: { letters: "DR", tone: "olive", reason: "No third-party logo permission found." },
     notes: [
       {
         kind: "billing",
@@ -868,7 +834,7 @@ export const catalog = [
     },
     interactive: { args: [] },
     models: { kind: "none" },
-    logo: { show: "letters", letters: "AM", tone: "rose", pending: "No third-party logo permission found." },
+    logo: { letters: "AM", tone: "rose", reason: "No third-party logo permission found." },
     notes: [
       {
         kind: "billing",
@@ -954,8 +920,17 @@ export const catalog = [
     },
     interactive: { args: [MODEL_FLAG], model: ["-m", MODEL] },
     models: { kind: "fixed", models: [] },
-    logo: { show: "letters", letters: "QW", tone: "indigo", pending: "The repository grants no logo permission." },
-    notes: [],
+    logo: { letters: "QW", tone: "indigo", reason: "The repository grants no logo permission." },
+    notes: [
+      {
+        kind: "billing",
+        text: "Qwen Code isn't free: its free sign-in ended on 15 April 2026. It runs on the key or plan you connect with /auth, billed by that provider.",
+      },
+      {
+        kind: "terms",
+        text: "Alibaba limits Coding Plan and Token Plan keys to interactive use. With those plans, choose Start in terminal, where you type to Qwen Code yourself.",
+      },
+    ],
     docsUrl: "https://github.com/QwenLM/qwen-code",
     domains: ["github.com/QwenLM", "qwen-code-assets.oss-cn-hangzhou.aliyuncs.com"],
   },
@@ -999,7 +974,7 @@ export const catalog = [
     // Kimi Code's documented automation surface is `kimi acp`, which needs an Agent Client Protocol client.
     interactive: { args: [] },
     models: { kind: "none" },
-    logo: { show: "letters", letters: "KM", tone: "sky", pending: "No third-party logo permission found." },
+    logo: { letters: "KM", tone: "sky", reason: "No third-party logo permission found." },
     notes: [],
     docsUrl: "https://moonshotai.github.io/kimi-code/en/guides/getting-started",
     domains: ["code.kimi.com", "moonshotai.github.io", "github.com/MoonshotAI"],
@@ -1045,18 +1020,20 @@ export const catalog = [
     interactive: { args: ["session"] },
     models: { kind: "none" },
     logo: {
-      show: "letters",
       letters: "GO",
       tone: "teal",
-      pending: "The Linux Foundation trademark policy needs written permission for logos.",
+      reason: "The Linux Foundation trademark policy needs written permission for logos.",
     },
-    notes: [{ kind: "billing", text: "Runs on the provider and model you set up with goose configure." }],
+    notes: [
+      { kind: "billing", text: "Runs on the provider and model you set up with goose configure." },
+      { kind: "trademark", text: "goose is a trademark of LF Projects, LLC." },
+    ],
     docsUrl: "https://goose-docs.ai/docs/getting-started/installation",
     domains: ["goose-docs.ai", "github.com/aaif-goose", "raw.githubusercontent.com/aaif-goose"],
   },
   {
     id: "junie",
-    name: "Junie CLI",
+    name: "Junie",
     vendor: "JetBrains",
     binaries: [{ name: "junie" }],
     tier: "terminal",
@@ -1080,7 +1057,7 @@ export const catalog = [
     // Junie's headless mode needs an --auth token, which Vector never passes, so it stays in the terminal.
     interactive: { args: [MODEL_FLAG], model: ["--model", MODEL] },
     models: { kind: "fixed", models: [] },
-    logo: { show: "letters", letters: "JU", tone: "plum", pending: "No third-party logo permission found." },
+    logo: { letters: "JU", tone: "plum", reason: "No third-party logo permission found." },
     notes: [
       {
         kind: "billing",
@@ -1088,9 +1065,11 @@ export const catalog = [
         source: "https://junie.jetbrains.com/docs/junie-cli.html",
       },
       { kind: "info", text: "Runs in Vector's terminal only for now." },
+      // JetBrains' brand guidelines ask for this attribution with a link back to jetbrains.com.
+      { kind: "trademark", text: "Junie is a trademark of JetBrains s.r.o.", source: "https://www.jetbrains.com/" },
     ],
     docsUrl: "https://junie.jetbrains.com/docs/junie-cli.html",
-    domains: ["junie.jetbrains.com"],
+    domains: ["junie.jetbrains.com", "www.jetbrains.com"],
   },
 ] as const satisfies readonly Agent[]
 
@@ -1110,6 +1089,22 @@ export function isId(value: unknown): value is Id {
 
 export function isChatId(value: unknown): value is ChatId {
   return typeof value === "string" && byId.get(value)?.tier === "chat"
+}
+
+/** How many of the user's own coding agents may run at once, in Vector's chat and in its terminal together, whichever
+    agents they are. Each one runs on that person's own account, so Vector keeps it to what one person runs. */
+export const MAX_RUNNING = 4
+
+/** Why a start was refused at MAX_RUNNING, for every place that refuses one. */
+export const RUN_LIMIT_MESSAGE = `${MAX_RUNNING} of your coding agents are already running, which is as many as Vector runs at once. Let one finish or stop one, then try again.`
+
+/** Whether a run, or the record of one, stays out of everything Vector learns from or measures: training, evaluation
+    and benchmark exports, the model recommendations and the memory of failed checks. Every run of a user's own coding
+    agent does: their vendors' terms bar using these runs to build or evaluate other models. A record says so itself
+    (`excludedFromLearning`), so it stays out even after its agent leaves the catalog; anything not run by Vector's own
+    agent counts too. */
+export function excludedFromLearning(record: { runtime?: unknown; excludedFromLearning?: unknown }) {
+  return record.excludedFromLearning === true || (typeof record.runtime === "string" && record.runtime !== "vector")
 }
 
 export const chatIds = catalog.filter((agent) => agent.tier === "chat").map((agent) => agent.id) as ChatId[]

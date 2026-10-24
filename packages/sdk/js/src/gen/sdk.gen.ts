@@ -162,6 +162,48 @@ import type {
   InstanceDisposeData,
   InstanceDisposeErrors,
   InstanceDisposeResponses,
+  LocalCheckData,
+  LocalCheckErrors,
+  LocalCheckResponses,
+  LocalDetectData,
+  LocalDetectErrors,
+  LocalDetectResponses,
+  LocalEgressClearData,
+  LocalEgressClearErrors,
+  LocalEgressClearResponses,
+  LocalEgressExportData,
+  LocalEgressExportErrors,
+  LocalEgressExportResponses,
+  LocalEgressListData,
+  LocalEgressListErrors,
+  LocalEgressListResponses,
+  LocalEgressReportData,
+  LocalEgressReportErrors,
+  LocalEgressReportResponses,
+  LocalEgressSummaryData,
+  LocalEgressSummaryErrors,
+  LocalEgressSummaryResponses,
+  LocalGetData,
+  LocalGetErrors,
+  LocalGetResponses,
+  LocalGrantData,
+  LocalGrantErrors,
+  LocalGrantResponses,
+  LocalProbeData,
+  LocalProbeErrors,
+  LocalProbeResponses,
+  LocalRecommendData,
+  LocalRecommendErrors,
+  LocalRecommendResponses,
+  LocalServersAddData,
+  LocalServersAddErrors,
+  LocalServersAddResponses,
+  LocalStartupReleaseData,
+  LocalStartupReleaseErrors,
+  LocalStartupReleaseResponses,
+  LocalUpdateData,
+  LocalUpdateErrors,
+  LocalUpdateResponses,
   LspCodeActionData,
   LspCodeActionErrors,
   LspCodeActionResponses,
@@ -255,9 +297,18 @@ import type {
   MemoryEraseData,
   MemoryEraseErrors,
   MemoryEraseResponses,
+  MemoryEraseSessionData,
+  MemoryEraseSessionErrors,
+  MemoryEraseSessionResponses,
+  MemoryExportData,
+  MemoryExportErrors,
+  MemoryExportResponses,
   MemoryGetData,
   MemoryGetErrors,
   MemoryGetResponses,
+  MemoryImportData,
+  MemoryImportErrors,
+  MemoryImportResponses,
   MemoryKnowledgeData,
   MemoryKnowledgeErrors,
   MemoryKnowledgeResponses,
@@ -273,6 +324,9 @@ import type {
   MemoryModelUpdateData,
   MemoryModelUpdateErrors,
   MemoryModelUpdateResponses,
+  MemoryPostingCheckData,
+  MemoryPostingCheckErrors,
+  MemoryPostingCheckResponses,
   MemoryRecordsGetData,
   MemoryRecordsGetErrors,
   MemoryRecordsGetResponses,
@@ -285,6 +339,30 @@ import type {
   MemoryRemoveData,
   MemoryRemoveErrors,
   MemoryRemoveResponses,
+  MemoryResearchExportData,
+  MemoryResearchExportErrors,
+  MemoryResearchExportResponses,
+  MemoryResearchForgetAllData,
+  MemoryResearchForgetAllErrors,
+  MemoryResearchForgetAllResponses,
+  MemoryResearchForgetData,
+  MemoryResearchForgetErrors,
+  MemoryResearchForgetResponses,
+  MemoryResearchForgetSourceData,
+  MemoryResearchForgetSourceErrors,
+  MemoryResearchForgetSourceResponses,
+  MemoryResearchGetData,
+  MemoryResearchGetErrors,
+  MemoryResearchGetResponses,
+  MemoryResearchKeepData,
+  MemoryResearchKeepErrors,
+  MemoryResearchKeepResponses,
+  MemoryResearchListData,
+  MemoryResearchListErrors,
+  MemoryResearchListResponses,
+  MemoryResearchSourceData,
+  MemoryResearchSourceErrors,
+  MemoryResearchSourceResponses,
   MemoryReviewListData,
   MemoryReviewListErrors,
   MemoryReviewListResponses,
@@ -1404,7 +1482,7 @@ export class Config extends HeyApiClient {
   /**
    * Update global configuration
    *
-   * Update global Vector configuration settings and preferences.
+   * Update global Vector configuration settings and preferences. Under a company lock, a change to a key the company keeps fails with ConfigLocked; the parts of Vector Local the company leaves to you still change.
    */
   public update<ThrowOnError extends boolean = false>(options?: Options<GlobalConfigUpdateData, ThrowOnError>) {
     return (options?.client ?? this.client).patch<GlobalConfigUpdateResponses, GlobalConfigUpdateErrors, ThrowOnError>({
@@ -1533,7 +1611,7 @@ export class Config2 extends HeyApiClient {
   /**
    * Update configuration
    *
-   * Update Vector configuration settings and preferences.
+   * Update Vector configuration settings and preferences. Under a company lock, a change to a key the company keeps fails with ConfigLocked.
    */
   public update<ThrowOnError extends boolean = false>(options?: Options<ConfigUpdateData, ThrowOnError>) {
     return (options?.client ?? this.client).patch<ConfigUpdateResponses, ConfigUpdateErrors, ThrowOnError>({
@@ -2043,6 +2121,224 @@ export class Formatter extends HeyApiClient {
   }
 }
 
+export class Egress extends HeyApiClient {
+  /**
+   * Erase what Vector sent
+   *
+   * Erase the network log: the events in memory, the counters and the files on this computer. Under a company lock the company sets how long the log is kept, so it fails with LocalError (locked).
+   */
+  public clear<ThrowOnError extends boolean = false>(options?: Options<LocalEgressClearData, ThrowOnError>) {
+    return (options?.client ?? this.client).delete<LocalEgressClearResponses, LocalEgressClearErrors, ThrowOnError>({
+      url: "/local/egress",
+      ...options,
+    })
+  }
+
+  /**
+   * List what Vector sent
+   *
+   * The last 2,000 requests Vector decided while Vector Local was on: when, which kind of request, where it went (origin and class), the session, the size it sent, and whether it was allowed or blocked, with the rule. Never a path, a query, a header or a body.
+   */
+  public list<ThrowOnError extends boolean = false>(options?: Options<LocalEgressListData, ThrowOnError>) {
+    return (options?.client ?? this.client).get<LocalEgressListResponses, LocalEgressListErrors, ThrowOnError>({
+      url: "/local/egress",
+      ...options,
+    })
+  }
+
+  /**
+   * Summarize what Vector sent
+   *
+   * Model calls by origin, pages read and the other hosts they loaded, searches, the memory requests carried, and blocked requests by source. A session's counters include its subagents and helpers.
+   */
+  public summary<ThrowOnError extends boolean = false>(options?: Options<LocalEgressSummaryData, ThrowOnError>) {
+    return (options?.client ?? this.client).get<LocalEgressSummaryResponses, LocalEgressSummaryErrors, ThrowOnError>({
+      url: "/local/egress/summary",
+      ...options,
+    })
+  }
+
+  /**
+   * Export what Vector sent
+   *
+   * Every event the network log keeps on this computer (30 days unless set otherwise), as JSON lines or CSV.
+   */
+  public export<ThrowOnError extends boolean = false>(options?: Options<LocalEgressExportData, ThrowOnError>) {
+    return (options?.client ?? this.client).get<LocalEgressExportResponses, LocalEgressExportErrors, ThrowOnError>({
+      url: "/local/egress/export",
+      ...options,
+    })
+  }
+
+  /**
+   * Add events to the network log
+   *
+   * Requests the desktop app's own windows made or blocked, which its main process decides and records while it applies Vector Local, added to this Vector's network log whatever this Vector's own Vector Local setting is.
+   */
+  public report<ThrowOnError extends boolean = false>(options?: Options<LocalEgressReportData, ThrowOnError>) {
+    return (options?.client ?? this.client).post<LocalEgressReportResponses, LocalEgressReportErrors, ThrowOnError>({
+      url: "/local/egress/report",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  }
+}
+
+export class Servers extends HeyApiClient {
+  /**
+   * Add a model server
+   *
+   * Read the server at an address, put it on the model server list with the identity it answered with, and add it to your user config as a provider with the models it runs, each with its context, reply limit, tool calling and image input. Its cloud models are left out. With Vector Local on, listing a server loosens it, so the request needs `confirm: true`, and fails with LocalConfirmError otherwise; so does adding a server on the list again when it answers as a different server, and `identity` says what changed. Headers are used to read the server and are not saved.
+   */
+  public add<ThrowOnError extends boolean = false>(options?: Options<LocalServersAddData, ThrowOnError>) {
+    return (options?.client ?? this.client).post<LocalServersAddResponses, LocalServersAddErrors, ThrowOnError>({
+      url: "/local/servers",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  }
+}
+
+export class Startup extends HeyApiClient {
+  /**
+   * Let the startup fetches go
+   *
+   * On a desktop first run, the app starts its engine with the model catalog's refresh, the free models and Codium plans catalogs and the provider policy held until the person chooses how to run models. This lets them go: each loads now, in this Vector, with no restart. A Vector that holds nothing answers false.
+   */
+  public release<ThrowOnError extends boolean = false>(options?: Options<LocalStartupReleaseData, ThrowOnError>) {
+    return (options?.client ?? this.client).post<LocalStartupReleaseResponses, LocalStartupReleaseErrors, ThrowOnError>(
+      { url: "/local/startup/release", ...options },
+    )
+  }
+}
+
+export class Local extends HeyApiClient {
+  /**
+   * Get Vector Local
+   *
+   * The Vector Local policy in effect for this Vector: on or off, Web access, the model server list, the services you allowed and what the policy files said. Also a change to your config that would loosen it and waits for you, the keys a company lock keeps, where the network log is kept, and every kind of request Vector makes.
+   */
+  public get<ThrowOnError extends boolean = false>(options?: Options<LocalGetData, ThrowOnError>) {
+    return (options?.client ?? this.client).get<LocalGetResponses, LocalGetErrors, ThrowOnError>({
+      url: "/local",
+      ...options,
+    })
+  }
+
+  /**
+   * Change Vector Local
+   *
+   * Change Vector Local in your user config. A change is judged by what it changes in the settings in effect, so a change your config holds is never part of it. A change that makes it stricter applies at once. One that would loosen it (turn it off, a looser Web access, a new model server, a new or removed identity pin for a server on the list, a newly allowed service or site) fails with LocalConfirmError and the list of what it loosens, unless the request says `confirm: true`, which an owner's app sends only after asking. Turning Vector Local on applies at once, and holds the services, internet model servers and sites your config lets through until you confirm them. With `held`, it applies the change your config holds instead, and only as `held` lists it. A Vector an agent started cannot loosen it, even while Vector Local is off, and under a company lock only the keys your company left to you change.
+   */
+  public update<ThrowOnError extends boolean = false>(options?: Options<LocalUpdateData, ThrowOnError>) {
+    return (options?.client ?? this.client).patch<LocalUpdateResponses, LocalUpdateErrors, ThrowOnError>({
+      url: "/local",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  }
+
+  /**
+   * Find model servers
+   *
+   * Find the model servers running on this computer: Ollama, LM Studio, vLLM, llama.cpp and SGLang on their usual ports at 127.0.0.1 and ::1. It never scans your network; add a server elsewhere by its address.
+   */
+  public detect<ThrowOnError extends boolean = false>(options?: Options<LocalDetectData, ThrowOnError>) {
+    return (options?.client ?? this.client).post<LocalDetectResponses, LocalDetectErrors, ThrowOnError>({
+      url: "/local/detect",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  }
+
+  /**
+   * Read a model server
+   *
+   * Read the server at an address you typed: what kind it is, its version, its models with their context, tools and image support, and the identity Vector pins when you add it. It asks for these only; it sends no prompt. With Vector Local on, only that server is let through while it is read, and Web access None keeps internet servers blocked.
+   */
+  public probe<ThrowOnError extends boolean = false>(options?: Options<LocalProbeData, ThrowOnError>) {
+    return (options?.client ?? this.client).post<LocalProbeResponses, LocalProbeErrors, ThrowOnError>({
+      url: "/local/probe",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  }
+
+  /**
+   * Check Vector Local
+   *
+   * Read every layer of Vector Local, one row each: the switch, the policy, a held change, the network guard, unlabelled requests, Vector's own services, Web access, each model server on the list (it answers, as the server it was when added) and the network log. With `model`, it also runs that model through 2 or 3 requests with the role's real tools (agent, subagent, review for Vectorscope, judge or research) and records the result in your user config; a model the model catalog lists at a cloud address keeps the catalog's limits. It reads only servers you or your company host: never a cloud AI service, and never a server on the internet that is not on your model server list. It never loads a model too big for free memory without `confirmed`.
+   */
+  public check<ThrowOnError extends boolean = false>(options?: Options<LocalCheckData, ThrowOnError>) {
+    return (options?.client ?? this.client).post<LocalCheckResponses, LocalCheckErrors, ThrowOnError>({
+      url: "/local/check",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  }
+
+  /**
+   * Allow a request once
+   *
+   * Let the next request of a kind Vector Local asks about through, such as a model download or a manual update check. Each grant answers one ask and is never saved. Allow a service for good with PATCH /local instead.
+   */
+  public grant<ThrowOnError extends boolean = false>(options?: Options<LocalGrantData, ThrowOnError>) {
+    return (options?.client ?? this.client).post<LocalGrantResponses, LocalGrantErrors, ThrowOnError>({
+      url: "/local/grant",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  }
+
+  /**
+   * Suggest models
+   *
+   * This computer's memory and GPUs, and the model families that fit them for each role, as dated examples from the publishers' own repositories or the Ollama library. Check each model's licence.
+   */
+  public recommend<ThrowOnError extends boolean = false>(options?: Options<LocalRecommendData, ThrowOnError>) {
+    return (options?.client ?? this.client).get<LocalRecommendResponses, LocalRecommendErrors, ThrowOnError>({
+      url: "/local/recommend",
+      ...options,
+    })
+  }
+
+  private _egress?: Egress
+  get egress(): Egress {
+    return (this._egress ??= new Egress({ client: this.client }))
+  }
+
+  private _servers?: Servers
+  get servers(): Servers {
+    return (this._servers ??= new Servers({ client: this.client }))
+  }
+
+  private _startup?: Startup
+  get startup(): Startup {
+    return (this._startup ??= new Startup({ client: this.client }))
+  }
+}
+
 export class Auth2 extends HeyApiClient {
   /**
    * Remove MCP OAuth
@@ -2168,7 +2464,7 @@ export class Settings extends HeyApiClient {
   /**
    * Get memory settings
    *
-   * Whether Vector may add to its memory as it works.
+   * Whether Vector may add to its memory as it works, which facets of how you work it may learn, and when the optional model learner runs.
    */
   public get<ThrowOnError extends boolean = false>(options?: Options<MemorySettingsGetData, ThrowOnError>) {
     return (options?.client ?? this.client).get<MemorySettingsGetResponses, MemorySettingsGetErrors, ThrowOnError>({
@@ -2180,7 +2476,7 @@ export class Settings extends HeyApiClient {
   /**
    * Change memory settings
    *
-   * Turn Vector's learning on or off, reading the repository's own docs, and keeping originals of added documents. Memory already saved stays until you erase it; turning repository docs off forgets what Vector read of them, and turning originals off deletes the kept copies.
+   * Turn Vector's learning on or off, each facet of how you work it may learn, the optional model learner, reading the repository's own docs, and keeping originals of added documents. Memory already saved stays until you erase it; turning repository docs off forgets what Vector read of them, and turning originals off deletes the kept copies.
    */
   public update<ThrowOnError extends boolean = false>(options?: Options<MemorySettingsUpdateData, ThrowOnError>) {
     return (options?.client ?? this.client).patch<
@@ -2495,6 +2791,125 @@ export class Review extends HeyApiClient {
   }
 }
 
+export class Posting extends HeyApiClient {
+  /**
+   * Check text before Vector posts it
+   *
+   * Compares text Vector is about to post or commit with the owner's memory: how they work, what they told Vector about themselves, and private documents the given sessions recalled. A sentence that repeats one is taken out of text Vector wrote, and only shown for text the user typed. A fork's links and images may point only at GitHub.
+   */
+  public check<ThrowOnError extends boolean = false>(options?: Options<MemoryPostingCheckData, ThrowOnError>) {
+    return (options?.client ?? this.client).post<MemoryPostingCheckResponses, MemoryPostingCheckErrors, ThrowOnError>({
+      url: "/memory/posting-check",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  }
+}
+
+export class Research extends HeyApiClient {
+  /**
+   * Forget all research in this repository
+   *
+   * Forget every research run of the repository: their pages, notes and reports. Vector does not keep those pages again on its own.
+   */
+  public forgetAll<ThrowOnError extends boolean = false>(options?: Options<MemoryResearchForgetAllData, ThrowOnError>) {
+    return (options?.client ?? this.client).delete<
+      MemoryResearchForgetAllResponses,
+      MemoryResearchForgetAllErrors,
+      ThrowOnError
+    >({ url: "/memory/research", ...options })
+  }
+
+  /**
+   * List research runs
+   *
+   * Deep research runs this repository's brain keeps: question, date, sources, notes, size and whether you kept it. Runs nobody keeps are deleted after `retain` days, and past `limit` bytes the oldest of them go first.
+   */
+  public list<ThrowOnError extends boolean = false>(options?: Options<MemoryResearchListData, ThrowOnError>) {
+    return (options?.client ?? this.client).get<MemoryResearchListResponses, MemoryResearchListErrors, ThrowOnError>({
+      url: "/memory/research",
+      ...options,
+    })
+  }
+
+  /**
+   * Forget a research run
+   *
+   * Forget a run and everything it holds: its pages, notes and report. Vector does not keep those pages again on its own. The session keeps its messages.
+   */
+  public forget<ThrowOnError extends boolean = false>(options: Options<MemoryResearchForgetData, ThrowOnError>) {
+    return (options.client ?? this.client).delete<
+      MemoryResearchForgetResponses,
+      MemoryResearchForgetErrors,
+      ThrowOnError
+    >({ url: "/memory/research/{runID}", ...options })
+  }
+
+  /**
+   * Get a research run
+   *
+   * One run: its plan, the queries it sent, its sources (skipped ones too), its notes and its latest report.
+   */
+  public get<ThrowOnError extends boolean = false>(options: Options<MemoryResearchGetData, ThrowOnError>) {
+    return (options.client ?? this.client).get<MemoryResearchGetResponses, MemoryResearchGetErrors, ThrowOnError>({
+      url: "/memory/research/{runID}",
+      ...options,
+    })
+  }
+
+  /**
+   * Keep a research run
+   *
+   * Keep the run past the retention, and its report in the brain, where the owner's requests can recall it like any private document. Sessions with invited guests and models that may train on your prompts never get it. Its pages stay held. A run an invited guest acted in cannot be kept.
+   */
+  public keep<ThrowOnError extends boolean = false>(options: Options<MemoryResearchKeepData, ThrowOnError>) {
+    return (options.client ?? this.client).post<MemoryResearchKeepResponses, MemoryResearchKeepErrors, ThrowOnError>({
+      url: "/memory/research/{runID}/keep",
+      ...options,
+    })
+  }
+
+  /**
+   * Export a research run
+   *
+   * The run as an attachment: the report with a bibliography as Markdown, or with `format=json` the run, its queries, sources, notes and report.
+   */
+  public export<ThrowOnError extends boolean = false>(options: Options<MemoryResearchExportData, ThrowOnError>) {
+    return (options.client ?? this.client).get<MemoryResearchExportResponses, MemoryResearchExportErrors, ThrowOnError>(
+      { url: "/memory/research/{runID}/export", ...options },
+    )
+  }
+
+  /**
+   * Forget a research source
+   *
+   * Forget the text Vector saved from one page of a run. The source stays listed as forgotten, and a report saved after this marks the notes that quoted it. Vector does not keep that page again on its own.
+   */
+  public forgetSource<ThrowOnError extends boolean = false>(
+    options: Options<MemoryResearchForgetSourceData, ThrowOnError>,
+  ) {
+    return (options.client ?? this.client).delete<
+      MemoryResearchForgetSourceResponses,
+      MemoryResearchForgetSourceErrors,
+      ThrowOnError
+    >({ url: "/memory/research/{runID}/sources/{sourceID}", ...options })
+  }
+
+  /**
+   * Read a research source
+   *
+   * One source of a run and the text Vector saved from its page, chunk by chunk, as citations open it.
+   */
+  public source<ThrowOnError extends boolean = false>(options: Options<MemoryResearchSourceData, ThrowOnError>) {
+    return (options.client ?? this.client).get<MemoryResearchSourceResponses, MemoryResearchSourceErrors, ThrowOnError>(
+      { url: "/memory/research/{runID}/sources/{sourceID}", ...options },
+    )
+  }
+}
+
 export class Memory extends HeyApiClient {
   /**
    * List memory
@@ -2581,6 +2996,46 @@ export class Memory extends HeyApiClient {
   }
 
   /**
+   * Erase what Vector learned in a session
+   *
+   * Forget every entry Vector learned whose only evidence is this session, so it is not learned again. What you wrote and what other sessions also taught stay. The session keeps its messages until you delete them.
+   */
+  public eraseSession<ThrowOnError extends boolean = false>(options: Options<MemoryEraseSessionData, ThrowOnError>) {
+    return (options.client ?? this.client).delete<MemoryEraseSessionResponses, MemoryEraseSessionErrors, ThrowOnError>({
+      url: "/memory/sessions/{sessionID}",
+      ...options,
+    })
+  }
+
+  /**
+   * Export memory
+   *
+   * Everything Vector keeps for this repository, for you, or both, as an attachment: a Markdown page per kind with each entry's evidence and what Vector read from documents, or with `format=json` the same as data. Never the documents' files.
+   */
+  public export<ThrowOnError extends boolean = false>(options?: Options<MemoryExportData, ThrowOnError>) {
+    return (options?.client ?? this.client).get<MemoryExportResponses, MemoryExportErrors, ThrowOnError>({
+      url: "/memory/export",
+      ...options,
+    })
+  }
+
+  /**
+   * Import memory
+   *
+   * Read an export (Markdown or JSON) back in. Every preference, term, decision, lesson and fact it holds lands waiting for your approval, so a changed file cannot put memory in use; rules stay in their files. What you forgot is not imported again.
+   */
+  public import<ThrowOnError extends boolean = false>(options?: Options<MemoryImportData, ThrowOnError>) {
+    return (options?.client ?? this.client).post<MemoryImportResponses, MemoryImportErrors, ThrowOnError>({
+      url: "/memory/import",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  }
+
+  /**
    * Tidy memory now
    *
    * Merge duplicates, drop what waited for review too long, archive what goes unused and mark stale entries.
@@ -2644,6 +3099,16 @@ export class Memory extends HeyApiClient {
   private _review?: Review
   get review(): Review {
     return (this._review ??= new Review({ client: this.client }))
+  }
+
+  private _posting?: Posting
+  get posting(): Posting {
+    return (this._posting ??= new Posting({ client: this.client }))
+  }
+
+  private _research?: Research
+  get research(): Research {
+    return (this._research ??= new Research({ client: this.client }))
   }
 }
 
@@ -4898,6 +5363,11 @@ export class VectorClient extends HeyApiClient {
   private _formatter?: Formatter
   get formatter(): Formatter {
     return (this._formatter ??= new Formatter({ client: this.client }))
+  }
+
+  private _local?: Local
+  get local(): Local {
+    return (this._local ??= new Local({ client: this.client }))
   }
 
   private _mcp?: Mcp

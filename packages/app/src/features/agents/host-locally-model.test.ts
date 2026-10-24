@@ -1,14 +1,19 @@
 import { describe, expect, test } from "bun:test"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
+import { join } from "node:path"
 import { ExternalAgent } from "@vectordevai/schema/external-agent"
 import {
-  agentBadge,
   canStart,
   customModelError,
   filterHostRows,
+  HOST_FOOTNOTE,
+  HOST_LOCALLY_ELSEWHERE,
+  hostLocallyRefusal,
   hostRows,
   hostState,
   installOptions,
   modelFlag,
+  NOTE_LABEL,
   startCopy,
   STATUS_LABEL,
   vendorLink,
@@ -34,7 +39,7 @@ describe("Host locally rows", () => {
       false,
     )
     expect(rows.map((row) => row.agent.id)).toEqual(ExternalAgent.catalog.map((entry) => entry.id))
-    expect(rows.length).toBe(16)
+    expect(rows.length).toBe(15)
     const state = (id: string) => rows.find((row) => row.agent.id === id)!.state
     expect(state("claude-code")).toBe("ready")
     expect(state("cursor")).toBe("signed-out")
@@ -81,12 +86,15 @@ describe("Host locally rows", () => {
   test("search matches every word against name, vendor, label, command and status", () => {
     const rows = hostRows([detection("claude-code", { state: "ready", installed: true })], false)
     const ids = (term: string) => filterHostRows(rows, term).map((row) => row.agent.id)
-    expect(ids("")).toHaveLength(16)
+    expect(ids("")).toHaveLength(15)
     expect(ids("  claude ")).toEqual(["claude-code"])
-    expect(ids("google")).toEqual(["gemini", "antigravity"])
+    expect(ids("google")).toEqual(["gemini"])
     expect(ids("work or api")).toEqual(["gemini"])
-    expect(ids("agy")).toEqual(["antigravity"])
+    expect(ids("agy")).toEqual([])
     expect(ids("cursor-agent")).toEqual(["cursor"])
+    expect(ids("cursor cli")).toEqual(["cursor"])
+    expect(ids("kilo cli")).toEqual(["kilo"])
+    expect(ids("jetbrains")).toEqual(["junie"])
     expect(ids("ready")).toEqual(["claude-code"])
     expect(ids("GITHUB copilot")).toEqual(["copilot"])
     expect(ids("nothing like this")).toEqual([])
@@ -97,17 +105,59 @@ describe("Host locally rows", () => {
   })
 })
 
+describe("who may start an agent", () => {
+  test("only this computer's own Vector, for its owner: never a server elsewhere or a guest's invite", () => {
+    expect(hostLocallyRefusal({ local: true, username: "vector" })).toBeUndefined()
+    expect(hostLocallyRefusal({ local: true })).toBeUndefined()
+    // A remote or SSH host would run the agent on that machine, and a guest's agents are the person's who invited them.
+    expect(hostLocallyRefusal({ local: false, username: "vector" })).toBe(HOST_LOCALLY_ELSEWHERE)
+    expect(hostLocallyRefusal({ local: true, username: "guest" })).toBe(HOST_LOCALLY_ELSEWHERE)
+    expect(HOST_LOCALLY_ELSEWHERE).toContain("only on this computer")
+  })
+})
+
+describe("never behind a plan", () => {
+  test("the launcher and the agents' views read nothing of Vector's account, plan, credits or pricing", () => {
+    // What decides whether an agent can start is what desktop detected on this computer, and nothing else.
+    expect(canStart({ agent: agent("claude-code"), state: "ready" })).toBe(true)
+    const files = readdirSync(import.meta.dir).filter((name) => /\.(?:ts|tsx)$/.test(name) && !name.includes(".test."))
+    expect(files.length).toBeGreaterThan(10)
+    const tied = files.filter((name) =>
+      /codium|vector-account|billing-window|\bcredits?\b|upgrade|pricing|paywall|useAccount|plan\(\)/i.test(
+        readFileSync(join(import.meta.dir, name), "utf8"),
+      ),
+    )
+    expect(tied).toEqual([])
+  })
+})
+
 describe("badges", () => {
-  test("an official file only where the catalog switches it on; letters everywhere else", () => {
-    expect(agentBadge(agent("cursor"), "dark")).toEqual({ kind: "official", src: "/agent-logos/cursor-dark.svg" })
-    expect(agentBadge(agent("cursor"), "light")).toEqual({ kind: "official", src: "/agent-logos/cursor-light.svg" })
-    expect(agentBadge(agent("kilo"), "dark")).toEqual({ kind: "official", src: "/agent-logos/kilo.svg" })
-    // The owner's decision: Claude Code, Codex and Muse Code show letters until their vendors allow more.
-    for (const id of ["claude-code", "codex", "muse-code"]) expect(agentBadge(agent(id), "dark").kind).toBe("letters")
-    expect(agentBadge(agent("claude-code"), "dark")).toEqual({ kind: "letters", letters: "CC", tone: "sand" })
-    // Turning the switch off falls back to letters without touching anything else.
-    const off = { ...agent("cursor"), logo: { ...agent("cursor").logo, show: "letters" as const } }
-    expect(agentBadge(off, "dark")).toEqual({ kind: "letters", letters: "CU", tone: "slate" })
+  test("every agent is two letters, and the app ships no vendor's logo or icon file", () => {
+    expect(ExternalAgent.catalog.map((entry) => entry.logo.letters)).toEqual([
+      "CC",
+      "CX",
+      "CU",
+      "CP",
+      "GE",
+      "MC",
+      "KI",
+      "CL",
+      "PI",
+      "DR",
+      "AM",
+      "QW",
+      "KM",
+      "GO",
+      "JU",
+    ])
+    // The owner's decision (23 October 2026): no third-party logo files at all, Cursor's and Kilo's included.
+    const pub = join(import.meta.dir, "../../../public")
+    expect(existsSync(join(pub, "agent-logos"))).toBe(false)
+    const names = ExternalAgent.catalog.flatMap((entry) => [entry.id, ...entry.binaries.map((binary) => binary.name)])
+    const shipped = readdirSync(pub, { recursive: true }).map(String)
+    expect(
+      shipped.filter((file) => names.some((name) => file.toLowerCase().split(/[\\/]/).at(-1)!.startsWith(`${name}.`))),
+    ).toEqual([])
   })
 })
 
@@ -116,10 +166,24 @@ describe("copy", () => {
     expect(startCopy(agent("claude-code"))).toBe(
       "Runs your installed Claude Code in Vector's chat, in an isolated copy of the repository.",
     )
-    // Antigravity CLI has no headless form, so it stays in the terminal.
-    expect(startCopy(agent("antigravity"))).toBe(
-      "Runs your installed Antigravity CLI in Vector's terminal, in an isolated copy of the repository.",
+    // Kimi Code has no headless form, so it stays in the terminal.
+    expect(startCopy(agent("kimi"))).toBe(
+      "Runs your installed Kimi Code in Vector's terminal, in an isolated copy of the repository.",
     )
+  })
+
+  test("the fine print says Vector is independent and the names are their owners' trademarks", () => {
+    expect(HOST_FOOTNOTE).toContain("never reads its credentials")
+    expect(HOST_FOOTNOTE).toContain("not affiliated with, endorsed by or sponsored by these companies")
+    expect(HOST_FOOTNOTE).toContain("trademarks of their owners")
+    expect(HOST_FOOTNOTE).not.toContain("logos")
+    expect(NOTE_LABEL.trademark).toBe("Trademark")
+  })
+
+  test("a trademark notice links where its owner asks, on the agent's own domains", () => {
+    const junie = agent("junie")
+    const notice = junie.notes.find((note) => note.kind === "trademark")!
+    expect(vendorLink(junie, notice.source)).toEqual({ href: "https://www.jetbrains.com/", label: "www.jetbrains.com" })
   })
 
   test("no launcher copy uses the words the owner ruled out", () => {
@@ -127,7 +191,12 @@ describe("copy", () => {
       ...ExternalAgent.catalog.map(startCopy),
       ...Object.values(STATUS_LABEL),
       ...ExternalAgent.catalog.flatMap((entry) => entry.notes.map((note) => note.text)),
-    ].join("\n")
+      HOST_FOOTNOTE,
+      HOST_LOCALLY_ELSEWHERE,
+    ]
+      .join("\n")
+      // A company's legal name is quoted as it is registered.
+      .replace("LF Projects, LLC", "LF")
     expect(text).not.toMatch(/\bproject\b|\bexactly\b|never exceeds|absolute privacy|partner|official integration/i)
     expect(text).not.toMatch(/your (?:claude|chatgpt|cursor|google|gemini) (?:plan|subscription)/i)
   })
@@ -136,7 +205,7 @@ describe("copy", () => {
     expect(modelFlag(agent("claude-code"))).toBe("--model")
     expect(modelFlag(agent("gemini"))).toBe("-m")
     expect(modelFlag(agent("muse-code"))).toBeUndefined()
-    // Droid's exec takes -m, but its own screen in the terminal has no model flag, so no model choice is offered.
+    // Factory Droid's exec takes -m, but its own screen in the terminal has no model flag, so no model choice is offered.
     expect(modelFlag(agent("droid"))).toBeUndefined()
     expect(agent("droid").models.kind).toBe("none")
   })

@@ -31,6 +31,9 @@ export type BrowserAgentCommand =
   | "scroll"
   | "clearLogs"
   | "setVisible"
+  | "readPage"
+  | "observePage"
+  | "clickRef"
 
 export type BrowserAgentInput = {
   contextId: string
@@ -38,6 +41,8 @@ export type BrowserAgentInput = {
   url?: string
   allowExternal?: boolean
   selector?: string
+  /** A ref_N handle from observePage, for clickRef. */
+  ref?: string
   text?: string
   key?: string
   milliseconds?: number

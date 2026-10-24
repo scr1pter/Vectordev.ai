@@ -1,4 +1,5 @@
 import type { Config, VectorClient } from "@vectordevai/sdk/v2/client"
+import type { LocalProbe } from "@vectordevai/core/local-mode/probe"
 import { providerAllowed } from "@vectordevai/schema/provider-policy"
 import type { validateCustomProvider } from "./dialog-custom-provider-form"
 
@@ -8,6 +9,11 @@ export async function saveCustomProvider(input: {
   directory?: string
   conflictMessage: string
   updateConfig: (config: Config) => Promise<unknown>
+  /**
+   * Puts the server Vector read on the model server list through the Local API, which asks the owner first when that
+   * loosens Vector Local; false when the owner said no. The list is never written with the provider.
+   */
+  list: (server: { readonly origin: string; readonly pin: LocalProbe.Pin }) => Promise<boolean>
 }) {
   const providerID = input.result.providerID
   const [providers, config, credential] = await Promise.all([
@@ -37,4 +43,6 @@ export async function saveCustomProvider(input: {
   }
 
   await input.updateConfig({ provider: { [providerID]: input.result.config } })
+  // The server goes on the list after the provider is saved, and only once the owner agrees.
+  return { listed: input.result.local ? await input.list(input.result.local) : false }
 }

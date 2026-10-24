@@ -51,10 +51,17 @@ export function useProviders(directory?: Accessor<string | undefined>) {
     const directory = dir()
     if (directory ? !serverSync().child(directory)[0].provider_ready : !serverSync().data.ready) return
     for (const item of providers().unavailable ?? []) {
+      // Vector Local keeps these off on purpose and keeps the credential; the model picker's Off in Vector Local group
+      // says why, so an expected block is not toasted as an ignored credential.
+      if (item.reason === "off-in-local") continue
       if (!takeProviderNotice(serverSDK().scope, `credential:${item.id}:${item.reason}`)) continue
       showToast({
         title: language.t("provider.unavailable.title", { provider: providers().all.get(item.id)?.name ?? item.id }),
-        description: language.t(`provider.unavailable.${item.reason}`, { provider: item.id }),
+        // A saved ChatGPT sign-in points at OpenAI's own routes: an API key, or the user's Codex CLI in Host locally.
+        description:
+          item.id === "openai" && item.reason === "sign-in-paused"
+            ? language.t("provider.unavailable.openai.sign-in-paused")
+            : language.t(`provider.unavailable.${item.reason}`, { provider: item.id }),
         duration: 10000,
       })
     }
@@ -62,6 +69,8 @@ export function useProviders(directory?: Accessor<string | undefined>) {
   return {
     all: () => new Map([...providers().all].filter(([id, provider]) => !isHiddenProvider(id, provider))),
     default: () => providers().default,
+    /** The connected models the engine says run on a model server someone hosts. */
+    hosted: () => providers().hosted ?? [],
     popular: () =>
       pipe(
         providers().all,

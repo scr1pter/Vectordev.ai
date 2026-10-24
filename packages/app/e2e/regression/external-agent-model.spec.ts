@@ -7,9 +7,9 @@ import { mockVectorServer } from "../utils/mock-server"
 const directory = "/tmp/vector-external-model"
 const parentSessionId = "ses_external_model_parent"
 const runtimes = [
-  { id: "claude-code", label: "Claude Code", pick: "Opus (latest)", value: "opus" },
-  { id: "codex", label: "Codex", pick: "GPT-5.5", value: "gpt-5.5" },
-  { id: "cursor", label: "Cursor Agent", pick: "Composer 2.5", value: "composer-2.5" },
+  { id: "claude-code", label: "Claude Code", vendor: "Anthropic", pick: "Opus (latest)", value: "opus" },
+  { id: "codex", label: "Codex", vendor: "OpenAI", pick: "GPT-5.5", value: "gpt-5.5" },
+  { id: "cursor", label: "Cursor CLI", vendor: "Anysphere", pick: "Composer 2.5", value: "composer-2.5" },
 ]
 
 for (const runtime of runtimes) {
@@ -109,6 +109,18 @@ for (const runtime of runtimes) {
     await page.goto(
       `/parallel-workspaces/${workspaceId}?${new URLSearchParams({ project: directory, parentSession: parentSessionId })}`,
     )
+    // The conversation says whose agent this is: the user's own, running in Vector, not a Vector agent.
+    await expect(page.locator("[data-agent-ownership]")).toHaveText(
+      `This is your own ${runtime.label} running in Vector, not a Vector agent. Vector is not affiliated with ${runtime.vendor}.`,
+    )
+    const shots = process.env.HOST_LOCALLY_SHOTS
+    if (shots) {
+      // Let the conversation's entrance settle, so the picture shows it as a person reads it.
+      await page.waitForTimeout(800)
+      await page
+        .locator("[data-vector-external-agent-workspace]")
+        .screenshot({ path: `${shots}/chat-${runtime.id}.png` })
+    }
     const composer = page.locator("[data-agent-chat-composer]")
     const chip = composer.getByRole("button", { name: `${runtime.label} model: Agent default`, exact: true })
     await expect(chip).toBeVisible()

@@ -21,6 +21,8 @@ import { Flag } from "./flag/flag"
 import { Global } from "./global"
 import { VectorAccount } from "./vector-account"
 import { makeGlobalNode } from "./effect/app-node"
+import { Egress } from "./local-mode/egress"
+import { StartupHold } from "./startup-hold"
 import {
   FreeModelMetadata,
   freeModelDataPolicy,
@@ -61,12 +63,24 @@ export function createClient(
     request?: (url: string, init: RequestInit) => Promise<Response>
     now?: () => number
     disabled?: () => boolean
+    /**
+     * A desktop first run's hold (StartupHold): nothing is fetched while it holds, and once it is released the catalog
+     * is read again and every listener hears it, so free models (the user's own OpenRouter key's included) are listed
+     * in the same engine, with no restart.
+     */
+    hold?: Pick<typeof StartupHold, "held" | "onRelease">
+    /**
+     * Whether Vector Local is on: free models send prompts through vectordev.ai and openrouter.ai to the services that
+     * run them, outside the servers the user lists, so the catalog is OFF and nothing is fetched.
+     */
+    local?: () => boolean
     /** How long a non-forced catalog read waits for vectordev.ai before answering without it. */
     wait?: number
   } = {},
 ) {
   const now = input.now ?? Date.now
   const request = input.request ?? fetch
+  const off = () => input.disabled?.() === true || input.hold?.held() === true
   // `stamp` is the cache file's modification time as this client last read or wrote it.
   const state: { value?: FreeModelCatalog; expires: number; pending?: Promise<FreeModelCatalog>; stamp?: number } = {
     expires: 0,
@@ -85,6 +99,7 @@ export function createClient(
     return value
   }
   const catalog = async (force = false): Promise<FreeModelCatalog> => {
+    if (input.local?.()) return serve(OFF)
     // The desktop engine, the terminal and "vector models" share the cache file: when another of them wrote a newer
     // catalog, this client reads that instead of serving its own copy until it expires.
     if (input.file && state.value && !state.pending) {
@@ -121,7 +136,7 @@ export function createClient(
   }
   const load = (saved: FreeModelCatalog | undefined) => {
     const pending = (async () => {
-      const response = input.disabled?.()
+      const response = off()
         ? undefined
         : await request(CATALOG_URL, {
             redirect: "error",
@@ -173,7 +188,7 @@ export function createClient(
     return pending
   }
   const forKey = async (key: string, force = false) => {
-    if (!key || input.disabled?.()) return []
+    if (!key || off() || input.local?.()) return []
     const digest = createHash("sha256").update(key).digest("hex")
     const cached = users.get(digest)
     if (!force && cached && cached.expires > now()) return cached.models
@@ -243,6 +258,15 @@ export function createClient(
     listeners.add(listener)
     return () => void listeners.delete(listener)
   }
+  // Every listener hears the catalog read after the hold, once, even one that did not change: the models built while
+  // it held left out the user's own key's. A catalog that changed is told by load() itself.
+  input.hold?.onRelease(() => {
+    const before = served.value
+    void catalog(true).then((value) => {
+      if (before && signature(before) !== signature(value)) return
+      listeners.forEach((listener) => listener(value))
+    })
+  })
   return { catalog, forKey, trainingConsent, setTrainingConsent, subscribe }
 }
 
@@ -303,6 +327,10 @@ export const node = makeGlobalNode({
         file: path.join(Global.Path.cache, "free-models-v2.json"),
         consentFile: trainingConsentFile(),
         disabled: () => Flag.VECTOR_DISABLE_MODELS_FETCH,
+        hold: StartupHold,
+        local: () => Egress.policy().enabled,
+        // Read only with Vector Local off (local, above), so OpenRouter's lists never need a source of their own.
+        request: (url, init) => Egress.fetch("free-models-catalog", url, init),
       }),
     ),
   ),

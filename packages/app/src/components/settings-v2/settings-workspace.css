@@ -645,7 +645,7 @@ html .settings-v2-workspace .settings-v2-nav-search input:focus-visible {
   mask-image: linear-gradient(to bottom, transparent 0, #000 12px);
 }
 
-/* Sections built outside the settings kit (Vector account, Teams, web search keys) take its type and fields. */
+/* Sections built outside the settings kit (Vector account, Teams) take its type and fields. */
 .settings-v2-workspace .settings-form-section {
   gap: 12px;
 }

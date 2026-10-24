@@ -479,6 +479,8 @@ const cfg = {
       options: {
         apiKey: "test-key",
         baseURL: "http://localhost:1/v1",
+        // The fake server answers any number of requests at once, unlike a model server whose count nobody set.
+        concurrency: 64,
       },
     },
   },
@@ -895,7 +897,7 @@ it.instance("title generation sends only what the user typed", () =>
     yield* prompt.awaitTitles()
     const database = yield* Database.Service
     const recorded = yield* database.db.select().from(EventTable).where(eq(EventTable.aggregate_id, chat.id)).all()
-    const usage = recorded.filter((event) => event.type === `${SessionEvent.AncillaryUsage.type}.1`)
+    const usage = recorded.filter((event) => event.type === `${SessionEvent.AncillaryUsage.type}.2`)
     expect(usage).toHaveLength(1)
     // The server's automatic title reply reports no usage; keep its spend unknown rather than inventing tokens.
     expect(usage[0]?.data).toMatchObject({ incomplete: true, unpriced: true })
@@ -908,6 +910,30 @@ it.instance("title generation sends only what the user typed", () =>
     expect(bodies[0]).not.toContain("Generate a title")
     expect(bodies[1]).toContain("Generate a title")
     expect((yield* sessions.get(chat.id)).title).toBe("E2E Title")
+  }),
+)
+
+it.instance("a title on a model server on this computer is brief, and one cut off while thinking is not used", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({ permission: [{ permission: "*", pattern: "*", action: "allow" }] })
+    // A model that thinks aloud reaches its reply limit before it closes its thinking.
+    yield* llm.title("<think>The user wants a short title about the login redirect, so")
+    yield* llm.text("done")
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      model: ref,
+      parts: [{ type: "text", text: "Fix the login redirect" }],
+    })
+    yield* prompt.awaitTitles()
+    const title = (yield* llm.hits).find((hit) => JSON.stringify(hit.body).includes("Generate a title"))
+    // The fake server is on this computer, so the title's reply is held to a few hundred tokens.
+    expect(title?.body.max_tokens).toBe(ProviderSvc.BRIEF_REPLY)
+    expect((yield* sessions.get(chat.id)).title).toBe("Fix the login redirect")
+    yield* llm.title("E2E Title")
   }),
 )
 
@@ -934,7 +960,7 @@ codiumPrompts.instance("a Codium session's title goes through the gateway and co
     expect((yield* sessions.get(chat.id)).title).toBe("Fix the login redirect")
     const database = yield* Database.Service
     const recorded = yield* database.db.select().from(EventTable).where(eq(EventTable.aggregate_id, chat.id)).all()
-    const usage = recorded.filter((event) => event.type === `${SessionEvent.AncillaryUsage.type}.1`)
+    const usage = recorded.filter((event) => event.type === `${SessionEvent.AncillaryUsage.type}.2`)
     expect(usage).toHaveLength(1)
     // Title spend counts toward the session in tokens; credits are a share of the plan, never dollars to add up.
     expect(usage[0]?.data).toMatchObject({
@@ -1089,7 +1115,7 @@ for (const ending of ["cancel", "reject"] as const)
         expect(yield* llm.hits).toHaveLength(1)
         const database = yield* Database.Service
         const recorded = yield* database.db.select().from(EventTable).where(eq(EventTable.aggregate_id, chat.id)).all()
-        expect(recorded.filter((event) => event.type === `${SessionEvent.AncillaryUsage.type}.1`)).toEqual([])
+        expect(recorded.filter((event) => event.type === `${SessionEvent.AncillaryUsage.type}.2`)).toEqual([])
       }),
     30_000,
   )

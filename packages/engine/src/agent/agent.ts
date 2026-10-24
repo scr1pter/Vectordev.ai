@@ -18,6 +18,9 @@ import PROMPT_GENERAL from "./prompt/general.txt"
 import PROMPT_JUDGE from "./prompt/judge.txt"
 import PROMPT_MIGRATION from "./prompt/migration.txt"
 import PROMPT_PERFORMANCE from "./prompt/performance.txt"
+import PROMPT_RESEARCH from "./prompt/research.txt"
+import PROMPT_RESEARCH_JUDGE from "./prompt/research-judge.txt"
+import PROMPT_RESEARCHER from "./prompt/researcher.txt"
 import PROMPT_REVIEW from "./prompt/review.txt"
 import PROMPT_SECURITY from "./prompt/security.txt"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
@@ -75,6 +78,59 @@ const CLOUD_MUTATIONS = [
   "vector_cloud_database",
   "vector_cloud_environment",
   "vector_cloud_hosting",
+]
+
+// Deep research's agents (section 5.3): the lead, its web workers and the judge that checks the lead's citations.
+export const RESEARCH = "research"
+export const RESEARCHER = "researcher"
+export const RESEARCH_JUDGE = "research-judge"
+const RESEARCH_AGENTS: Record<string, { readonly tools: readonly string[]; readonly subagents: readonly string[] }> = {
+  // The lead plans, searches, reads, notes and writes the report. It reads the repository and the brain, and the
+  // user's visible browser only to hand a sign-in or a paywall to the user. It delegates to its researchers alone; the
+  // judge is launched by Vector when a report is checked.
+  [RESEARCH]: {
+    tools: [
+      "research_plan",
+      "research_search",
+      "research_read",
+      "research_browser",
+      "research_note",
+      "research_report",
+      "memory",
+      "question",
+      "read",
+      "grep",
+      "glob",
+      "list",
+      "browser",
+      "task",
+    ],
+    subagents: [RESEARCHER, RESEARCH_JUDGE],
+  },
+  // A web worker answers one sub-question from the web. It sees no repository file, no memory tool and not the user's
+  // own browser, since what it sends (queries and addresses) leaves the machine.
+  [RESEARCHER]: { tools: ["research_search", "research_read", "research_browser", "research_note"], subagents: [] },
+  // The judge gets the cited passages in its brief and answers in plain lines.
+  [RESEARCH_JUDGE]: { tools: [], subagents: [] },
+}
+/** The tools a research agent may be offered at all, whatever any rule allows; nothing for any other agent. */
+export function researchTools(agent: string): readonly string[] | undefined {
+  return RESEARCH_AGENTS[agent]?.tools
+}
+// Coding and outside tools no user or repository rule may hand a research agent. They are denied last.
+const RESEARCH_DENIED = [
+  "edit",
+  "write",
+  "apply_patch",
+  "bash",
+  "todowrite",
+  "plan_enter",
+  "plan_exit",
+  "vector_cloud*",
+  "webfetch",
+  "websearch",
+  "skill",
+  "escalate",
 ]
 
 const GeneratedAgent = Schema.Struct({
@@ -190,6 +246,8 @@ const layer = Layer.effect(
           webfetch: "ask",
           private_network: "ask",
           websearch: "ask",
+          // With Vector Local on, a shell command that may reach the network asks first (tool/shell.ts).
+          network_command: "ask",
           // Vector Cloud actions that publish, change a database or write a
           // host's environment act on the user's own accounts and may bill them.
           vector_cloud_publish: "ask",
@@ -274,6 +332,80 @@ const layer = Layer.effect(
             }),
             rules.flatMap((rule) => narrow(rule, tools, verificationCommands)),
             Permission.fromConfig({ bash: readonlyBashDenies }),
+          )
+        }
+        // The research agents follow the same pattern (RC1): user and repository rules only narrow within the agent's
+        // own tools and subagents, and the coding tools are denied last, so a global `bash: allow`, `edit: allow` or
+        // `"*": "allow"` reopens nothing. Plan mode's merge order would let them. research_read asks once per run (the
+        // tool scopes it to the run and never saves it), and an address on the user's own network asks per origin.
+        const researchAgent = (name: string, rules: PermissionV1.Rule[]) => {
+          const tools = [...RESEARCH_AGENTS[name].tools]
+          const subagents = [...RESEARCH_AGENTS[name].subagents]
+          const reads = tools.includes("read")
+          const browses = tools.includes("browser")
+          // A blanket read allow ("*": "allow", `read: allow`) lands after the read defaults, so secret files would
+          // stop asking. Their asks follow each such allow again, except for a path one of the rules names itself.
+          const blanket = (pattern: string) => /^[*/]*$/.test(pattern)
+          const secrets = Permission.fromConfig({
+            read: Object.fromEntries(
+              Object.entries(readDefaults).filter(
+                ([pattern]) =>
+                  pattern !== "*" &&
+                  !rules.some(
+                    (rule) =>
+                      rule.permission === "read" &&
+                      !blanket(rule.pattern) &&
+                      (Wildcard.match(rule.pattern, pattern) || Wildcard.match(pattern, rule.pattern)),
+                  ),
+              ),
+            ),
+          })
+          return Permission.merge(
+            defaults,
+            Permission.fromConfig({
+              "*": "deny",
+              ...Object.fromEntries(tools.map((tool) => [tool, "allow" as const])),
+              ...(tools.includes("research_read")
+                ? { research_read: "ask" as const, private_network: "ask" as const }
+                : {}),
+              ...(reads ? { read: readDefaults, external_directory: readonlyExternalDirectory } : {}),
+              ...(browses
+                ? {
+                    browser_external: "ask" as const,
+                    browser_interact: "ask" as const,
+                    browser_sensitive: "ask" as const,
+                  }
+                : {}),
+              ...(subagents.length
+                ? {
+                    task: {
+                      "*": "deny" as const,
+                      ...Object.fromEntries(subagents.map((item) => [item, "allow" as const])),
+                    },
+                  }
+                : {}),
+            }),
+            // The run's first read asks however broad an allow is ("*", "research_*"): only a rule for research_read
+            // itself answers it.
+            rules.flatMap((rule) =>
+              narrow(rule, tools, [], { subagents, external: reads })
+                .filter(
+                  (item) =>
+                    item.permission !== "research_read" ||
+                    item.action !== "allow" ||
+                    rule.permission === "research_read",
+                )
+                .flatMap((item) =>
+                  reads && item.permission === "read" && item.action === "allow" && blanket(item.pattern)
+                    ? [item, ...secrets]
+                    : [item],
+                ),
+            ),
+            Permission.fromConfig({
+              ...Object.fromEntries(RESEARCH_DENIED.map((tool) => [tool, "deny" as const])),
+              // MCP resources are read under `read` with an `mcp:` pattern; the lead, which reads files, reads none.
+              ...(reads ? { read: { "mcp:*": "deny" as const } } : {}),
+            }),
           )
         }
 
@@ -436,6 +568,40 @@ const layer = Layer.effect(
             mode: "subagent",
             native: true,
           },
+          // Deep research (section 5.3). The lead is a primary agent and a subagent build may hand a research question
+          // to; it makes no code changes. The app's agent picker leaves it out by name (context/local.tsx): the Mode
+          // menu picks it.
+          [RESEARCH]: {
+            name: RESEARCH,
+            description:
+              "Deep research (preview). Researches a question across the web and this repository's brain, then writes a report where each claim cites a quote found in its source. Makes no code changes.",
+            permission: researchAgent(RESEARCH, user),
+            prompt: PROMPT_RESEARCH,
+            options: {},
+            mode: "all",
+            native: true,
+          },
+          [RESEARCHER]: {
+            name: RESEARCHER,
+            description:
+              "Research worker for one sub-question of a Deep research plan. Searches and reads the web and saves notes with quotes; it has no files, no memory tool and no shell.",
+            permission: researchAgent(RESEARCHER, user),
+            prompt: PROMPT_RESEARCHER,
+            options: {},
+            mode: "subagent",
+            native: true,
+          },
+          // Launched by Vector when a research report is checked, never by a model: hidden from the task list.
+          [RESEARCH_JUDGE]: {
+            name: RESEARCH_JUDGE,
+            description: "Checks that each cited note's quote supports its claim.",
+            permission: researchAgent(RESEARCH_JUDGE, user),
+            prompt: PROMPT_RESEARCH_JUDGE,
+            options: {},
+            mode: "subagent",
+            native: true,
+            hidden: true,
+          },
           performance: {
             name: "performance",
             permission: Permission.merge(
@@ -574,11 +740,12 @@ const layer = Layer.effect(
           return first === -1 ? [] : rules.slice(first)
         }
         for (const [name, item] of Object.entries(agents)) {
-          if (!(name in readonlySpecialists)) item.permission = Permission.merge(item.permission, userCeiling(name))
+          if (!(name in readonlySpecialists) && !(name in RESEARCH_AGENTS))
+            item.permission = Permission.merge(item.permission, userCeiling(name))
         }
 
         // Rebuilt after the config loop above, so a read-only specialist's own config rules, and the user ceiling, are
-        // narrowed like the user's.
+        // narrowed like the user's. The research agents likewise.
         for (const name of Object.keys(readonlySpecialists)) {
           const item = agents[name]
           if (!item) continue
@@ -587,6 +754,37 @@ const layer = Layer.effect(
             ...Permission.fromConfig(cfg.agent?.[name]?.permission ?? {}),
             ...userCeiling(name),
           ])
+        }
+        for (const name of Object.keys(RESEARCH_AGENTS)) {
+          const item = agents[name]
+          if (!item) continue
+          item.permission = researchAgent(name, [
+            ...user,
+            ...Permission.fromConfig(cfg.agent?.[name]?.permission ?? {}),
+            ...userCeiling(name),
+          ])
+        }
+
+        // The research tools are the research agents' alone, and so are the researcher and the judge: no other agent,
+        // whatever its rules, may call one or launch one outside a research run. The build agent alone may hand a
+        // question to the research lead with its research tool (on Work and Thorough requests).
+        for (const [name, item] of Object.entries(agents)) {
+          if (name in RESEARCH_AGENTS) continue
+          // Only where task may launch them: a rule for one subagent would otherwise be the last word on task for an
+          // agent that may launch none, and offer it the tool.
+          const launches = [RESEARCHER, RESEARCH_JUDGE].filter(
+            (agent) => Permission.evaluate("task", agent, item.permission).action !== "deny",
+          )
+          item.permission = Permission.merge(
+            item.permission,
+            Permission.fromConfig({
+              "research_*": "deny",
+              ...(name === "build" ? {} : { research: "deny" as const }),
+              ...(launches.length
+                ? { task: Object.fromEntries(launches.map((agent) => [agent, "deny" as const])) }
+                : {}),
+            }),
+          )
         }
 
         // A wildcard allow (an agent's or the user's "*": "allow") must not silently
@@ -779,16 +977,30 @@ const layer = Layer.effect(
 // One user or config rule as it may apply to a read-only specialist that has `tools` and may run the `verification`
 // commands (each a literal prefix ending in `*`). A deny always applies. An allow or ask applies to the tools it
 // names, and an ask also narrows external reads and the verification commands it covers: `bash: ask` asks before
-// each of them, `git *: ask` before the git ones, `git diff --stat*: ask` before that one alone.
-function narrow(rule: PermissionV1.Rule, tools: string[], verification: string[]): PermissionV1.Rule[] {
+// each of them, `git *: ask` before the git ones, `git diff --stat*: ask` before that one alone. For an agent that
+// delegates to `subagents` alone (the research lead), a rule for `task` applies to those of them its pattern names,
+// never to any other subagent, and an agent that reads no file (`external: false`) gets no external-read rule.
+function narrow(
+  rule: PermissionV1.Rule,
+  tools: string[],
+  verification: string[],
+  options: { readonly subagents?: readonly string[]; readonly external?: boolean } = {},
+): PermissionV1.Rule[] {
   if (rule.action === "deny") return [rule]
   const named = tools
     .filter((tool) => Wildcard.match(tool, rule.permission))
-    .map((tool) => ({ ...rule, permission: tool }))
+    .flatMap((tool) =>
+      tool === "task" && options.subagents
+        ? options.subagents
+            .filter((agent) => Wildcard.match(agent, rule.pattern))
+            .map((agent) => ({ ...rule, permission: tool, pattern: agent }))
+        : [{ ...rule, permission: tool }],
+    )
   if (rule.action !== "ask") return named
-  const external = Wildcard.match("external_directory", rule.permission)
-    ? [{ ...rule, permission: "external_directory" }]
-    : []
+  const external =
+    options.external !== false && Wildcard.match("external_directory", rule.permission)
+      ? [{ ...rule, permission: "external_directory" }]
+      : []
   const bash = Wildcard.match("bash", rule.permission)
     ? verification.flatMap((pattern) => {
         const prefix = pattern.slice(0, -1)

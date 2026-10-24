@@ -1,6 +1,10 @@
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { EgressGuard } from "@vectordevai/core/local-mode/guard"
+
 // The help assistant runs through the main process for the same reason bug
 // reports do: the packaged renderer is served over a custom protocol and
-// cannot reach vectordev.ai itself.
+// cannot reach vectordev.ai itself. Its request is Vector Local's
+// `help-assistant` source, which Vector Local keeps off unless the user allows it.
 const API = (process.env.VECTOR_HELP_API_URL || "https://vectordev.ai/api/help").replace(/\/$/, "")
 
 export type HelpTurn = { role: "user" | "assistant"; content: string }
@@ -8,12 +12,18 @@ export type HelpInput = { messages: HelpTurn[]; context: string }
 export type HelpResult = { reply?: string; error?: string }
 
 export async function askHelpAssistant(input: HelpInput): Promise<HelpResult> {
-  const response = await fetch(`${API}/chat`, {
+  const response = await Egress.fetch("help-assistant", `${API}/chat`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ messages: input?.messages ?? [], context: input?.context ?? "" }),
   }).catch((cause: unknown) => (cause instanceof Error ? cause : new Error(String(cause))))
 
+  if (response instanceof EgressGuard.EgressBlocked) {
+    return {
+      error:
+        "The help assistant is off while Vector Local is on, because it sends your question to vectordev.ai. The Vector docs answer most questions without it.",
+    }
+  }
   if (response instanceof Error) {
     return { error: "Vector could not reach the help assistant. Check your connection." }
   }

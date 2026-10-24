@@ -24,6 +24,7 @@ import {
   canStart,
   customModelError,
   filterHostRows,
+  HOST_FOOTNOTE,
   hostRows,
   installOptions,
   modelFlag,
@@ -43,6 +44,9 @@ export type HostLocallyProps = {
   detect: (options?: { refresh?: boolean }) => Promise<unknown>
   /** The repository agents start in, and whose session terminal runs the commands. Empty when none is open. */
   directory: () => string
+  /** Why nothing may start, continue or be set up from here, such as a connection to a server elsewhere or as a guest
+      (hostLocallyRefusal). Required, so no caller can leave the check out. */
+  refusal: () => string | undefined
   /** The chat agent the agent launcher is set to, marked in the list. */
   selected: () => string | undefined
   picks: (id: string) => readonly RuntimeModelPick[] | undefined
@@ -201,6 +205,9 @@ function AgentList(props: {
                 computer.
               </p>
             </Show>
+            <Show when={available() && props.context.refusal()}>
+              {(refusal) => <p data-slot="host-notice">{refusal()}</p>}
+            </Show>
             <div data-slot="host-section">
               <span>Host locally</span>
               <span>Your installed command lines</span>
@@ -251,9 +258,7 @@ function AgentList(props: {
             </Show>
           </div>
         </ScrollView>
-        <p data-slot="host-footnote">
-          Vector runs each agent's own command and never reads its credentials. Names and logos belong to their owners.
-        </p>
+        <p data-slot="host-footnote">{HOST_FOOTNOTE}</p>
       </DialogBody>
     </>
   )
@@ -298,7 +303,11 @@ function AgentDetail(props: { context: HostLocallyProps; row: () => HostRow; onB
   // Only an agent with a model flag on the surface it runs on takes a model; any other runs its own default, even
   // when an earlier pick is remembered.
   const choosesModel = () => agent().models.kind !== "none" && Boolean(modelFlag(agent()))
-  const chosen = () => (choosesModel() ? custom().trim() || model() : undefined)
+  const chosen = (surface: ExternalAgent.Tier) => {
+    if (!choosesModel()) return undefined
+    if (surface === "terminal" && !agent().interactive.model) return undefined
+    return custom().trim() || model()
+  }
 
   // A setup command runs in this window's own terminal, on the engine of the open repository, in the empty folder
   // desktop picked. Leaving the window stops a command still running, so nothing keeps going out of sight.
@@ -337,7 +346,7 @@ function AgentDetail(props: { context: HostLocallyProps; row: () => HostRow; onB
     owned?.remove()
   })
   const running = () => Boolean(setup.title && setup.exitCode === undefined && !setup.error)
-  const canRun = () => Boolean(props.context.directory()) && !running()
+  const canRun = () => !props.context.refusal() && Boolean(props.context.directory()) && !running()
 
   // Detection that finds the agent newly installed changes `installed`, which asks desktop for its sign-in again.
   const runSetup = (launch: ExternalAgent.TerminalLaunch) =>
@@ -349,12 +358,14 @@ function AgentDetail(props: { context: HostLocallyProps; row: () => HostRow; onB
     setTimeout(() => setState("copied", (value) => (value === text ? "" : value)), 1_500)
   }
 
-  const start = async () => {
+  // A chat agent can also start in the terminal, where the user types to it directly: the way to run one on a plan
+  // its vendor limits to interactive use, such as Qwen Code on an Alibaba Coding Plan.
+  const start = async (surface: ExternalAgent.Tier) => {
     const current = agent()
-    if (customError()) return
-    const value = chosen()
+    if (customError() || props.context.refusal()) return
+    const value = chosen(surface)
     props.context.remember(current.id, value)
-    if (ExternalAgent.isChatId(current.id)) {
+    if (surface === "chat" && ExternalAgent.isChatId(current.id)) {
       props.context.onUse(current.id)
       props.close()
       return
@@ -396,15 +407,17 @@ function AgentDetail(props: { context: HostLocallyProps; row: () => HostRow; onB
   const install = () => options().find((item) => item.id === option()) ?? options()[0]
   const signIn = () => commands()?.signIn
   const startable = () => canStart(props.row())
-  const startBlocked = () => {
+  const startBlocked = () => props.context.refusal() ?? (agent().tier === "chat" ? customError() : terminalBlocked())
+  const terminalBlocked = () => {
+    if (props.context.refusal()) return props.context.refusal()
     if (customError()) return customError()
-    if (agent().tier === "chat") return undefined
     if (running()) return `${setup.title} is still running in this window.`
     if (!api?.launchTerminal) return "Update Vector's desktop app to start this agent from here."
     if (!props.context.directory()) return "Open a repository first: the agent works in an isolated copy of it."
     return undefined
   }
   const runBlocked = () => {
+    if (props.context.refusal()) return props.context.refusal()
     if (!props.context.directory()) return "Open a repository first, so Vector's terminal can run it."
     return undefined
   }
@@ -454,6 +467,14 @@ function AgentDetail(props: { context: HostLocallyProps; row: () => HostRow; onB
             </div>
 
             <p data-slot="host-copy">{startCopy(agent())}</p>
+
+            <Show when={api && props.context.refusal()}>
+              {(refusal) => (
+                <p data-slot="host-hint" data-tone="error" data-host-refusal>
+                  {refusal()}
+                </p>
+              )}
+            </Show>
 
             <Show when={props.row().state === "checking"}>
               <p data-slot="host-hint">Checking this computer for {agent().name}…</p>
@@ -697,7 +718,7 @@ function AgentDetail(props: { context: HostLocallyProps; row: () => HostRow; onB
                             <>
                               {" "}
                               <Link href={link().href} data-slot="host-link">
-                                Source
+                                {note.kind === "trademark" ? link().label : "Source"}
                               </Link>
                             </>
                           )}
@@ -721,11 +742,21 @@ function AgentDetail(props: { context: HostLocallyProps; row: () => HostRow; onB
         </Show>
         <div data-slot="host-actions">
           <Show when={startable()}>
+            <Show when={agent().tier === "chat"}>
+              <ButtonV2
+                variant="ghost"
+                disabled={state.busy || Boolean(terminalBlocked())}
+                title={terminalBlocked() ?? `Opens ${agent().name}'s own screen in Vector's terminal`}
+                onClick={() => void start("terminal")}
+              >
+                {state.busy ? "Starting…" : "Start in terminal"}
+              </ButtonV2>
+            </Show>
             <ButtonV2
               variant="contrast"
               disabled={state.busy || Boolean(startBlocked())}
               title={startBlocked()}
-              onClick={() => void start()}
+              onClick={() => void start(agent().tier)}
             >
               {agent().tier === "chat" ? `Use ${agent().name}` : state.busy ? "Starting…" : `Start ${agent().name}`}
             </ButtonV2>

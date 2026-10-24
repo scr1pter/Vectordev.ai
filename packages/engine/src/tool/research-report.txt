@@ -1,0 +1,7 @@
+Writes this research run's report and saves it in the repository's brain, held and private until the user keeps it.
+
+- answer: at most 1,500 characters. Cite notes as [N3] (or [N3, N5]) in the answer and the sections.
+- sections: up to 12, each with a heading and a body; subquestion names the sub-question a section answers.
+- disagreements and open_questions: say honestly where sources disagree and what is still open.
+- Every cited [N#] must be a note research_note saved, and a sub-question marked answered must have a note; otherwise the report is refused with what to fix. Sentences that state a number, a date or a name without a citation are listed for you to fix.
+- Calling research_report again saves the next version.

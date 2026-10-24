@@ -379,8 +379,7 @@ describe("provider HttpApi", () => {
     Effect.gen(function* () {
       const directory = (yield* TestInstance).directory
       const headers = { "x-vector-directory": directory, "content-type": "application/json" }
-      // ChatGPT sign-in is available again, so OpenAI without a pending sign-in is missing, not paused.
-      for (const missing of ["missing-provider-fixture", "constructor", "openai"]) {
+      for (const missing of ["missing-provider-fixture", "constructor"]) {
         const response = yield* requestCallback({ providerID: missing, method: 0, headers })
         expect(response.status).toBe(400)
         expect(JSON.parse(response.body)).toEqual({
@@ -396,6 +395,14 @@ describe("provider HttpApi", () => {
           data: { field: "providerID", message: expect.stringContaining("paused") },
         })
       }
+      // Vector's built-in Sign in with ChatGPT is off (owner decision, 23 October 2026): refused, pointing to OpenAI's
+      // own routes.
+      const openai = yield* requestCallback({ providerID: "openai", method: 0, headers })
+      expect(openai.status).toBe(400)
+      expect(JSON.parse(openai.body)).toMatchObject({
+        name: "ProviderAuthValidationFailed",
+        data: { field: "providerID", message: expect.stringContaining("Sign in with ChatGPT is off in Vector") },
+      })
     }),
     projectOptions,
     30000,

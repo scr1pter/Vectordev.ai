@@ -8,8 +8,10 @@ import { FileSystemWatcher } from "./filesystem-watcher"
 import { InstallationEvent } from "./installation-event"
 import { Integration } from "./integration"
 import { LegacyEvent } from "./legacy-event"
+import { LocalEvent } from "./local-event"
 import { LspEvent } from "./lsp-event"
 import { McpEvent } from "./mcp-event"
+import { MemoryEvent } from "./memory-event"
 import { ModelCatalog } from "./model-catalog"
 import { Permission } from "./permission"
 import { PermissionV1 } from "./permission-v1"
@@ -20,6 +22,7 @@ import { Pty } from "./pty"
 import { Question } from "./question"
 import { QuestionV1 } from "./question-v1"
 import { Reference } from "./reference"
+import { Research } from "./research"
 import { ServerEvent } from "./server-event"
 import { SessionCompactionEvent } from "./session-compaction-event"
 import { SessionEvent } from "./session-event"
@@ -75,6 +78,9 @@ export const Definitions = Event.inventory(
   ...SessionStatusEvent.Definitions,
   ...QuestionV1.Event.Definitions,
   ...SessionCompactionEvent.Definitions,
+  ...Research.Event.Definitions,
+  ...LocalEvent.Definitions,
+  ...MemoryEvent.Definitions,
   ...VcsEvent.Definitions,
   ...WorkspaceEvent.Definitions,
   ...WorktreeEvent.Definitions,

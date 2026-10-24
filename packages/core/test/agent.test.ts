@@ -120,6 +120,7 @@ describe("AgentV2", () => {
         "explore",
         "general",
         "plan",
+        "research",
         "summary",
         "title",
       ])

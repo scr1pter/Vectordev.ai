@@ -32,9 +32,11 @@ export function collectSecretValues(env: Record<string, string | undefined>): st
   return [...values].sort((a, b) => b.length - a.length)
 }
 
-export function redactSecrets(text: string, values: string[]): string {
+// `hide` gives what a value is replaced with, and is called once for each value the text holds.
+export function redactSecrets(text: string, values: string[], hide = (_value: string) => REDACTED): string {
   let out = text
-  for (const value of values) if (value.length >= MIN_LENGTH) out = out.split(value).join(REDACTED)
-  for (const shape of TOKEN_SHAPES) out = out.replace(shape, REDACTED)
+  for (const value of values)
+    if (value.length >= MIN_LENGTH && out.includes(value)) out = out.split(value).join(hide(value))
+  for (const shape of TOKEN_SHAPES) out = out.replace(shape, hide)
   return out
 }

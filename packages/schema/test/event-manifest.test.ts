@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test"
 import { FileSystem, Integration, Permission, Project, Reference, Session, Workspace } from "../src"
 import { EventManifest } from "../src/event-manifest"
 import { IdeEvent } from "../src/ide-event"
+import { MemoryEvent } from "../src/memory-event"
+import { Research } from "../src/research"
 import { SessionEvent } from "../src/session-event"
 import { SessionTodo } from "../src/session-todo"
 import { SessionV1 } from "../src/session-v1"
@@ -10,7 +12,7 @@ import { WorkspaceEvent } from "../src/workspace-event"
 describe("public event manifest", () => {
   test("owns the complete public event surface", () => {
     expect(EventManifest.ServerDefinitions.length).toBe(64)
-    expect(EventManifest.Definitions.length).toBe(95)
+    expect(EventManifest.Definitions.length).toBe(99)
     expect(SessionV1.Event.Definitions).toEqual([
       SessionV1.Event.Created,
       SessionV1.Event.Updated,
@@ -23,12 +25,13 @@ describe("public event manifest", () => {
       SessionV1.Event.Diff,
       SessionV1.Event.Error,
     ])
-    expect(EventManifest.Latest.size).toBe(95)
-    expect(EventManifest.Durable.size).toBe(40)
+    expect(EventManifest.Latest.size).toBe(99)
+    expect(EventManifest.Durable.size).toBe(41)
   })
 
   test("uses canonical definitions for current public events", () => {
-    expect(EventManifest.Durable.get("session.next.ancillary.usage.1")).toBe(SessionEvent.AncillaryUsage)
+    expect(EventManifest.Durable.get("session.next.ancillary.usage.2")).toBe(SessionEvent.AncillaryUsage)
+    expect(EventManifest.Durable.get("session.next.ancillary.usage.1")).toBe(SessionEvent.AncillaryUsageV1)
     expect(EventManifest.Latest.get("session.next.ancillary.usage")).toBe(SessionEvent.AncillaryUsage)
     expect(Session.Event).toBe(SessionEvent)
     expect(Session.Event.Definitions).toBe(SessionEvent.Definitions)
@@ -37,6 +40,8 @@ describe("public event manifest", () => {
     expect(EventManifest.Latest.get("session.next.step.ended")).toBe(SessionEvent.Step.Ended)
     expect(EventManifest.Durable.get("session.next.step.resumed.1")).toBe(SessionEvent.Step.Resumed)
     expect(EventManifest.Latest.get("todo.updated")).toBe(SessionTodo.Event.Updated)
+    expect(EventManifest.Latest.get("memory.learned")).toBe(MemoryEvent.Learned)
+    expect(EventManifest.Latest.get("research.updated")).toBe(Research.Event.Updated)
     expect(EventManifest.Latest.get("project.updated")).toBe(Project.Event.Updated)
     expect(Project.Event.Definitions).toEqual([Project.Event.Updated])
     expect(FileSystem.Event.Definitions).toEqual([FileSystem.Event.Edited])

@@ -1,7 +1,7 @@
 import { ExternalAgent } from "@vectordevai/schema/external-agent"
 
-/* What the Host locally launcher shows for each coding agent in the catalog: its badge, its status on this computer
-   and the copy around starting, signing in to and installing it. Everything here is derived from the catalog and
+/* What the Host locally launcher shows for each coding agent in the catalog: its status on this computer and the copy
+   around starting, signing in to and installing it. Everything here is derived from the catalog and
    desktop's detection; nothing reads the agents' own files. */
 
 /** A row's status. "checking" is the first detection still running; "unknown" is an agent Vector cannot read the
@@ -63,17 +63,6 @@ export function filterHostRows(rows: readonly HostRow[], term: string) {
   })
 }
 
-export type AgentBadge =
-  | { kind: "official"; src: string }
-  | { kind: "letters"; letters: string; tone: ExternalAgent.LetterTone }
-
-/** The vendor's own file only where the catalog switches it on; otherwise neutral letters. */
-export function agentBadge(agent: ExternalAgent.Agent, scheme: "light" | "dark"): AgentBadge {
-  const official = agent.logo.show === "official" ? agent.logo.official : undefined
-  if (official) return { kind: "official", src: `/agent-logos/${scheme === "light" ? official.light : official.dark}` }
-  return { kind: "letters", letters: agent.logo.letters, tone: agent.logo.tone }
-}
-
 export function startCopy(agent: ExternalAgent.Agent) {
   const surface = agent.tier === "chat" ? "Vector's chat" : "Vector's terminal"
   return `Runs your installed ${agent.name} in ${surface}, in an isolated copy of the repository.`
@@ -83,8 +72,26 @@ export const NOTE_LABEL: Record<ExternalAgent.Note["kind"], string> = {
   billing: "Billing",
   terms: "Terms",
   data: "Your data",
+  trademark: "Trademark",
   info: "Note",
 }
+
+/** Why Host locally starts, prompts and sets up nothing over this connection, or undefined when it may. Its agents run on
+    this computer, signed in to the account of the person using it, so they start only from this computer's own Vector
+    for its owner: never through a server elsewhere (a remote or SSH host, where the agent would run on that machine),
+    and never as a guest of someone's invite, whose agents are theirs. `username` is the one this app connects with;
+    an invite's link always signs its guests in as "guest". */
+export function hostLocallyRefusal(connection: { local: boolean; username?: string }) {
+  if (connection.local && connection.username !== "guest") return undefined
+  return HOST_LOCALLY_ELSEWHERE
+}
+
+export const HOST_LOCALLY_ELSEWHERE =
+  "Coding agents from Host locally run only on this computer, for the person using it. Vector is connected to a server elsewhere or as a guest, so they are off here."
+
+/** The launcher's fine print. Vector names these agents only to say which installed command runs. */
+export const HOST_FOOTNOTE =
+  "Vector runs each agent's own command and never reads its credentials. Vector is independent and is not affiliated with, endorsed by or sponsored by these companies. Their names are trademarks of their owners."
 
 /** A link from the catalog, only when it is https on one of the agent's own vendor domains. The catalog test holds
     every entry to this; the check here keeps an off-domain link from ever reaching the screen. */

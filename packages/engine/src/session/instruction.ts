@@ -12,6 +12,9 @@ import { FSUtil } from "@vectordevai/core/fs-util"
 import { withTransientReadRetry } from "@/util/effect-http-client"
 import { Global } from "@vectordevai/core/global"
 import { WebFetchRequest } from "@vectordevai/core/util/webfetch-request"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { EgressHttpClient } from "@vectordevai/core/local-mode/http-client"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import { collectBoundedResponseBody } from "@vectordevai/core/tool/http-body"
 import { containsPath } from "@/project/instance-context"
 import { Brain } from "@vectordevai/core/brain/brain"
@@ -35,6 +38,10 @@ export const KNOWLEDGE_LOADED = "knowledge:"
 export const LINKS = "vector.memory.links"
 
 export type Link = { readonly mode: "pointer" | "guard"; readonly file: string; readonly ids: readonly string[] }
+
+// How many remote instruction URLs, and texts of each, are remembered for the research check.
+const REMOTE_URLS = 32
+const REMOTE_VERSIONS = 4
 
 /** What the spec guard's lines add to one request at most, rendered again for each request. */
 export const GUARD = { tokens: 200 } as const
@@ -98,6 +105,12 @@ export interface Interface {
   readonly place: () => Effect.Effect<Brain.Place>
   readonly systemPaths: () => Effect.Effect<Set<string>, FSUtil.Error>
   readonly system: () => Effect.Effect<string[], FSUtil.Error>
+  /**
+   * What system() puts in a prompt, by whose it is: the repository's own instruction files are the work; the user's
+   * (their global files, configured files outside the repository, remote instructions) private. Remote instructions
+   * are the texts prompts in this process were sent, never fetched again here.
+   */
+  readonly contents: () => Effect.Effect<{ readonly work: string[]; readonly private: string[] }, FSUtil.Error>
   readonly find: (dir: string) => Effect.Effect<string | undefined, FSUtil.Error>
   /** Instruction files near a file, the memory about it, and with `asking`, the line naming what is linked to it. */
   readonly resolve: (
@@ -129,7 +142,7 @@ const layer: Layer.Layer<
     const flags = yield* RuntimeFlags.Service
     const brain = yield* Brain.Service
     const knowledge = yield* BrainKnowledge.Service
-    const http = HttpClient.filterStatusOk(withTransientReadRetry(yield* HttpClient.HttpClient))
+    const http = HttpClient.filterStatusOk(withTransientReadRetry(EgressHttpClient.make(yield* HttpClient.HttpClient)))
     const globalFiles = [
       path.join(global.config, "AGENTS.md"),
       ...(!flags.disableClaudeCodePrompt ? [path.join(global.home, ".claude", "CLAUDE.md")] : []),
@@ -146,6 +159,9 @@ const layer: Layer.Layer<
       { file: ".vector/BRAIN.md", type: "brain" as const },
       { file: "BRAIN.md", type: "brain" as const },
     ]
+
+    // The remote instructions prompts in this process were sent, by URL: each one's latest few texts.
+    const fetched = new Map<string, string[]>()
 
     const state = yield* InstanceState.make(
       Effect.fn("Instruction.state")(() =>
@@ -203,6 +219,10 @@ const layer: Layer.Layer<
       )
 
     const fetch = Effect.fnUntraced(function* (url: string) {
+      // Instruction URLs are remote config: with Vector Local on, one that is not on this computer or the list, or
+      // allowed, is skipped without a request, and the rest are decided and logged as they are sent.
+      const decided = LocalPolicy.decide(Egress.policy(), { purpose: "config-remote", url, source: "remote-config" })
+      if (decided.decision !== "allow") return ""
       // Instruction URLs come from the user's own config (or a project they trusted), so an intranet page is fine.
       return yield* WebFetchRequest.execute(http, HttpClientRequest.get(url), {
         authorize: () => Effect.void,
@@ -214,6 +234,7 @@ const layer: Layer.Layer<
         Effect.map((body) => new TextDecoder().decode(body)),
         Effect.scoped,
         Effect.timeout(5000),
+        EgressHttpClient.labelled("remote-config"),
         Effect.catch(() => Effect.succeed("")),
       )
     })
@@ -299,11 +320,37 @@ const layer: Layer.Layer<
 
       const files = yield* Effect.forEach(Array.from(paths), read, { concurrency: 8 })
       const remote = yield* Effect.forEach(urls, fetch, { concurrency: 4 })
+      urls.forEach((url, i) => {
+        if (!remote[i]) return
+        const known = (fetched.get(url) ?? []).filter((text) => text !== remote[i])
+        fetched.delete(url)
+        fetched.set(url, [...known, remote[i]].slice(-REMOTE_VERSIONS))
+        if (fetched.size > REMOTE_URLS) fetched.delete(fetched.keys().next().value!)
+      })
 
       return [
         ...Array.from(paths).flatMap((item, i) => (files[i] ? [`Instructions from: ${item}\n${files[i]}`] : [])),
         ...urls.flatMap((item, i) => (remote[i] ? [`Instructions from: ${item}\n${remote[i]}`] : [])),
       ]
+    })
+
+    const contents = Effect.fn("Instruction.contents")(function* () {
+      const ctx = yield* InstanceState.context
+      const config = yield* cfg.get()
+      const paths = Array.from(yield* systemPaths())
+      const files = yield* Effect.forEach(paths, read, { concurrency: 8 })
+      const local = paths.flatMap((item, i) =>
+        files[i] ? [{ text: `Instructions from: ${item}\n${files[i]}`, own: containsPath(item, ctx) }] : [],
+      )
+      return {
+        work: local.flatMap((item) => (item.own ? [item.text] : [])),
+        private: [
+          ...local.flatMap((item) => (item.own ? [] : [item.text])),
+          ...(config.instructions ?? []).flatMap((url) =>
+            (fetched.get(url) ?? []).map((text) => `Instructions from: ${url}\n${text}`),
+          ),
+        ],
+      }
     })
 
     const find = Effect.fn("Instruction.find")(function* (dir: string) {
@@ -434,7 +481,7 @@ const layer: Layer.Layer<
       return { text: links.map((item) => linked("guard", item.file)).join("\n"), links }
     })
 
-    return Service.of({ clear, guard, place, systemPaths, system, find, resolve })
+    return Service.of({ clear, guard, place, systemPaths, system, contents, find, resolve })
   }),
 )
 

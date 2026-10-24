@@ -1,8 +1,10 @@
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import { afterAll, describe, expect, test } from "bun:test"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 
 import { ExternalAgent } from "@vectordevai/schema/external-agent"
 
@@ -21,9 +23,11 @@ import {
   executableNames,
   externalModelValue,
   modelRejected,
+  externalAgentOffInLocal,
   resolveAgentPath,
   runCli,
   runExternalCodingAgent,
+  runningTerminalAgents,
   runsThroughCmd,
   signedInFromProbe,
   runtimeArguments,
@@ -45,6 +49,41 @@ async function installFakeCli(directory: string, name: string) {
 }
 
 afterAll(() => rm(root, { recursive: true, force: true }))
+
+describe("Vector Local", () => {
+  // Settings > Vector Local says external agents do not start while it is on. A real CLI is installed here, so the
+  // refusal is the gate's, not a missing program's.
+  test("an outside agent does not start while Vector Local is on, and starts again once it is off", async () => {
+    const directory = join(root, "local-gate")
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, "started"), "")
+    await writeFile(
+      join(directory, "claude"),
+      `#!/bin/sh
+echo yes > "${join(directory, "started")}"
+printf '%s\n' '{"type":"result","is_error":false,"result":"OK","session_id":"s"}'
+`,
+    )
+    await chmod(join(directory, "claude"), 0o755)
+    const run = () =>
+      runExternalCodingAgent({
+        runtime: "claude-code",
+        cwd: directory,
+        prompt: "fixture only",
+        env: { HOME: root, PATH: `${directory}:/usr/bin:/bin` },
+        timeoutMs: 15_000,
+      })
+    Egress.configure({ ...LocalPolicy.OFF, enabled: true })
+    try {
+      await expect(run()).rejects.toThrow(externalAgentOffInLocal("Claude Code"))
+      expect(await Bun.file(join(directory, "started")).text()).toBe("")
+    } finally {
+      Egress.configure(LocalPolicy.OFF)
+    }
+    expect((await run()).exitCode).toBe(0)
+    expect((await Bun.file(join(directory, "started")).text()).trim()).toBe("yes")
+  }, 20_000)
+})
 
 describe("structured external chat", () => {
   // Captured from a real cursor-agent 2026.09.02 run that created one file; only
@@ -639,6 +678,43 @@ describe("finishing a turn on the protocol's final event", () => {
     expect(() => process.kill(pid, 0)).toThrow()
   }, 20_000)
 
+  test("pi's chat run starts without ANTHROPIC_OAUTH_TOKEN, by any spelling, and keeps the rest of the environment", async () => {
+    // The fake records only whether each variable is set, never its value.
+    const { directory, env } = await fakeCli(
+      "pi-env",
+      "pi",
+      [
+        `case "$1" in --version) echo "0.74.1"; exit 0;; esac`,
+        `for name in ANTHROPIC_OAUTH_TOKEN anthropic_oauth_token ANTHROPIC_API_KEY FIXTURE_KEEP; do`,
+        `  printenv "$name" > /dev/null && echo "$name" >> seen`,
+        `done`,
+        printLines([
+          { type: "session", id: "pi-session" },
+          { type: "agent_settled", aborted: false },
+        ]),
+      ].join("\n"),
+    )
+    const result = await runExternalCodingAgent({
+      runtime: "pi",
+      cwd: directory,
+      prompt: "fixture only",
+      env: {
+        ...env,
+        ANTHROPIC_OAUTH_TOKEN: "sk-ant-oat-fixture",
+        anthropic_oauth_token: "sk-ant-oat-fixture",
+        ANTHROPIC_API_KEY: "fixture-api-key",
+        FIXTURE_KEEP: "1",
+      },
+      finishGraceMs: 50,
+      killGraceMs: 50,
+    })
+    expect(result.exitCode).toBe(0)
+    expect((await Bun.file(join(directory, "seen")).text()).trim().split("\n")).toEqual([
+      "ANTHROPIC_API_KEY",
+      "FIXTURE_KEEP",
+    ])
+  }, 20_000)
+
   test("a codex turn.failed ends the run as a failure with codex's own message", async () => {
     const { env } = await fakeCli(
       "codex-failed",
@@ -991,6 +1067,40 @@ describe("external agent run outcome", () => {
     expect(outcome).toEqual({ exitCode: 0 })
   })
 
+  test("an agent's own words about its limit, extra usage or sign-in reach the user as it wrote them", () => {
+    // Claude Code's result when a plan's limit is reached, and Codex's turn.failed for the same.
+    const claude = agentOutcome("claude-code", 0, [
+      '[stdout] {"type":"result","subtype":"success","is_error":true,"result":"Claude AI usage limit reached|1792000000"}',
+    ])
+    expect(claude).toEqual({ exitCode: 1, error: "Claude AI usage limit reached|1792000000", account: true })
+    const codex = agentOutcome("codex", 1, [
+      `[stdout] {"type":"turn.failed","error":{"message":"You've hit your usage limit. Upgrade to Pro, or try again at 3:05 PM."}}`,
+    ])
+    expect(codex.error).toBe("You've hit your usage limit. Upgrade to Pro, or try again at 3:05 PM.")
+    expect(codex.account).toBe(true)
+    // A CLI that says it only on stderr is quoted as well, word for word, not hidden behind an exit code.
+    const cursor = agentOutcome("cursor", 1, [
+      "[stderr] Warning: Node 20 is deprecated",
+      "[stderr] You've reached your usage limit for this billing cycle. Turn on extra usage in your dashboard.",
+    ])
+    expect(cursor.error).toBe(
+      "You've reached your usage limit for this billing cycle. Turn on extra usage in your dashboard.",
+    )
+    const longNotice = `Usage limit reached. ${"Your account keeps its existing plan. ".repeat(25)}Reset: tomorrow.`
+    expect(agentOutcome("cursor", 1, [`[stderr] ${longNotice}`]).error).toBe(longNotice)
+    // The sign-in message leads unchanged, and Vector's own hint follows as a paragraph of its own.
+    const signedOut = agentOutcome("claude-code", 0, [notLoggedIn])
+    expect(signedOut.error!.split("\n\n")).toEqual([
+      "Not logged in · Please run /login",
+      "Claude Code is installed but not signed in. Run `claude auth login` in a terminal to sign in, then run this again.",
+    ])
+    expect(signedOut.account).toBe(true)
+    // An ordinary failure is not an account message.
+    expect(agentOutcome("claude-code", 2, ["[stderr] TypeError: cannot read property of undefined"]).account).toBe(
+      undefined,
+    )
+  })
+
   test("a normal edit that mentions unauthorized is not mistaken for a sign-out", () => {
     const outcome = agentOutcome("claude-code", 0, [
       '[stdout] {"type":"assistant","message":{"content":"Added a 401 Unauthorized branch to the router"}}',
@@ -1136,6 +1246,46 @@ describe("capturing a session id from a live run", () => {
     })
     expect(result.sessionId).toBe("one")
     expect(seen).toEqual(["one"])
+  })
+
+  test("a limit the agent reported is never read as a refused resume, so nothing runs again on it", async () => {
+    const directory = await installStreamingCli(
+      "codex",
+      "#!/bin/sh\necho 'error: unknown option --resume' >&2\necho 'Usage limit reached. Upgrade your plan or try again later.' >&2\nexit 2\n",
+    )
+    const result = await runExternalCodingAgent({
+      runtime: "codex",
+      cwd: root,
+      prompt: "go",
+      resumeSessionId: "sid",
+      env: { HOME: root, PATH: `${directory}:/usr/bin:/bin` },
+    })
+    expect(result.resumeRejected).toBe(false)
+    expect(result.error).toBe("Usage limit reached. Upgrade your plan or try again later.")
+  })
+
+  test("a run that worked keeps what the agent printed about its usage, as it wrote it", async () => {
+    const directory = await installStreamingCli(
+      "codex",
+      [
+        "#!/bin/sh",
+        "echo 'Reading prompt from stdin...' >&2",
+        "echo 'You have used 90% of your 5-hour usage limit.' >&2",
+        `echo '{"type":"thread.started","thread_id":"t-notice"}'`,
+        `echo '{"type":"item.completed","item":{"id":"i","type":"agent_message","text":"Done"}}'`,
+        `echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'`,
+      ].join("\n"),
+    )
+    const result = await runExternalCodingAgent({
+      runtime: "codex",
+      cwd: root,
+      prompt: "go",
+      env: { HOME: root, PATH: `${directory}:/usr/bin:/bin` },
+      finishGraceMs: 50,
+      killGraceMs: 50,
+    })
+    expect(result.exitCode).toBe(0)
+    expect(result.notices).toEqual(["You have used 90% of your 5-hour usage limit."])
   })
 
   test("a refused resume is reported as resumeRejected, not as a failed task", async () => {
@@ -1377,7 +1527,7 @@ printf 'Tip: use --model <id> to switch.\\n'`,
       source: "catalog",
       models: [{ id: "auto" }, { id: "pro" }, { id: "flash" }, { id: "flash-lite" }],
     })
-    expect(await listAgentModels("antigravity", { env })).toEqual({ id: "antigravity", source: "none", models: [] })
+    expect(await listAgentModels("kimi", { env })).toEqual({ id: "kimi", source: "none", models: [] })
     await expect(listAgentModels("../../etc", { env })).rejects.toThrow("Choose an agent from the list.")
   })
 
@@ -1444,7 +1594,7 @@ describe("commands for the built-in terminal", () => {
     expect(interactive).toMatchObject({
       display: "copilot",
       interactive: true,
-      hint: "Type /login inside Copilot CLI, then follow its steps.",
+      hint: "Type /login inside GitHub Copilot CLI, then follow its steps.",
     })
   })
 
@@ -1483,27 +1633,109 @@ describe("commands for the built-in terminal", () => {
       prepared.push(projectPath)
       return { path: join(root, "isolated"), isolation: "copy" as const }
     }
+    const runs = join(root, "terminal-runs")
     const result = await launchAgentTerminal(
       { id: "gemini", projectPath: "/repo", model: "pro" },
-      { env: gemini.env, platform: "linux", prepare },
+      { env: gemini.env, platform: "linux", prepare, runs },
     )
     expect(prepared).toEqual(["/repo"])
     expect(result.workspace).toEqual({ path: join(root, "isolated"), isolation: "copy" })
     expect(result.launch).toMatchObject({ title: "Gemini CLI", display: "gemini -m pro", cwd: join(root, "isolated") })
-    expect(result.launch.args[1]!.split("\n")[0]).toBe(`'${join(gemini.directory, "gemini")}' '-m' 'pro'`)
+    // The shell notes its process id beside the checkout first, so the running agent counts toward the cap.
+    const lines = result.launch.args[1]!.split("\n")
+    expect(lines[0]).toBe(`printf '%s' "$$" > '${join(root, "terminal-agent.pid")}'`)
+    expect(lines[1]).toBe(`'${join(gemini.directory, "gemini")}' '-m' 'pro'`)
+    expect(lines.slice(2, 4)).toEqual(["status=$?", `rm -f '${join(root, "terminal-agent.pid")}'`])
 
     // Nothing is prepared for a launch that cannot start.
-    const agy = await fakeCli("agy", "agy")
+    const kimi = await fakeCli("kimi", "kimi")
     await expect(
-      launchAgentTerminal({ id: "antigravity", projectPath: "/repo", model: "x" }, { env: agy.env, prepare }),
+      launchAgentTerminal({ id: "kimi", projectPath: "/repo", model: "x" }, { env: kimi.env, prepare, runs }),
     ).rejects.toThrow("has no model setting")
     await expect(
-      launchAgentTerminal({ id: "gemini", projectPath: "/repo", model: "a b" }, { env: gemini.env, prepare }),
+      launchAgentTerminal({ id: "gemini", projectPath: "/repo", model: "a b" }, { env: gemini.env, prepare, runs }),
     ).rejects.toThrow("is not a model name")
     await expect(
-      launchAgentTerminal({ id: "junie", projectPath: "/repo" }, { env: gemini.env, prepare }),
+      launchAgentTerminal({ id: "junie", projectPath: "/repo" }, { env: gemini.env, prepare, runs }),
     ).rejects.toThrow("is not installed")
     expect(prepared).toEqual(["/repo"])
+  })
+
+  test("an agent's shell writes its process id while the agent runs and removes it when the agent ends", async () => {
+    const pidFile = join(root, "marker-run", "terminal-agent.pid")
+    await mkdir(dirname(pidFile), { recursive: true })
+    const seen = join(root, "marker-run", "seen")
+    const launch = terminalLaunch({
+      title: "t",
+      display: "agent",
+      line: `cat '${pidFile}' > '${seen}'`,
+      cwd: root,
+      env: {},
+      platform: "linux",
+      pidFile,
+    })
+    const child = Bun.spawn([launch.command, ...launch.args], { stdin: "pipe", stdout: "pipe" })
+    child.stdin.write("\n")
+    child.stdin.end()
+    expect(await child.exited).toBe(0)
+    expect((await Bun.file(seen).text()).trim()).toBe(String(child.pid))
+    expect(await Bun.file(pidFile).exists()).toBe(false)
+    // An install or a sign-in is not an agent session, so it writes nothing.
+    expect(
+      terminalLaunch({ title: "t", display: "x", line: "true", cwd: root, env: {}, platform: "linux" }).args[1],
+    ).not.toContain(".pid")
+  })
+
+  test("the terminal agents that count are the ones whose shell is alive, and a stale mark is cleared", async () => {
+    const runs = join(root, "counted-runs")
+    const exited = Bun.spawn(["/bin/sh", "-c", "exit 0"])
+    await exited.exited
+    const mark = async (run: string, pid: number | string) => {
+      await mkdir(join(runs, run), { recursive: true })
+      await writeFile(join(runs, run, "terminal-agent.pid"), String(pid))
+    }
+    await mark("live", process.pid)
+    await mark("gone", exited.pid)
+    await mark("garbled", "not a pid")
+    await mark("pending", JSON.stringify({ pendingUntil: Date.now() + 60_000 }))
+    await mark("expired", JSON.stringify({ pendingUntil: Date.now() - 1 }))
+    await mkdir(join(runs, "chat-only"), { recursive: true })
+
+    expect(await runningTerminalAgents(runs)).toBe(2)
+    expect(await Bun.file(join(runs, "gone", "terminal-agent.pid")).exists()).toBe(false)
+    expect(await Bun.file(join(runs, "expired", "terminal-agent.pid")).exists()).toBe(false)
+    expect(await runningTerminalAgents(join(root, "no-runs-yet"))).toBe(0)
+  })
+
+  test("a terminal agent is refused once four of the user's agents run, and nothing is prepared for it", async () => {
+    const gemini = await fakeCli("gemini-capped", "gemini")
+    const runs = join(root, "capped-runs")
+    await mkdir(join(runs, "one"), { recursive: true })
+    await writeFile(join(runs, "one", "terminal-agent.pid"), String(process.pid))
+    const prepared: string[] = []
+    const prepare = async (projectPath: string) => {
+      prepared.push(projectPath)
+      await mkdir(join(runs, "next", "workspace"), { recursive: true })
+      return { path: join(runs, "next", "workspace"), isolation: "copy" as const }
+    }
+    // Three in Vector's chat and one in a terminal.
+    await expect(
+      launchAgentTerminal({ id: "gemini", projectPath: "/repo" }, { env: gemini.env, prepare, runs, chatRunning: 3 }),
+    ).rejects.toThrow(ExternalAgent.RUN_LIMIT_MESSAGE)
+    expect(prepared).toEqual([])
+    const started = await launchAgentTerminal(
+      { id: "gemini", projectPath: "/repo" },
+      { env: gemini.env, prepare, runs, chatRunning: 2 },
+    )
+    expect(started.launch.args[1]).toContain(join(runs, "next", "terminal-agent.pid"))
+    expect(await runningTerminalAgents(runs)).toBe(2)
+    // The renderer has not opened the first terminal yet, but its reservation still occupies the fourth slot.
+    await expect(
+      launchAgentTerminal(
+        { id: "gemini", projectPath: "/repo" },
+        { env: gemini.env, prepare, runs, chatRunning: () => 2 },
+      ),
+    ).rejects.toThrow(ExternalAgent.RUN_LIMIT_MESSAGE)
   })
 })
 
@@ -1602,7 +1834,7 @@ describe("choosing the model an external CLI runs", () => {
       ["[stderr] Cannot use this model: nope. Available models: auto, composer-2.5"],
       "nope",
     )
-    expect(cursor.error).toBe("Cursor Agent: Cannot use this model: nope. Available models: auto, composer-2.5")
+    expect(cursor.error).toBe("Cursor CLI: Cannot use this model: nope. Available models: auto, composer-2.5")
     expect(modelRejected("nope", cursor)).toBe(true)
 
     const claude = agentOutcome(
@@ -1678,7 +1910,7 @@ describe("choosing the model an external CLI runs", () => {
     })
     expect(result.exitCode).toBe(1)
     expect(result.error).toBe(
-      "Cursor Agent: Cannot use this model: fixture-nope. Run cursor-agent models to see what you can use.",
+      "Cursor CLI: Cannot use this model: fixture-nope. Run cursor-agent models to see what you can use.",
     )
     expect(result.modelRejected).toBe(true)
   }, 20_000)

@@ -11,6 +11,9 @@ import { httpClient } from "../effect/app-node-platform"
 import { AbsolutePath } from "../schema"
 import { WebFetchRequest } from "../util/webfetch-request"
 import { collectBoundedResponseBody } from "../tool/http-body"
+import { Egress } from "../local-mode/egress"
+import { EgressHttpClient } from "../local-mode/http-client"
+import { LocalPolicy } from "../local-mode/policy"
 
 const skillConcurrency = 4
 const maxIndexBytes = 1024 * 1024
@@ -85,7 +88,7 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
     const global = yield* Global.Service
-    const http = (yield* HttpClient.HttpClient).pipe(
+    const http = EgressHttpClient.make(yield* HttpClient.HttpClient).pipe(
       HttpClient.retryTransient({
         retryOn: "errors-and-responses",
         times: 2,
@@ -112,6 +115,13 @@ const layer = Layer.effect(
 
     return Service.of({
       pull: Effect.fn("SkillDiscovery.pull")(function* (url) {
+        // Skills from an address in config are remote config: with Vector Local on, an address that is not on this
+        // computer or the list, or allowed, is skipped without a request, and the rest are decided as they are sent.
+        const decided = LocalPolicy.decide(Egress.policy(), { purpose: "config-remote", url, source: "remote-config" })
+        if (decided.decision !== "allow") {
+          yield* Effect.logWarning("Vector Local skipped skills from an address", { url, reason: decided.reason })
+          return []
+        }
         const base = url.endsWith("/") ? url : `${url}/`
         const source = new URL(base)
         const index = new URL("index.json", source).href
@@ -228,7 +238,7 @@ const layer = Layer.effect(
             }),
           { concurrency: skillConcurrency },
         ).pipe(Effect.map((directories) => directories.flat()))
-      }),
+      }, EgressHttpClient.labelled("remote-config")),
     })
   }),
 )

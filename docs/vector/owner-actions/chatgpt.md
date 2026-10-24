@@ -1,67 +1,54 @@
-# Sign in with ChatGPT: re-enabled at the owner's request
+# Sign in with ChatGPT: off
 
-## Request (10 October 2026)
+## Decision (23 October 2026)
 
-On 10 October 2026 the owner asked in writing to bring the sign-in back: "please make it so that i can login with my codex account to access gpt models in vector". Vector's native Sign in with ChatGPT is re-enabled using the Codex CLI's public OAuth client registration. People can sign in with a ChatGPT Plus or Pro account and use the GPT models their plan includes. It is available again from the next desktop release; desktop 1.99.104 and 1.99.105 shipped with it turned off.
+Vector's built-in Sign in with ChatGPT is off. After a legal review of OpenAI's current terms, the owner chose to turn it off: the Sign in with ChatGPT Terms of 29 September 2026 and the Codex auth docs do not let a commercial app reuse the Codex CLI's registration, and OpenAI has not issued Vector one of its own. This is a careful reading of the terms, not legal advice.
 
-This supersedes the record that disabled the sign-in pending provider authorization (commit `b37300270`, PR #8). That record turned the sign-in off because OpenAI has not authorized the borrowed Codex client for Vector, citing the public statement below, and required older sign-ins without a registration stamp to sign in again; this change reverses both. That commit's LGPL and licensing changes are unaffected.
+- **Now:** the remote switch at <https://vectordev.ai/policy/providers.json> is `{ "chatgptSignIn": false }` (commit `98e6cc2fb`), so installed copies stop offering the sign-in and stop using saved ones without a release.
+- **From the next release:** the code defaults to off as well. `CHATGPT_SIGN_IN = false` in `packages/core/src/provider-policy.ts`, so a copy that never reads the switch (offline, or with `VECTOR_DISABLE_MODELS_FETCH=1`) offers no ChatGPT sign-in either.
+- **Kept for Vector's own registration:** `VECTOR_OPENAI_OAUTH_CLIENT_ID` still turns the sign-in on with a registration OpenAI issues to Vector, subject to the remote switch. The Codex CLI client is never used for a new sign-in while `CHATGPT_SIGN_IN` is off.
 
-## Owner confirmation (10 October 2026)
+People with a ChatGPT plan keep two routes, both OpenAI's own: connect OpenAI with an API key, or run their own installed Codex CLI from Host locally in the desktop app, where it signs in with its own `codex login`.
 
-Before this change was made, the owner was told why `b37300270` turned the sign-in off: the client ID is OpenAI's Codex CLI registration and OpenAI has not authorized Vector to use it; OpenAI can block it at any time, which would break every user's GPT access at once; it likely conflicts with OpenAI's terms; and investors' technical diligence may flag it. The owner was offered running the installed Codex CLI inside Vector, an OpenAI API key, or applying for Vector's own registration, and chose, in writing, to re-enable the borrowed sign-in anyway. Do not remove it again on compliance grounds without asking the owner; if OpenAI objects, use the remote off-switch below and tell the owner.
+## What users see
 
-## Risk
+- Providers lists OpenAI with an API key only: "GPT models with your OpenAI API key" in the app, "(API key)" in the TUI and `vector providers login`.
+- A saved ChatGPT sign-in is neither used nor refreshed. Vector shows its sign-in-paused notice: "Sign in with ChatGPT is off in Vector. Connect OpenAI with an API key, or run your own Codex CLI from Host locally. Run vector providers logout openai to remove the saved sign-in." (the CLI's version adds "in the desktop app" after Host locally). Saved sign-ins are not deleted.
+- A sign-in chosen from a list read earlier is refused with "Sign in with ChatGPT is off in Vector. Connect OpenAI with an API key, or run your own Codex CLI from Host locally in the desktop app."
+- OpenAI API keys keep working.
 
-- OpenAI has not authorized a Vector registration. The client ID belongs to OpenAI's Codex CLI, and Vector uses it without OpenAI's permission.
-- OpenAI may object, block this client for other applications, restrict the Codex backend (`chatgpt.com/backend-api/codex`) or change its sign-in endpoints at any time and without notice. Sign-in, refresh or model calls would then fail for everyone at once.
-- The owner's acceptance of this risk, once recorded, does not establish provider permission. The earlier provider-approval concern is recorded in a [public statement cited by this repository](https://x.com/thsottiaux/status/2097131394199896166); that statement is not a substitute for reviewing the applicable provider agreement.
-- If OpenAI objects, turn the sign-in off with the remote switch below, then remove it in the next release.
+## History
+
+- **26 September 2026:** the built-in gate was restored.
+- **1.99.104 and 1.99.105:** shipped with the sign-in off (commit `b37300270`), because OpenAI had not authorized the borrowed Codex CLI client for Vector.
+- **10 October 2026:** at the owner's written request ("please make it so that i can login with my codex account to access gpt models in vector"), the sign-in was re-enabled with the Codex CLI's public registration, after the owner was told the risk and offered the installed Codex CLI, an API key or Vector's own registration instead. Releases 1.99.106 to 1.99.110 shipped it on.
+- **23 October 2026:** turned off with the remote switch after the legal review, and set to default off in code for the next release.
 
 ## What ships
 
-- `packages/core/src/provider-policy.ts` sets `CHATGPT_SIGN_IN = true` and holds `CODEX_CLI_CLIENT_ID`, which `CHATGPT_CLIENT_ID` uses. It is the only source file that carries the client ID.
-- The Engine (`packages/engine/src/plugin/openai/codex.ts`) and V2 Core (`packages/core/src/plugin/provider/openai.ts`) offer "ChatGPT Pro/Plus (browser)" and "ChatGPT Pro/Plus (headless)" next to the OpenAI API key, in the desktop app, the TUI and `vector providers login`.
-- Requests identify as Vector: `originator: vector` and `User-Agent: vector/<version>`. Nothing claims to be Codex except the client ID itself. The browser sign-in also sends OpenAI's `codex_cli_simplified_flow` sign-in parameter, as it did before 1.99.104.
-- The Engine sends a sign-in's model requests over the Codex backend's Responses WebSocket (`OpenAI-Beta: responses_websockets=2026-02-06`), one connection per session, as the Codex CLI does. When a request repeats the previous response's input and output and adds new items, it names that response in `previous_response_id` and sends only the new items; anything else, and any request the server cannot continue, is sent in full. A failed handshake serves the call over HTTP and keeps new connections on HTTP for 5 minutes. Title requests stay on HTTP. `VECTOR_DISABLE_WEBSOCKETS=1` keeps every request on HTTP. API keys use the WebSocket only on pre-release builds or with `VECTOR_EXPERIMENTAL_WEBSOCKETS=1`.
-- New sign-ins and every refresh record the client ID and issuer with the saved credential. Sign-ins saved before 1.99.104 have no such record; they all came from the Codex CLI client, so Vector uses and refreshes them again while that client is configured, without a new sign-in.
-- A ChatGPT sign-in shows OpenAI's GPT-5 generation onward and the `codex-*` models, listed with no per-token cost because the plan covers them, and GPT-5.5 onward with the Codex backend's 272K-token input window.
-- Release guards: `script/artifact-audit.ts` (used by the CLI publisher, the desktop package checks and the cloud CLI package) allows this one client ID and still rejects every other borrowed registration, including the GitHub one. `packages/engine/test/compliance/upstream-free.test.ts` allows the ID only in `provider-policy.ts`.
-- The separately installed Codex runtime (`packages/desktop/src/main/external-agents.ts`) is unchanged.
-
-**23 October 2026: turned off.** After a legal review of OpenAI's current terms (the Sign in with ChatGPT Terms of 29 September 2026 and the Codex auth docs found that a commercial app reusing the Codex CLI's registration is not allowed), the owner chose to turn the sign-in off with the remote switch. ChatGPT-plan users can keep using GPT models through their own OpenAI API key or through their own installed Codex CLI in the Host locally launcher. To bring it back properly, Vector needs its own registration through OpenAI's Sign in with ChatGPT program.
+- `packages/core/src/provider-policy.ts` holds `CHATGPT_SIGN_IN = false` and `CODEX_CLI_CLIENT_ID`, which `CHATGPT_CLIENT_ID` still names. It is the only source file that carries the client ID; with the sign-in off, the ID is used only to recognise the sign-ins saved with it, which stay paused.
+- The Engine (`packages/engine/src/plugin/openai/codex.ts`) and V2 Core (`packages/core/src/plugin/provider/openai.ts`) keep the "ChatGPT Pro/Plus (browser)" and "(headless)" flows for a registration of Vector's own. With none configured, OpenAI lists only its API key, and V2 Core registers no ChatGPT method at all. With one configured, the Engine keeps the ChatGPT method indexes while the remote switch hides them, so a choice from a list read earlier is refused rather than landing on the API key.
+- With a registration configured, requests identify as Vector (`originator: vector`, `User-Agent: vector/<version>`), and new sign-ins and every refresh record the client ID and issuer with the saved credential. Sign-ins saved with the Codex CLI client, stamped or from before 1.99.104, do not match another registration and have to be redone.
+- Release guards: `script/artifact-audit.ts` still allows the Codex CLI client ID, because `provider-policy.ts` still names it, and rejects every other borrowed registration. `packages/engine/test/compliance/upstream-free.test.ts` allows the ID only in `provider-policy.ts`. Removing the ID in a release means adding it back to the rejected registrations and deleting `CODEX_CLI_CLIENT_ID`.
+- The separately installed Codex CLI in Host locally (`packages/desktop/src/main/external-agents.ts`) is unchanged: Vector runs the user's own `codex` and never reads its credentials.
 
 ## Remote off-switch
 
-The website serves the switch at <https://vectordev.ai/policy/providers.json> from `packages/web/public/policy/providers.json`:
+The website serves the switch at <https://vectordev.ai/policy/providers.json> from `packages/web/public/policy/providers.json`. It is `{ "chatgptSignIn": false }` today.
 
-```json
-{ "chatgptSignIn": true }
-```
+Installed Engines, desktop apps and CLIs read it in the background at startup and again before every new ChatGPT sign-in, waiting at most 3 seconds (`packages/core/src/provider-remote-policy.ts`). The last answer is cached in Vector's cache folder as `provider-policy.json`. If the website cannot be reached, Vector uses the last answer it saw; with no answer yet, releases before the next one fall back to their own default, which was on. `VECTOR_DISABLE_MODELS_FETCH=1` skips both the check and the cache, so such installs follow the release default.
 
-Installed Engines, desktop apps and CLIs read it in the background at startup and again before every new ChatGPT sign-in, waiting at most 3 seconds (`packages/core/src/provider-remote-policy.ts`). The last answer is cached in Vector's cache folder as `provider-policy.json`. If the website cannot be reached, Vector uses the last answer it saw; with no answer yet, the sign-in stays on. `VECTOR_DISABLE_MODELS_FETCH=1` skips both the check and the cache, so such installs follow the release default.
+With the code default off, the switch matters only for older releases and for a registration of Vector's own: turning it off stops that registration's sign-ins too, and turning it on does not bring back the Codex CLI client.
 
-When the switch is `false`:
+Keep `policy` in the keep list of `script/prune-vector-site.mjs`; the deploy deletes every top-level folder it does not keep.
 
-- sign-in option lists read after the change no longer show the ChatGPT methods. A list read earlier keeps showing them: an app window that already opened the OpenAI sign-in options (until a failed attempt rereads them), a CLI prompt already on screen, and V2 Core until its next reload;
-- a new sign-in is refused with "ChatGPT sign-in is temporarily unavailable; connect OpenAI with an API key.", including one chosen from a list read before the change;
-- saved ChatGPT sign-ins are neither used nor refreshed, and Vector shows its sign-in-paused notice with `vector providers logout openai`;
-- OpenAI API keys keep working. Saved sign-ins are not deleted, so turning the switch back on restores them.
+## Path to a registration of Vector's own
 
-To turn it off:
-
-1. Change `packages/web/public/policy/providers.json` to `{ "chatgptSignIn": false }` and commit it to `main`. vectordev.ai deploys from `main`; no app release is needed.
-2. Check `curl -s https://vectordev.ai/policy/providers.json` returns the new value.
-3. Running copies pick it up at their next start or their next ChatGPT sign-in attempt. Until a running copy restarts, a sign-in it already uses keeps working.
-
-Keep `policy` in the keep list of `script/prune-vector-site.mjs`; the deploy deletes every top-level folder it does not keep. To remove the sign-in permanently, set `CHATGPT_SIGN_IN = false` in a release.
-
-## Path to an approved registration
-
-1. Ask OpenAI for a registration issued to Vector, covering the browser redirect `http://localhost:1455/auth/callback`, the device flow and access to the Codex backend for ChatGPT plans.
-2. Test it without a release by setting `VECTOR_OPENAI_OAUTH_CLIENT_ID=<client id>`. It replaces the built-in client; the remote switch still applies.
-3. Once approved, set `CHATGPT_CLIENT_ID` to the new ID, add the Codex CLI client back to the rejected registrations in `script/artifact-audit.ts` and its tests, and allow the new ID in the source-independence test. Then delete `CODEX_CLI_CLIENT_ID` and have `chatgptCredentialMatches` return `false` for unstamped sign-ins, so the release no longer carries the old client.
-4. People signed in with the Codex CLI client then sign in again: their saved sign-ins name the old client, or carry no stamp and are matched only against `CODEX_CLI_CLIENT_ID`, so they no longer match. This holds whether the new ID arrives through `VECTOR_OPENAI_OAUTH_CLIENT_ID` or through `CHATGPT_CLIENT_ID`.
+1. Apply through OpenAI's Sign in with ChatGPT interest form (openai.com/form/sign-in-with-chatgpt-interest/), for a registration issued to Vector that covers the browser redirect `http://localhost:1455/auth/callback` and the device flow.
+2. Test it without a release by setting `VECTOR_OPENAI_OAUTH_CLIENT_ID=<client id>`. The sign-in turns on with it; the remote switch still applies.
+3. Once approved, follow OpenAI's documented flow under its terms: Vector's own name and client, without the Codex CLI's `codex_cli_simplified_flow` sign-in parameter, OpenAI's supported endpoints, tokens kept only on the user's computer, no charge or Codium plan required for plan use, and no pooling or sharing of a plan. Then set `CHATGPT_CLIENT_ID` to the new ID and `CHATGPT_SIGN_IN = true`, add the Codex CLI client back to the rejected registrations in `script/artifact-audit.ts` and its tests, allow the new ID in the source-independence test, and delete `CODEX_CLI_CLIENT_ID`.
+4. People who signed in with the Codex CLI client sign in again: their saved sign-ins name the old client, or carry no stamp, so they do not match the new registration.
 
 ## Release note
 
-Suggested line for the next desktop release notes: "Sign in with ChatGPT is back: connect OpenAI, choose ChatGPT Pro/Plus, and use the GPT models your ChatGPT plan includes. If you signed in before 1.99.104, that sign-in works again."
+Suggested line for the next desktop release notes: "Sign in with ChatGPT is off in Vector. To use GPT models, connect OpenAI with an API key, or run your own Codex CLI from Host locally."

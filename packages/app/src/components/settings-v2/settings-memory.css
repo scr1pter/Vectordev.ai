@@ -594,3 +594,42 @@ button.settings-memory-doc-title:hover {
 [data-component="settings-memory-search-model"] > .settings-v2-card-body > .settings-memory-error {
   margin: 0 0 8px;
 }
+
+/* About you: the session an item came from, as a link in its line, and the import file picker as a button. */
+.settings-memory-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--v2-text-text-muted);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.settings-memory-link:hover {
+  color: var(--v2-text-text-base);
+}
+
+.settings-memory-file {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  min-height: 32px;
+  border: 1px solid var(--vx-line);
+  border-radius: 8px;
+  color: var(--v2-text-text-base);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.settings-memory-file:hover,
+.settings-memory-file:focus-within {
+  border-color: var(--vx-line-strong, var(--vx-line));
+}
+
+/* About you: a facet's title on the left and its "Learn this kind" switch on the right, in the workspace too. */
+.settings-memory .settings-v2-card-head.settings-memory-facet-head {
+  grid-template-columns: 1fr auto;
+}

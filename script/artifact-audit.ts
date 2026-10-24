@@ -13,8 +13,8 @@
  * - the former product name, case-insensitive, in UTF-8 and both UTF-16 byte orders,
  *   except inside the precise allowlist below;
  * - retired upstream hosts;
- * - borrowed OAuth registrations and shared-key literals, except the ChatGPT sign-in client the
- *   owner re-enabled on 10 October 2026.
+ * - borrowed OAuth registrations and shared-key literals, except the Codex CLI client that Sign in with
+ *   ChatGPT used, which the provider policy still names but no longer uses by default (23 October 2026).
  *
  * The former name is never written here. Like packages/core/src/flag/legacy.ts and the
  * upstream-free compliance test, it is derived from the MIT notice in THIRD_PARTY_NOTICES.md.
@@ -41,8 +41,9 @@ import { Readable } from "node:stream"
 const root = path.resolve(import.meta.dir, "..")
 // Bytes of surrounding text kept around each match: longer than any notice line.
 const CONTEXT = 256
-// The Codex CLI's public client for Sign in with ChatGPT is the one borrowed registration allowed: the owner
-// asked on 10 October 2026 to re-enable it (docs/vector/owner-actions/chatgpt.md). Every other stays here.
+// The Codex CLI's public client is the one borrowed registration allowed. The owner re-enabled Sign in with ChatGPT
+// with it on 10 October 2026 and turned it off on 23 October 2026; provider-policy.ts still names it, with the sign-in
+// off by default, until a release removes it (docs/vector/owner-actions/chatgpt.md). Every other stays here.
 const credentials = [
   { label: "retired public model key assignment", value: 'apiKey:"public"' },
   { label: "retired public model key assignment", value: 'apiKey: "public"' },

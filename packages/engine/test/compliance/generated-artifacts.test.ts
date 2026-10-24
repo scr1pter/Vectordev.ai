@@ -36,6 +36,18 @@ test("published schemas and dependency notices match their generators", async ()
   }
 }, 60_000)
 
+// Vector loads an earlier version's research.search and research.browser_search and drops them, so the published
+// schema lists them, marked deprecated, while still refusing any other key an editor would underline.
+test("the published config schema accepts an earlier version's research search keys, marked deprecated", async () => {
+  const root = path.resolve(import.meta.dir, "../../../..")
+  const schema = await Bun.file(path.join(root, "packages/web/public/config.json")).json()
+  const research = schema.$defs.ResearchConfig
+  expect(research.additionalProperties).toBe(false)
+  for (const key of ["search", "browser_search"])
+    expect(research.properties[key].description).toStartWith("@deprecated")
+  expect(Object.keys(research.properties)).toContain("retain_days")
+})
+
 function difference(file: string, expected: Buffer, actual: Buffer) {
   const before = expected.toString("utf8").split("\n")
   const after = actual.toString("utf8").split("\n")

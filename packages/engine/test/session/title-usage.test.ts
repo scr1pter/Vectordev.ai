@@ -90,7 +90,7 @@ const setup = Effect.fn("test.titleUsage")(function* (selected = model) {
     .run()
   return {
     usage: TitleUsage.create({ sessionID, model: selected, publish: events.publish }),
-    records: database.db.select().from(EventTable).where(eq(EventTable.type, "session.next.ancillary.usage.1")).all(),
+    records: database.db.select().from(EventTable).where(eq(EventTable.type, "session.next.ancillary.usage.2")).all(),
     session: database.db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get(),
     messages: database.db.select().from(SessionMessageTable).all(),
   }

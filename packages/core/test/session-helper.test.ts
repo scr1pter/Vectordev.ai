@@ -11,6 +11,9 @@ describe("isHelperName", () => {
       "codespace.autocomplete",
       "browser-agent.planner",
       "swarm.planner",
+      "brain.learn",
+      "research.expand",
+      "help.answer",
     ]
     expect(names.filter((name) => !isHelperName(name))).toEqual([])
   })
@@ -25,6 +28,9 @@ describe("isHelperName", () => {
       "Vectorscope review",
       "other.planner",
       "swarm.planner ",
+      "brain",
+      "research.",
+      "Brain.learn",
     ]
     expect(names.filter(isHelperName)).toEqual([])
   })

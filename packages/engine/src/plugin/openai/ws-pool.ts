@@ -1,5 +1,6 @@
 import WebSocket from "ws"
 import { createHash } from "node:crypto"
+import { EgressGuard } from "@vectordevai/core/local-mode/guard"
 import { ProviderError } from "@/provider/error"
 import { isRecord } from "@/util/record"
 import { OpenAIWebSocket } from "./ws"
@@ -252,6 +253,12 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
         invalidate(entry)
         throw error
       }
+      // Vector Local refused the call: nothing was sent, and HTTP would carry it to the same place.
+      if (error instanceof EgressGuard.EgressBlocked) {
+        trace("failure", { reason: "connect" })
+        invalidate(entry)
+        throw error
+      }
 
       trace("failure", { reason: streaming ? "stream" : "connect" })
       invalidate(entry)
@@ -337,6 +344,13 @@ async function socket(
   signal?: AbortSignal | null,
   trace?: ReturnType<typeof OpenAITransport.createTrace>,
 ) {
+  // Every call is decided before it is sent, on a pooled socket too: one opened while Vector Local was off carries
+  // nothing once it is on, and a socket is reused only along the route (the proxy) the call may take now.
+  const route = OpenAIWebSocket.route(OpenAIWebSocket.toWebSocketUrl(url))
+  if (route instanceof EgressGuard.EgressBlocked) {
+    invalidate(entry)
+    throw route
+  }
   // A session can switch endpoints/accounts without changing its ID. Never reuse the old authenticated socket.
   const identity = createHash("sha256")
     .update(
@@ -347,6 +361,7 @@ async function socket(
         headers["openai-organization"],
         headers["openai-project"],
         headers["openai-beta"],
+        route.proxy ?? "",
       ]),
     )
     .digest("hex")
@@ -367,6 +382,7 @@ async function socket(
     headers,
     timeout: connectTimeout,
     signal: signal ?? undefined,
+    route,
   })
   entry.connectedAt = Date.now()
   entry.identity = identity

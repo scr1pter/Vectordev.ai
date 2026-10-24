@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { agentReviewCopy, agentRuntimeLabel, type AgentRuntime } from "./agent-runtime-copy"
+import { agentOwnership, agentReviewCopy, agentRuntimeLabel, type AgentRuntime } from "./agent-runtime-copy"
 
 const runtimes = [
   { runtime: "vector", label: "Vector" },
   { runtime: "claude-code", label: "Claude Code" },
   { runtime: "codex", label: "Codex" },
-  { runtime: "cursor", label: "Cursor Agent" },
+  { runtime: "cursor", label: "Cursor CLI" },
 ] satisfies { runtime: AgentRuntime; label: string }[]
 
 describe("agent runtime review copy", () => {
@@ -37,7 +37,21 @@ describe("agent runtime review copy", () => {
       "Vector couldn't save Claude Code's conversation, so your next message restarts it with a written summary of the work so far.",
     )
     expect(agentReviewCopy("cursor", { running: false, resumable: false }).followUpHelp).toContain(
-      "Cursor Agent's conversation",
+      "Cursor CLI's conversation",
     )
+  })
+
+  test("an outside agent's conversation says it is the user's own agent, not Vector's, and not its vendor's product", () => {
+    expect(agentOwnership("codex")).toBe(
+      "This is your own Codex running in Vector, not a Vector agent. Vector is not affiliated with OpenAI.",
+    )
+    expect(agentReviewCopy("claude-code", { running: false, resumable: true }).ownership).toBe(
+      "This is your own Claude Code running in Vector, not a Vector agent. Vector is not affiliated with Anthropic.",
+    )
+    expect(agentOwnership("cursor")).toContain("your own Cursor CLI")
+    expect(agentOwnership("cursor")).toContain("Anysphere")
+    // Vector's own agent needs no such line.
+    expect(agentOwnership("vector")).toBeUndefined()
+    expect(agentReviewCopy("vector", { running: false, resumable: true }).ownership).toBeUndefined()
   })
 })

@@ -117,8 +117,26 @@ Options:
       --judge        run LLM-as-a-judge after large tasks that changed files (thorough) or after
                      every task that changed files (changes)
                                                     [string] [choices: "off", "thorough", "changes"]
+      --research     Deep research (preview): plan the question, search and read the web and this
+                     repository's brain, and write a report in which each claim cites a quote from
+                     its source. Makes no code changes. Reads public pages for the run without
+                     asking; any other approval, a page on your own network included, needs --auto
+                                                                                           [boolean]
+      --depth        with --research: focused (one agent, plus up to 2 researchers), deep (up to 4
+                     researchers and a judge that checks the citations) or auto (the default)
+                                                       [string] [choices: "focused", "deep", "auto"]
+      --search       with --research: browser (the default: each research agent searches the web in
+                     its own browser in the desktop app) or none (this repository's brain, its files
+                     and the addresses in the message)         [string] [choices: "browser", "none"]
+      --scope        with --research: the web, this repository's brain and files, or both (all)
+                                                           [string] [choices: "web", "brain", "all"]
+      --report       with --research: write the report, with its sources, to this Markdown file
+                                                                                            [string]
       --auto         auto-approve permissions that are not explicitly denied (dangerous!)
-                                                                          [boolean] [default: false]"
+                                                                          [boolean] [default: false]
+      --local        keep this run on Vector Local: model calls go only to the model servers on your
+                     list, and Vector's own requests to vectordev.ai are blocked. It only tightens,
+                     and changes no setting                                                [boolean]"
 `;
 
 exports[`vector CLI help-text snapshots every documented command emits stable help text: vector debug --help 1`] = `
@@ -728,7 +746,7 @@ Options:
       --mode                  agent mode            [string] [choices: "all", "primary", "subagent"]
       --permissions, --tools  comma-separated list of permissions to allow (default: all).
                               Available: "bash, read, edit, glob, grep, webfetch, task, todowrite,
-                              websearch, lsp, skill"                                        [string]
+                              lsp, skill"                                                   [string]
   -m, --model                 model to use in the format of provider/model                  [string]"
 `;
 

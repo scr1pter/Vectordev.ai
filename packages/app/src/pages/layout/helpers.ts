@@ -99,9 +99,11 @@ export function homeSessionServerStatus(active: boolean, status: () => { working
 }
 
 const VECTOR_PROJECT_ID = "4b0ea68d7af9a6031a7ffda7ad66e0cb83315750"
+/** Vector's icon, bundled with the app (app/public), so showing it reaches no server. */
+export const VECTOR_ICON = "/favicon-96x96-desktop-v4.png"
 
 export function getProjectAvatarSource(id?: string, icon?: { color?: string; url?: string; override?: string }) {
-  if (id === VECTOR_PROJECT_ID) return "https://vectordev.ai/favicon-96x96-desktop-v4.png?v=desktop-20260712"
+  if (id === VECTOR_PROJECT_ID) return VECTOR_ICON
   if (icon?.override) return icon.override
   if (icon?.color) return undefined
   return icon?.url

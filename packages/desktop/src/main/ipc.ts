@@ -16,6 +16,7 @@ import { write } from "./logging"
 import { sendBugReport } from "./bug-report"
 import { askHelpAssistant, type HelpInput } from "./help-assistant"
 import { clearLocalMemory, readLocalMemory, writeLocalMemory } from "./local-memory"
+import { desktopLocalStatus } from "./local-mode"
 import { deleteRepoRule, listRepoRules, saveRepoRule, type SaveRepoRuleInput } from "./repo-rules"
 import { ensureRuntime, preparePluginCommand, type RuntimeName } from "./runtime-bootstrap"
 import { convertHeicToJpeg } from "./image-convert"
@@ -45,7 +46,14 @@ import {
   submitPullRequestReview,
   viewPullRequest,
 } from "./github-pr"
-import { getPinchZoomEnabled, getWindowID, setPinchZoomEnabled, setTitlebar, updateTitlebar } from "./windows"
+import {
+  getMainWindowCount,
+  getPinchZoomEnabled,
+  getWindowID,
+  setPinchZoomEnabled,
+  setTitlebar,
+  updateTitlebar,
+} from "./windows"
 import { assertTrustedRenderer } from "./ipc-security"
 import {
   openPathApplicationCommand,
@@ -61,6 +69,7 @@ import { inspectAgentTask, listAgentTasks, messageAgentTask, stopAgentTask, type
 import { onTaskBoardChange } from "./task-board-events"
 import { initTaskRelay } from "./task-relay"
 import { runBrowserAgent } from "./browser-agent"
+import { ResearchWatch } from "./research-browser"
 import { prepareAgentTask } from "./context-budget"
 import { speakVoiceText, stopVoiceSynthesis } from "./voice-synthesis"
 import { cancelBackgroundTask, clearCompletedBackgroundTasks, listBackgroundTasks } from "./background-tasks"
@@ -125,6 +134,7 @@ import {
   type GithubCloneInput,
 } from "./github-clone"
 import { pushWithOauth as pushToGitlab, type GitlabOauthPushInput } from "./gitlab"
+import { usePostingEngine } from "./posting-check"
 import {
   cancelDeviceLogin as cancelGitlabLogin,
   completeDeviceLogin as completeGitlabLogin,
@@ -159,6 +169,8 @@ import {
   parallelWorkspaceCloudScopes,
   refreshParallelWorkspace,
   removeParallelWorkspaceRecord,
+  repairParallelWorkspace,
+  runningChatAgents,
   runParallelWorkspace,
   setParallelWorkspaceRuntimeModel,
   stopParallelWorkspace,
@@ -221,6 +233,11 @@ type Deps = {
   setUsageSharing: (enabled: boolean) => void
 }
 
+// A research browser's key: its run and its agent's session, as the bridge validated them.
+function watchID(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,64}:[A-Za-z0-9_-]{1,64}$/.test(value)
+}
+
 function handle<T extends unknown[], R>(channel: string, listener: (event: IpcMainInvokeEvent, ...args: T) => R) {
   ipcMain.handle(channel, (event, ...args) => {
     assertTrustedRenderer(event)
@@ -237,6 +254,8 @@ function on<T extends unknown[]>(channel: string, listener: (event: IpcMainEvent
 
 export function registerIpcHandlers(deps: Deps) {
   initializeVectorAccount(deps.awaitInitialization)
+  // Pull requests, reviews and commits Vector makes are checked against the owner's memory by the engine first.
+  usePostingEngine(deps.awaitInitialization)
   app.once("will-quit", initTaskRelay(deps.awaitInitialization))
   handle("vector-account-status", () => vectorAccount.status())
   handle("vector-account-start", () => vectorAccount.start())
@@ -280,6 +299,34 @@ export function registerIpcHandlers(deps: Deps) {
   handle("agent-tasks-unsubscribe", (event) => {
     taskSubscriptions.get(event.sender.id)?.()
     taskSubscriptions.delete(event.sender.id)
+  })
+
+  // The Sources tab watches research browsers: their chips, snapshots and Stop. Nothing here sends input to a page.
+  const researchSubscriptions = new Map<number, () => void>()
+  app.once("will-quit", () => {
+    researchSubscriptions.forEach((stop) => stop())
+    researchSubscriptions.clear()
+  })
+  handle("research-watch-list", () => ResearchWatch.list())
+  handle("research-watch-snapshot", (_event, id: unknown) => (watchID(id) ? ResearchWatch.snapshot(id) : undefined))
+  handle("research-watch-stop", (_event, id: unknown) => (watchID(id) ? ResearchWatch.stop(id) : false))
+  handle("research-watch-subscribe", (event) => {
+    const id = event.sender.id
+    researchSubscriptions.get(id)?.()
+    researchSubscriptions.set(
+      id,
+      ResearchWatch.subscribe(() => {
+        if (!event.sender.isDestroyed()) event.sender.send("research-watch-changed")
+      }),
+    )
+    event.sender.once("destroyed", () => {
+      researchSubscriptions.get(id)?.()
+      researchSubscriptions.delete(id)
+    })
+  })
+  handle("research-watch-unsubscribe", (event) => {
+    researchSubscriptions.get(event.sender.id)?.()
+    researchSubscriptions.delete(event.sender.id)
   })
 
   handle("kill-sidecar", () => deps.killSidecar())
@@ -357,6 +404,7 @@ export function registerIpcHandlers(deps: Deps) {
   handle("local-memory-read", () => readLocalMemory())
   handle("local-memory-write", (_event, content: string) => writeLocalMemory(String(content ?? "")))
   handle("local-memory-clear", () => clearLocalMemory())
+  handle("vector-local-status", () => desktopLocalStatus())
   handle("repo-rules-list", (_event: IpcMainInvokeEvent, repositoryPath?: string) =>
     listRepoRules(repositoryPath ? String(repositoryPath) : undefined),
   )
@@ -406,6 +454,10 @@ export function registerIpcHandlers(deps: Deps) {
   handle("parallel-workspaces-follow-up", async (_event: IpcMainInvokeEvent, id: string, text: string) => {
     const engine = await deps.awaitInitialization()
     return followUpParallelWorkspace(id, engine, text)
+  })
+  handle("parallel-workspaces-repair", async (_event: IpcMainInvokeEvent, id: string) => {
+    const engine = await deps.awaitInitialization()
+    return repairParallelWorkspace(String(id), engine)
   })
   handle("parallel-workspaces-set-runtime-model", (_event: IpcMainInvokeEvent, id: string, model?: string) =>
     setParallelWorkspaceRuntimeModel(id, model),
@@ -593,7 +645,9 @@ export function registerIpcHandlers(deps: Deps) {
     listAgentModels(id, { refresh: options?.refresh === true }),
   )
   handle("external-agents-commands", (_event, id: string) => agentCommands(id))
-  handle("external-agents-launch-terminal", (_event, input: TerminalAgentInput) => launchAgentTerminal(input))
+  handle("external-agents-launch-terminal", (_event, input: TerminalAgentInput) =>
+    launchAgentTerminal(input, { chatRunning: runningChatAgents }),
+  )
   handle("external-agents-open-editor", (_event: IpcMainInvokeEvent, input: OpenInEditorInput) => openInEditor(input))
   handle("external-agents-prepare-workspace", (_event: IpcMainInvokeEvent, projectPath: string) =>
     prepareWorkspace(projectPath),
@@ -888,7 +942,8 @@ export function registerIpcHandlers(deps: Deps) {
     return "unknown"
   })
 
-  handle("get-window-count", () => BrowserWindow.getAllWindows().length)
+  // Main windows only: a hidden helper window, such as the research browsers' host, is not one the user has open.
+  handle("get-window-count", () => getMainWindowCount())
 
   handle("get-window-id", (event: IpcMainInvokeEvent) => {
     const win = BrowserWindow.fromWebContents(event.sender)

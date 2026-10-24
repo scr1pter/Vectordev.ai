@@ -59,6 +59,8 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   // Whether the owner's personal memory and private documents may go to this step's model: no guest is in the
   // session and the model does not train on prompts. Absent, they stay out.
   personal?: boolean
+  // A role whose output leaves the machine or reaches the web (section 6.4a): its tools find nothing personal.
+  outward?: boolean
 }) {
   const tools: Record<string, AITool> = {}
   const run = yield* EffectBridge.make()
@@ -69,9 +71,17 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   const mcp = yield* MCP.Service
   const truncate = yield* Truncate.Service
   const brain = yield* Brain.Service
+  // What a compaction folded away still counts for the rules that ask about outside content, so they read the session's
+  // stored messages as well as the window the model sees.
+  const history = () =>
+    sessions.messages({ sessionID: input.session.id }).pipe(
+      Effect.catch(() => Effect.succeed([] as SessionV1.WithParts[])),
+      Effect.map((stored) => [...stored, ...input.messages]),
+    )
 
   const context = (args: Record<string, unknown>, options: ToolExecutionOptions): Tool.Context => ({
     sessionID: input.session.id,
+    parentID: input.session.parentID,
     abort: options.abortSignal!,
     messageID: input.processor.message.id,
     callID: options.toolCallId,
@@ -80,6 +90,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
       // Whether the model may train on prompts, for tools that keep the owner's personal memory away from such a model.
       mayTrain: freeModelMayTrain(input.model),
       personal: input.personal === true,
+      outward: input.outward === true,
       invokedAgents: input.invokedAgents,
       promptOps: input.promptOps,
       ...(input.taskSize ? { taskSize: input.taskSize } : {}),
@@ -94,6 +105,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
       ),
     agent: input.agent.name,
     messages: input.messages,
+    history,
     metadata: (val) =>
       input.processor.updateToolCall(options.toolCallId, (match) => {
         if (!["running", "pending"].includes(match.state.status)) return match
@@ -137,14 +149,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
           SessionMemory.source(path.resolve(instance.worktree, pattern), brain.files()),
         )
         if (files.length === 0) return
-        const hold = input.session.parentID
-          ? "subagent"
-          : SessionMemory.taint([
-              ...(yield* sessions
-                .messages({ sessionID: input.session.id })
-                .pipe(Effect.catch(() => Effect.succeed([] as SessionV1.WithParts[])))),
-              ...input.messages,
-            ])
+        const hold = input.session.parentID ? "subagent" : SessionMemory.taint(yield* history())
         if (!hold) return
         yield* permission.ask({
           permission: PermissionPolicy.MEMORY_SOURCE,
@@ -220,6 +225,11 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     })
     if (ToolRegistry.isBuiltinPatch(item)) NativePatch.mark(tools[item.id])
   }
+
+  // A research agent is offered its own tools alone, whatever a session's rules allow (RC1): no MCP tool or resource
+  // reaches Deep research. What they return would be private text the outbound check does not see, and a resource's
+  // address is the model's to write, so a hostile page could choose what is sent to an MCP server.
+  if (Agent.researchTools(input.agent.name)) return tools
 
   const hasMcpResourceServer = Object.values(yield* mcp.clients()).some(
     (client) => !!client.getServerCapabilities()?.resources,

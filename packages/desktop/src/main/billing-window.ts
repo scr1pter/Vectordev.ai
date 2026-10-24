@@ -6,6 +6,7 @@ import {
   billingWindowOptions,
   type BillingOutcome,
 } from "./billing-navigation"
+import { egressFilter, type Step } from "./egress-filter"
 import { write as writeLog } from "./logging"
 
 const windows = new WeakSet<BrowserWindow>()
@@ -61,12 +62,9 @@ export function openBillingWindow(url: string, origin: string, parent?: BrowserW
 
   billing.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
   billing.setPermissionCheckHandler(() => false)
-  // Catches every way back to the site, server redirects and form posts included, before the request leaves.
-  billing.webRequest.onBeforeRequest({ urls: [`${origin}/*`] }, (details, callback) => {
-    if (details.resourceType !== "mainFrame") return callback({})
-    callback({ cancel: true })
-    route(details.url)
-  })
+  // Through the session's one dispatcher, after Vector Local's decision; the window takes its step off when it closes,
+  // so the next billing window's step is the one that runs.
+  const unregister = egressFilter.register(billing, billingRequests(origin, route), { kind: "billing" })
   // will-navigate is the page's own; will-redirect also comes from frames, which billingStep lets through.
   contents.on("will-navigate", (event) => {
     if (!route(event.url, event.isMainFrame)) event.preventDefault()
@@ -98,6 +96,7 @@ export function openBillingWindow(url: string, origin: string, parent?: BrowserW
   window.once("ready-to-show", show)
   setTimeout(show, 3_000)
   window.once("closed", () => {
+    unregister()
     finish("closed")
     if (state.current === window) state.current = undefined
     void billing.clearStorageData().catch(() => undefined)
@@ -107,6 +106,18 @@ export function openBillingWindow(url: string, origin: string, parent?: BrowserW
   // Failures arrive through did-fail-load; a navigation this window stopped itself also rejects here.
   void window.loadURL(url).catch(() => undefined)
   return finished.promise
+}
+
+/**
+ * The billing window's step on its session's requests: catches every way back to the site, server redirects and form
+ * posts included, before the request leaves, and routes it instead of loading it. Frames and other hosts load.
+ */
+export function billingRequests(origin: string, route: (target: string) => unknown): Step {
+  return (details, callback) => {
+    if (details.resourceType !== "mainFrame" || URL.parse(details.url)?.origin !== origin) return callback({})
+    callback({ cancel: true })
+    route(details.url)
+  }
 }
 
 /** Brings the open billing window forward; false when none is open. */

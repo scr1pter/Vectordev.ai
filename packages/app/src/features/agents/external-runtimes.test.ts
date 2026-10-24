@@ -30,7 +30,7 @@ describe("external runtimes", () => {
 
   test("externalRuntimeSetup returns undefined for vector", () => {
     expect(externalRuntimeSetup("vector")).toBeUndefined()
-    expect(externalRuntimeSetup("cursor")?.label).toBe("Cursor Agent")
+    expect(externalRuntimeSetup("cursor")?.label).toBe("Cursor CLI")
   })
 
   test("an installed but explicitly signed-out runtime is not ready", () => {

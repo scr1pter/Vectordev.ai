@@ -67,8 +67,10 @@ import { useSettings } from "@/context/settings"
 import { agentCostLabel, type TeamConversation } from "@/features/agents/agent-dashboard-model"
 import { AgentBadge, AgentStatusPill } from "@/features/agents/agent-badge"
 import { externalAgentsApi } from "@/features/agents/external-agent-desktop"
-import { canStart, hostRows, STATUS_LABEL } from "@/features/agents/host-locally-model"
+import { canStart, hostLocallyRefusal, hostRows, STATUS_LABEL } from "@/features/agents/host-locally-model"
 import { ExternalAgent } from "@vectordevai/schema/external-agent"
+import { OffInLocal } from "@/features/local/off-in-local"
+import { useLocalStatus } from "@/features/local/use-local"
 import {
   externalRuntimeReady,
   EXTERNAL_RUNTIME_IDS,
@@ -89,6 +91,7 @@ import {
   isInternalProjectPath,
   isManagedAgentWorkspacePath,
   isUsableProjectPath,
+  ServerConnection,
   useServer,
   validatedRouteProjectPath,
 } from "@/context/server"
@@ -262,6 +265,8 @@ type ParallelWorkspaceRecord = {
   validationPassed?: boolean
   repairAttempts?: number
   error?: string
+  /** Set on every workspace of a user's own coding agent, which stays out of everything Vector learns from. */
+  excludedFromLearning?: boolean
 }
 
 type ParallelWorkspaceApi = {
@@ -282,6 +287,8 @@ type ParallelWorkspaceApi = {
   refresh: (id: string) => Promise<ParallelWorkspaceRecord>
   run: (id: string, concurrency?: number) => Promise<ParallelWorkspaceRecord>
   followUp: (id: string, text: string) => Promise<ParallelWorkspaceRecord>
+  // Optional: a desktop build from before Try a fix repaired failed checks by itself.
+  repair?: (id: string) => Promise<ParallelWorkspaceRecord>
   // Optional: a desktop build from before the model picker has no such channel.
   setRuntimeModel?: (id: string, model?: string) => Promise<ParallelWorkspaceRecord>
   stop: (id: string) => Promise<ParallelWorkspaceRecord>
@@ -641,6 +648,10 @@ export default function NewLayout(props: ParentProps) {
   const [parallelCompareRuntimes, setParallelCompareRuntimes] = createSignal(false)
   const [externalAgentStatuses, setExternalAgentStatuses] = createSignal<ExternalAgent.Detection[]>([])
   const [externalAgentsChecking, setExternalAgentsChecking] = createSignal(false)
+  // Claude Code, Codex and Cursor make their own connections, which Vector Local does not see, so they do not start
+  // while it is on (desktop main refuses them too). Their tiles stay, labelled Off in Vector Local.
+  const localReader = useLocalStatus()
+  const externalOffInLocal = () => localReader.status()?.policy.enabled === true
   const [parallelFilter, setParallelFilter] = createSignal("")
   const [parallelBusy, setParallelBusy] = createSignal(false)
   const [parallelError, setParallelError] = createSignal("")
@@ -850,8 +861,9 @@ export default function NewLayout(props: ParentProps) {
 
   // The Browser Agent's live page is a native Electron WebContentsView that
   // composites on top of all DOM, so it paints over any modal dialog. Hide it
-  // whenever a dialog is open and restore it when the stack clears. The
-  // main-process setVisible handler ignores contextId, so any value is fine.
+  // whenever a dialog is open and restore it when the stack clears. The main
+  // process hides every browser view in this window and later shows only the
+  // ones it hid, whatever contextId is sent.
   createEffect(() => {
     const modalOpen = Boolean(dialog.active)
     const run = globalThis.window?.api?.runBrowserAgent
@@ -1444,7 +1456,8 @@ export default function NewLayout(props: ParentProps) {
   const externalRuntimeStatus = (runtime: ParallelAgentRuntime) =>
     runtime === "vector" ? undefined : externalAgentStatuses().find((agent) => agent.id === runtime)
 
-  const externalReady = (runtime: ParallelAgentRuntime) => externalRuntimeReady(externalRuntimeStatus(runtime))
+  const externalReady = (runtime: ParallelAgentRuntime) =>
+    !externalOffInLocal() && externalRuntimeReady(externalRuntimeStatus(runtime))
 
   const parallelRuntimeReady = () =>
     parallelRuntime() === "vector" ? parallelModelOptions().length > 0 : externalReady(parallelRuntime())
@@ -1468,6 +1481,24 @@ export default function NewLayout(props: ParentProps) {
   // Host locally: every coding agent Vector can run from the user's own installed command line, with its setup. A
   // chat agent becomes this launcher's runtime; a terminal agent starts at once in the open session's terminal.
   const hostLocallyRows = createMemo(() => hostRows(externalAgentStatuses(), externalAgentsChecking()))
+  // Host locally's agents run on this computer under its owner's own accounts, so nothing starts, continues or sets
+  // up while this window is connected to a server elsewhere or as a guest. In the desktop app that means its own
+  // built-in engine, whose terminals no guest can open; any other server, even one on this computer such as an older
+  // CLI's `vector invite`, may let a guest in.
+  const hostLocallyBlocked = () =>
+    externalOffInLocal()
+      ? "Off in Vector Local: coding agents from Host locally are unavailable."
+      : hostLocallyRefusal({
+          local:
+            platform.platform === "desktop"
+              ? Boolean(server.current && ServerConnection.builtin(server.current))
+              : server.isLocal(),
+          username: server.current?.http.username,
+        })
+  // The user's own coding agents running in Vector's chat. Desktop also counts the ones open in a terminal and refuses
+  // past the cap; this lets a launch say so before it creates anything.
+  const runningOwnAgents = () =>
+    parallelRecords().filter((record) => isExternalRuntime(record.runtime) && isParallelWorkspaceRunning(record)).length
   const openHostLocally = async () => {
     const { DialogHostLocally } = await import("@/features/agents/dialog-host-locally")
     if (!externalAgentStatuses().length && !externalAgentsChecking()) void detectExternalRuntimes()
@@ -1478,6 +1509,7 @@ export default function NewLayout(props: ParentProps) {
         checking={externalAgentsChecking}
         detect={detectExternalRuntimes}
         directory={() => activeWorkspaceScope().sourcePath}
+        refusal={hostLocallyBlocked}
         selected={launchExternalRuntime}
         picks={(id) => runtimeModels.picks[id]}
         remember={rememberRuntimeChoice}
@@ -1987,11 +2019,26 @@ export default function NewLayout(props: ParentProps) {
       openProviderSettings()
       return
     }
+    const offInLocal = externalOffInLocal() ? runtimes.find((runtime) => runtime !== "vector") : undefined
+    if (offInLocal) {
+      setParallelError(`${parallelRuntimeLabel(offInLocal)} does not start while Vector Local is on.`)
+      return
+    }
     const missingRuntime = runtimes.find((runtime) => runtime !== "vector" && !externalReady(runtime))
     if (missingRuntime) {
       setParallelError(
         `${parallelRuntimeLabel(missingRuntime)} is not installed or signed in on this computer. Vector only launches real, detected runtimes.`,
       )
+      return
+    }
+    const ownAgents = runtimes.filter((runtime) => runtime !== "vector").length
+    const blocked = ownAgents ? hostLocallyBlocked() : undefined
+    if (blocked) {
+      setParallelError(blocked)
+      return
+    }
+    if (ownAgents && runningOwnAgents() + ownAgents > ExternalAgent.MAX_RUNNING) {
+      setParallelError(ExternalAgent.RUN_LIMIT_MESSAGE)
       return
     }
     setParallelBusy(true)
@@ -2425,6 +2472,12 @@ export default function NewLayout(props: ParentProps) {
       reportDesktopOnlyParallel()
       return
     }
+    const workspace = parallelRecords().find((record) => record.id === id)
+    const blocked = workspace && isExternalRuntime(workspace.runtime) ? hostLocallyBlocked() : undefined
+    if (blocked) {
+      setParallelError(blocked)
+      return
+    }
     const record = await api.run(id, Number.POSITIVE_INFINITY).catch((error: unknown) => {
       setParallelError(error instanceof Error ? error.message : String(error))
       return undefined
@@ -2443,6 +2496,11 @@ export default function NewLayout(props: ParentProps) {
     }
     const workspace = parallelRecords().find((record) => record.id === id)
     if (!workspace) return
+    const blocked = hostLocallyBlocked()
+    if (blocked) {
+      setParallelError(blocked)
+      return
+    }
     const text = externalAgentFollowUpSubmission({
       draft: externalAgentFollowUpDraft(followUpDrafts(), id),
       running: isParallelWorkspaceRunning(workspace),
@@ -2456,6 +2514,35 @@ export default function NewLayout(props: ParentProps) {
       setParallelError(error instanceof Error ? error.message : String(error))
       // Preserve both the refused message and anything drafted while awaiting it.
       setFollowUpDrafts((drafts) => restoreExternalAgentFollowUpDraft(drafts, id, text))
+      return undefined
+    })
+    setFollowUpBusy(false)
+    if (!record) return
+    setParallelRecords((records) => records.map((item) => (item.id === id ? record : item)))
+    void loadBackgroundTasks()
+  }
+
+  // Try a fix: the one click that sends a failed check to the user's own coding agent, as their message. Desktop
+  // never runs the agent again on a failed check by itself.
+  const tryWorkspaceFix = async (id: string) => {
+    const api = parallelApi()
+    if (!api) {
+      reportDesktopOnlyParallel()
+      return
+    }
+    const blocked = hostLocallyBlocked()
+    if (blocked) {
+      setParallelError(blocked)
+      return
+    }
+    if (!api.repair) {
+      setParallelError("Update Vector's desktop app to send a failed check to this agent.")
+      return
+    }
+    setFollowUpBusy(true)
+    setParallelError("")
+    const record = await api.repair(id).catch((error: unknown) => {
+      setParallelError(error instanceof Error ? error.message : String(error))
       return undefined
     })
     setFollowUpBusy(false)
@@ -3581,6 +3668,13 @@ export default function NewLayout(props: ParentProps) {
       set: (value) => void setWorkspaceRuntimeModel(record().id, value),
     })
     const stats = () => parallelDiffStats(record())
+    // The check that failed after this agent's last change, while nothing runs: what Try a fix would send.
+    const failedCheck = () => {
+      const report = record().validationReport
+      if (record().mergeState !== "none" || isParallelWorkspaceRunning(record())) return undefined
+      if (!report?.hadChecks || report.passed) return undefined
+      return report.checks.find((check) => check.status === "failed")
+    }
     const copy = () =>
       agentReviewCopy(record().runtime, {
         running: isParallelWorkspaceRunning(record()),
@@ -3648,7 +3742,7 @@ export default function NewLayout(props: ParentProps) {
                 {parallelError()}
               </div>
             </Show>
-            <Show when={record().error}>
+            <Show when={record().error && !failedCheck()}>
               <div class="vector-agent-chat-error" role="alert">
                 {record().error}
               </div>
@@ -3688,7 +3782,33 @@ export default function NewLayout(props: ParentProps) {
                       ]
                 }
                 runtimeLabel={copy().label}
+                ownership={copy().ownership}
               />
+            </Show>
+            <Show when={failedCheck()}>
+              {(check) => (
+                <section class="vector-agent-check-failed" data-agent-check-failed aria-label="Failed check">
+                  <div class="vector-agent-check-failed-head">
+                    <strong>{check().label} failed</strong>
+                    <code>{[check().command, ...check().args].join(" ")}</code>
+                  </div>
+                  <pre>{check().output.slice(-1_600)}</pre>
+                  <div class="vector-agent-check-failed-actions">
+                    <p>
+                      Try a fix sends this output to {copy().label} as your message. Vector doesn't run {copy().label}{" "}
+                      again on its own.
+                    </p>
+                    <button
+                      type="button"
+                      data-action="external-agent-try-fix"
+                      disabled={followUpBusy()}
+                      onClick={() => void tryWorkspaceFix(record().id)}
+                    >
+                      Try a fix
+                    </button>
+                  </div>
+                </section>
+              )}
             </Show>
           </div>
         }
@@ -3739,21 +3859,33 @@ export default function NewLayout(props: ParentProps) {
         }
         composer={
           <Show when={record().mergeState === "none"}>
-            <ExternalAgentComposer
-              runtimeLabel={copy().label}
-              model={modelState}
-              modelLabel={modelName()}
-              value={externalAgentFollowUpDraft(followUpDrafts(), record().id)}
-              running={isParallelWorkspaceRunning(record())}
-              sending={followUpBusy()}
-              resumable={Boolean(record().externalSessionId)}
-              hasConversation={Boolean(record().turns?.some((turn) => turn.role === "agent"))}
-              onInput={(value) =>
-                setFollowUpDrafts((drafts) => withExternalAgentFollowUpDraft(drafts, record().id, value))
+            <Show
+              when={!externalOffInLocal()}
+              fallback={
+                <OffInLocal
+                  source="external-agents"
+                  status={localReader.status()}
+                  client={localReader.client()}
+                  named
+                />
               }
-              onSend={() => void sendWorkspaceFollowUp(record().id)}
-              onStop={() => void stopParallelWorkspace(record().id)}
-            />
+            >
+              <ExternalAgentComposer
+                runtimeLabel={copy().label}
+                model={modelState}
+                modelLabel={modelName()}
+                value={externalAgentFollowUpDraft(followUpDrafts(), record().id)}
+                running={isParallelWorkspaceRunning(record())}
+                sending={followUpBusy()}
+                resumable={Boolean(record().externalSessionId)}
+                hasConversation={Boolean(record().turns?.some((turn) => turn.role === "agent"))}
+                onInput={(value) =>
+                  setFollowUpDrafts((drafts) => withExternalAgentFollowUpDraft(drafts, record().id, value))
+                }
+                onSend={() => void sendWorkspaceFollowUp(record().id)}
+                onStop={() => void stopParallelWorkspace(record().id)}
+              />
+            </Show>
           </Show>
         }
         actions={
@@ -4115,7 +4247,7 @@ export default function NewLayout(props: ParentProps) {
                       <span class="mt-0.5 block text-[9.5px] leading-3 opacity-70">
                         {parallelRuntime() === "vector"
                           ? "One shared checkout. Agents see each other's edits and can message each other while working."
-                          : `One shared checkout. ${parallelRuntimeLabel(parallelRuntime())} agents see each other's edits and are told what teammates did, but cannot message back — only Vector's own agent can send.`}
+                          : `One shared checkout. ${parallelRuntimeLabel(parallelRuntime())} sees the other agents' edits. It takes only your own messages, so teammates' messages do not reach it.`}
                       </span>
                     </button>
                   </div>
@@ -4500,6 +4632,15 @@ export default function NewLayout(props: ParentProps) {
                       )
                     })()}
                   </div>
+                  <Show when={externalOffInLocal()}>
+                    <div class="mt-2" data-component="parallel-external-off-in-local">
+                      <OffInLocal
+                        source="external-agents"
+                        status={localReader.status()}
+                        client={localReader.client()}
+                      />
+                    </div>
+                  </Show>
                   <Show
                     when={!parallelCompareRuntimes() && externalReady(parallelRuntime()) && launchExternalRuntime()}
                   >
@@ -4933,7 +5074,11 @@ export default function NewLayout(props: ParentProps) {
                   </Show>
 
                   <Show when={record().runtime !== "vector" && (record().turns?.length ?? 0) > 0}>
-                    <ExternalAgentTranscript turns={record().turns ?? []} runtimeLabel={reviewCopy().label} />
+                    <ExternalAgentTranscript
+                      turns={record().turns ?? []}
+                      runtimeLabel={reviewCopy().label}
+                      ownership={reviewCopy().ownership}
+                    />
                   </Show>
 
                   <Show when={record().logs.length || record().terminalOutput.length}>

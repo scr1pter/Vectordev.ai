@@ -2,8 +2,9 @@ import { spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { createServer } from "node:net"
 import { app } from "electron"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 import { checkHealth } from "../server"
-import { type WslCommandLine, resolveWslVector, wslArgs } from "./runtime"
+import { type WslCommandLine, resolveWslVector, wslArgs, wslLocalPolicy, wslNetwork } from "./runtime"
 import { pollWslHealth, requireWslAuthentication, wslReinstallMessage } from "./startup"
 import { wslServerScript } from "./scripts"
 import { redactWslOutput, wslLaunchEnvironment, wslProcessLifetime } from "./lifecycle"
@@ -35,6 +36,11 @@ export async function spawnWslSidecar(
 
   const port = await allocatePort()
   opts.signal.throwIfAborted()
+  // The engine in WSL keeps the desktop's Vector Local as a floor (user-level: never a lock), with the servers on this
+  // computer listed where the distro reaches them, and is told how WSL networks it for the pane's guidance.
+  const network = await wslNetwork(distro, { signal: opts.signal })
+  const local = wslLocalPolicy(Egress.policy(), network)
+  opts.signal.throwIfAborted()
   const password = randomUUID()
   const username = "vector"
   const script = wslServerScript({
@@ -48,6 +54,8 @@ export async function spawnWslSidecar(
       VECTOR_CLI_TOKEN: opts.token,
       VECTOR_SERVER_USERNAME: username,
       VECTOR_SERVER_PASSWORD: password,
+      VECTOR_LOCAL_WSL_NETWORK: network.mode,
+      ...(local ? { VECTOR_LOCAL_POLICY: local } : {}),
       ...(process.env.VECTOR_MCP_AUTH_KEY ? { VECTOR_MCP_AUTH_KEY: process.env.VECTOR_MCP_AUTH_KEY } : {}),
       ...(process.env.VECTOR_CREDENTIAL_KEY ? { VECTOR_CREDENTIAL_KEY: process.env.VECTOR_CREDENTIAL_KEY } : {}),
     },

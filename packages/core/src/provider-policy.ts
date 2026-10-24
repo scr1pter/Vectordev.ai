@@ -13,10 +13,11 @@ export function providerUsable(id: string, provider?: Parameters<typeof Provider
   return ProviderPolicy.providerUsable(id, provider) || Boolean(activeOAuthApproval(id))
 }
 
-// Sign in with ChatGPT is on because the owner asked on 10 October 2026 to re-enable it. OpenAI has not
-// authorized a Vector registration and may object or block it; the owner's confirmation of that risk is
-// pending (docs/vector/owner-actions/chatgpt.md). The others need Vector-owned registrations and provider approval.
-export const CHATGPT_SIGN_IN = true
+// Sign in with ChatGPT through the Codex CLI's registration is off (owner decision, 23 October 2026): OpenAI has
+// not issued Vector a registration, and its terms do not let a commercial app reuse the Codex CLI's
+// (docs/vector/owner-actions/chatgpt.md). VECTOR_OPENAI_OAUTH_CLIENT_ID still turns the sign-in on with a
+// registration OpenAI issues to Vector. The others need Vector-owned registrations and provider approval.
+export const CHATGPT_SIGN_IN = false
 export const XAI_SIGN_IN = false
 export const POE_SIGN_IN = false
 export const DIGITALOCEAN_SIGN_IN = false
@@ -24,10 +25,12 @@ export const GITLAB_SIGN_IN = false
 
 // The Codex CLI's public client registration. Every ChatGPT sign-in saved before 1.99.104 came from it.
 export const CODEX_CLI_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
-// The registration new sign-ins use. VECTOR_OPENAI_OAUTH_CLIENT_ID swaps in a registration OpenAI approves for
-// Vector; an approved one can replace this value while CODEX_CLI_CLIENT_ID keeps naming the old client.
+// The built-in registration, used only while CHATGPT_SIGN_IN is on. VECTOR_OPENAI_OAUTH_CLIENT_ID swaps in a
+// registration OpenAI approves for Vector; an approved one can replace this value while CODEX_CLI_CLIENT_ID keeps
+// naming the old client.
 export const CHATGPT_CLIENT_ID = CODEX_CLI_CLIENT_ID
-export const CHATGPT_SIGN_IN_UNAVAILABLE = "ChatGPT sign-in is temporarily unavailable; connect OpenAI with an API key."
+export const CHATGPT_SIGN_IN_UNAVAILABLE =
+  "Sign in with ChatGPT is off in Vector. Connect OpenAI with an API key, or run your own Codex CLI from Host locally in the desktop app."
 
 // The owner's remote off-switch, as last read from vectordev.ai (see provider-remote-policy.ts).
 // It starts on so a first run without the website still offers the sign-in.
@@ -36,12 +39,14 @@ export function applyRemoteProviderPolicy(policy: { chatgptSignIn: boolean }) {
   remote.chatgptSignIn = policy.chatgptSignIn
 }
 
+// `enabled` is the owner's remote switch; pass true to ask what this build offers whatever the switch says. A
+// registration of Vector's own in VECTOR_OPENAI_OAUTH_CLIENT_ID works while CHATGPT_SIGN_IN is off.
 export function chatgptOAuthConfiguration(
   environment: NodeJS.ProcessEnv = process.env,
-  enabled = CHATGPT_SIGN_IN && remote.chatgptSignIn,
+  enabled = remote.chatgptSignIn,
 ) {
   if (!enabled) return
-  const clientId = environment.VECTOR_OPENAI_OAUTH_CLIENT_ID?.trim() || CHATGPT_CLIENT_ID
+  const clientId = environment.VECTOR_OPENAI_OAUTH_CLIENT_ID?.trim() || (CHATGPT_SIGN_IN ? CHATGPT_CLIENT_ID : "")
   if (!/^[A-Za-z0-9._-]{8,256}$/.test(clientId)) return
   return { clientId, origin: "https://auth.openai.com" }
 }

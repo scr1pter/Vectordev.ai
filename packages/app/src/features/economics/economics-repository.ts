@@ -5,6 +5,7 @@
 // persist.ts uses) so unrelated projects never collide or leak into each
 // other's history.
 import { checksum } from "@vectordevai/core/util/encode"
+import { ExternalAgent } from "@vectordevai/schema/external-agent"
 import { createEffect, createSignal } from "solid-js"
 import type { MeasuredLatency, ModelOutcome, TaskCategory } from "./economics-types"
 import { totalSessionCost, type MeasuredUsage, type SessionSpend } from "./token-usage"
@@ -45,7 +46,7 @@ function parseOutcomes(raw: string | null): StoredOutcome[] {
       return undefined
     }
   })()
-  return Array.isArray(parsed) ? (parsed as StoredOutcome[]) : []
+  return Array.isArray(parsed) ? (parsed as StoredOutcome[]).filter(eligibleOutcome) : []
 }
 
 async function readOutcomes(projectId: string): Promise<StoredOutcome[]> {
@@ -58,7 +59,7 @@ async function readOutcomes(projectId: string): Promise<StoredOutcome[]> {
 }
 
 async function writeOutcomes(projectId: string, outcomes: StoredOutcome[]): Promise<void> {
-  const capped = outcomes.slice(-MAX_OUTCOMES_PER_PROJECT)
+  const capped = outcomes.filter(eligibleOutcome).slice(-MAX_OUTCOMES_PER_PROJECT)
   const value = JSON.stringify(capped)
 
   const api = storeApi()
@@ -85,18 +86,17 @@ function queueOutcome<T>(projectId: string, update: () => Promise<T>) {
   const next = (queues.get(key) ?? Promise.resolve()).then(update)
   queues.set(
     key,
-    next.then(() => undefined, () => undefined),
+    next.then(
+      () => undefined,
+      () => undefined,
+    ),
   )
   return next
 }
 
 // Workspace validation/status and session spend advance independently. Replace only a complete snapshot
 // that does not regress either axis; a rerun's new session is ordered by the workspace revision alone.
-export function recordWorkspaceOutcome(
-  outcome: ModelOutcome,
-  input: WorkspaceOutcomeVersion,
-  current = () => true,
-) {
+export function recordWorkspaceOutcome(outcome: ModelOutcome, input: WorkspaceOutcomeVersion, current = () => true) {
   return queueOutcome<"written" | "unchanged" | "stale">(outcome.projectId, async () => {
     if (!current()) return "stale"
     if (!Number.isFinite(input.workspaceRevision) || input.workspaceRevision < 0) return "stale"
@@ -181,8 +181,25 @@ async function appendOutcome(outcome: ModelOutcome, updatedAt?: number) {
   setVersion((value) => value + 1)
 }
 
+// Filter at the storage boundary so every consumer, including exports and model rankings, sees the same history.
 export async function listOutcomes(projectId: string): Promise<ModelOutcome[]> {
   return readOutcomes(projectId).catch(() => [])
+}
+
+// Older samples named the runtime as their provider and lack the durable exclusion mark. Keep retired labels too.
+const OWN_AGENT_NAMES = new Set(
+  [
+    ...ExternalAgent.catalog.flatMap((agent) => [agent.id, agent.name]),
+    "Cursor Agent",
+    "Kilo Code",
+    "Droid",
+    "Antigravity CLI",
+    "antigravity",
+  ].map((name) => name.toLowerCase()),
+)
+
+function eligibleOutcome(outcome: ModelOutcome) {
+  return !ExternalAgent.excludedFromLearning(outcome) && !OWN_AGENT_NAMES.has(outcome.provider?.toLowerCase() ?? "")
 }
 
 // A project's outcome history that stays current as new outcomes are recorded. A signal rather than a resource:
@@ -207,6 +224,8 @@ export function createOutcomes(projectId: () => string) {
 // ParallelWorkspaceRecord satisfies it.
 export type WorkspaceRecordForEconomics = {
   id: string
+  runtime?: string
+  excludedFromLearning?: boolean
   provider: string
   model: string
   sourcePath: string
@@ -229,6 +248,7 @@ export function outcomesFromWorkspaceRecord(
   spend?: SessionSpend,
   timing?: MeasuredLatency,
 ): ModelOutcome | undefined {
+  if (ExternalAgent.excludedFromLearning(record)) return undefined
   // Keep cumulative history, but validation is not evidence for the requested model when observed work disagrees.
   const attributable = !measured || (measured.provider === record.provider && measured.model === record.model)
   // Workspace age changes on refresh, validation and integration. Only actual reply history supplies timing.

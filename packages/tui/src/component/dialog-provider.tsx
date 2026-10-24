@@ -23,6 +23,7 @@ import {
   providerRuntimeEnabled,
 } from "@vectordevai/schema/provider-policy"
 import { saveCustomProviderCredential } from "./custom-provider-credential"
+import { DialogLocalServers } from "./dialog-local"
 import { OPENROUTER_REMOTE_COPY } from "@vectordevai/core/free-model-choice"
 
 const PROVIDER_PRIORITY: Record<string, number> = {
@@ -33,6 +34,7 @@ const PROVIDER_PRIORITY: Record<string, number> = {
 }
 
 const CUSTOM_PROVIDER_OPTION_VALUE = "__vector_custom_provider__"
+const LOCAL_SERVERS_OPTION_VALUE = "__vector_local_servers__"
 const CUSTOM_PROVIDER_ID = /^[a-z0-9][a-z0-9-_]*$/
 
 type ProviderOptionBase = {
@@ -49,6 +51,9 @@ type ProviderOption =
     })
   | (ProviderOptionBase & {
       type: "custom"
+    })
+  | (ProviderOptionBase & {
+      type: "local"
     })
 
 export function providerOptions(
@@ -70,11 +75,18 @@ export function providerOptions(
         providerID: provider.id,
         description: {
           anthropic: "(API key)",
-          openai: "(ChatGPT Plus/Pro or API key)",
+          openai: "(API key)",
         }[provider.id],
         category: provider.id in PROVIDER_PRIORITY ? "Popular" : "Providers",
       })),
     ),
+    {
+      type: "local",
+      title: "Models on this computer (Vector Local)",
+      value: LOCAL_SERVERS_OPTION_VALUE,
+      description: "Ollama, LM Studio, vLLM, llama.cpp or SGLang running here",
+      category: "Providers",
+    },
     {
       type: "custom",
       title: "Other",
@@ -138,6 +150,16 @@ export function createDialogProviderOptions(input?: {
     return pipe(
       providerOptions(sync.data.provider_next.all),
       map((provider) => {
+        if (provider.type === "local")
+          return {
+            title: provider.title,
+            value: provider.value,
+            description: provider.description,
+            category: provider.category,
+            onSelect() {
+              dialog.replace(() => <DialogLocalServers />)
+            },
+          }
         if (provider.type === "custom") {
           return {
             title: provider.title,

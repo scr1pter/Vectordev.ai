@@ -6,7 +6,7 @@ import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option } from "effect"
 import { NamedError } from "@vectordevai/core/util/error"
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { Config } from "@/config/config"
-import { ConfigManaged } from "@/config/managed"
+import { ConfigManaged } from "@vectordevai/core/config/managed"
 import { ConfigParse } from "../../src/config/parse"
 import { Npm } from "@vectordevai/core/npm"
 
@@ -1376,6 +1376,75 @@ it.instance("a trusted repository's run limits alone leave no budget", () =>
     yield* writeTrustedConfigEffect(path.join(test.directory, ".vector"), { budget: { run: { usd: 0.5 } } })
     expect((yield* Config.use.get()).budget).toBeUndefined()
   }),
+)
+
+// Research's settings are the user's (sections 5.7 and 7.2): a repository, trusted or not, may only add domains to
+// avoid and turn the build agent's research tool down. Its preferred domains, caps and robots.txt switch never apply,
+// so a cloned repository cannot choose what research reads.
+for (const trusted of [true, false])
+  it.instance(`${trusted ? "a trusted" : "an untrusted"} repository's research block only adds avoided domains`, () =>
+    withGlobalConfig(
+      {
+        config: {
+          research: {
+            domains: { prefer: ["nature.com"], avoid: ["pinterest.com"] },
+          },
+        },
+      },
+      () =>
+        Effect.gen(function* () {
+          const test = yield* TestInstance
+          const write = trusted ? writeTrustedConfigEffect : writeConfigEffect
+          yield* write(test.directory, {
+            research: {
+              limits: { deep: { usd: 50, pages: 400, researchers: 4 } },
+              robots: false,
+              domains: { prefer: ["attacker.example"], avoid: ["spam.example"] },
+              tool: "thorough",
+              depth: "deep",
+              retain_days: 365,
+            },
+          })
+          expect((yield* Config.use.get()).research).toEqual({
+            domains: { prefer: ["nature.com"], avoid: ["pinterest.com", "spam.example"] },
+            tool: "thorough",
+          })
+          // The repository's avoid list narrows what research reads; only the user's own sites clear a host name
+          // from the outbound check.
+          expect(yield* Config.use.researchDomains()).toEqual({ prefer: ["nature.com"], avoid: ["pinterest.com"] })
+        }),
+    ),
+  )
+
+// Research searches in each research agent's own browser now, so there is no search setting. A user's config from an
+// earlier version that names a search service, its address or browser_search still loads, without an error, and those
+// settings are dropped.
+it.instance("an earlier version's research search settings load and are ignored", () =>
+  withGlobalConfig(
+    {
+      config: {
+        research: {
+          search: { provider: "exa", url: "https://searx.example.lan" },
+          browser_search: true,
+          tool: "thorough",
+        },
+      },
+    },
+    () =>
+      Effect.gen(function* () {
+        expect((yield* Config.use.get()).research).toEqual({ tool: "thorough" })
+      }),
+  ),
+)
+
+it.instance("a repository cannot turn the build agent's research tool back on", () =>
+  withGlobalConfig({ config: { research: { tool: "off" } } }, () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* writeTrustedConfigEffect(test.directory, { research: { tool: "work" } })
+      expect((yield* Config.use.get()).research).toEqual({ tool: "off" })
+    }),
+  ),
 )
 
 it.effect("says once per file that a repository's run limits are ignored", () =>

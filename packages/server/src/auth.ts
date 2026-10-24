@@ -182,6 +182,9 @@ export function isOwnerOnlyRoute(method: string, route: string) {
   if (route.startsWith("/api/credential") || route.startsWith("/api/permission/saved")) return true
   // Memory is the owner's own: their rules, what they told Vector about themselves and what it learned in their work.
   if (route === "/memory" || route.startsWith("/memory/")) return true
+  // Vector Local is the owner's: its settings, the model servers they listed, the services they allowed and the
+  // network log of every session. Reading the log would show a guest where the owner's other sessions went.
+  if (route === "/local" || route.startsWith("/local/")) return true
   if (route.startsWith("/experimental/project/") && route.includes("/copy")) return true
   // Creating a worktree runs the project's start command and an extra startup command from the request, and removing
   // or resetting one discards the owner's work in a directory outside the guest's workspace.

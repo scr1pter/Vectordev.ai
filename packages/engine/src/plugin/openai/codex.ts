@@ -13,6 +13,7 @@ import { createServer } from "http"
 import { OpenAIWebSocketPool } from "./ws-pool"
 import { OpenAITransport } from "./transport"
 import { OauthCallbackPage } from "@vectordevai/core/oauth/page"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 
 const ISSUER = "https://auth.openai.com"
 const CODEX_API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses"
@@ -133,7 +134,7 @@ async function exchangeCodeForTokens(
   redirectUri: string,
   pkce: PkceCodes,
 ): Promise<TokenResponse> {
-  const response = await fetch(`${issuer}/oauth/token`, {
+  const response = await Egress.fetch("chatgpt-signin", `${issuer}/oauth/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": `vector/${InstallationVersion}` },
     body: new URLSearchParams({
@@ -151,7 +152,7 @@ async function exchangeCodeForTokens(
 }
 
 async function refreshAccessToken(clientId: string, refreshToken: string, issuer = ISSUER): Promise<TokenResponse> {
-  const response = await fetch(`${issuer}/oauth/token`, {
+  const response = await Egress.fetch("chatgpt-signin", `${issuer}/oauth/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": `vector/${InstallationVersion}` },
     body: new URLSearchParams({
@@ -371,7 +372,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
       type: "oauth",
       authorize: async () => {
         const app = await signInConfiguration()
-        const deviceResponse = await fetch(`${issuer}/api/accounts/deviceauth/usercode`, {
+        const deviceResponse = await Egress.fetch("chatgpt-signin", `${issuer}/api/accounts/deviceauth/usercode`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -395,7 +396,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
           method: "auto" as const,
           async callback() {
             while (true) {
-              const response = await fetch(`${issuer}/api/accounts/deviceauth/token`, {
+              const response = await Egress.fetch("chatgpt-signin", `${issuer}/api/accounts/deviceauth/token`, {
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
@@ -413,7 +414,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                   code_verifier: string
                 }
 
-                const tokenResponse = await fetch(`${issuer}/oauth/token`, {
+                const tokenResponse = await Egress.fetch("chatgpt-signin", `${issuer}/oauth/token`, {
                   method: "POST",
                   headers: {
                     "Content-Type": "application/x-www-form-urlencoded",

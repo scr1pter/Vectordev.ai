@@ -60,7 +60,7 @@ describe("external runtime models", () => {
     ])
     // With nothing current above it, the default leads the runtime's own section.
     const listed = buildModelSections({ models: externalRuntimeModels("cursor"), now: Date.now(), keepOrder: true })
-    expect(listed.map((section) => section.label)).toEqual(["Cursor Agent"])
+    expect(listed.map((section) => section.label)).toEqual(["Cursor CLI"])
     expect(listed[0].items.map((item) => item.id)).toEqual([
       RUNTIME_DEFAULT_MODEL,
       ...EXTERNAL_RUNTIME_MODELS.cursor.models.map((model) => model.id),
@@ -97,6 +97,12 @@ describe("external runtime models", () => {
     state("opus").set({ providerID: provider, modelID: RUNTIME_DEFAULT_MODEL })
     state().set(undefined)
     expect(sent).toEqual(["claude-opus-5-5", undefined, undefined])
+  })
+
+  test("pi surfaces no models, Claude's included: the model is the user's pick inside pi", () => {
+    expect(EXTERNAL_RUNTIME_MODELS.pi.models).toEqual([])
+    expect(externalRuntimeModels("pi").map((model) => model.id)).toEqual([RUNTIME_DEFAULT_MODEL])
+    expect(JSON.stringify(agentModels("pi"))).not.toMatch(/claude|anthropic|opus|sonnet|haiku|fable/i)
   })
 
   test("a model chosen before the list changed still shows as what the workspace runs", () => {

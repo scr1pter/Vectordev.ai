@@ -50,7 +50,7 @@ const layer = Layer.effect(
         // Persist the cooldown before starting so repeated offline launches do not retry immediately.
         yield* afs.writeWithDirs(marker, String(now + retryDelay))
         // A timed-out reify may leave a partial package directory. Only a completed install is reusable.
-        yield* npm.add(specifier, { timeout, force: true }).pipe(Effect.timeout(timeout))
+        yield* npm.addAs("npm-plugins", specifier, { timeout, force: true }).pipe(Effect.timeout(timeout))
         yield* afs.writeWithDirs(readyFile(global.cache), specifier)
         yield* afs.remove(marker, { force: true })
       }).pipe(
