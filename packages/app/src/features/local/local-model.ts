@@ -71,8 +71,8 @@ export const NOT_COVERED: readonly { title: string; body: string }[] = [
     body: "Shell commands, stdio MCP servers and language servers make their own connections. With Web access None, the shell sandbox blocks the agent's shell commands on macOS and Linux; MCP servers and language servers run outside it, and Windows has no such block.",
   },
   {
-    title: "Model and search servers that forward requests",
-    body: "A LiteLLM proxy, Ollama's cloud models and SearXNG can pass your prompts or queries on to a cloud service. Vector labels the ones it can recognise.",
+    title: "Model servers that forward requests",
+    body: "A LiteLLM proxy and Ollama's cloud models can pass your prompts on to a cloud service. Vector labels the ones it can recognise.",
   },
   {
     title: "Everything outside Vector",
@@ -120,9 +120,6 @@ const NAMES: Record<string, string> = {
   gitlab: "GitLab merge requests",
   "vector-cloud": "Vector Cloud",
   "git-remote": "Vector's own git fetches and pushes",
-  "websearch-exa": "Exa search",
-  "websearch-parallel": "Parallel search",
-  "websearch-searxng": "SearXNG search",
   webfetch: "Web reads",
   "agent-browser": "The agent's browser",
   "research-reader": "Deep research reads",

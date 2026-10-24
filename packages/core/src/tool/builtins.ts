@@ -18,7 +18,6 @@ import { SkillTool } from "./skill"
 import { TeammateMessageTool } from "./teammate"
 import { TodoWriteTool } from "./todowrite"
 import { WebFetchTool } from "./webfetch"
-import { WebSearchTool } from "./websearch"
 import { WriteTool } from "./write"
 
 /**
@@ -55,7 +54,6 @@ export const node = makeLocationNode({
     TeammateMessageTool.node,
     TodoWriteTool.node,
     WebFetchTool.node,
-    WebSearchTool.node,
     WriteTool.node,
   ],
 })

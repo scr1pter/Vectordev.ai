@@ -1,423 +1,155 @@
-import { afterAll, describe, expect, test } from "bun:test"
-import { Effect, Exit } from "effect"
-import { FetchHttpClient, HttpClient } from "effect/unstable/http"
-import { ResearchOutbound } from "../../src/research/outbound"
+import { describe, expect, test } from "bun:test"
 import { ResearchSearch } from "../../src/research/search"
-import { FakeWeb } from "../lib/fake-web"
-import { NetworkGuard } from "../lib/network-guard"
 
-const guard = NetworkGuard.use()
-const web = FakeWeb.start({
-  sites: {
-    ...FakeWeb.sites(),
-    // A SearXNG server whose settings leave the json format off: it answers every search 403.
-    searxoff: { "/search": { status: 403, headers: { "content-type": "text/html" }, body: "<h1>403 Forbidden</h1>" } },
-    // A server that answers with a page rather than SearXNG's JSON.
-    searxhtml: { "/search": { headers: { "content-type": "text/html" }, body: "<html><body>Results</body></html>" } },
-    searxbusy: { "/search": { status: 429, headers: { "content-type": "text/plain" }, body: "Too many requests" } },
-    // A server under a path, as SearXNG often is behind a reverse proxy.
-    proxied: {
-      "/searx/search": (request, context) => {
-        const query = new URL(request.url).searchParams
-        return Response.json({
-          results: [{ url: context.url("article", "/"), title: query.get("q"), content: query.get("time_range") }],
-        })
-      },
-    },
-    // A search server that sends the search on to a host outside the fake web.
-    away: { "/search": FakeWeb.redirect(307, () => "https://search.example.com/search?q=heat") },
-  },
-})
-afterAll(() => web.close())
-const http = Effect.runSync(
-  Effect.gen(function* () {
-    return yield* HttpClient.HttpClient
-  }).pipe(Effect.provide(FetchHttpClient.layer)),
-)
+// Research searches in each research agent's own browser (section 5.7, owner decision 23 Oct 2026): these are the
+// pieces both sides share, the results page Vector builds for a query (the desktop's navigation rule allows exactly
+// these) and how results are kept, whichever process read them off the page.
 
-// What the run holds privately, for the outbound check every search passes.
-const context: ResearchOutbound.Context = {
-  private: [
-    "Acme's Q3 churn rose to 7.4 percent after the Falcon pricing change.",
-    "// Tickets are on jira.acme.internal.",
-  ],
-  typed: ["Research how heat pumps perform in cold climates."],
-  public: [],
-}
-const search = (
-  site: string,
-  query: ResearchSearch.Query,
-  authorize: (url: string) => Effect.Effect<void, unknown>,
-  using = context,
-) =>
-  Effect.runPromiseExit(
-    ResearchSearch.searxng(query, {
-      http,
-      url: web.url(site, "/"),
-      context: using,
-      authorize,
-      authorizePrivate: web.authorizePrivate,
-      resolver: web.resolver,
-    }),
-  )
-
-const failure = (exit: Exit.Exit<unknown, unknown>) => {
-  if (Exit.isSuccess(exit)) throw new Error("expected the search to fail")
-  return exit.cause.reasons.flatMap((reason) => (reason._tag === "Fail" ? [reason.error] : []))[0]
-}
-
-describe("ResearchSearch.parseSearxng", () => {
-  test("reads results from SearXNG's JSON answer, each page once by its canonical form", () => {
-    const results = ResearchSearch.parseSearxng(
-      JSON.stringify({
-        query: "heat pumps",
-        number_of_results: 4,
-        results: [
-          {
-            url: "https://example.com/study?utm_source=searx&b=2&a=1",
-            title: "Heat pump field study",
-            content: "A field study of 412 homes.",
-            engine: "duckduckgo",
-            publishedDate: "2026-03-14T08:00:00",
-          },
-          { url: "https://EXAMPLE.com/study?a=1&b=2#results", title: "The same study again", content: "Copy" },
-          { url: "https://example.org/report.pdf", title: null, content: null, publishedDate: null, engine: null },
-        ],
-        answers: [],
-        infoboxes: [],
-      }),
+describe("ResearchSearch.page", () => {
+  test("Google's results page first, as the visible browser's address bar searches, with the period as tbs", () => {
+    expect(ResearchSearch.page("google", { query: "heat pump savings" })).toBe(
+      "https://www.google.com/search?q=heat+pump+savings",
     )
+    expect(ResearchSearch.page("google", { query: "heat pumps", site: "nature.com", recency: "month" })).toBe(
+      "https://www.google.com/search?q=heat+pumps+site%3Anature.com&tbs=qdr%3Am",
+    )
+    expect(ResearchSearch.ENGINES).toEqual(["google", "duckduckgo"])
+  })
+
+  test("DuckDuckGo's HTML results page, with the period as df", () => {
+    expect(ResearchSearch.page("duckduckgo", { query: "heat pumps & cold", recency: "week" })).toBe(
+      "https://html.duckduckgo.com/html/?q=heat+pumps+%26+cold&df=w",
+    )
+  })
+
+  test("only those pages count as results pages", () => {
+    expect(ResearchSearch.engineOf(ResearchSearch.page("google", { query: "x" }))).toBe("google")
+    expect(ResearchSearch.engineOf(ResearchSearch.page("duckduckgo", { query: "x" }))).toBe("duckduckgo")
+    for (const url of [
+      "http://www.google.com/search?q=x",
+      "https://www.google.com/url?q=https://evil.example.com",
+      "https://www.google.com:8443/search?q=x",
+      "https://user:pass@www.google.com/search?q=x",
+      "https://google.com/search?q=x",
+      "https://duckduckgo.com/html/?q=x",
+      "https://html.duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com",
+      "https://www.google.com.evil.example/search?q=x",
+      "not an address",
+    ])
+      expect(ResearchSearch.engineOf(url)).toBeUndefined()
+  })
+
+  test("the engines' own pages a search may lead to: results pages, Google's check and consent wall, DuckDuckGo's check", () => {
+    for (const url of [
+      ResearchSearch.page("google", { query: "x" }),
+      ResearchSearch.page("duckduckgo", { query: "x" }),
+      "https://www.google.com/sorry/index?continue=https://www.google.com/search%3Fq%3Dx",
+      "https://ipv6.google.com/sorry/index",
+      "https://consent.google.com/ml?continue=https://www.google.com/search",
+      "https://consent.google.co.uk/",
+      "https://duckduckgo.com/anomaly.js",
+    ])
+      expect(ResearchSearch.enginePage(url)).toBe(true)
+    for (const url of [
+      "https://www.google.com/preferences",
+      "https://www.google.com/sorryish",
+      "https://policies.google.com/privacy",
+      "http://www.google.com/sorry/index",
+      "https://www.google.com:8443/sorry/index",
+      "https://sorry.example.com/sorry/index",
+      "https://duckduckgo.com/about",
+      "not an address",
+    ])
+      expect(ResearchSearch.enginePage(url)).toBe(false)
+  })
+
+  test("search unavailable names only the engines tried", () => {
+    expect(ResearchSearch.unavailable([{ engine: "google" }, { engine: "duckduckgo" }])).toStartWith(
+      "Search is unavailable right now: Google and DuckDuckGo answered with a check",
+    )
+    // Vector Local let only DuckDuckGo's page through.
+    const one = ResearchSearch.unavailable([{ engine: "duckduckgo" }])
+    expect(one).toStartWith("Search is unavailable right now: DuckDuckGo answered with a check")
+    expect(one).not.toContain("Google")
+    expect(ResearchSearch.unavailable([])).toStartWith(
+      "Search is unavailable right now: no results page could be loaded.",
+    )
+    expect(one).toContain("say in the report that web search was unavailable")
+  })
+
+  test("a site filter is a host name, sent as site:", () => {
+    expect(ResearchSearch.site("nature.com")).toBe(true)
+    expect(ResearchSearch.site("www.nature.com")).toBe(true)
+    expect(ResearchSearch.site("nature.com/articles")).toBe(false)
+    expect(ResearchSearch.site("heat pumps")).toBe(false)
+    expect(ResearchSearch.words({ query: "heat pumps", site: "nature.com" })).toBe("heat pumps site:nature.com")
+  })
+})
+
+describe("ResearchSearch.clean", () => {
+  test("keeps web addresses only, each page once by its canonical form, never the engines' own", () => {
+    const results = ResearchSearch.clean([
+      { url: "https://nature.com/a?utm_source=x", title: "A study", snippet: "Homes saved energy." },
+      { url: "https://nature.com/a", title: "The same study" },
+      { url: "ftp://files.example.com/b", title: "Not the web" },
+      { url: "javascript:alert(1)", title: "Not a page" },
+      { url: "https://www.google.com/search?q=heat+pumps+cost", title: "Searches related to heat pumps" },
+      { url: "https://maps.google.com/?q=heat", title: "Maps" },
+      { url: "https://webcache.googleusercontent.com/search?q=cache:x", title: "Cached" },
+      { url: "https://www.googleadservices.com/pagead/aclk?sa=L", title: "An ad" },
+      { url: "https://duckduckgo.com/y.js?ad_domain=example.com", title: "An ad" },
+      { url: "https://developers.google.com/maps/heat", title: "Developers" },
+      { url: "https://example.org/c", title: "", snippet: "  Spaced\n\nout  " },
+    ])
     expect(results).toEqual([
-      {
-        url: "https://example.com/study?utm_source=searx&b=2&a=1",
-        title: "Heat pump field study",
-        snippet: "A field study of 412 homes.",
-        published: "2026-03-14",
-        engine: "duckduckgo",
-      },
-      { url: "https://example.org/report.pdf", title: "example.org", snippet: "" },
+      { url: "https://nature.com/a?utm_source=x", title: "A study", snippet: "Homes saved energy." },
+      { url: "https://developers.google.com/maps/heat", title: "Developers", snippet: "" },
+      { url: "https://example.org/c", title: "example.org", snippet: "Spaced out" },
     ])
   })
 
-  test("leaves out addresses that are not http or https and results it cannot read", () => {
-    const results = ResearchSearch.parseSearxng(
-      JSON.stringify({
-        results: [
-          { url: "javascript:alert(1)", title: "Script" },
-          { url: "file:///etc/passwd", title: "File" },
-          { url: "https://user:secret@example.com/", title: "Credentials" },
-          { title: "No address" },
-          { url: 42, title: "Number" },
-          "not a result",
-          null,
-          { url: "not a url", title: "Broken" },
-          { url: "https://example.net/kept", title: "Kept", publishedDate: "not a date" },
-        ],
-      }),
-    )
-    expect(results).toEqual([{ url: "https://example.net/kept", title: "Kept", snippet: "" }])
+  test("cleans hidden characters, cuts long text and keeps to the limit", () => {
+    const many = Array.from({ length: 30 }, (_, index) => ({ url: `https://example.org/${index}`, title: `R${index}` }))
+    expect(ResearchSearch.clean(many)).toHaveLength(ResearchSearch.DEFAULT_RESULTS)
+    expect(ResearchSearch.clean(many, 3)).toHaveLength(3)
+    expect(ResearchSearch.clean(many, 0)).toHaveLength(1)
+    expect(ResearchSearch.clean(many, 100)).toHaveLength(ResearchSearch.MAX_RESULTS)
+    const [hidden] = ResearchSearch.clean([
+      { url: "https://example.org/x", title: "Heat​ pumps‮", snippet: "x".repeat(900) },
+    ])
+    expect(hidden?.title).toBe("Heat pumps")
+    expect(hidden?.snippet.length).toBe(500)
+    expect(hidden?.snippet.endsWith("…")).toBe(true)
   })
 
-  test("cleans hidden characters out of titles and snippets and cuts them to length", () => {
-    const hidden = String.fromCodePoint(0x200b)
-    const results = ResearchSearch.parseSearxng(
-      JSON.stringify({
-        results: [
-          {
-            url: "https://example.com/a",
-            title: `Heat${hidden} pumps\n\n  in   winter`,
-            content: "word ".repeat(400),
-            engine: "e".repeat(80),
-          },
-        ],
-      }),
-    )
-    expect(results[0]?.title).toBe("Heat pumps in winter")
-    expect(results[0]?.snippet.length).toBeLessThanOrEqual(500)
-    expect(results[0]?.snippet.endsWith("…")).toBe(true)
-    expect(results[0]?.engine?.length).toBeLessThanOrEqual(40)
-  })
-
-  test("keeps the asked number of results, at least 1 and at most 20", () => {
-    const answer = JSON.stringify({
-      results: Array.from({ length: 30 }, (_, index) => ({ url: `https://example.com/${index}`, title: `R${index}` })),
-    })
-    expect(ResearchSearch.parseSearxng(answer)).toHaveLength(ResearchSearch.DEFAULT_RESULTS)
-    expect(ResearchSearch.parseSearxng(answer, 3)).toHaveLength(3)
-    expect(ResearchSearch.parseSearxng(answer, 0)).toHaveLength(1)
-    expect(ResearchSearch.parseSearxng(answer, 100)).toHaveLength(ResearchSearch.MAX_RESULTS)
-  })
-
-  test("gives no results for an answer that is not SearXNG's JSON", () => {
-    expect(ResearchSearch.parseSearxng("<html>Results</html>")).toEqual([])
-    expect(ResearchSearch.parseSearxng("")).toEqual([])
-    expect(ResearchSearch.parseSearxng(JSON.stringify({ query: "x" }))).toEqual([])
-    expect(ResearchSearch.parseSearxng(JSON.stringify({ results: "none" }))).toEqual([])
+  test("the engines' own hosts on their country domains are theirs, and other hosts are not", () => {
+    for (const host of [
+      "google.com",
+      "www.google.co.uk",
+      "www.google.com.au",
+      "google.de",
+      "consent.google.com",
+      "ipv4.google.com",
+    ])
+      expect(ResearchSearch.own(host)).toBe(true)
+    for (const host of ["html.duckduckgo.com", "duckduckgo.com"]) expect(ResearchSearch.own(host)).toBe(true)
+    for (const host of ["developers.google.com", "scholar.example.com", "notgoogle.com", "google.example.com"])
+      expect(ResearchSearch.own(host)).toBe(false)
   })
 })
 
-describe("ResearchSearch.searxngUrl", () => {
-  test("asks the server's JSON search, under the path it is served from", () => {
-    expect(ResearchSearch.searxngUrl("https://searx.example.lan", { query: "heat pumps" })).toBe(
-      "https://searx.example.lan/search?q=heat+pumps&format=json",
+describe("ResearchSearch.listing", () => {
+  test("fences what the sites wrote and marks a page the run already read", () => {
+    const text = ResearchSearch.listing(
+      "heat pumps",
+      [
+        { url: "https://nature.com/a", title: "A study", snippet: "Homes saved energy." },
+        { url: "https://example.org/b", title: "Another", snippet: "" },
+      ],
+      new Map([["https://nature.com/a", "S1"]]),
     )
-    expect(
-      ResearchSearch.searxngUrl("https://example.lan/searx/?token=x#top", {
-        query: "heat pumps",
-        site: "nature.com",
-        recency: "year",
-      }),
-    ).toBe("https://example.lan/searx/search?q=heat+pumps+site%3Anature.com&format=json&time_range=year")
-  })
-})
-
-describe("ResearchSearch.order", () => {
-  test("auto takes SearXNG, then Exa or Parallel, then the browser, and always ends with none", () => {
-    expect(
-      ResearchSearch.order({ provider: "auto", searxng: "https://searx.example.lan", exa: true, parallel: true }),
-    ).toEqual(["searxng", "exa", "parallel", "none"])
-    expect(ResearchSearch.order({ provider: "auto", exa: false, parallel: true, browser: true })).toEqual([
-      "parallel",
-      "browser",
-      "none",
-    ])
-    expect(ResearchSearch.order({ provider: "auto", exa: false, parallel: false })).toEqual(["none"])
-  })
-
-  test("under Vector Local, Exa and Parallel are used only when the user allowed them", () => {
-    expect(ResearchSearch.order({ provider: "auto", exa: true, parallel: true, local: { allowed: [] } })).toEqual([
-      "none",
-    ])
-    expect(ResearchSearch.order({ provider: "auto", exa: true, parallel: true, local: { allowed: ["exa"] } })).toEqual([
-      "exa",
-      "none",
-    ])
-    expect(ResearchSearch.order({ provider: "parallel", exa: false, parallel: true, local: { allowed: [] } })).toEqual([
-      "none",
-    ])
-  })
-
-  test("a chosen provider that is not set up falls back to none", () => {
-    expect(ResearchSearch.order({ provider: "searxng", exa: true, parallel: true })).toEqual(["none"])
-    expect(ResearchSearch.order({ provider: "browser", exa: false, parallel: false })).toEqual(["none"])
-    expect(ResearchSearch.order({ provider: "exa", exa: true, parallel: false })).toEqual(["exa", "none"])
-    expect(ResearchSearch.order({ provider: "none", searxng: "https://x.lan", exa: true, parallel: true })).toEqual([
-      "none",
-    ])
-  })
-
-  test("says what a paid service sees under Vector Local", () => {
-    expect(ResearchSearch.provided("exa")).toBe("Exa sees your search queries; billed by Exa on your key")
-    expect(ResearchSearch.provided("parallel")).toBe(
-      "Parallel sees your search queries; billed by Parallel on your key",
-    )
-  })
-})
-
-describe("ResearchSearch.searxng", () => {
-  test("searches a SearXNG server through the web request guards", async () => {
-    const authorized: string[] = []
-    const exit = await search("searxng", { query: "heat pumps" }, (url) =>
-      Effect.sync(() => {
-        authorized.push(url)
-      }),
-    )
-    expect(Exit.isSuccess(exit)).toBe(true)
-    if (!Exit.isSuccess(exit)) return
-    expect(exit.value.map((result) => result.url)).toEqual([
-      web.url("article", "/"),
-      web.url("copy", "/heat-pumps"),
-      web.url("docs", "/report.pdf"),
-    ])
-    expect(exit.value[0]).toMatchObject({ published: "2026-03-14", engine: "fake" })
-    expect(authorized).toEqual([web.url("searxng", "/search?q=heat+pumps&format=json")])
-    const hit = web.hits().findLast((entry) => entry.site === "searxng")
-    expect(hit?.headers.accept).toBe("application/json")
-    expect(web.refused()).toEqual([])
-    expect(guard.outside()).toEqual([])
-  })
-
-  test("passes the site and time range on, under the server's own path", async () => {
-    const exit = await Effect.runPromiseExit(
-      ResearchSearch.searxng(
-        { query: "heat pumps", site: "nature.com", recency: "month" },
-        {
-          http,
-          url: web.url("proxied", "/searx"),
-          context,
-          authorize: () => Effect.void,
-          authorizePrivate: web.authorizePrivate,
-          resolver: web.resolver,
-        },
-      ),
-    )
-    expect(Exit.isSuccess(exit)).toBe(true)
-    if (!Exit.isSuccess(exit)) return
-    expect(exit.value).toEqual([
-      { url: web.url("article", "/"), title: "heat pumps site:nature.com", snippet: "month" },
-    ])
-  })
-
-  test("checks the words it sends, the site filter included, and sends nothing private", async () => {
-    const before = web.count("searxng")
-    const leaked = failure(
-      await search(
-        "searxng",
-        { query: "Acme's Q3 churn rose to 7.4 percent after the Falcon pricing change" },
-        () => Effect.void,
-      ),
-    )
-    expect(leaked).toMatchObject({
-      _tag: "ResearchSearchRefused",
-      reason: "words",
-      message: "That search would send text from your private files. Rephrase it with public terms.",
-    })
-    const filtered = failure(
-      await search("searxng", { query: "outage reports", site: "jira.acme.internal" }, () => Effect.void),
-    )
-    expect(filtered).toMatchObject({ _tag: "ResearchSearchRefused", reason: "token" })
-    expect(web.count("searxng")).toBe(before)
-  })
-
-  test("sends a site filter on a domain the user prefers, though it looks internal, and checks every other host", async () => {
-    // A learned preference names its domains, and they exist to become site: filters (section 6.4a). The work names
-    // wiki.acme.com and a private fact an address at acme.com, so without the preference it reads as an internal host.
-    const preferring = {
-      ...context,
-      private: [...context.private, "Ask ops@acme.com for access."],
-      work: ["Prefer primary sources such as wiki.acme.com and nejm.org, and avoid dailymail.co.uk."],
-      domains: ["wiki.acme.com", "nejm.org", "dailymail.co.uk"],
-    }
-    const before = web.count("searxng")
-    const authorized: string[] = []
-    const sent = await search(
-      "searxng",
-      { query: "heat pumps", site: "wiki.acme.com" },
-      (url) =>
-        Effect.sync(() => {
-          authorized.push(url)
-        }),
-      preferring,
-    )
-    expect(Exit.isSuccess(sent)).toBe(true)
-    expect(authorized).toEqual([web.url("searxng", "/search?q=heat+pumps+site%3Awiki.acme.com&format=json")])
-    expect(web.count("searxng")).toBe(before + 1)
-    // Without the preference the work keeps the host out, and the preference clears no copied private text.
-    expect(
-      failure(
-        await search("searxng", { query: "heat pumps", site: "wiki.acme.com" }, () => Effect.void, {
-          ...preferring,
-          domains: [],
-        }),
-      ),
-    ).toMatchObject({ _tag: "ResearchSearchRefused", reason: "token" })
-    expect(
-      failure(
-        await search(
-          "searxng",
-          { query: "churn rose to 7.4 percent after the Falcon pricing change", site: "nejm.org" },
-          () => Effect.void,
-          preferring,
-        ),
-      ),
-    ).toMatchObject({ _tag: "ResearchSearchRefused" })
-    // A preferred domain clears itself as a host name or a site: filter only: not an intranet name, nor an email
-    // address on it.
-    expect(
-      failure(
-        await search("searxng", { query: "outage reports", site: "jira.acme.internal" }, () => Effect.void, preferring),
-      ),
-    ).toMatchObject({ _tag: "ResearchSearchRefused", reason: "token" })
-    expect(
-      failure(
-        await search("searxng", { query: "jane@nejm.org heat pumps" }, () => Effect.void, {
-          ...preferring,
-          private: [...preferring.private, "Ask jane@nejm.org for the data."],
-        }),
-      ),
-    ).toMatchObject({ _tag: "ResearchSearchRefused", reason: "token" })
-    expect(web.count("searxng")).toBe(before + 1)
-    expect(guard.outside()).toEqual([])
-  })
-
-  test("takes only a host name as the site filter", async () => {
-    const before = web.count("searxng")
-    for (const site of ["nature.com OR acme", "nature.com/path", "-site", ""]) {
-      expect(failure(await search("searxng", { query: "heat pumps", site }, () => Effect.void))).toMatchObject({
-        message: ResearchSearch.SITE,
-      })
-    }
-    expect(web.count("searxng")).toBe(before)
-  })
-
-  test("says how to turn on the json format when the server refuses it", async () => {
-    expect(failure(await search("searxoff", { query: "heat pumps" }, () => Effect.void))).toMatchObject({
-      message: ResearchSearch.JSON_OFF,
-    })
-    expect(failure(await search("searxhtml", { query: "heat pumps" }, () => Effect.void))).toMatchObject({
-      message: ResearchSearch.JSON_OFF,
-    })
-  })
-
-  test("says when the server is limiting searches", async () => {
-    expect(failure(await search("searxbusy", { query: "heat pumps" }, () => Effect.void))).toMatchObject({
-      message: ResearchSearch.BUSY,
-    })
-  })
-
-  test("passes the caller's refusal on unchanged and sends nothing", async () => {
-    const before = web.count("searxng")
-    const refusal = new Error("Web access is set to None")
-    expect(failure(await search("searxng", { query: "heat pumps" }, () => Effect.fail(refusal)))).toBe(refusal)
-    expect(web.count("searxng")).toBe(before)
-  })
-
-  test("decides a redirect off the server again before following it", async () => {
-    const authorized: string[] = []
-    const refusal = new Error("That host is not on the list")
-    const exit = await search("away", { query: "heat" }, (url) =>
-      Effect.suspend(() => {
-        authorized.push(url)
-        return url.startsWith("https://search.example.com") ? Effect.fail(refusal) : Effect.void
-      }),
-    )
-    expect(failure(exit)).toBe(refusal)
-    expect(authorized).toEqual([
-      web.url("away", "/search?q=heat&format=json"),
-      "https://search.example.com/search?q=heat",
-    ])
-    expect(web.refused()).toEqual([])
-    expect(guard.outside()).toEqual([])
-  })
-
-  test("asks before a server on the user's own network, and refuses it without the ask", async () => {
-    const asked: string[] = []
-    const allowed = await Effect.runPromiseExit(
-      ResearchSearch.searxng(
-        { query: "heat pumps" },
-        {
-          http,
-          url: web.url("searxng", "/"),
-          context,
-          authorize: () => Effect.void,
-          authorizePrivate: (url) =>
-            Effect.sync(() => {
-              asked.push(url)
-            }),
-          resolver: web.resolver,
-        },
-      ),
-    )
-    expect(Exit.isSuccess(allowed)).toBe(true)
-    expect(asked).toEqual([web.url("searxng", "/search?q=heat+pumps&format=json")])
-    const before = web.count("searxng")
-    const refused = await Effect.runPromiseExit(
-      ResearchSearch.searxng(
-        { query: "heat pumps" },
-        { http, url: web.url("searxng", "/"), context, authorize: () => Effect.void, resolver: web.resolver },
-      ),
-    )
-    expect(failure(refused)).toMatchObject({ _tag: "ResearchSearchFailed" })
-    expect(web.count("searxng")).toBe(before)
+    expect(text).toContain("untrusted_web_page")
+    expect(text).toContain("1. A study (already read as S1)")
+    expect(text).toContain("2. Another\n   https://example.org/b")
   })
 })

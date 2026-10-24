@@ -11,7 +11,6 @@ import { ResearchProvenance } from "@vectordevai/core/research/provenance"
 import { ResearchQuote } from "@vectordevai/core/research/quote"
 import { ResearchRate } from "@vectordevai/core/research/rate"
 import { ResearchStore } from "@vectordevai/core/research/store"
-import { ConfigResearchV1 } from "@vectordevai/core/v1/config/research"
 import { memoryRoleRows, researchCapRows } from "../src/data/docs-content"
 import { docsNav } from "../src/data/docs-nav"
 import { publishedDesktopVersion, release111, release111Copy, release111Version } from "../src/data/vector-releases"
@@ -92,15 +91,12 @@ test("the research page's caps, limits and refusals are the engine's", () => {
   expect(page).not.toMatch(/\bprevents?\b/i)
 })
 
-test("the docs name the search services research can use, and no other", () => {
-  // When a search service is added or removed (the browser-search branch removes all three), the research page's
-  // Search section and the Vector Local page's forwarding line change with it.
-  const services = { searxng: "SearXNG", exa: "Exa", parallel: "Parallel" } as const
-  const offered: readonly string[] = ConfigResearchV1.Provider.literals
-  for (const [id, name] of Object.entries(services)) {
-    expect(text(research).includes(name)).toBe(offered.includes(id))
-  }
-  expect(text(local).includes("SearXNG")).toBe(offered.includes("searxng"))
+test("the docs describe isolated browser search and its blocked-search fallback", () => {
+  const page = text(research)
+  expect(page).toContain("each research agent's own browser")
+  expect(page).toContain("no search service or key to configure")
+  expect(page).toContain("Vector stops there and tries its fallback")
+  expect(page).toContain("does not solve the check, disguise the browser or rotate addresses")
 })
 
 test("the research page quotes the app's own words", async () => {
@@ -136,7 +132,7 @@ test("the Vector Local page lists what it does not cover in the app's words", as
   expect(covered.map(([title]) => title)).toEqual([
     "Sites you approve",
     "Programs the agent starts",
-    "Model and search servers that forward requests",
+    "Model servers that forward requests",
     "Everything outside Vector",
     "It is a policy inside Vector, not a firewall",
   ])

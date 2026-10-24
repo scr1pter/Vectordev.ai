@@ -42,7 +42,7 @@ import { ResearchWords } from "./words"
 // It does not chase private text an agent encodes on purpose (digits spread over words, respellings) or paraphrases.
 // Deliberate leaks are limited by how a run is built instead: an address must come from a search result, a page link
 // or the user's text, researchers in Deep carry no private context, and memory writes are held after web content. The
-// queries go to the search service the user set up and are shown in the Sources tab.
+// queries go to a search engine in the calling agent's own research browser and are shown in the Sources tab.
 //
 // Both sides are compared folded: NFKD without accents and invisible characters, any script's digits as ASCII, letters
 // that look like Latin ones as Latin (WebFence.latin), and in lower case.

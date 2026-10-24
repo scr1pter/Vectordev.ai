@@ -14,6 +14,7 @@ import {
   draftOf,
   planProblem,
   planReply,
+  searchHelp,
   searchLine,
   site,
   type Draft,
@@ -28,9 +29,6 @@ const FORMATS: readonly { value: Research.Format; label: string }[] = [
   { value: "table", label: "Table" },
   { value: "memo", label: "Memo" },
 ]
-
-const SETUP =
-  "To search the web, add a SearXNG server (with its JSON format turned on) or an Exa or Parallel key to research.search in your user config. Changing config restarts Vector's engine, which stops running sessions, so set it up between runs."
 
 /**
  * The research_plan question as a plan card (section 8.2): every field of the plan can be changed before Start, Start
@@ -278,9 +276,18 @@ export function ResearchPlanCard(props: { request: QuestionRequest; data: PlanCa
               <div data-slot="research-row">
                 <span data-slot="research-muted">{line()}</span>
                 <Show when={card()?.search.provider === "none" && draft.scope !== "brain" && !card()?.offline}>
-                  <button type="button" data-slot="research-button" onClick={() => setSetup((open) => !open)}>
-                    Set up
-                  </button>
+                  <Show when={searchHelp(card())}>
+                    {(help) => (
+                      <button
+                        type="button"
+                        data-slot="research-button"
+                        aria-expanded={setup()}
+                        onClick={() => setSetup((open) => !open)}
+                      >
+                        {help().label}
+                      </button>
+                    )}
+                  </Show>
                   <button
                     type="button"
                     data-slot="research-button"
@@ -293,13 +300,8 @@ export function ResearchPlanCard(props: { request: QuestionRequest; data: PlanCa
               </div>
             )}
           </Show>
-          <Show when={setup()}>
-            <div data-slot="research-notice">
-              <div>{card()?.search.reason ?? SETUP}</div>
-              <Show when={card()?.search.reason}>
-                <div>{SETUP}</div>
-              </Show>
-            </div>
+          <Show when={setup() && searchHelp(card())}>
+            {(help) => <div data-slot="research-notice">{help().text}</div>}
           </Show>
 
           <div data-slot="research-pair">

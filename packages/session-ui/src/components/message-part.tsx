@@ -419,17 +419,7 @@ function taskAgent(
   }
 }
 
-function webSearchProviderLabel(provider: unknown) {
-  if (provider === "parallel") return "Parallel Web Search"
-  if (provider === "exa") return "Exa Web Search"
-  return "Web Search"
-}
-
-export function getToolInfo(
-  tool: string,
-  input: any = {},
-  metadata: Record<string, unknown> | undefined = {},
-): ToolInfo {
+export function getToolInfo(tool: string, input: any = {}): ToolInfo {
   const i18n = useI18n()
   switch (tool) {
     case "read":
@@ -462,10 +452,11 @@ export function getToolInfo(
         title: i18n.t("ui.tool.webfetch"),
         subtitle: input.url,
       }
+    // Sessions from earlier versions may hold web search calls; the tool itself is gone.
     case "websearch":
       return {
         icon: "window-cursor",
-        title: webSearchProviderLabel(metadata?.provider),
+        title: i18n.t("ui.tool.websearch"),
         subtitle: input.query,
       }
     case "research_plan":
@@ -818,11 +809,7 @@ function isContextGroupTool(part: PartType): part is ToolPart {
 }
 
 function contextToolDetail(part: ToolPart): string | undefined {
-  const info = getToolInfo(
-    part.tool,
-    part.state.input ?? {},
-    "metadata" in part.state ? part.state.metadata : undefined,
-  )
+  const info = getToolInfo(part.tool, part.state.input ?? {})
   if (info.subtitle) return info.subtitle
   if (part.state.status === "error") return part.state.error
   if ((part.state.status === "running" || part.state.status === "completed") && part.state.title)
@@ -874,7 +861,7 @@ function contextToolTrigger(part: ToolPart, i18n: ReturnType<typeof useI18n>) {
       }
     }
     default: {
-      const info = getToolInfo(part.tool, input, "metadata" in part.state ? part.state.metadata : undefined)
+      const info = getToolInfo(part.tool, input)
       return {
         title: info.title,
         subtitle: info.subtitle || contextToolDetail(part),
@@ -891,17 +878,17 @@ function contextToolSummary(parts: ToolPart[]) {
   return { read, search, list }
 }
 
-function ExaOutput(props: { output?: string }) {
+function WebResults(props: { output?: string }) {
   const links = createMemo(() => urls(props.output))
 
   return (
     <Show when={links().length > 0}>
-      <div data-component="exa-tool-output">
-        <div data-slot="exa-tool-links">
+      <div data-component="web-results">
+        <div data-slot="web-results-links">
           <For each={links()}>
             {(url) => (
               <a
-                data-slot="exa-tool-link"
+                data-slot="web-results-link"
                 href={url}
                 target="_blank"
                 rel="noopener noreferrer"
@@ -1535,7 +1522,6 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
                 <ToolErrorCard
                   tool={part().tool}
                   error={error()}
-                  title={part().tool === "websearch" ? webSearchProviderLabel(partMetadata().provider) : undefined}
                   defaultOpen={props.defaultOpen}
                   open={controlledOpen()}
                   onOpenChange={props.onToolOpenChange ? handleToolOpenChange : undefined}
@@ -1951,27 +1937,28 @@ ToolRegistry.register({
   },
 })
 
+// Sessions from earlier versions may hold web search calls; the tool itself is gone.
 ToolRegistry.register({
   name: "websearch",
   render(props) {
+    const i18n = useI18n()
     const query = createMemo(() => {
       const value = props.input.query
       if (typeof value !== "string") return ""
       return value
     })
-    const title = createMemo(() => webSearchProviderLabel(props.metadata.provider))
 
     return (
       <BasicTool
         {...props}
         icon="window-cursor"
         trigger={{
-          title: title(),
+          title: i18n.t("ui.tool.websearch"),
           subtitle: query(),
-          subtitleClass: "exa-tool-query",
+          subtitleClass: "web-results-query",
         }}
       >
-        <ExaOutput output={props.output} />
+        <WebResults output={props.output} />
       </BasicTool>
     )
   },
@@ -1981,14 +1968,20 @@ ToolRegistry.register({
 // on opening it, what it found. The app's plan card, Sources tab and report card show the rest. What pages wrote
 // reaches these rows only as titles, addresses and snippets, and is shown as plain text, never as Markdown.
 
-const RESEARCH_SEARCH: Record<string, string> = { searxng: "SearXNG", exa: "Exa", parallel: "Parallel" }
+// The results page a search read, by its engine.
+const RESEARCH_SEARCH: Record<string, string> = {
+  google: "Google",
+  duckduckgo: "DuckDuckGo",
+}
 
 const RESEARCH_REFUSED: Record<string, string> = {
   outbound: "refused: it would send private text",
   provenance: "refused: address not from a search, a page link or your message",
   budget: "budget used",
   scope: "outside this research's scope",
-  none: "no search service set up",
+  none: "no web search for this run",
+  desktop: "needs the desktop app's browser",
+  local: "Vector Local's Web access",
   offline: "Web access is None",
 }
 
@@ -2065,6 +2058,7 @@ ToolRegistry.register({
     const state = createMemo(() => {
       if (props.status !== "completed") return undefined
       if (typeof props.metadata.refused === "string") return RESEARCH_REFUSED[props.metadata.refused] ?? "refused"
+      if (props.metadata.unavailable === true) return "search unavailable right now"
       return `${results().length} result${results().length === 1 ? "" : "s"}`
     })
     return (
@@ -2072,18 +2066,18 @@ ToolRegistry.register({
         {...props}
         icon="magnifying-glass"
         trigger={{
-          title: `Search${RESEARCH_SEARCH[props.metadata.provider] ? ` · ${RESEARCH_SEARCH[props.metadata.provider]}` : ""}`,
+          title: `Search${RESEARCH_SEARCH[props.metadata.engine] ? ` · ${RESEARCH_SEARCH[props.metadata.engine]}` : ""}`,
           subtitle: typeof props.input.query === "string" ? props.input.query : "",
           args: state() ? [state()!] : [],
         }}
       >
         <Show when={results().length > 0}>
-          <div data-component="exa-tool-output">
-            <div data-slot="exa-tool-links">
+          <div data-component="web-results">
+            <div data-slot="web-results-links">
               <For each={results()}>
                 {(item) => (
                   <a
-                    data-slot="exa-tool-link"
+                    data-slot="web-results-link"
                     href={item.url}
                     target="_blank"
                     rel="noopener noreferrer"

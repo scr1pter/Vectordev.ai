@@ -22,7 +22,7 @@ it.instance(
   "a quote not in the source is refused, a paraphrase is marked, and the report cites saved notes only",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research", permission: allow })
       const article = web.url("article", "/")

@@ -5,16 +5,16 @@ import type { TaskSize } from "@vectordevai/schema/task-size"
 import { NonNegativeInt, PositiveInt } from "../../schema"
 
 // The `research` block: Deep research's settings. They are read from user, global and managed config only, so a
-// checked-in repository config can neither send the user's queries to a server its author runs, nor clear host names
-// from the outbound check with preferred domains, nor raise the caps or turn robots.txt off. A repository may only add
-// domains to avoid and turn the build agent's research tool down (the engine's projectExecutableConfig).
+// checked-in repository config can neither clear host names from the outbound check with preferred domains, nor raise
+// the caps or turn robots.txt off. A repository may only add domains to avoid and turn the build agent's research tool
+// down (the engine's projectExecutableConfig).
+//
+// Research searches the web in each research agent's own browser, so there is no search setting. A config file from an
+// earlier version may still hold `search` (a search service and its address) or `browser_search`: they load, and are
+// dropped. The published JSON Schema still lists them, marked deprecated (RETIRED), so an editor that checks the file
+// against vectordev.ai/config.json does not underline them.
 
 const Strings = Schema.mutable(Schema.Array(Schema.String))
-
-export const Provider = Schema.Literals(["auto", "searxng", "exa", "parallel", "browser", "none"]).annotate({
-  identifier: "ResearchSearchProvider",
-})
-export type Provider = typeof Provider.Type
 
 export const Depth = Schema.Literals(["auto", "focused", "deep"]).annotate({ identifier: "ResearchDepthConfig" })
 export type Depth = typeof Depth.Type
@@ -34,16 +34,21 @@ export const Limits = Schema.Struct({
 }).annotate({ identifier: "ResearchLimitsConfig" })
 export type Limits = Schema.Schema.Type<typeof Limits>
 
-export const Info = Schema.Struct({
-  search: Schema.optional(
-    Schema.Struct({
-      provider: Schema.optional(Provider),
-      url: Schema.optional(Schema.String).annotate({ description: "A SearXNG instance with its JSON format enabled" }),
-    }),
-  ).annotate({
+/** The keys an earlier version's research block took, as the published JSON Schema lists them: loaded, and dropped. */
+export const RETIRED = {
+  search: {
+    type: "object",
     description:
-      "Where research searches go: searxng (the url below), exa or parallel (on your own key, billed by them), none, or auto, the first of those set up. browser is not available yet. Read from your user config only. Default: none set up.",
-  }),
+      "@deprecated Research searches the web in each research agent's own browser in the desktop app, with no search service or key; this setting is ignored.",
+  },
+  browser_search: {
+    type: "boolean",
+    description:
+      "@deprecated Research always searches in each research agent's own browser in the desktop app; this setting is ignored.",
+  },
+} as const
+
+export const Info = Schema.Struct({
   depth: Schema.optional(Depth).annotate({
     description:
       "Focused: one agent, plus up to 2 researchers when the question has independent parts. Deep: up to 4 researchers and a citation judge (default: auto)",
@@ -61,9 +66,6 @@ export const Info = Schema.Struct({
   ).annotate({ description: "Sites research prefers or avoids. A repository's config may only add to avoid." }),
   robots: Schema.optional(Schema.Boolean).annotate({
     description: "Respect robots.txt for links Vector finds itself (default: true). Read from your user config only.",
-  }),
-  browser_search: Schema.optional(Schema.Boolean).annotate({
-    description: "Let the desktop app load a search engine's results page as a search provider (default: false)",
   }),
   retain_days: Schema.optional(PositiveInt).annotate({
     description: "Days an unkept research run stays in the brain (default: 30)",

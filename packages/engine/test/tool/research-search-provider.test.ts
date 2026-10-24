@@ -1,125 +1,47 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { readFileSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
-import { Effect, Layer } from "effect"
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
+import { Effect } from "effect"
 import { Global } from "@vectordevai/core/global"
 import { Egress } from "@vectordevai/core/local-mode/egress"
+import { ResearchSearch } from "@vectordevai/core/research/search"
+import { ResearchStore } from "@vectordevai/core/research/store"
 import type { SessionV1 } from "@vectordevai/core/v1/session"
-import { Auth } from "@/auth"
 import { Config } from "@/config/config"
 import { Session } from "@/session/session"
-import { McpWebSearch } from "../../src/tool/mcp-websearch"
-import {
-  BROWSER,
-  OPTIONS,
-  PAID,
-  UNDATED,
-  options,
-  paid,
-  parsePaid,
-  searchProvider,
-} from "../../src/tool/research-search"
+import { Instruction } from "../../src/session/instruction"
+import { ResearchRun } from "../../src/tool/research-run"
+import { OPTIONS, options, searchProvider } from "../../src/tool/research-search"
+import { FakeBridge } from "../lib/fake-bridge"
 import { calls, output, plan, runtime, send, setup } from "../lib/research"
 import { FakeWeb } from "../../../core/test/lib/fake-web"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
 
-// Where Deep research searches (section 5.7): the user's own SearXNG server, else Exa or Parallel on their own key
-// (under Vector Local only when the user allowed them), else nothing. A search `vector run --research --search` names
-// picks among those. Exa and Parallel get the query alone, and their answers are read for results with addresses.
+// Where Deep research searches (section 5.7, owner decision 23 Oct 2026): in the calling agent's own research browser
+// in the desktop app, the lead's or each researcher's, through the bridge's research.search. There is no search
+// service and no key. Without the desktop's browser nothing is searched, and the tool says so. A search goes out only
+// after the outbound check and Vector Local's Web access, and its results join the run's provenance.
 
 const guard = NetworkGuard.use()
-const SEARXNG = { search: { url: "https://searx.example.lan" } }
-
-// Exa on the fake web: what it was asked, and results that point back at the fake web's pages.
-const asked: string[] = []
-const web = FakeWeb.start({
-  sites: {
-    ...FakeWeb.sites(),
-    exa: {
-      "/mcp": async (request, context) => {
-        asked.push(await request.text())
-        return Response.json({
-          result: {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({
-                  results: [
-                    {
-                      url: context.url("article", "/"),
-                      title: "Heat pump field study",
-                      text: "The study followed 412 homes.",
-                    },
-                  ],
-                }),
-              },
-            ],
-          },
-        })
-      },
-    },
-  },
+const web = FakeWeb.start({ sites: FakeWeb.sites() })
+const it = runtime(web)
+const bridge = FakeBridge.start(FakeBridge.searching(web))
+afterAll(async () => {
+  await bridge.close()
+  await web.close()
 })
-afterAll(() => web.close())
-// Every request goes out as it would, but Exa's address reaches the fake web instead.
-const it = runtime(web, {
-  http: Layer.effect(
-    HttpClient.HttpClient,
-    Effect.gen(function* () {
-      const http = yield* HttpClient.HttpClient
-      return HttpClient.mapRequest(http, (request) =>
-        request.url === McpWebSearch.EXA_URL ? HttpClientRequest.setUrl(request, web.direct("exa", "/mcp")) : request,
-      )
-    }),
-  ).pipe(Layer.provide(FetchHttpClient.layer)),
-})
+const allow = [{ permission: "research_read", pattern: "*", action: "allow" as const }]
+const researcher = (hit: { body: Record<string, unknown> }) => JSON.stringify(hit.body).includes("research_assignment")
+// The engine pointed at the fake desktop for one test, as the desktop app points it at its own.
+const withDesktop = <A, E, R>(effect: Effect.Effect<A, E, R>) => FakeBridge.within(bridge, effect)
 
 describe("research's search provider", () => {
-  test("auto takes SearXNG, then Exa or Parallel, then none", () => {
-    expect(searchProvider(SEARXNG, { exa: true, parallel: true })).toEqual({
-      provider: "searxng",
-      url: "https://searx.example.lan",
-    })
-    expect(searchProvider(undefined, { exa: true, parallel: true })).toEqual({ provider: "exa" })
-    expect(searchProvider(undefined, { exa: false, parallel: true })).toEqual({ provider: "parallel" })
-    expect(searchProvider(undefined)).toEqual({ provider: "none" })
-  })
-
-  test("under Vector Local, Exa and Parallel only when the user allowed them there", () => {
-    expect(searchProvider(undefined, { exa: true, parallel: true, local: { allowed: [] } })).toEqual({
-      provider: "none",
-    })
-    expect(searchProvider(undefined, { exa: true, parallel: true, local: { allowed: ["parallel"] } })).toEqual({
-      provider: "parallel",
-    })
-    const named = searchProvider(
-      { search: { provider: "exa" } },
-      { exa: true, parallel: false, local: { allowed: [] } },
-    )
-    expect(named.provider).toBe("none")
-    expect(named.provider === "none" ? named.reason : "").toContain("Vector Local keeps research's searches off Exa")
-  })
-
-  test("a named search that is not set up says why, and the browser is not built yet", () => {
-    const exa = searchProvider({ search: { provider: "exa" } })
-    expect(exa.provider === "none" ? exa.reason : "").toContain("no Exa key is set up")
-    const searxng = searchProvider({ search: { provider: "searxng" } })
-    expect(searxng.provider === "none" ? searxng.reason : "").toContain("no SearXNG address is set up")
-    const browser = searchProvider({ search: { provider: "browser" }, browser_search: true })
-    expect(browser).toEqual({ provider: "none", reason: BROWSER })
-  })
-
-  test("the command line's --search picks among what the user set up, and none searches nothing", () => {
-    expect(searchProvider(SEARXNG, { exa: true, parallel: false }, "exa")).toEqual({ provider: "exa" })
-    expect(searchProvider(SEARXNG, { exa: true, parallel: false }, "none")).toEqual({ provider: "none" })
-    expect(searchProvider(SEARXNG, { exa: true, parallel: false }, "auto")).toEqual({
-      provider: "searxng",
-      url: "https://searx.example.lan",
-    })
-    // It never reaches a server the user's settings do not name.
-    const parallel = searchProvider(SEARXNG, { exa: true, parallel: false }, "parallel")
-    expect(parallel.provider).toBe("none")
+  test("the research browser where the desktop has one, else nothing, and the command line's none searches nothing", () => {
+    expect(searchProvider({ browser: true })).toEqual({ provider: "browser" })
+    expect(searchProvider({ browser: false })).toEqual({ provider: "none", reason: ResearchSearch.NEEDS_DESKTOP })
+    expect(searchProvider({ browser: true, chosen: "none" })).toEqual({ provider: "none", reason: ResearchSearch.NONE })
+    // A search service an earlier version's command line named (its messages may still say so) changes nothing.
+    for (const chosen of ["searxng", "exa", "parallel", "auto"])
+      expect(searchProvider({ browser: true, chosen })).toEqual({ provider: "browser" })
   })
 
   test("the command line's choices are read from the newest message the user sent", () => {
@@ -137,232 +59,268 @@ describe("research's search provider", () => {
     const followup = user("msg_2", [text("p3", "<vector_research_verdict>", { synthetic: true })])
     expect(options([sent, followup])).toEqual({ search: "none", scope: "brain" })
     expect(options([sent, user("msg_3", [text("p4", "Now research the costs")])])).toEqual({})
+    // An old command line's search name still leaves its scope standing.
     expect(
-      options([user("msg_4", [text("p5", "x"), text("p6", "y", { metadata: { [OPTIONS]: { search: "google" } } })])]),
-    ).toEqual({})
-  })
-})
-
-describe("Exa and Parallel through research", () => {
-  test("reads results from JSON, from text blocks and from bare addresses, each page once", () => {
-    const json = JSON.stringify({
-      results: [
-        {
-          url: "https://nature.com/a?utm_source=x",
-          title: "A study",
-          text: "Homes saved energy.",
-          publishedDate: "2025-04-02T00:00:00Z",
-        },
-        { url: "https://nature.com/a", title: "The same study" },
-        { url: "ftp://files.example.com/b", title: "Not the web" },
-        { url: "https://parallel.example.org/c", title: "Excerpts", excerpts: ["One.", "Two."] },
-      ],
-    })
-    expect(parsePaid(json)).toEqual([
-      {
-        url: "https://nature.com/a?utm_source=x",
-        title: "A study",
-        snippet: "Homes saved energy.",
-        published: "2025-04-02",
-      },
-      { url: "https://parallel.example.org/c", title: "Excerpts", snippet: "One. Two." },
-    ])
-    const blocks = [
-      "Title: Heat pumps in cold climates",
-      "URL: https://example.org/heat-pumps",
-      "Published Date: 2026-03-14",
-      "Author: Mara Lindqvist",
-      "Text: The study followed 412 homes through two winters.",
-      "",
-      "Title: A second page",
-      "URL: https://example.com/second",
-      "Text: More.",
-    ].join("\n")
-    expect(parsePaid(blocks)).toEqual([
-      {
-        url: "https://example.org/heat-pumps",
-        title: "Heat pumps in cold climates",
-        snippet: "The study followed 412 homes through two winters.",
-        published: "2026-03-14",
-      },
-      { url: "https://example.com/second", title: "A second page", snippet: "More." },
-    ])
-    expect(parsePaid("See https://example.org/x and https://example.org/y.", 1)).toEqual([
-      { url: "https://example.org/x", title: "example.org", snippet: "" },
-    ])
-  })
-
-  for (const provider of ["exa", "parallel"] as const)
-    test(`${provider} gets the query alone, with the site filter in it, on the user's key`, async () => {
-      const bodies: string[] = []
-      const headers: Headers[] = []
-      const server = Bun.serve({
-        hostname: "127.0.0.1",
-        port: 0,
-        async fetch(request) {
-          headers.push(request.headers)
-          bodies.push(await request.text())
-          return Response.json({
-            result: {
-              content: [
-                {
-                  type: "text",
-                  text: JSON.stringify({ results: [{ url: "https://nature.com/study", title: "Study" }] }),
-                },
-              ],
-            },
-          })
-        },
-      })
-      try {
-        const answer = await Effect.runPromise(
-          Effect.gen(function* () {
-            const http = yield* HttpClient.HttpClient
-            return yield* paid(
-              HttpClient.mapRequest(http, (request) => HttpClientRequest.setUrl(request, server.url.href)),
-              provider,
-              { query: "heat pump savings", site: "nature.com", limit: 3, recency: "week" },
-              `${provider}-test-key`,
-            )
-          }).pipe(Effect.provide(FetchHttpClient.layer)),
-        )
-        expect(answer).toEqual({
-          type: "results",
-          items: [{ url: "https://nature.com/study", title: "Study", snippet: "" }],
-        })
-        const body = JSON.parse(bodies[0] ?? "{}") as { params: { arguments: Record<string, unknown> } }
-        expect(JSON.stringify(body.params.arguments)).toContain("heat pump savings site:nature.com")
-        // Neither filters by date: Parallel is asked for the period in its objective, and Exa gets the query alone.
-        expect(body.params.arguments).toMatchObject(
-          provider === "parallel"
-            ? {
-                objective: "heat pump savings site:nature.com (published in the past week)",
-                search_queries: ["heat pump savings site:nature.com"],
-              }
-            : { query: "heat pump savings site:nature.com" },
-        )
-        expect(Object.keys(body.params.arguments)).not.toContain("session_id")
-        expect(Object.keys(body.params.arguments)).not.toContain("model_name")
-        expect(headers[0]?.get(provider === "exa" ? "x-api-key" : "authorization")).toBe(
-          provider === "exa" ? "exa-test-key" : "Bearer parallel-test-key",
-        )
-      } finally {
-        await server.stop(true)
-      }
-      expect(guard.outside()).toEqual([])
-    })
-
-  test("a service that fails is an answer, not a failed call", async () => {
-    const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("down", { status: 503 }) })
-    try {
-      const answer = await Effect.runPromise(
-        Effect.gen(function* () {
-          const http = yield* HttpClient.HttpClient
-          return yield* paid(
-            HttpClient.mapRequest(http, (request) => HttpClientRequest.setUrl(request, server.url.href)),
-            "exa",
-            { query: "heat pump savings" },
-          )
-        }).pipe(Effect.provide(FetchHttpClient.layer)),
-      )
-      expect(answer.type).toBe("failed")
-      expect(answer.type === "failed" ? answer.message : "").toContain("Exa did not answer the search")
-    } finally {
-      await server.stop(true)
-    }
-    expect(guard.outside()).toEqual([])
+      options([user("msg_4", [text("p5", "x", { metadata: { [OPTIONS]: { search: "exa", scope: "web" } } })])]),
+    ).toEqual({ search: "exa", scope: "web" })
+    expect(options([user("msg_5", [text("p6", "y", { metadata: { [OPTIONS]: { scope: "everything" } } })])])).toEqual(
+      {},
+    )
   })
 })
 
 it.instance(
-  "research_search through Exa: a private query is never sent, results are labelled billed and join provenance",
+  "without the desktop's browser research searches nothing, counts nothing and says so on the card and in the run",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web, { research: { search: { provider: "exa" } } })
-      const auth = yield* Auth.Service
-      yield* auth.set("exa", new Auth.Api({ type: "api", key: "exa-test-key" }))
+      const test = yield* setup()
       const sessions = yield* Session.Service
-      const session = yield* sessions.create({
-        title: "Research",
-        permission: [{ permission: "research_read", pattern: "*", action: "allow" }],
-      })
-      const sent = asked.length
+      const session = yield* sessions.create({ title: "Research", permission: allow })
+      const before = FakeBridge.searches(bridge).length
       yield* test.llm.tool("research_plan", plan())
-      // A query that copies a line of the owner's MEMORY.md is refused before it leaves.
-      yield* test.llm.tool("research_search", { query: "I work at Hooli on the payments team in Lisbon" })
-      yield* test.llm.tool("research_search", { query: "heat pump field study savings", recency: "year" })
-      // A result's address, which the user never typed, is the run's to read.
-      yield* test.llm.tool("research_read", { url: web.url("article", "/") })
+      yield* test.llm.tool("research_search", { query: "heat pump field study" })
       yield* test.llm.text("Done.")
       yield* send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." })
-      const [refused, searched] = yield* calls(session.id, "research_search")
-      expect(refused?.state.status === "completed" ? refused.state.metadata.refused : undefined).toBe("outbound")
-      expect(asked.slice(sent)).toHaveLength(1)
-      expect(asked.slice(sent)[0]).toContain("heat pump field study savings")
-      expect(asked.slice(sent)[0]).not.toContain("Hooli")
-      expect(output(searched)).toContain(PAID.replaceAll("{name}", "Exa"))
-      expect(output(searched)).toContain(UNDATED.replaceAll("{name}", "Exa").replace("{recency}", "year"))
-      expect(output(searched)).toContain(web.url("article", "/"))
-      const [read] = yield* calls(session.id, "research_read")
-      expect(read?.state.status === "completed" ? read.state.metadata.refused : "error").toBeUndefined()
-      expect(output(read)).toContain("S1")
+      const [planned] = yield* calls(session.id, "research_plan")
+      expect(output(planned)).toContain("Nothing is searched on the web here")
+      const [search] = yield* calls(session.id, "research_search")
+      expect(output(search)).toBe(ResearchSearch.NEEDS_DESKTOP)
+      expect(search?.state.status === "completed" ? search.state.metadata.refused : undefined).toBe("desktop")
+      expect(FakeBridge.searches(bridge).length).toBe(before)
+      const runID = search?.state.status === "completed" ? (search.state.metadata.runID as string) : ""
+      const store = yield* ResearchStore.Service
+      const instruction = yield* Instruction.Service
+      const place = yield* instruction.place()
+      expect((yield* store.get(place, runID))?.run.searches).toBe(0)
       expect(guard.outside()).toEqual([])
     }),
-  60_000,
+  90_000,
 )
 
 it.instance(
-  "with Vector Local on, research_search reaches Exa once the user allowed it there, decided and logged as Exa's",
+  "the lead searches in its own research browser: the query and its filters go to the desktop, and the results may be read",
   () =>
-    Effect.gen(function* () {
-      const test = yield* setup(web, { research: { search: { provider: "exa" } } })
-      const auth = yield* Auth.Service
-      yield* auth.set("exa", new Auth.Api({ type: "api", key: "exa-test-key" }))
-      const sessions = yield* Session.Service
-      const session = yield* sessions.create({ title: "Research" })
-      // Vector Local as the owner sets it in their own config, beside the research settings setup wrote there: the
-      // fake LLM server is the one model server on the list, and Exa is a service they allowed.
-      const file = path.join(Global.Path.config, "vector.json")
-      const written = JSON.parse(readFileSync(file, "utf8"))
-      writeFileSync(
-        file,
-        JSON.stringify({
-          ...written,
-          local: {
-            enabled: true,
-            endpoints: [new URL(test.llm.url).origin],
-            web: "ask",
-            allow: [{ source: "websearch-exa", reason: "Research searches", added_at: Date.now(), added_by: "app" }],
-          },
-        }),
-      )
-      Config.refreshLocal()
-      Config.confirmLocal()
-      yield* Effect.gen(function* () {
-        const since = Date.now()
-        const sent = asked.length
+    withDesktop(
+      Effect.gen(function* () {
+        const test = yield* setup()
+        const sessions = yield* Session.Service
+        const session = yield* sessions.create({ title: "Research", permission: allow })
+        const before = FakeBridge.searches(bridge).length
         yield* test.llm.tool("research_plan", plan())
-        yield* test.llm.tool("research_search", { query: "heat pump field study savings" })
+        yield* test.llm.tool("research_search", {
+          query: "heat pump field study",
+          site: "nature.com",
+          recency: "year",
+          limit: 5,
+        })
+        // A result's address, which the user never typed, is the run's to read.
+        yield* test.llm.tool("research_read", { url: web.url("article", "/") })
         yield* test.llm.text("Done.")
         yield* send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." })
-        const [searched] = yield* calls(session.id, "research_search")
-        expect(output(searched)).toContain(PAID.replaceAll("{name}", "Exa"))
-        expect(asked.slice(sent)).toHaveLength(1)
-        const decided = Egress.events({ since })
-          .filter((event) => event.source.startsWith("websearch-"))
-          .map((event) => [event.source, event.decision, event.rule])
-        expect(decided).toEqual([["websearch-exa", "allow", "allowed-source"]])
+        const sent = FakeBridge.searches(bridge).slice(before)
+        expect(sent).toHaveLength(1)
+        const research = yield* ResearchRun.Service
+        const limits = yield* research.limits("focused")
+        expect(sent[0]?.body).toMatchObject({
+          command: "research.search",
+          sessionID: session.id,
+          rootID: session.id,
+          agent: "research",
+          max: 1 + limits.researchers,
+          query: "heat pump field study site:nature.com",
+          recency: "year",
+          limit: 5,
+          engines: ["google", "duckduckgo"],
+        })
+        // Nothing but the run's own IDs and the query: no address, no page of the agent's choosing.
+        expect(sent[0]?.body).not.toHaveProperty("url")
+        const [search] = yield* calls(session.id, "research_search")
+        expect(output(search)).toContain("3 results from Google")
+        expect(output(search)).toContain("untrusted_web_page")
+        expect(search?.state.status === "completed" ? search.state.metadata : {}).toMatchObject({
+          provider: "browser",
+          engine: "google",
+        })
+        const [read] = yield* calls(session.id, "research_read")
+        expect(read?.state.status === "completed" ? read.state.metadata.refused : "error").toBeUndefined()
+        expect(output(read)).toContain("S1")
         expect(guard.outside()).toEqual([])
-      }).pipe(
-        Effect.ensuring(
-          Effect.promise(async () => {
-            writeFileSync(file, JSON.stringify(written))
-            Config.refreshLocal()
-            rmSync(Config.localConfirmedFile(), { force: true })
-            await Egress.erase()
+      }),
+    ),
+  90_000,
+)
+
+it.instance(
+  "each researcher searches in a research browser of its own, under the run's count of 1 + the researcher cap",
+  () =>
+    withDesktop(
+      Effect.gen(function* () {
+        const test = yield* setup()
+        const sessions = yield* Session.Service
+        const lead = yield* sessions.create({ title: "Research", permission: allow })
+        const before = FakeBridge.searches(bridge).length
+        yield* test.llm.tool("research_plan", plan({ depth: "deep" }))
+        yield* test.llm.tool("research_search", { query: "heat pump savings in cold climates" })
+        for (const prompt of ["What did field studies measure?", "How large were the savings?"]) {
+          yield* test.llm.tool("task", {
+            description: "Heat pumps",
+            prompt,
+            subagent_type: "researcher",
+            background: false,
+          })
+          yield* test.llm.toolMatch(researcher, "research_search", { query: "heat pump field study homes" })
+          yield* test.llm.textMatch(researcher, "Found it.")
+        }
+        yield* test.llm.text("Done.")
+        yield* send({ sessionID: lead.id, agent: "research", text: "Research how much heat pumps cut heating bills." })
+        const children = yield* sessions.children(lead.id)
+        expect(children).toHaveLength(2)
+        // The run's depth as it was approved: a plan no one can answer stays within the request's size.
+        const [planned] = yield* calls(lead.id, "research_plan")
+        const depth = planned?.state.status === "completed" ? planned.state.metadata.plan.depth : "focused"
+        const research = yield* ResearchRun.Service
+        const limits = yield* research.limits(depth)
+        const sent = FakeBridge.searches(bridge)
+          .slice(before)
+          .map((call) => call.body)
+        // One search each, in the lead's browser and in each researcher's own, all of one run.
+        expect(sent.map((body) => [body.sessionID, body.agent])).toEqual([
+          [lead.id, "research"],
+          ...children.map((child) => [child.id, "researcher"]),
+        ])
+        expect(new Set(sent.map((body) => body.runID)).size).toBe(1)
+        expect(sent.map((body) => body.max)).toEqual(Array(3).fill(1 + limits.researchers))
+        expect(sent.every((body) => body.rootID === lead.id)).toBe(true)
+        for (const child of children) {
+          const [search] = yield* calls(child.id, "research_search")
+          expect(output(search)).toContain("results from Google")
+        }
+        expect(guard.outside()).toEqual([])
+      }),
+    ),
+  120_000,
+)
+
+it.instance(
+  "a check on Google is said, with DuckDuckGo's results; when both ask for one, search is unavailable and the run is told so",
+  () =>
+    withDesktop(
+      Effect.gen(function* () {
+        const test = yield* setup()
+        const sessions = yield* Session.Service
+        const session = yield* sessions.create({ title: "Research", permission: allow })
+        const check = { engine: "google", reason: "Google asked for a check that it is not automated traffic." }
+        const answers = [
+          FakeBridge.searched(web, { engine: "duckduckgo", tried: [check] }),
+          FakeBridge.research({
+            ok: false,
+            error: ResearchSearch.unavailable([{ engine: "google" }, { engine: "duckduckgo" }]),
+            search: {
+              results: [],
+              tried: [
+                check,
+                { engine: "duckduckgo", reason: "DuckDuckGo asked for a check that it is not automated traffic." },
+              ],
+            },
           }),
-        ),
-      )
-    }),
-  60_000,
+          // Only DuckDuckGo's page was tried (Vector Local kept the search off Google), and it asked for a check.
+          FakeBridge.research({
+            ok: false,
+            error: ResearchSearch.unavailable([{ engine: "duckduckgo" }]),
+            search: {
+              results: [],
+              tried: [
+                { engine: "duckduckgo", reason: "DuckDuckGo asked for a check that it is not automated traffic." },
+              ],
+            },
+          }),
+        ]
+        bridge.answer((call) => {
+          if (call.path !== "/research") return FakeBridge.visible()
+          return call.body.command === "research.search" ? answers.shift() : FakeBridge.research()
+        })
+        yield* test.llm.tool("research_plan", plan())
+        yield* test.llm.tool("research_search", { query: "heat pump field study" })
+        yield* test.llm.tool("research_search", { query: "heat pump savings" })
+        yield* test.llm.tool("research_search", { query: "heat pump noise" })
+        yield* test.llm.text("Done.")
+        yield* send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." }).pipe(
+          Effect.ensuring(Effect.sync(() => bridge.answer(FakeBridge.searching(web)))),
+        )
+        const [fallback, unavailable, alone] = yield* calls(session.id, "research_search")
+        expect(output(fallback)).toContain("3 results from DuckDuckGo")
+        expect(output(fallback)).toContain(`${check.reason} Vector searched DuckDuckGo instead.`)
+        expect(fallback?.state.status === "completed" ? fallback.state.metadata.engine : undefined).toBe("duckduckgo")
+        expect(output(unavailable)).toContain(
+          ResearchSearch.unavailable([{ engine: "google" }, { engine: "duckduckgo" }]),
+        )
+        expect(unavailable?.state.status === "completed" ? unavailable.state.title : "").toBe("Search unavailable")
+        expect(unavailable?.state.status === "completed" ? unavailable.state.metadata : {}).toMatchObject({
+          unavailable: true,
+        })
+        expect(output(alone)).toContain(ResearchSearch.unavailable([{ engine: "duckduckgo" }]))
+        expect(output(alone)).not.toContain("Google")
+        expect(guard.outside()).toEqual([])
+      }),
+    ),
+  90_000,
+)
+
+it.instance(
+  "Vector Local's Web access decides each results page as research-browser traffic before the search leaves",
+  () =>
+    withDesktop(
+      Effect.gen(function* () {
+        const test = yield* setup()
+        const sessions = yield* Session.Service
+        const session = yield* sessions.create({ title: "Research", permission: allow })
+        const before = FakeBridge.searches(bridge).length
+        yield* test.llm.tool("research_plan", plan())
+        yield* test.llm.tool("research_search", { query: "heat pump field study" })
+        yield* test.llm.text("Done.")
+        const file = path.join(Global.Path.config, "vector.json")
+        const written = yield* Effect.promise(() => Bun.file(file).json())
+        const local = (block?: object) =>
+          Effect.promise(async () => {
+            await Bun.write(file, JSON.stringify(block ? { ...written, local: block } : written))
+            Config.refreshLocal()
+            Config.confirmLocal()
+          })
+        // The user keeps Vector off Google: the search goes to DuckDuckGo's page alone.
+        yield* local({
+          enabled: true,
+          web: "ask",
+          web_domains: { deny: ["google.com"] },
+          endpoints: [new URL(test.llm.url).origin],
+        })
+        yield* send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." }).pipe(
+          Effect.ensuring(local().pipe(Effect.orDie)),
+        )
+        expect(
+          FakeBridge.searches(bridge)
+            .slice(before)
+            .map((call) => call.body.engines),
+        ).toEqual([["duckduckgo"]])
+
+        // Your network only, with neither engine on the company's list: nothing leaves, and nothing counts.
+        const other = yield* sessions.create({ title: "Research", permission: allow })
+        yield* test.llm.tool("research_plan", plan())
+        yield* test.llm.tool("research_search", { query: "heat pump field study" })
+        yield* test.llm.text("Done.")
+        yield* local({ enabled: true, web: "network", endpoints: [new URL(test.llm.url).origin] })
+        yield* send({ sessionID: other.id, agent: "research", text: "Research how much heat pumps save." }).pipe(
+          Effect.ensuring(local().pipe(Effect.orDie)),
+        )
+        const [refused] = yield* calls(other.id, "research_search")
+        expect(output(refused)).toContain(
+          "Vector Local's Web access keeps research's searches off Google and DuckDuckGo",
+        )
+        expect(refused?.state.status === "completed" ? refused.state.metadata.refused : undefined).toBe("local")
+        expect(FakeBridge.searches(bridge).length - before).toBe(1)
+        expect(Egress.policy().enabled).toBe(false)
+        yield* Effect.promise(() => Egress.erase())
+        expect(guard.outside()).toEqual([])
+      }),
+    ),
+  90_000,
 )

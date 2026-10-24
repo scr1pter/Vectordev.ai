@@ -12,6 +12,7 @@ import { SessionMemory } from "../../src/session/memory"
 import { MessageID, type SessionID } from "../../src/session/schema"
 import { ResearchRun } from "../../src/tool/research-run"
 import { SubagentLifecycle } from "../../src/tool/subagent-lifecycle"
+import { FakeBridge } from "../lib/fake-bridge"
 import { calls, output, plan, ref, runtime, send, setup } from "../lib/research"
 import { FakeWeb } from "../../../core/test/lib/fake-web"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
@@ -36,7 +37,12 @@ const web = FakeWeb.start({
   },
 })
 const it = runtime(web)
-afterAll(() => web.close())
+// A desktop whose research browsers answer each search with the fake web's pages, for the tests that search.
+const bridge = FakeBridge.start(FakeBridge.searching(web))
+afterAll(async () => {
+  await bridge.close()
+  await web.close()
+})
 
 const NOTES = "The Falcon migration moves the ledger to the reconcileLedgerEntries service before the March freeze."
 const HABIT = "Prefer migration guides that show a rollback plan"
@@ -50,7 +56,7 @@ it.instance(
   "a Work request researches through the lead, at Focused, under research's caps, and is held as web",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const fs = yield* FSUtil.Service
       yield* fs.writeWithDirs(path.join(test.dir, "notes", "plan.md"), `# Plan\n\n${NOTES}\n`)
       const brain = yield* Brain.Service
@@ -125,7 +131,7 @@ it.instance(
   "research as a tool is not offered when the user turned it off",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web, { research: { tool: "off", search: { provider: "none" } } })
+      const test = yield* setup({ research: { tool: "off" } })
       const sessions = yield* Session.Service
       const build = yield* sessions.create({ title: "Build" })
       yield* test.llm.text("Done.")
@@ -144,7 +150,7 @@ it.instance(
   "what build ran with a shell, or heard from an explore subagent, stays out of its research requests",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const fs = yield* FSUtil.Service
       yield* fs.writeWithDirs(path.join(test.dir, "notes", "plan.md"), `# Plan\n\n${NOTES}\n`)
       const sessions = yield* Session.Service
@@ -193,7 +199,7 @@ it.instance(
   "a file build read before a compaction still counts against its research request",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const fs = yield* FSUtil.Service
       yield* fs.writeWithDirs(path.join(test.dir, "notes", "plan.md"), `# Plan\n\n${NOTES}\n`)
       const sessions = yield* Session.Service
@@ -232,7 +238,7 @@ it.instance(
   "a budget the model writes for a research lead only lowers research's default caps",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const build = yield* sessions.create({ title: "Build" })
       const lead = (hit: { body: Record<string, unknown> }) =>
@@ -274,7 +280,7 @@ it.instance(
   "the user's task rules apply to research started through the tool",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web, { permission: { task: { research: "deny" } } })
+      const test = yield* setup({ permission: { task: { research: "deny" } } })
       const sessions = yield* Session.Service
       const build = yield* sessions.create({ title: "Build" })
       yield* test.llm.tool("research", { question: "How do heat pumps perform in cold climates?", background: false })
@@ -291,7 +297,7 @@ it.instance(
   "a research lead cannot take another task's report with its brief",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const fs = yield* FSUtil.Service
       yield* fs.writeWithDirs(path.join(test.dir, "notes", "plan.md"), `# Plan\n\n${NOTES}\n`)
       const sessions = yield* Session.Service
@@ -331,7 +337,7 @@ it.instance(
   "a page build fetched from the user's own network counts against its research request",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const build = yield* sessions.create({
         title: "Build",
@@ -375,7 +381,7 @@ it.instance(
   "a private fact a subagent was briefed with and reported counts against build's research request",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const brain = yield* Brain.Service
       const instruction = yield* Instruction.Service
       const place = yield* instruction.place()
@@ -421,7 +427,7 @@ it.instance(
   "build's message to a running research lead passes the check its request did, and a researcher hears from its lead alone",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const fs = yield* FSUtil.Service
       yield* fs.writeWithDirs(path.join(test.dir, "notes", "plan.md"), `# Plan\n\n${NOTES}\n`)
       const sessions = yield* Session.Service
@@ -487,7 +493,7 @@ it.instance(
   "the instruction files in build's system prompt count against its research requests",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const fs = yield* FSUtil.Service
       yield* fs.writeWithDirs(
         path.join(test.dir, "AGENTS.md"),
@@ -531,7 +537,7 @@ it.instance(
   "after a switch to Deep research, what build's subagents took in earlier in the session counts against its searches",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const brain = yield* Brain.Service
       const instruction = yield* Instruction.Service
       const place = yield* instruction.place()
@@ -566,19 +572,22 @@ it.instance(
       const [task] = yield* calls(session.id, "task")
       expect(output(task)).toContain("Dana Whitfield")
 
-      // The same session, now in Deep research.
+      // The same session, now in Deep research, in the desktop app.
       yield* test.llm.tool("research_plan", plan())
       yield* test.llm.tool("research_search", {
         query: "badge number at Hooli is 44172 and my manager is Dana Whitfield",
       })
       yield* test.llm.tool("research_search", { query: "heat pump savings in cold climates" })
       yield* test.llm.text("Done.")
-      const before = web.count("searxng")
-      yield* send({ sessionID: session.id, agent: "research", text: "Research how heat pumps cut heating bills." })
+      const before = FakeBridge.searches(bridge).length
+      yield* FakeBridge.within(
+        bridge,
+        send({ sessionID: session.id, agent: "research", text: "Research how heat pumps cut heating bills." }),
+      )
       const [copied, fair] = yield* calls(session.id, "research_search")
       expect(output(copied)).toBe(ResearchOutbound.REFUSAL)
       expect(output(fair)).not.toBe(ResearchOutbound.REFUSAL)
-      expect(web.count("searxng") - before).toBe(1)
+      expect(FakeBridge.searches(bridge).length - before).toBe(1)
       expect(guard.outside()).toEqual([])
     }),
   120_000,
@@ -588,7 +597,7 @@ it.instance(
   "a research lead owns no paths, so owned_paths cannot carry text past the brief check",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const fs = yield* FSUtil.Service
       yield* fs.writeWithDirs(path.join(test.dir, "notes", "plan.md"), `# Plan\n\n${NOTES}\n`)
       const sessions = yield* Session.Service
@@ -615,7 +624,7 @@ it.instance(
   "a research lead does not take paths its launcher's own assignment owns",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const build = yield* sessions.create({ title: "Build" })
       // A general Subagent whose assignment owns a path named like the work, as a launcher's record keeps it.
@@ -669,7 +678,7 @@ it.instance(
   "a research task resumes only as the agent it ran",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const build = yield* sessions.create({ title: "Build" })
       const general = (hit: { body: Record<string, unknown> }) =>
@@ -730,7 +739,7 @@ it.instance(
   "a Light request does not research as a tool",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const build = yield* sessions.create({ title: "Build" })
       yield* test.llm.tool("research", {
@@ -750,7 +759,7 @@ it.instance(
   "a context pack is checked as the text it carries, so a line break cannot split a private run of words",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const fs = yield* FSUtil.Service
       yield* fs.writeWithDirs(path.join(test.dir, "notes", "plan.md"), `# Plan\n\n${NOTES}\n`)
       const sessions = yield* Session.Service

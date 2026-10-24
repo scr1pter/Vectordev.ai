@@ -5,6 +5,7 @@ import { Permission } from "../../src/permission"
 import { Question } from "../../src/question"
 import { Session } from "@/session/session"
 import { Instruction } from "../../src/session/instruction"
+import { FakeBridge } from "../lib/fake-bridge"
 import { calls, runtime, send, setup } from "../lib/research"
 import { FakeWeb } from "../../../core/test/lib/fake-web"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
@@ -17,7 +18,12 @@ import { ResearchScript } from "../../../core/test/lib/research-script"
 const guard = NetworkGuard.use()
 const web = FakeWeb.start({ sites: FakeWeb.sites() })
 const it = runtime(web, { client: "app" })
-afterAll(() => web.close())
+// The desktop app, whose research browsers answer the run's search with the fake web's pages.
+const bridge = FakeBridge.start(FakeBridge.searching(web))
+afterAll(async () => {
+  await bridge.close()
+  await web.close()
+})
 
 // Starts each plan card and allows each permission once.
 const answer = Effect.gen(function* () {
@@ -38,13 +44,13 @@ it.instance(
   "the scripted research run stores the rows the V2 runner's run must match",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       yield* answer
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research" })
       for (const call of ResearchScript.calls(web)) yield* test.llm.tool(call.tool, call.input)
       yield* test.llm.text(ResearchScript.CLOSING)
-      yield* send({ sessionID: session.id, agent: "research", text: ResearchScript.PROMPT })
+      yield* FakeBridge.within(bridge, send({ sessionID: session.id, agent: "research", text: ResearchScript.PROMPT }))
 
       const [planned] = yield* calls(session.id, "research_plan")
       const runID = planned?.state.status === "completed" ? planned.state.metadata.runID : undefined

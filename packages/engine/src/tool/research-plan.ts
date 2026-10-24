@@ -3,7 +3,6 @@ import { Database } from "@vectordevai/core/database/database"
 import { ResearchEstimate } from "@vectordevai/core/research/estimate"
 import { ResearchPlan } from "@vectordevai/core/research/plan"
 import { ResearchReader } from "@vectordevai/core/research/reader"
-import { ResearchSearch } from "@vectordevai/core/research/search"
 import { ResearchStore } from "@vectordevai/core/research/store"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
@@ -14,7 +13,6 @@ import { MemoryEvent } from "@vectordevai/schema/memory-event"
 import { Research } from "@vectordevai/schema/research"
 import type { TaskSize } from "@vectordevai/schema/task-size"
 import { Cause, Effect, Option, Schema } from "effect"
-import { Auth } from "@/auth"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Config } from "@/config/config"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -24,7 +22,8 @@ import { MessageV2 } from "../session/message-v2"
 import { MessageID, SessionID } from "../session/schema"
 import type { TaskSizeContext } from "./escalate"
 import { ResearchRun } from "./research-run"
-import { available, options, searchProvider } from "./research-search"
+import { ResearchBrowser } from "./research-browser"
+import { options, searchProvider } from "./research-search"
 import { SubagentLifecycle } from "./subagent-lifecycle"
 import { Tool } from "./tool"
 import DESCRIPTION from "./research-plan.txt"
@@ -92,10 +91,9 @@ export type Card = {
   /** Start deep is offered, with its own estimate. */
   readonly deep: boolean
   readonly deepEstimate?: string
-  /** What research searches with: SearXNG at a host, Exa or Parallel, or nothing yet, with why. */
+  /** Where research searches: in each research agent's own browser, or nowhere here, with why. */
   readonly search: {
-    readonly provider: "searxng" | "exa" | "parallel" | "none"
-    readonly host?: string
+    readonly provider: "browser" | "none"
     readonly reason?: string
   }
   /**
@@ -126,7 +124,6 @@ export const ResearchPlanTool = Tool.define<
   | SpendGuard.Service
   | FreeModelGuests.Service
   | Database.Service
-  | Auth.Service
   | Brain.Service
   | EventV2Bridge.Service
 >(
@@ -140,7 +137,6 @@ export const ResearchPlanTool = Tool.define<
     const guard = yield* SpendGuard.Service
     const guests = yield* FreeModelGuests.Service
     const database = yield* Database.Service
-    const auth = yield* Auth.Service
     const brain = yield* Brain.Service
     const events = yield* EventV2Bridge.Service
     // Who can answer a plan card: the same clients the question tool is offered to.
@@ -225,12 +221,8 @@ export const ResearchPlanTool = Tool.define<
                   ? "focused"
                   : ResearchPlan.deeper(plan.depth, ceiling),
           }
-          const provider = searchProvider(
-            cfg.research,
-            yield* available().pipe(Effect.provideService(Auth.Service, auth)),
-            chosen.search,
-          )
-          const estimate = yield* estimateLine(proposed, ctx, provider.provider)
+          const provider = searchProvider({ browser: ResearchBrowser.available(), chosen: chosen.search })
+          const estimate = yield* estimateLine(proposed, ctx)
           const start = Effect.fnUntraced(function* (input: Research.Plan) {
             // A run the model re-planned with the same question keeps its run and what it read.
             if (approved && approved.plan.question === input.question) {
@@ -285,18 +277,8 @@ export const ResearchPlanTool = Tool.define<
               ...(learned ? { learned } : {}),
               card: {
                 deep: offered,
-                ...(offered
-                  ? { deepEstimate: yield* estimateLine({ ...proposed, depth: "deep" }, ctx, provider.provider) }
-                  : {}),
-                search:
-                  provider.provider === "searxng"
-                    ? {
-                        provider: "searxng",
-                        ...(URL.canParse(provider.url) ? { host: new URL(provider.url).host } : {}),
-                      }
-                    : provider.provider === "none"
-                      ? { provider: "none", ...(provider.reason ? { reason: provider.reason } : {}) }
-                      : { provider: provider.provider },
+                ...(offered ? { deepEstimate: yield* estimateLine({ ...proposed, depth: "deep" }, ctx) } : {}),
+                search: provider,
                 preferences: {
                   prefer: ResearchPlan.sites(cfg.research?.domains?.prefer, kept.prefer_domains),
                   avoid: ResearchPlan.sites(cfg.research?.domains?.avoid, kept.avoid_domains),
@@ -389,10 +371,7 @@ export const ResearchPlanTool = Tool.define<
             output: approvedText({
               plan: decided.plan,
               runID,
-              estimate:
-                decided.plan.depth === proposed.depth
-                  ? estimate
-                  : yield* estimateLine(decided.plan, ctx, provider.provider),
+              estimate: decided.plan.depth === proposed.depth ? estimate : yield* estimateLine(decided.plan, ctx),
               automatic: false,
               provider: provider.provider,
               offline,
@@ -511,11 +490,7 @@ export const ResearchPlanTool = Tool.define<
     }
 
     // The plan card's estimate line, in the copy deck's words; always called an estimate.
-    function estimateLine(
-      plan: Research.Plan,
-      ctx: Tool.Context,
-      provider: ReturnType<typeof searchProvider>["provider"],
-    ) {
+    function estimateLine(plan: Research.Plan, ctx: Tool.Context) {
       return Effect.gen(function* () {
         const caps = yield* research.limits(plan.depth)
         const budget = (yield* guard.snapshot(SessionID.make(ctx.sessionID)))?.budget
@@ -554,7 +529,6 @@ export const ResearchPlanTool = Tool.define<
           // Research's default caps apply only when the user has none of their own.
           ...(own?.usd !== undefined ? { capUsd: own.usd } : own?.steps === undefined ? { capUsd: caps.usd } : {}),
           capSteps: own?.steps ?? caps.steps,
-          search: provider,
         })
       })
     }
@@ -652,7 +626,7 @@ function card(
     ...(plan.format ? [`Format: ${plan.format}${learned?.format ? ` (${FROM_PREFERENCES})` : ""}`] : []),
     estimate,
     ...(offline ? [ResearchRun.OFFLINE] : []),
-    ...(provider.provider === "none" && plan.scope !== "brain" ? [provider.reason ?? ResearchSearch.NONE] : []),
+    ...(provider.provider === "none" && plan.scope !== "brain" ? [provider.reason] : []),
   ].join("\n")
 }
 
@@ -673,7 +647,7 @@ function approvedText(input: {
       ? [ResearchRun.OFFLINE, "Use the memory tool and the repository's files (read, grep, glob, list) yourself."]
       : [
           input.provider === "none"
-            ? "No search service is set up: use this repository's brain and files, and the addresses in the user's message."
+            ? "Nothing is searched on the web here: use this repository's brain and files, and the addresses in the user's message."
             : "Search with research_search, read with research_read, and save each finding with research_note.",
           input.plan.depth === "deep"
             ? "Give independent sub-questions to researchers with the task tool, each brief written in public terms."

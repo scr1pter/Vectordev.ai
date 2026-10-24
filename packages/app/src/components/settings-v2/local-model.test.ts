@@ -182,7 +182,7 @@ describe("allowed services", () => {
         policy: {
           allow: [
             { source: "github", reason: "Our pull requests", added_at: Date.UTC(2026, 9, 21, 12), added_by: "app" },
-            { source: "websearch-exa", hosts: ["mcp.exa.ai"], reason: "Research", added_at: 0, added_by: "managed" },
+            { source: "mcp-remote", hosts: ["tools.example.org"], reason: "Research", added_at: 0, added_by: "managed" },
           ],
         },
       }),
@@ -196,8 +196,8 @@ describe("allowed services", () => {
       removable: true,
     })
     expect(rows[1]).toMatchObject({
-      name: "Exa search",
-      hosts: "mcp.exa.ai",
+      name: "Remote MCP servers",
+      hosts: "tools.example.org",
       by: "Set by your company",
       removable: false,
     })

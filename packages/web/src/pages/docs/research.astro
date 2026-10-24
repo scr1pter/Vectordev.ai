@@ -64,16 +64,19 @@ export const prerender = true
 
           <h2 id="search">Search</h2>
           <p>
-            Research searches through a search service you set up in your user config under <code>research.search</code>:
-            a SearXNG server with its JSON format turned on, or Exa or Parallel on your own key, billed by them. With none
-            set up, the plan card says so and the run uses this repository's brain, its files and the links you paste.
-            A repository's own config cannot choose where your searches go.
+            Research searches the web in each research agent's own browser in the desktop app, with no search service
+            or key to configure. Searches pass the same outbound and Vector Local checks as page reads. If a search
+            engine asks for a CAPTCHA or blocks the browser, Vector stops there and tries its fallback; it does not
+            solve the check, disguise the browser or rotate addresses. Without a research browser, or when search is
+            unavailable, the run uses this repository's brain, its files and the links you paste and says what it could
+            not search. A repository's own config cannot choose where your searches go.
           </p>
           <p>
             Vector checks outgoing searches for text from your private files. It refuses a query that copies, for
             example, a secret, a run of words, an email address, a phone or account number, a private host name or a path
-            in your home folder from the private context the run loaded, unless you typed it yourself: <em>That search
-            would send text from your private files. Rephrase it with public terms.</em> It checks for copied text, so a
+            in your home folder from the private context the run loaded: <em>That search would send text from your
+            private files. Rephrase it with public terms.</em> Your own message can clear copied words, contacts, hosts
+            and paths, but cannot clear a secret. It checks for copied text, so a
             paraphrase, or a spelling an agent changes on purpose, gets past it.
           </p>
 

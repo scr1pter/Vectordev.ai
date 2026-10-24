@@ -9,7 +9,6 @@ import { QuestionV2 } from "../question"
 import { ResearchEstimate } from "../research/estimate"
 import { ResearchPlan } from "../research/plan"
 import { ResearchReader } from "../research/reader"
-import { ResearchSearch } from "../research/search"
 import { ResearchStore } from "../research/store"
 import { SessionRunnerModel } from "../session/runner/model"
 import type { SessionMessage } from "../session/message"
@@ -100,7 +99,6 @@ const layer = Layer.effectDiscard(
       plan: Research.Plan,
       session: SessionSchema.Info,
       messages: readonly SessionMessage.Message[],
-      search: ResearchSearchTool.Provider["provider"],
     ) {
       const caps = yield* research.limits(plan.depth)
       const budget = (yield* guard.snapshot(session.id))?.budget
@@ -134,7 +132,6 @@ const layer = Layer.effectDiscard(
         kind,
         ...(own?.usd !== undefined ? { capUsd: own.usd } : own?.steps === undefined ? { capUsd: caps.usd } : {}),
         capSteps: own?.steps ?? caps.steps,
-        search,
       })
     })
 
@@ -187,8 +184,8 @@ const layer = Layer.effectDiscard(
 
               const messages =
                 approved?.messages ?? (yield* sessions.all(session.id).pipe(Effect.orElseSucceed(() => [])))
-              const provider = ResearchSearchTool.provider(settings.own)
-              const estimate = yield* estimateLine(plan, session, messages, provider.provider)
+              const provider = ResearchSearchTool.provider()
+              const estimate = yield* estimateLine(plan, session, messages)
               const start = Effect.fnUntraced(function* (chosen: Research.Plan) {
                 // A run the model re-planned with the same question keeps its run and what it read.
                 if (approved && approved.plan.question === chosen.question) {
@@ -330,7 +327,7 @@ function card(plan: Research.Plan, estimate: string, provider: ResearchSearchToo
     ...(plan.format ? [`Format: ${plan.format}`] : []),
     estimate,
     ...(offline ? [ResearchPlan.OFFLINE] : []),
-    ...(provider.provider === "none" && plan.scope !== "brain" ? [provider.reason ?? ResearchSearch.NONE] : []),
+    ...(provider.provider === "none" && plan.scope !== "brain" ? [provider.reason] : []),
   ].join("\n")
 }
 
@@ -351,7 +348,7 @@ function approvedText(input: {
       ? [ResearchPlan.OFFLINE, "Use the repository's files (read, grep, glob) yourself."]
       : [
           input.provider === "none"
-            ? "No search service is set up: use this repository's files, and the addresses in the user's message."
+            ? "Nothing is searched on the web here: use this repository's files, and the addresses in the user's message."
             : "Search with research_search, read with research_read, and save each finding with research_note.",
         ]),
     "Then write the report with research_report.",

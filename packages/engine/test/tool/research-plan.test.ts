@@ -3,6 +3,7 @@ import path from "path"
 import { Effect } from "effect"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { FSUtil } from "@vectordevai/core/fs-util"
+import { ResearchSearch } from "@vectordevai/core/research/search"
 import { ResearchStore } from "@vectordevai/core/research/store"
 import type { SessionV1 } from "@vectordevai/core/v1/session"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
@@ -12,6 +13,7 @@ import { Question } from "../../src/question"
 import { Session } from "@/session/session"
 import { Instruction } from "../../src/session/instruction"
 import { ResearchRun } from "../../src/tool/research-run"
+import { FakeBridge } from "../lib/fake-bridge"
 import { calls, output, plan, runtime, send, setup } from "../lib/research"
 import { FakeWeb } from "../../../core/test/lib/fake-web"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
@@ -24,7 +26,12 @@ import { NetworkGuard } from "../../../core/test/lib/network-guard"
 const guard = NetworkGuard.use()
 const web = FakeWeb.start({ sites: FakeWeb.sites() })
 const it = runtime(web, { client: "app" })
-afterAll(() => web.close())
+// A desktop whose research browsers answer each search with the fake web's pages, for the tests that search.
+const bridge = FakeBridge.start(FakeBridge.searching(web))
+afterAll(async () => {
+  await bridge.close()
+  await web.close()
+})
 
 // Answers each plan card with the next of `replies`, and keeps the questions asked.
 const answer = (replies: string[]) =>
@@ -50,7 +57,7 @@ it.instance(
   "Start deep raises the run to Thorough from the user's own answer, and a status-only call never asks again",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const asked = yield* answer(["Start deep"])
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research" })
@@ -86,7 +93,7 @@ it.instance(
   "a typed reply is a steer that starts nothing, the card's JSON answer carries edits, and Cancel stops",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const edited = `vector-plan:${JSON.stringify({
         action: "start",
         plan: { subquestions: ["Which homes did the study follow?"], avoid_domains: ["example.com"] },
@@ -134,7 +141,7 @@ for (const size of [undefined, "thorough" as const])
     `a headless run, which denies questions, has its plan approved within its ${size ?? "Work"} size and never asks`,
     () =>
       Effect.gen(function* () {
-        const test = yield* setup(web)
+        const test = yield* setup()
         const asked = yield* answer([])
         const sessions = yield* Session.Service
         // What `vector run` gives a session that no one can answer.
@@ -172,7 +179,7 @@ it.instance(
   "a site the user approved on the plan card may be searched though the run read it in a file",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const fs = yield* FSUtil.Service
       yield* fs.writeWithDirs(
         path.join(test.dir, "notes", "hosts.md"),
@@ -189,7 +196,10 @@ it.instance(
       // The approved domain clears itself as a site: value, not a host under it such as status.acmecorp.com.
       yield* test.llm.tool("research_search", { query: "outage history", site: "acmecorp.com" })
       yield* test.llm.text("Done.")
-      yield* send({ sessionID: session.id, agent: "research", text: "Research how often status pages report outages." })
+      yield* FakeBridge.within(
+        bridge,
+        send({ sessionID: session.id, agent: "research", text: "Research how often status pages report outages." }),
+      )
       const [search] = yield* calls(session.id, "research_search")
       expect(output(search)).toContain("untrusted_web_page")
     }),
@@ -200,7 +210,7 @@ it.instance(
   "while the plan card is open, its running part carries the plan as Vector would run it, both estimates, the search set up and the user's own sites",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web, { research: { domains: { prefer: [" Nature.com "], avoid: ["example.com"] } } })
+      const test = yield* setup({ research: { domains: { prefer: [" Nature.com "], avoid: ["example.com"] } } })
       const question = yield* Question.Service
       const sessions = yield* Session.Service
       // What the app's plan card reads: the research_plan part while its question waits for the user. The first card
@@ -228,10 +238,13 @@ it.instance(
           yield* Effect.sleep(10)
         }
       }).pipe(Effect.forkScoped)
+      // The first card is the desktop app's, which searches in research browsers; the second is shown where there is
+      // no desktop browser.
       for (const session of [first, second]) {
         yield* test.llm.tool("research_plan", plan())
         yield* test.llm.text("Done.")
-        yield* send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." })
+        const sent = send({ sessionID: session.id, agent: "research", text: "Research how much heat pumps save." })
+        yield* session === first ? FakeBridge.within(bridge, sent) : sent
       }
 
       expect(seen).toHaveLength(2)
@@ -241,7 +254,7 @@ it.instance(
         card: {
           deep: true,
           deepEstimate: expect.stringContaining("About 40 pages and 24 searches"),
-          search: { provider: "searxng", host: new URL(web.url("searxng", "/")).host },
+          search: { provider: "browser" },
           preferences: { prefer: ["nature.com"], avoid: ["example.com"] },
           offline: false,
         },
@@ -250,7 +263,10 @@ it.instance(
       expect(seen[1]).toMatchObject({
         plan: { prefer_domains: ["nature.com", "arxiv.org"], format: "table" },
         learned: { prefer_domains: ["nature.com", "arxiv.org"], format: "table" },
-        card: { preferences: { prefer: ["nature.com", "arxiv.org"], avoid: ["example.com"], format: "table" } },
+        card: {
+          search: { provider: "none", reason: ResearchSearch.NEEDS_DESKTOP },
+          preferences: { prefer: ["nature.com", "arxiv.org"], avoid: ["example.com"], format: "table" },
+        },
       })
       // Once answered, the part keeps what the run started with, not the card.
       const [planned] = yield* calls(second.id, "research_plan")
@@ -264,7 +280,7 @@ it.instance(
   "what the user ticks Always for on the plan card is kept as their preference in use, carried by the next plan, and a later choice adds to it",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const card = (edits: Record<string, unknown>, always: string[]) =>
         `vector-plan:${JSON.stringify({ action: "start", plan: edits, always })}`
       const asked = yield* answer([

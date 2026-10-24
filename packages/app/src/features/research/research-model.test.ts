@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { Message, Part } from "@vectordevai/sdk/v2/client"
 import type { Research } from "@vectordevai/schema/research"
+import { ResearchSearch } from "@vectordevai/core/research/search"
 import {
   capLabel,
   chipText,
@@ -25,6 +26,7 @@ import {
   reportMarkdown,
   reportPath,
   runChips,
+  searchHelp,
   searchLine,
   segments,
   sendMode,
@@ -133,7 +135,7 @@ describe("the plan card", () => {
     const card = {
       deep: true,
       deepEstimate: "About 40 pages and 24 searches.",
-      search: { provider: "searxng", host: "gpu-box:8080" },
+      search: { provider: "browser" },
       preferences: { prefer: ["nature.com"], avoid: [] },
       offline: false,
     }
@@ -206,18 +208,29 @@ describe("the plan card", () => {
     ).toBeUndefined()
   })
 
-  test("says what research searches with, and what it uses without a search service", () => {
+  test("says research searches in its own browser, and what it uses without one", () => {
     const card = { deep: false, preferences: { prefer: [], avoid: [] }, offline: false }
-    expect(searchLine({ ...card, search: { provider: "searxng", host: "gpu-box:8080" } })).toBe(
-      "Search: SearXNG (gpu-box:8080)",
+    expect(searchLine({ ...card, search: { provider: "browser" } })).toBe(
+      "Search: Google, in each research agent's own browser (DuckDuckGo when Google asks for a check). No search service or key.",
     )
-    expect(searchLine({ ...card, search: { provider: "exa" } })).toBe(
-      "Search: Exa, on your key. Searches go to Exa, billed by Exa.",
+    expect(
+      searchLine({ ...card, search: { provider: "none", reason: "Searching the web needs Vector's browser." } }),
+    ).toBe(
+      "Nothing is searched on the web here. Research will use this repository's brain, its files and links you paste.",
     )
-    expect(searchLine({ ...card, search: { provider: "none" } })).toBe(
-      "No search service set up. Research will use this repository's brain, its files and links you paste.",
-    )
+    // An older engine named the search service it used.
+    expect(searchLine({ ...card, search: { provider: "service" } })).toBe("Search: the web")
     expect(searchLine(undefined)).toBeUndefined()
+  })
+
+  test("offers the engine's reason alone when nothing is searched, and Set up only without one", () => {
+    const card = { deep: false, preferences: { prefer: [], avoid: [] }, offline: false }
+    // `vector run --research --search none`: nothing to set up, so no "open this repository there to search".
+    for (const reason of [ResearchSearch.NONE, ResearchSearch.NEEDS_DESKTOP])
+      expect(searchHelp({ ...card, search: { provider: "none", reason } })).toEqual({ label: "Why", text: reason })
+    expect(searchHelp({ ...card, search: { provider: "none" } })).toMatchObject({ label: "Set up" })
+    expect(searchHelp({ ...card, search: { provider: "browser" } })).toBeUndefined()
+    expect(searchHelp(undefined)).toBeUndefined()
   })
 
   test("says why a plan cannot start", () => {

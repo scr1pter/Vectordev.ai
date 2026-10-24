@@ -22,8 +22,6 @@ describe("RuntimeFlags", () => {
             VECTOR_DISABLE_EXTERNAL_SKILLS: "true",
             VECTOR_DISABLE_LSP_DOWNLOAD: "true",
             VECTOR_EXPERIMENTAL: "true",
-            VECTOR_ENABLE_EXA: "true",
-            VECTOR_ENABLE_PARALLEL: "true",
             VECTOR_ENABLE_EXPERIMENTAL_MODELS: "true",
             VECTOR_ENABLE_QUESTION_TOOL: "true",
             VECTOR_CLIENT: "desktop",
@@ -37,8 +35,6 @@ describe("RuntimeFlags", () => {
       expect(flags.disableExternalSkills).toBe(true)
       expect(flags.disableLspDownload).toBe(true)
       expect(flags.disableClaudeCodePrompt).toBe(false)
-      expect(flags.enableExa).toBe(true)
-      expect(flags.enableParallel).toBe(true)
       expect(flags.enableExperimentalModels).toBe(true)
       expect(flags.enableQuestionTool).toBe(true)
       expect(flags.experimentalReferences).toBe(true)
@@ -143,7 +139,6 @@ describe("RuntimeFlags", () => {
       expect(flags.disableLspDownload).toBe(false)
       expect(flags.disableClaudeCodePrompt).toBe(false)
       expect(flags.disableClaudeCodeSkills).toBe(false)
-      expect(flags.enableExa).toBe(false)
       expect(flags.experimentalIconDiscovery).toBe(false)
       expect(flags.experimentalOxfmt).toBe(false)
       expect(flags.outputTokenMax).toBeUndefined()
@@ -354,7 +349,6 @@ describe("RuntimeFlags", () => {
               VECTOR_DISABLE_EXTERNAL_SKILLS: "true",
               VECTOR_DISABLE_LSP_DOWNLOAD: "true",
               VECTOR_EXPERIMENTAL: "true",
-              VECTOR_ENABLE_EXA: "true",
               VECTOR_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS: "1234",
               VECTOR_CLIENT: "desktop",
             }),
@@ -369,7 +363,6 @@ describe("RuntimeFlags", () => {
       expect(flags.disableLspDownload).toBe(false)
       expect(flags.disableClaudeCodePrompt).toBe(false)
       expect(flags.disableClaudeCodeSkills).toBe(false)
-      expect(flags.enableExa).toBe(false)
       expect(flags.experimentalIconDiscovery).toBe(false)
       expect(flags.experimentalOxfmt).toBe(false)
       expect(flags.outputTokenMax).toBeUndefined()

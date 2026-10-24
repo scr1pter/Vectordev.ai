@@ -4,33 +4,15 @@ import { InstanceBootstrap } from "@/project/bootstrap"
 import { InstanceStore } from "@/project/instance-store"
 import { FreeModels } from "@vectordevai/core/free-models"
 import { VectorAccount } from "@vectordevai/core/vector-account"
-import { WebSearchTool } from "@vectordevai/core/tool/websearch"
 import { Effect, Layer } from "effect"
 import { Auth } from "@/auth"
 import { Teams } from "@vectordevai/core/teams"
 import { VectorTeams } from "@/teams"
-import { makeGlobalNode, makeLocationNode } from "@vectordevai/core/effect/app-node"
+import { makeGlobalNode } from "@vectordevai/core/effect/app-node"
 import { BrainWorker } from "@vectordevai/core/brain/worker/host"
 import { BrainWorkerSource } from "@/brain/worker-source"
 
 const bootstrapReplacement = [InstanceStore.bootstrapNode, InstanceBootstrap.node] as const
-const searchCredentials = makeLocationNode({
-  service: WebSearchTool.CredentialsService,
-  layer: Layer.effect(
-    WebSearchTool.CredentialsService,
-    Effect.gen(function* () {
-      const auth = yield* Auth.Service
-      return WebSearchTool.CredentialsService.of({
-        get: (provider) =>
-          auth.get(provider).pipe(
-            Effect.map((value) => (value?.type === "api" ? value.key : undefined)),
-            Effect.orDie,
-          ),
-      })
-    }),
-  ),
-  deps: [Auth.node],
-})
 
 const freeModelCredentials = makeGlobalNode({
   service: FreeModels.CredentialsService,
@@ -58,7 +40,6 @@ export function build<A, E>(root: LayerNode.Node<A, E, any>, replacements: Layer
     root,
     replacements.concat([
       bootstrapReplacement,
-      [WebSearchTool.credentialsNode, searchCredentials],
       [FreeModels.credentialsNode, freeModelCredentials],
       [Teams.node, VectorTeams.node],
       // The engine's builds carry the background reader's source.

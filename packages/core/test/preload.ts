@@ -5,15 +5,5 @@ process.env.VECTOR_MODELS_PATH = path.join(import.meta.dir, "plugin", "fixtures"
 process.env.VECTOR_DISABLE_MODELS_FETCH = "true"
 // The local search model is never downloaded in tests; a test serves the fixture model from 127.0.0.1 or a folder.
 process.env.VECTOR_BRAIN_EMBED = "off"
-// Web search registers whenever a search key or flag is in the environment; clear them so tool lists are stable.
-for (const name of [
-  "EXA_API_KEY",
-  "PARALLEL_API_KEY",
-  "VECTOR_WEBSEARCH_PROVIDER",
-  "VECTOR_EXPERIMENTAL",
-  "VECTOR_ENABLE_EXA",
-  "VECTOR_EXPERIMENTAL_EXA",
-  "VECTOR_ENABLE_PARALLEL",
-  "VECTOR_EXPERIMENTAL_PARALLEL",
-])
-  delete process.env[name]
+// Experimental features stay off unless a test turns one on, so tool lists are stable.
+delete process.env["VECTOR_EXPERIMENTAL"]

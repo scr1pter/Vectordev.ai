@@ -8,6 +8,8 @@ import { FakeWeb } from "../../../core/test/lib/fake-web"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
 import { clickPoint, fieldValue, observePage, readPage, typeTarget, typingMoved, type PageRead } from "./browser-page"
 import { NOT_LINK, PAGE_STARTED, POST, SCHEME } from "./research-navigation"
+import { ResearchSearch } from "@vectordevai/core/research/search"
+import { readSearchPage, type SearchPageRead } from "./research-search-page"
 import { USER, useResearchNetwork } from "./research-proxy"
 
 // Research browsers against a stand-in for Electron's windows, views, pages and sessions (section 5.6a). What only
@@ -958,6 +960,207 @@ describe("research browsers", () => {
     await close("ses_lead")
     expect(guard.outside()).toEqual([])
     expect(LocalPolicy.hostClass("article.web.test")).toBe("internet")
+  })
+})
+
+// What each results page shows, by the address the research browser loaded: Google's page answers with its results,
+// unless `blocked` names it, when it shows the unusual-traffic check instead.
+const shown = { blocked: new Set<string>() }
+const resultsFor = (url: string): SearchPageRead => {
+  const engine = ResearchSearch.engineOf(url)
+  const query = URL.canParse(url) ? (new URL(url).searchParams.get("q") ?? "") : ""
+  if (engine && shown.blocked.has(engine))
+    return {
+      url: engine === "google" ? "https://www.google.com/sorry/index?continue=x" : url,
+      title: "",
+      items: [],
+      check: "captcha",
+      none: false,
+      text: "Our systems have detected unusual traffic from your computer network.",
+    }
+  return {
+    url,
+    title: `${query} - ${engine}`,
+    items: [
+      { href: ARTICLE, title: `Study on ${query}`, snippet: "The study followed 412 homes." },
+      { href: `/url?q=${encodeURIComponent(PAPER)}`, title: "A copy", snippet: "" },
+    ],
+    none: false,
+    text: "",
+  }
+}
+scripts.set(readSearchPage, (contents) => resultsFor(contents.url))
+// The addresses a research browser loaded, its first empty page left out.
+const loaded = (view: FakeView) => view.webContents.navigationHistory.entries.filter((url) => url !== "about:blank")
+
+describe("searching in research browsers", () => {
+  // A run of its own, so no browser an earlier test stopped stands in the way.
+  const search = (input: Partial<research.ResearchInput> & Pick<research.ResearchInput, "sessionID">) =>
+    send({ command: "research.search", runID: "run_search", ...input })
+  const done = (sessionID: string) => close(sessionID, "run_search")
+
+  test("the lead and each researcher search at once, each in a browser of its own, within 1 + the researcher cap", async () => {
+    const asked = [
+      { sessionID: "ses_lead", query: "heat pump savings" },
+      { sessionID: "ses_r1", query: "heat pump costs site:nature.com" },
+      { sessionID: "ses_r2", query: "heat pump noise" },
+    ]
+    const before = views.length
+    const reports = await Promise.all(
+      asked.map((item) => search({ sessionID: item.sessionID, query: item.query, max: 3 })),
+    )
+    expect(reports.map((report) => report.ok)).toEqual([true, true, true])
+    expect(reports.map((report) => report.label).toSorted()).toEqual(["Research lead", "Researcher 1", "Researcher 2"])
+    const opened = views.slice(before)
+    expect(opened).toHaveLength(3)
+    expect(new Set(opened.map((view) => view.webContents.partition.name)).size).toBe(3)
+    // Each browser loaded Google's results page for its own agent's query, and nothing else.
+    expect(opened.flatMap(loaded).toSorted()).toEqual(
+      asked.map((item) => ResearchSearch.page("google", { query: item.query })).toSorted(),
+    )
+    const lead = reports[asked.findIndex((item) => item.sessionID === "ses_lead")]!
+    expect(lead.search).toEqual({
+      engine: "google",
+      results: [
+        { url: ARTICLE, title: "Study on heat pump savings", snippet: "The study followed 412 homes." },
+        { url: PAPER, title: "A copy", snippet: "" },
+      ],
+      tried: [],
+    })
+    // A fourth agent past the run's count waits for one of the three to close.
+    const state = { done: false }
+    const waiting = search({ sessionID: "ses_r3", query: "heat pumps", max: 3 }).then((report) => {
+      state.done = true
+      return report
+    })
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    expect(state.done).toBe(false)
+    await done("ses_r1")
+    expect((await waiting).ok).toBe(true)
+    await Promise.all(["ses_lead", "ses_r2", "ses_r3"].map((sessionID) => done(sessionID)))
+  }, 30_000)
+
+  test("a check on Google is never answered: the same browser loads DuckDuckGo's page once instead", async () => {
+    shown.blocked = new Set(["google"])
+    const report = await search({ sessionID: "ses_lead", query: "heat pumps", recency: "week" })
+    const view = latest()
+    expect(report.ok).toBe(true)
+    expect(report.search?.engine).toBe("duckduckgo")
+    expect(report.search?.tried).toEqual([
+      { engine: "google", reason: "Google asked for a check that it is not automated traffic." },
+    ])
+    expect(loaded(view)).toEqual([
+      ResearchSearch.page("google", { query: "heat pumps", recency: "week" }),
+      ResearchSearch.page("duckduckgo", { query: "heat pumps", recency: "week" }),
+    ])
+    // Nothing on the check was clicked, typed into or pressed.
+    expect(view.webContents.inputs).toEqual([])
+
+    // Both asked for a check: search is unavailable, and neither page is tried again.
+    shown.blocked = new Set(["google", "duckduckgo"])
+    const unavailable = await search({ sessionID: "ses_lead", query: "heat pump noise" })
+    expect(unavailable).toMatchObject({
+      ok: false,
+      error: ResearchSearch.unavailable([{ engine: "google" }, { engine: "duckduckgo" }]),
+    })
+    expect(unavailable.search?.tried.map((item) => item.engine)).toEqual(["google", "duckduckgo"])
+    expect(loaded(view)).toHaveLength(4)
+    expect(view.webContents.inputs).toEqual([])
+
+    // On a search engine's page the agent may not read, observe, click, type, press, scroll or take a screenshot.
+    for (const command of [
+      "research.read",
+      "research.observe",
+      "research.click",
+      "research.type",
+      "research.press",
+      "research.scroll",
+      "research.screenshot",
+    ] as const)
+      expect(
+        await send({
+          command,
+          runID: "run_search",
+          sessionID: "ses_lead",
+          ref: "ref_1",
+          text: "x",
+          key: "Enter",
+          images: true,
+        }),
+      ).toMatchObject({ ok: false, error: research.ON_SEARCH })
+    expect(view.webContents.inputs).toEqual([])
+    // Opening a result leaves the search page, and the page can be read again.
+    expect(
+      await send({ command: "research.open", runID: "run_search", sessionID: "ses_lead", url: ARTICLE }),
+    ).toMatchObject({ ok: true })
+    expect((await send({ command: "research.read", runID: "run_search", sessionID: "ses_lead" })).read?.title).toBe(
+      "Heat pumps",
+    )
+    shown.blocked = new Set()
+    await done("ses_lead")
+  }, 30_000)
+
+  test("a search reaches only the engines it was given, and loads no page of the agent's choosing", async () => {
+    const report = await search({ sessionID: "ses_lead", query: "heat pumps", engines: ["duckduckgo"] })
+    expect(report.search?.engine).toBe("duckduckgo")
+    expect(loaded(latest())).toEqual([ResearchSearch.page("duckduckgo", { query: "heat pumps" })])
+    expect(await search({ sessionID: "ses_lead", query: "  " })).toMatchObject({
+      ok: false,
+      error: "Give the words to search for.",
+    })
+    // With only DuckDuckGo's page let through, and a check on it, the agent is told of DuckDuckGo alone.
+    shown.blocked = new Set(["duckduckgo"])
+    const unavailable = await search({ sessionID: "ses_lead", query: "heat pump noise", engines: ["duckduckgo"] })
+    expect(unavailable).toMatchObject({ ok: false, error: ResearchSearch.unavailable([{ engine: "duckduckgo" }]) })
+    expect(unavailable.error).not.toContain("Google")
+    shown.blocked = new Set()
+    await done("ses_lead")
+    expect(guard.outside()).toEqual([])
+  })
+
+  test("a result that never commits, a PDF, leaves the search page's guard on until another page commits", async () => {
+    const pdf = web.url("docs", "/report.pdf")
+    const from = { runID: "run_search", sessionID: "ses_lead", provenance: [ARTICLE, pdf] }
+    shown.blocked = new Set(["google", "duckduckgo"])
+    expect(await send({ ...from, command: "research.search", query: "heat pumps" })).toMatchObject({ ok: false })
+    const view = latest()
+    const check = ResearchSearch.page("duckduckgo", { query: "heat pumps" })
+    expect(view.webContents.url).toBe(check)
+    // The PDF is a download, so it is read into memory and the check page stays shown.
+    const opened = await send({ ...from, command: "research.open", url: pdf })
+    expect(opened).toMatchObject({ ok: true, pdf: { url: pdf } })
+    expect(view.webContents.url).toBe(check)
+    for (const command of ["research.observe", "research.click", "research.read", "research.type"] as const)
+      expect(await send({ ...from, command, ref: "ref_1", text: "x" })).toMatchObject({
+        ok: false,
+        error: research.ON_SEARCH,
+      })
+    expect(view.webContents.inputs).toEqual([])
+    // The page is still a search's, so its own navigation to another results page is the search's too: robots.txt,
+    // which no fake site serves for DuckDuckGo, does not decide it.
+    await view.webContents.navigate(`${check}&s=30`)
+    expect(view.webContents.url).toBe(`${check}&s=30`)
+    expect(await send({ ...from, command: "research.observe" })).toMatchObject({ ok: false, error: research.ON_SEARCH })
+    // A result that commits lifts the guard.
+    expect(await send({ ...from, command: "research.open", url: ARTICLE })).toMatchObject({ ok: true })
+    expect((await send({ ...from, command: "research.read" })).read?.title).toBe("Heat pumps")
+    shown.blocked = new Set()
+    await done("ses_lead")
+  }, 30_000)
+
+  test("a page on a search engine's own host is held to the guard, however the browser got there", async () => {
+    // An address the user typed, which the rule lets the agent open.
+    const wall = "https://consent.google.com/ml?continue=https://www.google.com/search"
+    const from = { runID: "run_search", sessionID: "ses_lead", typed: [wall] }
+    expect(await send({ ...from, command: "research.open", url: wall })).toMatchObject({ ok: true })
+    expect(latest().webContents.url).toBe(wall)
+    for (const command of ["research.observe", "research.click", "research.read", "research.press"] as const)
+      expect(await send({ ...from, command, ref: "ref_1", key: "Enter" })).toMatchObject({
+        ok: false,
+        error: research.ON_SEARCH,
+      })
+    expect(latest().webContents.inputs).toEqual([])
+    await done("ses_lead")
   })
 })
 

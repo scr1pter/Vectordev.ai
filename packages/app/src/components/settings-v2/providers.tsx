@@ -14,7 +14,6 @@ import { DialogSelectProvider } from "../dialog-select-provider"
 import { DialogCustomProvider } from "../dialog-custom-provider"
 import { SettingsListV2 } from "./parts/list"
 import { brandProviderName } from "@/utils/provider-brand"
-import { SettingsSearch } from "../settings-search"
 import { SettingsVectorTeams } from "../settings-vector-teams"
 import { OffInLocal } from "@/features/local/off-in-local"
 import "./settings-v2.css"
@@ -278,9 +277,6 @@ export const SettingsProvidersV2: Component = () => {
           >
             {language.t("dialog.provider.viewAll")}
           </button>
-        </div>
-        <div class="settings-v2-section">
-          <SettingsSearch />
         </div>
       </div>
     </>

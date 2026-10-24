@@ -2205,8 +2205,6 @@ export type LocalConfig = {
   recommend?: unknown
 }
 
-export type ResearchSearchProvider = "auto" | "searxng" | "exa" | "parallel" | "browser" | "none"
-
 export type ResearchDepthConfig = "auto" | "focused" | "deep"
 
 export type ResearchToolConfig = "work" | "thorough" | "off"
@@ -2220,10 +2218,6 @@ export type ResearchLimitsConfig = {
 }
 
 export type ResearchConfig = {
-  search?: {
-    provider?: ResearchSearchProvider
-    url?: string
-  }
   depth?: ResearchDepthConfig
   tool?: ResearchToolConfig
   limits?: {
@@ -2235,7 +2229,6 @@ export type ResearchConfig = {
     avoid?: Array<string>
   }
   robots?: boolean
-  browser_search?: boolean
   retain_days?: number
 }
 

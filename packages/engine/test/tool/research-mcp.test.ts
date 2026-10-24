@@ -65,7 +65,7 @@ it.instance(
   "no research agent is offered an MCP tool or resource, even where the session's rules allow them",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       // A client's tools list sets session rules, which come after the agent's.
       const open = [
@@ -104,7 +104,7 @@ it.instance(
   "what an MCP tool returned to build stays out of its research requests",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const build = yield* sessions.create({ title: "Build" })
       yield* test.llm.tool("notes_search", { query: "renewals" })

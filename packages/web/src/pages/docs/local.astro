@@ -121,7 +121,7 @@ Set-ItemProperty -Path $key -Name Config -Value $json -Type String`
           <ul class="feature-list">
             <li><strong>Sites you approve</strong><span>They receive the requests you approved. That is the point of research.</span></li>
             <li><strong>Programs the agent starts</strong><span>Shell commands, stdio MCP servers and language servers make their own connections. With Web access None, the shell sandbox blocks the agent's shell commands on macOS and Linux; MCP servers and language servers run outside it, and Windows has no such block.</span></li>
-            <li><strong>Model and search servers that forward requests</strong><span>A LiteLLM proxy, Ollama's cloud models and SearXNG can pass your prompts or queries on to a cloud service. Vector labels the ones it can recognise.</span></li>
+            <li><strong>Model servers that forward requests</strong><span>A LiteLLM proxy and Ollama's cloud models can pass your prompts on to a cloud service. Vector labels the ones it can recognise.</span></li>
             <li><strong>Everything outside Vector</strong><span>The operating system, other apps, and the DNS resolver for names Vector is allowed to look up.</span></li>
             <li><strong>It is a policy inside Vector, not a firewall</strong><span>A person with administrator rights on this computer can change it. Companies should pair it with network controls.</span></li>
           </ul>

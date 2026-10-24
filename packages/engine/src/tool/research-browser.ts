@@ -4,6 +4,7 @@ import { WebFence } from "@vectordevai/core/research/fence"
 import { ResearchOutbound } from "@vectordevai/core/research/outbound"
 import { ResearchProvenance } from "@vectordevai/core/research/provenance"
 import { ResearchReader } from "@vectordevai/core/research/reader"
+import type { ResearchSearch } from "@vectordevai/core/research/search"
 import { ResearchStore } from "@vectordevai/core/research/store"
 import { Effect, Schema, Scope, Stream } from "effect"
 import type { Provider } from "@/provider/provider"
@@ -31,7 +32,8 @@ import DESCRIPTION from "./research-browser.txt"
 //   desktop's research proxy follows Web access as it was when the app started, so the stricter of the two applies.
 // The run and the agent's session come from the tool context, never from the model's input. A browser closes when its
 // agent's session finishes, as well as on the desktop's own idle timeout. Outside the desktop app (the CLI, WSL, a
-// remote server, a headless run) there is no research browser, and the tool says so.
+// remote server, a headless run) there is no research browser, and the tool says so. research_search searches in the
+// same browser (research.search, research-search.ts), so each agent's searches load in its own browser too.
 
 export const NEEDS_DESKTOP =
   "Research browsers need the desktop browser, which this Vector does not have (the CLI, WSL, a remote server or a headless run). Read pages with research_read instead; a page built by script is reported as skipped."
@@ -124,6 +126,11 @@ export type Report = {
   readonly screenshot?: string
   readonly pdf?: { readonly url: string; readonly base64: string; readonly contentType: string }
   readonly value?: string
+  readonly search?: {
+    readonly engine?: ResearchSearch.Engine
+    readonly results: readonly { readonly url: string; readonly title?: string; readonly snippet?: string }[]
+    readonly tried: readonly { readonly engine: ResearchSearch.Engine; readonly reason: string }[]
+  }
 }
 
 const EMPTY: Report = { ok: false, generation: "", label: "", url: "", address: "", title: "", joined: [], refused: [] }

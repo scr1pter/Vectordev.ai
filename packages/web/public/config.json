@@ -1014,17 +1014,6 @@
       },
       "additionalProperties": false
     },
-    "ResearchSearchProvider": {
-      "type": "string",
-      "enum": [
-        "auto",
-        "searxng",
-        "exa",
-        "parallel",
-        "browser",
-        "none"
-      ]
-    },
     "ResearchDepthConfig": {
       "type": "string",
       "enum": [
@@ -1081,20 +1070,6 @@
     "ResearchConfig": {
       "type": "object",
       "properties": {
-        "search": {
-          "type": "object",
-          "properties": {
-            "provider": {
-              "$ref": "#/$defs/ResearchSearchProvider"
-            },
-            "url": {
-              "type": "string",
-              "description": "A SearXNG instance with its JSON format enabled"
-            }
-          },
-          "additionalProperties": false,
-          "description": "Where research searches go: searxng (the url below), exa or parallel (on your own key, billed by them), none, or auto, the first of those set up. browser is not available yet. Read from your user config only. Default: none set up."
-        },
         "depth": {
           "$ref": "#/$defs/ResearchDepthConfig",
           "description": "Focused: one agent, plus up to 2 researchers when the question has independent parts. Deep: up to 4 researchers and a citation judge (default: auto)"
@@ -1139,15 +1114,19 @@
           "type": "boolean",
           "description": "Respect robots.txt for links Vector finds itself (default: true). Read from your user config only."
         },
-        "browser_search": {
-          "type": "boolean",
-          "description": "Let the desktop app load a search engine's results page as a search provider (default: false)"
-        },
         "retain_days": {
           "exclusiveMinimum": 0,
           "type": "integer",
           "maximum": 9007199254740991,
           "description": "Days an unkept research run stays in the brain (default: 30)"
+        },
+        "search": {
+          "type": "object",
+          "description": "@deprecated Research searches the web in each research agent's own browser in the desktop app, with no search service or key; this setting is ignored."
+        },
+        "browser_search": {
+          "type": "boolean",
+          "description": "@deprecated Research always searches in each research agent's own browser in the desktop app; this setting is ignored."
         }
       },
       "additionalProperties": false
@@ -1720,7 +1699,7 @@
         },
         "research": {
           "$ref": "#/$defs/ResearchConfig",
-          "description": "Deep research (preview): where research searches go (a SearXNG server, or Exa or Parallel on your own key), when the build agent may research as a tool, what one run may spend and read, the sites it prefers or avoids, and robots.txt. depth, browser_search and retain_days do not apply yet. Read from your user config; a repository's config may only add sites to avoid and turn the research tool down."
+          "description": "Deep research (preview): when the build agent may research as a tool, what one run may spend and read, the sites it prefers or avoids, and robots.txt. Research searches the web in each research agent's own browser in the desktop app; there is no search service to set up. depth and retain_days do not apply yet. Read from your user config; a repository's config may only add sites to avoid and turn the research tool down."
         },
         "experimental": {
           "type": "object",

@@ -92,9 +92,9 @@ function projectExecutableConfig(config: Info, trusted: boolean, base: Info): In
     if (Object.keys(budget).length) next.budget = budget
     else delete next.budget
   }
-  // Research's settings are the user's too, trusted or not (sections 5.7 and 7.2): where it searches, the domains it
-  // prefers (which clear host names from the outbound check), its caps and robots.txt. Otherwise a cloned repository
-  // could send the user's queries to a search server its author runs and choose what research reads.
+  // Research's settings are the user's too, trusted or not (sections 5.7 and 7.2): the domains it prefers (which clear
+  // host names from the outbound check), its caps and robots.txt. Otherwise a cloned repository could raise the caps
+  // and choose what research reads.
   if (next.research) {
     const research = repositoryResearch(next.research, base.research)
     if (research) next.research = research

@@ -65,18 +65,6 @@ describe("FakeWeb", () => {
     expect(await (await fetch(web.direct("spa", "/"))).text()).toContain('<div id="root"></div>')
   })
 
-  test("answers SearXNG JSON searches with results on the fake web, and refuses other formats", async () => {
-    const result = await fetch(web.direct("searxng", "/search?q=heat+pumps&format=json"))
-    const body = (await result.json()) as { query: string; results: { url: string }[] }
-    expect(body.query).toBe("heat pumps")
-    expect(body.results.map((item) => new URL(item.url).hostname)).toEqual([
-      "article.web.test",
-      "copy.web.test",
-      "docs.web.test",
-    ])
-    expect((await fetch(web.direct("searxng", "/search?q=x"))).status).toBe(403)
-  })
-
   test("serves the model server endpoints from the fixtures", async () => {
     expect(await (await fetch(web.direct("ollama", "/api/version"))).json()).toEqual({ version: "0.12.6" })
     const tags = (await (await fetch(web.direct("ollama", "/api/tags"))).json()) as { models: { name: string }[] }

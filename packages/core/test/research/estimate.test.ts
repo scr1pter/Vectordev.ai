@@ -115,16 +115,6 @@ describe("ResearchEstimate.copy", () => {
     )
   })
 
-  test("says who bills for searches on the user's own key", () => {
-    expect(line("free", { search: "exa" })).toBe(
-      "About 25 pages and 8 searches. No per-token charge on this free model, within its daily limits. Step cap 120. Searches go to Exa on your key, billed by Exa.",
-    )
-    expect(line("free", { search: "parallel" })).toContain("billed by Parallel.")
-    expect(line("free", { search: "searxng" })).toBe(
-      "About 25 pages and 8 searches. No per-token charge on this free model, within its daily limits. Step cap 120.",
-    )
-  })
-
   test("formats the single-agent estimate in dollars and cents", () => {
     const estimate = ResearchEstimate.estimate({
       pages: 2,

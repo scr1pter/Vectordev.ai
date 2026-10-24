@@ -56,7 +56,7 @@ it.instance(
   "with Web access None research is offered no network tool, and its plan is the brain's and Focused",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       yield* local({ enabled: true, web: "none", endpoints: [new URL(test.llm.url).origin] })
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research" })
@@ -102,7 +102,7 @@ it.instance(
   "with Web access Ask the same research is offered its network tools",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       yield* local({ enabled: true, web: "ask", endpoints: [new URL(test.llm.url).origin] })
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research" })
@@ -129,7 +129,7 @@ it.instance(
   "a run planned before Web access became None searches and reads nothing more on the web",
   () =>
     Effect.gen(function* () {
-      const test = yield* setup(web)
+      const test = yield* setup()
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research" })
       yield* test.llm.tool("research_plan", plan({ scope: "web" }))
@@ -160,7 +160,7 @@ it.instance(
       expect([searched.output, searched.metadata.refused]).toEqual([ResearchRun.OFFLINE, "offline"])
       expect([page.output, page.metadata.refused]).toEqual([ResearchRun.OFFLINE, "offline"])
       expect([opened.output, opened.metadata.refused]).toEqual([ResearchRun.OFFLINE, "offline"])
-      expect(web.hits().filter((hit) => hit.site === "searxng" || hit.site === "article")).toEqual([])
+      expect(web.hits().filter((hit) => hit.site === "article")).toEqual([])
     }),
   120_000,
 )

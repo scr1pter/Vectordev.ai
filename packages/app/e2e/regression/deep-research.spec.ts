@@ -166,7 +166,8 @@ const finished = [
     metadata: {
       runID,
       query: "heat pump field trial savings cold climate",
-      provider: "searxng",
+      provider: "browser",
+      engine: "duckduckgo",
       results: [{ url: source.url, title: source.title, snippet: "Field trials" }],
     },
   }),
@@ -343,7 +344,7 @@ test("a research plan opens as an editable plan card that answers with only what
   const card = {
     deep: true,
     deepEstimate: "About 40 pages and 24 searches. Estimated $0.90–$2.80 at list prices. Cap $3.00.",
-    search: { provider: "searxng", host: "gpu-box:8080" },
+    search: { provider: "browser" },
     preferences: { prefer: ["nature.com"], avoid: [] },
     offline: false,
   }
@@ -392,7 +393,7 @@ test("a research plan opens as an editable plan card that answers with only what
   await expect(planCard).toContainText("from your preferences")
   await expect(planCard).toContainText("About 15 pages and 8 searches")
   await expect(planCard).toContainText("Start deep: About 40 pages and 24 searches")
-  await expect(planCard).toContainText("Search: SearXNG (gpu-box:8080)")
+  await expect(planCard).toContainText("Search: Google, in each research agent's own browser")
   await expect(planCard).toContainText("Preview")
   await expect(planCard.getByRole("button", { name: "Start deep" })).toBeVisible()
 
@@ -417,6 +418,51 @@ test("a research plan opens as an editable plan card that answers with only what
   })
 })
 
+test("a plan card that searches nothing says why, with the engine's reason alone and nothing to set up", async ({
+  page,
+}) => {
+  // What the engine says for `vector run --research --search none`, where no set-up would change anything.
+  const reason =
+    "This research searches nothing on the web. It uses this repository's brain, its files and the addresses in your message."
+  const card = {
+    deep: false,
+    search: { provider: "none", reason },
+    preferences: { prefer: [], avoid: [] },
+    offline: false,
+  }
+  await setup(page, {
+    messages: [
+      user,
+      assistant([tool("plan", "research_plan", { status: "running", input: plan, metadata: { plan, card } })], false),
+    ],
+    questions: [
+      {
+        id: "que_plan",
+        sessionID,
+        questions: [
+          {
+            header: "Research plan",
+            question: `Research: ${plan.question}`,
+            options: [
+              { label: "Start", description: "Research at this depth (focused)" },
+              { label: "Cancel", description: "Stop without searching or reading anything" },
+            ],
+            custom: true,
+          },
+        ],
+        tool: { messageID: "msg_02_assistant", callID: "call_plan" },
+      },
+    ],
+  })
+  const planCard = page.locator('[data-component="research-plan-card"]')
+  await expect(planCard).toBeVisible({ timeout: 30_000 })
+  await expect(planCard).toContainText("Nothing is searched on the web here.")
+  await expect(planCard.getByRole("button", { name: "Set up" })).toHaveCount(0)
+  await planCard.getByRole("button", { name: "Why", exact: true }).click()
+  await expect(planCard).toContainText(reason)
+  await expect(planCard).not.toContainText("open this repository there to search")
+})
+
 test("the report card cites with chips that show their quote and open the source at that passage", async ({ page }) => {
   const sent = await setup(page, { messages: [user, assistant(finished)] })
   const card = page.locator('[data-component="research-report"]')
@@ -432,7 +478,7 @@ test("the report card cites with chips that show their quote and open the source
   await expect(badge).toHaveAttribute("title", /^Vector's estimate\./)
 
   // Each research call is a one-line row: what it did, in a few words.
-  for (const text of ["Research plan", "approved, focused", "Search · SearXNG", "1 result", "Read S1", "Note N1"])
+  for (const text of ["Research plan", "approved, focused", "Search · DuckDuckGo", "1 result", "Read S1", "Note N1"])
     await expect(page.getByText(text, { exact: true }).first()).toBeVisible()
 
   await chip.click()

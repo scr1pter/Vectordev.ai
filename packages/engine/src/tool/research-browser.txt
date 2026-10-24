@@ -9,4 +9,5 @@ Drives your own research browser for this research run: an isolated, cookie-free
 - type {ref, text}: types into a text or search field only, never a sign-in, contact or payment field. The text is checked first: it must not carry words from the user's private context.
 - press {key}: Enter, Tab, Escape or an arrow key. scroll, back, and screenshot (only for a model that reads images). close when you are done.
 - Research browsers only read: forms that send data (POST), downloads, sign-ins and pop-up windows are refused. A sign-in or a paywall is for the user: say so, and the research lead can hand it to the user with the browser tool's handoff.
+- research_search loads its results page in this same browser. While a search engine's page is shown, only open, back and close work here: open a result to browse again. A check for automated traffic is never answered.
 - Research browsers need the desktop app. In the CLI, WSL, a remote server or a headless run this tool says so; read pages with research_read instead.

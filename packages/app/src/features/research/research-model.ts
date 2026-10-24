@@ -15,8 +15,14 @@ export const PLACEHOLDER = "What should Vector research?"
 export const GUEST = "Sources are visible to the repository owner."
 export const HELD = "This report and its sources stay private and out of later sessions until you keep them."
 export const WRAP_UP = "Write the report now from what you have"
+/** Where research searches, as the plan card says it. */
+export const SEARCH_WHERE =
+  "Search: Google, in each research agent's own browser (DuckDuckGo when Google asks for a check). No search service or key."
 export const NO_SEARCH =
-  "No search service set up. Research will use this repository's brain, its files and links you paste."
+  "Nothing is searched on the web here. Research will use this repository's brain, its files and links you paste."
+/** How to search, for an engine that gave no reason it searches nowhere. */
+export const SETUP =
+  "Research searches the web in Vector's desktop app, where each research agent has a browser of its own: open this repository there to search. No search service or key is needed."
 export const PAYWALL =
   "Paywalled: Vector kept the public excerpt only. Use Open in browser to read the rest with your own sign-in."
 export const VIEW_ONLY =
@@ -184,7 +190,8 @@ export const CANCEL = "Cancel"
 export type Card = {
   readonly deep: boolean
   readonly deepEstimate?: string
-  readonly search: { readonly provider: string; readonly host?: string; readonly reason?: string }
+  /** browser or none; an older engine may name its search service, which reads as the web. */
+  readonly search: { readonly provider: string; readonly reason?: string }
   /** The user's own sites and format: from their config, and from what they ticked Always for on an earlier card. */
   readonly preferences: {
     readonly prefer: readonly string[]
@@ -333,11 +340,19 @@ export function decodePlanAnswer(text: string): Research.PlanAnswer | undefined 
 /** The plan card's search line. */
 export function searchLine(card: Card | undefined) {
   if (!card) return undefined
-  if (card.search.provider === "searxng") return `Search: SearXNG${card.search.host ? ` (${card.search.host})` : ""}`
-  if (card.search.provider === "exa") return "Search: Exa, on your key. Searches go to Exa, billed by Exa."
-  if (card.search.provider === "parallel")
-    return "Search: Parallel, on your key. Searches go to Parallel, billed by Parallel."
-  return NO_SEARCH
+  if (card.search.provider === "browser") return SEARCH_WHERE
+  if (card.search.provider === "none") return NO_SEARCH
+  return "Search: the web"
+}
+
+/**
+ * What the plan card offers beside "Nothing is searched", when research searches nowhere here: the engine's own reason,
+ * alone, under Why (it says what holds search back: no desktop browser, or a run told to search nothing, which no
+ * set-up changes); how to search, under Set up, only when the engine gave no reason.
+ */
+export function searchHelp(card: Card | undefined) {
+  if (card?.search.provider !== "none") return undefined
+  return card.search.reason ? { label: "Why", text: card.search.reason } : { label: "Set up", text: SETUP }
 }
 
 // ---------------------------------------------------------------------------------------------------------------

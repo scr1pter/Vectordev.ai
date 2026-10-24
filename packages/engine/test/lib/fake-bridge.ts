@@ -1,5 +1,7 @@
 export * as FakeBridge from "./fake-bridge"
 
+import { Effect } from "effect"
+
 // A stand-in for the desktop's browser bridge on 127.0.0.1, for the browser and research_browser tools: POST /command
 // for the user's visible browser, POST /research for research browsers, each with the bridge's bearer token. A test
 // answers each command with its own handler and reads back every command the engine sent. The engine finds the bridge
@@ -61,6 +63,15 @@ export function use(bridge: Bridge) {
   }
 }
 
+/** Runs `effect` with the engine pointed at this bridge, as the desktop app points it at its own, and no longer after. */
+export function within<A, E, R>(bridge: Bridge, effect: Effect.Effect<A, E, R>) {
+  return Effect.acquireUseRelease(
+    Effect.sync(() => use(bridge)),
+    () => effect,
+    (pointed) => Effect.sync(() => pointed.off()),
+  )
+}
+
 /** A visible-browser report as the desktop's runBrowserAgent gives one. */
 export function visible(input: { readonly url?: string; readonly title?: string } & Record<string, unknown> = {}) {
   const url = input.url ?? ""
@@ -102,4 +113,53 @@ export function research(input: Record<string, unknown> = {}) {
     refused: [],
     ...input,
   }
+}
+
+/**
+ * A research browser's answer to research.search, as the desktop gives one once it read a results page: the fake
+ * web's heat pump pages, from Google unless `engine` says otherwise.
+ */
+export function searched(
+  web: { readonly url: (site: string, path: string) => string },
+  input: { readonly engine?: "google" | "duckduckgo"; readonly tried?: readonly unknown[] } = {},
+) {
+  return research({
+    search: {
+      engine: input.engine ?? "google",
+      results: [
+        {
+          url: web.url("article", "/"),
+          title: "How heat pumps cut heating bills in cold climates",
+          snippet: "A field study of air-source heat pumps in 412 homes.",
+        },
+        {
+          url: web.url("copy", "/heat-pumps"),
+          title: "How heat pumps cut heating bills in cold climates (syndicated)",
+          snippet: "The study followed 412 homes through two winters.",
+        },
+        {
+          url: web.url("docs", "/report.pdf"),
+          title: "Heat pump field study (PDF)",
+          snippet: "Delivered heating energy fell by 61 percent.",
+        },
+      ],
+      tried: input.tried ?? [],
+    },
+  })
+}
+
+/**
+ * A desktop whose research browsers answer research.search with `searched` and every other command as an open,
+ * empty research browser does; the user's visible browser answers too.
+ */
+export function searching(web: Parameters<typeof searched>[0]): Handler {
+  return (call) => {
+    if (call.path !== "/research") return visible()
+    return call.body.command === "research.search" ? searched(web) : research()
+  }
+}
+
+/** The research.search commands the engine sent. */
+export function searches(bridge: Bridge) {
+  return bridge.calls().filter((call) => call.path === "/research" && call.body.command === "research.search")
 }

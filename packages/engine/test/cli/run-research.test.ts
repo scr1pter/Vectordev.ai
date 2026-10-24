@@ -8,7 +8,7 @@ import path from "node:path"
 import { Effect } from "effect"
 import { EgressGuard } from "@vectordevai/core/local-mode/guard"
 import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
-import { runPermissionReply } from "../../src/cli/cmd/run"
+import { RETIRED_SEARCH_NOTICE, runPermissionReply } from "../../src/cli/cmd/run"
 import { cliIt } from "../lib/cli-process"
 import { FakeWeb } from "../../../core/test/lib/fake-web"
 
@@ -140,6 +140,27 @@ describe("vector run --research", () => {
         })
         vector.expectExit(result, 0)
         expect(result.stderr).toContain("deep · brain")
+      }),
+    90_000,
+  )
+
+  cliIt.concurrent(
+    "a search service an earlier version's --search named is ignored, once, with a notice; another name is refused",
+    ({ llm, vector }) =>
+      Effect.gen(function* () {
+        yield* llm.tool("research_plan", PLAN)
+        yield* llm.text("Planned.")
+        const result = yield* vector.run("Research how much heat pumps save", {
+          extraArgs: ["--research", "--depth", "focused", "--scope", "brain", "--search", "exa"],
+        })
+        vector.expectExit(result, 0)
+        expect(result.stderr.split(`--search exa is ignored: ${RETIRED_SEARCH_NOTICE}`)).toHaveLength(2)
+        // It reads as the default, the research browser.
+        const [first] = (yield* llm.hits).map((hit) => JSON.stringify(hit.body))
+        expect(first).toContain("search the web in the research browser")
+        const unknown = yield* vector.run("Research heat pumps", { extraArgs: ["--research", "--search", "bing"] })
+        vector.expectExit(unknown, 1)
+        expect(unknown.stderr).toContain("Invalid values")
       }),
     90_000,
   )

@@ -88,4 +88,18 @@ describe("research browser input", () => {
     expect(() => parseResearchBrowserInput({ ...valid, generation: "a b" })).toThrow("Invalid research browser generation.")
     expect(() => parseResearchBrowserInput([valid])).toThrow("Invalid research browser command.")
   })
+
+  test("a search takes its words, a period, a count and the engines it may reach, and nothing else", () => {
+    const search = { command: "research.search", runID: "r", sessionID: "s", agent: "researcher", max: 3 }
+    expect(
+      parseResearchBrowserInput({ ...search, query: "heat pumps site:nature.com", recency: "week", limit: 8, engines: ["duckduckgo", "google"] }),
+    ).toEqual({ ...search, query: "heat pumps site:nature.com", recency: "week", limit: 8, engines: ["google", "duckduckgo"] })
+    // No address: the desktop builds the results page itself.
+    expect(() => parseResearchBrowserInput({ ...search, query: "x", page: "https://evil.example/" })).toThrow("Research browser commands take no page.")
+    expect(() => parseResearchBrowserInput({ ...search, query: "x".repeat(601) })).toThrow("Invalid browser query.")
+    for (const recency of ["hour", 1]) expect(() => parseResearchBrowserInput({ ...search, recency })).toThrow("Invalid research browser recency.")
+    for (const limit of [0, 21, 2.5, "8"]) expect(() => parseResearchBrowserInput({ ...search, limit })).toThrow("Invalid research browser limit.")
+    for (const engines of [[], ["bing"], ["google", "google"], "google"])
+      expect(() => parseResearchBrowserInput({ ...search, engines })).toThrow("Invalid research browser engines.")
+  })
 })

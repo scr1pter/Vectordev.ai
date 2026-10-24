@@ -87,14 +87,16 @@ const WITHOUT_SOURCE: Readonly<Record<string, string>> = {
 // Call sites of the registry that consult Vector Local through another file, and how. Every other call site of an
 // engine source consults it itself.
 const DECIDED_ELSEWHERE: Readonly<Record<string, string>> = {
+  "packages/engine/src/tool/research-search.ts":
+    "Decides each results page a search loads with ResearchSearch.reachable (core research/search.ts) before it asks the desktop's research browser.",
+  "packages/core/src/tool/research-search.ts":
+    "Decides each results page a search loads with ResearchSearch.reachable (research/search.ts) before it asks the desktop's research browser.",
   "packages/llm/src/route/executor.ts":
     "Sends through the HTTP client LayerNodePlatform.requestExecutor gives it, which decides each request as a model call (EgressHttpClient.models).",
   "packages/core/src/plugin/provider/snowflake-cortex.ts":
     "A V2 route's model calls are refused before the route is built (SessionRunnerModel.allowedInLocal); a V1 call goes through provider.ts's fetch first.",
   "packages/core/src/plugin/provider/google-vertex.ts":
     "A V2 route's model calls are refused before the route is built (SessionRunnerModel.allowedInLocal); a V1 call goes through provider.ts's fetch first.",
-  "packages/engine/src/tool/mcp-websearch.ts":
-    "Sends with the client tool/websearch.ts and tool/research-search.ts label with the provider's source.",
   "packages/engine/src/git/index.ts":
     "Decides each git command that connects with Git.refusal (core git.ts) before git starts: the review's and the GitHub handler's fetches and pushes.",
   "packages/engine/src/review/source.ts":
@@ -103,8 +105,6 @@ const DECIDED_ELSEWHERE: Readonly<Record<string, string>> = {
     "Decides each git command that connects with Git.refusal (core git.ts) before git starts: a reset's fetch, a submodule update.",
   "packages/core/src/research/reader.ts":
     "Sends with the client its caller hands it, which tool/research-read.ts and tool/research-run.ts label research-reader.",
-  "packages/core/src/research/search.ts":
-    "Sends with the client its caller hands it, which tool/research-search.ts labels websearch-searxng.",
 }
 
 // The http and https addresses a file writes. One on this computer, a reserved example name, or one built from parts
@@ -239,36 +239,6 @@ const UNLABELLED_CALLS: ReadonlyArray<{ readonly file: string; readonly call: st
     why: "Sends with the client its caller hands it, labelled research-reader there (tool/research-read.ts, tool/research-run.ts).",
   },
   {
-    file: "packages/core/src/research/search.ts",
-    call: "WebFetchRequest.execute(",
-    why: "Sends with the client its caller hands it, labelled websearch-searxng there (tool/research-search.ts).",
-  },
-  {
-    file: "packages/core/src/research/search.ts",
-    call: "HttpClientRequest.get(address)",
-    why: "Sends with the client its caller hands it, labelled websearch-searxng there (tool/research-search.ts).",
-  },
-  {
-    file: "packages/core/src/tool/websearch.ts",
-    call: "HttpClientRequest.post(url)",
-    why: "Built inside the search the tool's execute labels with the provider's source (websearch-exa or websearch-parallel).",
-  },
-  {
-    file: "packages/core/src/tool/websearch.ts",
-    call: "filterStatusOk(http).execute(request)",
-    why: "Sent inside the search the tool's execute labels with the provider's source (websearch-exa or websearch-parallel).",
-  },
-  {
-    file: "packages/engine/src/tool/mcp-websearch.ts",
-    call: "HttpClientRequest.post(url)",
-    why: "Sends with the client tool/websearch.ts and tool/research-search.ts label with the provider's source.",
-  },
-  {
-    file: "packages/engine/src/tool/mcp-websearch.ts",
-    call: ".execute(request)",
-    why: "Sends with the client tool/websearch.ts and tool/research-search.ts label with the provider's source.",
-  },
-  {
     file: "packages/llm/src/route/executor.ts",
     call: ".execute(request)",
     why: "Sends through the HTTP client LayerNodePlatform.requestExecutor gives it, which decides each request as a model call (EgressHttpClient.models).",
@@ -307,6 +277,11 @@ const UNLABELLED_CALLS: ReadonlyArray<{ readonly file: string; readonly call: st
     file: "packages/engine/src/tool/browser.ts",
     call: "return fetch(`${url}/command`",
     why: "The desktop app's browser bridge on this computer; the page itself is decided before (webAccess).",
+  },
+  {
+    file: "packages/core/src/tool/research-search.ts",
+    call: "fetch(`${desktop.url}/research`",
+    why: "The desktop app's browser bridge on this computer; each results page is decided before (ResearchSearch.reachable), and the desktop's research proxy decides every request a research browser makes.",
   },
   {
     file: "packages/engine/src/tool/research-browser.ts",
