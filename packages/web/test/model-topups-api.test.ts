@@ -384,7 +384,7 @@ test("a second completed purchase increases the same lifetime cap without cleari
   })
   keys.get("wallet_key_1")!.data.usage = 29.6
   expect(await balance()).toMatchObject({ purchased: { state: "low" }, empty: false, low: true })
-  // Too few for the cheapest full reply in the catalog (Xiaomi MiMo V2.6 Flash's 16,384 output tokens).
+  // Too few for the smallest request reservation in the reviewed catalog.
   keys.get("wallet_key_1")!.data.usage = 29.996
   expect(await balance()).toMatchObject({ access: true, purchased: { state: "used" }, empty: true, low: false })
 })

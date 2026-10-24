@@ -58,6 +58,17 @@ export function auditModelPlanCatalog(
           : []),
         ...(!endpoint.tag.trim() || !endpoint.provider_name.trim() ? ["missing provider identity"] : []),
         ...(!supportsTools(endpoint.supported_parameters) ? ["missing tools/tool_choice"] : []),
+        ...(!endpoint.supported_parameters.includes(configured.outputTokenParameter ?? "max_tokens")
+          ? ["missing the configured output-token parameter"]
+          : []),
+        ...(configured.reasoningEffort && !endpoint.supported_parameters.includes("reasoning")
+          ? ["missing pinned reasoning support"]
+          : []),
+        ...(configured.explicitCache &&
+        (rate(endpoint.pricing.input_cache_read) === undefined ||
+          rate(endpoint.pricing.input_cache_write) === undefined)
+          ? ["missing explicit-cache pricing"]
+          : []),
         // The gateway requires every option it forwards, so an endpoint missing one is never routed a request that
         // sets it. Without its own list a model forwards the gateway's default options.
         ...((configured.options ?? MODEL_PLAN_OPTIONS).some((option) => !endpoint.supported_parameters.includes(option))
@@ -137,11 +148,11 @@ function withinPricingLimits(pricing: Readonly<Record<string, unknown>>, configu
     }
     const price = rate(value)
     if (price === undefined) return false
-    // The gateway turns off OpenRouter's web plugin and accepts only function tools, so no request can buy a search.
-    if (key === "web_search") return true
+    // The gateway rejects media and native add-ons; these rates cannot apply to its text/function-tool requests.
+    if (["web_search", "image", "audio", "input_audio_cache"].includes(key)) return true
     if (key === "discount") return price <= 1
     if (key === "prompt" || key.startsWith("input_cache_")) return price * 1_000_000 <= configured.inputPrice
-    if (key === "completion") return price * 1_000_000 <= configured.outputPrice
+    if (key === "completion" || key === "internal_reasoning") return price * 1_000_000 <= configured.outputPrice
     return price === 0
   })
 }

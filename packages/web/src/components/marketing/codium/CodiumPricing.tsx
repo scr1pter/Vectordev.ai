@@ -563,7 +563,11 @@ export function CodiumQuestions(props: { models: CodiumPricingView["models"] }) 
       question: "Which models are included, and where do my requests go?",
       answer: (
         <React.Fragment>
-          <p>Every plan and top-up includes the same coding models, and Vector never switches models for you.</p>
+          <p>
+            Every plan and top-up includes the same {props.models.length} coding models.
+            {props.models[0] && ` ${props.models[0].name} is the recommended default; you choose which model to use.`}
+            {names("advanced") && " The advanced models use credits faster."}
+          </p>
           <ul>
             {props.models.map((model) => (
               <li key={model.id}>
@@ -573,10 +577,9 @@ export function CodiumQuestions(props: { models: CodiumPricingView["models"] }) 
             ))}
           </ul>
           <p>
-            Codium requests, including the code and tool output a task sends, go through Vector and OpenRouter to a
-            provider serving the model you picked. Vector asks OpenRouter to route them only to zero-data-retention
-            endpoints that don't collect data for training. Review the <a href="/legal/privacy#codium">privacy policy</a>{" "}
-            before sending code.
+            Codium requests, including the code and tool output a task sends, go through Vector to a provider serving
+            the model you picked. Vector routes them only to zero-data-retention endpoints that don't collect data for
+            training. Review the <a href="/legal/privacy#codium">privacy policy</a> before sending code.
           </p>
         </React.Fragment>
       ),
@@ -723,7 +726,7 @@ function Segmented<T extends string>(props: {
   )
 }
 
-/** "DeepSeek V4.1 Flash: 250–2,500" for each model with a reviewed range of typical tasks, in catalog order. */
+/** Each model's reviewed range of typical tasks, in catalog order. */
 function taskLines(offer: CodiumOffer, models: CodiumPricingView["models"]) {
   return models.flatMap((model, row) => {
     const tasks = offer.tasks[row]
@@ -741,7 +744,10 @@ function planGroups(index: number, tasks: string[]) {
     index === 1
       ? [usage, { label: "Every plan includes", icon: WorkspaceIcon, items: EVERY_PLAN }]
       : index === 2
-        ? [{ label: "In the free Vector workspace", items: WORKSPACE }, { ...usage, icon: TasksIcon }]
+        ? [
+            { label: "In the free Vector workspace", items: WORKSPACE },
+            { ...usage, icon: TasksIcon },
+          ]
         : [usage]
   return groups.filter((group) => group.items.length > 0)
 }

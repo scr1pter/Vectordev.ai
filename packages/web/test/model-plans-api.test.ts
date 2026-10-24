@@ -1077,7 +1077,7 @@ describe("model plan HTTP inference", () => {
         data_collection: "deny",
         zdr: true,
         require_parameters: true,
-        max_price: { prompt: 1, completion: 2, request: 0, image: 0 },
+        max_price: { prompt: 1, completion: 2, request: 0 },
       },
     })
     expect(JSON.stringify(chats()[0]!.body)).not.toContain("strip me")

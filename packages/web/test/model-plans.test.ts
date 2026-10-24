@@ -7,6 +7,7 @@ import {
   modelCreditMarkup,
   publicModelPlans,
   configuredPlanModels,
+  modelPlanRequestCredits,
   requireModelPlans,
 } from "../../../api/_lib/model-plan-config"
 import { modelPlanRequest, requireModelPlanContext, streamModelPlanResponse } from "../../../api/_lib/model-plan-chat"
@@ -93,11 +94,13 @@ describe("subscription configuration", () => {
     expect(publicModelPlans().product).toBe("Vector Codium")
     expect(publicModelPlans()).not.toHaveProperty("markupPercent")
     expect(publicModelPlans().models.map((model) => model.id)).toEqual([
-      "deepseek/deepseek-v4.1-flash",
-      "xiaomi/mimo-v2.6-flash",
+      "deepseek/deepseek-v4.1-flash-1017",
       "anthropic/claude-haiku-5.5",
+      "openai/gpt-6-luna",
+      "moonshotai/kimi-k3.1-pro",
+      "google/gemini-4-argon",
     ])
-    expect(publicModelPlans().catalogUpdated).toBe("2026-10-10")
+    expect(publicModelPlans().catalogUpdated).toBe("2026-10-23")
     expect(() => requireModelPlans()).toThrow("not available yet")
   })
   test("the public configuration carries no credit amounts, model prices or limits", () => {
@@ -132,9 +135,19 @@ describe("subscription configuration", () => {
     expect(original.plans.map((plan) => plan.multiple)).toEqual([undefined, 5, 10, 20])
     expect(original.plans[0]!.tasks).toEqual([
       [50, 500],
-      [80, 800],
       [30, 300],
+      [60, 600],
+      [5, 50],
+      [5, 50],
     ])
+  })
+  test("premium models reserve their full context and reply at the reviewed prices", () => {
+    delete process.env.MODEL_PLAN_MODELS_JSON
+    for (const id of ["moonshotai/kimi-k3.1-pro", "google/gemini-4-argon"]) {
+      const model = configuredPlanModels().find((model) => model.id === id)!
+      expect(modelPlanRequestCredits(model)).toBeCloseTo(0.33792, 8)
+      expect(model.description).toContain("Uses credits faster")
+    }
   })
   test("markup is configurable and never rounds credits above the purchased allowance", () => {
     names.forEach((name) => delete process.env[name])
@@ -302,11 +315,26 @@ describe("gateway request policy", () => {
         expect(() => requireModelPlanContext(body, model)).not.toThrow()
         continue
       }
-      expect(body.provider.quantizations).toEqual(["fp8", "bf16"])
+      expect(body.provider).toMatchObject({ zdr: true, data_collection: "deny", require_parameters: true })
+      expect(body.provider.quantizations).toEqual(model.quantizations)
       expect(body.tool_choice).toBe("required")
-      expect(body).toHaveProperty("temperature", 0.2)
-      expect(body.reasoning).toEqual(model.id.startsWith("deepseek/") ? { effort: "high" } : undefined)
-      expect(JSON.stringify(body)).not.toContain("cache_control")
+      expect(body.reasoning).toEqual({ effort: "high" })
+      if (model.id === "deepseek/deepseek-v4.1-flash-1017" || model.id === "google/gemini-4-argon")
+        expect(body).toHaveProperty("temperature", 0.2)
+      else expect(body).not.toHaveProperty("temperature")
+      if (model.id === "openai/gpt-6-luna") {
+        expect(body).not.toHaveProperty("max_tokens")
+        expect(body).toHaveProperty("max_completion_tokens", 8192)
+        expect(body.prompt_cache_options).toEqual({ mode: "explicit", ttl: "30m" })
+        expect(JSON.stringify(body.messages)).toContain('"prompt_cache_breakpoint":{"mode":"explicit"}')
+        expect(JSON.stringify(body.messages)).not.toContain("cache_control")
+        expect(() => requireModelPlanContext(body, model)).not.toThrow()
+      }
+      if (model.id === "google/gemini-4-argon") {
+        expect(JSON.stringify(body.messages)).toContain('"cache_control":{"type":"ephemeral"}')
+        expect(body).not.toHaveProperty("prompt_cache_options")
+      }
+      if (!model.explicitCache) expect(JSON.stringify(body)).not.toContain("cache_control")
     }
   })
 
@@ -342,6 +370,43 @@ describe("gateway request policy", () => {
     ).toEqual([{ role: "user", content: "fix" }])
   })
 
+  test("the configured output parameter caps every model and client cache settings cannot override policy", () => {
+    const models = configuredPlanModels()
+    for (const model of models) {
+      const body = modelPlanRequest(
+        {
+          model: model.id,
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: "Fix the parser",
+                  prompt_cache_breakpoint: { ttl: "12h" },
+                  cache_control: { ttl: "1h" },
+                },
+              ],
+            },
+          ],
+          max_tokens: 1_000_000,
+          max_completion_tokens: 1_000_000,
+          prompt_cache_options: { mode: "automatic", ttl: "12h" },
+          tool_choice: { type: "function", function: { name: "read" } },
+        },
+        models,
+      )
+      expect(body).toHaveProperty(model.outputTokenParameter ?? "max_tokens", model.maxOutputTokens)
+      expect(JSON.stringify(body)).not.toMatch(/12h|1h|automatic/)
+      if (model.autoToolChoice) expect(body.tool_choice).toBe("auto")
+      if (model.id === "openai/gpt-6-luna") {
+        expect(() =>
+          requireModelPlanContext({ ...body, messages: [{ role: "user", content: "x".repeat(600_000) }] }, model),
+        ).toThrow(expect.objectContaining({ code: "MODEL_PLAN_CONTEXT" }))
+      }
+    }
+  })
+
   test("preserves bounded retry timing without exposing upstream billing errors", async () => {
     for (const status of [402, 429]) {
       const response = new ServerResponse(new IncomingMessage(new Socket()))
@@ -369,12 +434,12 @@ describe("gateway request policy", () => {
       },
       [model],
     )
-    expect(result.max_tokens).toBe(8192)
+    expect(result).toHaveProperty("max_tokens", 8192)
     expect(result.provider).toEqual({
       data_collection: "deny",
       zdr: true,
       require_parameters: true,
-      max_price: { prompt: 0.1, completion: 0.3, request: 0, image: 0 },
+      max_price: { prompt: 0.1, completion: 0.3, request: 0 },
     })
     expect(result.messages).toEqual([{ role: "user", content: "fix it" }])
     expect(result).not.toHaveProperty("apiKey")

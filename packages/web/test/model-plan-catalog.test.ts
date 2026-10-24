@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { MODEL_PLAN_OPTIONS } from "../../../api/_lib/model-plan-config"
+import { configuredPlanModels, MODEL_PLAN_OPTIONS } from "../../../api/_lib/model-plan-config"
+import snapshot from "./fixtures/codium-endpoints-2026-10-23.json"
+import { catalogBody } from "../../engine/script/release-catalog"
 import { auditModelPlanCatalog } from "../scripts/model-plan-catalog"
 
 const configured = {
@@ -22,11 +24,42 @@ const endpoint = {
   context_length: 256000,
   max_completion_tokens: 32768,
   pricing: { prompt: "0.0000003", completion: "0.0000012", input_cache_read: "0.00000003", discount: 0 },
-  supported_parameters: [...MODEL_PLAN_OPTIONS],
+  supported_parameters: [...MODEL_PLAN_OPTIONS, "max_tokens"],
   status: 0,
 }
 
 describe("configured Codium model audit", () => {
+  test("the committed provider mirror contains the reviewed models and remains release-canonical", async () => {
+    const text = await Bun.file(new URL("../public/models/api.json", import.meta.url)).text()
+    expect(catalogBody(text)).toBe(text)
+    const catalog = JSON.parse(text)
+    for (const model of configuredPlanModels()) {
+      expect(catalog.openrouter.models[model.id]).toMatchObject({ id: model.id, name: model.name, tool_call: true })
+    }
+    expect(catalog.openrouter.models["openai/gpt-6-luna"].cost).toMatchObject({
+      input: 0.1,
+      output: 0.5,
+      cache_write: 0.125,
+      tiers: [{ input: 0.2, output: 0.75, tier: { type: "context", size: 272000 } }],
+    })
+    expect(catalog.openrouter.models["anthropic/claude-haiku-5.5"].cost).toMatchObject({
+      input: 0.1,
+      output: 0.5,
+      tiers: [{ input: 0.5, output: 2.5, tier: { type: "context", size: 100000 } }],
+    })
+    expect(catalog.openrouter.models["deepseek/deepseek-v4.1-flash-1017"].cost).toMatchObject({
+      input: 0.3,
+      output: 1.2,
+      cache_read: 0.006,
+    })
+  })
+  test("the reviewed five-model catalog has a compatible ZDR route in the captured public metadata", () => {
+    const results = auditModelPlanCatalog(configuredPlanModels(), snapshot.models, snapshot.endpoints)
+    expect(results.map((result) => ({ model: result.model, ok: result.ok, failures: result.failures }))).toEqual(
+      configuredPlanModels().map((model) => ({ model: model.id, ok: true, failures: [] })),
+    )
+    expect(results.every((result) => result.providers.length === 1)).toBe(true)
+  })
   test("only reviewed precision endpoints qualify when a quantization allowlist is configured", () => {
     const result = auditModelPlanCatalog(
       [{ ...configured, quantizations: ["fp8", "bf16"] }],
@@ -72,7 +105,7 @@ describe("configured Codium model audit", () => {
     { pricing: { ...endpoint.pricing, prompt: "0.00000031" } },
     { pricing: { ...endpoint.pricing, completion: "0.00000121" } },
     { pricing: { ...endpoint.pricing, request: "0.0001" } },
-    { pricing: { ...endpoint.pricing, image: "0.001" } },
+    { pricing: { ...endpoint.pricing, internal_reasoning: "0.000002" } },
     { pricing: { ...endpoint.pricing, input_cache_write: "0.0000004" } },
     { pricing: { ...endpoint.pricing, prompt: "" } },
     { pricing: { ...endpoint.pricing, completion: "NaN" } },
@@ -116,11 +149,11 @@ describe("configured Codium model audit", () => {
   })
 
   test("an endpoint must accept every option the gateway forwards to the model", () => {
-    const tools = { ...endpoint, supported_parameters: ["tools", "tool_choice"] }
+    const tools = { ...endpoint, supported_parameters: ["tools", "tool_choice", "max_tokens"] }
     const result = auditModelPlanCatalog(
       [{ ...configured, options: ["tools", "tool_choice", "stop"] }],
       [model],
-      [tools, { ...endpoint, tag: "stops", supported_parameters: ["tools", "tool_choice", "stop"] }],
+      [tools, { ...endpoint, tag: "stops", supported_parameters: ["tools", "tool_choice", "stop", "max_tokens"] }],
     )[0]
     expect(result.ok).toBe(true)
     expect(result.providers.map((provider) => provider.id)).toEqual(["stops"])
@@ -132,13 +165,70 @@ describe("configured Codium model audit", () => {
         {
           ...endpoint,
           tag: "seedless",
-          supported_parameters: MODEL_PLAN_OPTIONS.filter((option) => option !== "seed"),
+          supported_parameters: [...MODEL_PLAN_OPTIONS.filter((option) => option !== "seed"), "max_tokens"],
         },
         endpoint,
       ],
     )[0]
     expect(defaults.providers.map((provider) => provider.id)).toEqual(["example/fp8"])
     expect(auditModelPlanCatalog([configured], [model], [tools])[0]).toMatchObject({ ok: false, providers: [] })
+  })
+
+  test("requires the output-limit spelling and pinned reasoning the gateway sends", () => {
+    const target = {
+      ...configured,
+      outputTokenParameter: "max_completion_tokens" as const,
+      reasoningEffort: "high" as const,
+    }
+    expect(auditModelPlanCatalog([target], [model], [endpoint])[0].ok).toBe(false)
+    expect(
+      auditModelPlanCatalog(
+        [target],
+        [model],
+        [{ ...endpoint, supported_parameters: [...MODEL_PLAN_OPTIONS, "max_completion_tokens", "reasoning"] }],
+      )[0].ok,
+    ).toBe(true)
+  })
+
+  test("explicit caching requires published read/write prices within the reservation ceiling", () => {
+    const target = { ...configured, explicitCache: true }
+    expect(auditModelPlanCatalog([target], [model], [endpoint])[0].ok).toBe(false)
+    expect(
+      auditModelPlanCatalog(
+        [target],
+        [model],
+        [{ ...endpoint, pricing: { ...endpoint.pricing, input_cache_write: endpoint.pricing.prompt } }],
+      )[0].ok,
+    ).toBe(true)
+    expect(
+      auditModelPlanCatalog(
+        [target],
+        [model],
+        [{ ...endpoint, pricing: { ...endpoint.pricing, input_cache_write: "0.0000004" } }],
+      )[0].ok,
+    ).toBe(false)
+  })
+
+  test("text-only routes can list unused media prices, but reasoning and unknown fees stay bounded", () => {
+    const pricing = {
+      ...endpoint.pricing,
+      image: "0.01",
+      audio: "0.01",
+      input_audio_cache: "0.01",
+      internal_reasoning: endpoint.pricing.completion,
+    }
+    expect(auditModelPlanCatalog([configured], [model], [{ ...endpoint, pricing }])[0].ok).toBe(true)
+    expect(
+      auditModelPlanCatalog(
+        [configured],
+        [model],
+        [{ ...endpoint, pricing: { ...pricing, internal_reasoning: "0.01" } }],
+      )[0].ok,
+    ).toBe(false)
+    expect(
+      auditModelPlanCatalog([configured], [model], [{ ...endpoint, pricing: { ...pricing, unknown_fee: "0.01" } }])[0]
+        .ok,
+    ).toBe(false)
   })
 
   test("accepts zero flat fees but rejects unknown positive fees and malformed pricing overrides", () => {
