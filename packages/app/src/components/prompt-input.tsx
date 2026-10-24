@@ -93,61 +93,27 @@ import { recommendationAvailable, recommendModel } from "@/features/economics/ec
 import { categorizeTask } from "@/features/economics/task-categorizer"
 import {
   DEPTHS,
-  DESCRIPTION as RESEARCH_DESCRIPTION,
-  LABEL as RESEARCH_LABEL,
+  MODES,
   PLACEHOLDER as RESEARCH_PLACEHOLDER,
   PREVIEW,
   SCOPES,
   browserStorage,
   capLabel,
+  modesFor,
   rememberMode,
   rememberedMode,
   scopeLabel,
+  sendMode,
   stickyMode,
   type Depth,
+  type Mode,
 } from "@/features/research/research-model"
-import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import type { Research } from "@vectordevai/schema/research"
+import { LocalStatusPill } from "@/features/local/status-pill"
+import { useLocalStatus } from "@/features/local/use-local"
 import "@/features/research/research.css"
 
 export type PromptInputState = ReturnType<typeof usePrompt>
-
-type ExecutionMode = "normal" | "quick" | "fast" | "research"
-
-// The Mode menu: Normal, Quick, Fast, then Deep research directly under Fast (owner, 22 Oct).
-const EXECUTION_MODES: readonly {
-  id: ExecutionMode
-  label: string
-  description: string
-  dot: string
-  preview?: boolean
-}[] = [
-  {
-    id: "normal" as const,
-    label: "Normal",
-    description: "Standard execution speed and token use.",
-    dot: "#8a8595",
-  },
-  {
-    id: "quick" as const,
-    label: "Quick",
-    description: "Answers simple questions quickly with minimal context and fewer tokens.",
-    dot: "#70c7b1",
-  },
-  {
-    id: "fast" as const,
-    label: "Fast",
-    description: "Targets 1.5x speed with priority capacity and wider parallel execution. Uses more tokens.",
-    dot: "#9b6cff",
-  },
-  {
-    id: "research" as const,
-    label: RESEARCH_LABEL,
-    description: RESEARCH_DESCRIPTION,
-    dot: "#6ea8fe",
-    preview: true,
-  },
-]
 
 export type PromptInputHistory = {
   entries: (mode: "normal" | "shell") => PromptHistoryStoredEntry[]
@@ -661,16 +627,27 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   // The mode is per session. Deep research is sticky: a session whose latest request went to the research agent stays
   // in it, and a new session starts in it when it was the last mode picked in this repository. Normal, Quick and Fast
   // last until the composer changes session, as before.
-  const [pickedModes, setPickedModes] = createStore<Record<string, ExecutionMode>>({})
+  const [pickedModes, setPickedModes] = createStore<Record<string, Mode>>({})
   const modeKey = () => props.controls.session.id ?? `new:${sdk().directory}`
-  const executionMode = createMemo<ExecutionMode>(() => {
-    const picked = pickedModes[modeKey()]
-    if (picked) return picked
-    const id = props.controls.session.id
-    if (id) return stickyMode(sync().data.message?.[id] ?? []) ?? "normal"
-    return rememberedMode(browserStorage(), sdk().directory) ?? "normal"
+  // Vector Local as the engine holds it, for the pill, the Mode menu and the image check on send.
+  const localMode = useLocalStatus()
+  // Where the engine says the selected model's requests go: on a server someone hosts (this computer, the user's network
+  // or the Vector Local list) Fast is hidden, and a research cap is a step count only when the engine counts the
+  // model's steps as having no per-token price.
+  const hosted = createMemo(() => props.controls.model.selection.hosted())
+  const modes = createMemo(() => modesFor(hosted() !== undefined))
+  const sessionTitle = (id: string) => sync().data.session.find((item) => item.id === id)?.title
+  const executionMode = createMemo<Mode>(() => {
+    const chosen = (() => {
+      const picked = pickedModes[modeKey()]
+      if (picked) return picked
+      const id = props.controls.session.id
+      if (id) return stickyMode(sync().data.message?.[id] ?? []) ?? "normal"
+      return rememberedMode(browserStorage(), sdk().directory) ?? "normal"
+    })()
+    return sendMode(chosen, hosted() !== undefined)
   })
-  const setExecutionMode = (mode: ExecutionMode) => {
+  const setExecutionMode = (mode: Mode) => {
     setPickedModes(modeKey(), mode)
     rememberMode(browserStorage(), sdk().directory, mode)
   }
@@ -689,16 +666,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const researching = createMemo(() => executionMode() === "research" && store.mode !== "shell")
   const [researchDepth, setResearchDepth] = createSignal<Depth>("auto")
   const [researchScope, setResearchScope] = createSignal<Research.Scope>("web+brain")
-  // A model on a server the user hosts has no per-token price, so its research cap is a step count.
-  const hostedModel = createMemo(() => {
-    const url = props.controls.model.selection.current()?.api?.url
-    if (!url || !URL.canParse(url)) return false
-    return LocalPolicy.hostClass(new URL(url).hostname) !== "internet"
-  })
   const researchCap = createMemo(() =>
     capLabel({
       depth: researchDepth(),
-      local: hostedModel(),
+      local: hosted()?.local === true,
       own: sync().data.config.budget?.run,
       limits: sync().data.config.research?.limits,
     }),
@@ -1643,9 +1614,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   // Check provider variants directly: `variants` also includes the UI-only default option.
   const showVariantControl = createMemo(() => props.controls.model.selection.variant.list().length > 0)
   const [executionModeMenuOpen, setExecutionModeMenuOpen] = createSignal(false)
-  const executionModeMeta = createMemo(
-    () => EXECUTION_MODES.find((mode) => mode.id === executionMode()) ?? EXECUTION_MODES[0],
-  )
+  const executionModeMeta = createMemo(() => MODES.find((mode) => mode.id === executionMode()) ?? MODES[0])
   const accepting = createMemo(() => {
     const id = props.controls.session.id
     if (!id) return permission.isAutoAcceptingDirectory(sdk().directory)
@@ -1730,6 +1699,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       judgeScope: settings.general.judgeScope,
       autoModelRouting: settings.general.autoModelRouting,
       connectProvider: () => setModelStartNudge((count) => count + 1),
+      localMode: () => localMode.status()?.policy.enabled === true,
       confirmFreeModelTraining: (model) => {
         const client = sdk().client
         return freeModelTrainingGate({
@@ -2380,7 +2350,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                         <MenuV2.Content>
                           <div class="w-[286px] p-1" role="group" aria-label="Mode" data-component="prompt-mode-menu">
                             <div class="px-2 pb-1 pt-1 text-[11px] font-medium text-v2-text-text-faint">Mode</div>
-                            {EXECUTION_MODES.map((mode) => (
+                            {modes().map((mode) => (
                               <button
                                 type="button"
                                 class="flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-white/[0.06]"
@@ -2410,6 +2380,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                         </MenuV2.Content>
                       </MenuV2.Portal>
                     </MenuV2>
+                  </Show>
+                  <Show when={store.mode !== "shell"}>
+                    <LocalStatusPill
+                      reader={localMode}
+                      sessionID={props.controls.session.id}
+                      sessionTitle={sessionTitle}
+                    />
                   </Show>
                 </div>
                 <Show when={micAvailable() && !listening() && !transcribing()}>
@@ -2799,11 +2776,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                         <TooltipV2 placement="top" gutter={4} value={executionModeMeta().description}>
                           <Select
                             size="normal"
-                            options={EXECUTION_MODES.map((mode) => mode.id)}
+                            options={modes().map((mode) => mode.id)}
                             current={executionMode()}
-                            label={(value) => EXECUTION_MODES.find((mode) => mode.id === value)?.label ?? "Normal"}
+                            label={(value) => MODES.find((mode) => mode.id === value)?.label ?? "Normal"}
                             onSelect={(value) => {
-                              setExecutionMode(value as ExecutionMode)
+                              setExecutionMode(value as Mode)
                               restoreFocus()
                             }}
                             class="max-w-[140px] text-text-base"
@@ -2813,6 +2790,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                             variant="ghost"
                           />
                         </TooltipV2>
+                        <LocalStatusPill
+                          reader={localMode}
+                          sessionID={props.controls.session.id}
+                          sessionTitle={sessionTitle}
+                        />
                       </Show>
                     </Show>
                   </div>

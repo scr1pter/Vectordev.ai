@@ -12,6 +12,7 @@ import {
   encodePlanAnswer,
   formatPreference,
   highlights,
+  modesFor,
   ownerOnly,
   planCard,
   planEdits,
@@ -26,6 +27,7 @@ import {
   runChips,
   searchLine,
   segments,
+  sendMode,
   sessionRuns,
   site,
   sizeOf,
@@ -66,6 +68,15 @@ describe("the composer's mode", () => {
     expect(stickyMode([user("m1", "research"), user("m3", "quick", { size: "chat" })])).toBeUndefined()
     expect(stickyMode([user("m1", "research"), user("m3", "build")])).toBeUndefined()
     expect(stickyMode([user("m1", "build"), reply("m2")])).toBeUndefined()
+  })
+
+  test("offers no Fast for a model on a server someone hosts, and sends a Fast picked for another model as Normal", () => {
+    expect(modesFor(false).map((mode) => mode.id)).toEqual(["normal", "quick", "fast", "research"])
+    expect(modesFor(true).map((mode) => mode.id)).toEqual(["normal", "quick", "research"])
+    expect(sendMode("fast", true)).toBe("normal")
+    expect(sendMode("fast", false)).toBe("fast")
+    expect(sendMode("research", true)).toBe("research")
+    expect(sendMode("quick", true)).toBe("quick")
   })
 
   test("maps the Depth chip to the request's size, Auto leaving it to Vector", () => {

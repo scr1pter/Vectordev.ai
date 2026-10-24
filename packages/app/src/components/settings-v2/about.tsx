@@ -3,6 +3,7 @@ import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 import { usePlatform } from "@/context/platform"
 import { useUpdaterAction } from "@/components/updater-action"
 import { updaterPresentation } from "./updater-presentation"
+import { OffInLocal } from "@/features/local/off-in-local"
 import notices from "../../../../../THIRD_PARTY_NOTICES.md?raw"
 import "./settings-v2.css"
 
@@ -61,6 +62,8 @@ export function SettingsAboutV2() {
             )}
           </Show>
         </div>
+
+        <OffInLocal source={["updates", "release-notes"]} named />
 
         <div class="settings-license-buttons">
           <ButtonV2 variant="outline" icon="download" onClick={() => open("/download")}>

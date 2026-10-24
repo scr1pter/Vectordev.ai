@@ -1196,6 +1196,49 @@ describe("image attachments", () => {
     expect(sentPrompts).toHaveLength(0)
     expect(optimistic).toHaveLength(0)
   })
+
+  test("with Vector Local on and no model on the listed servers that reads images, says so and sends nothing", async () => {
+    currentModel = { id: "qwen3:30b", provider: { id: "ollama" } }
+    availableModels = [currentModel, { id: "qwen3:8b", provider: { id: "ollama" } }]
+    const submit = createPromptSubmit({
+      prompt,
+      info: () => undefined,
+      imageAttachments: () => [
+        {
+          type: "image",
+          id: "image",
+          filename: "image.png",
+          mime: "image/png",
+          dataUrl: "data:image/png;base64,iVBORw0KGgo=",
+        },
+      ],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+      localMode: () => true,
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+
+    expect(toasts).toMatchObject([
+      {
+        title: "No model on your servers reads images",
+        description:
+          "With Vector Local on, images go only to models on the servers you listed, and none of them accepts images. Remove the image, or add a vision model on a server you host, then send again.",
+      },
+    ])
+    expect(createdSessions).toHaveLength(0)
+    expect(sentPrompts).toHaveLength(0)
+  })
 })
 
 describe("included model data notice", () => {

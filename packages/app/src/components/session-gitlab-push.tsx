@@ -11,6 +11,7 @@ import { For, Match, Show, Switch, createMemo, createSignal, onCleanup, onMount,
 import { usePlatform } from "@/context/platform"
 import { useSDK } from "@/context/sdk"
 import { showToast } from "@/utils/toast"
+import { OffInLocal } from "@/features/local/off-in-local"
 
 type GitlabPublishResult = {
   ok: boolean
@@ -372,6 +373,9 @@ export function DialogGitlabPush(props: { projectPath: string }) {
       description={dialogDescription()}
       class="w-full max-w-[560px] mx-auto [&_[data-slot=dialog-body]]:min-h-0 [&_[data-slot=dialog-body]]:overflow-y-auto [&_[data-slot=dialog-body]]:overscroll-contain"
     >
+      <div class="px-6 empty:hidden">
+        <OffInLocal source="gitlab" named />
+      </div>
       <Switch>
         <Match when={mode() === "checking"}>
           <div class="flex items-center justify-center gap-3 p-10">
@@ -398,8 +402,8 @@ export function DialogGitlabPush(props: { projectPath: string }) {
             <Icon name="gitlab" size="large" />
             <div class="text-16-medium text-text-strong">Connect GitLab</div>
             <p class="max-w-[380px] text-13-regular text-text-weak">
-              Authorize Vector with your GitLab account to create GitLab projects and push this repository. No command-line tools
-              required.
+              Authorize Vector with your GitLab account to create GitLab projects and push this repository. No
+              command-line tools required.
             </p>
             <Show when={authError()}>
               <div class="w-full rounded-lg border border-[rgba(236,94,94,0.35)] bg-[rgba(236,94,94,0.08)] px-4 py-3 text-12-regular text-text-strong">

@@ -12,6 +12,7 @@ import { type Accessor, batch, createMemo, For, Show } from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { Link } from "@/components/link"
 import { useServerSDK } from "@/context/server-sdk"
+import { useServer } from "@/context/server"
 import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
 import {
@@ -30,16 +31,21 @@ import {
 } from "./dialog-custom-provider-form"
 import { saveCustomProvider } from "./dialog-custom-provider-save"
 import { DialogSelectProvider } from "./dialog-select-provider"
+import { useLocalChange } from "@/features/local/allow-dialog"
+import { enginePlace, listServer, probeServer } from "@/features/local/local-model"
 
 type Props = {
   back?: "providers" | "close"
   directory?: Accessor<string | undefined>
   /**
-   * Find servers: the engine's search of its own computer (loopback only). The dialog shows Find servers only when a
-   * caller passes it, since the search runs where the engine runs, not in this window.
+   * Find servers: the engine's search of its own computer (loopback only), since the search runs where the engine
+   * runs, not in this window. Without it the dialog asks the engine through the Local API (POST /local/detect).
    */
   detect?: () => Promise<readonly LocalProbe.Server[]>
-  /** Reads the server at a typed address through the engine, for Identify, with the key and headers typed here. */
+  /**
+   * Reads the server at a typed address through the engine, for Identify, with the key and headers typed here.
+   * Without it the dialog asks the engine through the Local API (POST /local/probe).
+   */
   identify?: (input: {
     readonly url: string
     readonly headers: Readonly<Record<string, string>>
@@ -58,6 +64,9 @@ export function DialogCustomProvider(props: Props) {
   const serverSync = useServerSync()
   const serverSDK = useServerSDK()
   const language = useLanguage()
+  const server = useServer()
+  // Find servers asks the engine's computer, which is another one when Vector is connected to a remote server.
+  const place = () => enginePlace(server.isLocal() ? undefined : server.name)
 
   const [form, setForm] = createStore<FormState>({
     providerID: "",
@@ -70,6 +79,20 @@ export function DialogCustomProvider(props: Props) {
     err: {},
   })
   const [search, setSearch] = createStore<Search>({ status: "idle", servers: [], skipped: 0 })
+  const local = useLocalChange()
+  // Finding and reading servers run in the engine, on its own computer; a guest is refused them, as the owner's.
+  const detect =
+    props.detect ??
+    (() =>
+      serverSDK()
+        .client.local.detect({}, { throwOnError: true })
+        .then((result) => result.data.map(probeServer)))
+  const identify =
+    props.identify ??
+    ((input: { readonly url: string; readonly headers: Readonly<Record<string, string>> }) =>
+      serverSDK()
+        .client.local.probe({ url: input.url, headers: { ...input.headers } }, { throwOnError: true })
+        .then((result) => (result.data.server ? probeServer(result.data.server) : undefined)))
   const label = createMemo(() => labels(form))
 
   const existing = () => [
@@ -91,26 +114,21 @@ export function DialogCustomProvider(props: Props) {
   }
 
   const find = async () => {
-    if (!props.detect) return
     setSearch({ status: "looking", servers: [], message: undefined })
-    const servers = await props.detect().catch(() => undefined)
+    const servers = await detect().catch(() => undefined)
     if (!servers) return setSearch({ status: "failed", message: "Vector could not look for servers. Try again." })
     setSearch({
       status: "done",
       servers,
-      message: servers.length
-        ? undefined
-        : "No model server answered on this computer. Start one, or type its address.",
+      message: servers.length ? undefined : `No model server answered ${place()}. Start one, or type its address.`,
     })
     if (servers.length === 1) chooseServer(servers[0])
   }
 
   const identifyTyped = async () => {
-    if (!props.identify || !form.baseURL.trim()) return
+    if (!form.baseURL.trim()) return
     setSearch({ status: "looking", message: undefined })
-    const server = await props
-      .identify({ url: form.baseURL.trim(), headers: identifyHeaders(form) })
-      .catch(() => undefined)
+    const server = await identify({ url: form.baseURL.trim(), headers: identifyHeaders(form) }).catch(() => undefined)
     if (!server) return setSearch({ status: "failed", message: "Nothing Vector recognises answered at this address." })
     setSearch({ status: "done", message: undefined })
     chooseServer(server)
@@ -202,14 +220,22 @@ export function DialogCustomProvider(props: Props) {
 
   const saveMutation = useMutation(() => ({
     mutationFn: async (result: NonNullable<ReturnType<typeof validate>>) => {
-      await saveCustomProvider({
-        client: serverSDK().client,
+      const client = serverSDK().client
+      // The server goes on the Vector Local list through the Local API, which asks first when that loosens it.
+      const outcome = { listing: "" }
+      const saved = await saveCustomProvider({
+        client,
         result,
         directory: props.directory?.(),
         updateConfig: (config) => serverSync().updateConfig(config),
         conflictMessage: language.t("provider.custom.error.providerID.exists"),
+        list: async (server) => {
+          const changed = await local.change(client, listServer(server))
+          if (changed.type === "failed") outcome.listing = changed.message
+          return changed.type === "applied"
+        },
       })
-      return result
+      return { ...result, listed: saved.listed, listing: outcome.listing }
     },
     onSuccess: (result) => {
       dialog.close()
@@ -219,6 +245,12 @@ export function DialogCustomProvider(props: Props) {
         title: language.t("provider.connect.toast.connected.title", { provider: result.name }),
         description: language.t("provider.connect.toast.connected.description", { provider: result.name }),
       })
+      // Saved, but its server is not on the Vector Local list: its models stay off while Vector Local is on.
+      if (result.local && !result.listed)
+        showToast({
+          title: `${result.name} is not on your Vector Local list`,
+          description: `${result.listing ? `${result.listing} ` : ""}Its models stay off while Vector Local is on. Add its server in Settings > Vector Local.`,
+        })
     },
     onError: (err) => {
       const message = err instanceof Error ? err.message : String(err)
@@ -280,18 +312,16 @@ export function DialogCustomProvider(props: Props) {
                 )}
               </For>
             </div>
-            <Show when={props.detect}>
-              <Button
-                type="button"
-                size="small"
-                variant="secondary"
-                class="self-start"
-                disabled={search.status === "looking"}
-                onClick={find}
-              >
-                {search.status === "looking" ? "Looking on this computer…" : "Find servers on this computer"}
-              </Button>
-            </Show>
+            <Button
+              type="button"
+              size="small"
+              variant="secondary"
+              class="self-start"
+              disabled={search.status === "looking"}
+              onClick={find}
+            >
+              {search.status === "looking" ? `Looking ${place()}…` : `Find servers ${place()}`}
+            </Button>
             <Show when={search.servers.length > 1}>
               <div class="flex flex-col gap-1">
                 <For each={search.servers}>
@@ -347,17 +377,15 @@ export function DialogCustomProvider(props: Props) {
                     error={form.err.baseURL}
                   />
                 </div>
-                <Show when={props.identify}>
-                  <Button
-                    type="button"
-                    size="small"
-                    variant="ghost"
-                    disabled={search.status === "looking" || !form.baseURL.trim()}
-                    onClick={identifyTyped}
-                  >
-                    Identify
-                  </Button>
-                </Show>
+                <Button
+                  type="button"
+                  size="small"
+                  variant="ghost"
+                  disabled={search.status === "looking" || !form.baseURL.trim()}
+                  onClick={identifyTyped}
+                >
+                  Identify
+                </Button>
               </div>
               <Show when={label().identity}>
                 <p class="text-12-regular text-text-base">{label().identity}</p>

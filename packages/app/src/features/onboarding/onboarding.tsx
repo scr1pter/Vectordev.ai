@@ -1,4 +1,6 @@
 import { createMemo, For, onCleanup, onMount, Show } from "solid-js"
+import { useDialog } from "@vectordevai/ui/context/dialog"
+import { OffInLocal } from "@/features/local/off-in-local"
 import "./onboarding.css"
 
 // The ambient sky both onboarding surfaces share: purple hues drifting on a
@@ -220,8 +222,15 @@ export const GUIDE_SECTIONS: GuideSection[] = [
         tip: "Run Review changes first, then push — a commit should never contain a diff you haven't read.",
       },
       {
+        title: "Vector Local",
+        where: "Settings → Vector Local, or Models you host in Getting started.",
+        body: "Run Vector's AI features on model servers you or your company host. With Vector Local on, the agent, subagents, the judge, Vectorscope, Deep research and Vector's helpers use only the model servers on your list, Vector blocks its own requests to vectordev.ai and to AI services that are not on your list unless you allow one, and the network log, What Vector sent, shows the requests it made or blocked. Programs the agent runs make their own connections.",
+        tip: "Run a check in Settings → Vector Local after setting it up: it reads every layer and says which one needs attention.",
+      },
+      {
         title: "Settings",
-        where: "The gear or your name at the bottom of the sidebar, Settings in its Help menu, or Cmd+, (Ctrl+, on Windows and Linux).",
+        where:
+          "The gear or your name at the bottom of the sidebar, Settings in its Help menu, or Cmd+, (Ctrl+, on Windows and Linux).",
         body: "Everything about how Vector runs. Providers is where you sign in with ChatGPT or connect your own keys for OpenAI, Anthropic, Google, and more, and Models manages which models appear in your pickers. In the desktop app, Account is where you sign in and see your Vector Codium plan and the credits left, and Spend limits caps what Vector may spend.",
         tip: "Connect a provider with your API key, then switch models per task from the composer's model chip.",
       },
@@ -235,6 +244,14 @@ export function OnboardingProgress(props: {
   onReplayTour: () => void
   onClose: () => void
 }) {
+  const dialog = useDialog()
+  // The third way to connect a model, beside free models and an API key: model servers the person or their company
+  // hosts, set up with the Vector Local wizard. The wizard loads only when it is opened.
+  const hostModels = async () => {
+    props.onClose()
+    const { DialogLocalSetup } = await import("@/features/local/setup-wizard")
+    void dialog.show(() => <DialogLocalSetup />)
+  }
   const doneCount = createMemo(() => props.steps.filter((step) => step.done).length)
   const allDone = createMemo(() => doneCount() === props.steps.length)
 
@@ -294,40 +311,63 @@ export function OnboardingProgress(props: {
             <div class="vprogress-steps">
               <For each={props.steps}>
                 {(step) => (
-                  <div class="vprogress-step" data-done={step.done}>
-                    <span class="vprogress-node" data-done={step.done}>
-                      <Show when={step.done}>
-                        <svg viewBox="0 0 16 16" aria-hidden="true">
-                          <path
-                            d="m3.5 8.5 3 3 6-7"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                          />
-                        </svg>
-                      </Show>
-                    </span>
-                    <div class="vprogress-copy">
-                      <div class="vprogress-step-title">{step.title}</div>
-                      <div class="vprogress-step-detail">{step.detail}</div>
-                    </div>
-                    <Show when={!step.done}>
-                      <div class="vprogress-actions">
-                        <button type="button" class="vprogress-go" onClick={step.onGo}>
-                          {step.cta} →
-                        </button>
-                        <Show when={step.secondary}>
-                          {(secondary) => (
-                            <button type="button" class="vprogress-alt" onClick={secondary().onGo}>
-                              {secondary().label}
-                            </button>
-                          )}
+                  <>
+                    <div class="vprogress-step" data-done={step.done}>
+                      <span class="vprogress-node" data-done={step.done}>
+                        <Show when={step.done}>
+                          <svg viewBox="0 0 16 16" aria-hidden="true">
+                            <path
+                              d="m3.5 8.5 3 3 6-7"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="2"
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                            />
+                          </svg>
                         </Show>
+                      </span>
+                      <div class="vprogress-copy">
+                        <div class="vprogress-step-title">{step.title}</div>
+                        <div class="vprogress-step-detail">{step.detail}</div>
+                      </div>
+                      <Show when={!step.done}>
+                        <div class="vprogress-actions">
+                          <button type="button" class="vprogress-go" onClick={step.onGo}>
+                            {step.cta} →
+                          </button>
+                          <Show when={step.secondary}>
+                            {(secondary) => (
+                              <button type="button" class="vprogress-alt" onClick={secondary().onGo}>
+                                {secondary().label}
+                              </button>
+                            )}
+                          </Show>
+                        </div>
+                      </Show>
+                    </div>
+                    <Show when={step.id === "provider" && !step.done}>
+                      <div class="vprogress-host" data-component="onboarding-models-you-host">
+                        <div class="vprogress-copy">
+                          <div class="vprogress-step-title">Models you host (Vector Local)</div>
+                          <div class="vprogress-step-detail">
+                            Run Vector's AI features on model servers you or your company host, such as Ollama or vLLM.
+                            Vector finds the servers on this computer and checks each model with its tools.
+                          </div>
+                          {/* With Vector Local on, free models are off; the step above still offers them, so say so. */}
+                          <OffInLocal source="vector-free-models" named />
+                        </div>
+                        <button
+                          type="button"
+                          class="vprogress-alt"
+                          data-action="onboarding-models-you-host"
+                          onClick={() => void hostModels()}
+                        >
+                          Set up
+                        </button>
                       </div>
                     </Show>
-                  </div>
+                  </>
                 )}
               </For>
             </div>

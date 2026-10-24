@@ -4329,6 +4329,13 @@ export type PermissionNotFoundError = {
   message: string
 }
 
+export type HostedModel = {
+  providerID: string
+  modelID: string
+  origin: string
+  local: boolean
+}
+
 export type FreeModelConsent = {
   training: boolean
 }
@@ -15706,6 +15713,7 @@ export type ProviderListResponses = {
       reason: "sign-in-paused" | "provider-not-configured" | "disabled" | "no-models" | "off-in-local"
       message: string
     }>
+    hosted?: Array<HostedModel>
   }
 }
 

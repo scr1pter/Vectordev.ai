@@ -15,7 +15,8 @@ import {
   PRESETS,
   validateCustomProvider,
 } from "./dialog-custom-provider-form"
-import { listed, saveCustomProvider } from "./dialog-custom-provider-save"
+import { saveCustomProvider } from "./dialog-custom-provider-save"
+import { listServer } from "../features/local/local-model"
 
 const t = (key: string) => key
 
@@ -347,40 +348,15 @@ describe("per-model fields", () => {
 })
 
 describe("saving a server Vector read", () => {
-  test("adds it to the list once and pins it, keeping the other servers", () => {
-    const current = {
-      endpoints: ["http://10.0.0.5:8000"],
-      pins: { "http://10.0.0.5:8000": { kind: "vllm", version: "0.11.0", models: "sha256:def" } },
-    }
-    expect(listed(current, { origin: OLLAMA.origin, pin: OLLAMA.pin })).toEqual({
-      endpoints: ["http://10.0.0.5:8000", "http://127.0.0.1:11434"],
-      pins: {
-        "http://10.0.0.5:8000": { kind: "vllm", version: "0.11.0", models: "sha256:def" },
-        "http://127.0.0.1:11434": { kind: "ollama", version: "0.12.6", models: "sha256:abc" },
-      },
-    })
-    const again = listed(listed(current, { origin: OLLAMA.origin, pin: OLLAMA.pin }), {
-      origin: OLLAMA.origin,
-      pin: { ...OLLAMA.pin, spki: "key" },
-    })
-    expect(again.endpoints).toEqual(["http://10.0.0.5:8000", "http://127.0.0.1:11434"])
-    expect(again.pins?.["http://127.0.0.1:11434"]?.spki).toBe("key")
-  })
-
-  test("reads the global list, not the merged config, and writes provider and list in one global update", async () => {
-    const requests: string[] = []
-    const updates: Config[] = []
+  test("through the Local API, writes the provider alone and lists the server only once the owner agrees", async () => {
     const client = createVectorClient({
       baseUrl: "http://fixture.test",
       fetch: Object.assign(
         async (source: RequestInfo | URL, init?: RequestInit) => {
           const request = source instanceof Request ? source : new Request(source, init)
           const pathname = new URL(request.url).pathname
-          requests.push(`${request.method} ${pathname}`)
           if (pathname === "/provider") return Response.json({ all: [], connected: [], default: {} })
-          // The merged config also holds a company's servers, which must not be copied into the user's file.
-          if (pathname === "/config") return Response.json({ local: { endpoints: ["https://company.example.com"] } })
-          if (pathname === "/global/config") return Response.json({ local: { endpoints: ["http://10.0.0.5:8000"] } })
+          if (pathname === "/config") return Response.json({})
           if (pathname.startsWith("/auth/")) return Response.json(false)
           throw new Error(`Unexpected request: ${request.method} ${pathname}`)
         },
@@ -388,23 +364,33 @@ describe("saving a server Vector read", () => {
       ),
     })
     const result = validateCustomProvider({ form: applyServer(empty(), OLLAMA).form, t }).result!
-    await saveCustomProvider({
-      client,
-      result,
-      conflictMessage: "Choose a different ID",
-      updateConfig: async (config) => {
-        updates.push(config)
-      },
-    })
-    expect(requests).toContain("GET /global/config")
-    expect(updates).toEqual([
-      {
-        provider: { ollama: result.config },
-        local: {
-          endpoints: ["http://10.0.0.5:8000", "http://127.0.0.1:11434"],
-          pins: { "http://127.0.0.1:11434": { kind: "ollama", version: "0.12.6", models: "sha256:abc" } },
+    const save = async (agree: boolean) => {
+      const updates: Config[] = []
+      const listed: unknown[] = []
+      const saved = await saveCustomProvider({
+        client,
+        result,
+        conflictMessage: "Choose a different ID",
+        updateConfig: async (config) => {
+          updates.push(config)
         },
+        list: async (server) => {
+          listed.push(listServer(server))
+          return agree
+        },
+      })
+      return { updates, listed, saved }
+    }
+    const agreed = await save(true)
+    // The list never goes through the config file, which would only hold it while Vector Local is on.
+    expect(agreed.updates).toEqual([{ provider: { ollama: result.config } }])
+    expect(agreed.listed).toEqual([
+      {
+        endpoints: { add: ["http://127.0.0.1:11434"] },
+        pins: { "http://127.0.0.1:11434": { kind: "ollama", version: "0.12.6", models: "sha256:abc" } },
       },
     ])
+    expect(agreed.saved).toEqual({ listed: true })
+    expect((await save(false)).saved).toEqual({ listed: false })
   })
 })

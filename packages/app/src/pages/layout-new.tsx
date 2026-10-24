@@ -64,6 +64,8 @@ import { agentReviewCopy, agentRuntimeLabel, type AgentRuntime } from "@/feature
 import { useSettings } from "@/context/settings"
 import { agentCostLabel, type TeamConversation } from "@/features/agents/agent-dashboard-model"
 import { ExternalRuntimeSetupPanel } from "@/features/agents/external-runtime-setup"
+import { OffInLocal } from "@/features/local/off-in-local"
+import { useLocalStatus } from "@/features/local/use-local"
 import {
   externalRuntimeReady,
   externalRuntimeSetup,
@@ -630,6 +632,10 @@ export default function NewLayout(props: ParentProps) {
   const [parallelCompareRuntimes, setParallelCompareRuntimes] = createSignal(false)
   const [externalAgentStatuses, setExternalAgentStatuses] = createSignal<ExternalAgentStatus[]>([])
   const [externalAgentsChecking, setExternalAgentsChecking] = createSignal(false)
+  // Claude Code, Codex and Cursor make their own connections, which Vector Local does not see, so they do not start
+  // while it is on (desktop main refuses them too). Their tiles stay, labelled Off in Vector Local.
+  const localReader = useLocalStatus()
+  const externalOffInLocal = () => localReader.status()?.policy.enabled === true
   const [parallelFilter, setParallelFilter] = createSignal("")
   const [parallelBusy, setParallelBusy] = createSignal(false)
   const [parallelError, setParallelError] = createSignal("")
@@ -1388,7 +1394,8 @@ export default function NewLayout(props: ParentProps) {
   const externalRuntimeStatus = (runtime: ParallelAgentRuntime) =>
     runtime === "vector" ? undefined : externalAgentStatuses().find((agent) => agent.id === runtime)
 
-  const externalReady = (runtime: ParallelAgentRuntime) => externalRuntimeReady(externalRuntimeStatus(runtime))
+  const externalReady = (runtime: ParallelAgentRuntime) =>
+    !externalOffInLocal() && externalRuntimeReady(externalRuntimeStatus(runtime))
 
   const parallelRuntimeReady = () =>
     parallelRuntime() === "vector" ? parallelModelOptions().length > 0 : externalReady(parallelRuntime())
@@ -1402,7 +1409,8 @@ export default function NewLayout(props: ParentProps) {
   // runtime that is simply hidden is why this feature read as broken.
   const blockedRuntimes = () =>
     (["claude-code", "codex", "cursor"] as ExternalRuntime[])
-      .filter((runtime) => !externalReady(runtime))
+      // Under Vector Local their Off in Vector Local label says why, not a setup step.
+      .filter((runtime) => !externalOffInLocal() && !externalReady(runtime))
       .map((runtime) => ({ runtime, setup: externalRuntimeSetup(runtime) }))
 
   // Who the collaboration graph is drawn over: teammates already in the picked
@@ -1889,6 +1897,11 @@ export default function NewLayout(props: ParentProps) {
     if (runtimes.includes("vector") && parallelModelOptions().length === 0) {
       setParallelError("Connect an AI provider first — parallel agents run on your own keys.")
       openProviderSettings()
+      return
+    }
+    const offInLocal = externalOffInLocal() ? runtimes.find((runtime) => runtime !== "vector") : undefined
+    if (offInLocal) {
+      setParallelError(`${parallelRuntimeLabel(offInLocal)} does not start while Vector Local is on.`)
       return
     }
     const missingRuntime = runtimes.find((runtime) => runtime !== "vector" && !externalReady(runtime))
@@ -3607,19 +3620,31 @@ export default function NewLayout(props: ParentProps) {
         }
         composer={
           <Show when={record().mergeState === "none"}>
-            <ExternalAgentComposer
-              runtimeLabel={copy().label}
-              value={externalAgentFollowUpDraft(followUpDrafts(), record().id)}
-              running={isParallelWorkspaceRunning(record())}
-              sending={followUpBusy()}
-              resumable={Boolean(record().externalSessionId)}
-              hasConversation={Boolean(record().turns?.some((turn) => turn.role === "agent"))}
-              onInput={(value) =>
-                setFollowUpDrafts((drafts) => withExternalAgentFollowUpDraft(drafts, record().id, value))
+            <Show
+              when={!externalOffInLocal()}
+              fallback={
+                <OffInLocal
+                  source="external-agents"
+                  status={localReader.status()}
+                  client={localReader.client()}
+                  named
+                />
               }
-              onSend={() => void sendWorkspaceFollowUp(record().id)}
-              onStop={() => void stopParallelWorkspace(record().id)}
-            />
+            >
+              <ExternalAgentComposer
+                runtimeLabel={copy().label}
+                value={externalAgentFollowUpDraft(followUpDrafts(), record().id)}
+                running={isParallelWorkspaceRunning(record())}
+                sending={followUpBusy()}
+                resumable={Boolean(record().externalSessionId)}
+                hasConversation={Boolean(record().turns?.some((turn) => turn.role === "agent"))}
+                onInput={(value) =>
+                  setFollowUpDrafts((drafts) => withExternalAgentFollowUpDraft(drafts, record().id, value))
+                }
+                onSend={() => void sendWorkspaceFollowUp(record().id)}
+                onStop={() => void stopParallelWorkspace(record().id)}
+              />
+            </Show>
           </Show>
         }
         actions={
@@ -4291,6 +4316,7 @@ export default function NewLayout(props: ParentProps) {
                         // one that names its blocker reads as a setup step.
                         const reason = () => {
                           if (runtime === "vector") return ready() ? "Ready on your keys" : "No provider connected"
+                          if (externalOffInLocal()) return "Off in Vector Local"
                           if (!globalThis.window?.api) return "Desktop only"
                           if (externalAgentsChecking() && !status()) return "Checking…"
                           if (signedOut()) return "Signed out"
@@ -4313,13 +4339,15 @@ export default function NewLayout(props: ParentProps) {
                               "is-blocked": !ready(),
                             }}
                             title={
-                              signedOut()
-                                ? `${parallelRuntimeLabel(runtime)} is installed but not signed in. Run: ${externalRuntimeSetup(runtime)?.signInCommand ?? ""}`
-                                : ready()
-                                  ? undefined
-                                  : runtime === "vector"
-                                    ? "Connect an AI provider — Vector agents run on your own keys."
-                                    : `${parallelRuntimeLabel(runtime)} is not detected. Install it with: ${externalRuntimeSetup(runtime)?.installCommand ?? ""}`
+                              runtime !== "vector" && externalOffInLocal()
+                                ? `${parallelRuntimeLabel(runtime)} does not start while Vector Local is on.`
+                                : signedOut()
+                                  ? `${parallelRuntimeLabel(runtime)} is installed but not signed in. Run: ${externalRuntimeSetup(runtime)?.signInCommand ?? ""}`
+                                  : ready()
+                                    ? undefined
+                                    : runtime === "vector"
+                                      ? "Connect an AI provider — Vector agents run on your own keys."
+                                      : `${parallelRuntimeLabel(runtime)} is not detected. Install it with: ${externalRuntimeSetup(runtime)?.installCommand ?? ""}`
                             }
                             onClick={() => {
                               setParallelRuntime(runtime)
@@ -4339,9 +4367,19 @@ export default function NewLayout(props: ParentProps) {
                       }}
                     </For>
                   </div>
+                  <Show when={externalOffInLocal()}>
+                    <div class="mt-2" data-component="parallel-external-off-in-local">
+                      <OffInLocal
+                        source="external-agents"
+                        status={localReader.status()}
+                        client={localReader.client()}
+                      />
+                    </div>
+                  </Show>
                   <Show
                     when={
                       isExternalRuntime(parallelRuntime()) &&
+                      !externalOffInLocal() &&
                       (!externalRuntimeStatus(parallelRuntime())?.installed ||
                         externalRuntimeStatus(parallelRuntime())?.signedIn === false)
                     }

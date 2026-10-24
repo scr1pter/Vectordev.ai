@@ -1302,11 +1302,28 @@ export type Info = Types.DeepMutable<Schema.Schema.Type<typeof Info>>
 
 const DefaultModelIDs = Schema.Record(Schema.String, Schema.String)
 
+// A connected model whose requests go to a model server someone hosts (this computer, the user's network or the model
+// server list), read the way the engine sends them (Provider.line): a server added in Vector sets the provider's base
+// URL and leaves the model's `api.url` empty, so a client cannot tell this from the model alone.
+export const HostedModel = Schema.Struct({
+  providerID: ProviderV2.ID,
+  modelID: ModelV2.ID,
+  /** The server's origin. */
+  origin: Schema.String,
+  /**
+   * Whether the run guard counts its steps as `local`, with no per-token price: a server on this computer or a private
+   * one on the list, that passes nothing on, for a model with no price set. Otherwise dollar caps apply to it.
+   */
+  local: Schema.Boolean,
+}).annotate({ identifier: "HostedModel" })
+export type HostedModel = Types.DeepMutable<Schema.Schema.Type<typeof HostedModel>>
+
 export const ListResult = Schema.Struct({
   all: Schema.Array(Info),
   default: DefaultModelIDs,
   connected: Schema.Array(Schema.String),
   unavailable: Schema.optional(Schema.Array(ProviderUnavailable)),
+  hosted: Schema.optional(Schema.Array(HostedModel)),
 })
 export type ListResult = Types.DeepMutable<Schema.Schema.Type<typeof ListResult>>
 

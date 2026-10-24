@@ -13,6 +13,7 @@ import { batch, createEffect, createMemo, startTransition } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useModels } from "@/context/models"
 import { useProviders } from "@/hooks/use-providers"
+import { hostedServer } from "@/features/local/local-model"
 import { Persist, persisted } from "@/utils/persist"
 import {
   cycleModelVariant,
@@ -345,6 +346,11 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const model = {
       ready: models.ready,
       current,
+      /** The model server the engine says the current model's requests go to, when someone hosts it. */
+      hosted: () => {
+        const item = current()
+        return item ? hostedServer(providers.hosted(), { providerID: item.provider.id, modelID: item.id }) : undefined
+      },
       recent,
       list: models.list,
       cycle(direction: 1 | -1) {
