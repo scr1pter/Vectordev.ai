@@ -1202,8 +1202,9 @@ describe("reading sign-in state from an auth probe", () => {
 })
 
 describe("external agent detection through the env seam", () => {
-  // Every agent is looked up in a fake HOME and PATH, so no real CLI on the test
-  // host is ever spawned and no real account is ever probed.
+  // Every agent is looked up in a fake HOME and a PATH of one fake folder. An injected environment never searches the
+  // machine's own folders (/opt/homebrew/bin, /usr/local/bin and the rest), so no real CLI on the test host is ever
+  // spawned and no real account is ever probed. The fakes use shell built-ins only, so they need nothing else on PATH.
   async function fakeAgents(name: string, scripts: Record<string, string>) {
     const directory = join(root, "detect", name)
     await mkdir(directory, { recursive: true })
@@ -1211,12 +1212,38 @@ describe("external agent detection through the env seam", () => {
       await writeFile(join(directory, cli), `#!/bin/sh\n${body}\n`)
       await chmod(join(directory, cli), 0o755)
     }
-    return { directory, env: { HOME: join(root, "detect", `${name}-home`), PATH: `${directory}:/usr/bin:/bin` } }
+    return { directory, env: { HOME: join(root, "detect", `${name}-home`), PATH: directory } }
+  }
+  // What detection found sits in the fake folder, whatever the test host has installed.
+  const onlyFakes = (agents: Awaited<ReturnType<typeof detectExternalAgents>>, directory: string) => {
+    for (const agent of agents.filter((agent) => agent.path))
+      expect({ id: agent.id, inside: agent.path!.startsWith(`${directory}/`) }).toEqual({ id: agent.id, inside: true })
   }
 
+  test("an injected environment searches only its own PATH and HOME, never the machine's folders", async () => {
+    const env = { HOME: join(root, "detect", "machine-home"), PATH: join(root, "detect", "machine-path") }
+    for (const platform of ["darwin", "linux"] as const) {
+      const machine = await agentCandidatePaths("codex", env, platform)
+      const injected = await agentCandidatePaths("codex", env, platform, false)
+      expect(machine).toContain("/opt/homebrew/bin/codex")
+      for (const path of injected)
+        expect({ path, inside: path.startsWith(`${env.HOME}/`) || path.startsWith(`${env.PATH}/`) }).toEqual({
+          path,
+          inside: true,
+        })
+      expect(injected).toContain(join(env.HOME, ".local", "bin", "codex"))
+    }
+    expect(await agentCandidatePaths("codex", env, "darwin")).toContain(
+      "/Applications/ChatGPT.app/Contents/Resources/codex",
+    )
+    // Without a HOME of its own, an injected environment has only its PATH.
+    expect(await agentCandidatePaths("codex", { PATH: env.PATH }, "linux", false)).toEqual([join(env.PATH, "codex")])
+  })
+
   test("reports every catalog agent in order, then VS Code, without throwing", async () => {
-    const { env } = await fakeAgents("none", {})
+    const { directory, env } = await fakeAgents("none", {})
     const agents = await detectExternalAgents({ env, platform: "linux" })
+    onlyFakes(agents, directory)
     expect(agents.map((agent) => agent.id)).toEqual([...ExternalAgent.catalog.map((agent) => agent.id), "vscode"])
     for (const agent of agents) {
       expect(agent).toMatchObject({ installed: false, state: "not-installed" })
@@ -1231,9 +1258,10 @@ describe("external agent detection through the env seam", () => {
       codex: `case "$1" in --version) echo "codex-cli 0.164.0";; login) echo "Logged in using ChatGPT";; esac`,
       kilo: `case "$1" in --version) echo "7.8.17";; auth) printf 'Credentials\\n\\n0 credentials\\n';; esac`,
       // Any call other than --version leaves a mark: Gemini CLI documents no status command, so none may run.
-      gemini: `[ "$1" = "--version" ] && echo "0.65.0" && exit 0; touch "${join(root, "detect", "gemini-probed")}"`,
+      gemini: `[ "$1" = "--version" ] && echo "0.65.0" && exit 0; : > "${join(root, "detect", "gemini-probed")}"`,
     })
     const agents = await detectExternalAgents({ env, platform: "linux" })
+    onlyFakes(agents, directory)
     const by = (id: string) => agents.find((agent) => agent.id === id)!
     expect(by("claude-code")).toMatchObject({ state: "signed-out", signedIn: false, version: "2.1.215 (Claude Code)" })
     expect(by("claude-code").path).toBe(join(directory, "claude"))
@@ -1393,7 +1421,15 @@ describe("commands for the built-in terminal", () => {
     const windows = await agentCommands("claude-code", { env, platform: "win32", directory: join(root, "setup") })
     expect(windows.install.map((option) => option.id)).toEqual(["powershell", "winget"])
     expect(windows.install[0]!.launch).toMatchObject({ command: "powershell.exe", env: {} })
-    expect(windows.install[0]!.launch.args.slice(0, 2)).toEqual(["-NoProfile", "-Command"])
+    expect(windows.install[0]!.launch.args.slice(0, 2)).toEqual(["-NoProfile", "-EncodedCommand"])
+    // Base64 carries no quote for the Windows command line to rewrite, so a vendor line with its own nested double
+    // quotes reaches PowerShell as written.
+    const codex = await agentCommands("codex", { env, platform: "win32", directory: join(root, "setup") })
+    const powershell = codex.install.find((option) => option.id === "powershell")!
+    expect(powershell.launch.args[2]).toMatch(/^[A-Za-z0-9+/]+=*$/)
+    const encoded = Buffer.from(powershell.launch.args[2]!, "base64").toString("utf16le").split("\n")
+    expect(encoded[0]).toBe('powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"')
+    expect(encoded.at(-1)).toBe("exit $code")
   })
 
   test("sign-in runs the installed command it found, and an interactive one carries its hint", async () => {

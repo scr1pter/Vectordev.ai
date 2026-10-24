@@ -136,6 +136,9 @@ describe("copy", () => {
     expect(modelFlag(agent("claude-code"))).toBe("--model")
     expect(modelFlag(agent("gemini"))).toBe("-m")
     expect(modelFlag(agent("muse-code"))).toBeUndefined()
+    // Droid's exec takes -m, but its own screen in the terminal has no model flag, so no model choice is offered.
+    expect(modelFlag(agent("droid"))).toBeUndefined()
+    expect(agent("droid").models.kind).toBe("none")
   })
 })
 

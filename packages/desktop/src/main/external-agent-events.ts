@@ -73,9 +73,9 @@ export function redactAgentOutput(value: string) {
   return value.replace(SECRET_VALUE_PATTERN, "$1[redacted]").replace(BEARER_PATTERN, "$1[redacted]")
 }
 
-// The family of a chat runtime's event stream. A runtime with no headless form never reaches a reader: the runner
-// refuses it first.
-function parserOf(runtime: ExternalAgent.ChatId) {
+// The family of an agent's event stream. A reader follows the catalog's parser id, not the agent's tier, so a reader
+// stays tested while its agent runs in the terminal (Amp); the runner refuses anything that is not chat first.
+function parserOf(runtime: ExternalAgent.Id) {
   const parser = ExternalAgent.find(runtime)?.headless?.parser
   if (!parser) throw new Error(`"${String(runtime).slice(0, 40)}" has no event stream Vector can read.`)
   return parser
@@ -187,7 +187,7 @@ function transcript(roots: string[]) {
   return { messages, activity, message, tool, settle }
 }
 
-export function createAgentChat(runtime: ExternalAgent.ChatId, roots: string[] = []) {
+export function createAgentChat(runtime: ExternalAgent.Id, roots: string[] = []) {
   const chat = transcript(roots)
   const read = reader(parserOf(runtime), chat)
   return (line: string): AgentChat => {
@@ -465,7 +465,7 @@ export function summaryFromAgentLine(line: string) {
 // absent than guessed at. pi is the exception: its id sits on the session
 // header ({"type":"session","id":…}), and every later record has an `id` of
 // its own, so only that header counts.
-export function sessionFromAgentLine(line: string, runtime?: ExternalAgent.ChatId) {
+export function sessionFromAgentLine(line: string, runtime?: ExternalAgent.Id) {
   const event = parseAgentJson(line)
   if (runtime && parserOf(runtime) === "pi") return event?.type === "session" ? textAt(event, ["id"]) : undefined
   return textAt(event, ["session_id", "thread_id", "sessionId", "threadId", "chat_id", "chatId"])
@@ -478,7 +478,7 @@ export function sessionFromAgentLine(line: string, runtime?: ExternalAgent.ChatI
 // by turn.failed or an exit. Claude Code, Cursor, Qwen Code and Amp end on
 // `result` (is_error on failure), Gemini CLI on `result` (status "error" on
 // failure), and pi on agent_settled, once it has no retry or queued work left.
-export function agentTurnFinished(runtime: ExternalAgent.ChatId, line: string): AgentTurnFinish | undefined {
+export function agentTurnFinished(runtime: ExternalAgent.Id, line: string): AgentTurnFinish | undefined {
   const event = parseAgentJson(line)
   if (!event) return undefined
   const parser = parserOf(runtime)
@@ -499,7 +499,7 @@ export function agentTurnFinished(runtime: ExternalAgent.ChatId, line: string): 
 // words. Claude Code, Cursor and Codex mark it is_error on any event (Codex's turn.failed carries error.message), Qwen
 // Code and Amp on their result, Gemini CLI with a result of status "error", and pi on its last assistant message
 // (stopReason "error") or a retry that finally failed.
-export function reportedAgentError(runtime: ExternalAgent.ChatId, output: string[], fallback: string) {
+export function reportedAgentError(runtime: ExternalAgent.Id, output: string[], fallback: string) {
   const parser = parserOf(runtime)
   const events = output.map(parseAgentJson).filter((event): event is Record<string, unknown> => Boolean(event))
   if (parser === "gemini") {
@@ -532,7 +532,7 @@ export function reportedAgentError(runtime: ExternalAgent.ChatId, output: string
 // What a run cost as the CLI reported it: the total on Claude Code's result
 // (total_cost_usd), or for pi the sum of what each assistant message cost.
 // One reader per run, since pi's total has to be added up.
-export function costReader(runtime: ExternalAgent.ChatId) {
+export function costReader(runtime: ExternalAgent.Id) {
   const pi = parserOf(runtime) === "pi"
   let total = 0
   return (line: string) => {

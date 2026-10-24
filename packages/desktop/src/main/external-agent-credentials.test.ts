@@ -14,8 +14,12 @@ const ROOTS = ["desktop/src", "app/src", "schema/src"].map((root) => join(PACKAG
 // A path written either way code builds one: "a/b" in a string, or join("a", "b").
 const SEPARATOR = "(?:[/\\\\]|[\"'`]\\s*,\\s*[\"'`])"
 const location = (...segments: string[]) => new RegExp(segments.join(SEPARATOR), "i")
+// gh holds the GitHub token Copilot CLI can sign in with.
 const AGENT_DIRECTORIES =
-  "(?:cline|kilo|goose|github-copilot|copilot|amp|droid|factory|gemini|qwen|kimi|junie|muse|cursor)\\b"
+  "(?:cline|kilo|goose|github-copilot|copilot|gh|amp|droid|factory|gemini|qwen|kimi|junie|muse|cursor)\\b"
+// A dot folder named on its own, as a path segment: after a quote or a separator, so an i18n key such as
+// "session.header.open.app.antigravity" is not one.
+const dotFolder = (name: string) => new RegExp(`(?<=["'\`/\\\\])\\.${name}(?=["'\`/\\\\])`, "i")
 
 const CREDENTIAL_LOCATIONS: [string, RegExp][] = [
   ["~/.claude and ~/.claude.json", /\.claude(?:\.json)?(?=["'`/\\])/],
@@ -29,6 +33,9 @@ const CREDENTIAL_LOCATIONS: [string, RegExp][] = [
   ["~/.junie", /\.junie(?=["'`/\\])/],
   ["~/.muse", /\.muse(?=["'`/\\])/],
   ["~/.pi/agent", location("\\.pi", "agent")],
+  ["~/.cline", dotFolder("cline")],
+  ["~/.kilocode", dotFolder("kilocode")],
+  ["~/.antigravity", dotFolder("antigravity")],
   // Cursor's bin folder is where its CLI lives; anything else under ~/.cursor is its configuration.
   ["Cursor's CLI config", location("\\.cursor", "(?!bin\\b)[\\w.-]+")],
   ["~/.config/<agent>", location("\\.config", AGENT_DIRECTORIES)],
@@ -79,11 +86,21 @@ describe("agent credentials stay out of Vector", () => {
       'join(home, ".local", "share", "kilo")',
       'join(home, ".cursor", "cli-config.json")',
       '"~/.pi/agent/auth.json"',
+      'join(home, ".cline", "data")',
+      "`${home}/.kilocode/cli/config.json`",
+      'join(homedir(), ".antigravity")',
+      'readFile("~/.config/gh/hosts.yml")',
       'execFile("security", ["find-generic-password", "-s", "Claude Code-credentials"])',
     ])
       expect({ read, caught: caught(read) }).toEqual({ read, caught: true })
     // What Vector does touch: an agent's bin folder, and its vendor's web domains.
-    for (const fine of ['join(home, ".cursor", "bin")', "https://code.claude.com/docs", "https://docs.claude.com"])
+    for (const fine of [
+      'join(home, ".cursor", "bin")',
+      "https://code.claude.com/docs",
+      "https://docs.claude.com",
+      '"session.header.open.app.antigravity"',
+      "https://docs.cline.bot/cline-cli/overview",
+    ])
       expect({ fine, caught: caught(fine) }).toEqual({ fine, caught: false })
   })
 

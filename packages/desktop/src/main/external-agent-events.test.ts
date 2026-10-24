@@ -495,6 +495,7 @@ describe("Qwen Code stream-json", () => {
   })
 })
 
+// Amp runs in Vector's terminal until it offers a mode that asks before running tools; its reader stays tested for then.
 describe("Amp stream-json", () => {
   test("the documented tool run becomes its answer and one finished read", () => {
     const chat = replay("amp", AMP_DOCUMENTED).at(-1)!
@@ -566,7 +567,7 @@ describe("Amp stream-json", () => {
       session_id: AMP_SESSION,
     })
     expect(agentTurnFinished("amp", failed)).toBe("failure")
-    expect(agentOutcome("amp", 1, [`[stdout] ${failed}`]).error).toBe("Out of credits")
+    expect(reportedAgentError("amp", [`[stdout] ${failed}`], "fallback")).toBe("Out of credits")
     const system = JSON.stringify({
       type: "system",
       subtype: "error_max_turns",
@@ -576,7 +577,7 @@ describe("Amp stream-json", () => {
     expect(reportedAgentError("amp", [`[stdout] ${system}`, `[stdout] ${failed}`], "fallback")).toBe(
       "Reached the turn limit",
     )
-    expect(agentOutcome("amp", 0, lines(AMP_DOCUMENTED))).toEqual({ exitCode: 0 })
+    expect(reportedAgentError("amp", lines(AMP_DOCUMENTED), "fallback")).toBeUndefined()
   })
 })
 
@@ -679,7 +680,11 @@ describe("the new chat agents through a real local process", () => {
   async function fakeCli(name: string, cli: string, body: string) {
     const directory = join(root, "cli", name)
     await mkdir(directory, { recursive: true })
-    await writeFile(join(directory, cli), `#!/bin/sh\nprintf '%s\\n' "$@" > "${join(directory, "argv")}"\n${body}\n`)
+    // `--version` answers as the vendor's CLI does, since a generic name such as pi counts only with its own version.
+    await writeFile(
+      join(directory, cli),
+      `#!/bin/sh\n[ "$1" = "--version" ] && echo 1.0.0 && exit 0\nprintf '%s\\n' "$@" > "${join(directory, "argv")}"\n${body}\n`,
+    )
     await chmod(join(directory, cli), 0o755)
     return {
       env: { HOME: root, PATH: `${directory}:/usr/bin:/bin` },
@@ -694,7 +699,6 @@ describe("the new chat agents through a real local process", () => {
   const runs = [
     { runtime: "gemini" as const, cli: "gemini", events: GEMINI_EDIT, session: "6f1d2a64-6d2b-4d55-9e3e-0d1f8f0b7c11" },
     { runtime: "qwen" as const, cli: "qwen", events: QWEN_EDIT, session: QWEN_SESSION },
-    { runtime: "amp" as const, cli: "amp", events: AMP_DOCUMENTED, session: AMP_SESSION },
     { runtime: "pi" as const, cli: "pi", events: PI_EDIT, session: PI_SESSION },
   ]
   for (const run of runs) {
@@ -763,9 +767,17 @@ describe("the new chat agents through a real local process", () => {
     }
   }, 20_000)
 
-  test("through a Windows command script, Gemini CLI, Qwen Code and Amp read the prompt from stdin", () => {
+  test("Amp, which runs without asking before tools, never reaches a headless spawn", async () => {
+    const cli = await fakeCli("amp-terminal", "amp", print(AMP_DOCUMENTED))
+    await expect(
+      runExternalCodingAgent({ runtime: "amp" as never, cwd: workspace, prompt: "x", env: cli.env }),
+    ).rejects.toThrow("runs in Vector's terminal only")
+    expect(await Bun.file(join(root, "cli", "amp-terminal", "argv")).exists()).toBe(false)
+  })
+
+  test("through a Windows command script, Gemini CLI and Qwen Code read the prompt from stdin", () => {
     const prompt = "line one\nline two"
-    for (const runtime of ["gemini", "qwen", "amp"] as const) {
+    for (const runtime of ["gemini", "qwen"] as const) {
       const argv = runtimeArguments(runtime, workspace, prompt, undefined, true)
       expect(argv).not.toContain(prompt)
       expect(argv).not.toContain("-p")

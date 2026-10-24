@@ -9,11 +9,8 @@ import type { ExternalRuntime } from "./external-runtimes"
    is chosen straight to the CLI (packages/desktop/src/main/external-agents.ts, runtimeArguments), so a value the CLI
    refuses comes back as the CLI's own error and the workspace goes back to the default. */
 export const EXTERNAL_RUNTIME_MODELS = Object.fromEntries(
-  ExternalAgent.chatIds.map((id) => {
-    const agent = ExternalAgent.find(id)!
-    return [id, { mark: agent.modelMark ?? agent.id, models: catalogModels(agent) }]
-  }),
-) as Record<ExternalRuntime, { mark: string; models: readonly CliModel[] }>
+  ExternalAgent.chatIds.map((id) => [id, { models: catalogModels(ExternalAgent.find(id)!) }]),
+) as Record<ExternalRuntime, { models: readonly CliModel[] }>
 
 type CliModel = ExternalAgent.CliModel
 
@@ -49,9 +46,10 @@ export function agentModels(
     options.current && !listed.some((model) => model.id === options.current)
       ? [{ id: options.current, name: options.current }]
       : []
-  // A provider-shaped row, so the picker draws the agent as its one section with its catalog mark. "custom" marks a
-  // list the host supplies, which the picker never hides as an unsupported provider.
-  const provider = { id: agent.modelMark ?? agent.id, name: agent.name, source: "custom" }
+  // A provider-shaped row, so the picker draws the agent as its one section. Its id is the agent's own, which no
+  // provider mark carries, so the section shows the picker's neutral mark rather than a model maker's logo beside an
+  // agent's name. "custom" marks a list the host supplies, which the picker never hides as an unsupported provider.
+  const provider = { id: agent.id, name: agent.name, source: "custom" }
   return [...listed, ...kept].map((model) => ({ ...model, provider }))
 }
 

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto"
 import { constants } from "node:fs"
 import { access, cp, mkdir, rm, stat } from "node:fs/promises"
 import { homedir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, isAbsolute, join, relative } from "node:path"
 import { StringDecoder } from "node:string_decoder"
 import type { AgentChat } from "./parallel-workspace-turns"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
@@ -95,18 +95,32 @@ export function executableNames(cli: string, platform: NodeJS.Platform = process
 
 // Every path Vector will look at for `cli`, in preference order: the user's own
 // PATH first, then the places package and version managers actually install to.
+// `machineFolders: false` keeps the search to the environment's own PATH and the
+// folders under its own HOME, leaving out this machine's fixed system and app
+// folders (/opt/homebrew/bin, /usr/local/bin, /Applications/…), which no
+// environment names.
 export async function agentCandidatePaths(
   cli: string,
   env: AgentEnvironment = agentEnvironment(),
   platform: NodeJS.Platform = process.platform,
+  machineFolders = true,
 ) {
-  const directories = new Set([
-    ...(env.PATH ?? "").split(pathSeparator(platform)).filter(Boolean),
-    ...toolBinDirectories(env, platform),
-    ...editorBundleDirectories(cli, env, platform),
-    ...versionManagerBinDirectories(env, platform),
-  ])
-  return [...directories].flatMap((directory) => executableNames(cli, platform).map((name) => join(directory, name)))
+  const onPath = (env.PATH ?? "").split(pathSeparator(platform)).filter(Boolean)
+  const home = env.HOME || env.USERPROFILE
+  const directories = [
+    ...new Set([
+      ...onPath,
+      ...toolBinDirectories(env, platform),
+      ...editorBundleDirectories(cli, env, platform),
+      ...versionManagerBinDirectories(env, platform),
+    ]),
+  ].filter((directory) => machineFolders || onPath.includes(directory) || (home ? within(home, directory) : false))
+  return directories.flatMap((directory) => executableNames(cli, platform).map((name) => join(directory, name)))
+}
+
+function within(root: string, path: string) {
+  const inside = relative(root, path)
+  return inside !== "" && !inside.startsWith("..") && !isAbsolute(inside)
 }
 
 async function isExecutableFile(path: string) {
@@ -127,8 +141,9 @@ export async function resolveAgentPath(
   cli: string,
   env: AgentEnvironment = agentEnvironment(),
   platform: NodeJS.Platform = process.platform,
+  machineFolders = true,
 ) {
-  const candidates = await agentCandidatePaths(cli, env, platform)
+  const candidates = await agentCandidatePaths(cli, env, platform, machineFolders)
   // Checked in parallel — a serial walk over this many directories is slow
   // enough to show up in the picker — but order still decides the winner.
   const found = await Promise.all(candidates.map(async (path) => ((await isExecutableFile(path)) ? path : undefined)))
@@ -223,6 +238,10 @@ export function signedInFromCredentialCount(output: string) {
   return /\benvironment\b/i.test(output) ? undefined : false
 }
 
+// `env` is the test seam. An injected environment is searched on its own: its
+// PATH and the folders under its HOME, never this machine's fixed system and app
+// folders, so a test can only ever find, and then probe, the CLIs it put there
+// itself, and never a real agent signed in to a real account.
 export type AgentLookup = { env?: AgentEnvironment; platform?: NodeJS.Platform }
 
 // The first of the agent's binaries that is on this machine and is really this
@@ -233,7 +252,7 @@ export type AgentLookup = { env?: AgentEnvironment; platform?: NodeJS.Platform }
 export async function findAgentBinary(agent: ExternalAgent.Agent, lookup: AgentLookup = {}, readVersion = false) {
   const env = lookup.env ?? agentEnvironment()
   for (const binary of agent.binaries) {
-    const path = await resolveAgentPath(binary.name, env, lookup.platform)
+    const path = await resolveAgentPath(binary.name, env, lookup.platform, !lookup.env)
     if (!path) continue
     // A run only needs the path; the version is spawned for detection and for a name that needs confirming.
     if (!readVersion && !binary.version && !binary.notVersion) return { binary, path, version: undefined }
@@ -276,7 +295,7 @@ async function detectAgent(agent: ExternalAgent.Agent, lookup: AgentLookup): Pro
 
 async function detectEditor(lookup: AgentLookup): Promise<ExternalAgentStatus> {
   const env = lookup.env ?? agentEnvironment()
-  const path = await resolveAgentPath(VSCODE.cli, env, lookup.platform)
+  const path = await resolveAgentPath(VSCODE.cli, env, lookup.platform, !lookup.env)
   if (!path) return { ...VSCODE, tier: "editor", state: "not-installed", installed: false }
   const result = await runCli(path, ["--version"], 5_000, env)
   const version = result.failed ? undefined : (firstLine(result.stdout) ?? firstLine(result.stderr))
@@ -295,10 +314,9 @@ export async function detectExternalAgents(
   options: { refresh?: boolean } & AgentLookup = {},
 ): Promise<ExternalAgentStatus[]> {
   if (!options.env && !options.refresh && cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.result
-  const lookup = {
-    env: options.env ?? (options.refresh ? refreshAgentEnvironment() : undefined),
-    platform: options.platform,
-  }
+  // A refresh replaces the shared environment rather than injecting one, so it still searches the machine's folders.
+  if (options.refresh && !options.env) refreshAgentEnvironment()
+  const lookup = { env: options.env, platform: options.platform }
   // One candidate that cannot be probed must not hide the others.
   const result = await Promise.all([
     ...ExternalAgent.catalog.map((agent) =>
@@ -352,7 +370,7 @@ export async function listAgentModels(
   const list = (async (): Promise<ExternalAgent.ModelList> => {
     const fallback = { id: agent.id, source: "catalog" as const, models: models.fallback }
     const env = options.env ?? agentEnvironment()
-    const found = await findAgentBinary(agent, { env, platform: options.platform })
+    const found = await findAgentBinary(agent, { env: options.env, platform: options.platform })
     if (!found) return { ...fallback, error: `${agent.name} is not installed.` }
     const result = await runCli(
       found.path,
@@ -427,7 +445,11 @@ function jsonValue(text: string): unknown {
 // terminal already starts from a filtered environment, and Vector's login-shell
 // PATH is what makes a just-installed CLI and its Node runtime findable. Windows
 // has no login-shell PATH to add, and a second PATH beside its own Path would
-// make the variable ambiguous, so nothing is passed there.
+// make the variable ambiguous, so nothing is passed there. The PowerShell
+// script goes as -EncodedCommand (base64 of its UTF-16LE text, as open-path.ts
+// does): a vendor command that nests its own double quotes, such as Codex's
+// `powershell -ExecutionPolicy ByPass -c "irm … | iex"`, then reaches
+// PowerShell as written, whatever quoting the Windows command line applies.
 export function terminalLaunch(input: {
   title: string
   display: string
@@ -449,7 +471,7 @@ export function terminalLaunch(input: {
       title: input.title,
       display: input.display,
       command: "powershell.exe",
-      args: ["-NoProfile", "-Command", script],
+      args: ["-NoProfile", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")],
       cwd: input.cwd,
       env,
     }
@@ -494,7 +516,7 @@ export async function agentCommands(
   const platform = catalogPlatform(options.platform ?? process.platform)
   const env = options.env ?? agentEnvironment()
   const cwd = options.directory ?? (await setupDirectory())
-  const found = await findAgentBinary(agent, { env, platform: options.platform })
+  const found = await findAgentBinary(agent, { env: options.env, platform: options.platform })
   const display = found ? ExternalAgent.signInCommand(agent, found.binary.name) : undefined
   return {
     id: agent.id,
@@ -542,7 +564,7 @@ export async function launchAgentTerminal(
   const args = ExternalAgent.interactiveArguments(agent, externalModelValue(input.model))
   const platform = catalogPlatform(options.platform ?? process.platform)
   const env = options.env ?? agentEnvironment()
-  const found = await findAgentBinary(agent, { env, platform: options.platform })
+  const found = await findAgentBinary(agent, { env: options.env, platform: options.platform })
   if (!found) throw new Error(`${agent.name} is not installed, or Vector can't find it.`)
   const workspace = await (options.prepare ?? prepareWorkspace)(input.projectPath)
   return {
@@ -941,7 +963,7 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
   const agent = chatAgent(input.runtime)
   const setup = { label: agent.name }
   const env = input.env ?? agentEnvironment()
-  const found = await findAgentBinary(agent, { env })
+  const found = await findAgentBinary(agent, { env: input.env })
   if (!found) {
     const install = ExternalAgent.installFor(agent, catalogPlatform(process.platform))[0]?.command
     throw new Error(

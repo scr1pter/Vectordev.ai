@@ -43,6 +43,10 @@ describe("external runtime models", () => {
       expect.arrayContaining(["opus", "sonnet", "claude-opus-5-5"]),
     )
     expect(externalRuntimeModels("codex").map((model) => model.id)).toContain("gpt-5.5")
+    // The section carries the agent's own id, which no provider mark has, so no model maker's logo sits beside an
+    // agent's name (owner decision 1: neutral marks for Claude Code and Codex).
+    for (const runtime of runtimes)
+      expect(new Set(externalRuntimeModels(runtime).map((model) => model.provider.id))).toEqual(new Set([runtime]))
     expect(externalRuntimeModels("cursor").map((model) => model.id)).toEqual(
       expect.arrayContaining(["auto", "composer-2.5"]),
     )

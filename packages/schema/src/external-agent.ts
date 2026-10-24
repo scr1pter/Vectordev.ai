@@ -7,8 +7,9 @@ export * as ExternalAgent from "./external-agent"
  * reads, copies or passes an agent's credentials, keychain entries or tokens.
  *
  * Facts come from each vendor's own documentation, linked per entry. An agent is "chat" only once desktop reads its
- * event stream, tested against the vendor's documented examples. The headless forms of the "terminal" agents are kept
- * for that work and have not been run.
+ * event stream, tested against the vendor's documented examples, and its headless form keeps a safe approval default,
+ * since the chat does not show the commands an agent runs. The headless forms of the "terminal" agents are kept for
+ * that work and have not been run.
  */
 
 export const platforms = ["darwin", "linux", "win32"] as const
@@ -139,8 +140,6 @@ export type Agent = {
   headless?: Headless
   interactive: Interactive
   models: Models
-  /** The provider mark the model picker draws beside this agent's models. */
-  modelMark?: string
   logo: Logo
   notes: readonly Note[]
   docsUrl: string
@@ -255,7 +254,6 @@ export const catalog = [
     },
     interactive: { args: [MODEL_FLAG], model: ["--model", MODEL] },
     models: { kind: "fixed", models: CLAUDE_MODELS },
-    modelMark: "anthropic",
     logo: { show: "letters", letters: "CC", tone: "sand", pending: "Anthropic's written permission is needed first." },
     notes: [],
     docsUrl: "https://code.claude.com/docs/en/overview",
@@ -323,7 +321,6 @@ export const catalog = [
     },
     interactive: { args: [MODEL_FLAG], model: ["--model", MODEL] },
     models: { kind: "live", args: ["debug", "models"], read: "json-or-lines", fallback: CODEX_MODELS },
-    modelMark: "openai",
     logo: { show: "letters", letters: "CX", tone: "slate", pending: "OpenAI's co-branding approval is needed first." },
     notes: [],
     docsUrl: "https://developers.openai.com/codex/cli",
@@ -367,7 +364,6 @@ export const catalog = [
     },
     interactive: { args: [MODEL_FLAG], model: ["--model", MODEL] },
     models: { kind: "live", args: ["models"], read: "lines", fallback: CURSOR_MODELS },
-    modelMark: "cursor",
     logo: {
       show: "official",
       letters: "CU",
@@ -719,7 +715,9 @@ export const catalog = [
     id: "pi",
     name: "pi",
     vendor: "Earendil",
-    binaries: [{ name: "pi" }],
+    // `pi` is a generic name (digits-of-pi calculators use it too), so it counts only when `pi --version` prints a
+    // bare version as its first line, which is all pi's main.ts writes (console.log(VERSION)).
+    binaries: [{ name: "pi", version: "^\\s*v?\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?[ \\t]*(?:\\r?\\n|$)" }],
     tier: "chat",
     install: [
       {
@@ -816,8 +814,9 @@ export const catalog = [
       parser: "droid",
       docsUrl: "https://docs.factory.com/reference/cli-reference",
     },
+    // Droid's own screen takes no model flag; the model is picked inside it. `exec -m` above stays for chat.
     interactive: { args: [] },
-    models: { kind: "fixed", models: [] },
+    models: { kind: "none" },
     logo: { show: "letters", letters: "DR", tone: "olive", pending: "No third-party logo permission found." },
     notes: [
       {
@@ -834,7 +833,10 @@ export const catalog = [
     name: "Amp",
     vendor: "Amp",
     binaries: [{ name: "amp" }],
-    tier: "chat",
+    // Stays in the terminal, where the user watches each command run: Amp does not ask before running tools and has
+    // no flag that makes it ask (ampcode.com/docs/tools), and Vector's chat leaves tool arguments out, so in chat it
+    // would run commands unseen. Its event reader in desktop stays tested for when Amp offers a mode that asks.
+    tier: "terminal",
     install: [
       {
         id: "script",
@@ -846,8 +848,7 @@ export const catalog = [
     ],
     signIn: { args: ["login"], interactive: false },
     // The documented forms: `amp --execute "<prompt>" --stream-json`, the same with the prompt piped and no value
-    // after --execute, and `amp threads continue <thread id>` for the session_id of the init message. Amp has no
-    // approval flag; it does not ask before running tools.
+    // after --execute, and `amp threads continue <thread id>` for the session_id of the init message.
     headless: {
       fresh: ["--execute", PROMPT, "--stream-json"],
       resume: ["threads", "continue", SESSION, "--execute", PROMPT, "--stream-json"],
@@ -866,7 +867,7 @@ export const catalog = [
       },
       {
         kind: "terms",
-        text: "Amp does not ask before running tools, so in the isolated copy it can change files and run commands without asking.",
+        text: "Amp does not ask before running tools, so it can change files and run commands in the isolated copy without asking.",
         source: "https://ampcode.com/docs/tools",
       },
     ],

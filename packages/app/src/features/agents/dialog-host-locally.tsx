@@ -295,7 +295,10 @@ function AgentDetail(props: { context: HostLocallyProps; row: () => HostRow; onB
     setListOpen(false)
   }
   const customError = () => customModelError(custom())
-  const chosen = () => custom().trim() || model()
+  // Only an agent with a model flag on the surface it runs on takes a model; any other runs its own default, even
+  // when an earlier pick is remembered.
+  const choosesModel = () => agent().models.kind !== "none" && Boolean(modelFlag(agent()))
+  const chosen = () => (choosesModel() ? custom().trim() || model() : undefined)
 
   // A setup command runs in this window's own terminal, on the engine of the open repository, in the empty folder
   // desktop picked. Leaving the window stops a command still running, so nothing keeps going out of sight.
@@ -460,7 +463,7 @@ function AgentDetail(props: { context: HostLocallyProps; row: () => HostRow; onB
               <section data-slot="host-block" aria-label="Start">
                 <span data-slot="host-label">Model</span>
                 <Show
-                  when={agent().models.kind !== "none"}
+                  when={choosesModel()}
                   fallback={<p data-slot="host-hint">Choose the model inside {agent().name}.</p>}
                 >
                   <Show
@@ -526,7 +529,7 @@ function AgentDetail(props: { context: HostLocallyProps; row: () => HostRow; onB
                     {customError() ??
                       (listed()?.error
                         ? `${agent().name} didn't list its models (${listed()!.error}), so this is Vector's list.`
-                        : `A custom ID goes to ${agent().name} as ${modelFlag(agent()) ?? "its model setting"}, in place of the choice above.`)}
+                        : `A custom ID goes to ${agent().name} as ${modelFlag(agent())}, in place of the choice above.`)}
                   </p>
                 </Show>
               </section>

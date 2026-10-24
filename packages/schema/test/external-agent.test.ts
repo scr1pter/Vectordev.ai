@@ -66,9 +66,10 @@ describe("external agent catalog", () => {
   })
 
   test("only the agents whose event parser ships run in Vector's chat", () => {
-    expect(ExternalAgent.chatIds).toEqual(["claude-code", "codex", "cursor", "gemini", "pi", "amp", "qwen"])
+    // Amp has a reader but stays in the terminal: it does not ask before running tools (owner decision 6).
+    expect(ExternalAgent.chatIds).toEqual(["claude-code", "codex", "cursor", "gemini", "pi", "qwen"])
     expect(ExternalAgent.isChatId("gemini")).toBe(true)
-    for (const id of ["copilot", "antigravity", "muse-code", "kilo", "cline", "droid", "kimi", "goose", "junie"])
+    for (const id of ["copilot", "antigravity", "muse-code", "kilo", "cline", "droid", "amp", "kimi", "goose", "junie"])
       expect(ExternalAgent.isChatId(id)).toBe(false)
     expect(ExternalAgent.isChatId("vector")).toBe(false)
     expect(ExternalAgent.isId("junie")).toBe(true)
@@ -127,6 +128,44 @@ describe("external agent catalog", () => {
       // "Run your installed Claude Code", never "use your <vendor> plan in Vector".
       expect(text).not.toMatch(/\b(?:plan|subscription)s? in Vector\b/i)
     }
+  })
+
+  test("in chat, only an agent that asks before commands, or runs without its shell, may run commands", () => {
+    // Cursor alone keeps --force, as it always ran; pi runs without its shell tools; Amp, which cannot be made to ask,
+    // stays in the terminal where its commands are seen.
+    for (const agent of agents.filter((agent) => agent.tier === "chat")) {
+      const argv = agent.headless!.fresh.join(" ")
+      const guarded =
+        /--permission-mode acceptEdits|--sandbox workspace-write|--approval-mode auto[-_]edit|--exclude-tools bash/.test(
+          argv,
+        ) ||
+        (agent.id === "cursor" && argv.includes("--force"))
+      expect({ id: agent.id, guarded }).toEqual({ id: agent.id, guarded: true })
+    }
+    expect(ExternalAgent.find("amp")!.tier).toBe("terminal")
+  })
+
+  test("a model choice is offered only where the surface the agent runs on has a model flag", () => {
+    for (const agent of agents.filter((agent) => agent.models.kind !== "none")) {
+      const flag = agent.tier === "chat" ? agent.headless?.model : agent.interactive.model
+      expect({ id: agent.id, flag: Boolean(flag) }).toEqual({ id: agent.id, flag: true })
+    }
+    expect(ExternalAgent.find("droid")!.models.kind).toBe("none")
+  })
+
+  test("a generic command name counts as the agent only with the agent's own version output", () => {
+    const pattern = (id: string, name: string) =>
+      new RegExp(ExternalAgent.find(id)!.binaries.find((binary) => binary.name === name)!.version!)
+    const pi = pattern("pi", "pi")
+    // pi's main.ts prints its version alone (console.log(VERSION)); `--version` output here is stdout, a line feed,
+    // then stderr, as desktop reads it.
+    for (const output of ["0.74.1\n\n", "1.0.0\n\n", "1.2.0-beta.3\n\nwarning on stderr", "v1.0.0\r\n\n"])
+      expect({ output, pi: pi.test(output) }).toEqual({ output, pi: true })
+    for (const output of ["pi version 2.1.0\n\n", "3.14159265358979\n\n", "1.2.3 digits\n\n", "\n\n", "1.0\n\n"])
+      expect({ output, pi: pi.test(output) }).toEqual({ output, pi: false })
+    const cursor = pattern("cursor", "agent")
+    expect(cursor.test("2026.09.02-c22c1a3\n\n")).toBe(true)
+    expect(cursor.test("agent 1.4.0\n\n")).toBe(false)
   })
 
   test("only Claude Code, Codex, Cursor and Kilo probe sign-in; the rest stay unknown", () => {
@@ -276,8 +315,9 @@ describe("external agent command builders", () => {
   })
 
   // Each form is the vendor's documented one: geminicli headless.md and cli-reference.md, Qwen Code's headless.md,
-  // ampcode.com/docs/cli/streaming-json and /threads, pi's docs/cli.md and docs/json.md.
-  test("the agents added to chat run their documented headless forms", () => {
+  // ampcode.com/docs/cli/streaming-json and /threads, pi's docs/cli.md and docs/json.md. Amp's form is kept for when
+  // it can run in chat.
+  test("the agents with an event reader have their documented headless forms", () => {
     const gemini = ExternalAgent.find("gemini")!
     const qwen = ExternalAgent.find("qwen")!
     const amp = ExternalAgent.find("amp")!

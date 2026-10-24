@@ -1457,6 +1457,14 @@ export default function NewLayout(props: ParentProps) {
   // Chat runtimes that are not ready, named where a comparison leaves them out.
   const blockedRuntimes = () => EXTERNAL_RUNTIME_IDS.filter((runtime) => !externalReady(runtime))
 
+  // A comparison names every runtime it will start before it starts, and the ones whose sign-in Vector can't check.
+  const comparisonNames = (runtimes: readonly ParallelAgentRuntime[]) => {
+    const names = runtimes.map((runtime) => parallelRuntimeLabel(runtime))
+    return names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : (names[0] ?? "")
+  }
+  const uncheckedComparisonRuntimes = () =>
+    readyComparisonRuntimes().filter((runtime) => externalRuntimeStatus(runtime)?.state === "unknown")
+
   // Host locally: every coding agent Vector can run from the user's own installed command line, with its setup. A
   // chat agent becomes this launcher's runtime; a terminal agent starts at once in the open session's terminal.
   const hostLocallyRows = createMemo(() => hostRows(externalAgentStatuses(), externalAgentsChecking()))
@@ -4554,8 +4562,13 @@ export default function NewLayout(props: ParentProps) {
                   </button>
                   <Show when={parallelCompareRuntimes()}>
                     <p class="mt-1.5 px-1 text-[10px] leading-4 text-amber-100/62">
-                      Comparison runs consume each selected runtime's normal usage. Vector compares verified evidence
-                      and never merges automatically.
+                      Runs {comparisonNames(readyComparisonRuntimes())}, each in its own isolated workspace and on its
+                      own normal usage. Vector compares verified evidence and never merges automatically.
+                      <Show when={uncheckedComparisonRuntimes().length}>
+                        {" "}
+                        Vector can't check whether {comparisonNames(uncheckedComparisonRuntimes())}{" "}
+                        {uncheckedComparisonRuntimes().length > 1 ? "are" : "is"} signed in.
+                      </Show>
                       <Show when={blockedRuntimes().length}>
                         {" "}
                         {blockedRuntimes()
