@@ -22,6 +22,54 @@ const capture = async (page: Page, testInfo: TestInfo, name: string) => {
   await page.screenshot({ path: testInfo.outputPath(name) })
 }
 
+test("the Settings header names the person signed in, with their photo or initials, and Vector when no one is", async ({
+  page,
+}, testInfo) => {
+  const header = page.locator(".settings-v2-brand-row")
+  const box = async () => {
+    const value = await header.boundingBox()
+    return { width: value?.width, height: value?.height }
+  }
+
+  await page.goto("/e2e/fixtures/account-settings.html?account=signed-out")
+  await expect(header).toHaveAttribute("data-identity", "vector")
+  await expect(header.locator("img.settings-v2-brand-mark")).toHaveAttribute("src", "/vector-logo.png")
+  await expect(header.locator(".settings-v2-brand-name")).toHaveText("Vector")
+  await expect(header.locator(".settings-v2-brand-subtitle")).toHaveText("Settings")
+  const vector = await box()
+  await capture(page, testInfo, "settings-header-signed-out.png")
+
+  await page.goto("/e2e/fixtures/account-settings.html?account=photo")
+  await expect(header).toHaveAttribute("data-identity", "account")
+  await expect(header.locator(".settings-v2-brand-name")).toHaveText("Ana Diaz")
+  await expect(header.locator(".settings-v2-brand-subtitle")).toHaveText("Settings")
+  const picture = header.locator("img.settings-v2-brand-avatar")
+  await expect(picture).toHaveAttribute("referrerpolicy", "no-referrer")
+  await expect.poll(() => picture.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0)
+  // The photo takes the logo's place at the logo's size, so the header does not move when the account arrives.
+  expect(await box()).toEqual(vector)
+  await capture(page, testInfo, "settings-header-photo.png")
+
+  await page.goto("/e2e/fixtures/account-settings.html?account=signed-in")
+  await expect(header.locator(".settings-v2-brand-avatar")).toHaveText("AD")
+  await expect(header.locator(".settings-v2-brand-name")).toHaveText("Ana Diaz")
+  expect(await box()).toEqual(vector)
+  await capture(page, testInfo, "settings-header-initials.png")
+
+  await page.goto("/e2e/fixtures/account-settings.html?account=broken")
+  await expect(header.locator(".settings-v2-brand-avatar")).toHaveText("AD")
+  await expect(header.locator("img.settings-v2-brand-avatar")).toHaveCount(0)
+
+  await page.goto("/e2e/fixtures/account-settings.html?account=email")
+  await expect(header.locator(".settings-v2-brand-name")).toHaveText("ana.diaz")
+  await expect(header.locator(".settings-v2-brand-avatar")).toHaveText("AD")
+
+  // Signing out puts Vector back.
+  await page.getByRole("button", { name: "Sign out" }).click()
+  await expect(header).toHaveAttribute("data-identity", "vector")
+  await expect(header.locator(".settings-v2-brand-name")).toHaveText("Vector")
+})
+
 test("Account shows who is signed in and that Codium is coming soon, and nothing can be bought", async ({
   page,
 }, testInfo) => {

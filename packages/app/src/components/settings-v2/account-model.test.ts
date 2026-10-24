@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
-import { accountIdentity, codiumSummary, deletionStep, sameEmail } from "./account-model"
+import { accountIdentity, codiumSummary, deletionStep, sameEmail, settingsIdentity } from "./account-model"
 
 const renewsAt = Date.UTC(2026, 10, 1, 12)
 
@@ -100,6 +100,61 @@ describe("account identity", () => {
       detail: undefined,
     })
     expect(accountIdentity({})).toEqual({ title: "", detail: undefined })
+  })
+})
+
+describe("the Settings header", () => {
+  const photo = "data:image/png;base64,iVBORw0KGgo="
+  const signedIn = { authenticated: true, pending: false }
+
+  test("names the signed-in person beside their photo", () => {
+    expect(settingsIdentity({ ...signedIn, name: "Ana Diaz", email: "ana@example.com", avatar: photo })).toEqual({
+      name: "Ana Diaz",
+      initials: "AD",
+      photo,
+    })
+  })
+
+  test("shows their initials when there is no photo", () => {
+    expect(settingsIdentity({ ...signedIn, name: "Ana Maria Diaz", email: "ana@example.com" })).toEqual({
+      name: "Ana Maria Diaz",
+      initials: "AD",
+      photo: undefined,
+    })
+    expect(settingsIdentity({ ...signedIn, name: "ana", email: "ana@example.com" })?.initials).toBe("A")
+  })
+
+  test("uses the part of the email before the @ when the account has no name", () => {
+    expect(settingsIdentity({ ...signedIn, name: "  ", email: "ana.diaz@example.com" })).toEqual({
+      name: "ana.diaz",
+      initials: "AD",
+      photo: undefined,
+    })
+  })
+
+  test("keeps Vector's logo and name while no one is signed in", () => {
+    expect(settingsIdentity({ authenticated: false, pending: false })).toBeUndefined()
+    expect(settingsIdentity({ authenticated: false, pending: true, email: "ana@example.com" })).toBeUndefined()
+    expect(settingsIdentity({ ...signedIn })).toBeUndefined()
+  })
+
+  test("falls back to the initials when the photo will not load, until a different photo arrives", () => {
+    const other = "data:image/jpeg;base64,/9j/4AAQ"
+    expect(settingsIdentity({ ...signedIn, name: "Ana Diaz", avatar: photo }, photo)).toEqual({
+      name: "Ana Diaz",
+      initials: "AD",
+      photo: undefined,
+    })
+    expect(settingsIdentity({ ...signedIn, name: "Ana Diaz", avatar: other }, photo)?.photo).toBe(other)
+  })
+
+  test("never loads a URL or a non-raster image for the photo", () => {
+    for (const avatar of ["https://example.com/photo.png", "data:image/svg+xml;base64,PHN2Zz4="])
+      expect(settingsIdentity({ ...signedIn, name: "Ana Diaz", avatar })).toEqual({
+        name: "Ana Diaz",
+        initials: "AD",
+        photo: undefined,
+      })
   })
 })
 

@@ -8,7 +8,8 @@ import "../../src/index.css"
 import "../../src/vector-premium.css"
 
 // Settings > Account against a stand-in for the desktop's account bridge. The query picks the account: ?account=
-// signed-out, signed-in (no photo) or photo, ?codium= coming-soon, plan, low, ended, none (on sale, never bought) or
+// signed-out, signed-in (no photo), photo, broken (a photo that will not decode) or email (no name and no photo),
+// ?codium= coming-soon, plan, low, ended, none (on sale, never bought) or
 // error, and ?billing= how the
 // billing window ends (completed, cancelled, closed, website, busy or failed; pending keeps it open until
 // accountFixture.finish() closes it). Links the page opens, billing requests and account actions it takes are kept on
@@ -83,11 +84,12 @@ const signedIn = {
   expiresAt: Date.now() + 86_400_000,
 }
 const initial =
-  query.get("account") === "signed-out"
-    ? { authenticated: false, pending: false }
-    : query.get("account") === "photo"
-      ? { ...signedIn, avatar: photo }
-      : signedIn
+  {
+    "signed-out": { authenticated: false, pending: false },
+    photo: { ...signedIn, avatar: photo },
+    broken: { ...signedIn, avatar: "data:image/png;base64,AAAA" },
+    email: { authenticated: true, pending: false, email: "ana.diaz@example.com", expiresAt: signedIn.expiresAt },
+  }[query.get("account") ?? ""] ?? signedIn
 
 // What /api/model-plans/config lists, by name and price; nothing is available while Codium is coming soon.
 const sale = codium.enabled
