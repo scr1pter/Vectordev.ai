@@ -1905,7 +1905,7 @@ describe("Vector's own installs under Vector Local", () => {
       // Allowed with Web access Ask: the installer runs.
       Egress.configure(LocalPolicy.resolve({ global: { enabled: true, allow: [allowed] } }))
       await Gopls.spawn(dir, {} as never, flags)
-      expect(await Bun.file(ran).text()).toContain("install golang.org/x/tools/gopls@latest")
+      expect((await Bun.file(ran).text()).replaceAll('"', "")).toContain("install golang.org/x/tools/gopls@latest")
     } finally {
       process.env.PATH = PATH
       await rm(dir, { recursive: true, force: true })
