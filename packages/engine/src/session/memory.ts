@@ -166,6 +166,19 @@ export const HOLD = "hold"
  * does not count at all: Vector learns what the user likes only from this.
  */
 export function typed(message: SessionV1.WithParts) {
+  return own(message, true)
+}
+
+/**
+ * What the user sent in a message themselves: what they typed and what they pasted into it, without Vector's synthetic
+ * notes, attached file contents, text from outside or a slash command's template. Where an address or a question came
+ * from reads this, not `typed`: a link the user pasted came from them, though Vector learns nothing from it.
+ */
+export function said(message: SessionV1.WithParts) {
+  return own(message, false)
+}
+
+function own(message: SessionV1.WithParts, unpaste: boolean) {
   return message.parts
     .flatMap((part) => {
       if (part.type !== "text" || part.synthetic || part.ignored) return []
@@ -173,6 +186,7 @@ export function typed(message: SessionV1.WithParts) {
       // the one a line before it such as "Here is the email:" introduces.
       if (outside(part)) return [PASTE_BREAK]
       const found = command(part)
+      if (!unpaste) return [found ? found.arguments : part.text]
       return [
         found ? unpasted(found.arguments, found.pasted) : unpasted(part.text, part.metadata?.[BrainSchema.PASTED]),
       ]
@@ -181,14 +195,23 @@ export function typed(message: SessionV1.WithParts) {
     .trim()
 }
 
-// A typed part's text without the spans the user pasted into it, each left as two blank lines so the words on either
+// A typed part's text without the lines the user pasted into it, each left as two blank lines so the words on either
 // side neither join nor run into a quote across it, and a line before the paste that introduces it ("Bob wrote:")
-// introduces nothing the user typed. Spans that do not fit the text leave nothing of it: a part that says it holds
-// pasted text, but not where, vouches for none of its words.
+// introduces nothing the user typed. A span takes the whole lines it touches: a clause typed around a pasted name
+// ("never push to <main> without a review") would otherwise be learned cut short. Spans that do not fit the text leave
+// nothing of it: a part that says it holds pasted text, but not where, vouches for none of its words.
 function unpasted(text: string, spans: unknown) {
   if (spans === undefined) return text
   if (!Array.isArray(spans) || !spans.every((span) => fits(span, text.length))) return ""
   const cut = (spans as [number, number][])
+    .flatMap(([start, end]): [number, number][] => {
+      const inner = text.slice(start, end)
+      const from = start + inner.length - inner.trimStart().length
+      const to = end - (inner.length - inner.trimEnd().length)
+      if (from >= to) return []
+      const after = text.indexOf("\n", to)
+      return [[from === 0 ? 0 : text.lastIndexOf("\n", from - 1) + 1, after === -1 ? text.length : after]]
+    })
     .toSorted((a, b) => a[0] - b[0])
     .reduce(
       (out, span) => ({
@@ -346,8 +369,9 @@ const WORKING = 20
 
 /**
  * What a request is working on, for recall to bring in what is linked to it: files the last 20 messages edited, wrote,
- * patched, attached or read, files and symbols the request names, and the working tree's changed files. At most
- * `BrainFuse.SEEDS`, strongest first; a file touched several ways counts the strongest way.
+ * patched, attached or read, files and symbols the request names (in what the user pasted too, such as a stack trace),
+ * and the working tree's changed files. At most `BrainFuse.SEEDS`, strongest first; a file touched several ways counts
+ * the strongest way.
  */
 export function workingSet(messages: readonly SessionV1.WithParts[], root: string, changed: readonly string[] = []) {
   const relative = (file: string) =>
@@ -372,7 +396,7 @@ export function workingSet(messages: readonly SessionV1.WithParts[], root: strin
     }),
   )
   const asked = request(messages).flatMap((message) =>
-    BrainAnchor.names({ text: typed(message) }).flatMap((name): BrainFuse.Seed[] => {
+    BrainAnchor.names({ text: said(message) }).flatMap((name): BrainFuse.Seed[] => {
       if (name.kind === "path") return [{ path: relative(name.text), weight: BrainFuse.SEED.attached }]
       if (name.kind === "symbol" || name.kind === "env") return [{ symbol: name.text, weight: BrainFuse.SEED.symbol }]
       return []

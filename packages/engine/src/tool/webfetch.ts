@@ -191,9 +191,9 @@ export const WebFetchTool = Tool.define(
 /**
  * Whether the agent's own choice of `address` asks again under Vector Local's rule for after the web (section 4.4):
  * once the conversation took in anything from outside, an address on a host it has not reached asks, as does one that
- * did not appear in an earlier web result or link. An address the person typed never asks again for this. The ask's
- * pattern starts with PermissionPolicy.AFTER_WEB, so no saved approval, rule or auto-accept answers it. With Vector
- * Local off it never applies.
+ * did not appear in an earlier web result or link. An address the person typed or pasted never asks again for this.
+ * The ask's pattern starts with PermissionPolicy.AFTER_WEB, so no saved approval, rule or auto-accept answers it. With
+ * Vector Local off it never applies.
  *
  * It reads the whole conversation (Tool.Context.history), so a compaction that folded a page away does not end it.
  * Outside content is whatever holds memory for review (SessionMemory.taint): a page, a search, an MCP tool, a remote
@@ -203,10 +203,10 @@ export const WebFetchTool = Tool.define(
  * A subagent works from a brief its launching agent wrote, which carries whatever that agent read: it counts as having
  * read the web from its first step, and nothing in its brief counts as typed by the person.
  *
- * An address with a user name or password in it asks unless the person typed it whole. The browser tool applies this
- * rule to the addresses it opens only: a page it reaches by a click, typing or a form asks by origin alone
- * (browser_interact). Where such a navigation may go is the desktop's to decide, by Web access rather than by this
- * rule (Vector Local in the desktop, phase L7, not built yet).
+ * An address with a user name or password in it asks unless the person typed or pasted it whole. The browser tool
+ * applies this rule to the addresses it opens only: a page it reaches by a click, typing or a form asks by origin
+ * alone (browser_interact). Where such a navigation may go is the desktop's to decide, by Web access rather than by
+ * this rule (Vector Local in the desktop, phase L7, not built yet).
  */
 export const newAddress = Effect.fn("WebFetchTool.newAddress")(function* (
   address: string,
@@ -216,8 +216,8 @@ export const newAddress = Effect.fn("WebFetchTool.newAddress")(function* (
   return unvouched(address, ctx.history ? yield* ctx.history() : ctx.messages, ctx.parentID !== undefined)
 })
 
-// Whether nothing vouches for `address` in a conversation that took in outside content: the person did not type it,
-// or the web did not both give it and serve a page from its host.
+// Whether nothing vouches for `address` in a conversation that took in outside content: the person did not type or
+// paste it, or the web did not both give it and serve a page from its host.
 function unvouched(address: string, messages: readonly SessionV1.WithParts[], launched: boolean) {
   if (!launched && SessionMemory.taint(messages) === undefined) return false
   const url = new URL(address)
@@ -227,8 +227,8 @@ function unvouched(address: string, messages: readonly SessionV1.WithParts[], la
   const forms = credentials
     ? [address.trim(), url.href]
     : [address.trim(), url.href, `${url.host}${url.pathname}${url.search}`]
-  const said = (text: string) => forms.some((form) => text.includes(form))
-  if (!launched && messages.some((message) => message.info.role === "user" && said(SessionMemory.typed(message))))
+  const names = (text: string) => forms.some((form) => text.includes(form))
+  if (!launched && messages.some((message) => message.info.role === "user" && names(SessionMemory.said(message))))
     return false
   if (credentials) return true
   const tools = messages.flatMap((message) => message.parts.flatMap((part) => (part.type === "tool" ? [part] : [])))
@@ -242,7 +242,7 @@ function unvouched(address: string, messages: readonly SessionV1.WithParts[], la
   )
   // Only what the web gave counts as a result: an address the agent wrote itself, in a command's output say, does not.
   const listed = tools.some(
-    (part) => WEB_RESULTS.has(part.tool) && part.state.status === "completed" && said(part.state.output),
+    (part) => WEB_RESULTS.has(part.tool) && part.state.status === "completed" && names(part.state.output),
   )
   return !(reached && listed)
 }

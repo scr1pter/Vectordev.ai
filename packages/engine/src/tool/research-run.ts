@@ -283,11 +283,12 @@ const layer = Layer.effect(
       return yield* Effect.forEach([leader.id, ...children.map((child) => child.id)], (id) => history(ctx, id))
     })
 
-    const typedOf = Effect.fn("ResearchRun.typed")(function* (ctx: Tool.Context) {
+    // What the root user sent themselves: an address or a question they pasted is theirs as much as one they typed.
+    const saidOf = Effect.fn("ResearchRun.said")(function* (ctx: Tool.Context) {
       const root = yield* top(ctx.sessionID)
       const messages = yield* history(ctx, root.id)
       return messages.flatMap((message) =>
-        message.info.role === "user" ? [SessionMemory.typed(message)].filter(Boolean) : [],
+        message.info.role === "user" ? [SessionMemory.said(message)].filter(Boolean) : [],
       )
     })
 
@@ -438,7 +439,7 @@ const layer = Layer.effect(
           ...named.flatMap((reference) => [reference.name, reference.path, reference.description ?? ""]),
           ...servers.map((server) => server.instructions),
         ].filter(Boolean),
-        typed: yield* typedOf(ctx),
+        typed: yield* saidOf(ctx),
         public: [...results.flatMap((result) => [result.title, result.snippet]), ...sources.open],
         // The user's own sites become site: filters: the ones they chose, and the sites their own preferences about
         // sources name (section 6.4a), of those the run was shown and that pass the outward screen, read as the check
@@ -508,7 +509,7 @@ const layer = Layer.effect(
 
     const provenance = Effect.fn("ResearchRun.provenance")(function* (ctx: Tool.Context, found: Found) {
       const parts = (yield* members(ctx, found.lead)).flat().flatMap((message) => message.parts)
-      const typed = (yield* typedOf(ctx)).flatMap(ResearchProvenance.typed)
+      const typed = (yield* saidOf(ctx)).flatMap(ResearchProvenance.typed)
       const results = parts.flatMap((part) => resultsOf(part, found.run.id).map((result) => result.url))
       const links = parts.flatMap((part) => linksOf(part, found.run.id))
       return ResearchProvenance.add(

@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs"
 import os from "node:os"
 import path from "path"
-import { afterAll, expect } from "bun:test"
+import { afterAll, expect, test } from "bun:test"
 import { Effect, Fiber, Layer, Stream } from "effect"
 import { LLMEvent } from "@vectordevai/llm"
 import { ConfigV1 } from "@vectordevai/core/v1/config/config"
@@ -406,10 +406,43 @@ it.instance(
           { type: "text", text: "Never use emojis in commit messages", metadata: { [BrainSchema.PASTED]: [[0, 999]] } },
         ],
       })
-      expect((yield* learned()).map((entry) => entry.text)).toEqual(["Always use tables for comparisons"])
+      // A name pasted into a typed clause takes the clause's line with it, so nothing is learned cut short
+      // ("Never push directly to"), while the next line, typed whole, still teaches.
+      const clause = "Never push directly to main without a review.\nAlways run the linter before you commit"
+      const at = clause.indexOf("main")
+      yield* send({ parts: [{ type: "text", text: clause, metadata: { [BrainSchema.PASTED]: [[at, at + 4]] } }] })
+      expect((yield* learned()).map((entry) => entry.text).toSorted()).toEqual([
+        "Always run the linter before you commit",
+        "Always use tables for comparisons",
+      ])
     }),
   120_000,
 )
+
+test("what the user pasted is theirs to have sent, though it teaches nothing", () => {
+  const link = "https://www.nature.com/articles/s41586-024-07000-1"
+  const text = `Summarize ${link} for me`
+  const message = {
+    info: { id: "msg_said", sessionID: "ses_said", role: "user" },
+    parts: [
+      { type: "text", text, metadata: { [BrainSchema.PASTED]: [[10, 10 + link.length]] } },
+      { type: "text", text: "From: Dana\nI prefer Fridays.", metadata: { [BrainSchema.OUTSIDE]: "issue" } },
+      { type: "text", text: "Recalled notes", synthetic: true },
+    ],
+  } as unknown as Parameters<typeof SessionMemory.said>[0]
+  // Where an address came from reads what the user sent, the pasted link included; text from outside is not theirs.
+  expect(SessionMemory.said(message)).toBe(text)
+  // What Vector learns from leaves out the line the paste sat on.
+  expect(SessionMemory.typed(message)).toBe("")
+  const lines = { ...message, parts: [{ type: "text", text: `I prefer tables.\nRead ${link}\nAlways cite sources.` }] }
+  const start = lines.parts[0]!.text.indexOf(link)
+  const marked = {
+    ...lines,
+    parts: [{ ...lines.parts[0]!, metadata: { [BrainSchema.PASTED]: [[start, start + link.length]] } }],
+  } as unknown as Parameters<typeof SessionMemory.typed>[0]
+  expect(SessionMemory.typed(marked)).toBe("I prefer tables.\n\n\n\n\nAlways cite sources.")
+  expect(SessionMemory.said(marked)).toBe(`I prefer tables.\nRead ${link}\nAlways cite sources.`)
+})
 
 it.instance(
   "in the user's own voice a step of the task teaches nothing, and what names something of one repository stays with it",

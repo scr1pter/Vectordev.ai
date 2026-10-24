@@ -9,6 +9,7 @@ import { httpClient } from "@vectordevai/core/effect/app-node-platform"
 import type { HttpClient } from "effect/unstable/http"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
+import { BrainSchema } from "@vectordevai/core/brain/schema"
 import { Global } from "@vectordevai/core/global"
 import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
@@ -281,6 +282,8 @@ export const send = Effect.fn("ResearchTest.send")(function* (input: {
   readonly agent: string
   readonly text: string
   readonly size?: "light" | "standard" | "thorough"
+  /** Where the text holds what the user pasted, as a composer marks it (BrainSchema.PASTED). */
+  readonly pasted?: readonly (readonly [number, number])[]
 }) {
   const llm = yield* TestLLMServer
   const prompt = yield* SessionPrompt.Service
@@ -290,7 +293,13 @@ export const send = Effect.fn("ResearchTest.send")(function* (input: {
     agent: input.agent,
     model: ref,
     ...(input.size ? { size: input.size } : {}),
-    parts: [{ type: "text", text: input.text }],
+    parts: [
+      {
+        type: "text",
+        text: input.text,
+        ...(input.pasted ? { metadata: { [BrainSchema.PASTED]: input.pasted.map((span) => [...span]) } } : {}),
+      },
+    ],
   })
   return (yield* llm.hits).slice(before).map((hit) => JSON.stringify(hit.body))
 })
