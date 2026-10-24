@@ -748,7 +748,7 @@ const layer: Layer.Layer<
         .select({ data: EventTable.data })
         .from(EventTable)
         .innerJoin(SessionTable, eq(EventTable.aggregate_id, SessionTable.id))
-        .where(and(eq(EventTable.type, EventV2.versionedType(SessionEvent.AncillaryUsage.type, 1)), inDirectory))
+        .where(and(inArray(EventTable.type, SessionEvent.AncillaryUsageStored), inDirectory))
         .all()
         .pipe(Effect.orDie)
       const helpers = yield* db

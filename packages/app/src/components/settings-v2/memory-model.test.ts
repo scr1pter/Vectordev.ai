@@ -27,6 +27,7 @@ describe("memory page model", () => {
     expect(originLabel({ origin: "agent", scope: "repository" })).toBe("Vector learned this")
     expect(originLabel({ origin: "user", scope: "personal" })).toBe("You added this")
     expect(originLabel({ origin: "failure-memory", scope: "repository" })).toBe("Failure memory from checks Vector ran")
+    expect(originLabel({ origin: "import", scope: "personal" })).toBe("You imported this")
     expect(originLabel({ origin: "file", scope: "personal", source: { file: files.memory } }, files)).toBe(
       "From your MEMORY.md",
     )
@@ -93,6 +94,7 @@ describe("memory page model", () => {
     expect(holdLabel("web")).toContain("reaches outside this computer")
     expect(holdLabel("mcp")).toContain("an MCP server's prompt")
     expect(kindLabel("failure")).toBe("Past failure")
+    expect(kindLabel("term")).toBe("Term")
   })
 
   test("sums up memory and its cost in plain words", () => {

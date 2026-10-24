@@ -294,9 +294,18 @@ import type {
   MemoryEraseData,
   MemoryEraseErrors,
   MemoryEraseResponses,
+  MemoryEraseSessionData,
+  MemoryEraseSessionErrors,
+  MemoryEraseSessionResponses,
+  MemoryExportData,
+  MemoryExportErrors,
+  MemoryExportResponses,
   MemoryGetData,
   MemoryGetErrors,
   MemoryGetResponses,
+  MemoryImportData,
+  MemoryImportErrors,
+  MemoryImportResponses,
   MemoryKnowledgeData,
   MemoryKnowledgeErrors,
   MemoryKnowledgeResponses,
@@ -2434,7 +2443,7 @@ export class Settings extends HeyApiClient {
   /**
    * Get memory settings
    *
-   * Whether Vector may add to its memory as it works.
+   * Whether Vector may add to its memory as it works, which facets of how you work it may learn, and when the optional model learner runs.
    */
   public get<ThrowOnError extends boolean = false>(options?: Options<MemorySettingsGetData, ThrowOnError>) {
     return (options?.client ?? this.client).get<MemorySettingsGetResponses, MemorySettingsGetErrors, ThrowOnError>({
@@ -2446,7 +2455,7 @@ export class Settings extends HeyApiClient {
   /**
    * Change memory settings
    *
-   * Turn Vector's learning on or off, reading the repository's own docs, and keeping originals of added documents. Memory already saved stays until you erase it; turning repository docs off forgets what Vector read of them, and turning originals off deletes the kept copies.
+   * Turn Vector's learning on or off, each facet of how you work it may learn, the optional model learner, reading the repository's own docs, and keeping originals of added documents. Memory already saved stays until you erase it; turning repository docs off forgets what Vector read of them, and turning originals off deletes the kept copies.
    */
   public update<ThrowOnError extends boolean = false>(options?: Options<MemorySettingsUpdateData, ThrowOnError>) {
     return (options?.client ?? this.client).patch<
@@ -2957,6 +2966,46 @@ export class Memory extends HeyApiClient {
   public erase<ThrowOnError extends boolean = false>(options?: Options<MemoryEraseData, ThrowOnError>) {
     return (options?.client ?? this.client).post<MemoryEraseResponses, MemoryEraseErrors, ThrowOnError>({
       url: "/memory/erase",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  }
+
+  /**
+   * Erase what Vector learned in a session
+   *
+   * Forget every entry Vector learned whose only evidence is this session, so it is not learned again. What you wrote and what other sessions also taught stay. The session keeps its messages until you delete them.
+   */
+  public eraseSession<ThrowOnError extends boolean = false>(options: Options<MemoryEraseSessionData, ThrowOnError>) {
+    return (options.client ?? this.client).delete<MemoryEraseSessionResponses, MemoryEraseSessionErrors, ThrowOnError>({
+      url: "/memory/sessions/{sessionID}",
+      ...options,
+    })
+  }
+
+  /**
+   * Export memory
+   *
+   * Everything Vector keeps for this repository, for you, or both, as an attachment: a Markdown page per kind with each entry's evidence and what Vector read from documents, or with `format=json` the same as data. Never the documents' files.
+   */
+  public export<ThrowOnError extends boolean = false>(options?: Options<MemoryExportData, ThrowOnError>) {
+    return (options?.client ?? this.client).get<MemoryExportResponses, MemoryExportErrors, ThrowOnError>({
+      url: "/memory/export",
+      ...options,
+    })
+  }
+
+  /**
+   * Import memory
+   *
+   * Read an export (Markdown or JSON) back in. Every preference, term, decision, lesson and fact it holds lands waiting for your approval, so a changed file cannot put memory in use; rules stay in their files. What you forgot is not imported again.
+   */
+  public import<ThrowOnError extends boolean = false>(options?: Options<MemoryImportData, ThrowOnError>) {
+    return (options?.client ?? this.client).post<MemoryImportResponses, MemoryImportErrors, ThrowOnError>({
+      url: "/memory/import",
       ...options,
       headers: {
         "Content-Type": "application/json",

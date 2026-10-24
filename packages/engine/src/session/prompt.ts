@@ -76,6 +76,8 @@ import { Egress } from "@vectordevai/core/local-mode/egress"
 import type { LocalMode } from "@vectordevai/schema/local-mode"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
+import { BrainLearn } from "@vectordevai/core/brain/learn"
+import type { BrainSchema } from "@vectordevai/core/brain/schema"
 import { ownerBlock, scopeOf, scopeQuery } from "@vectordevai/core/review/prompt"
 import { Git } from "@/git"
 import { DOCUMENTS as MEMORY_DOCUMENTS } from "@/tool/memory"
@@ -96,6 +98,7 @@ import { ResearchQuote } from "@vectordevai/core/research/quote"
 import { ResearchOutbound } from "@vectordevai/core/research/outbound"
 import { WebFence } from "@vectordevai/core/research/fence"
 import { Research } from "@vectordevai/schema/research"
+import { MemoryEvent } from "@vectordevai/schema/memory-event"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -109,12 +112,9 @@ const MAX_INSTRUCTION_SNAPSHOTS = 256
 const VECTORSCOPE = "vectorscope."
 // Agents whose output leaves the machine or reaches the web: research workers and the research judge.
 const OUTWARD_AGENTS = new Set(["researcher", "research-judge"])
-// The kinds of the owner's own entries that say how they work (section 6.4a), until B1's facets exist.
-const HOW_YOU_WORK = new Set<string>([...Brain.HABIT_KINDS, "rule"])
-// A preference in the sources facet (section 6.3), until B1 files each entry under its facet: one that names kinds of
-// sources (papers, studies, primary or official sources, journals, preprints, standards) or a site.
-const SOURCES =
-  /\b(?:sources?|papers?|stud(?:y|ies)|journals?|peer[- ]reviewed|primary (?:research|data|literature)|preprints?|arxiv|pubmed|doi|standards? bod(?:y|ies)|official (?:data|statistics|figures)|government (?:data|sites?)|(?:[a-z0-9-]+\.)+(?:com|org|gov|edu|net|int|io|eu|uk))\b/i
+// The kinds of the owner's own entries that say how they work (section 6.4a): their rules, preferences, decisions,
+// lessons and terms.
+const HOW_YOU_WORK = new Set<string>([...Brain.HABIT_KINDS, "rule", "term"])
 
 /**
  * Who a session's memory is for (section 6.4a). A role whose output leaves the machine or reaches the web gets the
@@ -128,20 +128,27 @@ export function audienceOf(session: Pick<Session.Info, "internal" | "parentID">,
 }
 
 /**
- * The owner's own kinds of memory a role hears (section 6.4a), pinned in its digest and given to it to start with. A
- * Vectorscope reviewer of a pull request Vector cannot trust hears preferences and review notes only, a research
- * worker preferences only, and the research judge none pinned: its brief carries the sources facet alone (briefFor).
+ * What of how the owner works a role hears (section 6.4a), pinned in its digest and given to it to start with: the
+ * owner's own kinds of memory, and of their preferences and terms only the facets its work needs. A research worker
+ * hears preferences about format, sources and style (no vocabulary: the lead resolves the owner's words when it writes
+ * sub-questions, and a private code name would otherwise reach queries), and the research judge the sources facet
+ * alone. A Vectorscope reviewer hears no terms, and of a pull request Vector cannot trust only preferences and review
+ * notes. A research lead the build agent started hears the research facets: preferences and terms of them, a term only
+ * when it passes the outward screen (its meaning names no one, no amount and no date, since the lead's queries reach
+ * the web), and no decision or lesson, which has no facet and is no part of how the owner researches.
  */
 export function habitsOf(
-  session: Pick<Session.Info, "internal">,
+  session: Pick<Session.Info, "internal" | "parentID">,
   agent: string,
   scope?: ReviewScope,
-): readonly Brain.HabitKind[] {
-  if (agent === "research-judge") return []
-  if (agent === "researcher") return ["preference"]
+): { readonly kinds: readonly Brain.HabitKind[]; readonly facets?: readonly BrainSchema.Facet[] } {
+  if (agent === ResearchRun.JUDGE) return { kinds: ["preference"], facets: ["sources"] }
+  if (agent === "researcher") return { kinds: ["preference"], facets: ["format", "sources", "style"] }
   if (session.internal?.startsWith(VECTORSCOPE))
-    return scope?.trust === "trusted" ? [...Brain.HABIT_KINDS, "review"] : ["preference", "review"]
-  return Brain.HABIT_KINDS
+    return { kinds: scope?.trust === "trusted" ? [...Brain.HABIT_KINDS, "review"] : ["preference", "review"] }
+  if (agent === ResearchRun.LEAD && session.parentID)
+    return { kinds: ["preference", "term"], facets: Brain.RESEARCH_FACETS }
+  return { kinds: [...Brain.HABIT_KINDS, "term"] }
 }
 
 /** What a Vectorscope reviewer's prompt says it reviews: the changed paths, and whether the owner wrote them. */
@@ -285,6 +292,8 @@ const layer = Layer.effect(
     // Request messages whose recall already ran in this process, so a message that recalled nothing is not scored again
     // on every step.
     const recallsTried = new Set<MessageID>()
+    // The model learner a finished run left reading its session's last message, which the session's next run cancels.
+    const learners = new Map<SessionID, Fiber.Fiber<void>>()
     // The brain's digest (rules, MEMORY.md, pinned memory) is part of the snapshot, so it is byte-stable for the session
     // too; a memory saved mid-session reaches later sessions, and this one through recall and search.
     const sessionInstructions = Effect.fn("SessionPrompt.sessionInstructions")(function* (
@@ -296,12 +305,13 @@ const layer = Layer.effect(
         readonly index: boolean
         readonly audience: Brain.Audience
         readonly kinds?: readonly Brain.HabitKind[]
+        readonly facets?: readonly BrainSchema.Facet[]
         /** Whether the instruction files (AGENTS.md and the rest) go too. */
         readonly files: boolean
       },
     ) {
       const snapshot = instructionSnapshots.get(sessionID)
-      const full = `${key}|${memory.personal ? "personal" : "shared"}|${memory.index ? "index" : "plain"}|${memory.audience}|${memory.kinds?.join(",") ?? "all"}|${memory.files ? "files" : "brief"}`
+      const full = `${key}|${memory.personal ? "personal" : "shared"}|${memory.index ? "index" : "plain"}|${memory.audience}|${memory.kinds?.join(",") ?? "all"}|${memory.facets?.join(",") ?? "all"}|${memory.files ? "files" : "brief"}`
       // Re-inserting keeps the most recently used sessions at the end; the oldest go once there are too many.
       instructionSnapshots.delete(sessionID)
       if (snapshot && snapshot.key === full && !cold) {
@@ -1986,6 +1996,9 @@ const layer = Layer.effect(
       resumed?: ResumeFreeModelsInput & { parentID: MessageID },
     ) {
       const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
+      // A new prompt cancels the model learner still reading the run before it.
+      const learning = learners.get(sessionID)
+      if (learning) yield* Fiber.interrupt(learning)
       // A run that ends before the provider answers keeps its provisional title without starting another request.
       const answering = yield* Deferred.make<boolean>()
       const ended = yield* Deferred.make<void>()
@@ -2120,6 +2133,8 @@ const layer = Layer.effect(
       let step = 0
       // Every message this run writes sorts after this ID, which is how the judge finds the requests the run answered.
       const since = MessageID.ascending()
+      // The user messages this run answered and the size of the request each was in, for the learner once it is over.
+      const taught = new Map<MessageID, { readonly message: SessionV1.WithParts; readonly tier: TaskSize.Tier }>()
       // The judge's rounds in this run; a compaction may summarise earlier verdicts out of view.
       let judged = 0
       // Before the first request, so a prompt arriving after the cache expired sends the cleared history.
@@ -2211,6 +2226,7 @@ const layer = Layer.effect(
             })
           : []
         const sized = requests.at(-1)
+        for (const user of sized?.users ?? []) taught.set(user.info.id, { message: user, tier: sized!.tier })
 
         if (step === 1 && !resumed) {
           const background = yield* InstanceState.get(backgroundTasks)
@@ -2548,16 +2564,14 @@ const layer = Layer.effect(
                     // A research worker and the judge work from their brief: the repository's instruction files name
                     // its code, hosts and people, and what a worker sends leaves the machine.
                     files: !OUTWARD_AGENTS.has(agent.name),
-                    // An outward digest pins only the kinds the role hears: preferences alone for a pull request
-                    // Vector cannot trust.
+                    // An outward digest pins only the kinds and facets the role hears: preferences alone for a pull
+                    // request Vector cannot trust.
                     ...(audience === "outward"
-                      ? {
-                          kinds: habitsOf(
-                            session,
-                            agent.name,
-                            session.internal?.startsWith(VECTORSCOPE) ? reviewScope(msgs) : undefined,
-                          ),
-                        }
+                      ? habitsOf(
+                          session,
+                          agent.name,
+                          session.internal?.startsWith(VECTORSCOPE) ? reviewScope(msgs) : undefined,
+                        )
                       : {}),
                   },
                 ).pipe(Effect.orDie),
@@ -2689,6 +2703,22 @@ const layer = Layer.effect(
           )
         // What the run's answers cited or the agent opened is credited by how the run ended.
         yield* creditRun(sessionID).pipe(Effect.ignore, Effect.forkIn(background.scope))
+        // What the user typed teaches Vector how they work: plain code at once, and the model learner, where it runs,
+        // in the background.
+        const later = yield* learnRun(session, taught).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("learning failed", { error: Cause.squash(cause) }).pipe(Effect.as(undefined)),
+          ),
+        )
+        if (later) {
+          const learner = yield* later.pipe(Effect.catchCause(() => Effect.void), Effect.forkIn(background.scope))
+          learners.set(sessionID, learner)
+          background.titles.add(learner)
+          learner.addObserver(() => {
+            background.titles.delete(learner)
+            if (learners.get(sessionID) === learner) learners.delete(sessionID)
+          })
+        }
         // The repository's tracked docs are read beside it, and what documents are linked to is checked against the
         // code, each at most every 10 minutes per repository.
         yield* instruction
@@ -2700,6 +2730,171 @@ const layer = Layer.effect(
           )
       }
       return yield* lastAssistant(sessionID)
+    })
+
+    // Learning about you (section 6.3), once a run is over: what the user typed in each request message it answered
+    // that was more than a greeting teaches Vector their terms and preferences, read by plain code with no model call.
+    // Only typed words count (not what they pasted, a slash command's text or text from outside), and never in a session
+    // an invited guest is in, a subagent or Vector's own helpers, whose messages Vector or another agent wrote. Each
+    // message keeps the per-message cap and the facets the user turned off; what a short message says goes into use at
+    // once and the rest waits for a second sighting. The cap is each message's own: what the agent's memory tool wrote
+    // while answering it counts, and what the learner writes for the run's other messages, all at its end, does not. A
+    // correction the rules found nothing in goes to the optional model learner, returned to run in the background
+    // (nothing when it has no work or may not run), and only then is the session read; what it suggests waits for the
+    // user unless it is the user's own clause, so only the user puts a model's words in use. Every write says it is the
+    // learner's, which alone may make an instruction personal without a first-person quote. Each message's writes are
+    // announced for the app's "Learned" chip.
+    const learnRun = Effect.fn("SessionPrompt.learnRun")(function* (
+      session: Session.Info,
+      taught: ReadonlyMap<MessageID, { readonly message: SessionV1.WithParts; readonly tier: TaskSize.Tier }>,
+    ) {
+      if (session.parentID || session.internal) return undefined
+      // The run already holds the messages it answered, so nothing is read to learn from them.
+      const requests = [...taught.values()]
+        .filter((item) => item.tier !== "chat" && item.message.info.role === "user")
+        .toSorted((a, b) => (a.message.info.id < b.message.info.id ? -1 : 1))
+        .flatMap((item) => {
+          const typed = SessionMemory.typed(item.message)
+          return typed ? [{ message: item.message, typed }] : []
+        })
+      // Most messages teach nothing, and finding that out is plain code.
+      if (requests.every((request) => BrainLearn.learn(request.typed).length === 0 && !BrainLearn.gate(request.typed)))
+        return undefined
+      if (yield* guests.marked(session.id)) return undefined
+      const settings = yield* brain.learnSettings()
+      if (!settings.learning) return undefined
+      const place = yield* instruction.place()
+      // What the memory tool wrote while each message was the one being answered, up to the run's next message, read
+      // before the learner writes anything.
+      const asked = [...taught.values()]
+        .map((item) => item.message.info)
+        .filter((info) => info.role === "user")
+        .toSorted((a, b) => (a.id < b.id ? -1 : 1))
+      const room = new Map(
+        yield* Effect.forEach(requests, (request) =>
+          Effect.gen(function* () {
+            const next = asked.find((info) => info.id > request.message.info.id)
+            const written =
+              (yield* brain.written(session.id, request.message.info.time.created)) -
+              (next ? yield* brain.written(session.id, next.time.created) : 0)
+            return [request.message.info.id, Math.max(0, Brain.LIMIT.perMessage - written)] as const
+          }),
+        ),
+      )
+      const write = Effect.fnUntraced(function* (
+        message: SessionV1.WithParts,
+        items: readonly BrainLearn.Learned[],
+        pending: "sighting" | "review",
+      ) {
+        // What is past the message's cap is never proposed; a refused write leaves its place to the next item.
+        const results: Brain.WriteResult[] = []
+        for (const item of items) {
+          if (results.filter((result) => result.type !== "refused").length >= (room.get(message.info.id) ?? 0)) break
+          results.push(
+            yield* brain.propose(place, {
+              kind: item.kind,
+              text: item.text,
+              scope: "personal",
+              facet: item.facet,
+              origin: "agent",
+              evidence: { type: "message", quote: item.quote, verified: true },
+              learner: true,
+              sessionID: session.id,
+              ...(item.status === "proposed" ? { pending } : {}),
+            }),
+          )
+        }
+        const entryIDs = results.flatMap((result) =>
+          result.type === "added" || result.type === "superseded" || result.type === "promoted" ? [result.entry.id] : [],
+        )
+        if (entryIDs.length)
+          yield* events.publish(MemoryEvent.Learned, { sessionID: session.id, entryIDs, messageID: message.info.id })
+      })
+      const corrections = yield* Effect.forEach(requests, (request) =>
+        Effect.gen(function* () {
+          const learned = BrainLearn.learn(request.typed, { facets: settings.facets })
+          yield* write(request.message, learned, "sighting")
+          return learned.length === 0 && BrainLearn.gate(request.typed) ? [request] : []
+        }),
+      ).pipe(Effect.map((all) => all.flat()))
+      const last = corrections.at(-1)
+      const user = last?.message.info
+      // The model learner runs where the user let it: with Vector Local on, by default.
+      const allowed =
+        settings.modelLearner === "always" || (settings.modelLearner === "local-only" && Egress.policy().enabled)
+      if (!last || user?.role !== "user" || !allowed) return undefined
+      // Only a correction the rules found nothing in needs the session: whether it read outside content, and the reply
+      // before the correction.
+      const msgs = yield* sessions.messages({ sessionID: session.id })
+      const tainted = SessionMemory.taint(msgs) !== undefined
+      const before = msgs.filter((message) => message.info.id < user.id)
+      return Effect.gen(function* () {
+        const learned = yield* modelLearn({
+          session,
+          user,
+          typed: last.typed,
+          reply: SessionTaskSize.closingText(before).slice(-600),
+          tainted,
+          settings,
+        })
+        // A model's own words wait for the user, never for the same words from another session: a model would
+        // write them again.
+        yield* write(last.message, learned, "review")
+      })
+    })
+
+    // The optional model learner (section 6.3): one small-model request reads a correction ("no, I meant…") after the
+    // agent's reply. It runs where the user let it (with Vector Local on, by default), never on a model that may train
+    // on prompts, at helper priority once the run is over; the session's next prompt cancels it, and its tokens count in
+    // the session. What it suggests is kept only with a quote of the user's own typed words, never from a question, a
+    // step of the task or feedback on the answer, and goes into use only when it is the user's own clause, never in a
+    // session that read outside content; anything else waits for the user.
+    const modelLearn = Effect.fn("SessionPrompt.modelLearn")(function* (input: {
+      session: Session.Info
+      user: SessionV1.User
+      typed: string
+      reply: string
+      tainted: boolean
+      settings: Brain.LearnSettings
+    }) {
+      const primary = yield* provider.getModel(input.user.model.providerID, input.user.model.modelID).pipe(Effect.option)
+      if (Option.isNone(primary)) return []
+      const model =
+        (yield* provider.getSmallModel(input.user.model.providerID, input.user.model.modelID)) ?? primary.value
+      if (freeModelMayTrain(primary.value) || freeModelMayTrain(model)) return []
+      const title = yield* agents.get("title")
+      if (!title) return []
+      const usage = TitleUsage.create({ sessionID: input.session.id, model, publish: events.publish, purpose: "memory" })
+      const reply = yield* llm
+        .stream({
+          // Its own instructions on the title helper's: no tools, no repository context.
+          agent: { ...title, name: "brain.learn", prompt: BrainLearn.PROMPT, temperature: 0 },
+          user: input.user,
+          system: [],
+          small: true,
+          tools: {},
+          model,
+          sessionID: input.session.id,
+          retries: 1,
+          started: usage.started,
+          messages: [{ role: "user", content: BrainLearn.request({ typed: input.typed, reply: input.reply }) }],
+        })
+        .pipe(
+          Stream.tap(usage.record),
+          Stream.filter(LLMEvent.is.textDelta),
+          Stream.map((event) => event.text),
+          Stream.mkString,
+          Effect.ensuring(usage.finish()),
+          Effect.catchCause(() => Effect.succeed("")),
+        )
+      return BrainLearn.parse(reply).flatMap((suggestion) => {
+        const learned = BrainLearn.accept(suggestion, {
+          typed: input.typed,
+          tainted: input.tainted,
+          facets: input.settings.facets,
+        })
+        return learned ? [learned] : []
+      })
     })
 
     // Proven knowledge, once a run is over: for each of its last requests, what the answers cited (of what they were
@@ -2770,24 +2965,12 @@ const layer = Layer.effect(
       const requestID = launcher?.role === "assistant" ? launcher.parentID : undefined
       const place = yield* instruction.place()
       const outward = audienceOf(input.session, input.agent) === "outward"
-      // The research judge hears the sources facet of how the owner works and nothing else (section 6.4a): until B1's
-      // facets exist, their preferences that name sources.
-      const judge = input.agent === ResearchRun.JUDGE
       const habits = input.personal
         ? yield* brain.habits(place, {
             query,
             budget: Brain.HABITS.subagent,
             audience: outward ? "outward" : "owner",
-            kinds: judge ? ["preference"] : habitsOf(input.session, input.agent),
-            ...(judge
-              ? {
-                  exclude: new Set(
-                    (yield* brain.list(place, { scope: "personal" }))
-                      .filter((entry) => entry.kind === "preference" && !SOURCES.test(entry.text))
-                      .map((entry) => entry.id),
-                  ),
-                }
-              : {}),
+            ...habitsOf(input.session, input.agent),
             sessionID: input.session.id,
             ...(requestID ? { requestID } : {}),
             tier: "brief",
@@ -2847,7 +3030,7 @@ const layer = Layer.effect(
         files: scope.paths.map((file) => path.join(place.root, file)),
         budget: Brain.HABITS.review,
         audience: "outward",
-        kinds: habitsOf(input.session, input.agent, scope),
+        ...habitsOf(input.session, input.agent, scope),
         wrap: ownerBlock,
         sessionID: input.session.id,
         tier: "review",
@@ -2931,12 +3114,17 @@ const layer = Layer.effect(
       return input.msgs
     })
 
-    // The owner's own entries that do not say how they work: facts about them, and anything learned beside a private
-    // document whatever its kind. Until B1's facets exist, how they work is their preferences, decisions, lessons and
-    // rules.
+    // The owner's own entries a research lead's recall leaves out (section 6.4): facts about them, anything learned
+    // beside a private document whatever its kind, and of their preferences and terms those outside the research
+    // facets (their tooling).
     const notHabits = Effect.fn("SessionPrompt.notHabits")(function* (place: Brain.Place) {
       return (yield* brain.list(place, { scope: "personal" }))
-        .filter((entry) => entry.private === true || !HOW_YOU_WORK.has(entry.kind))
+        .filter(
+          (entry) =>
+            entry.private === true ||
+            !HOW_YOU_WORK.has(entry.kind) ||
+            (entry.facet !== undefined && !Brain.RESEARCH_FACETS.includes(entry.facet)),
+        )
         .map((entry) => entry.id)
     })
 
@@ -3347,7 +3535,12 @@ const layer = Layer.effect(
               ...part,
               metadata: {
                 ...part.metadata,
-                [SessionMemory.COMMAND]: { source: cmd.source ?? "command", arguments: input.arguments, ...(outside ? { outside } : {}) },
+                [SessionMemory.COMMAND]: {
+                  source: cmd.source ?? "command",
+                  arguments: input.arguments,
+                  ...(input.pasted?.length ? { pasted: input.pasted } : {}),
+                  ...(outside ? { outside } : {}),
+                },
               },
             }
           : part,
@@ -3789,6 +3982,9 @@ export const CommandInput = Schema.Struct({
   agent: Schema.optional(Schema.String),
   model: Schema.optional(Schema.String),
   arguments: Schema.String,
+  // The spans of `arguments` the user pasted rather than typed, as [start, end] string offsets, which Vector never
+  // learns how they work from.
+  pasted: Schema.optional(Schema.Array(Schema.Tuple([Schema.Int, Schema.Int]))),
   command: Schema.String,
   variant: Schema.optional(Schema.String),
   executionMode: Schema.optional(Schema.Union([Schema.Literal("normal"), Schema.Literal("fast")])),

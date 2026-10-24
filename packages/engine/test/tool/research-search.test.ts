@@ -463,3 +463,41 @@ for (const own of [false, true])
       }),
     90_000,
   )
+
+it.instance(
+  "a site the owner's own sources preference names clears itself as a site: value, and a site another facet names does not",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* setup(web)
+      const brain = yield* Brain.Service
+      const instruction = yield* Instruction.Service
+      const place = yield* instruction.place()
+      // Pinned, so the run's digest carries both: one about sources (section 6.4a), one about the owner's tooling.
+      const own = (text: string, facet?: BrainSchema.Facet) =>
+        Effect.gen(function* () {
+          const written = yield* brain.propose(place, {
+            kind: "preference",
+            text,
+            scope: "personal",
+            origin: "user",
+            evidence: { type: "user" },
+            ...(facet ? { facet } : {}),
+          })
+          if (written.type !== "refused") yield* brain.update(place, written.entry.id, { pinned: true }, "user")
+        })
+      yield* own("I prefer fda.gov for drug interaction data")
+      yield* own("Install packages from pkgs.initech.com", "tooling")
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "Research", permission: allow })
+      yield* test.llm.tool("research_plan", plan())
+      yield* test.llm.tool("research_search", { query: "drug interaction warnings", site: "fda.gov" })
+      yield* test.llm.tool("research_search", { query: "package mirror outages", site: "pkgs.initech.com" })
+      yield* test.llm.text("Done.")
+      yield* send({ sessionID: session.id, agent: "research", text: "Research drug interaction warnings." })
+      const [sources, tooling] = yield* calls(session.id, "research_search")
+      expect(output(sources)).toContain("untrusted_web_page")
+      expect(output(tooling)).toBe(ResearchOutbound.REFUSAL)
+      expect(guard.outside()).toEqual([])
+    }),
+  90_000,
+)

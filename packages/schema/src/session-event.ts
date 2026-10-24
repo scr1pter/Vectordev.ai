@@ -204,24 +204,52 @@ export namespace Step {
   export type Resumed = typeof Resumed.Type
 }
 
+// Version 2 of ancillary usage: a purpose besides a title's.
+const usageOptions = {
+  durable: {
+    aggregate: "sessionID",
+    version: 2,
+  },
+} as const
+
+// What every version of ancillary usage records about the request besides its purpose.
+const ancillaryUsage = {
+  model: Model.Ref,
+  cost: Step.Ended.data.fields.cost.pipe(optional),
+  unpriced: Step.Ended.data.fields.unpriced,
+  tokens: Step.Ended.data.fields.tokens.pipe(optional),
+  // Only partial provider usage was available; normalized totals are a lower bound, not a fully priced request.
+  incomplete: Schema.Boolean.pipe(optional),
+}
+
 // Shared by both session engines. Provider work outside the transcript still belongs to the session's spend.
 export const AncillaryUsage = Event.define({
   type: "session.next.ancillary.usage",
-  ...options,
+  ...usageOptions,
   schema: {
     ...Base,
     // Stable across archive remapping; separate billed attempts never share this identity.
     usageID: Event.ID,
-    purpose: Schema.Literal("title"),
-    model: Model.Ref,
-    cost: Step.Ended.data.fields.cost.pipe(optional),
-    unpriced: Step.Ended.data.fields.unpriced,
-    tokens: Step.Ended.data.fields.tokens.pipe(optional),
-    // Only partial provider usage was available; normalized totals are a lower bound, not a fully priced request.
-    incomplete: Schema.Boolean.pipe(optional),
+    // title: the session's title. memory: the optional model learner reading what the user typed (section 6.3).
+    purpose: Schema.Literals(["title", "memory"]),
+    ...ancillaryUsage,
   },
 })
 export type AncillaryUsage = typeof AncillaryUsage.Type
+
+// What builds before the model learner wrote, a title's usage alone. It is still read; usage is written as version 2,
+// which those builds skip rather than fail to decode.
+export const AncillaryUsageV1 = Event.define({
+  type: "session.next.ancillary.usage",
+  ...options,
+  schema: { ...Base, usageID: Event.ID, purpose: Schema.Literal("title"), ...ancillaryUsage },
+})
+
+/** The stored types of ancillary usage, of every version read: what usage and archives select. */
+export const AncillaryUsageStored = [
+  Event.versionedType(AncillaryUsageV1.type, options.durable.version),
+  Event.versionedType(AncillaryUsage.type, usageOptions.durable.version),
+]
 
 export namespace Text {
   export const Started = Event.define({

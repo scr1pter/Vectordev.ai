@@ -95,6 +95,7 @@ export type Event =
   | EventResearchUpdated
   | EventLocalUpdated
   | EventLocalBlocked
+  | EventMemoryLearned
   | EventVcsBranchUpdated
   | EventWorkspaceReady
   | EventWorkspaceFailed
@@ -933,7 +934,7 @@ export type GlobalEvent = {
           timestamp: number
           sessionID: string
           usageID: string
-          purpose: "title"
+          purpose: "title" | "memory"
           model: ModelRef
           cost?: number
           unpriced?: boolean
@@ -1782,6 +1783,15 @@ export type GlobalEvent = {
         properties: {
           source: string
           origin: string
+        }
+      }
+    | {
+        id: string
+        type: "memory.learned"
+        properties: {
+          sessionID: string
+          entryIDs: Array<string>
+          messageID?: string
         }
       }
     | {
@@ -3327,8 +3337,8 @@ export type McpServerNotFoundError = {
 export type MemoryEntry = {
   id: string
   scope: "repository" | "personal"
-  kind: "rule" | "preference" | "decision" | "lesson" | "fact" | "failure" | "review"
-  origin: "file" | "user" | "agent" | "failure-memory"
+  kind: "rule" | "preference" | "decision" | "lesson" | "fact" | "failure" | "review" | "term"
+  origin: "file" | "user" | "agent" | "failure-memory" | "import"
   status: "active" | "proposed" | "quarantined" | "archived" | "superseded"
   pinned: boolean
   text: string
@@ -3356,6 +3366,11 @@ export type MemoryEntry = {
   createdAt: number
   updatedAt: number
   private?: boolean
+  facet?: "format" | "workflow" | "vocabulary" | "tooling" | "sources" | "style"
+  term?: {
+    key: string
+    meaning: string
+  }
 }
 
 export type MemoryStats = {
@@ -3480,6 +3495,13 @@ export type MemoryError = {
   }
 }
 
+export type MemoryImportResult = {
+  entries: Array<MemoryEntry>
+  known: number
+  refused: number
+  over: number
+}
+
 export type MemoryTidy = {
   merged: number
   promoted: number
@@ -3488,10 +3510,23 @@ export type MemoryTidy = {
   stale: number
 }
 
+export type MemoryFacets = {
+  format: boolean
+  workflow: boolean
+  vocabulary: boolean
+  tooling: boolean
+  sources: boolean
+  style: boolean
+}
+
+export type MemoryModelLearner = "local-only" | "always" | "off"
+
 export type MemorySettings = {
   learning: boolean
   repositoryDocs: boolean
   keepOriginals: boolean
+  facets: MemoryFacets
+  modelLearner: MemoryModelLearner
 }
 
 export type MemoryModelOption = {
@@ -5127,6 +5162,7 @@ export type V2Event =
   | ResearchUpdated
   | LocalUpdated
   | LocalBlocked
+  | MemoryLearned
   | VcsBranchUpdated
   | WorkspaceReady
   | WorkspaceFailed
@@ -5737,7 +5773,7 @@ export type SyncEventSessionNextAncillaryUsage = {
   type: "sync"
   id: string
   syncEvent: {
-    type: "session.next.ancillary.usage.1"
+    type: "session.next.ancillary.usage.2"
     id: string
     seq: number
     aggregateID: string
@@ -5745,7 +5781,7 @@ export type SyncEventSessionNextAncillaryUsage = {
       timestamp: number
       sessionID: string
       usageID: string
-      purpose: "title"
+      purpose: "title" | "memory"
       model: ModelRef
       cost?: number
       unpriced?: boolean
@@ -6724,7 +6760,7 @@ export type SessionNextAncillaryUsage = {
     timestamp: number
     sessionID: string
     usageID: string
-    purpose: "title"
+    purpose: "title" | "memory"
     model: ModelRef
     cost?: number
     unpriced?: boolean
@@ -8760,6 +8796,25 @@ export type LocalBlocked = {
   }
 }
 
+export type MemoryLearned = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "memory.learned"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    entryIDs: Array<string>
+    messageID?: string
+  }
+}
+
 export type VcsBranchUpdated = {
   id: string
   metadata?: {
@@ -9058,7 +9113,7 @@ export type EventSessionNextAncillaryUsage = {
     timestamp: number
     sessionID: string
     usageID: string
-    purpose: "title"
+    purpose: "title" | "memory"
     model: ModelRef
     cost?: number
     unpriced?: boolean
@@ -9930,6 +9985,16 @@ export type EventLocalBlocked = {
   properties: {
     source: string
     origin: string
+  }
+}
+
+export type EventMemoryLearned = {
+  id: string
+  type: "memory.learned"
+  properties: {
+    sessionID: string
+    entryIDs: Array<string>
+    messageID?: string
   }
 }
 
@@ -13199,7 +13264,7 @@ export type MemoryListResponse = MemoryListResponses[keyof MemoryListResponses]
 
 export type MemoryCreateData = {
   body?: {
-    kind: "preference" | "decision" | "lesson" | "fact"
+    kind: "preference" | "decision" | "lesson" | "fact" | "term"
     text: string
     scope: "repository" | "personal"
   }
@@ -13311,6 +13376,7 @@ export type MemoryUpdateData = {
   body?: {
     text?: string
     pinned?: boolean
+    facet?: "format" | "workflow" | "vocabulary" | "tooling" | "sources" | "style"
     action?: "approve" | "reject" | "archive" | "restore" | "undo"
   }
   path: {
@@ -13382,6 +13448,111 @@ export type MemoryEraseResponses = {
 
 export type MemoryEraseResponse = MemoryEraseResponses[keyof MemoryEraseResponses]
 
+export type MemoryEraseSessionData = {
+  body?: never
+  path: {
+    /**
+     * The session, such as ses_4k2q7m3x
+     */
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/sessions/{sessionID}"
+}
+
+export type MemoryEraseSessionErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryEraseSessionError = MemoryEraseSessionErrors[keyof MemoryEraseSessionErrors]
+
+export type MemoryEraseSessionResponses = {
+  /**
+   * How many entries were erased
+   */
+  200: number
+}
+
+export type MemoryEraseSessionResponse = MemoryEraseSessionResponses[keyof MemoryEraseSessionResponses]
+
+export type MemoryExportData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    scope?: "personal" | "repository" | "all"
+    format?: "markdown" | "json"
+  }
+  url: "/memory/export"
+}
+
+export type MemoryExportErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryExportError = MemoryExportErrors[keyof MemoryExportErrors]
+
+export type MemoryExportResponses = {
+  /**
+   * Success
+   */
+  200: string
+}
+
+export type MemoryExportResponse = MemoryExportResponses[keyof MemoryExportResponses]
+
+export type MemoryImportData = {
+  body?: {
+    text: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/import"
+}
+
+export type MemoryImportErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryImportError = MemoryImportErrors[keyof MemoryImportErrors]
+
+export type MemoryImportResponses = {
+  /**
+   * What the import brought in
+   */
+  200: MemoryImportResult
+}
+
+export type MemoryImportResponse = MemoryImportResponses[keyof MemoryImportResponses]
+
 export type MemoryTidyData = {
   body?: never
   path?: never
@@ -13451,6 +13622,15 @@ export type MemorySettingsUpdateData = {
     learning?: boolean
     repositoryDocs?: boolean
     keepOriginals?: boolean
+    facets?: {
+      format?: boolean
+      workflow?: boolean
+      vocabulary?: boolean
+      tooling?: boolean
+      sources?: boolean
+      style?: boolean
+    }
+    modelLearner?: MemoryModelLearner
   }
   path?: never
   query?: {
@@ -16486,6 +16666,7 @@ export type SessionCommandData = {
     agent?: string
     model?: string
     arguments: string
+    pasted?: Array<[number, number]>
     command: string
     variant?: string
     executionMode?: "normal" | "fast"

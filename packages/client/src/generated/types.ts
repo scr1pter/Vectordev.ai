@@ -1096,7 +1096,7 @@ export type SessionsHistoryOutput = {
           readonly timestamp: number
           readonly sessionID: string
           readonly usageID: string
-          readonly purpose: "title"
+          readonly purpose: "title" | "memory"
           readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
           readonly cost?: number
           readonly unpriced?: boolean
@@ -1849,7 +1849,7 @@ export type SessionsEventsOutput =
         readonly timestamp: number
         readonly sessionID: string
         readonly usageID: string
-        readonly purpose: "title"
+        readonly purpose: "title" | "memory"
         readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
         readonly cost?: number
         readonly unpriced?: boolean

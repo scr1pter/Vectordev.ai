@@ -268,7 +268,7 @@ const providerConfig = (url: string): Partial<ConfigV1.Info> => ({
     researcher: { description: "Stand-in research worker", mode: "all", prompt: "Research the question." },
     // An agent of the owner's own beside it, to show what the same memory search gives a role whose output stays here.
     librarian: { description: "Stand-in owner agent", mode: "all", prompt: "Answer from what you know." },
-    // A stand-in for the research judge, which hears nothing of how the owner works until B1 gives it sources.
+    // A stand-in for the research judge, which hears the sources facet of how the owner works.
     "research-judge": { description: "Stand-in research judge", mode: "all", prompt: "Check the citations." },
   },
 })
@@ -524,28 +524,37 @@ it.instance(
 )
 
 it.instance(
-  "an agent whose output reaches the web gets the outward digest and screened preferences only",
+  "an agent whose output reaches the web gets the outward digest and screened preferences of its facets only",
   () =>
     Effect.gen(function* () {
       const { brain, place } = yield* setup()
       const pinned = (yield* brain.list(place, { scope: "personal" })).filter((entry) => entry.text === DECISION || entry.text === FACT)
       for (const entry of pinned) yield* brain.update(place, entry.id, { pinned: true }, "user")
+      // Filed under the sources and format facets, which research hears; HABIT is the owner's workflow, which it does not.
+      const SOURCES = "Prefer peer-reviewed studies on payments testing as sources"
+      const FORMAT = "Summarise payments test comparisons in tables"
+      for (const text of [SOURCES, FORMAT])
+        yield* brain.propose(place, { kind: "preference", text, scope: "personal", origin: "user", evidence: { type: "user" } })
       const llm = yield* TestLLMServer
       const child = yield* subagent("thorough", "researcher")
       yield* llm.text("Done.")
       const [body] = yield* send({ sessionID: child.id, agent: "researcher", text: "how do payments tests run in CI elsewhere" })
       expect(body).toContain("Never force-push to main")
-      expect(body).toContain(HABIT)
+      expect(body).toContain(SOURCES)
+      expect(body).toContain(FORMAT)
+      expect(body).not.toContain(HABIT)
       expect(body).not.toContain("Hooli")
       expect(body).not.toContain("badge number")
       expect(body).not.toContain("Globex")
       // A research worker hears the owner's preferences only, pinned or recalled.
       expect(body).not.toContain(DECISION)
-      // The research judge hears none of them, only the rules.
+      // The research judge hears the sources facet alone, and the rules.
       const judge = yield* subagent("thorough", "research-judge")
       yield* llm.text("Done.")
       const [checked] = yield* send({ sessionID: judge.id, agent: "research-judge", text: "check how payments tests run in CI" })
       expect(checked).toContain("Never force-push to main")
+      expect(checked).toContain(SOURCES)
+      expect(checked).not.toContain(FORMAT)
       expect(checked).not.toContain(HABIT)
       expect(checked).not.toContain(DECISION)
       expect(checked).not.toContain("Hooli")
@@ -722,6 +731,107 @@ training.instance(
         expect(body).not.toContain("badge number")
         expect(body).not.toContain("vector_memory_recall")
         expect(body).not.toContain("how_the_owner_reviews")
+      }
+    }),
+  90_000,
+)
+
+// How the owner works with their tooling and format apart, and a term of theirs: what each role's facets let through.
+const TOOLING = "I prefer pnpm over npm for the payments tests"
+const FORMAT = "Summarise payments test comparisons in tables"
+const TERM = "When I say charge, I mean the payments retry loop and its ledger writes"
+const QUESTION = "how do payments tests compare with pnpm, in tables"
+
+const ownWays = Effect.fn("test.ownWays")(function* () {
+  const { brain, place } = yield* setup()
+  for (const [kind, text] of [
+    ["preference", TOOLING],
+    ["preference", FORMAT],
+    ["term", TERM],
+  ] as const)
+    yield* brain.propose(place, { kind, text, scope: "personal", origin: "user", evidence: { type: "user" } })
+  const facets = new Map((yield* brain.list(place, { scope: "personal" })).map((entry) => [entry.text, entry.facet]))
+  expect([facets.get(TOOLING), facets.get(FORMAT), facets.get(TERM)]).toEqual(["tooling", "format", "vocabulary"])
+})
+
+it.instance(
+  "the research lead's recall leaves out the owner's tooling, which the build agent's keeps",
+  () =>
+    Effect.gen(function* () {
+      yield* ownWays()
+      const llm = yield* TestLLMServer
+      const sessions = yield* Session.Service
+      const lead = yield* sessions.create({ title: "Research", permission: allow })
+      yield* llm.text("Done.")
+      const [researched] = yield* send({ sessionID: lead.id, agent: "research", text: `Research ${QUESTION}` })
+      expect(researched).toContain(FORMAT)
+      expect(researched).toContain(HABIT)
+      expect(researched).not.toContain(TOOLING)
+      expect(researched).not.toContain("badge number")
+      const build = yield* sessions.create({ title: "Build", permission: allow })
+      yield* llm.text("Done.")
+      const [built] = yield* send({ sessionID: build.id, agent: "build", text: `Check ${QUESTION}` })
+      expect(built).toContain(TOOLING)
+      expect(built).toContain(FORMAT)
+    }),
+  90_000,
+)
+
+it.instance(
+  "a research lead the build agent started hears only the research facets of how the owner works",
+  () =>
+    Effect.gen(function* () {
+      yield* ownWays()
+      const llm = yield* TestLLMServer
+      const child = yield* subagent("thorough", "research")
+      yield* llm.text("Done.")
+      // Its task names the owner's decision about pull requests, which is no research facet, so it is not heard.
+      const [body] = yield* send({
+        sessionID: child.id,
+        agent: "research",
+        text: `Research ${QUESTION}, and how to review migrations before handlers in every pull request`,
+      })
+      const recall = blocks(body!, "vector_memory_recall").join("\n")
+      expect(recall).toContain(FORMAT)
+      expect(recall).not.toContain(TOOLING)
+      expect(body).not.toContain(TOOLING)
+      expect(body).not.toContain(DECISION)
+      expect(body).not.toContain("badge number")
+      // A subagent of the owner's own, with the same task, hears their tooling too.
+      const general = yield* subagent("thorough")
+      yield* llm.text("Done.")
+      const [owner] = yield* send({ sessionID: general.id, agent: "general", text: `Research ${QUESTION}` })
+      expect(blocks(owner!, "vector_memory_recall").join("\n")).toContain(TOOLING)
+    }),
+  90_000,
+)
+
+it.instance(
+  "an owner subagent gets a term only when its task names it, and a Vectorscope reviewer never does",
+  () =>
+    Effect.gen(function* () {
+      yield* ownWays()
+      const llm = yield* TestLLMServer
+      const named = yield* subagent("standard")
+      yield* llm.text("Done.")
+      const [naming] = yield* send({
+        sessionID: named.id,
+        agent: "general",
+        text: "find why charge fails when the payments tests run",
+      })
+      expect(naming).toContain("payments retry loop")
+      const other = yield* subagent("standard")
+      yield* llm.text("Done.")
+      const [plain] = yield* send({
+        sessionID: other.id,
+        agent: "general",
+        text: "find why the payments tests flake when run together",
+      })
+      expect(plain).not.toContain("payments retry loop")
+      // The review's paths name charge (src/payments/charge.ts), and still no term reaches the reviewer.
+      for (const trust of ["trusted", "untrusted"] as const) {
+        const review = yield* reviewer({ trust })
+        expect(review.body).not.toContain("payments retry loop")
       }
     }),
   90_000,
