@@ -119,6 +119,12 @@ export const docsNav: DocGroup[] = [
         blurb: "Sign in to Vector for free models, or connect a provider account or API key.",
       },
       {
+        id: "local",
+        title: "Vector Local",
+        blurb:
+          "In development: run Vector's AI features on model servers you or your company host, with a log of what Vector sent.",
+      },
+      {
         id: "cloud-services",
         title: "Vector Cloud",
         blurb: "Deployments, domains, databases and logs through your own Vercel and Supabase accounts.",
