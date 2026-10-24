@@ -5,6 +5,7 @@ import { useDialog } from "@vectordevai/ui/context/dialog"
 import { usePlatform } from "@/context/platform"
 import { useSettings } from "@/context/settings"
 import { persisted } from "@/utils/persist"
+import { afterFirstRun, mayFetch, type DesktopLocal } from "@/utils/desktop-local"
 import { DialogReleaseNotes, type Highlight } from "@/components/dialog-release-notes"
 
 const CHANGELOG_URL = "https://vectordev.ai/changelog.json"
@@ -177,11 +178,20 @@ export const { use: useHighlights, provider: HighlightsProvider } = createSimple
         clearTimer()
       })
 
-      fetcher(CHANGELOG_URL, {
-        signal: controller.signal,
-        headers: { Accept: "application/json" },
-      })
-        .then((response) => (response.ok ? (response.json() as Promise<unknown>) : undefined))
+      // Release notes come from vectordev.ai. In the desktop app, Vector Local keeps them off unless the user allows
+      // them, and a first run holds them until the person has chosen how to run models, when they are read; while
+      // Vector Local keeps them off the version stays unseen, so they show once they may.
+      const fetched = Promise.withResolvers<DesktopLocal | undefined>()
+      onCleanup(afterFirstRun(fetched.resolve))
+      fetched.promise
+        .then((local) => {
+          if (!mayFetch(local, "release-notes") || controller.signal.aborted) return undefined
+          return fetcher(CHANGELOG_URL, {
+            signal: controller.signal,
+            headers: { Accept: "application/json" },
+          })
+        })
+        .then((response) => (response?.ok ? (response.json() as Promise<unknown>) : undefined))
         .then((json) => {
           if (!json) return
           const highlights = loadReleaseHighlights(json, platform.version, previous)

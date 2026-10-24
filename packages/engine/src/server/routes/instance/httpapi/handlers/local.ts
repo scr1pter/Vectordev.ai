@@ -9,6 +9,7 @@ import { LocalHardware } from "@vectordevai/core/local-mode/hardware"
 import { LocalProbe } from "@vectordevai/core/local-mode/probe"
 import { LocalRecommend } from "@vectordevai/core/local-mode/recommend"
 import { LocalSources } from "@vectordevai/core/local-mode/sources"
+import { StartupHold } from "@vectordevai/core/startup-hold"
 import { GlobalBus } from "@/bus/global"
 import { Config } from "@/config/config"
 import { LocalSettings } from "@/config/local-settings"
@@ -88,10 +89,11 @@ export const localHandlers = HttpApiBuilder.group(InstanceHttpApi, "local", (han
       return true
     })
 
+    // The desktop records what its windows did only while it applies Vector Local, which it may while this Vector reads
+    // it off (the two disagree, and the desktop uses the stricter), so its lines are kept whatever this policy says.
     const egressReport = Effect.fn("LocalHttpApi.egressReport")(function* (ctx: {
       payload: { events: readonly LocalMode.Event[] }
     }) {
-      if (!Egress.policy().enabled) return 0
       ctx.payload.events.forEach((event) => Egress.report(event))
       return ctx.payload.events.length
     })
@@ -181,6 +183,11 @@ export const localHandlers = HttpApiBuilder.group(InstanceHttpApi, "local", (han
       return true
     })
 
+    // The desktop's first run holds Vector's own startup fetches until the person has chosen how to run models.
+    const releaseStartup = Effect.fn("LocalHttpApi.releaseStartup")(function* () {
+      return StartupHold.release()
+    })
+
     const recommend = Effect.fn("LocalHttpApi.recommend")(function* () {
       const hardware = yield* Effect.promise(() => LocalHardware.read())
       const suggested = LocalRecommend.recommend({ usable: hardware.usable })
@@ -214,6 +221,7 @@ export const localHandlers = HttpApiBuilder.group(InstanceHttpApi, "local", (han
       .handle("addServer", addServer)
       .handle("check", check)
       .handle("grant", grant)
+      .handle("releaseStartup", releaseStartup)
       .handle("recommend", recommend)
   }),
 )

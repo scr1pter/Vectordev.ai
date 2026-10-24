@@ -261,7 +261,7 @@ export const LocalApi = HttpApi.make("local")
             identifier: "local.egress.report",
             summary: "Add events to the network log",
             description:
-              "Requests the desktop app's own windows made or blocked, which its main process decides, added to this Vector's network log while Vector Local is on.",
+              "Requests the desktop app's own windows made or blocked, which its main process decides and records while it applies Vector Local, added to this Vector's network log whatever this Vector's own Vector Local setting is.",
           }),
         ),
         HttpApiEndpoint.post("detect", `${root}/detect`, {
@@ -325,6 +325,17 @@ export const LocalApi = HttpApi.make("local")
             summary: "Allow a request once",
             description:
               "Let the next request of a kind Vector Local asks about through, such as a model download or a manual update check. Each grant answers one ask and is never saved. Allow a service for good with PATCH /local instead.",
+          }),
+        ),
+        HttpApiEndpoint.post("releaseStartup", `${root}/startup/release`, {
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Boolean, "Whether this Vector was holding them"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "local.startup.release",
+            summary: "Let the startup fetches go",
+            description:
+              "On a desktop first run, the app starts its engine with the model catalog's refresh, the free models and Codium plans catalogs and the provider policy held until the person chooses how to run models. This lets them go: each loads now, in this Vector, with no restart. A Vector that holds nothing answers false.",
           }),
         ),
         HttpApiEndpoint.get("recommend", `${root}/recommend`, {

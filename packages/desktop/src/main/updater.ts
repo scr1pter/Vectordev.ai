@@ -1,10 +1,11 @@
-import { constants } from "node:fs"
+import { constants, existsSync, readFileSync } from "node:fs"
 import { access } from "node:fs/promises"
-import { dirname } from "node:path"
-import { app, dialog } from "electron"
+import { dirname, join } from "node:path"
+import { app, dialog, session } from "electron"
 import pkg from "electron-updater"
 import { UPDATER_DISABLED_REASON, UPDATER_ENABLED } from "./constants"
 import { createUpdaterController, startPlatformInstall, type UpdaterReadyRecord } from "./updater-controller"
+import { createUpdateGate, duringUpdateCheck } from "./local-mode"
 import { getLogger } from "./logging"
 import { getStore } from "./store"
 import { setAppQuitting } from "./windows"
@@ -112,11 +113,58 @@ export function setupAutoUpdater(input: { stop: () => Promise<void>; relaunch: (
       detail: state.message,
     })
   }
-  return controller
+
+  // Vector Local turns automatic checks off (a company mirror excepted) and asks before each check the person starts;
+  // the first run's hold keeps automatic checks back until the person has chosen how to run models.
+  const feed = updateFeed()
+  const local = createUpdateGate({
+    feed: () => feed,
+    ask: async (question) =>
+      (
+        await dialog.showMessageBox({
+          type: "question",
+          title: "Vector Local",
+          message: question.message,
+          detail: question.detail,
+          buttons: ["Check once", "Cancel"],
+          defaultId: 0,
+          cancelId: 1,
+        })
+      ).response === 0,
+    tell: async (notice) =>
+      void (await dialog.showMessageBox({
+        type: "info",
+        title: "Vector Local",
+        message: notice.message,
+        detail: notice.detail,
+      })),
+    during: (origins, run) =>
+      duringUpdateCheck((partition, options) => session.fromPartition(partition, options), origins, run),
+  })
+  // A check the person started, or undefined when they cancelled Vector Local's question or it refused the check. An
+  // installation without in-app updates checks nothing, so there is nothing to ask about.
+  const checked = () => (UPDATER_ENABLED ? local.checked(() => controller.check()) : controller.check())
+  return {
+    ...controller,
+    start: () => (local.automatic() ? controller.start() : Promise.resolve(controller.getState())),
+    poll: () => (local.automatic() ? controller.poll() : Promise.resolve(controller.getState())),
+    checked,
+    check: async () => (await checked()) ?? controller.getState(),
+  }
+}
+
+// The feed electron-updater reads, from the app-update.yml electron-builder writes beside the app's resources; none in
+// a development build.
+function updateFeed() {
+  const file = join(process.resourcesPath ?? "", "app-update.yml")
+  if (!process.resourcesPath || !existsSync(file)) return undefined
+  return readFileSync(file, "utf8").match(/^url:\s*['"]?([^'"\s]+)/m)?.[1]
 }
 
 export async function showUpdaterDialog(controller: ReturnType<typeof setupAutoUpdater>, alertOnFail: boolean) {
-  const state = await controller.check()
+  // A check the person cancelled shows nothing, not the state an earlier check left.
+  const state = await controller.checked()
+  if (!state) return
   if (state.status === "error") {
     if (!alertOnFail) return
     await dialog.showMessageBox({

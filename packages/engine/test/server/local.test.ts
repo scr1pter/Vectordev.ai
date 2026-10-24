@@ -9,6 +9,7 @@ import { Egress } from "@vectordevai/core/local-mode/egress"
 import { ModelSlots } from "@vectordevai/core/local-mode/model-slots"
 import type { LocalProbe } from "@vectordevai/core/local-mode/probe"
 import { LocalSources } from "@vectordevai/core/local-mode/sources"
+import { StartupHold } from "@vectordevai/core/startup-hold"
 import type { LocalMode } from "@vectordevai/schema/local-mode"
 import { Config } from "../../src/config/config"
 import type { LocalSettings } from "../../src/config/local-settings"
@@ -182,6 +183,7 @@ describe("the Local API", () => {
       ["POST", "/local/servers", { url: "http://127.0.0.1:9" }],
       ["POST", "/local/check", {}],
       ["POST", "/local/grant", { source: "embedding-model" }],
+      ["POST", "/local/startup/release"],
       ["GET", "/local/recommend"],
     ]
     for (const [method, route, body] of routes) {
@@ -510,6 +512,26 @@ describe("the Local API", () => {
 
     expect(await json<boolean>(await send("DELETE", "/local/egress"))).toBe(true)
     expect(await json<LocalMode.Event[]>(await send("GET", "/local/egress"))).toEqual([])
+  })
+
+  test("keeps the desktop's lines while this Vector reads Vector Local off, so none are lost to a mismatch", async () => {
+    expect(Config.local().enabled).toBe(false)
+    const desktop: LocalMode.Event = {
+      id: "evt_desktop_mismatch",
+      time: Date.now(),
+      source: "release-notes",
+      purpose: "release-notes",
+      class: "internet",
+      origin: "https://vectordev.ai",
+      method: "GET",
+      decision: "block",
+      rule: "vector-service",
+      reason: "Vector Local blocks Vector's own services unless you allow them.",
+      carried: { personal: 0, documents: 0, repository: 0 },
+    }
+    expect(await json<number>(await send("POST", "/local/egress/report", { events: [desktop] }))).toBe(1)
+    const events = await json<LocalMode.Event[]>(await send("GET", "/local/egress"))
+    expect(events.map((event) => event.id)).toEqual(["evt_desktop_mismatch"])
   })
 
   test("under a company lock, Erase is refused: the company sets how long the network log is kept", async () => {
@@ -861,6 +883,23 @@ describe("the Local API", () => {
     expect(never.data.code).toBe("invalid")
     const missing = await json<Refusal>(await send("POST", "/local/grant", { source: "no-such-source" }))
     expect(missing.data.code).toBe("not-found")
+  })
+
+  test("a desktop first run's held startup fetches go once the owner lets them, and a guest cannot", async () => {
+    StartupHold.useTestHold(true)
+    try {
+      const released: string[] = []
+      StartupHold.onRelease(() => void released.push("released"))
+      expect((await send("POST", "/local/startup/release", undefined, guest)).status).toBe(403)
+      expect(StartupHold.held()).toBe(true)
+      expect(await json<boolean>(await send("POST", "/local/startup/release"))).toBe(true)
+      expect(StartupHold.held()).toBe(false)
+      expect(released).toEqual(["released"])
+      // Once is enough: a second answer holds nothing.
+      expect(await json<boolean>(await send("POST", "/local/startup/release"))).toBe(false)
+    } finally {
+      StartupHold.useTestHold(false)
+    }
   })
 
   test("model suggestions name dated examples with their label", async () => {

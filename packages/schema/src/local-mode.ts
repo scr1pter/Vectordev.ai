@@ -84,6 +84,9 @@ export const Rule = Schema.Literals([
   "web-port",
   // A request for this computer or the user's network that the proxy environment would still send through a proxy.
   "proxy-environment",
+  // A desktop window's own rule stopped a request Vector Local let through, before it left: a research browser's
+  // navigation rule, or the billing window handing its return to the app.
+  "window-rule",
 ]).annotate({ identifier: "EgressRule" })
 export type Rule = typeof Rule.Type
 
@@ -182,6 +185,9 @@ export const Event = Schema.Struct({
   carried: Carried,
   // For a request no call site labelled: the first stack frame outside the network guard, so the code can be found.
   frame: optional(Schema.String),
+  // For a request a browser Vector drives made: the page it opened, or something a page loaded (an image, a script,
+  // a frame). The counters count a page as a page read and what pages loaded only as other hosts they reached.
+  resource: optional(Schema.Literals(["page", "subresource"])),
 }).annotate({ identifier: "EgressEvent" })
 export type Event = typeof Event.Type
 
@@ -192,7 +198,8 @@ export const Summary = Schema.Struct({
   helper_requests: NonNegativeInt,
   // Model calls by origin.
   model_calls: Schema.Record(Schema.String, NonNegativeInt),
-  // Web pages read, and the other hosts reached for web purposes.
+  // Web pages read (what a page loaded is not a page), and the other hosts reached for web purposes: the hosts what
+  // the pages loaded came from, the pages' own hosts left out ("6 pages, 41 other hosts they loaded").
   pages: NonNegativeInt,
   hosts: NonNegativeInt,
   searches: NonNegativeInt,

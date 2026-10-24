@@ -98,6 +98,9 @@ describe("EgressProxy", () => {
         ["research-browser", "research-browser", "CONNECT", "allow"],
       ])
       expect(Egress.events()[0]).toMatchObject({ session_id: "ses_researcher", root_session_id: "ses_lead" })
+      // A connection is a host the browser reached, not a page: the desktop's Chromium filter logs the pages.
+      expect(Egress.events().map((event) => event.resource)).toEqual(["subresource", "subresource"])
+      expect(Egress.summary("ses_lead")).toMatchObject({ requests: 2, pages: 0 })
     } finally {
       await proxy.stop()
     }

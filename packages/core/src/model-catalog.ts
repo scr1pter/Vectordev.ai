@@ -16,6 +16,7 @@ import { Egress } from "./local-mode/egress"
 import { EgressHttpClient } from "./local-mode/http-client"
 import { LocalPolicy } from "./local-mode/policy"
 import { LocalSources } from "./local-mode/sources"
+import { StartupHold } from "./startup-hold"
 
 const decodeJson = Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)
 
@@ -238,7 +239,15 @@ const layer = Layer.effect(
       if (fromDisk) return fromDisk
       const snapshot = yield* loadSnapshot
       if (snapshot) return snapshot
-      if (!source || Flag.VECTOR_MODELS_PATH || Flag.VECTOR_DISABLE_MODELS_FETCH || offline(source)) return {}
+      // A desktop first run holds the fetch until the person has chosen how to run models; the refresh below runs then.
+      if (
+        !source ||
+        Flag.VECTOR_MODELS_PATH ||
+        Flag.VECTOR_DISABLE_MODELS_FETCH ||
+        offline(source) ||
+        StartupHold.held()
+      )
+        return {}
       // Flock is cross-process: concurrent Vector CLIs can race on this cache file.
       // A failed fetch degrades to an empty catalog so configured and custom providers still resolve.
       return yield* Effect.scoped(
@@ -259,7 +268,14 @@ const layer = Layer.effect(
     const get = (): Effect.Effect<Record<string, Provider>> => Effect.uninterruptible(cachedGet)
 
     const refresh = Effect.fn("ModelCatalog.refresh")(function* (force = false) {
-      if (!source || Flag.VECTOR_MODELS_PATH || Flag.VECTOR_DISABLE_MODELS_FETCH || offline(source)) return
+      if (
+        !source ||
+        Flag.VECTOR_MODELS_PATH ||
+        Flag.VECTOR_DISABLE_MODELS_FETCH ||
+        offline(source) ||
+        StartupHold.held()
+      )
+        return
       if (!force && (yield* fresh())) return
       yield* Effect.scoped(
         Effect.gen(function* () {
@@ -294,6 +310,15 @@ const layer = Layer.effect(
           Effect.ignore,
         ),
       )
+      // A desktop first run's hold (StartupHold) skips the refreshes above until the person has chosen how to run
+      // models; the catalog refreshes as soon as they have, in this process.
+      if (StartupHold.held())
+        yield* Effect.forkScoped(
+          Effect.callback<void>((resume) => Effect.sync(StartupHold.onRelease(() => resume(Effect.void)))).pipe(
+            Effect.andThen(refresh()),
+            Effect.ignore,
+          ),
+        )
     }
 
     return Service.of({ get, refresh })

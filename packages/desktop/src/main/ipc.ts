@@ -16,6 +16,7 @@ import { write } from "./logging"
 import { sendBugReport } from "./bug-report"
 import { askHelpAssistant, type HelpInput } from "./help-assistant"
 import { clearLocalMemory, readLocalMemory, writeLocalMemory } from "./local-memory"
+import { desktopLocalStatus } from "./local-mode"
 import { deleteRepoRule, listRepoRules, saveRepoRule, type SaveRepoRuleInput } from "./repo-rules"
 import { ensureRuntime, preparePluginCommand, type RuntimeName } from "./runtime-bootstrap"
 import { convertHeicToJpeg } from "./image-convert"
@@ -396,6 +397,7 @@ export function registerIpcHandlers(deps: Deps) {
   handle("local-memory-read", () => readLocalMemory())
   handle("local-memory-write", (_event, content: string) => writeLocalMemory(String(content ?? "")))
   handle("local-memory-clear", () => clearLocalMemory())
+  handle("vector-local-status", () => desktopLocalStatus())
   handle("repo-rules-list", (_event: IpcMainInvokeEvent, repositoryPath?: string) =>
     listRepoRules(repositoryPath ? String(repositoryPath) : undefined),
   )

@@ -504,8 +504,24 @@ describe("research browsers", () => {
     // Never called: Electron applies it to the whole app, and an empty list is no list on Windows. A challenge for
     // ambient sign-in is cancelled in headersReceived instead.
     expect(partition.ntlm).toEqual([])
-    // L7's dispatcher must compose this listener, not replace it.
-    expect(partition.web.beforeRequest).toBe(research.researchRequestHandlers.beforeRequest)
+    // The rule runs in the session's one onBeforeRequest listener, Vector Local's dispatcher (egress-filter.ts), after
+    // its own decision: a request no research browser made reaches the rule, which refuses it.
+    const unowned = await new Promise<{ cancel?: boolean }>((resolve) =>
+      partition.web.beforeRequest!(
+        {
+          id: 1,
+          url: ARTICLE,
+          method: "GET",
+          resourceType: "script",
+          webContentsId: -5,
+          referrer: "",
+          timestamp: 0,
+          uploadData: [],
+        },
+        resolve,
+      ),
+    )
+    expect(unowned).toEqual({ cancel: true })
     expect(partition.web.beforeSendHeaders).toBe(research.researchRequestHandlers.beforeSendHeaders)
     const config = partition.proxies.at(-1) as { mode: string; proxyRules: string; proxyBypassRules: string }
     expect(config).toMatchObject({ mode: "fixed_servers", proxyBypassRules: "<-loopback>" })

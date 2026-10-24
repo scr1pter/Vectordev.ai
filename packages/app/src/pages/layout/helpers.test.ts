@@ -8,6 +8,8 @@ import {
 } from "./deep-links"
 import { type Session } from "@vectordevai/sdk/v2/client"
 import {
+  VECTOR_ICON,
+  getProjectAvatarSource,
   childSessionOnPath,
   closeHomeProject,
   displayName,
@@ -380,5 +382,15 @@ describe("layout workspace helpers", () => {
     expect(errorMessage({ data: { message: "boom" } }, "fallback")).toBe("boom")
     expect(errorMessage(new Error("broken"), "fallback")).toBe("broken")
     expect(errorMessage("unknown", "fallback")).toBe("fallback")
+  })
+})
+
+describe("getProjectAvatarSource", () => {
+  test("shows Vector's own repository with the icon bundled with the app, so it reaches no server", () => {
+    expect(getProjectAvatarSource("4b0ea68d7af9a6031a7ffda7ad66e0cb83315750")).toBe(VECTOR_ICON)
+    expect(VECTOR_ICON.startsWith("/")).toBe(true)
+    expect(getProjectAvatarSource("other", { url: "https://example.com/icon.png" })).toBe(
+      "https://example.com/icon.png",
+    )
   })
 })

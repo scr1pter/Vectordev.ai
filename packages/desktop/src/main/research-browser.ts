@@ -21,6 +21,7 @@ import {
 } from "./browser-page"
 import { POST, addLinks, decideResearchNavigation, spelled, type Decision, type Kind } from "./research-navigation"
 import { NEEDS_GUARD, startResearchProxy, type ResearchProxy } from "./research-proxy"
+import { egressFilter } from "./egress-filter"
 
 // Every research agent's own browser (section 5.6a). The lead `research` agent and each `researcher` it starts drive
 // one research browser apiece, through the engine's research_browser tool and the bridge's POST /research. A run (keyed
@@ -73,9 +74,9 @@ import { NEEDS_GUARD, startResearchProxy, type ResearchProxy } from "./research-
 // - A browser closes when its agent's session finishes (the engine closes it), when its run is stopped, after 10 idle
 //   minutes, or when its page stops answering.
 //
-// Electron keeps one listener per webRequest event per session. `registerResearchListeners` and
-// `researchRequestHandlers` are exported so Vector Local's Chromium dispatcher (L7) composes these instead of
-// replacing them.
+// Electron keeps one listener per webRequest event per session, and Vector Local's Chromium dispatcher
+// (egress-filter.ts) holds each session's onBeforeRequest: the navigation rule registers there as a step, which runs
+// after Vector Local's own decision. The other webRequest events are this file's alone.
 
 export const PARTITION_PREFIX = "vector-research-"
 export const VIEW = { width: 1280, height: 900 } as const
@@ -274,6 +275,8 @@ type Browser = {
   readonly view: WebContentsView
   readonly contents: WebContents
   readonly contentsID: number
+  /** Stops attributing what this browser loads to its agent's session (the Vector Local dispatcher's log). */
+  readonly unattribute: () => void
   queue: Promise<unknown>
   closing: AbortController
   closed: boolean
@@ -443,9 +446,12 @@ async function open(key: string, input: ResearchInput, run: Run): Promise<Browse
     harden(partition)
     hardened.add(partition)
   }
-  const proxy = await startResearchProxy({
-    attribution: { sessionID: input.sessionID, ...(input.rootID ? { rootID: input.rootID } : {}), agent: input.agent },
-  }).catch(async (error: unknown) => {
+  const attribution = {
+    sessionID: input.sessionID,
+    ...(input.rootID ? { rootID: input.rootID } : {}),
+    agent: input.agent,
+  }
+  const proxy = await startResearchProxy({ attribution }).catch(async (error: unknown) => {
     await pool.release(slot)
     return { error: error instanceof Error ? error.message : String(error) }
   })
@@ -496,6 +502,8 @@ async function open(key: string, input: ResearchInput, run: Run): Promise<Browse
     view,
     contents,
     contentsID: contents.id,
+    // The pages it opens count in its run's counters, as its proxy's connections do.
+    unattribute: egressFilter.attribute(contents.id, attribution),
     queue: Promise.resolve(),
     closing: new AbortController(),
     closed: false,
@@ -890,9 +898,9 @@ function harden(partition: Session) {
   registerResearchListeners(partition)
 }
 
-/** Registers the research browsers' webRequest listeners on a slot session. L7's dispatcher composes these. */
+/** Registers the research browsers' webRequest listeners on a slot session, the navigation rule through the dispatcher. */
 export function registerResearchListeners(target: Pick<Session, "webRequest">) {
-  target.webRequest.onBeforeRequest(researchRequestHandlers.beforeRequest)
+  egressFilter.register(target, researchRequestHandlers.beforeRequest, { kind: "research-browser" })
   target.webRequest.onBeforeSendHeaders(researchRequestHandlers.beforeSendHeaders)
   target.webRequest.onHeadersReceived(researchRequestHandlers.headersReceived)
   target.webRequest.onCompleted(researchRequestHandlers.done)
@@ -1059,9 +1067,9 @@ async function devtools(browser: Browser) {
   // keyboard from the user's own window.
   await send("Emulation.setFocusEmulationEnabled", { enabled: true })
   // Before the page's own scripts in every frame, a frame its script just made included (the Electron smoke checks it):
-  // no print dialog, no peer connections and no file pickers. What holds whatever a page does is the documents' sandbox
-  // for print() and dialogs, the proxy-only WebRTC policy, the Blink feature turned off for file pickers, and the
-  // network stack's refusal of service workers.
+  // no print dialog, no peer connections, no WebTransport (whose connections no webRequest listener sees) and no
+  // file pickers. What holds whatever a page does is the documents' sandbox for print() and dialogs, the proxy-only
+  // WebRTC policy, the Blink feature turned off for file pickers, and the network stack's refusal of service workers.
   await send("Page.addScriptToEvaluateOnNewDocument", { source: STUBS, runImmediately: true })
   // For holding the page's scripts between commands (lifecycle).
   await send("Debugger.enable")
@@ -1080,6 +1088,7 @@ const STUBS = `(() => {
   stub(window, "RTCPeerConnection", undefined);
   stub(window, "webkitRTCPeerConnection", undefined);
   stub(window, "RTCDataChannel", undefined);
+  stub(window, "WebTransport", undefined);
   const cancelled = () => Promise.reject(new DOMException("The user aborted a request.", "AbortError"));
   ["showOpenFilePicker", "showSaveFilePicker", "showDirectoryPicker"].forEach((key) => {
     if (key in window) stub(window, key, cancelled);
@@ -1137,6 +1146,7 @@ async function closeBrowser(browser: Browser) {
   browser.closing.abort()
   browsers.delete(browser.key)
   byContents.delete(browser.contentsID)
+  browser.unattribute()
   browser.run.browsers.delete(browser.sessionID)
   const contents = browser.contents
   if (host.window && !host.window.isDestroyed()) host.window.contentView.removeChildView(browser.view)

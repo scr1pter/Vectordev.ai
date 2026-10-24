@@ -77,6 +77,9 @@ const api: ElectronAPI = {
     ensure: (name) => ipcRenderer.invoke("runtime-ensure", name),
     preparePluginCommand: (command) => ipcRenderer.invoke("runtime-prepare-plugin-command", command),
   },
+  vectorLocal: {
+    status: () => ipcRenderer.invoke("vector-local-status"),
+  },
   localMemory: {
     read: () => ipcRenderer.invoke("local-memory-read"),
     write: (content) => ipcRenderer.invoke("local-memory-write", content),

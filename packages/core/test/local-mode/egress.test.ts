@@ -159,7 +159,8 @@ describe("Egress.decide", () => {
       helper_requests: 3,
       model_calls: { [MODEL]: 2 },
       pages: 1,
-      hosts: 1,
+      // The page's own host is not another host it loaded.
+      hosts: 0,
       searches: 0,
       carried,
       blocked: { "model-catalog": 1 },
@@ -167,6 +168,41 @@ describe("Egress.decide", () => {
     expect(Egress.summary("ses_other").requests).toBe(0)
     expect(Egress.summary().requests).toBe(4)
     expect(Egress.events({ blocked: true }).map((event) => event.source)).toEqual(["model-catalog"])
+  })
+
+  test("counts a page a browser opened as a page and what the page loaded only as hosts it reached", () => {
+    Egress.configure(on())
+    EgressAttribution.run({ sessionID: "ses_browse", agent: "build" }, () => {
+      const page = (url: string) =>
+        Egress.record(
+          { source: "agent-browser", url, resource: "page" },
+          LocalPolicy.decide(Egress.policy(), { purpose: "browser", url, source: "agent-browser" }),
+        )
+      const loaded = (url: string) =>
+        Egress.record(
+          { source: "agent-browser", url, resource: "subresource" },
+          LocalPolicy.decide(Egress.policy(), { purpose: "browser", url, source: "agent-browser" }),
+        )
+      page("https://news.example.org/")
+      loaded("https://cdn.example.net/app.js")
+      loaded("https://fonts.example.com/font.woff2")
+      loaded("https://cdn.example.net/style.css")
+      page("https://docs.example.org/guide")
+    })
+    const summary = Egress.summary("ses_browse")
+    // "2 pages, 2 other hosts they loaded": the pages' own hosts are not among the others.
+    expect({ pages: summary.pages, hosts: summary.hosts, requests: summary.requests }).toEqual({
+      pages: 2,
+      hosts: 2,
+      requests: 5,
+    })
+    expect(Egress.events({ session: "ses_browse" }).map((event) => event.resource)).toEqual([
+      "page",
+      "subresource",
+      "subresource",
+      "subresource",
+      "page",
+    ])
   })
 
   test("tells the user about unlabelled blocks and blocks they caused, once per source in ten minutes", () => {

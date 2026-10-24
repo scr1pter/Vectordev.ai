@@ -45,6 +45,8 @@ export type Request = {
   readonly notify?: boolean
   /** The size of the request's body, when it is known before it is sent. */
   readonly bytes?: number
+  /** For a browser Vector drives: the page it opened, or something a page loaded, which is not counted as a page. */
+  readonly resource?: LocalMode.Event["resource"]
 }
 
 export type Decided = LocalPolicy.Verdict & {
@@ -82,7 +84,9 @@ type Totals = {
   helper_requests: number
   model_calls: Record<string, number>
   pages: number
+  /** The origins reached for web purposes, and those of the pages read, which are not "other hosts". */
   hosts: Set<string>
+  pageOrigins: Set<string>
   searches: number
   carried: { personal: number; documents: number; repository: number }
   blocked: Record<string, number>
@@ -282,6 +286,7 @@ export function record(request: Request, verdict: LocalPolicy.Verdict) {
       verdict,
       tool: request.tool,
       bytes: request.bytes,
+      resource: request.resource,
     },
     request.notify,
   )
@@ -434,7 +439,7 @@ export function summary(rootID?: string): LocalMode.Summary {
     helper_requests: totals.helper_requests,
     model_calls: { ...totals.model_calls },
     pages: totals.pages,
-    hosts: totals.hosts.size,
+    hosts: [...totals.hosts].filter((origin) => !totals.pageOrigins.has(origin)).length,
     searches: totals.searches,
     carried: { ...totals.carried },
     blocked: { ...totals.blocked },
@@ -460,9 +465,12 @@ export function notices(listener: (event: LocalMode.Event) => void) {
   }
 }
 
-/** Records an event made elsewhere, such as the desktop's own windows, while Vector Local is on. */
+/**
+ * Records an event made elsewhere, such as the desktop's own windows. The desktop records them only while it applies
+ * Vector Local, so they are kept whatever this process's own policy says: in memory, and in the log file while it is
+ * open here.
+ */
 export function report(event: LocalMode.Event) {
-  if (!state.policy.enabled) return
   remember(event, false)
   post({ kind: "event", event, notify: false, agent: undefined })
 }
@@ -537,6 +545,7 @@ function push(
     readonly tool?: string
     readonly frame?: string
     readonly bytes?: number
+    readonly resource?: LocalMode.Event["resource"]
   },
   notify = false,
 ) {
@@ -559,6 +568,7 @@ function push(
     ...(input.tool ? { tool: input.tool } : {}),
     carried: scope?.carried ?? ZERO,
     ...(input.frame ? { frame: input.frame } : {}),
+    ...(input.resource ? { resource: input.resource } : {}),
   }
   const told = notify || (event.decision !== "allow" && event.source === "unlabelled")
   remember(event, told, scope?.agent)
@@ -588,6 +598,7 @@ function count(key: string, event: LocalMode.Event, agent: string | undefined) {
         model_calls: {},
         pages: 0,
         hosts: new Set(),
+        pageOrigins: new Set(),
         searches: 0,
         carried: { ...ZERO },
         blocked: {},
@@ -601,7 +612,12 @@ function count(key: string, event: LocalMode.Event, agent: string | undefined) {
   }
   if (event.purpose === "inference") totals.model_calls[event.origin] = (totals.model_calls[event.origin] ?? 0) + 1
   if (WEB.has(event.purpose)) {
-    totals.pages += 1
+    // What a page loaded (an image, a script, a frame) is another host it reached, not a page read; a page's own
+    // origin is not one of the other hosts.
+    if (event.resource !== "subresource") {
+      totals.pages += 1
+      totals.pageOrigins.add(event.origin)
+    }
     totals.hosts.add(event.origin)
   }
   if (event.purpose === "web-search") totals.searches += 1

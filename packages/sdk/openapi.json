@@ -5963,7 +5963,7 @@
             }
           }
         },
-        "description": "Requests the desktop app's own windows made or blocked, which its main process decides, added to this Vector's network log while Vector Local is on.",
+        "description": "Requests the desktop app's own windows made or blocked, which its main process decides and records while it applies Vector Local, added to this Vector's network log whatever this Vector's own Vector Local setting is.",
         "summary": "Add events to the network log",
         "requestBody": {
           "content": {
@@ -6454,6 +6454,71 @@
           {
             "lang": "js",
             "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.grant({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/local/startup/release": {
+      "post": {
+        "tags": ["local"],
+        "operationId": "local.startup.release",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Whether this Vector was holding them",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "description": "Whether this Vector was holding them"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "On a desktop first run, the app starts its engine with the model catalog's refresh, the free models and Codium plans catalogs and the provider policy held until the person chooses how to run models. This lets them go: each loads now, in this Vector, with no restart. A Vector that holds nothing answers false.",
+        "summary": "Let the startup fetches go",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.local.startup.release({\n  ...\n})"
           }
         ]
       }
@@ -34976,7 +35041,8 @@
           "resolved-outside",
           "private-destination",
           "web-port",
-          "proxy-environment"
+          "proxy-environment",
+          "window-rule"
         ]
       },
       "EgressCarried": {
@@ -35054,6 +35120,10 @@
           },
           "frame": {
             "type": "string"
+          },
+          "resource": {
+            "type": "string",
+            "enum": ["page", "subresource"]
           }
         },
         "required": [

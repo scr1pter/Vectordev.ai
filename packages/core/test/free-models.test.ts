@@ -182,6 +182,8 @@ console.log(JSON.stringify({ file: FreeModels.trainingConsentFile(), consent: aw
       await rm(home, { recursive: true, force: true })
     }
   },
+  // Seven processes, each loading the free models module and what it imports, which takes most of a second.
+  30_000,
 )
 
 test("a known OFF catalog answers at once and refreshes in the background", async () => {

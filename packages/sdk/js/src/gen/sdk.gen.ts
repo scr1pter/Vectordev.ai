@@ -198,6 +198,9 @@ import type {
   LocalServersAddData,
   LocalServersAddErrors,
   LocalServersAddResponses,
+  LocalStartupReleaseData,
+  LocalStartupReleaseErrors,
+  LocalStartupReleaseResponses,
   LocalUpdateData,
   LocalUpdateErrors,
   LocalUpdateResponses,
@@ -2170,7 +2173,7 @@ export class Egress extends HeyApiClient {
   /**
    * Add events to the network log
    *
-   * Requests the desktop app's own windows made or blocked, which its main process decides, added to this Vector's network log while Vector Local is on.
+   * Requests the desktop app's own windows made or blocked, which its main process decides and records while it applies Vector Local, added to this Vector's network log whatever this Vector's own Vector Local setting is.
    */
   public report<ThrowOnError extends boolean = false>(options?: Options<LocalEgressReportData, ThrowOnError>) {
     return (options?.client ?? this.client).post<LocalEgressReportResponses, LocalEgressReportErrors, ThrowOnError>({
@@ -2199,6 +2202,19 @@ export class Servers extends HeyApiClient {
         ...options?.headers,
       },
     })
+  }
+}
+
+export class Startup extends HeyApiClient {
+  /**
+   * Let the startup fetches go
+   *
+   * On a desktop first run, the app starts its engine with the model catalog's refresh, the free models and Codium plans catalogs and the provider policy held until the person chooses how to run models. This lets them go: each loads now, in this Vector, with no restart. A Vector that holds nothing answers false.
+   */
+  public release<ThrowOnError extends boolean = false>(options?: Options<LocalStartupReleaseData, ThrowOnError>) {
+    return (options?.client ?? this.client).post<LocalStartupReleaseResponses, LocalStartupReleaseErrors, ThrowOnError>(
+      { url: "/local/startup/release", ...options },
+    )
   }
 }
 
@@ -2315,6 +2331,11 @@ export class Local extends HeyApiClient {
   private _servers?: Servers
   get servers(): Servers {
     return (this._servers ??= new Servers({ client: this.client }))
+  }
+
+  private _startup?: Startup
+  get startup(): Startup {
+    return (this._startup ??= new Startup({ client: this.client }))
   }
 }
 
