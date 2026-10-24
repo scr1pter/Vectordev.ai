@@ -1,8 +1,9 @@
-import { constants, existsSync, readFileSync } from "node:fs"
+import { constants } from "node:fs"
 import { access } from "node:fs/promises"
-import { dirname, join } from "node:path"
+import { dirname } from "node:path"
 import { app, dialog, session } from "electron"
 import pkg from "electron-updater"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 import { UPDATER_DISABLED_REASON, UPDATER_ENABLED } from "./constants"
 import { createUpdaterController, startPlatformInstall, type UpdaterReadyRecord } from "./updater-controller"
 import { createUpdateGate, duringUpdateCheck } from "./local-mode"
@@ -10,6 +11,7 @@ import { getLogger } from "./logging"
 import { getStore } from "./store"
 import { setAppQuitting } from "./windows"
 import { prepareMacUpdateInstaller, recordUpdateFailure, takeUpdateFailure } from "./mac-update-installer"
+import { updateFeed } from "./update-feed"
 
 const { autoUpdater } = pkg
 const key = "ready"
@@ -22,6 +24,10 @@ export function setupAutoUpdater(input: { stop: () => Promise<void>; relaunch: (
   autoUpdater.allowDowngrade = false
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = false
+  // A company's mirror replaces the feed app-update.yml names (update-feed.ts); the checks on what installs stay.
+  const { feed, ignored } = updateFeed({ policy: Egress.policy(), resources: process.resourcesPath })
+  if (feed?.options) autoUpdater.setFeedURL(feed.options)
+  if (ignored) logger.warn(ignored)
   logger.log("auto updater configured", {
     channel: autoUpdater.channel,
     allowPrerelease: autoUpdater.allowPrerelease,
@@ -29,6 +35,7 @@ export function setupAutoUpdater(input: { stop: () => Promise<void>; relaunch: (
     currentVersion: app.getVersion(),
     enabled: UPDATER_ENABLED,
     disabledReason: UPDATER_DISABLED_REASON,
+    mirror: feed?.mirror === true,
   })
 
   const store = getStore("vector.updater")
@@ -116,9 +123,8 @@ export function setupAutoUpdater(input: { stop: () => Promise<void>; relaunch: (
 
   // Vector Local turns automatic checks off (a company mirror excepted) and asks before each check the person starts;
   // the first run's hold keeps automatic checks back until the person has chosen how to run models.
-  const feed = updateFeed()
   const local = createUpdateGate({
-    feed: () => feed,
+    feed: () => feed?.url,
     ask: async (question) =>
       (
         await dialog.showMessageBox({
@@ -151,14 +157,6 @@ export function setupAutoUpdater(input: { stop: () => Promise<void>; relaunch: (
     checked,
     check: async () => (await checked()) ?? controller.getState(),
   }
-}
-
-// The feed electron-updater reads, from the app-update.yml electron-builder writes beside the app's resources; none in
-// a development build.
-function updateFeed() {
-  const file = join(process.resourcesPath ?? "", "app-update.yml")
-  if (!process.resourcesPath || !existsSync(file)) return undefined
-  return readFileSync(file, "utf8").match(/^url:\s*['"]?([^'"\s]+)/m)?.[1]
 }
 
 export async function showUpdaterDialog(controller: ReturnType<typeof setupAutoUpdater>, alertOnFail: boolean) {
