@@ -716,7 +716,7 @@ export const SOURCES: readonly Source[] = [
     local: "not-covered",
     where: ["engine"],
     callSites: ["packages/engine/src/tool/shell.ts"],
-    note: "With Web access None the shell sandbox blocks them on macOS and Linux; Windows has no such block",
+    note: "With Web access None the shell sandbox blocks the agent's shell commands on macOS and Linux. Stdio MCP servers and language servers run outside the sandbox, and Windows has no such block",
   },
 ]
 

@@ -68,7 +68,7 @@ export const NOT_COVERED: readonly { title: string; body: string }[] = [
   { title: "Sites you approve", body: "They receive the requests you approved. That is the point of research." },
   {
     title: "Programs the agent starts",
-    body: "Shell commands, stdio MCP servers and language servers make their own connections. With Web access None they are blocked on macOS and Linux; Windows has no such block.",
+    body: "Shell commands, stdio MCP servers and language servers make their own connections. With Web access None, the shell sandbox blocks the agent's shell commands on macOS and Linux; MCP servers and language servers run outside it, and Windows has no such block.",
   },
   {
     title: "Model and search servers that forward requests",
