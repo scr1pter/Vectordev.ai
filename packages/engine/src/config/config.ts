@@ -858,8 +858,8 @@ export function localLoosening(block: ConfigLocalV1.Info | undefined) {
 export function localHeldAdvice() {
   if (agentMarked())
     return "An agent or Vector's own terminal started this Vector, so it cannot apply a change like this."
-  if (Flag.VECTOR_CLIENT === "desktop")
-    return `To apply it, quit Vector, delete ${localConfirmedFile()} and start Vector again.`
+  // The desktop app applies a held change itself, from Settings > Vector Local.
+  if (Flag.VECTOR_CLIENT === "desktop") return "To apply it, open Settings → Vector Local and choose Review and apply."
   return "To apply it now, confirm it with /local in the terminal UI. vector local confirm in a terminal applies it when this Vector next starts."
 }
 
