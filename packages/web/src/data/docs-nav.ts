@@ -39,9 +39,9 @@ export const docsNav: DocGroup[] = [
       },
       {
         id: "external-agents",
-        title: "Orchestrate Claude Code, Codex and Cursor",
+        title: "Run your own coding agents",
         blurb:
-          "Run Claude Code, Codex and Cursor in Vector workspaces, on the CLIs and subscriptions you already have.",
+          "Run Claude Code, Codex, Cursor CLI and twelve more agents you installed yourself in Vector workspaces, each with its own sign-in.",
       },
       {
         id: "automations",

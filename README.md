@@ -20,11 +20,11 @@ Vector is free. Create a free Vector account at [vectordev.ai](https://vectordev
 
 Vector works in three places:
 
-- **Desktop app** (macOS, Windows, Linux). Agent and Editor views of the same session, with the terminal, browser and pull-request review in one window. Run several agents at once, each in its own checkout or sharing yours, and run Claude Code, Codex and Cursor Agent inside Vector using your own installed, signed-in tools.
+- **Desktop app** (macOS, Windows, Linux). Agent and Editor views of the same session, with the terminal, browser and pull-request review in one window. Run several agents at once, each in its own checkout or sharing yours, and run Claude Code, Codex, Cursor CLI and other coding agents you installed yourself inside Vector, each with its own sign-in.
 - **Terminal agent** (`@vectordevai/cli`). Run `vector` in any repository. `vector invite` shares your live workspace over one link that a teammate on a network that can reach your computer can open.
 - **GitHub.** `vector github install` sets up pull requests from issue comments and reviews by **Vectorscope**, Vector's code reviewer, which reads the repository around a change and comments on exact lines. `vector vectorscope` reviews your branch locally before you push.
 
-**Models and keys.** Sign in to Vector to use free models, or bring the model: connect a provider with your own API key in Settings or with `vector auth login`, sign in with ChatGPT for OpenAI models, or point Vector at a local model or company gateway in `vector.json`. Keys are stored by Vector on your machine, and Vector's server does not send them back to connected clients or invite guests; an invite guest can still use your terminal and agents, so share invite links only with people you trust. Prompts and relevant context go only to the providers and tools you choose.
+**Models and keys.** Sign in to Vector to use free models, or bring the model: connect a provider with your own API key in Settings or with `vector auth login`, or point Vector at a local model or company gateway in `vector.json`. Keys are stored by Vector on your machine, and Vector's server does not send them back to connected clients or invite guests; an invite guest can still use your terminal and agents, so share invite links only with people you trust. Prompts and relevant context go only to the providers and tools you choose.
 
 ```bash
 npm install -g @vectordevai/cli
@@ -59,13 +59,13 @@ Installers are at [vectordev.ai/download](https://vectordev.ai/download), and re
 
 **Change an agent's branch.** Click the branch name in a session's header to switch that checkout to another local branch, or type a new name to create one from the current commit. Vector never stashes or discards your work to switch, and it refuses to switch while a Vector agent is running in that checkout. In agent workspaces Vector manages, you can create a branch there but not switch to an existing one.
 
-**The agents you already use.** Claude Code, Codex and Cursor Agent run inside Vector on subscriptions you already have, in readable conversations that answer like any other chat.
+**The agents you already use.** Claude Code, Codex, Cursor CLI and twelve more coding agents you installed yourself start from Host locally, each with its own sign-in. Six answer in readable conversations like any other chat, marked as your own agent rather than Vector's; the rest open in Vector's terminal. Vector is independent and is not affiliated with their vendors.
 
 **Verified completion.** Turn on LLM-as-a-judge and the agent writes down what success looks like before it starts, exercises the work when it finishes, and hands it to the Judge, a read-only specialist that compares the result with your request and sends it back with a specific repair if it falls short. It is opt-in and costs extra model calls.
 
 ### Workspace
 
-**Watch every agent edit live.** The file an agent edits opens on its own, and the change types itself in that agent's colour behind a labelled cursor — Vector's own agent, its subagents, and Claude Code, Codex and Cursor Agent alike. Several agents at once read like named cursors in a shared document, and your own saves never steal the view.
+**Watch every agent edit live.** The file an agent edits opens on its own, and the change types itself in that agent's colour behind a labelled cursor — Vector's own agent, its subagents, and Claude Code, Codex and Cursor CLI alike. Several agents at once read like named cursors in a shared document, and your own saves never steal the view.
 
 **One workspace, two ways to work.** Agent and Editor are two views of the same session. Search for a file and change it yourself, or ask the agent beside it to make the change. Files open in persistent tabs, and the terminal, browser and review all live in the same shell.
 
