@@ -73,21 +73,23 @@ describe("release workflow supply-chain policy", () => {
     ).toBeGreaterThanOrEqual(4)
   })
 
-  test("desktop jobs with read-only tokens never write to the GitHub release", async () => {
-    // A read-only token cannot see a draft release, so a write there fails with "release not found" (run #87). Only the
-    // approved publish job writes to the release.
-    const workflow = Bun.YAML.parse(await read(".github/workflows/vector-desktop-release.yml")) as {
+  test("the desktop release publishes no GitHub release and writes nothing to the repository", async () => {
+    // Downloads and updates come from Vector's own download store; a GitHub release on the source repository was a second,
+    // public copy of every installer, and its draft edit was refused with HTTP 403 in the 1.99.111 run.
+    const text = await read(".github/workflows/vector-desktop-release.yml")
+    const workflow = Bun.YAML.parse(text) as {
       permissions?: Record<string, string>
       jobs: Record<string, { permissions?: Record<string, string>; steps?: Array<{ run?: string }> }>
     }
     const writesRelease = /gh release (upload|create|edit|delete)/
-    const readOnly = Object.entries(workflow.jobs).filter(
-      ([, job]) => (job.permissions ?? workflow.permissions)?.contents !== "write",
-    )
-    expect(readOnly.map(([name]) => name)).toContain("mac")
-    for (const [name, job] of readOnly) {
+    expect(writesRelease.test(text)).toBe(false)
+    expect(Object.keys(workflow.jobs)).not.toContain("draft")
+    for (const [name, job] of Object.entries(workflow.jobs)) {
+      expect({ job: name, contents: (job.permissions ?? workflow.permissions)?.contents }).not.toEqual({
+        job: name,
+        contents: "write",
+      })
       for (const run of (job.steps ?? []).flatMap((step) => (step.run ? [step.run] : []))) {
-        expect({ job: name, writes: writesRelease.test(run) }).toEqual({ job: name, writes: false })
         for (const script of run.match(/\bpackages\/[\w./-]+\.ts\b/g) ?? []) {
           expect({ job: name, script, writes: writesRelease.test(await read(script)) }).toEqual({
             job: name,
