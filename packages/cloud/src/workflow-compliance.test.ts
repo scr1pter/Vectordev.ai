@@ -168,3 +168,30 @@ test("the engine suite has room to finish in the test and release workflows", as
     tests.jobs.unit.steps.find((step) => step.name === "Run unit tests")?.["timeout-minutes"],
   ).toBeGreaterThanOrEqual(45)
 })
+
+// One Bun process for the whole engine suite crashed twice in the 1.99.111 release (Bun 1.3.14 segmentation faults).
+// The release runs it in shards, each with ripgrep, that together cover every test file.
+test("the release runs the engine suite in shards that cover it all", async () => {
+  const workflow = Bun.YAML.parse(await read(".github/workflows/vector-desktop-release.yml")) as {
+    jobs: {
+      test: {
+        strategy: { matrix: { include: Array<{ name: string; directory: string; command: string }> } }
+        steps: Array<{ name?: string; if?: string }>
+      }
+    }
+  }
+  const engine = workflow.jobs.test.strategy.matrix.include.filter((entry) => entry.directory === "packages/engine")
+  const shards = engine.map((entry) =>
+    entry.command
+      .match(/--shard=(\d+)\/(\d+)/)
+      ?.slice(1)
+      .map(Number),
+  )
+  expect(engine.length).toBeGreaterThanOrEqual(2)
+  expect(shards.every((shard) => shard !== undefined && shard[1] === engine.length)).toBe(true)
+  expect(shards.map((shard) => shard?.[0]).sort()).toEqual(engine.map((_, index) => index + 1))
+  expect(engine.every((entry) => entry.name.startsWith("vector"))).toBe(true)
+  expect(workflow.jobs.test.steps.find((step) => step.name === "Install ripgrep")?.if).toBe(
+    "startsWith(matrix.name, 'vector')",
+  )
+})
