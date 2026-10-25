@@ -4,7 +4,7 @@ import { publishedDesktopVersion, release199, upcomingRelease } from "../src/dat
 // Desktop 1.99.110 was released from main on 2026-10-23, so no later edit may present it, or anything before it, as
 // upcoming. 1.99.109 was published on 2026-10-19 and 1.99.108 on 2026-10-17 by release run #88; 1.99.107 was skipped
 // and never published.
-const shipped = "1.99.110"
+const shipped = "1.99.111"
 const web = new URL("..", import.meta.url).pathname
 // The source repository is private, so its releases and files 404 for visitors. Installers come from the account
 // download page, which needs a free Vector account.
