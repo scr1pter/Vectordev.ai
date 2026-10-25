@@ -372,7 +372,8 @@ jobs:
     name: Test (${{ matrix.name }})
     needs: prepare
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # The engine suite runs whole here, four tests at a time: 25 minutes for 1.99.110, past 30 for 1.99.111.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -401,6 +402,12 @@ jobs:
     steps:
       - name: Check out release source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      # The test workflow runs every package's tests on Node 24, the Node line Electron 42 ships; the desktop guard
+      # smoke needs it (http.setGlobalProxyFromEnv), and the runner image's own Node is older.
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
       - name: Set up Bun
         uses: ./.github/actions/setup-bun
         with:

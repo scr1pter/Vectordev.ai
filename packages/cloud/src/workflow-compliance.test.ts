@@ -139,3 +139,32 @@ test("Vector's workflows pin their Ubuntu runner", async () => {
   ).flat()
   expect(floating).toEqual([])
 })
+
+// The release's package tests run on the Node the test workflow and Electron 42 use: the desktop guard smoke calls
+// http.setGlobalProxyFromEnv, which the runner image's older Node lacks.
+test("the release's package tests set up Node 24 before they run", async () => {
+  const workflow = Bun.YAML.parse(await read(".github/workflows/vector-desktop-release.yml")) as {
+    jobs: { test: { steps: Array<{ name?: string; uses?: string; if?: string; with?: { "node-version"?: string } }> } }
+  }
+  const steps = workflow.jobs.test.steps
+  const node = steps.findIndex((step) => step.uses?.startsWith("actions/setup-node@"))
+  expect(node).toBeGreaterThanOrEqual(0)
+  expect(steps[node]).toMatchObject({ with: { "node-version": "24" } })
+  expect(steps[node]?.if).toBeUndefined()
+  expect(node).toBeLessThan(steps.findIndex((step) => step.name === "Run package tests"))
+})
+
+// The engine suite runs whole on Linux: 22 minutes in the test workflow and past 30 four tests at a time in the
+// release on 24 October 2026. Its limits leave it room to finish, so a cut-off run is a hang, not a slow day.
+test("the engine suite has room to finish in the test and release workflows", async () => {
+  const release = Bun.YAML.parse(await read(".github/workflows/vector-desktop-release.yml")) as {
+    jobs: { test: { "timeout-minutes": number } }
+  }
+  expect(release.jobs.test["timeout-minutes"]).toBeGreaterThanOrEqual(45)
+  const tests = Bun.YAML.parse(await read(".github/workflows/test.yml")) as {
+    jobs: { unit: { steps: Array<{ name?: string; "timeout-minutes"?: number }> } }
+  }
+  expect(
+    tests.jobs.unit.steps.find((step) => step.name === "Run unit tests")?.["timeout-minutes"],
+  ).toBeGreaterThanOrEqual(45)
+})

@@ -72,8 +72,8 @@ jobs:
             turbo-${{ runner.os }}-
 
       - name: Run unit tests
-        # On Linux this step runs the engine suite too, which alone takes 17 to 19 minutes on hosted runners.
-        timeout-minutes: 35
+        # On Linux this step runs the engine suite too, which alone took 22 minutes on 24 October 2026 and keeps growing.
+        timeout-minutes: 50
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
             GITHUB_ACTIONS=false bun turbo test --filter='!@vectordevai/engine' --log-order=stream --continue=dependencies-successful
