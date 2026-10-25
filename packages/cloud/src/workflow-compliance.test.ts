@@ -195,3 +195,28 @@ test("the release runs the engine suite in shards that cover it all", async () =
     "startsWith(matrix.name, 'vector')",
   )
 })
+
+// The test workflow runs the engine suite only in shards, on Linux as on Windows: one Bun process for the whole suite
+// crashed in Bun 1.3.14 on 25 October 2026.
+test("the test workflow runs the engine suite only in shards, on Linux and Windows", async () => {
+  const workflow = Bun.YAML.parse(await read(".github/workflows/test.yml")) as {
+    jobs: Record<
+      string,
+      { "runs-on": string; strategy?: { matrix?: { shard?: number[] } }; steps: Array<{ name?: string; run?: string }> }
+    >
+  }
+  const unit = workflow.jobs.unit.steps.find((step) => step.name === "Run unit tests")?.run ?? ""
+  expect(unit).toContain("--filter='!@vectordevai/engine'")
+  expect(unit).not.toContain("else")
+  for (const [job, host] of [
+    ["engine-linux", "ubuntu-24.04"],
+    ["engine-windows", "windows-latest"],
+  ] as const) {
+    const shards = workflow.jobs[job]?.strategy?.matrix?.shard ?? []
+    expect(workflow.jobs[job]?.["runs-on"]).toBe(host)
+    expect(shards).toEqual(shards.map((_, index) => index + 1))
+    expect(shards.length).toBeGreaterThanOrEqual(4)
+    const run = workflow.jobs[job]?.steps.find((step) => step.name === "Run Engine shard")?.run ?? ""
+    expect(run).toContain(`--shard=\${{ matrix.shard }}/${shards.length}`)
+  }
+})
