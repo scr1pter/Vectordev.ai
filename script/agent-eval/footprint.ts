@@ -13,6 +13,8 @@
 //   bun script/agent-eval/footprint.ts --sessions 2                      each scenario twice, to see a second
 //                                                                        session start on a warm cache
 //   bun script/agent-eval/footprint.ts --scenario solo-fix --out report.json --dump requests/
+//   bun script/agent-eval/footprint.ts --config-content '{"agent":{"build":{"prompt":"…"}}}'
+//                                                                        Vector with this configuration added
 
 import { spawn, spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
@@ -815,10 +817,12 @@ function vectorEnv(runtime: Runtime, home: string, base: string, dir: string) {
     },
     options: { apiKey: "bench", baseURL: `${base}/v1` },
   }
+  // --config-content adds to this, as prompt evolution's `agent.<agent>.prompt` does.
   const config = {
     formatter: false,
     lsp: false,
     provider: runtime === "vector-openai" ? { openai } : { anthropic },
+    ...flags.configContent,
   }
   return {
     PATH: process.env.PATH ?? "",
@@ -1300,7 +1304,17 @@ function parseFlags(argv: string[]) {
     sessions: value("sessions"),
     openaiModel: value("openai-model"),
     codexModel: value("codex-model"),
+    configContent: configContent(value("config-content")),
     ws: argv.includes("--ws"),
     keep: argv.includes("--keep"),
   }
+}
+
+// Configuration added to Vector's own, as a JSON object.
+function configContent(text: string | undefined): Record<string, unknown> | undefined {
+  if (text === undefined) return undefined
+  const value = JSON.parse(text)
+  if (value && typeof value === "object" && !Array.isArray(value)) return value
+  process.stderr.write("--config-content must be a JSON object\n")
+  process.exit(2)
 }

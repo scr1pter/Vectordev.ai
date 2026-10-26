@@ -60,6 +60,7 @@ import { FSUtil } from "@vectordevai/core/fs-util"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Agent } from "../agent/agent"
 import { Skill } from "../skill"
+import { LearnedSkill } from "../skill/learned"
 import { Permission } from "@/permission"
 import { BackgroundJob } from "@/background/job"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -557,6 +558,7 @@ export const node = LayerNode.make({
     Global.node,
     ResearchStore.node,
     ResearchRun.node,
+    LearnedSkill.node,
   ],
 })
 

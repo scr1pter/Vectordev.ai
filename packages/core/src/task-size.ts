@@ -105,9 +105,14 @@ export function withheld(tier: Tier, agents = 0): ReadonlySet<string> {
 
 /**
  * The size guidance attached to a request's user message. It is worked out from that request alone, so a message renders
- * the same on every later request and the provider's prompt cache keeps it.
+ * the same on every later request and the provider's prompt cache keeps it. `solo`: this repository's runs say Thorough
+ * work passes as often without subagents for less (a learned workflow default), which only words the advice; the task
+ * tool is still offered.
  */
-export function note(tier: Tier, options: { readonly escalate: boolean; readonly judge: boolean }) {
+export function note(
+  tier: Tier,
+  options: { readonly escalate: boolean; readonly judge: boolean; readonly solo?: boolean },
+) {
   const escalate = options.escalate
     ? " Call escalate only for exceptionally hard work across the whole system or dozens of files; an app, a feature, bug fixes or a deploy never need it."
     : ""
@@ -116,7 +121,7 @@ export function note(tier: Tier, options: { readonly escalate: boolean; readonly
   if (tier === "standard")
     return `<task_size>Standard request: do the work yourself and keep a short to-do list for multi-step work. Subagents are not offered.${escalate}</task_size>`
   if (tier === "thorough")
-    return `<task_size>Thorough request: plan with the to-do list, split independent substantial parts across subagents when that is cheaper, and verify with the strongest checks available.${options.judge ? " Vector runs the judge after you finish, so do not launch it yourself." : ""}</task_size>`
+    return `<task_size>Thorough request: plan with the to-do list, split independent substantial parts across subagents when that is cheaper, and verify with the strongest checks available.${options.judge ? " Vector runs the judge after you finish, so do not launch it yourself." : ""}${options.solo ? " In this repository, Thorough work has passed as often without subagents for less: split only clearly independent, large parts." : ""}</task_size>`
   // A greeting goes out on the quick lane, which carries no note.
   return undefined
 }

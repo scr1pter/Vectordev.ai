@@ -185,6 +185,8 @@ export function isOwnerOnlyRoute(method: string, route: string) {
   // Vector Local is the owner's: its settings, the model servers they listed, the services they allowed and the
   // network log of every session. Reading the log would show a guest where the owner's other sessions went.
   if (route === "/local" || route.startsWith("/local/")) return true
+  // The held prompt files are paths in the owner's home, and approving them loads what an agent may have written there.
+  if (route === "/config/prompt-trust" || route.startsWith("/config/prompt-trust/")) return true
   if (route.startsWith("/experimental/project/") && route.includes("/copy")) return true
   // Creating a worktree runs the project's start command and an extra startup command from the request, and removing
   // or resetting one discards the owner's work in a directory outside the guest's workspace.

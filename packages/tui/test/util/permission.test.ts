@@ -13,6 +13,11 @@ test("a change to a memory file after outside content always asks", () => {
   expect(canAlwaysAllowPermission("memory_source", ["*"])).toBe(false)
 })
 
+test("a change to a file Vector's prompts are read from always asks", () => {
+  expect(canAutoApprovePermission("prompt_source", ["*"])).toBe(false)
+  expect(canAlwaysAllowPermission("prompt_source", ["*"])).toBe(false)
+})
+
 test("sensitive permissions can only be allowed once", () => {
   expect(canAlwaysAllowPermission("webfetch", ["https://example.com"])).toBe(true)
   expect(canAlwaysAllowPermission("browser_sensitive", ["*"])).toBe(false)

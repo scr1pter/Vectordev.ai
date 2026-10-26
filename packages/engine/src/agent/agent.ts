@@ -239,6 +239,8 @@ const layer = Layer.effect(
         const defaults = Permission.fromConfig({
           "*": "allow",
           doom_loop: "ask",
+          // A learned skill Vector put in use on its own, after two matching runs, asks before it first loads.
+          learned_skill: "ask",
           unsandboxed_shell: "ask",
           browser_external: "ask",
           browser_interact: "ask",

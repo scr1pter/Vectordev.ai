@@ -11,6 +11,8 @@ import { SessionRunState } from "./run-state"
 import { SessionSummary } from "./summary"
 import { BackgroundJob } from "@/background/job"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
+import { BrainSkill } from "@vectordevai/core/brain/skill"
+import { BrainWorkflow } from "@vectordevai/core/brain/workflow"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { Instruction } from "./instruction"
 
@@ -47,6 +49,8 @@ const layer = Layer.effect(
     const state = yield* SessionRunState.Service
     const background = yield* BackgroundJob.Service
     const knowledge = yield* BrainKnowledge.Service
+    const skills = yield* BrainSkill.Service
+    const workflow = yield* BrainWorkflow.Service
     const instruction = yield* Instruction.Service
     const guests = yield* FreeModelGuests.Service
 
@@ -158,15 +162,24 @@ const layer = Layer.effect(
         (job) => background.cancel(job.id),
         { concurrency: "unbounded", discard: true },
       )
-      // What the reverted runs cited loses the credit they gave it: the undo says they did not work out. A session a
-      // guest is in takes no credit back, as it gives none: a guest's undo cannot lower the owner's records.
+      // What the reverted runs cited loses the credit they gave it: the undo says they did not work out. So do the
+      // learned skills they passed, what they drafted is withdrawn, and their workflow runs count as failures. A session
+      // a guest is in takes no credit back, as it gives none: a guest's undo cannot lower the owner's records.
       const requests = [
         ...remove.flatMap((msg) => (msg.info.role === "user" ? [msg.info.id] : [])),
-        ...(target && removeParts.length > 0 ? [target.info.role === "user" ? target.info.id : target.info.parentID] : []),
+        ...(target && removeParts.length > 0
+          ? [target.info.role === "user" ? target.info.id : target.info.parentID]
+          : []),
       ]
       if (requests.length > 0 && !(yield* guests.marked(sessionID)))
         yield* instruction.place().pipe(
-          Effect.flatMap((place) => knowledge.reverted(place, { sessionID, requests })),
+          Effect.flatMap((place) =>
+            Effect.all([
+              knowledge.reverted(place, { sessionID, requests }),
+              skills.reverted(place, { sessionID, requests }),
+              workflow.reverted(place, { sessionID, requests }),
+            ]),
+          ),
           Effect.catchCause((cause) => Effect.logWarning("brain revert credit failed", { cause })),
         )
       for (const msg of remove) {
@@ -197,6 +210,8 @@ export const node = LayerNode.make({
     SessionRunState.node,
     BackgroundJob.node,
     BrainKnowledge.node,
+    BrainSkill.node,
+    BrainWorkflow.node,
     Instruction.node,
     FreeModelGuests.node,
   ],

@@ -14,7 +14,7 @@ import { Plugin } from "@/plugin"
 import type { TaskPromptOps } from "@/tool/task"
 import type { TaskSizeContext } from "@/tool/escalate"
 import { type Tool as AITool, tool, jsonSchema, type ToolExecutionOptions, asSchema } from "ai"
-import { Effect, Result, Schema } from "effect"
+import { Effect, Option, Result, Schema } from "effect"
 import { MessageV2 } from "./message-v2"
 import { Session } from "./session"
 import { SessionProcessor } from "./processor"
@@ -29,6 +29,10 @@ import { SessionMemory } from "./memory"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 import { InstanceState } from "@/effect/instance-state"
+import { Config } from "@/config/config"
+import { PromptTrust } from "@/config/prompt-trust"
+import { Global } from "@vectordevai/core/global"
+import { PromptSource } from "./prompt-source"
 import path from "path"
 
 const MCP_RESOURCE_TOOLS = {
@@ -78,6 +82,21 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
       Effect.catch(() => Effect.succeed([] as SessionV1.WithParts[])),
       Effect.map((stored) => [...stored, ...input.messages]),
     )
+  // The prompt files each tool call's approved prompt_source ask let it change, by call, taken into the hold's baseline
+  // once the call completes.
+  const prompted = new Map<string, string[]>()
+  // What this directory's prompts are read from (section 8.2), worked out for each edit a tool call asks for.
+  const prompts = Effect.fnUntraced(function* () {
+    const config = yield* Effect.serviceOption(Config.Service)
+    if (Option.isNone(config)) return yield* Effect.die(new Error("The prompt guard needs the config service"))
+    const instance = yield* InstanceState.context
+    return yield* PromptSource.sources({
+      config: config.value,
+      global: Option.getOrElse(yield* Effect.serviceOption(Global.Service), () => Global.make()),
+      directory: instance.directory,
+      worktree: instance.worktree,
+    })
+  })
 
   const context = (args: Record<string, unknown>, options: ToolExecutionOptions): Tool.Context => ({
     sessionID: input.session.id,
@@ -139,12 +158,31 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
           ruleset: Permission.merge(input.agent.permission, input.session.permission ?? []),
         }
         yield* permission.ask({ ...req, ...request })
+        if (req.permission !== "edit") return
+        const instance = yield* InstanceState.context
+        // A file Vector reads into an agent's prompt or permissions asks again, every time and in every session, after
+        // the edit rules allowed the change: whichever tool writes it, and whatever configuration or a client allows.
+        const sources = yield* prompts()
+        const sourced = req.patterns.filter((pattern) =>
+          PromptSource.is(path.resolve(instance.worktree, pattern), sources),
+        )
+        if (sourced.length > 0) {
+          yield* permission.ask({
+            permission: PermissionPolicy.PROMPT_SOURCE,
+            patterns: sourced,
+            always: [],
+            metadata: req.metadata,
+            ...request,
+          })
+          prompted.set(options.toolCallId, [
+            ...(prompted.get(options.toolCallId) ?? []),
+            ...sourced.map((pattern) => path.resolve(instance.worktree, pattern)),
+          ])
+        }
         // A line in a file memory is read from binds every later request, so planted text must not land in one unseen:
         // a session that took in outside content asks every time before it changes one, whichever tool writes it (an
         // edit, a patch or a shell redirect) and whatever the edit rules allow. A subagent always asks: it works from a
         // brief another agent wrote, which carries whatever that agent took in.
-        if (req.permission !== "edit") return
-        const instance = yield* InstanceState.context
         const files = req.patterns.filter((pattern) =>
           SessionMemory.source(path.resolve(instance.worktree, pattern), brain.files()),
         )
@@ -200,7 +238,11 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID },
               { args },
             )
-            const result = yield* item.execute(args, ctx)
+            const result = yield* item.execute(args, ctx).pipe(
+              // The owner approved these changes, so they are not held at the next start.
+              Effect.tap(() => PromptTrust.accept(prompted.get(options.toolCallId) ?? [])),
+              Effect.ensuring(Effect.sync(() => prompted.delete(options.toolCallId))),
+            )
             const output = {
               ...result,
               attachments: result.attachments?.map((attachment) => ({

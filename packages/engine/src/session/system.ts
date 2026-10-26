@@ -12,6 +12,7 @@ import PROMPT_KIMI from "./prompt/kimi.txt"
 
 import PROMPT_CODEX from "./prompt/codex.txt"
 import PROMPT_TRINITY from "./prompt/trinity.txt"
+import { providerPromptFile } from "./provider-prompt"
 import type { Provider } from "@/provider/provider"
 import type { Agent } from "@/agent/agent"
 import { GENERAL_SUBAGENT } from "@/agent/subagent-kind"
@@ -36,20 +37,22 @@ export function provider(model: Provider.Model, explore = true) {
   ]
 }
 
-function providerPrompt(model: Provider.Model) {
-  if (model.api.id.includes("gpt-4") || model.api.id.includes("o1") || model.api.id.includes("o3")) return PROMPT_BEAST
-  if (model.api.id.includes("gpt")) {
-    if (model.api.id.includes("codex")) {
-      return PROMPT_CODEX
-    }
-    return PROMPT_GPT
-  }
-  if (model.api.id.includes("gemini-")) return PROMPT_GEMINI
-  if (model.api.id.includes("claude")) return PROMPT_ANTHROPIC
-  if (model.api.id.toLowerCase().includes("trinity")) return PROMPT_TRINITY
-  if (model.api.id.toLowerCase().includes("kimi")) return PROMPT_KIMI
-  return PROMPT_DEFAULT
+const PROVIDER_PROMPTS: Record<ReturnType<typeof providerPromptFile>, string> = {
+  "anthropic.txt": PROMPT_ANTHROPIC,
+  "beast.txt": PROMPT_BEAST,
+  "codex.txt": PROMPT_CODEX,
+  "default.txt": PROMPT_DEFAULT,
+  "gemini.txt": PROMPT_GEMINI,
+  "gpt.txt": PROMPT_GPT,
+  "kimi.txt": PROMPT_KIMI,
+  "trinity.txt": PROMPT_TRINITY,
 }
+
+function providerPrompt(model: Provider.Model) {
+  return PROVIDER_PROMPTS[providerPromptFile(model.api.id)]
+}
+
+export { providerPromptFile }
 
 /** What the current agent may launch through the task tool in this session. */
 export type SubagentAvailability = {
@@ -250,7 +253,14 @@ export interface Interface {
     model: Provider.Model,
     options?: EnvironmentOptions,
   ) => Effect.Effect<{ stable: string[]; session: string[] }>
-  readonly skills: (agent: Agent.Info) => Effect.Effect<string | undefined>
+  /**
+   * `learned` are the session's learned skills as its listing shows them this step (LearnedSkill.listing): one line
+   * each, never a procedure. A skill on disk or built in with the same name wins.
+   */
+  readonly skills: (
+    agent: Agent.Info,
+    options?: { readonly learned?: readonly Skill.Info[] },
+  ) => Effect.Effect<string | undefined>
   readonly mcp: (agent: Agent.Info, permission?: PermissionV1.Ruleset) => Effect.Effect<string | undefined>
 }
 
@@ -352,10 +362,22 @@ const layer = Layer.effect(
         return { stable, session }
       }),
 
-      skills: Effect.fn("SystemPrompt.skills")(function* (agent: Agent.Info) {
+      skills: Effect.fn("SystemPrompt.skills")(function* (
+        agent: Agent.Info,
+        options?: { readonly learned?: readonly Skill.Info[] },
+      ) {
         if (Permission.disabled(["skill"], agent.permission).has("skill")) return
 
-        const list = yield* skill.available(agent)
+        const available = yield* skill.available(agent)
+        const named = options?.learned?.length ? new Set((yield* skill.all()).map((item) => item.name)) : new Set()
+        const list = [
+          ...available,
+          ...(options?.learned ?? []).filter(
+            (learned) =>
+              !named.has(learned.name) &&
+              Permission.evaluate("skill", learned.name, agent.permission).action !== "deny",
+          ),
+        ]
 
         return [
           "Skills provide specialized instructions and workflows for specific tasks.",

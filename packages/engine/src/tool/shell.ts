@@ -13,7 +13,7 @@ import { fileURLToPath } from "url"
 import { Config } from "@/config/config"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Shell } from "@vectordevai/core/shell"
-import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
+import { AGENT_MARKER, untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 import { ShellID } from "./shell/id"
 import { Sandbox } from "./shell/sandbox"
 import { CloudCli } from "./shell/cloud-cli"
@@ -254,7 +254,8 @@ function hiddenSubstitution(root: Node, zsh: boolean) {
     opened.add(start + node.text.length - 1)
     backticks.push([start, start + node.text.length])
   }
-  const within = (ranges: [number, number][], index: number) => ranges.some(([start, end]) => index >= start && index < end)
+  const within = (ranges: [number, number][], index: number) =>
+    ranges.some(([start, end]) => index >= start && index < end)
   // zsh runs code through syntax the bash grammar does not model: parameter flags (`${(e)X}`) and glob qualifiers
   // (`*(e:...:)`, `*(+fn)`). Outside quotes, a parenthesised group stuck to a word is read as one; inside double
   // quotes only the flags are live.
@@ -468,7 +469,31 @@ function expand(text: string, cwd: string, shell: string) {
 function shellWord(arg: string, cwd: string, ps: boolean, shell: string) {
   if (ps) return expand(arg, cwd, shell).replace(/`([\s\S])/g, "$1")
   if (Shell.name(shell) === "cmd") return home(cmdWord(unquote(arg)))
-  return home(bashWord(arg))
+  return home(posixHome(arg, bashWord(arg)))
+}
+
+// Whether a command removes or overrides the agent marker: it names the marker at all (`unset`, `env -u`, an assignment,
+// PowerShell's `Env:`), or starts a program with an emptied environment (`env -i`, `env -`, bash's `exec -c`,
+// PowerShell's `-UseNewEnvironment`).
+export function dropsMarker(command: string) {
+  return (
+    command.includes(AGENT_MARKER) ||
+    /(?:^|[\s;&|(`/])env(?:\s+-\S*)*?\s+(?:-[A-Za-z]*i[A-Za-z]*|--ignore-environment|-)(?=\s|$)/.test(command) ||
+    /(?:^|[\s;&|(`])exec(?:\s+-\S*)*?\s+-[A-Za-z]*c[A-Za-z]*(?=\s|$)/.test(command) ||
+    /-UseNewEnvironment\b/i.test(command)
+  )
+}
+
+// bash and zsh expand a word that starts with `$HOME`, `${HOME}`, `$XDG_CONFIG_HOME` or `${XDG_CONFIG_HOME}`, bare or
+// in double quotes, before the program sees it: the commonest spelling of a global prompt file
+// (`cp x $HOME/.config/vector/AGENTS.md`), which the scan would otherwise ask for as written, inside the worktree. The
+// shell Vector starts inherits this process's environment. Single quotes and a backslash keep the text as written.
+function posixHome(raw: string, word: string) {
+  if (!/^"?\$\{?(?:HOME|XDG_CONFIG_HOME)\b/.test(raw)) return word
+  return word.replace(/^\$(?:\{(HOME|XDG_CONFIG_HOME)\}|(HOME|XDG_CONFIG_HOME))(?=$|\/)/, (match, braced, bare) => {
+    if ((braced ?? bare) === "HOME") return os.homedir()
+    return process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config")
+  })
 }
 
 // A word split into its folder and the name of the file it opens. Windows opens a name whatever its case and without its
@@ -577,6 +602,44 @@ function pathArgs(list: Part[], ps: boolean, cmd = false) {
     out.push(item.text)
   }
   return out
+}
+
+// Options of cp, mv, install and ln whose value is the next word.
+const VALUED = new Set(["-t", "--target-directory", "-m", "--mode", "-o", "--owner", "-g", "--group", "-S", "--suffix"])
+
+// The files a bash command writes by name rather than through a redirect (section 8.2), best effort: the last operand of
+// cp, mv, install and ln, or the folder -t names, every file of tee and of sed -i, and dd's of=. Interpreters, git
+// apply and patch write files this does not see.
+function writes(cmd: string, words: readonly string[]): { target: string; sources: string[]; folder: boolean }[] {
+  const file = (target: string) => ({ target, sources: [], folder: false })
+  if (cmd === "dd") return words.flatMap((word) => (word.startsWith("of=") ? [file(word.slice(3))] : []))
+  if (cmd === "tee") return words.filter((word) => !word.startsWith("-")).map(file)
+  if (cmd === "sed") return edited(words).map(file)
+  if (!["cp", "mv", "install", "ln"].includes(cmd)) return []
+  // `install -d` only makes folders.
+  if (cmd === "install" && words.some((word) => /^-[A-Za-z]*d/.test(word) || word === "--directory")) return []
+  const operands = words.filter((word, index) => !word.startsWith("-") && !VALUED.has(words[index - 1] ?? ""))
+  const named = words.findIndex((word) => word === "-t" || word === "--target-directory")
+  const folder =
+    words.find((word) => word.startsWith("--target-directory="))?.slice("--target-directory=".length) ??
+    (named === -1 ? undefined : words[named + 1])
+  if (folder) return [{ target: folder, sources: operands, folder: true }]
+  if (operands.length < 2) return []
+  return [{ target: operands[operands.length - 1], sources: operands.slice(0, -1), folder: false }]
+}
+
+// The files `sed -i` edits in place: every operand but the script, which is the first one unless -e or -f gave it.
+// BSD sed takes the backup suffix of a bare -i as the next word, often ''.
+function edited(words: readonly string[]) {
+  if (!words.some((word) => /^-[A-Za-z]*i/.test(word) || word.startsWith("--in-place"))) return []
+  const scripts = (word: string | undefined) =>
+    !!word && (/^-[A-Za-z]*[ef]$/.test(word) || /^--(expression|file)$/.test(word))
+  const operands = words.filter(
+    (word, index) =>
+      !word.startsWith("-") && !scripts(words[index - 1]) && !(words[index - 1] === "-i" && bashWord(word) === ""),
+  )
+  const scripted = words.some((word) => scripts(word) || /^--(expression|file)=/.test(word))
+  return scripted ? operands : operands.slice(1)
 }
 
 function preview(text: string) {
@@ -713,6 +776,21 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan,
       metadata: {
         command: input.command,
         files: Array.from(scan.writes),
+      },
+    })
+  }
+
+  // Vector's owner-only commands refuse under the agent marker every program the agent starts carries (CliOwnerGate). A
+  // command that removes or overrides it would run one as the owner, so it asks every time, whatever the rules allow.
+  // Best effort, like the write scan: a program that empties its children's environment some other way is not seen.
+  if (dropsMarker(input.command)) {
+    yield* ctx.ask({
+      permission: PermissionPolicy.AGENT_MARKER,
+      patterns: [input.command],
+      always: [],
+      metadata: {
+        command: input.command,
+        reason: PermissionPolicy.AGENT_MARKER_REASON,
       },
     })
   }
@@ -890,15 +968,17 @@ const grammar = (wasm: () => Promise<{ default: string }>) =>
     parser.setLanguage(await Language.load(resolveWasm(asset)))
     return parser
   })
-const bashParser = grammar(() =>
-  import("tree-sitter-bash/tree-sitter-bash.wasm" as string, {
-    with: { type: "wasm" },
-  }),
+const bashParser = grammar(
+  () =>
+    import("tree-sitter-bash/tree-sitter-bash.wasm" as string, {
+      with: { type: "wasm" },
+    }),
 )
-const psParser = grammar(() =>
-  import("tree-sitter-powershell/tree-sitter-powershell.wasm" as string, {
-    with: { type: "wasm" },
-  }),
+const psParser = grammar(
+  () =>
+    import("tree-sitter-powershell/tree-sitter-powershell.wasm" as string, {
+      with: { type: "wasm" },
+    }),
 )
 
 export const ShellTool = Tool.define(
@@ -1014,7 +1094,9 @@ export const ShellTool = Tool.define(
         // open. A name that is only an expansion (`$file`) may be anything, as `cat $file` may be in bash.
         // bash's brace expansion (`.e{n,}v`) and zsh's glob syntax (`.e(n|x)v`, `.env(N)`) open names a plain wildcard
         // would, so each group counts as one.
-        const named = win ? file.name : file.name.replace(/\{[^{}]*(?:,|\.\.)[^{}]*\}/g, "*").replace(/\([^()]*\)/g, "*")
+        const named = win
+          ? file.name
+          : file.name.replace(/\{[^{}]*(?:,|\.\.)[^{}]*\}/g, "*").replace(/\([^()]*\)/g, "*")
         const glob = named.replace(expansion, "*")
         if (!file.name.replace(expansion, "") || !/[*?[]/.test(glob)) return yield* linkedEnv(file.dir + file.name)
         const folder = /[*?[]/.test(file.dir) ? undefined : yield* wordPath(file.dir || ".", cwd, ps, shell)
@@ -1118,6 +1200,26 @@ export const ShellTool = Tool.define(
           scan.patterns.add(["git", "diff", "--no-index", ...tokens.slice(2)].join(" "))
 
         for (const arg of item.command.slice(1)) yield* envRead(arg.text)
+
+        // A file a command writes by name asks what the edit tool asks, as a redirect's does, so the edit rules and the
+        // prompt guard see it. A copy into a folder writes each source's name inside it.
+        if (!win && cmd) {
+          for (const write of writes(cmd, tokens.slice(1))) {
+            const resolved = yield* argPath(write.target, cwd, ps, shell)
+            const into =
+              resolved !== undefined &&
+              write.sources.length > 0 &&
+              (write.folder || write.target.endsWith("/") || (yield* fs.isDir(resolved)))
+            const files =
+              resolved && into
+                ? write.sources.map((source) => path.join(resolved, path.basename(bashWord(source))))
+                : [resolved]
+            for (const file of files) {
+              scan.writes.add(file ? path.relative(instance.worktree, file) : write.target)
+              if (file && !containsPath(file, instance)) scan.dirs.add(path.dirname(file))
+            }
+          }
+        }
 
         for (const cloud of yield* cloudRequests(tokens, 0)) {
           const text = source(item.node)
@@ -1228,7 +1330,9 @@ export const ShellTool = Tool.define(
         if (root.hasError || hiddenSubstitution(root, Shell.name(shell) === "zsh")) unread(scan, root.text)
         for (const node of root.descendantsOfType("redirected_statement")) {
           if (!node) continue
-          if (node.namedChildren.every((child) => child?.type === "file_redirect" || child?.type === "heredoc_redirect"))
+          if (
+            node.namedChildren.every((child) => child?.type === "file_redirect" || child?.type === "heredoc_redirect")
+          )
             unread(scan, node.text)
         }
       }

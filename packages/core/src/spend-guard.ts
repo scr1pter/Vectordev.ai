@@ -78,6 +78,8 @@ export type Run = {
   readonly unpricedSteps: number
   // The cost kind of the latest step, for the spend snapshot.
   readonly costKind?: CostKind
+  // Steps counted by cost kind, so a run's cost is known only when every step was priced. No limit reads it.
+  readonly kinds: Readonly<Partial<Record<CostKind, number>>>
   readonly stopped?: Stop
   readonly warned: boolean
   readonly loops: ReadonlyMap<SessionID, Loop>
@@ -131,6 +133,7 @@ export function start(rootID: SessionID, budget: RunBudget.Info, loopRules = tru
     spentUsd: 0,
     steps: 0,
     unpricedSteps: 0,
+    kinds: {},
     warned: false,
     loops: new Map(),
     loopRules,
@@ -172,6 +175,7 @@ export function afterStep(run: Run, step: Step, sessionID = run.rootID): { run: 
     spentUsd: run.spentUsd + (step.costKind === "priced" ? Math.max(step.costUsd ?? 0, 0) : 0),
     unpricedSteps: run.unpricedSteps + (step.costKind === "unknown" ? 1 : 0),
     costKind: step.costKind,
+    kinds: { ...run.kinds, [step.costKind]: (run.kinds[step.costKind] ?? 0) + 1 },
   }
   if (run.stopped) return { run: counted, verdict: { state: "stopped", ...run.stopped } }
   const limits = checkLimits(counted, step, sessionID)

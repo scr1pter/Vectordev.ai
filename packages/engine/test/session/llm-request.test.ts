@@ -244,7 +244,9 @@ describe("system prompt layout across sessions", () => {
       plugin: {
         ...value.plugin,
         trigger: (name, _input, output) =>
-          Effect.succeed(name === "chat.headers" ? { ...output, headers: { "X-SESSION-ID": "ses_from_plugin" } } : output),
+          Effect.succeed(
+            name === "chat.headers" ? { ...output, headers: { "X-SESSION-ID": "ses_from_plugin" } } : output,
+          ),
       } as Input["plugin"],
     })
     expect(new Headers(prepared.headers).get("x-session-id")).toBe(value.sessionID)
@@ -262,5 +264,37 @@ describe("system prompt layout across sessions", () => {
       },
     })
     expect(Object.keys(prepared.tools)).toEqual(["bash", "read", "todowrite"])
+  })
+})
+
+// A learned workflow default sends Thorough work at the model's default effort, which adds no reasoning options of its
+// own (section 6.3). So reasoning the user configured for the model is sent as configured, where the size's high effort
+// would have replaced it, and a variant the user picked still wins over both.
+describe("a learned default effort", () => {
+  const thinking = {
+    ...claude,
+    options: { thinking: { type: "enabled", budgetTokens: 2048 } },
+    variants: {
+      high: { thinking: { type: "enabled", budgetTokens: 32_000 } },
+      max: { thinking: { type: "enabled", budgetTokens: 64_000 } },
+    },
+  } as unknown as Input["model"]
+
+  test("keeps the model's own reasoning options", async () => {
+    const value = input({ model: thinking, directory: "/work/a" })
+    const learned = await prepare({ ...value, effort: "default" })
+    const sized = await prepare({ ...value, effort: "high" })
+    expect(learned.params.options.thinking).toEqual({ type: "enabled", budgetTokens: 2048 })
+    expect(sized.params.options.thinking).toEqual({ type: "enabled", budgetTokens: 32_000 })
+  })
+
+  test("never beats the variant the user picked", async () => {
+    const value = input({ model: thinking, directory: "/work/a" })
+    const picked = await prepare({
+      ...value,
+      user: { ...value.user, model: { ...value.user.model, variant: "max" } } as Input["user"],
+      effort: "default",
+    })
+    expect(picked.params.options.thinking).toEqual({ type: "enabled", budgetTokens: 64_000 })
   })
 })

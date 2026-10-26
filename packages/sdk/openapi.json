@@ -1373,6 +1373,167 @@
         ]
       }
     },
+    "/config/prompt-trust": {
+      "get": {
+        "tags": ["config"],
+        "operationId": "config.promptTrust.get",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Held prompt files",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptTrustStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden | ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_Forbidden"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ForbiddenError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "The prompt files outside this repository (global agents, commands, skills and instruction files, and the prompt settings of global config) that changed since the owner last approved them. Vector does not load them until the owner approves. Owner only.",
+        "summary": "Get held prompt files",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.config.promptTrust.get({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/config/prompt-trust/approve": {
+      "post": {
+        "tags": ["config"],
+        "operationId": "config.promptTrust.approve",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Prompt files approved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptTrustApproved"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden | ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_Forbidden"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ForbiddenError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/effect_HttpApiError_Conflict"
+                }
+              }
+            }
+          }
+        },
+        "description": "Approve the held prompt files the owner was shown, as GET returned them, and reload the instance so Vector loads them. When the files held now are not exactly those, unchanged, nothing is approved and the request fails with 409: read the list again. Owner only.",
+        "summary": "Approve held prompt files",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromptTrustApproval"
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.config.promptTrust.approve({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/config/providers": {
       "get": {
         "tags": ["config"],
@@ -7743,7 +7904,7 @@
             }
           }
         },
-        "description": "Edit, pin or unpin, approve or reject a held entry, archive or restore. `undo` takes back what Vector learned: it is archived as your decision and Vector does not learn it again.",
+        "description": "Edit, pin or unpin, approve or reject a held entry, archive or restore. `undo` takes back what Vector learned: it is archived as your decision and Vector does not learn it again. A learned skill is refused with reason `skill-entry`: change it under /memory/skills.",
         "summary": "Change a memory entry",
         "requestBody": {
           "content": {
@@ -7848,7 +8009,7 @@
             }
           }
         },
-        "description": "Delete an entry for good. Vector keeps only a hash of its text so it does not learn it again. Entries from a file are changed in the file.",
+        "description": "Delete an entry for good. Vector keeps only a hash of its text so it does not learn it again. Entries from a file are changed in the file. A learned skill is refused with reason `skill-entry`: forget it under /memory/skills.",
         "summary": "Forget a memory entry",
         "x-codeSamples": [
           {
@@ -7913,7 +8074,7 @@
             }
           }
         },
-        "description": "Erase what Vector learned for this repository, for the user, or everywhere. Files people wrote are left alone.",
+        "description": "Erase what Vector learned for this repository, for the user, or everywhere. Erasing a repository or everything also erases its learned skills and workflow insights. Files people wrote are left alone.",
         "summary": "Erase learned memory",
         "requestBody": {
           "content": {
@@ -8004,7 +8165,7 @@
             }
           }
         },
-        "description": "Forget every entry Vector learned whose only evidence is this session, so it is not learned again. What you wrote and what other sessions also taught stay. The session keeps its messages until you delete them.",
+        "description": "Forget every entry Vector learned whose only evidence is this session, so it is not learned again, with its workflow records; a learned skill that session taught goes back to the text other sessions taught, or goes. What you wrote and what other sessions also taught stay. The session keeps its messages until you delete them.",
         "summary": "Erase what Vector learned in a session",
         "x-codeSamples": [
           {
@@ -8363,7 +8524,7 @@
             }
           }
         },
-        "description": "Turn Vector's learning on or off, each facet of how you work it may learn, the optional model learner, reading the repository's own docs, and keeping originals of added documents. Memory already saved stays until you erase it; turning repository docs off forgets what Vector read of them, and turning originals off deletes the kept copies.",
+        "description": "Turn Vector's learning on or off, each facet of how you work it may learn, the optional model learner, learned skills and their drafter, workflow insights and their exploration, reading the repository's own docs, and keeping originals of added documents. Memory already saved stays until you erase it; turning repository docs off forgets what Vector read of them, and turning originals off deletes the kept copies.",
         "summary": "Change memory settings",
         "requestBody": {
           "content": {
@@ -8406,6 +8567,18 @@
                   },
                   "modelLearner": {
                     "$ref": "#/components/schemas/MemoryModelLearner"
+                  },
+                  "skills": {
+                    "$ref": "#/components/schemas/MemorySkillLearning"
+                  },
+                  "skillDrafter": {
+                    "$ref": "#/components/schemas/MemorySkillDrafter"
+                  },
+                  "workflow": {
+                    "$ref": "#/components/schemas/MemoryWorkflowLearning"
+                  },
+                  "workflowExplore": {
+                    "type": "boolean"
                   }
                 },
                 "additionalProperties": false
@@ -8417,6 +8590,677 @@
           {
             "lang": "js",
             "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.settings.update({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/skills": {
+      "get": {
+        "tags": ["memory"],
+        "operationId": "memory.skills.list",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["active", "review", "archived", "all"]
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The repository's learned skills, with the skill settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemorySkillList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Skills Vector drafted for the repository at `directory` after a run turned a failing check green: in use, waiting for your review (`filter=review`), put away (`filter=archived`) or all of them. Each carries its procedure, checks, commands, version and counts.",
+        "summary": "List learned skills",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.skills.list({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/skills/{memoryID}": {
+      "get": {
+        "tags": ["memory"],
+        "operationId": "memory.skills.get",
+        "parameters": [
+          {
+            "name": "memoryID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A learned skill's id, such as s4k2q7m"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One learned skill with its evidence, versions and uses",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemorySkillDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "One learned skill: the runs that vouch for it, every version of its text, and how its loads fared.",
+        "summary": "Get a learned skill",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.skills.get({\n  ...\n})"
+          }
+        ]
+      },
+      "patch": {
+        "tags": ["memory"],
+        "operationId": "memory.skills.update",
+        "parameters": [
+          {
+            "name": "memoryID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A learned skill's id, such as s4k2q7m"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The skill after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemorySkillDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Edit its description, steps, checks or commands (a new version, checked like a draft), approve or reject a draft, archive it, restore it, undo the version in use, or roll back to `version`. Checks and commands must be on the allow lists.",
+        "summary": "Change a learned skill",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "description": {
+                    "type": "string"
+                  },
+                  "procedure": {
+                    "type": "string"
+                  },
+                  "checks": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "commands": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": ["approve", "reject", "archive", "restore", "undo", "rollback"]
+                  },
+                  "version": {
+                    "type": "number"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.skills.update({\n  ...\n})"
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["memory"],
+        "operationId": "memory.skills.forget",
+        "parameters": [
+          {
+            "name": "memoryID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A learned skill's id, such as s4k2q7m"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The skill was forgotten",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "forgotten": {
+                      "type": "boolean",
+                      "enum": [true]
+                    }
+                  },
+                  "required": ["forgotten"],
+                  "additionalProperties": false,
+                  "description": "The skill was forgotten"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Delete every version of the skill, its uses and the sessions' listings of it, and keep only a hash of its key so Vector does not draft it again.",
+        "summary": "Forget a learned skill",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.skills.forget({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/skills/{memoryID}/share": {
+      "get": {
+        "tags": ["memory"],
+        "operationId": "memory.skills.sharePreview",
+        "parameters": [
+          {
+            "name": "memoryID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A learned skill's id, such as s4k2q7m"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file sharing would write",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemorySkillSharePreview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "The file sharing the skill would write and where, after the same checks sharing makes, or the refusal it would give. Writes nothing.",
+        "summary": "Preview sharing a learned skill",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.skills.sharePreview({\n  ...\n})"
+          }
+        ]
+      },
+      "post": {
+        "tags": ["memory"],
+        "operationId": "memory.skills.share",
+        "parameters": [
+          {
+            "name": "memoryID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A learned skill's id, such as s4k2q7m"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file written for the team",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemorySkillShared"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Write a skill you approved to `.vector/skills/<name>/SKILL.md` for your team to commit, with no error excerpt, session ids or counts, after checking it against your personal memory (refused with reason `personal` and the sentences to edit). It changes the repository's settings, so the app reloads the directory once no session in it is busy and you trust them again. Refused with reason `exists` unless `force`.",
+        "summary": "Share a learned skill to the repository",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "force": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.skills.share({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/workflow": {
+      "get": {
+        "tags": ["memory"],
+        "operationId": "memory.workflow.get",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What the build agent's runs here passed with and cost, by size",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryWorkflowInsights"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "For each size, the effort, subagent split and subagent model the build agent ran with in this repository, how often their checks passed and what they cost, and the cheaper default the runs support. Runs where you, the agent or config chose the effort are left out, and unknown cost stays unknown.",
+        "summary": "Get workflow insights",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.workflow.get({\n  ...\n})"
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["memory"],
+        "operationId": "memory.workflow.reset",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "tier",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["light", "standard", "thorough"]
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "How many runs were forgotten",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "removed": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["removed"],
+                  "additionalProperties": false,
+                  "description": "How many runs were forgotten"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Forget the runs workflow insights learned from in this repository, for one size (`tier`) or every size. Learned defaults start again from nothing.",
+        "summary": "Reset workflow insights",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.workflow.reset({\n  ...\n})"
           }
         ]
       }
@@ -26710,6 +27554,32 @@
           "size": {
             "$ref": "#/components/schemas/TaskSizeTier"
           },
+          "workflow": {
+            "type": "object",
+            "properties": {
+              "effort": {
+                "type": "string",
+                "enum": ["default"]
+              },
+              "split": {
+                "type": "string",
+                "enum": ["solo"]
+              },
+              "subagentModel": {
+                "type": "string",
+                "enum": ["small"]
+              },
+              "source": {
+                "type": "string",
+                "enum": ["learned", "explore"]
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": ["source", "reason"],
+            "additionalProperties": false
+          },
           "finish": {
             "type": "string"
           },
@@ -32781,6 +33651,9 @@
               },
               "judge": {
                 "$ref": "#/components/schemas/TaskJudgeMode"
+              },
+              "learn": {
+                "type": "boolean"
               }
             },
             "additionalProperties": false
@@ -33287,6 +34160,9 @@
               },
               "judge": {
                 "$ref": "#/components/schemas/TaskJudgeMode"
+              },
+              "learn": {
+                "type": "boolean"
               }
             },
             "additionalProperties": false
@@ -33426,6 +34302,83 @@
           }
         },
         "required": ["workspace", "trusted", "ignored", "settings", "approvable"],
+        "additionalProperties": false
+      },
+      "PromptTrustFile": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "fingerprint": {
+            "type": "string"
+          }
+        },
+        "required": ["path"],
+        "additionalProperties": false
+      },
+      "PromptTrustStatus": {
+        "type": "object",
+        "properties": {
+          "held": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PromptTrustFile"
+            }
+          }
+        },
+        "required": ["held", "files"],
+        "additionalProperties": false
+      },
+      "effect_HttpApiError_Forbidden": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["Forbidden"]
+          }
+        },
+        "required": ["_tag"],
+        "additionalProperties": false
+      },
+      "PromptTrustApproval": {
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PromptTrustFile"
+            }
+          }
+        },
+        "required": ["files"],
+        "additionalProperties": false
+      },
+      "PromptTrustApproved": {
+        "type": "object",
+        "properties": {
+          "approved": {
+            "type": "number"
+          }
+        },
+        "required": ["approved"],
+        "additionalProperties": false
+      },
+      "effect_HttpApiError_Conflict": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["Conflict"]
+          }
+        },
+        "required": ["_tag"],
         "additionalProperties": false
       },
       "Model": {
@@ -36267,6 +37220,112 @@
         "required": ["_tag", "name", "message"],
         "additionalProperties": false
       },
+      "MemorySkill": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "procedure": {
+            "type": "string"
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "commands": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "failure": {
+            "type": "string"
+          },
+          "version": {
+            "type": "number"
+          },
+          "drafter": {
+            "type": "string",
+            "enum": ["rules", "model", "user", "import"]
+          },
+          "approvedBy": {
+            "type": "string",
+            "enum": ["user", "vector"]
+          },
+          "approvedAt": {
+            "type": "number"
+          },
+          "sharedPath": {
+            "type": "string"
+          },
+          "sharedAt": {
+            "type": "number"
+          },
+          "helpful": {
+            "type": "number"
+          },
+          "harmful": {
+            "type": "number"
+          },
+          "proven": {
+            "type": "number"
+          },
+          "uses": {
+            "type": "object",
+            "properties": {
+              "loads": {
+                "type": "number"
+              },
+              "passes": {
+                "type": "number"
+              },
+              "fails": {
+                "type": "number"
+              },
+              "ignored": {
+                "type": "number"
+              },
+              "reverts": {
+                "type": "number"
+              }
+            },
+            "required": ["loads", "passes", "fails", "ignored", "reverts"],
+            "additionalProperties": false
+          },
+          "instructionLikeFailure": {
+            "type": "boolean"
+          },
+          "fading": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "description",
+          "procedure",
+          "checks",
+          "commands",
+          "version",
+          "drafter",
+          "helpful",
+          "harmful",
+          "proven",
+          "uses",
+          "instructionLikeFailure",
+          "fading"
+        ],
+        "additionalProperties": false
+      },
       "MemoryEntry": {
         "type": "object",
         "properties": {
@@ -36279,7 +37338,7 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["rule", "preference", "decision", "lesson", "fact", "failure", "review", "term"]
+            "enum": ["rule", "preference", "decision", "lesson", "fact", "failure", "review", "term", "skill"]
           },
           "origin": {
             "type": "string",
@@ -36374,6 +37433,9 @@
             },
             "required": ["key", "meaning"],
             "additionalProperties": false
+          },
+          "skill": {
+            "$ref": "#/components/schemas/MemorySkill"
           }
         },
         "required": [
@@ -36417,9 +37479,22 @@
           },
           "learning": {
             "type": "boolean"
+          },
+          "skills": {
+            "type": "object",
+            "properties": {
+              "active": {
+                "type": "number"
+              },
+              "review": {
+                "type": "number"
+              }
+            },
+            "required": ["active", "review"],
+            "additionalProperties": false
           }
         },
-        "required": ["active", "review", "archived", "rules", "learned", "digestTokens", "learning"],
+        "required": ["active", "review", "archived", "rules", "learned", "digestTokens", "learning", "skills"],
         "additionalProperties": false
       },
       "MemoryList": {
@@ -36465,7 +37540,7 @@
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["message", "file", "check", "user", "file-item", "document"]
+            "enum": ["message", "file", "check", "user", "file-item", "document", "run"]
           },
           "path": {
             "type": "string"
@@ -36824,6 +37899,18 @@
         "type": "string",
         "enum": ["local-only", "always", "off"]
       },
+      "MemorySkillLearning": {
+        "type": "string",
+        "enum": ["review", "auto", "off"]
+      },
+      "MemorySkillDrafter": {
+        "type": "string",
+        "enum": ["off", "local-only", "always"]
+      },
+      "MemoryWorkflowLearning": {
+        "type": "string",
+        "enum": ["apply", "observe", "off"]
+      },
       "MemorySettings": {
         "type": "object",
         "properties": {
@@ -36841,9 +37928,341 @@
           },
           "modelLearner": {
             "$ref": "#/components/schemas/MemoryModelLearner"
+          },
+          "skills": {
+            "$ref": "#/components/schemas/MemorySkillLearning"
+          },
+          "skillDrafter": {
+            "$ref": "#/components/schemas/MemorySkillDrafter"
+          },
+          "workflow": {
+            "$ref": "#/components/schemas/MemoryWorkflowLearning"
+          },
+          "workflowExplore": {
+            "type": "boolean"
           }
         },
-        "required": ["learning", "repositoryDocs", "keepOriginals", "facets", "modelLearner"],
+        "required": [
+          "learning",
+          "repositoryDocs",
+          "keepOriginals",
+          "facets",
+          "modelLearner",
+          "skills",
+          "skillDrafter",
+          "workflow",
+          "workflowExplore"
+        ],
+        "additionalProperties": false
+      },
+      "MemorySkillList": {
+        "type": "object",
+        "properties": {
+          "skills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryEntry"
+            }
+          },
+          "settings": {
+            "type": "object",
+            "properties": {
+              "skills": {
+                "$ref": "#/components/schemas/MemorySkillLearning"
+              },
+              "skillDrafter": {
+                "$ref": "#/components/schemas/MemorySkillDrafter"
+              }
+            },
+            "required": ["skills", "skillDrafter"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["skills", "settings"],
+        "additionalProperties": false
+      },
+      "MemorySkillVersion": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "number"
+          },
+          "entryID": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "procedure": {
+            "type": "string"
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "commands": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "actor": {
+            "type": "string",
+            "enum": ["agent", "user", "vector", "import"]
+          },
+          "reason": {
+            "type": "string",
+            "enum": ["learned", "edited", "imported", "rollback"]
+          },
+          "createdAt": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "version",
+          "entryID",
+          "name",
+          "description",
+          "procedure",
+          "checks",
+          "commands",
+          "actor",
+          "reason",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "MemorySkillUses": {
+        "type": "object",
+        "properties": {
+          "loads": {
+            "type": "number"
+          },
+          "passes": {
+            "type": "number"
+          },
+          "fails": {
+            "type": "number"
+          },
+          "ignored": {
+            "type": "number"
+          },
+          "reverts": {
+            "type": "number"
+          }
+        },
+        "required": ["loads", "passes", "fails", "ignored", "reverts"],
+        "additionalProperties": false
+      },
+      "MemorySkillDetail": {
+        "type": "object",
+        "properties": {
+          "entry": {
+            "$ref": "#/components/schemas/MemoryEntry"
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryEvidence"
+            }
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemorySkillVersion"
+            }
+          },
+          "uses": {
+            "$ref": "#/components/schemas/MemorySkillUses"
+          }
+        },
+        "required": ["entry", "evidence", "versions", "uses"],
+        "additionalProperties": false
+      },
+      "MemorySkillSharePreview": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "exists": {
+            "type": "boolean"
+          }
+        },
+        "required": ["path", "text", "exists"],
+        "additionalProperties": false
+      },
+      "MemorySkillShared": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "trust": {
+            "type": "string",
+            "enum": ["changed"]
+          },
+          "reload": {
+            "type": "string",
+            "enum": ["when-idle"]
+          }
+        },
+        "required": ["path", "trust", "reload"],
+        "additionalProperties": false
+      },
+      "MemoryWorkflowArm": {
+        "type": "object",
+        "properties": {
+          "arm": {
+            "type": "object",
+            "properties": {
+              "effortTier": {
+                "$ref": "#/components/schemas/TaskSizeTier"
+              },
+              "effort": {
+                "type": "string"
+              },
+              "split": {
+                "type": "string",
+                "enum": ["solo", "subagents"]
+              },
+              "providerID": {
+                "type": "string"
+              },
+              "modelID": {
+                "type": "string"
+              },
+              "subagentModel": {
+                "type": "string",
+                "enum": ["parent", "small"]
+              }
+            },
+            "required": ["effortTier", "effort", "split", "providerID", "modelID"],
+            "additionalProperties": false
+          },
+          "rows": {
+            "type": "number"
+          },
+          "weight": {
+            "type": "number"
+          },
+          "signal": {
+            "type": "number"
+          },
+          "passRate": {
+            "type": "number"
+          },
+          "lower": {
+            "type": "number"
+          },
+          "checkedShare": {
+            "type": "number"
+          },
+          "costUsd": {
+            "type": "number"
+          },
+          "pricedWeight": {
+            "type": "number"
+          },
+          "tokens": {
+            "type": "number"
+          },
+          "lastAt": {
+            "type": "number"
+          }
+        },
+        "required": ["arm", "rows", "weight", "signal", "checkedShare", "pricedWeight", "lastAt"],
+        "additionalProperties": false
+      },
+      "MemoryWorkflowAdvice": {
+        "type": "object",
+        "properties": {
+          "effortTier": {
+            "$ref": "#/components/schemas/TaskSizeTier"
+          },
+          "effort": {
+            "type": "string",
+            "enum": ["default"]
+          },
+          "split": {
+            "type": "string",
+            "enum": ["solo"]
+          },
+          "subagentModel": {
+            "type": "string",
+            "enum": ["small"]
+          },
+          "source": {
+            "type": "string",
+            "enum": ["learned", "explore"]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "basis": {
+            "type": "object",
+            "properties": {
+              "chosen": {
+                "$ref": "#/components/schemas/MemoryWorkflowArm"
+              },
+              "instead": {
+                "$ref": "#/components/schemas/MemoryWorkflowArm"
+              }
+            },
+            "required": ["chosen", "instead"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["effortTier", "source", "reason", "basis"],
+        "additionalProperties": false
+      },
+      "MemoryWorkflowInsights": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/MemoryWorkflowLearning"
+          },
+          "explore": {
+            "type": "boolean"
+          },
+          "tiers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tier": {
+                  "$ref": "#/components/schemas/TaskSizeTier"
+                },
+                "arms": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MemoryWorkflowArm"
+                  }
+                },
+                "advice": {
+                  "$ref": "#/components/schemas/MemoryWorkflowAdvice"
+                },
+                "wouldAdvise": {
+                  "$ref": "#/components/schemas/MemoryWorkflowAdvice"
+                },
+                "excluded": {
+                  "type": "number"
+                }
+              },
+              "required": ["tier", "arms", "excluded"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["mode", "explore", "tiers"],
         "additionalProperties": false
       },
       "MemoryModelOption": {
@@ -41918,17 +43337,6 @@
           }
         },
         "required": ["name", "data"],
-        "additionalProperties": false
-      },
-      "effect_HttpApiError_Forbidden": {
-        "type": "object",
-        "properties": {
-          "_tag": {
-            "type": "string",
-            "enum": ["Forbidden"]
-          }
-        },
-        "required": ["_tag"],
         "additionalProperties": false
       },
       "Event.tui.prompt.append": {

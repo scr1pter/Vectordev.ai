@@ -74,6 +74,12 @@ export const settingsGroups: readonly SettingsGroup[] = [
           "reports",
           "sources",
           "citations",
+          "skills",
+          "learned skills",
+          "workflow",
+          "insights",
+          "effort",
+          "tokenomics",
         ],
       },
       {

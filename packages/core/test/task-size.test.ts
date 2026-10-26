@@ -483,4 +483,21 @@ describe("TaskSize helpers", () => {
     expect(TaskSize.note("standard", { escalate: true, judge: false })).toContain("to-do list for multi-step work")
     expect(TaskSize.note("chat", { escalate: true, judge: true })).toBeUndefined()
   })
+
+  test("a learned solo default only words Thorough's note, and sizing itself is unchanged", () => {
+    const solo = TaskSize.note("thorough", { escalate: false, judge: true, solo: true })!
+    expect(solo).toBe(
+      `${TaskSize.note("thorough", { escalate: false, judge: true })!.replace("</task_size>", "")} In this repository, Thorough work has passed as often without subagents for less: split only clearly independent, large parts.</task_size>`,
+    )
+    expect(TaskSize.note("thorough", { escalate: false, judge: true, solo: false })).toBe(
+      TaskSize.note("thorough", { escalate: false, judge: true }),
+    )
+    for (const tier of ["light", "standard"] as const)
+      expect(TaskSize.note(tier, { escalate: true, judge: true, solo: true })).toBe(
+        TaskSize.note(tier, { escalate: true, judge: true }),
+      )
+    // Subagents are still offered: the advice changes no tool.
+    expect(TaskSize.withheld("thorough")).toEqual(new Set())
+    expect(TaskSize.classify({ text: "Be thorough: refactor the billing module" })).toMatchObject({ tier: "thorough" })
+  })
 })

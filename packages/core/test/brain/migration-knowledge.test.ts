@@ -28,12 +28,17 @@ import {
   BrainRecordTable,
   BrainReviewTable,
   BrainSectionTable,
+  BrainSkillListingTable,
+  BrainSkillTable,
+  BrainSkillUseTable,
+  BrainSkillVersionTable,
   BrainSourceTable,
   BrainStateTable,
   BrainTermTable,
   BrainTombstoneTable,
   BrainUseTable,
   BrainVectorTable,
+  BrainWorkflowRunTable,
 } from "@vectordevai/core/brain/sql"
 import { DatabaseMigration } from "@vectordevai/core/database/migration"
 import { Global } from "@vectordevai/core/global"
@@ -47,6 +52,11 @@ const TABLES: readonly SQLiteTable[] = [
   BrainSourceTable,
   BrainStateTable,
   BrainUseTable,
+  BrainSkillTable,
+  BrainSkillVersionTable,
+  BrainSkillUseTable,
+  BrainSkillListingTable,
+  BrainWorkflowRunTable,
   BrainDocumentTable,
   BrainSectionTable,
   BrainItemTable,
@@ -152,6 +162,8 @@ describe("Brain knowledge migration", () => {
       { id: "20261121000000_credited_once" },
       { id: "20261201000000_research" },
       { id: "20261202000000_facets" },
+      { id: "20261210000000_learned_skills" },
+      { id: "20261211000000_workflow" },
     ])
     // What was learned before private memory existed is not private.
     expect(entries).toEqual([{ id: "m1a2b3", private: 0 }])
@@ -544,7 +556,7 @@ function declared(table: SQLiteTable) {
     indexes: [
       ...config.indexes.map((index) => ({ unique: index.config.unique, columns: names(index.config.columns) })),
       ...config.columns.filter((column) => column.isUnique).map((column) => ({ unique: true, columns: [column.name] })),
-    ].toSorted((a, b) => a.columns.join().localeCompare(b.columns.join())),
+    ].toSorted(byColumns),
     named: config.indexes.map((index) => index.config.name).toSorted(),
     foreign: config.foreignKeys
       .map((key) => {
@@ -558,6 +570,12 @@ function declared(table: SQLiteTable) {
       })
       .toSorted((a, b) => a.from.join().localeCompare(b.from.join())),
   }
+}
+
+// Indexes by their columns, then plain before unique: a learned skill's key has both, the plain lookup and the
+// partial unique index that allows one live entry per key.
+function byColumns(a: { unique: boolean; columns: string[] }, b: { unique: boolean; columns: string[] }) {
+  return a.columns.join().localeCompare(b.columns.join()) || Number(a.unique) - Number(b.unique)
 }
 
 // The same, read back from the database the migrations built.
@@ -589,7 +607,7 @@ function stored(db: Database, name: string) {
           (column) => column.name,
         ),
       }))
-      .toSorted((a, b) => a.columns.join().localeCompare(b.columns.join())),
+      .toSorted(byColumns),
     named: indexes
       .filter((index) => index.origin === "c" && !index.name.endsWith("_unique"))
       .map((index) => index.name)

@@ -194,7 +194,9 @@ describe("session.system", () => {
         reason: "disabled",
         permitted: ["docs-writer"],
       })
-      expect(custom).toContain("choose the narrowest one in the task tool's list. Otherwise do that part yourself, as you do small fixes")
+      expect(custom).toContain(
+        "choose the narrowest one in the task tool's list. Otherwise do that part yourself, as you do small fixes",
+      )
       // General with no specialist at all.
       const lone = subagentPolicy({ general: true, specialists: false, permitted: [] })
       expect(lone).toContain("No Subagent specialists are available to you")
@@ -365,6 +367,59 @@ describe("session.system", () => {
       expect(middle).toBeGreaterThan(alpha)
       expect(zeta).toBeGreaterThan(middle)
       expect(output).not.toContain("manual-skill")
+    }),
+  )
+
+  // Learned skills (section 5.4) are listed as one line each, never their steps; a skill on disk or built in of the
+  // same name wins, and the skill permission still decides what is listed.
+  it.effect("lists learned skills as their cards beside the others, never their steps", () =>
+    Effect.gen(function* () {
+      const prompt = yield* SystemPrompt.Service
+      const learned: Skill.Info[] = [
+        {
+          name: "learned-bun-typecheck-src",
+          description: "When bun typecheck fails in src: steps that made it pass here before.",
+          location: "learned",
+          content: "",
+        },
+        {
+          name: "alpha-skill",
+          description: "A learned skill named like one on disk.",
+          location: "learned",
+          content: "",
+        },
+      ]
+      const output = (yield* prompt.skills(build, { learned })) ?? ""
+      expect(output).toContain("<name>learned-bun-typecheck-src</name>")
+      expect(output).toContain(
+        "<description>When bun typecheck fails in src: steps that made it pass here before.</description>",
+      )
+      expect(output).toContain("<location>learned</location>")
+      expect(output).not.toContain("## Steps")
+      expect(output).toContain("Alpha skill.")
+      expect(output).not.toContain("A learned skill named like one on disk.")
+      const denied: Agent.Info = {
+        ...build,
+        permission: Permission.fromConfig({ "*": "allow", skill: { "*": "allow", "learned-*": "deny" } }),
+      }
+      expect((yield* prompt.skills(denied, { learned })) ?? "").not.toContain("learned-bun-typecheck-src")
+      // Without learned skills the block is what it always was.
+      expect(yield* prompt.skills(build, { learned: [] })).toBe(yield* prompt.skills(build))
+    }),
+  )
+
+  it.instance("learned skills and workflow defaults leave the first system block as it was", () =>
+    Effect.gen(function* () {
+      const prompt = yield* SystemPrompt.Service
+      const model = { api: { id: "model" }, providerID: "provider" } as unknown as Provider.Model
+      const stable = (yield* prompt.environment(model, { tools: ["edit", "task"] })).stable
+      const skills =
+        (yield* prompt.skills(build, {
+          learned: [{ name: "learned-x", description: "X.", location: "learned", content: "" }],
+        })) ?? ""
+      expect(skills).toContain("learned-x")
+      expect(stable.join("\n")).not.toContain("learned-x")
+      expect((yield* prompt.environment(model, { tools: ["edit", "task"] })).stable).toEqual(stable)
     }),
   )
 

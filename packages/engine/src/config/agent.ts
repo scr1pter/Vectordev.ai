@@ -8,7 +8,8 @@ import { configEntryNameFromPath } from "./entry-name"
 import * as ConfigMarkdown from "./markdown"
 import { ConfigParse } from "./parse"
 
-export async function load(dir: string) {
+// `allowed` leaves out a prompt file that changed since the owner last approved it (PromptTrust).
+export async function load(dir: string, allowed: (file: string) => boolean) {
   const result: Record<string, ConfigAgentV1.Info> = {}
   for (const item of await Glob.scan("{agent,agents}/**/*.md", {
     cwd: dir,
@@ -16,6 +17,7 @@ export async function load(dir: string) {
     dot: true,
     symlink: true,
   })) {
+    if (!allowed(item)) continue
     const md = await ConfigMarkdown.parse(item).catch(() => undefined)
     if (!md) continue
 
@@ -31,7 +33,7 @@ export async function load(dir: string) {
   return result
 }
 
-export async function loadMode(dir: string) {
+export async function loadMode(dir: string, allowed: (file: string) => boolean) {
   const result: Record<string, ConfigAgentV1.Info> = {}
   for (const item of await Glob.scan("{mode,modes}/*.md", {
     cwd: dir,
@@ -39,6 +41,7 @@ export async function loadMode(dir: string) {
     dot: true,
     symlink: true,
   })) {
+    if (!allowed(item)) continue
     const md = await ConfigMarkdown.parse(item).catch(() => undefined)
     if (!md) continue
 

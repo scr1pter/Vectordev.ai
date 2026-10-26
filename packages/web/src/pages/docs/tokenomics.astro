@@ -1,6 +1,7 @@
 ---
 import DocsPage from "../../layouts/DocsPage.astro"
 import { runGuardRows, spendRows } from "../../data/docs-content"
+import { release113 } from "../../data/vector-releases"
 
 export const prerender = true
 ---
@@ -16,13 +17,42 @@ export const prerender = true
           <dl class="doc-rows">
             {spendRows.map(([term, detail]) => (<div><dt>{term}</dt><dd>{detail}</dd></div>))}
           </dl>
-          <p class="note">
-            Economics that learn: every session feeds measured token and cost evidence into model recommendations, so
-            the ranking is built from what providers actually reported rather than from list prices. A model gets no
-            recommendation until it has at least three recorded runs for that kind of task, and an unmeasured model
-            never outranks one that reported a real cost. Runs of the coding agents you start from
-            <a href="/docs/external-agents">Host locally</a> are left out: their vendors' terms bar using them to rank
-            models.
+          <h3 id="recommendations">Model recommendations</h3>
+          <p>
+            Every session feeds measured token and cost evidence into model recommendations, so the ranking is built from
+            what providers actually reported rather than from list prices. A recommendation is a suggestion: a model to
+            pick for a kind of task. A model gets none until it has at least three recorded runs for that kind of task,
+            and an unmeasured model never outranks one that reported a real cost. Runs of the coding agents you start
+            from <a href="/docs/external-agents">Host locally</a> are left out: their vendors' terms bar using them to
+            rank models.
+          </p>
+
+          <h3 id="learned-defaults">Learned defaults</h3>
+          <p>
+            {release113.since} learned defaults are separate from recommendations, with their own data and a higher bar.
+            For each repository and size of work, Vector records which effort, subagent split and subagent model got the
+            build agent's checks passing, and at what cost. A setting becomes the learned default only after at least 6
+            checked runs of it and of the size's own default in that repository, when it passes as often for at least
+            20% less, and it applies only when you leave effort on Default. Workflow insights record numbers only: size,
+            effort, subagent count, model id, outcome, steps, tokens and cost. They record no prompt or file text.
+          </p>
+          <p>
+            {release113.since} learned defaults only ever make work cheaper. Your own picks always win. Learned defaults
+            only drop Thorough's extra effort, skip subagents or use a cheaper subagent model; spend caps are unchanged.
+            A model or effort level you pick, one taken from a recommendation included, is your choice: it beats a
+            learned default, and runs where you, the agent or config chose the effort are left out of the statistics. The
+            effort never changes while the provider's prompt cache from your last request is warm, and the primary model
+            is never switched.
+          </p>
+          <p>
+            {release113.since} unknown cost stays unknown: a run with any step that was not priced, a local, plan or free
+            model's included, has no cost rather than $0, and a run whose subagents were still working is not used for
+            cost. Settings → Memory → Workflow insights shows each size's runs and the learned default with the reason,
+            and offers Apply, Observe only and Off. Set <code>sizing.learn</code> to <code>false</code> in
+            <code>vector.json</code> to keep each size's own defaults, and <code>--pure</code> runs without learned
+            defaults. Resetting every size, or erasing a repository's memory or everything in Settings → Memory, also
+            clears the app's model recommendations for that repository; <code>vector memory erase</code> and
+            <code>vector memory workflow reset</code> cannot reach them.
           </p>
                   <h3>Usage and streaks</h3>
           <p>

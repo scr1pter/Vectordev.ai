@@ -1105,6 +1105,26 @@ export const dict = {
   "settings.permissions.tool.doom_loop.description": "Detect repeated tool calls with identical input",
   "settings.permissions.tool.memory_source.description":
     "Change RULES.md, BRAIN.md or MEMORY.md after this session read outside content. A line there guides every later request, so check it is one you want",
+  "settings.permissions.tool.prompt_source.title": "Prompt files",
+  "settings.permissions.tool.prompt_source.description":
+    "Change a file Vector reads into an agent's instructions or permissions: an agent, command, skill or plugin, a loaded config file, or your global AGENTS.md or CLAUDE.md. It asks every time",
+  "settings.permissions.tool.agent_marker.title": "Agent marker",
+  "settings.permissions.tool.agent_marker.description":
+    "Run a command that removes the marker Vector puts on every program its agents start. Without it, Vector's owner-only commands, such as approving learned skills or prompt files, would run as you. It asks every time",
+  "settings.permissions.tool.learned_skill.title": "Learned skill",
+  "settings.permissions.tool.learned_skill.description":
+    "Load a skill Vector approved on its own after matching successful runs in this repository. Its commands still go through your permission rules",
+  "promptTrust.banner.title": "Prompt files held",
+  "promptTrust.banner.description.one":
+    "A prompt file outside this repository changed since you last approved it, so Vector is not loading it.",
+  "promptTrust.banner.description.other":
+    "{{count}} prompt files outside this repository changed since you last approved them, so Vector is not loading them.",
+  "promptTrust.banner.files": "Show files",
+  "promptTrust.banner.approve": "Approve",
+  "promptTrust.banner.approving": "Approving…",
+  "promptTrust.banner.failed": "Could not approve the prompt files",
+  "promptTrust.banner.changed":
+    "The held prompt files changed since this list was shown, so nothing was approved. Check the list again.",
   "settings.permissions.tool.vector_cloud_publish.title": "Publish",
   "settings.permissions.tool.vector_cloud_publish.description":
     "Deploy, promote, roll back, redeploy or cancel releases on your Vercel account",

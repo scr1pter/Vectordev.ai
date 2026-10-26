@@ -16,6 +16,7 @@ import { Env } from "../env"
 import { applyEdits, modify, parse } from "jsonc-parser"
 import { InstallationLocal } from "@vectordevai/core/installation/version"
 import { existsSync, readFileSync, renameSync, watch, writeFileSync } from "fs"
+import { isMainThread } from "node:worker_threads"
 import { isRecord } from "@/util/record"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { Redaction } from "@vectordevai/core/redaction"
@@ -31,6 +32,8 @@ import { ConfigPermissionV1 } from "@vectordevai/core/v1/config/permission"
 import { ConfigPluginV1 } from "@vectordevai/core/v1/config/plugin"
 import { ConfigAgent } from "./agent"
 import { ConfigCommand } from "./command"
+import { PromptTrust } from "./prompt-trust"
+import { PromptSource } from "@/session/prompt-source"
 import { ConfigManaged } from "@vectordevai/core/config/managed"
 import { ConfigParse } from "./parse"
 import { ConfigSchema } from "./schema"
@@ -402,6 +405,7 @@ type State = {
   /** A repository's own local block was left out, which the Vector Local pane says. */
   repositoryLocal: boolean
   directories: string[]
+  loaded: Loaded
   configDirectory: string | undefined
   deps: Fiber.Fiber<void>[]
   trust: WorkspaceTrust.Snapshot
@@ -416,6 +420,17 @@ type State = {
  * repository's avoid list narrows what research reads, but only these clear a host name from its outbound check.
  */
 export type ResearchDomains = { readonly prefer: readonly string[]; readonly avoid: readonly string[] }
+
+/**
+ * The config files and directories an instance loaded, spelled where they are on disk rather than where trust copied
+ * them: what the prompt guard counts as prompt sources (PromptSource).
+ */
+export type Loaded = {
+  /** The config files it loaded, or looked for in a config directory. */
+  readonly files: readonly string[]
+  /** The config directories it loaded agents, modes, commands, skills and plugins from. */
+  readonly directories: readonly string[]
+}
 
 export type TrustStatus = WorkspaceTrust.Status & {
   /**
@@ -444,6 +459,7 @@ export interface Interface {
   readonly storedMcp: (name: string) => Effect.Effect<Record<string, unknown>>
   readonly invalidate: () => Effect.Effect<void>
   readonly directories: () => Effect.Effect<string[]>
+  readonly loaded: () => Effect.Effect<Loaded>
   readonly trustedPath: (path: string) => Effect.Effect<string | undefined>
   readonly waitForDependencies: () => Effect.Effect<void>
   readonly trust: () => Effect.Effect<TrustStatus>
@@ -888,6 +904,45 @@ function announceHeldLocal() {
   localState.announced = pendingKey(pending)
   toastHeldLocal(pending)
 }
+
+// A global config file's prompt-bearing keys wait for the owner when they changed since the owner last approved them
+// (PromptTrust); the rest of the file, its providers and sign-ins included, still loads.
+// A prompt kept in a file its keys name with `{file:...}` counts as theirs: that file changed is held as well.
+function withheld(file: string, info: Info): Info {
+  if (PromptTrust.allowed(file) && PromptSource.references(file).every(PromptTrust.allowed)) return info
+  return PromptTrust.strip(info)
+}
+
+// The held prompt files each process has announced, so a reload does not say it again.
+const announcedPrompts = new Set<string>()
+
+/**
+ * Says once that prompt files outside the repository wait for the owner. A terminal gets one line on stderr; the
+ * terminal UI, whose server runs in a worker beside the screen, shows it as a toast instead; the desktop app shows its
+ * own banner from GET /config/prompt-trust.
+ */
+const announceHeldPrompts = Effect.fnUntraced(function* (held: readonly string[]) {
+  if (held.length === 0) return
+  yield* Effect.logWarning("holding prompt files that changed since the owner approved them", { count: held.length })
+  if (Flag.VECTOR_CLIENT === "desktop" || announcedPrompts.has(held.join("\0"))) return
+  announcedPrompts.add(held.join("\0"))
+  if (isMainThread) {
+    process.stderr.write(`${PromptTrust.notice(held.length)}\n`)
+    return
+  }
+  GlobalBus.emit("event", {
+    directory: "global",
+    payload: {
+      type: TuiEvent.ToastShow.type,
+      properties: {
+        title: "Prompt files held",
+        message: `${PromptTrust.notice(held.length)}.`,
+        variant: "warning",
+        duration: 15_000,
+      },
+    },
+  })
+})
 
 function toastHeldLocal(pending: LocalPending) {
   GlobalBus.emit("event", {
@@ -1633,9 +1688,14 @@ const layer = Layer.effect(
         }
       }
 
-      result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "config.json"), env, true))
-      result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "vector.json"), env))
-      result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "vector.jsonc"), env))
+      for (const [name, preserve] of [
+        ["config.json", true],
+        ["vector.json", false],
+        ["vector.jsonc", false],
+      ] as const) {
+        const file = path.join(Global.Path.config, name)
+        result = mergeConfig(result, withheld(file, yield* loadFile(file, env, preserve)))
+      }
 
       // The user's own files as written, local block included: an update replaces a list, so adding a model server to
       // the user's list starts from this one, and the servers they listed have no per-token price. What Vector Local
@@ -2031,7 +2091,7 @@ const layer = Layer.effect(
         if (agentConfig) {
           const next = agentConfig.project
             ? yield* loadProjectFile(agentConfig.path, authEnv, !trusted)
-            : yield* loadFile(agentConfig.path, authEnv, true)
+            : withheld(agentConfig.path, yield* loadFile(agentConfig.path, authEnv, true))
           yield* merge(agentConfig.path, next, agentConfig.project ? "local" : "global")
           yield* Effect.logDebug("loaded custom config", { path: agentConfig.path })
         }
@@ -2070,7 +2130,9 @@ const layer = Layer.effect(
             for (const file of ["vector.json", "vector.jsonc", ...LOCAL_CONFIG_FILES]) {
               const source = path.join(dir, file)
               yield* Effect.logDebug(`loading config from ${source}`)
-              const next = local ? yield* loadProjectFile(source, authEnv, !trusted) : yield* loadFile(source, authEnv)
+              const next = local
+                ? yield* loadProjectFile(source, authEnv, !trusted)
+                : withheld(source, yield* loadFile(source, authEnv))
               yield* merge(source, next)
               result.agent ??= {}
               result.mode ??= {}
@@ -2094,11 +2156,15 @@ const layer = Layer.effect(
           if (!locked.includes("command"))
             result.command = mergeDeep(
               result.command ?? {},
-              yield* Effect.promise(() => ConfigCommand.load(runtimeDir)),
+              yield* Effect.promise(() => ConfigCommand.load(runtimeDir, PromptTrust.allowed)),
             )
           const agents = mergeDeep(
-            locked.includes("agent") ? {} : yield* Effect.promise(() => ConfigAgent.load(runtimeDir)),
-            locked.includes("mode") ? {} : yield* Effect.promise(() => ConfigAgent.loadMode(runtimeDir)),
+            locked.includes("agent")
+              ? {}
+              : yield* Effect.promise(() => ConfigAgent.load(runtimeDir, PromptTrust.allowed)),
+            locked.includes("mode")
+              ? {}
+              : yield* Effect.promise(() => ConfigAgent.loadMode(runtimeDir, PromptTrust.allowed)),
           )
           if (local) projectGrants ||= grantsPermission({ agent: agents })
           else userPermissions = mergeConfigConcatArrays(userPermissions, { agent: agents })
@@ -2106,7 +2172,10 @@ const layer = Layer.effect(
           // Auto-discovered plugins under `.vector/plugin(s)` are already local files, so ConfigPlugin.load
           // returns normalized Specs and we only need to attach origin metadata here.
           if (!locked.includes("plugin"))
-            yield* mergePluginOrigins(dir, yield* Effect.promise(() => ConfigPlugin.load(runtimeDir)))
+            yield* mergePluginOrigins(
+              dir,
+              yield* Effect.promise(() => ConfigPlugin.load(runtimeDir, PromptTrust.allowed)),
+            )
         }
 
         if (!Flag.VECTOR_DISABLE_PROJECT_CONFIG) {
@@ -2234,10 +2303,42 @@ const layer = Layer.effect(
           })
         }
 
+        // What the prompt guard counts: the files and directories loaded for prompts and permissions, which an
+        // untrusted repository's are not. The hold records any root it has not seen and says what it holds.
+        const loadedDirectories = allDirectories.filter((directory) => !projectContains(directory) || trusted)
+        const loaded = {
+          files: [
+            ...["config.json", "vector.json", "vector.jsonc"].map((file) => path.join(Global.Path.config, file)),
+            ...(agentConfig && (!agentConfig.project || trusted) ? [agentConfig.path] : []),
+            ...(trusted ? projectFiles : []),
+            ...loadedDirectories
+              .filter((dir) => dir.endsWith(".vector") || dir === agentConfigDir?.path)
+              .flatMap((dir) =>
+                ["vector.json", "vector.jsonc", ...LOCAL_CONFIG_FILES].map((file) => path.join(dir, file)),
+              ),
+          ],
+          directories: loadedDirectories,
+        }
+        const prompts = PromptTrust.scope(
+          PromptSource.build({
+            ...loaded,
+            skills: result.skills?.paths ?? [],
+            instructions: result.instructions ?? [],
+            home: Global.Path.home,
+            config: Global.make().config,
+            directory: ctx.directory,
+            worktree: ctx.worktree,
+          }),
+          ctx,
+        )
+        yield* PromptTrust.record(prompts)
+        yield* announceHeldPrompts(yield* PromptTrust.held(prompts))
+
         return {
           config: result,
           repositoryLocal,
           directories,
+          loaded,
           configDirectory:
             agentConfigDir?.project && trustedSnapshot
               ? WorkspaceTrust.materializedPath(trustedSnapshot, agentConfigDir.path)
@@ -2279,6 +2380,10 @@ const layer = Layer.effect(
 
     const directories = Effect.fn("Config.directories")(function* () {
       return yield* InstanceState.use(state, (s) => s.directories)
+    })
+
+    const loaded = Effect.fn("Config.loaded")(function* () {
+      return yield* InstanceState.use(state, (s) => s.loaded)
     })
 
     const waitForDependencies = Effect.fn("Config.waitForDependencies")(function* () {
@@ -2487,6 +2592,7 @@ const layer = Layer.effect(
       storedMcp,
       invalidate,
       directories,
+      loaded,
       waitForDependencies,
       trust,
       trustedPath,

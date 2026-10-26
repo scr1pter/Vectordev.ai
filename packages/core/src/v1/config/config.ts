@@ -200,6 +200,10 @@ export const Info = Schema.Struct({
         description:
           "When Vector runs LLM-as-a-judge after a run that changed files: off, thorough (large tasks only) or changes (every task that changed files). Default: off for those runs. A prompt's own judge setting overrides it. Deep research's citation judge reads it too, and runs when it is unset: unset or thorough checks Deep reports and Focused ones that cite 8 or more notes, changes checks every report, and off turns it off.",
       }),
+      learn: Schema.optional(Schema.Boolean).annotate({
+        description:
+          "Use learned workflow defaults when you leave effort on Default: drop Thorough's extra effort, skip subagents or give them a cheaper model, only where this repository's checked runs passed as often for less (default: true). false keeps the size's defaults. Your own picks always win, and spend caps are unchanged.",
+      }),
     }),
   ).annotate({ description: "Task sizing: how much harness, reasoning and verification each request gets." }),
   local: Schema.optional(ConfigLocalV1.Info).annotate({

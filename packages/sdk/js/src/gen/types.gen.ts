@@ -456,6 +456,13 @@ export type AssistantMessage = {
   structured?: unknown
   variant?: string
   size?: TaskSizeTier
+  workflow?: {
+    effort?: "default"
+    split?: "solo"
+    subagentModel?: "small"
+    source: "learned" | "explore"
+    reason: string
+  }
   finish?: string
   forked?: boolean
 }
@@ -2380,6 +2387,7 @@ export type ConfigWithLocks = {
   sizing?: {
     auto?: boolean
     judge?: TaskJudgeMode
+    learn?: boolean
   }
   local?: LocalConfig
   research?: ResearchConfig
@@ -2546,6 +2554,7 @@ export type Config = {
   sizing?: {
     auto?: boolean
     judge?: TaskJudgeMode
+    learn?: boolean
   }
   local?: LocalConfig
   research?: ResearchConfig
@@ -2588,6 +2597,32 @@ export type ProjectTrustStatus = {
   ignored: boolean
   settings: boolean
   approvable: boolean
+}
+
+export type PromptTrustFile = {
+  path: string
+  fingerprint?: string
+}
+
+export type PromptTrustStatus = {
+  held: Array<string>
+  files: Array<PromptTrustFile>
+}
+
+export type EffectHttpApiErrorForbidden = {
+  _tag: "Forbidden"
+}
+
+export type PromptTrustApproval = {
+  files: Array<PromptTrustFile>
+}
+
+export type PromptTrustApproved = {
+  approved: number
+}
+
+export type EffectHttpApiErrorConflict = {
+  _tag: "Conflict"
 }
 
 export type Model = {
@@ -3504,10 +3539,38 @@ export type McpServerNotFoundError = {
   message: string
 }
 
+export type MemorySkill = {
+  key: string
+  name: string
+  description: string
+  procedure: string
+  checks: Array<string>
+  commands: Array<string>
+  failure?: string
+  version: number
+  drafter: "rules" | "model" | "user" | "import"
+  approvedBy?: "user" | "vector"
+  approvedAt?: number
+  sharedPath?: string
+  sharedAt?: number
+  helpful: number
+  harmful: number
+  proven: number
+  uses: {
+    loads: number
+    passes: number
+    fails: number
+    ignored: number
+    reverts: number
+  }
+  instructionLikeFailure: boolean
+  fading: boolean
+}
+
 export type MemoryEntry = {
   id: string
   scope: "repository" | "personal"
-  kind: "rule" | "preference" | "decision" | "lesson" | "fact" | "failure" | "review" | "term"
+  kind: "rule" | "preference" | "decision" | "lesson" | "fact" | "failure" | "review" | "term" | "skill"
   origin: "file" | "user" | "agent" | "failure-memory" | "import"
   status: "active" | "proposed" | "quarantined" | "archived" | "superseded"
   pinned: boolean
@@ -3541,6 +3604,7 @@ export type MemoryEntry = {
     key: string
     meaning: string
   }
+  skill?: MemorySkill
 }
 
 export type MemoryStats = {
@@ -3551,6 +3615,10 @@ export type MemoryStats = {
   learned: number
   digestTokens: number
   learning: boolean
+  skills: {
+    active: number
+    review: number
+  }
 }
 
 export type MemoryList = {
@@ -3565,7 +3633,7 @@ export type MemoryList = {
 }
 
 export type MemoryEvidence = {
-  type: "message" | "file" | "check" | "user" | "file-item" | "document"
+  type: "message" | "file" | "check" | "user" | "file-item" | "document" | "run"
   path?: string
   quote?: string
   command?: string
@@ -3691,12 +3759,116 @@ export type MemoryFacets = {
 
 export type MemoryModelLearner = "local-only" | "always" | "off"
 
+export type MemorySkillLearning = "review" | "auto" | "off"
+
+export type MemorySkillDrafter = "off" | "local-only" | "always"
+
+export type MemoryWorkflowLearning = "apply" | "observe" | "off"
+
 export type MemorySettings = {
   learning: boolean
   repositoryDocs: boolean
   keepOriginals: boolean
   facets: MemoryFacets
   modelLearner: MemoryModelLearner
+  skills: MemorySkillLearning
+  skillDrafter: MemorySkillDrafter
+  workflow: MemoryWorkflowLearning
+  workflowExplore: boolean
+}
+
+export type MemorySkillList = {
+  skills: Array<MemoryEntry>
+  settings: {
+    skills: MemorySkillLearning
+    skillDrafter: MemorySkillDrafter
+  }
+}
+
+export type MemorySkillVersion = {
+  version: number
+  entryID: string
+  name: string
+  description: string
+  procedure: string
+  checks: Array<string>
+  commands: Array<string>
+  actor: "agent" | "user" | "vector" | "import"
+  reason: "learned" | "edited" | "imported" | "rollback"
+  createdAt: number
+}
+
+export type MemorySkillUses = {
+  loads: number
+  passes: number
+  fails: number
+  ignored: number
+  reverts: number
+}
+
+export type MemorySkillDetail = {
+  entry: MemoryEntry
+  evidence: Array<MemoryEvidence>
+  versions: Array<MemorySkillVersion>
+  uses: MemorySkillUses
+}
+
+export type MemorySkillSharePreview = {
+  path: string
+  text: string
+  exists: boolean
+}
+
+export type MemorySkillShared = {
+  path: string
+  trust: "changed"
+  reload: "when-idle"
+}
+
+export type MemoryWorkflowArm = {
+  arm: {
+    effortTier: TaskSizeTier
+    effort: string
+    split: "solo" | "subagents"
+    providerID: string
+    modelID: string
+    subagentModel?: "parent" | "small"
+  }
+  rows: number
+  weight: number
+  signal: number
+  passRate?: number
+  lower?: number
+  checkedShare: number
+  costUsd?: number
+  pricedWeight: number
+  tokens?: number
+  lastAt: number
+}
+
+export type MemoryWorkflowAdvice = {
+  effortTier: TaskSizeTier
+  effort?: "default"
+  split?: "solo"
+  subagentModel?: "small"
+  source: "learned" | "explore"
+  reason: string
+  basis: {
+    chosen: MemoryWorkflowArm
+    instead: MemoryWorkflowArm
+  }
+}
+
+export type MemoryWorkflowInsights = {
+  mode: MemoryWorkflowLearning
+  explore: boolean
+  tiers: Array<{
+    tier: TaskSizeTier
+    arms: Array<MemoryWorkflowArm>
+    advice?: MemoryWorkflowAdvice
+    wouldAdvise?: MemoryWorkflowAdvice
+    excluded: number
+  }>
 }
 
 export type MemoryModelOption = {
@@ -5358,10 +5530,6 @@ export type ProjectCopyError = {
     message: string
     forceRequired?: boolean
   }
-}
-
-export type EffectHttpApiErrorForbidden = {
-  _tag: "Forbidden"
 }
 
 export type EventTuiPromptAppend2 = {
@@ -10923,6 +11091,75 @@ export type ConfigTrustApproveResponses = {
 
 export type ConfigTrustApproveResponse = ConfigTrustApproveResponses[keyof ConfigTrustApproveResponses]
 
+export type ConfigPromptTrustGetData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/config/prompt-trust"
+}
+
+export type ConfigPromptTrustGetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Forbidden | ForbiddenError
+   */
+  403: EffectHttpApiErrorForbidden | ForbiddenError
+}
+
+export type ConfigPromptTrustGetError = ConfigPromptTrustGetErrors[keyof ConfigPromptTrustGetErrors]
+
+export type ConfigPromptTrustGetResponses = {
+  /**
+   * Held prompt files
+   */
+  200: PromptTrustStatus
+}
+
+export type ConfigPromptTrustGetResponse = ConfigPromptTrustGetResponses[keyof ConfigPromptTrustGetResponses]
+
+export type ConfigPromptTrustApproveData = {
+  body?: PromptTrustApproval
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/config/prompt-trust/approve"
+}
+
+export type ConfigPromptTrustApproveErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Forbidden | ForbiddenError
+   */
+  403: EffectHttpApiErrorForbidden | ForbiddenError
+  /**
+   * Conflict
+   */
+  409: EffectHttpApiErrorConflict
+}
+
+export type ConfigPromptTrustApproveError = ConfigPromptTrustApproveErrors[keyof ConfigPromptTrustApproveErrors]
+
+export type ConfigPromptTrustApproveResponses = {
+  /**
+   * Prompt files approved
+   */
+  200: PromptTrustApproved
+}
+
+export type ConfigPromptTrustApproveResponse =
+  ConfigPromptTrustApproveResponses[keyof ConfigPromptTrustApproveResponses]
+
 export type ConfigProvidersData = {
   body?: never
   path?: never
@@ -13842,6 +14079,10 @@ export type MemorySettingsUpdateData = {
       style?: boolean
     }
     modelLearner?: MemoryModelLearner
+    skills?: MemorySkillLearning
+    skillDrafter?: MemorySkillDrafter
+    workflow?: MemoryWorkflowLearning
+    workflowExplore?: boolean
   }
   path?: never
   query?: {
@@ -13872,6 +14113,303 @@ export type MemorySettingsUpdateResponses = {
 }
 
 export type MemorySettingsUpdateResponse = MemorySettingsUpdateResponses[keyof MemorySettingsUpdateResponses]
+
+export type MemorySkillsListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    filter?: "active" | "review" | "archived" | "all"
+  }
+  url: "/memory/skills"
+}
+
+export type MemorySkillsListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemorySkillsListError = MemorySkillsListErrors[keyof MemorySkillsListErrors]
+
+export type MemorySkillsListResponses = {
+  /**
+   * The repository's learned skills, with the skill settings
+   */
+  200: MemorySkillList
+}
+
+export type MemorySkillsListResponse = MemorySkillsListResponses[keyof MemorySkillsListResponses]
+
+export type MemorySkillsForgetData = {
+  body?: never
+  path: {
+    /**
+     * A learned skill's id, such as s4k2q7m
+     */
+    memoryID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/skills/{memoryID}"
+}
+
+export type MemorySkillsForgetErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemorySkillsForgetError = MemorySkillsForgetErrors[keyof MemorySkillsForgetErrors]
+
+export type MemorySkillsForgetResponses = {
+  /**
+   * The skill was forgotten
+   */
+  200: {
+    forgotten: true
+  }
+}
+
+export type MemorySkillsForgetResponse = MemorySkillsForgetResponses[keyof MemorySkillsForgetResponses]
+
+export type MemorySkillsGetData = {
+  body?: never
+  path: {
+    /**
+     * A learned skill's id, such as s4k2q7m
+     */
+    memoryID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/skills/{memoryID}"
+}
+
+export type MemorySkillsGetErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemorySkillsGetError = MemorySkillsGetErrors[keyof MemorySkillsGetErrors]
+
+export type MemorySkillsGetResponses = {
+  /**
+   * One learned skill with its evidence, versions and uses
+   */
+  200: MemorySkillDetail
+}
+
+export type MemorySkillsGetResponse = MemorySkillsGetResponses[keyof MemorySkillsGetResponses]
+
+export type MemorySkillsUpdateData = {
+  body?: {
+    description?: string
+    procedure?: string
+    checks?: Array<string>
+    commands?: Array<string>
+    action?: "approve" | "reject" | "archive" | "restore" | "undo" | "rollback"
+    version?: number
+  }
+  path: {
+    /**
+     * A learned skill's id, such as s4k2q7m
+     */
+    memoryID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/skills/{memoryID}"
+}
+
+export type MemorySkillsUpdateErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemorySkillsUpdateError = MemorySkillsUpdateErrors[keyof MemorySkillsUpdateErrors]
+
+export type MemorySkillsUpdateResponses = {
+  /**
+   * The skill after the change
+   */
+  200: MemorySkillDetail
+}
+
+export type MemorySkillsUpdateResponse = MemorySkillsUpdateResponses[keyof MemorySkillsUpdateResponses]
+
+export type MemorySkillsSharePreviewData = {
+  body?: never
+  path: {
+    /**
+     * A learned skill's id, such as s4k2q7m
+     */
+    memoryID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/skills/{memoryID}/share"
+}
+
+export type MemorySkillsSharePreviewErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemorySkillsSharePreviewError = MemorySkillsSharePreviewErrors[keyof MemorySkillsSharePreviewErrors]
+
+export type MemorySkillsSharePreviewResponses = {
+  /**
+   * The file sharing would write
+   */
+  200: MemorySkillSharePreview
+}
+
+export type MemorySkillsSharePreviewResponse =
+  MemorySkillsSharePreviewResponses[keyof MemorySkillsSharePreviewResponses]
+
+export type MemorySkillsShareData = {
+  body?: {
+    force?: boolean
+  }
+  path: {
+    /**
+     * A learned skill's id, such as s4k2q7m
+     */
+    memoryID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/skills/{memoryID}/share"
+}
+
+export type MemorySkillsShareErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemorySkillsShareError = MemorySkillsShareErrors[keyof MemorySkillsShareErrors]
+
+export type MemorySkillsShareResponses = {
+  /**
+   * The file written for the team
+   */
+  200: MemorySkillShared
+}
+
+export type MemorySkillsShareResponse = MemorySkillsShareResponses[keyof MemorySkillsShareResponses]
+
+export type MemoryWorkflowResetData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    tier?: "light" | "standard" | "thorough"
+  }
+  url: "/memory/workflow"
+}
+
+export type MemoryWorkflowResetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryWorkflowResetError = MemoryWorkflowResetErrors[keyof MemoryWorkflowResetErrors]
+
+export type MemoryWorkflowResetResponses = {
+  /**
+   * How many runs were forgotten
+   */
+  200: {
+    removed: number
+  }
+}
+
+export type MemoryWorkflowResetResponse = MemoryWorkflowResetResponses[keyof MemoryWorkflowResetResponses]
+
+export type MemoryWorkflowGetData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/workflow"
+}
+
+export type MemoryWorkflowGetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryWorkflowGetError = MemoryWorkflowGetErrors[keyof MemoryWorkflowGetErrors]
+
+export type MemoryWorkflowGetResponses = {
+  /**
+   * What the build agent's runs here passed with and cost, by size
+   */
+  200: MemoryWorkflowInsights
+}
+
+export type MemoryWorkflowGetResponse = MemoryWorkflowGetResponses[keyof MemoryWorkflowGetResponses]
 
 export type MemoryModelGetData = {
   body?: never

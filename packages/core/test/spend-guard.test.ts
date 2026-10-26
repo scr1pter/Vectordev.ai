@@ -240,6 +240,26 @@ describe("SpendGuard.afterStep", () => {
     expect(result.run.steps).toBe(3)
   })
 
+  test("counts steps by cost kind, which no limit reads", () => {
+    expect(SpendGuard.start(root, {}).kinds).toEqual({})
+    const steps = [
+      step({ costUsd: 0.5 }),
+      step({ costKind: "local" }),
+      step({ costKind: "plan" }),
+      step({ costKind: "free" }),
+      step({ costKind: "unknown" }),
+      step({ costUsd: 0.25 }),
+    ]
+    const counted = play({ usd: 5 }, steps)
+    expect(counted.run.kinds).toEqual({ priced: 2, local: 1, plan: 1, free: 1, unknown: 1 })
+    // The same verdicts and spend as before kinds were counted: only priced steps add dollars.
+    expect(counted.verdicts.every((verdict) => verdict.state === "ok")).toBe(true)
+    expect(counted.run).toMatchObject({ spentUsd: 0.75, steps: 6, unpricedSteps: 1 })
+    const capped = play({ usd: 0.7 }, steps)
+    expect(capped.verdicts.map((verdict) => verdict.state)).toEqual(["ok", "ok", "ok", "ok", "ok", "stopped"])
+    expect(capped.run.kinds).toEqual(counted.run.kinds)
+  })
+
   test("pauses the same input three times with no file change in between", () => {
     const repeated = play({}, [
       step({ tools: [bash("bun test")] }),

@@ -60,6 +60,9 @@ import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainEmbed } from "@vectordevai/core/brain/embed"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
+import { BrainSkill } from "@vectordevai/core/brain/skill"
+import { BrainWorkflow } from "@vectordevai/core/brain/workflow"
+import { LearnedSkill } from "@/skill/learned"
 
 export const AppLayer = AppNodeBuilderV1.build(
   LayerNode.group([
@@ -97,6 +100,9 @@ export const AppLayer = AppNodeBuilderV1.build(
     SpendGuard.node,
     Brain.node,
     BrainKnowledge.node,
+    BrainSkill.node,
+    BrainWorkflow.node,
+    LearnedSkill.node,
     BrainEmbed.node,
     Instruction.node,
     LLM.node,

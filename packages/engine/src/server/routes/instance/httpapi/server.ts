@@ -64,6 +64,9 @@ import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainEmbed } from "@vectordevai/core/brain/embed"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
+import { BrainSkill } from "@vectordevai/core/brain/skill"
+import { BrainWorkflow } from "@vectordevai/core/brain/workflow"
+import { LearnedSkill } from "@/skill/learned"
 import { ResearchStore } from "@vectordevai/core/research/store"
 import { LocalProbe } from "@vectordevai/core/local-mode/probe"
 import { ModelCatalog } from "@vectordevai/core/model-catalog"
@@ -248,6 +251,9 @@ const app = LayerNode.group([
   FreeModelGuests.node,
   Brain.node,
   BrainKnowledge.node,
+  BrainSkill.node,
+  BrainWorkflow.node,
+  LearnedSkill.node,
   BrainEmbed.node,
   ResearchStore.node,
   LocalProbe.holdsNode,

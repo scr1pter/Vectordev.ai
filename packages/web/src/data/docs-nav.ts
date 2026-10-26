@@ -1,6 +1,6 @@
 // The documentation's shape: groups in order, each leaf a page under /docs.
 // Edit here and the sidebar, the pager and the search index all follow.
-import { release111 } from "./vector-releases"
+import { release111, release113 } from "./vector-releases"
 
 export type DocLink = { id: string; title: string; blurb: string }
 export type DocGroup = { label: string; links: DocLink[] }
@@ -73,8 +73,7 @@ export const docsNav: DocGroup[] = [
       {
         id: "tokenomics",
         title: "Vector Tokenomics Engine",
-        blurb:
-          "Measures what each run spends from the tokens your provider reports, and stops starting automations once your daily cap is spent.",
+        blurb: `Measures what each run spends from the tokens your provider reports, and stops starting automations once your daily cap is spent. ${release113.since} learned defaults that only make work cheaper.`,
       },
       {
         id: "mcp-and-plugins",
@@ -99,8 +98,7 @@ export const docsNav: DocGroup[] = [
       {
         id: "brain",
         title: "Vector Brain",
-        blurb:
-          "From desktop 1.99.110: rules, memory and what Vector learns, kept on your computer and sent only when they bear on a request.",
+        blurb: `From desktop 1.99.110: rules, memory and what Vector learns, kept on your computer and sent only when they bear on a request. ${release113.since} skills learned from your own runs, waiting for your review.`,
       },
       {
         id: "documents",

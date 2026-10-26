@@ -77,6 +77,7 @@ import type { LocalMode } from "@vectordevai/schema/local-mode"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { BrainLearn } from "@vectordevai/core/brain/learn"
+import { BrainSkill } from "@vectordevai/core/brain/skill"
 import type { BrainSchema } from "@vectordevai/core/brain/schema"
 import { ownerBlock, scopeOf, scopeQuery } from "@vectordevai/core/review/prompt"
 import { Git } from "@/git"
@@ -89,6 +90,10 @@ import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { RunBudget } from "@vectordevai/schema/run-budget"
 import { TaskSize } from "@vectordevai/core/task-size"
 import { SessionTaskSize } from "./task-size"
+import { SessionSkillLearn } from "./skill-learn"
+import { SessionWorkflow } from "./workflow"
+import { LearnedSkill } from "@/skill/learned"
+import { BackgroundJob } from "@/background/job"
 import { parseJudgeVerdict } from "./judge-verdict"
 import { isRecord } from "@/util/record"
 import { ResearchRun } from "@/tool/research-run"
@@ -272,6 +277,11 @@ const layer = Layer.effect(
     const git = yield* Git.Service
     const researchStore = yield* ResearchStore.Service
     const researchRun = yield* ResearchRun.Service
+    const brainSkills = yield* BrainSkill.Service
+    const learnedSkills = yield* LearnedSkill.Service
+    const skillLearn = yield* SessionSkillLearn.Service
+    const workflowSession = yield* SessionWorkflow.Service
+    const jobs = yield* BackgroundJob.Service
     const { db } = database
     const backgroundTasks = yield* InstanceState.make(
       Effect.fnUntraced(function* () {
@@ -294,6 +304,8 @@ const layer = Layer.effect(
     const recallsTried = new Set<MessageID>()
     // The model learner a finished run left reading its session's last message, which the session's next run cancels.
     const learners = new Map<SessionID, Fiber.Fiber<void>>()
+    // The skill drafter a finished run left wording its skill, cancelled the same way.
+    const drafters = new Map<SessionID, Fiber.Fiber<void>>()
     // The brain's digest (rules, MEMORY.md, pinned memory) is part of the snapshot, so it is byte-stable for the session
     // too; a memory saved mid-session reaches later sessions, and this one through recall and search.
     const sessionInstructions = Effect.fn("SessionPrompt.sessionInstructions")(function* (
@@ -2003,9 +2015,11 @@ const layer = Layer.effect(
       resumed?: ResumeFreeModelsInput & { parentID: MessageID },
     ) {
       const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
-      // A new prompt cancels the model learner still reading the run before it.
+      // A new prompt cancels the model learner and the skill drafter still reading the run before it.
       const learning = learners.get(sessionID)
       if (learning) yield* Fiber.interrupt(learning)
+      const drafting = drafters.get(sessionID)
+      if (drafting) yield* Fiber.interrupt(drafting)
       // A run that ends before the provider answers keeps its provisional title without starting another request.
       const answering = yield* Deferred.make<boolean>()
       const ended = yield* Deferred.make<void>()
@@ -2144,6 +2158,8 @@ const layer = Layer.effect(
       const taught = new Map<MessageID, { readonly message: SessionV1.WithParts; readonly tier: TaskSize.Tier }>()
       // The judge's rounds in this run; a compaction may summarise earlier verdicts out of view.
       let judged = 0
+      // What the run's latest build step ran with, for the workflow observation once it is over.
+      let decided: SessionWorkflow.Step | undefined
       // Before the first request, so a prompt arriving after the cache expired sends the cleared history.
       if (!resumed) yield* compaction.prune({ sessionID }).pipe(Effect.ignore)
 
@@ -2393,10 +2409,22 @@ const layer = Layer.effect(
         // A role whose output leaves the machine gets back only what it was given to start with: what the memory tool
         // found for it is not filled in from the owner's personal memory or private documents.
         const audience = audienceOf(session, agent.name)
+        // The session's learned skills (section 5.4): chosen on its first step off the quick lane from what that request
+        // asks, kept in brain.db, and only ever fewer after that, so the skills block stays the same from step to step.
+        const learned = quick
+          ? []
+          : yield* learnedSkills.listing({
+              session,
+              agent,
+              model,
+              guest,
+              query: (sized?.users ?? SessionMemory.request(msgs)).map(SessionMemory.typed).join("\n"),
+              first: !msgs.some((message) => message.info.role === "assistant" && message.info.agent !== "quick"),
+            })
         msgs = yield* withheldRecall(sessionID, msgs, personal, audience)
         // What the request carries out of the brain, for Vector Local's network log; counted only while it is on.
         const carried = Egress.policy().enabled
-          ? carriedOf(msgs, personal, personal && audience === "owner")
+          ? carriedOf(msgs, personal, personal && audience === "owner", learned.length)
           : undefined
         // What this agent may launch here: a general or specialist turned off is missing from the list, Plan mode or a
         // child session denies one by permission, and a subagent's own session is told not to start general Subagents
@@ -2409,6 +2437,16 @@ const layer = Layer.effect(
           nested: session.parentID !== undefined,
         })
         const explore = subagents.permitted?.includes("explore")
+        // A learned workflow default (section 6.3), for the build agent's own requests only.
+        const tuned =
+          build && agent.name === "build"
+            ? yield* tune({ session, agent, stepAgent, user: lastUser, model, build, requests, guest, subagents })
+            : undefined
+        if (tuned)
+          decided =
+            !tuned.advice && decided?.advice && decided.request.users[0]?.info.id === build?.users[0]?.info.id
+              ? { ...tuned, advice: decided.advice }
+              : tuned
         msgs = yield* SessionReminders.apply({ messages: msgs, agent, session, explore }).pipe(
           Effect.provideService(RuntimeFlags.Service, flags),
           Effect.provideService(FSUtil.Service, fsys),
@@ -2416,7 +2454,7 @@ const layer = Layer.effect(
         )
         // A quick agent is given no environment, so it is given no date either.
         if (!quick) msgs = SessionReminders.dates(msgs)
-        if (requests.length > 0) msgs = sizeNotes(msgs, quick ? [] : requests)
+        if (requests.length > 0) msgs = sizeNotes(msgs, quick ? [] : requests, workflowNotes(requests, tuned?.workflow))
 
         const msg: SessionV1.Assistant = {
           id: MessageID.ascending(),
@@ -2426,6 +2464,7 @@ const layer = Layer.effect(
           agent: stepAgent.name,
           variant: lastUser.model.variant,
           ...(build ? { size: build.tier } : chat ? { size: "chat" as const } : {}),
+          ...(tuned?.workflow ? { workflow: tuned.workflow } : {}),
           path: { cwd: ctx.directory, root: ctx.worktree },
           cost: 0,
           tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
@@ -2543,7 +2582,7 @@ const layer = Layer.effect(
             LLMRequestPrep.resolveTools({ tools, agent: stepAgent, permission: session.permission, user: lastUser }),
           )
           const [skills, env, snapshot, mcpInstructions, modelMsgs] = yield* Effect.all([
-            quick ? Effect.succeed(undefined) : sys.skills(agent),
+            quick ? Effect.succeed(undefined) : sys.skills(agent, { learned }),
             quick
               ? Effect.succeed({ stable: [], session: [] })
               : sys.environment(model, {
@@ -2619,12 +2658,14 @@ const layer = Layer.effect(
             user: lastUser,
             agent: stepAgent,
             explore,
-            // A greeting never reasons; otherwise the size sets effort where the user left it on its default. Changing
-            // thinking settings rewrites Anthropic's cached messages, so there effort follows the size the tools do.
+            // A greeting never reasons; otherwise the size sets effort where the user left it on its default, or a
+            // learned default drops Thorough's high effort to the model's own. Changing thinking settings rewrites
+            // Anthropic's cached messages, so there effort follows the size the tools do.
             effort: quick
               ? "off"
               : build
-                ? TaskSize.effort(ProviderTransform.usesCacheBreakpoints(model) ? build.offered : build.tier)
+                ? (tuned?.workflow?.effort ??
+                  TaskSize.effort(ProviderTransform.usesCacheBreakpoints(model) ? build.offered : build.tier))
                 : undefined,
             permission: session.permission,
             sessionID,
@@ -2713,6 +2754,43 @@ const layer = Layer.effect(
         )
         // What the run's answers cited or the agent opened is credited by how the run ended.
         yield* creditRun(sessionID).pipe(Effect.ignore, Effect.forkIn(background.scope))
+        // The spend guard ends the run once this returns, so its numbers are read now; the writes go on in the
+        // background. A run that turned a check green may draft a learned skill, and how a build request went is
+        // recorded for workflow insights.
+        const snapshot = yield* guard.snapshot(sessionID)
+        const running = (yield* jobs.list()).filter(
+          (job) => job.type === "task" && job.status === "running" && job.metadata?.parentSessionId === sessionID,
+        ).length
+        // A CLI run waits for them, as for titles, before the instance goes.
+        const kept = (fiber: Fiber.Fiber<void>) => {
+          background.titles.add(fiber)
+          fiber.addObserver(() => background.titles.delete(fiber))
+          return fiber
+        }
+        kept(
+          yield* workflowSession
+            .observe({ session, taught, since, run: snapshot, background: running, step: decided })
+            .pipe(Effect.ignore, Effect.forkIn(background.scope)),
+        )
+        kept(
+          yield* skillLearn.run(session, taught, snapshot).pipe(
+            Effect.flatMap((later) =>
+              later
+                ? later.pipe(
+                    Effect.forkIn(background.scope),
+                    Effect.map((drafter) => {
+                      drafters.set(sessionID, kept(drafter))
+                      drafter.addObserver(() => {
+                        if (drafters.get(sessionID) === drafter) drafters.delete(sessionID)
+                      })
+                    }),
+                  )
+                : Effect.void,
+            ),
+            Effect.catchCause((cause) => Effect.logWarning("skill learning failed", { cause })),
+            Effect.forkIn(background.scope),
+          ),
+        )
         // What the user typed teaches Vector how they work: plain code at once, and the model learner, where it runs,
         // in the background.
         const later = yield* learnRun(session, taught).pipe(
@@ -2743,6 +2821,80 @@ const layer = Layer.effect(
       return yield* lastAssistant(sessionID)
     })
 
+    // A build request's learned workflow default (section 6.3), decided at its first step at its size and carried on
+    // its assistant messages after that, so it never moves within a request; only an escalation, which sends it at a new
+    // size and so writes the cache anew, decides again. Where the provider caches, effort follows the size the request
+    // is sent at, and while the cache is warm at that size it stays what the request before ran with. Only a request
+    // nobody chose for gets one (SessionWorkflow.eligible).
+    const tune = Effect.fn("SessionPrompt.tune")(function* (input: {
+      session: Session.Info
+      agent: Agent.Info
+      stepAgent: Agent.Info
+      user: SessionV1.User
+      model: Provider.Model
+      build: SessionTaskSize.Request
+      requests: readonly SessionTaskSize.Request[]
+      guest: boolean
+      subagents: SystemPrompt.SubagentAvailability
+    }) {
+      const tierOf = (request: SessionTaskSize.Request) =>
+        ProviderTransform.usesCacheBreakpoints(input.model) ? request.offered : request.tier
+      const effortTier = tierOf(input.build)
+      const info = yield* provider.getProvider(input.model.providerID)
+      const earlier = input.build.messages.filter(
+        (message) => message.info.role === "assistant" && message.info.size === input.build.tier,
+      )
+      const stepped = earlier.length > 0
+      const previous = input.requests.slice(0, -1).findLast((request) => request.tier !== "chat")
+      const warm = input.build.warm && previous !== undefined && tierOf(previous) === effortTier
+      const eligible =
+        !stepped &&
+        (yield* workflowSession.eligible({
+          session: input.session,
+          agent: input.agent,
+          stepAgent: input.stepAgent,
+          user: input.user,
+          model: input.model,
+          provider: info,
+          result: input.build.result,
+          guest: input.guest,
+        }))
+      const advice = eligible
+        ? yield* workflowSession.advice({
+            session: input.session,
+            tier: input.build.tier,
+            effortTier,
+            result: input.build.result,
+            model: input.model,
+            requestID: input.build.users.at(-1)?.info.id ?? input.user.id,
+            warm,
+            offered: input.subagents.general || input.subagents.specialists ? ["task"] : [],
+            namedSubagents: input.build.result.agents.length > 0,
+          })
+        : undefined
+      const workflow = stepped
+        ? SessionWorkflow.recorded({ messages: earlier })
+        : eligible
+          ? SessionWorkflow.applied(advice, { warm, previous: previous && SessionWorkflow.recorded(previous) })
+          : undefined
+      return {
+        request: input.build,
+        effortTier,
+        model: input.model,
+        ...SessionWorkflow.source({
+          user: input.user,
+          stepAgent: input.stepAgent,
+          model: input.model,
+          provider: info,
+          result: input.build.result,
+          effortTier,
+          ...(workflow ? { workflow } : {}),
+        }),
+        ...(workflow ? { workflow } : {}),
+        ...(advice ? { advice } : {}),
+      } satisfies SessionWorkflow.Step
+    })
+
     // Learning about you (section 6.3), once a run is over: what the user typed in each request message it answered
     // that was more than a greeting teaches Vector their terms and preferences, read by plain code with no model call.
     // Only typed words count (not what they pasted, a slash command's text or text from outside), and never in a session
@@ -2759,7 +2911,8 @@ const layer = Layer.effect(
       session: Session.Info,
       taught: ReadonlyMap<MessageID, { readonly message: SessionV1.WithParts; readonly tier: TaskSize.Tier }>,
     ) {
-      if (session.parentID || session.internal) return undefined
+      // A Vector an agent started answers text that agent wrote, never the owner's own words.
+      if (session.parentID || session.internal || SessionMemory.agentStarted()) return undefined
       // The run already holds the messages it answered, so nothing is read to learn from them.
       const requests = [...taught.values()]
         .filter((item) => item.tier !== "chat" && item.message.info.role === "user")
@@ -2937,20 +3090,36 @@ const layer = Layer.effect(
           const request = msgs[start]!
           const given = SessionMemory.delivered(turn)
           const fetched = SessionMemory.fetched(turn)
-          if (!SessionMemory.finished(turn) || (given.size === 0 && fetched.length === 0)) return Effect.void
-          return knowledge.credit(place, {
-            sessionID,
-            requestID: request.info.id,
-            outcome:
-              SessionMemory.recovered(msgs.slice(0, start + turn.length), request.info.time.created) ||
-              SessionMemory.judged(turn)
-                ? "pass"
-                : "none",
-            delivered: [...given],
-            cited: SessionMemory.cited(SessionMemory.answered(turn), given),
-            fetched,
-            edited: SessionMemory.edited(turn),
-          })
+          // A learned skill is credited by its own checks alone, never by a passing run as a whole.
+          const loads = SessionMemory.skills(turn)
+          if (!SessionMemory.finished(turn)) return Effect.void
+          return Effect.all(
+            [
+              loads.length === 0
+                ? Effect.void
+                : brainSkills.credit(place, {
+                    sessionID,
+                    requestID: request.info.id,
+                    outcomes: SessionMemory.skillOutcomes(turn, loads),
+                  }),
+              given.size === 0 && fetched.length === 0
+                ? Effect.void
+                : knowledge.credit(place, {
+                    sessionID,
+                    requestID: request.info.id,
+                    outcome:
+                      SessionMemory.recovered(msgs.slice(0, start + turn.length), request.info.time.created) ||
+                      SessionMemory.judged(turn)
+                        ? "pass"
+                        : "none",
+                    delivered: [...given],
+                    cited: SessionMemory.cited(SessionMemory.answered(turn), given),
+                    fetched,
+                    edited: SessionMemory.edited(turn),
+                  }),
+            ],
+            { discard: true },
+          )
         },
         { discard: true },
       )
@@ -3181,14 +3350,27 @@ const layer = Layer.effect(
       const kept = msgs.flatMap((message) => SessionMemory.remember(message))
       const toolPersonal = found ? parts.flatMap((part) => SessionMemory.personal(part)) : []
       const codeLinks = parts.flatMap((part) => Instruction.links(part))
+      const loads = parts.flatMap((part) => SessionMemory.skill(part) ?? [])
       if (
         recalls.length === 0 &&
         known.length === 0 &&
         kept.length === 0 &&
         toolPersonal.length === 0 &&
-        codeLinks.length === 0
+        codeLinks.length === 0 &&
+        loads.length === 0
       )
         return msgs
+      // A learned skill's steps, from the version the session loaded, where personal memory may go and its output
+      // stays in the session; elsewhere a line says they were withheld.
+      const procedures = new Map(
+        found
+          ? yield* Effect.forEach(loads, (load) =>
+              learnedSkills
+                .fill({ id: load.id, version: load.version })
+                .pipe(Effect.map((text) => [`${load.id}\0${load.version}`, text] as const)),
+            )
+          : [],
+      )
       const place = yield* instruction.place()
       // A read's pointer and an edit's spec guard, each rendered again from the ids it named.
       const linkKey = (link: Instruction.Link) => `${link.mode}\0${link.file}\0${link.ids.join(",")}`
@@ -3281,6 +3463,17 @@ const layer = Layer.effect(
           if (part.type === "text" && value?.document && value.part)
             return [{ ...part, text: outlines.get(value.document) ?? part.text }]
           if (part.type !== "tool" || part.state.status !== "completed") return [part]
+          const load = SessionMemory.skill(part)
+          if (load)
+            return [
+              {
+                ...part,
+                state: {
+                  ...part.state,
+                  output: procedures.get(`${load.id}\0${load.version}`) ?? LearnedSkill.WITHHELD,
+                },
+              },
+            ]
           const withheld = found ? SessionMemory.personal(part) : []
           const own = Instruction.links(part)
           if (withheld.length === 0 && !value && own.length === 0) return [part]
@@ -3752,15 +3945,21 @@ function caches(model: Provider.Model) {
 // Each sized request's guidance rides on its last user message, worked out from that request alone, so every earlier
 // message renders the same on every request and stays in the provider's cache. The judge policy older clients sent
 // with each prompt is dropped: Vector runs the judge itself, and the policy would have the model launch it too.
-function sizeNotes(messages: SessionV1.WithParts[], requests: readonly SessionTaskSize.Request[]) {
+function sizeNotes(
+  messages: SessionV1.WithParts[],
+  requests: readonly SessionTaskSize.Request[],
+  // Each request's learned workflow default, by the user message its note rides on, so a request's note says the same
+  // on every step after it.
+  workflows: ReadonlyMap<string, SessionWorkflow.Workflow> = new Map(),
+) {
   const notes = new Map(
     requests.flatMap((request) => {
-      // A request whose opening message a compaction summarised carries its note on the compaction marker.
-      const user = request.users.at(-1) ?? request.messages.find((message) => message.info.role === "user")
+      const user = noted(request)
       if (!user || user.info.role !== "user" || !onBuild(user.info)) return []
       const text = TaskSize.note(request.result.tier, {
         escalate: !SessionTaskSize.capped(request.result),
         judge: request.judge !== "off",
+        solo: workflows.get(user.info.id)?.split === "solo",
       })
       return text ? [[user.info.id, text] as const] : []
     }),
@@ -3791,6 +3990,24 @@ function sizeNotes(messages: SessionV1.WithParts[], requests: readonly SessionTa
       ],
     }
   })
+}
+
+// The user message a request's size note rides on. A request whose opening message a compaction summarised carries its
+// note on the compaction marker.
+function noted(request: SessionTaskSize.Request) {
+  return request.users.at(-1) ?? request.messages.find((message) => message.info.role === "user")
+}
+
+// Each request's learned workflow default by the user message its note rides on: what its steps recorded, and for
+// the request being answered, what this step decided.
+function workflowNotes(requests: readonly SessionTaskSize.Request[], current: SessionWorkflow.Workflow | undefined) {
+  return new Map(
+    requests.flatMap((request, index) => {
+      const user = noted(request)
+      const workflow = index === requests.length - 1 && current ? current : SessionWorkflow.recorded(request)
+      return user && workflow ? [[user.info.id, workflow] as const] : []
+    }),
+  )
 }
 
 // Below Thorough the task tool may stay in a cached request's definitions; only a subagent the user named runs.
@@ -4171,6 +4388,11 @@ export const node = LayerNode.make({
     SpendGuard.node,
     Brain.node,
     BrainKnowledge.node,
+    BrainSkill.node,
+    LearnedSkill.node,
+    SessionSkillLearn.node,
+    SessionWorkflow.node,
+    BackgroundJob.node,
     FreeModelGuests.node,
     Git.node,
     ResearchStore.node,
@@ -4180,11 +4402,17 @@ export const node = LayerNode.make({
 
 /**
  * How many items of the owner's brain a request carries, for Vector Local's network log: personal memory entries,
- * document cards and passages, and the repository's own memory lines. Counted from the recall and memory-tool parts the
- * request fills in (withheldRecall), so nothing is read; `found` is whether what a tool found is filled in from personal
- * memory and private documents.
+ * document cards and passages, and the repository's own memory lines, learned skills listed and learned skills' steps
+ * included. Counted from the recall, memory-tool and skill parts the request fills in (withheldRecall), so nothing is
+ * read; `found` is whether what a tool found is filled in from personal memory and private documents, and `listed` how
+ * many learned skills the system prompt lists.
  */
-function carriedOf(msgs: readonly SessionV1.WithParts[], personal: boolean, found: boolean): LocalMode.Carried {
+export function carriedOf(
+  msgs: readonly SessionV1.WithParts[],
+  personal: boolean,
+  found: boolean,
+  listed = 0,
+): LocalMode.Carried {
   const parts = msgs.flatMap((message) => message.parts)
   const recalls = parts.flatMap((part) => SessionMemory.recall(part) ?? [])
   const known = parts.flatMap((part) => SessionMemory.knowledge(part) ?? [])
@@ -4197,7 +4425,8 @@ function carriedOf(msgs: readonly SessionV1.WithParts[], personal: boolean, foun
   const repository = new Set(
     recalls.flatMap((recall) => recall.ids.filter((id) => !recall.personal.includes(id) && !recall.cards.includes(id))),
   )
-  return { personal: own.size, documents: cards.size + passages, repository: repository.size }
+  const procedures = found ? parts.filter((part) => SessionMemory.skill(part) !== undefined).length : 0
+  return { personal: own.size, documents: cards.size + passages, repository: repository.size + listed + procedures }
 }
 
 export * as SessionPrompt from "./prompt"

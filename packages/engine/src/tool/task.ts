@@ -38,6 +38,7 @@ import type { BrainSchema } from "@vectordevai/core/brain/schema"
 import path from "path"
 import { isFreeModelRef } from "@vectordevai/schema/free-model"
 import { SessionMemory } from "../session/memory"
+import { SessionWorkflow } from "../session/workflow"
 import { ResearchRun } from "./research-run"
 
 export interface TaskPromptOps {
@@ -902,8 +903,11 @@ export const TaskTool = Tool.define(
       const inherit = !next.model || freeRoute
       // Explore only searches and reads, so without a model of its own it runs on the provider's small model, as
       // Claude Code runs Explore on Haiku. getSmallModel keeps a free parent on its own model.
+      // A general subagent does the same when the request runs with that learned default (section 6.3): this
+      // repository's runs passed as often with it for less. One pinned to a model or a variant of its own keeps it.
+      const learned = next.name === GENERAL_SUBAGENT && !next.variant && msg.info.workflow?.subagentModel === "small"
       const small =
-        next.name === "explore" && !next.model && !freeRoute
+        (next.name === "explore" || learned) && !next.model && !freeRoute
           ? yield* provider.getSmallModel(msg.info.providerID, msg.info.modelID)
           : undefined
       // Only a move that is known to cost less: the "small" model of a provider is not always cheaper than a parent
@@ -914,16 +918,7 @@ export const TaskTool = Tool.define(
               .getModel(msg.info.providerID, msg.info.modelID)
               .pipe(Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)))
           : undefined
-      const cheap =
-        small &&
-        parentModel &&
-        !small.cost.unpriced &&
-        !parentModel.cost.unpriced &&
-        small.cost.input <= parentModel.cost.input &&
-        small.cost.output <= parentModel.cost.output &&
-        small.cost.input + small.cost.output < parentModel.cost.input + parentModel.cost.output
-          ? small
-          : undefined
+      const cheap = SessionWorkflow.cheaper(small, parentModel) ? small : undefined
       const model = cheap
         ? { modelID: cheap.id, providerID: cheap.providerID }
         : !inherit && next.model

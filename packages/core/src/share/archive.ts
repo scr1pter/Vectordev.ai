@@ -24,6 +24,7 @@ import { InstallationVersion } from "../installation/version"
 import { ModelV2 } from "../model"
 import { encodedBody } from "./transport"
 import { BrainSchema } from "../brain/schema"
+import { BrainSkill } from "../brain/skill"
 
 const AncillaryUsage = Schema.Array(SessionEvent.AncillaryUsage.data).pipe(optional)
 export const Legacy = Schema.Struct({
@@ -68,6 +69,15 @@ const partText = (part: PublicSession.Part) =>
     : part.type === "attachment"
       ? `[Attachment: ${part.name} (${part.mediaType}); content is not included]`
       : part.text
+// A learned skill's steps never leave this computer in a public archive: its transcript keeps only the placeholder, and
+// whatever a part's output says, the archive carries that placeholder too.
+const learnedSkill = (tool: string, metadata: Record<string, unknown>) =>
+  tool === "skill" && typeof metadata.learned === "string"
+    ? BrainSkill.placeholder(
+        typeof metadata.name === "string" ? metadata.name : "learned skill",
+        typeof metadata.version === "number" ? metadata.version : 0,
+      )
+    : undefined
 const importedModel = Schema.decodeUnknownSync(ModelV2.Ref)({
   providerID: "vector",
   id: "imported",
@@ -154,7 +164,7 @@ export function publicArchive(local: Local): PublicSession.Archive {
                   input: json(part.state.input),
                   output:
                     part.state.status === "completed"
-                      ? part.state.output
+                      ? (learnedSkill(part.tool, part.state.metadata) ?? part.state.output)
                       : part.state.status === "error"
                         ? part.state.error
                         : "",

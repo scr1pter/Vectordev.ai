@@ -48,6 +48,11 @@ describe("settings registry", () => {
       expect(filterSettingsGroups(query).flatMap((group) => group.items.map((item) => item.value))).toEqual(["memory"])
   })
 
+  test("finds learned skills and workflow insights under Memory", () => {
+    for (const query of ["skills", "learned skills", "workflow", "insights", "effort", "tokenomics"])
+      expect(filterSettingsGroups(query).flatMap((group) => group.items.map((item) => item.value))).toEqual(["memory"])
+  })
+
   test("finds the Memory page, which replaced the rules page and the Local memory card, by what people call them", () => {
     for (const query of ["rules", "RULES.md", "MEMORY.md", "forget", "remember", "brain"])
       expect(filterSettingsGroups(query).flatMap((group) => group.items.map((item) => item.value))).toEqual(["memory"])

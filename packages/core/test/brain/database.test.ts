@@ -86,6 +86,8 @@ describe("BrainDatabase", () => {
         { id: "20261121000000_credited_once" },
         { id: "20261201000000_research" },
         { id: "20261202000000_facets" },
+        { id: "20261210000000_learned_skills" },
+        { id: "20261211000000_workflow" },
       ],
       state: [{ repository_id: "repo-1" }],
     })

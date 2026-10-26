@@ -46,6 +46,13 @@ export type Request = {
   readonly escalated: boolean
   /** The size whose tools and policies the request is sent with; see `offered` in `size`. */
   readonly offered: TaskSize.Tier
+  /**
+   * Whether the provider's prompt cache still holds the work before this request: it caches, an earlier request was
+   * more than a greeting, and this one started within the cache's lifetime of that one's end. A learned workflow
+   * default keeps the effort the request before it ran with while this holds, so thinking settings never change on a
+   * warm cache.
+   */
+  readonly warm: boolean
   readonly judge: TaskSize.JudgeMode
   /** What a compaction recorded of this request, when the summary replaced the message that opened it. */
   readonly carried?: Carried
@@ -126,10 +133,8 @@ export function size(input: Input): Request[] {
     const raised = capped(result) ? undefined : escalation(group.messages)
     const tier = raised ? TaskSize.max(result.tier, raised) : result.tier
     const start = (group.users[0] ?? group.messages[0]).info.time.created
-    const offered =
-      tier === "chat" || !input.caching || sticky === undefined || start - end > input.lifetime
-        ? tier
-        : TaskSize.max(sticky, tier)
+    const warm = tier !== "chat" && input.caching && sticky !== undefined && start - end <= input.lifetime
+    const offered = warm ? TaskSize.max(sticky!, tier) : tier
     // A greeting goes out on its own small request shape, so it neither reads nor refreshes the main cached prefix.
     if (tier !== "chat") {
       sticky = offered
@@ -142,6 +147,7 @@ export function size(input: Input): Request[] {
       tier,
       escalated: raised !== undefined,
       offered,
+      warm,
       judge: judgeMode(
         group.users,
         group.carried?.judge ?? input.judge,
