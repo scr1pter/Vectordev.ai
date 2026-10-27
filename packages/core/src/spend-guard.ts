@@ -413,6 +413,9 @@ export interface Interface {
   readonly link: (childID: SessionID, parentID: SessionID, options?: LinkOptions) => Effect.Effect<void>
   // The delegated ledger with this id, while it is kept.
   readonly delegated: (id: string) => Effect.Effect<ScopeSnapshot | undefined>
+  // Re-arms the delegated ledger as link() does, or creates it at its seed, with no session bound to it, so a launch
+  // is checked against the current budget before its child exists. `rootID` is the root of its conversation.
+  readonly rearm: (rootID: SessionID, delegated: NonNullable<LinkOptions["delegated"]>) => Effect.Effect<ScopeSnapshot>
   // Retains completed-attempt observations but allows old, unused launch ledgers to be reclaimed.
   readonly release: (sessionID: SessionID) => Effect.Effect<void>
   readonly scopes: (sessionID: SessionID) => Effect.Effect<ScopeSnapshot[]>
@@ -543,18 +546,19 @@ function delegate(current: State, rootID: SessionID, input: NonNullable<LinkOpti
     steps: input.seed?.steps ?? 0,
     unpricedSteps: input.seed?.unpricedSteps ?? 0,
   }
+  const armed: Ledger = {
+    kind: "delegated",
+    id: input.id,
+    lineage: key,
+    run: rearm(ledger?.run ?? seeded, input.budget),
+  }
   const state: State = {
     ...current,
     next: ledger ? current.next : current.next + 1,
     delegations: delegations.set(input.id, key),
-    ledgers: new Map(current.ledgers).set(key, {
-      kind: "delegated",
-      id: input.id,
-      lineage: key,
-      run: rearm(ledger?.run ?? seeded, input.budget),
-    }),
+    ledgers: new Map(current.ledgers).set(key, armed),
   }
-  return { key, state }
+  return { key, state, ledger: armed }
 }
 
 function snapshotOf(ledger: Ledger): ScopeSnapshot {
@@ -936,6 +940,12 @@ const layer = Layer.effect(
         const key = current.delegations.get(id)
         const ledger = key === undefined ? undefined : current.ledgers.get(key)
         return ledger ? snapshotOf(ledger) : undefined
+      }),
+      rearm: Effect.fn("SpendGuard.rearm")(function* (rootID, input) {
+        return yield* Ref.modify(state, (current) => {
+          const delegation = delegate(current, rootID, input)
+          return [snapshotOf(delegation.ledger), delegation.state] as const
+        })
       }),
     })
   }),
