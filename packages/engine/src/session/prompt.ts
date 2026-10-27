@@ -60,7 +60,8 @@ import { Process } from "@/util/process"
 import { Cause, Deferred, Effect, Exit, Fiber, Latch, Layer, Option, Scope, Context, Schema, Types } from "effect"
 
 import { InstanceState } from "@/effect/instance-state"
-import { TaskTool, type TaskPromptOps } from "@/tool/task"
+import { TaskTool, SUBTASK, type TaskPromptOps } from "@/tool/task"
+import { TaskLimits } from "@/task/limits"
 import { TaskNotify } from "@/task/notify"
 import { QUICK_DESCRIPTION } from "@/tool/escalate"
 import { SessionRunState } from "./run-state"
@@ -555,6 +556,7 @@ const layer = Layer.effect(
       sessionID: SessionID
       session: Session.Info
       msgs: SessionV1.WithParts[]
+      delegation?: TaskLimits.Context
     }) {
       const { task, model, lastUser, sessionID, session, msgs } = input
       const ctx = yield* InstanceState.context
@@ -630,7 +632,13 @@ const layer = Layer.effect(
           sessionID,
           abort: taskAbort.signal,
           callID: part.callID,
-          extra: { invokedAgents: [task.agent], promptOps },
+          // A user's slash command is counted like any launch, and may wait for a slot on its card.
+          extra: {
+            invokedAgents: [task.agent],
+            promptOps,
+            [SUBTASK]: true,
+            ...(input.delegation ? { delegation: input.delegation } : {}),
+          },
           messages: msgs,
           metadata: (val: { title?: string; metadata?: Record<string, any> }) =>
             Effect.gen(function* () {
@@ -817,7 +825,8 @@ const layer = Layer.effect(
           sessionID,
           abort: abort.signal,
           callID: started.callID,
-          extra: { ...input.extra, invokedAgents: [input.judge.name], promptOps },
+          // Vector's own launch: it takes no subagent slot and counts toward no request's limits.
+          extra: { ...input.extra, [TaskLimits.EXEMPT]: true, invokedAgents: [input.judge.name], promptOps },
           messages: input.msgs,
           metadata: (val) =>
             Effect.gen(function* () {
@@ -2296,9 +2305,21 @@ const layer = Layer.effect(
           fiber.addObserver(() => background.titles.delete(fiber))
         }
         const task = tasks.pop()
+        // The request a root session's subagent launches count against (5.B.2): the message that opened it.
+        const delegationContext: TaskLimits.Context | undefined =
+          session.parentID || session.internal
+            ? undefined
+            : {
+                // A compaction that replaced the opening message recorded it.
+                requestID:
+                  sized?.carried?.opened ??
+                  sized?.users[0]?.info.id ??
+                  msgs.findLast((message) => SessionTaskSize.real(message))?.info.id ??
+                  lastUser.id,
+              }
 
         if (task?.type === "subtask") {
-          yield* handleSubtask({ task, model, lastUser, sessionID, session, msgs })
+          yield* handleSubtask({ task, model, lastUser, sessionID, session, msgs, delegation: delegationContext })
           continue
         }
 
@@ -2529,6 +2550,7 @@ const layer = Layer.effect(
             // and its memory tool finds nothing personal.
             personal: personal && audience === "owner",
             outward: audience === "outward",
+            ...(delegationContext ? { delegation: delegationContext } : {}),
             ...(build
               ? { taskSize: { tier: build.tier, capped: SessionTaskSize.capped(build.result) } }
               : recoverable

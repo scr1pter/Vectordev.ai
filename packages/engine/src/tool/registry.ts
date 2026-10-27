@@ -12,6 +12,7 @@ import { GrepTool } from "./grep"
 import { ReadTool } from "./read"
 import { TaskTool } from "./task"
 import { TaskNotify } from "@/task/notify"
+import { TaskLimits } from "@/task/limits"
 import { TaskManageTool } from "./task-manage"
 import { TaskManager } from "@/task/manager"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
@@ -557,6 +558,7 @@ export const node = LayerNode.make({
     SpendGuard.node,
     TaskManager.node,
     TaskNotify.node,
+    TaskLimits.node,
     Global.node,
     ResearchStore.node,
     ResearchRun.node,

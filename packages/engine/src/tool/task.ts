@@ -39,7 +39,11 @@ import { SessionMemory } from "../session/memory"
 import { SessionWorkflow } from "../session/workflow"
 import { ResearchRun } from "./research-run"
 import { TaskNotify } from "@/task/notify"
+import { TaskLimits } from "@/task/limits"
 import { TaskSize } from "@vectordevai/core/task-size"
+import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
+import { SessionTaskSize } from "../session/task-size"
+import { isRecord } from "@/util/record"
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): Effect.Effect<void>
@@ -72,16 +76,24 @@ const BACKGROUND_QUEUED = [
   "Your message is queued: the background task reads it after its current run finishes, then carries on in the same session.",
   ...BACKGROUND_STILL_WORKING,
 ].join("\n")
-// Not a cap: past this many running siblings the result tells the model, so
-// it can tell the user, because each subagent spends on their keys.
-const BUSY_SUBAGENTS_PER_SESSION = 6
 const MAX_SUBAGENT_DEPTH = 2
+/** Why a child is queued once its prerequisites are met: every subagent slot of its conversation is taken (5.B.3). */
+export const SLOT_REASON = "Waiting for a free subagent slot"
+/**
+ * ctx.extra flag for a user's slash command (SessionPrompt.handleSubtask). It may wait for a slot on its card, where the
+ * main agent's own foreground launch is moved to the background instead (5.B.4).
+ */
+export const SUBTASK = "vector.task.subtask"
+const BATCH_WAITS =
+  "This batch would wait for subagent slots while you wait for it. Launch it in the background (the default), or launch fewer. No child was started."
 
-function busyNote(count: number, when: "now" | "launch") {
-  const spend = "Vector sets no limit, but each one spends on the user's provider keys, so tell the user"
-  return when === "now"
-    ? `${count} subagents are now running for this task. ${spend} how many are running.`
-    : `${count} subagents were running for this task when this one started. ${spend} how many ran.`
+// Past TaskLimits.BUSY running or waiting subagents a launch tells the agent, so it can tell the user (5.B.8).
+function busyNote(active: number, limit: number) {
+  return `${active} subagents are running or waiting in this conversation (it runs at most ${limit} at once). Each one spends on the user's provider keys, so tell the user how many are working.`
+}
+
+function queuedNote(running: number) {
+  return `Queued: ${running} subagents are already running, the most this conversation runs at once. It starts on its own when one finishes and you will be notified; use task_manage wait only if you cannot continue without it. Do not launch a replacement.`
 }
 
 function normalizedPath(value: string) {
@@ -297,6 +309,76 @@ export const TaskTool = Tool.define(
     const researchAgents = new Set([ResearchRun.LEAD, ResearchRun.RESEARCHER, ResearchRun.JUDGE])
     // Completion notes reach the parent through one window per parent, with every other note it gets.
     const notifier = yield* TaskNotify.Service
+    const limits = yield* TaskLimits.Service
+    const guests = yield* FreeModelGuests.Service
+
+    // The caller's root session and its depth below it. Walking past the depth limit cannot change the answer, so a
+    // corrupt parent chain cannot keep it looping either.
+    const lineage = Effect.fn("TaskTool.lineage")(function* (parent: Session.Info) {
+      let root = parent
+      let depth = 0
+      while (root.parentID && depth < MAX_SUBAGENT_DEPTH) {
+        depth += 1
+        const ancestor = yield* sessions.get(root.parentID).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+        if (!ancestor) break
+        root = ancestor
+      }
+      return { root, depth }
+    })
+
+    // The root's latest message from the user; a note, a judge's findings or a marker opens no request. A message
+    // with no parts yet counts as the user's.
+    const latestRequest = (rootID: SessionID) =>
+      sessions
+        .findMessage(
+          rootID,
+          (message) =>
+            message.info.role === "user" && (message.parts.length === 0 || SessionTaskSize.real(message)),
+        )
+        .pipe(
+          Effect.map((found): string => (Option.isSome(found) ? found.value.info.id : rootID)),
+          Effect.catchCause(() => Effect.succeed<string>(rootID)),
+        )
+
+    // The pool a root's launches count in (5.B.1). A desktop Parallel Workspace or Swarm root names the session it was
+    // started from, whose ancestors conversation() reads too.
+    const conversationOf = Effect.fn("TaskTool.conversationOf")(function* (root: Session.Info, guest: boolean) {
+      const known = new Map<string, Session.Info>([[root.id, root]])
+      const vector = root.metadata?.vector
+      let next = isRecord(vector) && typeof vector.parentSessionId === "string" ? vector.parentSessionId : undefined
+      for (let hops = 0; next !== undefined && !known.has(next) && hops <= MAX_SUBAGENT_DEPTH; hops++) {
+        const parsed = Schema.decodeUnknownOption(SessionID)(next)
+        if (Option.isNone(parsed)) break
+        const found = yield* sessions.get(parsed.value).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+        if (!found) break
+        known.set(found.id, found)
+        next = found.parentID
+      }
+      return TaskLimits.conversation(root, (id) => known.get(id), guest)
+    })
+
+    // What a launch counts against (5.B.2): its conversation's slots, and its request's launch count and delegated
+    // spend ceiling. Undefined for Vector's own launches, such as the judge, which are never counted.
+    const delegationOf = Effect.fn("TaskTool.delegationOf")(function* (
+      ctx: Tool.Context,
+      parent: Session.Info,
+      root: Session.Info,
+    ) {
+      if (ctx.extra?.[TaskLimits.EXEMPT] === true) return undefined
+      // Read at every launch, so a guest who joins later tightens every launch after that.
+      const guest = yield* guests.marked(root.id)
+      const context = ctx.extra?.delegation
+      const requestID =
+        SubagentLifecycle.read(parent)?.requestID ??
+        (isRecord(context) && typeof context.requestID === "string" ? context.requestID : undefined) ??
+        (yield* latestRequest(root.id))
+      return {
+        conversationID: yield* conversationOf(root, guest),
+        rootID: root.id,
+        requestID,
+        limits: TaskLimits.resolve(yield* config.get(), guest),
+      }
+    })
     // Ownership claimed by task calls that have not registered their job yet.
     const claims = SubagentLifecycle.claims
     const claimLock = SubagentLifecycle.controlLock
@@ -336,6 +418,7 @@ export const TaskTool = Tool.define(
         budget?: RunBudget.Info
         own: (sessionID: SessionID) => void
         persist: (metadata: object) => Effect.Effect<void>
+        admitted: (admission: TaskLimits.Admission) => void
       },
     ) {
       const cfg = yield* config.get()
@@ -550,15 +633,7 @@ export const TaskTool = Tool.define(
         }
       }
 
-      // Walking past the limit cannot change the answer, so a corrupt parent chain cannot keep it looping either.
-      let cursor = parent
-      let depth = 0
-      while (cursor.parentID && depth < MAX_SUBAGENT_DEPTH) {
-        depth += 1
-        const ancestor = yield* sessions.get(cursor.parentID).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
-        if (!ancestor) break
-        cursor = ancestor
-      }
+      const { root, depth } = yield* lineage(parent)
       if (depth >= MAX_SUBAGENT_DEPTH) {
         return yield* Effect.fail(
           new Error(
@@ -566,13 +641,6 @@ export const TaskTool = Tool.define(
           ),
         )
       }
-      let runningSiblings = 0
-      if (!params.task_id) {
-        runningSiblings = (yield* background.list()).filter(
-          (job) => job.type === id && job.status === "running" && job.metadata?.parentSessionId === ctx.sessionID,
-        ).length
-      }
-      const busy = runningSiblings + 1 > BUSY_SUBAGENTS_PER_SESSION
 
       // A disabled general (agent.general.disable) is missing from the agent list altogether, so
       // fail before any permission prompt whether it was omitted, named, aliased or resumed.
@@ -669,6 +737,49 @@ export const TaskTool = Tool.define(
       const budget =
         brief?.type === "ok" && brief.budget ? SpendGuard.tighter(params.budget, brief.budget) : params.budget
 
+      const msg = yield* MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID }).pipe(
+        Effect.provideService(Database.Service, database),
+        Effect.orDie,
+      )
+      if (msg.info.role !== "assistant") return yield* Effect.fail(new Error("Not an assistant message"))
+      const variant = msg.info.variant
+
+      // Admission (5.B.2) comes before the ask, so a launch past a limit is refused without asking the user. Its places
+      // and slots go back when this call's scope closes, unless bind() below hands them to the child.
+      const delegation = yield* delegationOf(ctx, parent, root)
+      const origin: TaskLimits.Origin = session ? "resume" : parent.parentID ? "nested" : "root"
+      const admission = delegation
+        ? yield* limits
+            .admit({
+              conversationID: delegation.conversationID,
+              requestID: delegation.requestID,
+              limits: delegation.limits,
+              origin,
+              count: 1,
+              parentID: ctx.sessionID,
+            })
+            .pipe(Effect.mapError((refused) => new Error(refused.message)))
+        : undefined
+      if (admission) batch?.admitted(admission)
+      if (admission?.waits && batch?.multiple && !runInBackground) return yield* Effect.fail(new Error(BATCH_WAITS))
+      // The request's delegated ledger (5.B.6), re-armed with the current budget at every link.
+      const delegated = delegation && {
+        id: TaskLimits.ledger(delegation.conversationID, delegation.requestID),
+        budget: delegation.limits.budget,
+        seed: yield* limits.seed(delegation.conversationID, delegation.requestID),
+      }
+      // A launch that waits for a slot. The main agent's foreground launch then moves to the background at once, so
+      // the agent is not left waiting behind other subagents; a user's slash command waits on its card (5.B.4).
+      const slotted = admission?.waits === true
+      const promoteNow =
+        slotted &&
+        !runInBackground &&
+        !parent.parentID &&
+        !batch?.multiple &&
+        flags.backgroundSubagents &&
+        ctx.extra?.[SUBTASK] !== true
+      const busy = !batch && admission !== undefined && admission.active > TaskLimits.BUSY
+
       if (!invoked) {
         yield* ctx.ask({
           permission: id,
@@ -700,13 +811,6 @@ export const TaskTool = Tool.define(
           ),
         )
       }
-
-      const msg = yield* MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID }).pipe(
-        Effect.provideService(Database.Service, database),
-        Effect.orDie,
-      )
-      if (msg.info.role !== "assistant") return yield* Effect.fail(new Error("Not an assistant message"))
-      const variant = msg.info.variant
 
       // Keep the parent's free route even if its model became unavailable after the tool call.
       const freeRoute = isFreeModelRef(msg.info)
@@ -814,8 +918,16 @@ export const TaskTool = Tool.define(
           budget,
           model: modelRef,
           background: runInBackground,
-          status: dependencies.length > 0 ? "queued" : "running",
+          status: dependencies.length > 0 || slotted ? "queued" : "running",
+          ...(slotted && dependencies.length === 0 ? { slotReason: SLOT_REASON } : {}),
           startedAt,
+          ...(delegation
+            ? {
+                conversationID: delegation.conversationID,
+                rootSessionID: delegation.rootID,
+                requestID: delegation.requestID,
+              }
+            : {}),
         }
 
         // A subagent launched before Plan mode keeps the edits it was launched with, so Plan mode resuming it takes
@@ -879,10 +991,12 @@ export const TaskTool = Tool.define(
         // on every write of this call's tool part, so the part and the child's
         // record agree.
         const outcome: SubagentLifecycle.Outcome = { status: record.status }
+        // Why the child waits for a slot; the part mirrors the record's slotReason as queuedReason (4.6).
+        let queuedReason = record.slotReason
         // What the child took in, once it settles: a parent whose subagent read the web is held as web, not subagent
         // (RC8), so its memory writes wait for the user for the right reason.
         const held: { [SessionMemory.HOLD]?: BrainSchema.Hold } = {}
-        const partMetadata = () => ({ ...metadata, ...outcome, ...held })
+        const partMetadata = () => ({ ...metadata, ...outcome, ...(queuedReason ? { queuedReason } : {}), ...held })
         // Once the call has returned (background launch or promotion), its tool
         // part is settled and later changes must patch the stored part.
         let detached = runInBackground
@@ -916,8 +1030,12 @@ export const TaskTool = Tool.define(
                   )
               : Effect.void
 
-        const transition = Effect.fn("TaskTool.transition")(function* (patch: SubagentLifecycle.Outcome) {
-          Object.assign(outcome, SubagentLifecycle.defined(patch))
+        const transition = Effect.fn("TaskTool.transition")(function* (
+          patch: SubagentLifecycle.Outcome & Pick<SubagentRecord, "slotReason">,
+        ) {
+          const { slotReason, ...rest } = patch
+          Object.assign(outcome, SubagentLifecycle.defined(rest))
+          if ("slotReason" in patch) queuedReason = slotReason
           yield* SubagentLifecycle.update(sessions, nextSession.id, patch, attempt)
           if (detached) return yield* persistPart()
           yield* ctx.metadata({ title, metadata: partMetadata() })
@@ -926,6 +1044,7 @@ export const TaskTool = Tool.define(
         // Lays a settled run over this call's part: what it ended as, and what it read.
         const settledPart = (settled: SubagentLifecycle.Outcome, hold: BrainSchema.Hold | undefined) => {
           Object.assign(outcome, SubagentLifecycle.defined(settled))
+          queuedReason = undefined
           if (hold) held[SessionMemory.HOLD] = hold
         }
 
@@ -968,28 +1087,42 @@ export const TaskTool = Tool.define(
               }),
             { concurrency: "unbounded" },
           )
-          if (dependencies.length > 0) yield* transition({ status: "running" })
-          // A brief is the parent model's text, so @names in it attach files but never invoke agents in the child. A
-          // researcher gets no file at all: what it sends leaves the machine.
-          const parts = (yield* ops.resolvePromptParts(
-            [
-              assignmentPrompt(briefed, subagentType === ResearchRun.RESEARCHER ? [] : ownedPaths),
-              ...prerequisites,
-            ].join("\n\n"),
-          )).filter(
-            (part) => part.type !== "agent" && (subagentType !== ResearchRun.RESEARCHER || part.type !== "file"),
-          )
-          return yield* ops.prompt({
-            messageID: MessageID.ascending(),
-            sessionID: nextSession.id,
-            model: {
-              modelID: model.modelID,
-              providerID: model.providerID,
-            },
-            variant: childVariant,
-            agent: next.name,
-            parts,
+          const work = Effect.gen(function* () {
+            // Queued for a prerequisite or a slot until now; running clears the reason.
+            if (outcome.status === "queued") yield* transition({ status: "running", slotReason: undefined })
+            // A brief is the parent model's text, so @names in it attach files but never invoke agents in the child. A
+            // researcher gets no file at all: what it sends leaves the machine.
+            const parts = (yield* ops.resolvePromptParts(
+              [
+                assignmentPrompt(briefed, subagentType === ResearchRun.RESEARCHER ? [] : ownedPaths),
+                ...prerequisites,
+              ].join("\n\n"),
+            )).filter(
+              (part) => part.type !== "agent" && (subagentType !== ResearchRun.RESEARCHER || part.type !== "file"),
+            )
+            return yield* ops.prompt({
+              messageID: MessageID.ascending(),
+              sessionID: nextSession.id,
+              model: {
+                modelID: model.modelID,
+                providerID: model.providerID,
+              },
+              variant: childVariant,
+              agent: next.name,
+              parts,
+            })
           })
+          // The slot is taken only once the prerequisites are met, so a child waiting on a dependency holds none (5.B.3).
+          if (!delegation) return yield* work
+          return yield* limits.run(
+            {
+              conversationID: delegation.conversationID,
+              childID: nextSession.id,
+              origin,
+              waiting: transition({ status: "queued", slotReason: SLOT_REASON }),
+            },
+            work,
+          )
         })
 
         // Once the background job ends, its child is settled and its note goes to the parent. Built when it runs, so it
@@ -1114,7 +1247,7 @@ export const TaskTool = Tool.define(
             if (ctx.abort.aborted)
               return yield* Effect.fail(new Error("Stopped before the message reached the background task."))
             yield* assertDependencies(nextSession.id, dependencies)
-            yield* guard.link(nextSession.id, ctx.sessionID, { budget })
+            yield* guard.link(nextSession.id, ctx.sessionID, { budget, ...(delegated ? { delegated } : {}) })
             const busy = dependencies.length === 0 && (yield* statuses.get(nextSession.id)).type !== "idle"
             const claim = { taskID: nextSession.id, dependencies }
             const release = Effect.sync(() => dependencyClaims.delete(claim))
@@ -1201,6 +1334,7 @@ export const TaskTool = Tool.define(
               budget,
               ...(batch ? { batch: { id: batchID, budget: batch.budget } } : {}),
               renew: session !== undefined && (yield* background.get(nextSession.id))?.status !== "running",
+              ...(delegated ? { delegated } : {}),
             })
             // A resumed child starts a new run: point its record at this call.
             if (session)
@@ -1215,7 +1349,10 @@ export const TaskTool = Tool.define(
                 resultRef: undefined,
                 resultSummary: undefined,
                 reason: undefined,
+                slotReason: record.slotReason,
               })
+            // The admission's place and any slot it reserved become the child's before its run can start.
+            if (admission) yield* limits.bind(admission, nextSession.id)
             return yield* background.start({
               id: nextSession.id,
               type: id,
@@ -1270,8 +1407,12 @@ export const TaskTool = Tool.define(
         // A stop that landed while this call was still setting up came before the job existed, so neither the parent's
         // sweep of its jobs nor the abort listener below saw it.
         if (ctx.abort.aborted) yield* background.cancel(info.id)
+        // Through the promotion path, as Move to background does: the call returns and the note arrives later.
+        else if (promoteNow) yield* background.promote(info.id)
 
         function backgroundResult() {
+          // Still waiting for the slot its admission found taken.
+          const queued = slotted && admission !== undefined && outcome.status === "queued"
           return {
             title,
             metadata: {
@@ -1282,8 +1423,11 @@ export const TaskTool = Tool.define(
             output: renderOutput({
               sessionID: nextSession.id,
               state: "running",
-              summary: "Background task started",
-              text: busy ? `${BACKGROUND_STARTED}\n${busyNote(runningSiblings + 1, "now")}` : BACKGROUND_STARTED,
+              summary: queued ? `Queued: ${SLOT_REASON.toLowerCase()}` : "Background task started",
+              text: [
+                queued ? queuedNote(admission.limits.running) : BACKGROUND_STARTED,
+                ...(busy && admission ? [busyNote(admission.active, admission.limits.running)] : []),
+              ].join("\n"),
             }),
           }
         }
@@ -1342,7 +1486,7 @@ export const TaskTool = Tool.define(
                 output: renderOutput({
                   sessionID: nextSession.id,
                   state,
-                  ...(busy ? { summary: busyNote(runningSiblings + 1, "launch") } : {}),
+                  ...(busy && admission ? { summary: busyNote(admission.active, admission.limits.running) } : {}),
                   text,
                 }),
               }
@@ -1434,22 +1578,49 @@ export const TaskTool = Tool.define(
           Effect.asVoid,
         )
       yield* ctx.metadata({ title, metadata: metadata() })
-      const launches = yield* Effect.forEach(params.tasks, (task, index) =>
-        prepare(
-          { ...task, background: params.background },
-          {
-            ...ctx,
-            metadata: (value) => publish(index, value.metadata ?? {}),
-          },
-          {
-            index,
-            multiple: items.length > 1,
-            budget: params.budget,
-            own: (sessionID) => {
-              owned.set(index, sessionID)
-            },
-            persist: (patch) => deferred(index, patch),
-          },
+      // The most subagents running or waiting in the conversation as the entries were admitted (5.B.8).
+      const busiest = { active: 0, limit: 0 }
+      // The whole batch is refused before any entry is prepared when it would pass the request's limit (5.B.2).
+      const capacity = Effect.gen(function* () {
+        const need = params.tasks.filter((task) => task.task_id === undefined).length
+        if (need === 0) return
+        const parent = yield* sessions.get(ctx.sessionID)
+        const delegation = yield* delegationOf(ctx, parent, (yield* lineage(parent)).root)
+        if (!delegation) return
+        yield* limits
+          .capacity({
+            conversationID: delegation.conversationID,
+            requestID: delegation.requestID,
+            limits: delegation.limits,
+            need,
+          })
+          .pipe(Effect.mapError((refused) => new Error(refused.message)))
+      })
+      const launches = yield* capacity.pipe(
+        Effect.andThen(
+          Effect.forEach(params.tasks, (task, index) =>
+            prepare(
+              { ...task, background: params.background },
+              {
+                ...ctx,
+                metadata: (value) => publish(index, value.metadata ?? {}),
+              },
+              {
+                index,
+                multiple: items.length > 1,
+                budget: params.budget,
+                own: (sessionID) => {
+                  owned.set(index, sessionID)
+                },
+                persist: (patch) => deferred(index, patch),
+                admitted: (admission) => {
+                  if (admission.active <= busiest.active) return
+                  busiest.active = admission.active
+                  busiest.limit = admission.limits.running
+                },
+              },
+            ),
+          ),
         ),
       ).pipe(
         Effect.catchCause((cause) =>
@@ -1488,7 +1659,8 @@ export const TaskTool = Tool.define(
         { concurrency: "unbounded" },
       )
       returned = true
-      return { title, metadata: metadata(), output: results.join("\n\n") }
+      const busy = busiest.active > TaskLimits.BUSY ? [busyNote(busiest.active, busiest.limit)] : []
+      return { title, metadata: metadata(), output: [...results, ...busy].join("\n\n") }
     })
 
     return {

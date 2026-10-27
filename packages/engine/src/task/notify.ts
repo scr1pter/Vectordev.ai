@@ -19,6 +19,7 @@ import type { TaskPromptOps } from "@/tool/task"
 import { Truncate } from "@/tool/truncate"
 import { Locale } from "@/util/locale"
 import { NoteWindow } from "./note-window"
+import { TaskLimits } from "./limits"
 
 // One pipeline for every note Vector writes into a parent about the work it handed off. Notes for one parent are held
 // in one window (NoteWindow) and reach it as one synthetic user message, which joins the parent's running turn or
@@ -129,6 +130,8 @@ export function render(input: {
   usage?: SubagentUsage
   duration?: number
   text: string
+  /** How much of its delegated ceiling the request's subagents have spent, once they pass the warning level. */
+  spend?: string
 }) {
   const attributes = [
     `id="${input.taskID}"`,
@@ -148,6 +151,7 @@ export function render(input: {
           `Pricing is unknown for ${input.usage.unpricedSteps} provider steps; recorded cost is only a measured subtotal.`,
         ]
       : []),
+    ...(input.spend ? [input.spend] : []),
     ...(guidance ? [guidance] : []),
     `<${tag}>`,
     TaskSize.neutralizeTags(input.text),
@@ -223,6 +227,25 @@ const layer = Layer.effect(
     // Parents whose helpers the user stopped with them: nothing they report starts a turn until the user writes again.
     // Session IDs are unique across instances, so one set serves them all.
     const fenced = new Set<SessionID>()
+    // Delegated ceilings a note has already reported as nearly spent (5.B.6), by ledger and ceiling, so a raised
+    // ceiling is reported again at its own warning level. The oldest are dropped past 256.
+    const warned = new Set<string>()
+
+    // Once a request's subagents have spent the warning share (80% by default) of their delegated ceiling, the next
+    // completion note from that request says so.
+    const spendLine = Effect.fnUntraced(function* (taskID: SessionID) {
+      const record = SubagentLifecycle.read(yield* sessions.get(taskID))
+      if (!record?.conversationID || !record.requestID) return undefined
+      const ledger = yield* guard.delegated(TaskLimits.ledger(record.conversationID, record.requestID))
+      const cap = ledger?.budget.usd
+      if (!ledger || cap === undefined) return undefined
+      if (ledger.spentUsd < cap * (ledger.budget.warnAt ?? SpendGuard.WARN_AT)) return undefined
+      const key = `${ledger.id}:${cap}`
+      if (warned.has(key)) return undefined
+      warned.add(key)
+      if (warned.size > 256) warned.delete(warned.values().next().value!)
+      return `Subagents in this request have spent ${SpendGuard.formatUsd(ledger.spentUsd)} of their ${SpendGuard.formatUsd(cap)} ceiling.`
+    })
 
     // Any prompt commits a pending revert, deleting the reverted messages and the redo, so a note never does: it waits
     // until the user resolves the revert, and is dropped when that removed the call that launched the task. Checks back
@@ -470,6 +493,7 @@ const layer = Layer.effect(
           usage: input.usage,
           duration: input.duration,
           text: capped.content,
+          spend: yield* spendLine(input.taskID),
         })
         yield* SubagentLifecycle.write(
           sessions,

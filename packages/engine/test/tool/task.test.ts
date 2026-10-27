@@ -5,7 +5,7 @@ import { SessionV1 } from "@vectordevai/core/v1/session"
 import { Database } from "@vectordevai/core/database/database"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { SessionProjector } from "@vectordevai/core/session/projector"
-import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
+import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import { Agent } from "../../src/agent/agent"
 import { BackgroundJob } from "@/background/job"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -22,6 +22,9 @@ import { SessionStatus } from "@/session/status"
 
 import { TaskTool, type TaskPromptOps } from "../../src/tool/task"
 import { TaskNotify } from "@/task/notify"
+import { TaskLimits } from "@/task/limits"
+import { TaskManager } from "@/task/manager"
+import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { Truncate } from "@/tool/truncate"
 import { ToolRegistry } from "@/tool/registry"
 import { Provider } from "@/provider/provider"
@@ -63,6 +66,9 @@ const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
       Provider.node,
       SpendGuard.node,
       TaskNotify.node,
+      TaskLimits.node,
+      TaskManager.node,
+      FreeModelGuests.node,
     ]),
     // The note window runs in milliseconds here: 300 of quiet, held at most a second.
     [[RuntimeFlags.node, RuntimeFlags.layer({ noteQuietMs: 300, noteHoldMs: 1_000, ...flags })]],
@@ -2082,7 +2088,8 @@ describe("tool.task", () => {
     }),
   )
 
-  background.instance("launches a seventeenth background subagent and says how many are running", () =>
+  // 5.B.3 and 5.B.8: a conversation runs at most 8 subagents at once; a ninth launch waits for a slot.
+  background.instance("a ninth background subagent is queued and says how many are running or waiting", () =>
     Effect.gen(function* () {
       const { chat, assistant } = yield* seed()
       const tool = yield* TaskTool
@@ -2112,11 +2119,15 @@ describe("tool.task", () => {
           },
         )
 
-      for (let index = 1; index < 17; index++) yield* launch(index)
-      const result = yield* launch(17)
+      for (let index = 1; index < 9; index++) yield* launch(index)
+      const result = yield* launch(9)
 
       expect(result.output).toContain(`state="running"`)
-      expect(result.output).toContain("17 subagents are now running")
+      expect(result.output).toContain("Queued: 8 subagents are already running, the most this conversation runs at once.")
+      expect(result.output).toContain(
+        "9 subagents are running or waiting in this conversation (it runs at most 8 at once).",
+      )
+      expect(result.metadata).toMatchObject({ status: "queued", queuedReason: "Waiting for a free subagent slot" })
     }),
   )
 
@@ -3591,7 +3602,7 @@ describe("tool.task", () => {
     }),
   )
 
-  background.instance("a foreground launch past six running siblings says how many were running", () =>
+  background.instance("a foreground launch past six running siblings says how many are running or waiting", () =>
     Effect.gen(function* () {
       const { chat, assistant } = yield* seed()
       const tool = yield* TaskTool
@@ -3613,7 +3624,10 @@ describe("tool.task", () => {
       )
 
       expect(result.output).toContain('state="completed"')
-      expect(result.output).toContain("7 subagents were running for this task when this one started")
+      // 5.B.8: the count is the conversation's running and waiting subagents, this launch included.
+      expect(result.output).toContain(
+        "7 subagents are running or waiting in this conversation (it runs at most 8 at once).",
+      )
     }),
   )
 
@@ -4459,5 +4473,560 @@ describe("task batches", () => {
         yield* jobs.cancel(initial.metadata.sessionId)
       }),
     { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } },
+  )
+})
+
+// Admission and slots in the task tool (multi-agent contract 5.B.2 to 5.B.8).
+describe("subagent limits", () => {
+  const SLOTS = "Waiting for a free subagent slot"
+  const never: TaskPromptOps = { ...stubOps(), prompt: () => Effect.never }
+  // The general Subagent may launch its own subagents here.
+  const nesting = { general: { permission: { task: "allow" as const } } }
+  const capped = (subagents: { running?: number; per_request?: number }, agent?: typeof nesting) => ({
+    trusted: true,
+    // A batch resolves every entry's model before it launches any.
+    config: { budget: { subagents }, provider: pricedProvider({ "test-model": {} }), ...(agent ? { agent } : {}) },
+  })
+  const brief = (area: string) => ({ description: `Inspect ${area}`, prompt: `Inspect ${area} and report.` })
+  const failure = (exit: Exit.Exit<unknown, unknown>) => (Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "")
+
+  // A root session with a user message and the assistant message that launches; `metadata` marks a parallel root.
+  const root = Effect.fn("TaskToolTest.root")(function* (metadata?: Record<string, unknown>) {
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({ title: "Root", ...(metadata ? { metadata } : {}) })
+    return { chat, assistant: yield* turn(chat.id) }
+  })
+
+  // A user message with text, so it opens a request, and the assistant message that answers it.
+  const turn = Effect.fn("TaskToolTest.turn")(function* (sessionID: SessionID, text?: string) {
+    const sessions = yield* Session.Service
+    const user = yield* sessions.updateMessage({
+      id: MessageID.ascending(),
+      role: "user",
+      sessionID,
+      agent: "build",
+      model: { ...ref, variant: "xhigh" },
+      time: { created: Date.now() },
+    })
+    if (text)
+      yield* sessions.updatePart({ id: PartID.ascending(), messageID: user.id, sessionID, type: "text", text })
+    const assistant: SessionV1.Assistant = {
+      id: MessageID.ascending(),
+      role: "assistant",
+      parentID: user.id,
+      sessionID,
+      mode: "build",
+      agent: "build",
+      cost: 0,
+      path: { cwd: "/tmp", root: "/tmp" },
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      modelID: ref.modelID,
+      providerID: ref.providerID,
+      variant: "xhigh",
+      time: { created: Date.now() },
+    }
+    yield* sessions.updateMessage(assistant)
+    return assistant
+  })
+
+  // Prompt ops whose child runs each hold until their gate opens, in the order they started.
+  const gated = (notes: SessionPrompt.PromptInput[] = []) => {
+    const started: string[] = []
+    const gates = new Map<string, Deferred.Deferred<void>>()
+    const gate = (sessionID: string) => {
+      const found = gates.get(sessionID)
+      if (found) return found
+      const made = Deferred.makeUnsafe<void>()
+      gates.set(sessionID, made)
+      return made
+    }
+    const ops = (parentID: SessionID): TaskPromptOps => ({
+      ...stubOps(),
+      prompt: (input) => {
+        if (input.sessionID === parentID) {
+          notes.push(input)
+          return Effect.succeed(reply(input, "noted"))
+        }
+        started.push(input.sessionID)
+        return Deferred.await(gate(input.sessionID)).pipe(Effect.as(reply(input, `report from ${input.sessionID}`)))
+      },
+    })
+    const release = (sessionID: string) => Deferred.succeed(gate(sessionID), undefined)
+    return { started, ops, release }
+  }
+
+  background.instance("a batch of 8 with none running returns one busy line counting 8", () =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* root()
+      const def = yield* (yield* TaskTool).init()
+      const result = yield* def.execute(
+        { tasks: Array.from({ length: 8 }, (_, index) => brief(`area ${index}`)) },
+        taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps: never }),
+      )
+      expect(result.output.split("\n").filter((line) => line.includes("subagents are running or waiting"))).toEqual([
+        "8 subagents are running or waiting in this conversation (it runs at most 8 at once). Each one spends on the user's provider keys, so tell the user how many are working.",
+      ])
+      expect(result.output).not.toContain("Queued:")
+    }),
+    { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } },
+  )
+
+  background.instance(
+    "with running = 2 a third launch is queued with the reason and starts in launch order",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const jobs = yield* BackgroundJob.Service
+        const { chat, assistant } = yield* root()
+        const def = yield* singleTaskDefinition(yield* TaskTool)
+        const children = gated()
+        const launch = (area: string) =>
+          def.execute(
+            { ...brief(area), background: true },
+            taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps: children.ops(chat.id) }),
+          )
+        const first = yield* launch("api")
+        const second = yield* launch("web")
+        const third = yield* launch("cli")
+        const fourth = yield* launch("docs")
+        const ids = [first, second, third, fourth].map((item) => item.metadata.sessionId)
+        yield* pollWithTimeout(
+          Effect.sync(() => (children.started.length === 2 ? true : undefined)),
+          "the first two should start",
+        )
+        expect(children.started).toEqual(ids.slice(0, 2))
+        expect(third.output).toContain("Queued: 2 subagents are already running")
+        expect(third.output).toContain("Do not launch a replacement.")
+        expect(third.metadata).toMatchObject({ status: "queued", queuedReason: SLOTS })
+        expect(SubagentLifecycle.read(yield* sessions.get(ids[2]))).toMatchObject({
+          status: "queued",
+          slotReason: SLOTS,
+          conversationID: chat.id,
+          rootSessionID: chat.id,
+        })
+
+        yield* children.release(ids[0])
+        yield* pollWithTimeout(
+          Effect.sync(() => (children.started.length === 3 ? true : undefined)),
+          "the third should start once a slot is free",
+        )
+        expect(children.started).toEqual(ids.slice(0, 3))
+        // Running clears the reason.
+        yield* pollWithTimeout(
+          sessions
+            .get(ids[2])
+            .pipe(
+              Effect.map((info) =>
+                SubagentLifecycle.read(info)?.status === "running" && !SubagentLifecycle.read(info)?.slotReason
+                  ? true
+                  : undefined,
+              ),
+            ),
+          "the third should be running without a reason",
+        )
+        yield* children.release(ids[1])
+        yield* pollWithTimeout(
+          Effect.sync(() => (children.started.length === 4 ? true : undefined)),
+          "the fourth should start next",
+        )
+        expect(children.started).toEqual(ids)
+        yield* Effect.forEach(ids.slice(2), children.release)
+        const settled = yield* Effect.forEach(ids, (id) => jobs.wait({ id }))
+        expect(settled.map((item) => item.info?.status)).toEqual(["completed", "completed", "completed", "completed"])
+      }),
+    capped({ running: 2 }),
+  )
+
+  background.instance(
+    "a nested foreground launch with every slot held is refused with the slots message and finishes within its timeout",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const { chat, assistant } = yield* root()
+        const def = yield* singleTaskDefinition(yield* TaskTool)
+        const ctx = taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps: never })
+        const first = yield* def.execute({ ...brief("api"), background: true }, ctx)
+        yield* def.execute({ ...brief("web"), background: true }, ctx)
+        const message = reply({ sessionID: first.metadata.sessionId, parts: [] }, "Delegate a check")
+        yield* sessions.updateMessage(message.info)
+        const exit = yield* awaitWithTimeout(
+          def
+            .execute(
+              { ...brief("nested"), subagent_type: "general" },
+              taskContext({ sessionID: first.metadata.sessionId, messageID: message.info.id, promptOps: stubOps() }),
+            )
+            .pipe(Effect.exit),
+          "a nested launch must never wait for a slot",
+        )
+        expect(failure(exit)).toContain(
+          "All 2 subagent slots of this conversation are in use, and a subagent's own subagents cannot wait for one. Do this part yourself. No child was started.",
+        )
+        expect(yield* sessions.children(first.metadata.sessionId)).toEqual([])
+      }),
+    capped({ running: 2 }, nesting),
+  )
+
+  background.instance(
+    "with running = 2, a child with two dependents plus a queued task_manage message finishes, so no slot is held during a dependency wait",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const jobs = yield* BackgroundJob.Service
+        const manager = yield* TaskManager.Service
+        const limits = yield* TaskLimits.Service
+        const { chat, assistant } = yield* root()
+        const def = yield* singleTaskDefinition(yield* TaskTool)
+        const gate = yield* Deferred.make<void>()
+        const prompts: string[] = []
+        const promptOps: TaskPromptOps = {
+          ...stubOps(),
+          prompt: (input) => {
+            if (input.sessionID === chat.id) return Effect.succeed(reply(input, "noted"))
+            prompts.push(input.sessionID)
+            // The first run holds; dependents and the queued message return at once.
+            return prompts.length === 1
+              ? Deferred.await(gate).pipe(Effect.as(reply(input, "foundation ready")))
+              : Effect.succeed(reply(input, "done"))
+          },
+        }
+        const ctx = taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps })
+        const base = yield* def.execute({ ...brief("foundation"), background: true }, ctx)
+        const id = base.metadata.sessionId
+        const dependents = yield* Effect.forEach(["api", "web"], (area) =>
+          def.execute({ ...brief(area), depends_on: [id], background: true }, ctx),
+        )
+        yield* manager.message({ sessionID: chat.id, taskID: id, text: "Also check the tests", delivery: "queue" }, promptOps)
+        yield* pollWithTimeout(Effect.sync(() => (prompts.length === 1 ? true : undefined)), "the foundation should start")
+        // The dependents wait on the foundation without a slot: only the foundation holds one.
+        const status = yield* limits.status(chat.id)
+        expect(status).toMatchObject({ running: 1, queued: 0 })
+        for (const item of dependents)
+          expect(SubagentLifecycle.read(yield* sessions.get(item.metadata.sessionId))).toMatchObject({ status: "queued" })
+        yield* Deferred.succeed(gate, undefined)
+        const settled = yield* awaitWithTimeout(
+          Effect.forEach([id, ...dependents.map((item) => item.metadata.sessionId)], (item) => jobs.wait({ id: item })),
+          "every child should finish",
+          "5 seconds",
+        )
+        expect(settled.map((item) => item.info?.status)).toEqual(["completed", "completed", "completed"])
+        expect(prompts).toHaveLength(4)
+      }),
+    capped({ running: 2 }),
+  )
+
+  background.instance(
+    "with per_request = 3, a batch of 4 is refused with the batch message and sessions.children(root) is unchanged",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const { chat, assistant } = yield* root()
+        const def = yield* (yield* TaskTool).init()
+        const published: unknown[] = []
+        const exit = yield* def
+          .execute(
+            { tasks: ["a", "b", "c", "d"].map(brief) },
+            {
+              ...taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps: stubOps() }),
+              metadata: (value: unknown) => Effect.sync(() => void published.push(value)),
+            },
+          )
+          .pipe(Effect.exit)
+        expect(failure(exit)).toContain(
+          "This batch would start 4 subagents, but this request may start only 3 more (budget.subagents.per_request). Launch fewer, or do the rest yourself. No child was started.",
+        )
+        expect(JSON.stringify(published.at(-1))).toContain("Task batch preflight refused; no child work started.")
+        expect(yield* sessions.children(chat.id)).toEqual([])
+      }),
+    capped({ per_request: 3 }),
+  )
+
+  background.instance(
+    "a task_id resume is not counted",
+    () =>
+      Effect.gen(function* () {
+        const { chat, assistant } = yield* root()
+        const def = yield* singleTaskDefinition(yield* TaskTool)
+        const ctx = taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps: stubOps() })
+        const first = yield* def.execute(brief("api"), ctx)
+        const resumed = yield* def.execute({ ...brief("api"), task_id: first.metadata.sessionId }, ctx)
+        expect(resumed.output).toContain('state="completed"')
+        const refused = yield* def.execute(brief("web"), ctx).pipe(Effect.exit)
+        expect(failure(refused)).toContain(
+          "This request has already started 1 of the 1 subagents one request may start (budget.subagents.per_request).",
+        )
+      }),
+    capped({ per_request: 1 }),
+  )
+
+  background.instance(
+    "a new layer, simulating a restart, re-seeds the count",
+    () =>
+      Effect.gen(function* () {
+        const { chat, assistant } = yield* root()
+        const ctx = taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps: stubOps() })
+        const before = yield* singleTaskDefinition(yield* TaskTool)
+        yield* before.execute(brief("api"), ctx)
+        yield* before.execute(brief("web"), ctx)
+        // A fresh TaskLimits knows nothing in memory, so the request's launches come from the database.
+        const restarted = yield* Layer.build(
+          TaskLimits.node.implementation as Layer.Layer<
+            TaskLimits.Service,
+            never,
+            Database.Service | FreeModelGuests.Service | SpendGuard.Service
+          >,
+        )
+        const after = yield* (yield* TaskTool.pipe(
+          Effect.provideService(TaskLimits.Service, Context.get(restarted, TaskLimits.Service)),
+        )).init()
+        const refused = yield* after.execute({ tasks: [brief("cli"), brief("docs")] }, ctx).pipe(Effect.exit)
+        expect(failure(refused)).toContain("This batch would start 2 subagents, but this request may start only 1 more")
+        const allowed = yield* after.execute({ tasks: [brief("cli")], background: false }, ctx)
+        expect(allowed.output).toContain('state="completed"')
+      }),
+    capped({ per_request: 3 }),
+  )
+
+  background.instance(
+    "the judge takes no slot",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const { chat, assistant } = yield* root()
+        const def = yield* singleTaskDefinition(yield* TaskTool)
+        yield* def.execute(
+          { ...brief("api"), background: true },
+          taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps: never }),
+        )
+        const base = taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps: stubOps() })
+        const judge = yield* awaitWithTimeout(
+          def.execute(
+            { description: "Judge the answer", prompt: "Judge it.", subagent_type: "general" },
+            { ...base, extra: { ...base.extra, [TaskLimits.EXEMPT]: true } },
+          ),
+          "the judge must not wait for a slot",
+        )
+        expect(judge.output).toContain('state="completed"')
+        const record = SubagentLifecycle.read(yield* sessions.get(judge.metadata.sessionId))
+        expect(record?.requestID).toBeUndefined()
+        expect((yield* (yield* TaskLimits.Service).status(chat.id)).running).toBe(1)
+      }),
+    capped({ running: 1 }),
+  )
+
+  background.instance(
+    "the delegated ceiling stops a child with the subagent message, the parent continues, a new launch in the request is refused, a raised budget.subagents.usd lets it launch again, and a new request may launch",
+    () =>
+      Effect.gen(function* () {
+        const guard = yield* SpendGuard.Service
+        const real = yield* Config.Service
+        const base = yield* real.get()
+        let usd = 1
+        // budget.subagents.usd is the user's own setting; a repository's is ignored, so it is set here.
+        const config = Config.Service.of({
+          ...real,
+          get: () => Effect.sync(() => ({ ...base, budget: { ...base.budget, subagents: { usd } } })),
+        })
+        const def = yield* singleTaskDefinition(yield* TaskTool.pipe(Effect.provideService(Config.Service, config)))
+        const { chat, assistant } = yield* root()
+        const stops: (SpendGuard.Stop | undefined)[] = []
+        const costly: TaskPromptOps = {
+          ...stubOps(),
+          prompt: (input) =>
+            guard
+              .record(input.sessionID, {
+                costUsd: 2,
+                costKind: "priced",
+                contextTokens: 1_000,
+                cachedTokens: 0,
+                continues: false,
+                tools: [],
+                patched: false,
+              })
+              .pipe(
+                Effect.andThen(guard.stopped(input.sessionID)),
+                Effect.map((stop) => {
+                  stops.push(stop)
+                  return reply(input, "spent")
+                }),
+              ),
+        }
+        const ctx = taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps: costly })
+        yield* def.execute(brief("expensive"), ctx)
+        expect(stops[0]?.message).toContain("Subagent spend ceiling reached")
+        expect(stops[0]?.message).toContain("the main agent carries on")
+        expect(yield* guard.stopped(chat.id)).toBeUndefined()
+
+        const refused = yield* def.execute(brief("more"), ctx).pipe(Effect.exit)
+        expect(failure(refused)).toContain("Subagents in this request reached their spend ceiling")
+        expect(failure(refused)).toContain("No child was started.")
+
+        usd = 5
+        const cheap = taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps: stubOps() })
+        expect((yield* def.execute(brief("raised"), cheap)).output).toContain('state="completed"')
+
+        usd = 1
+        const next = yield* turn(chat.id, "Now look at the docs.")
+        const fresh = taskContext({ sessionID: chat.id, messageID: next.id, promptOps: stubOps() })
+        expect((yield* def.execute(brief("next request"), fresh)).output).toContain('state="completed"')
+      }),
+  )
+
+  background.instance("at 80% of the delegated ceiling the next completion note says so, once", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      const jobs = yield* BackgroundJob.Service
+      const real = yield* Config.Service
+      const base = yield* real.get()
+      const config = Config.Service.of({
+        ...real,
+        get: () => Effect.succeed({ ...base, budget: { ...base.budget, subagents: { usd: 1 } } }),
+      })
+      const def = yield* singleTaskDefinition(yield* TaskTool.pipe(Effect.provideService(Config.Service, config)))
+      const { chat, assistant } = yield* root()
+      const notes: string[] = []
+      const costs = [0.5, 0.4, 0]
+      const promptOps: TaskPromptOps = {
+        ...stubOps(),
+        prompt: (input) => {
+          if (input.sessionID === chat.id) {
+            notes.push(JSON.stringify(input.parts))
+            return Effect.succeed(reply(input, "noted"))
+          }
+          const costUsd = costs.shift() ?? 0
+          return guard
+            .record(input.sessionID, {
+              costUsd,
+              costKind: "priced",
+              contextTokens: 1_000,
+              cachedTokens: 0,
+              continues: false,
+              tools: [],
+              patched: false,
+            })
+            .pipe(Effect.as(reply(input, "spent")))
+        },
+      }
+      const ctx = taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps })
+      for (const [index, area] of ["api", "web", "cli"].entries()) {
+        const launched = yield* def.execute({ ...brief(area), background: true }, ctx)
+        yield* jobs.wait({ id: launched.metadata.sessionId })
+        yield* pollWithTimeout(
+          Effect.sync(() => (notes.length === index + 1 ? true : undefined)),
+          `note ${index + 1} should arrive`,
+        )
+      }
+      const line = "Subagents in this request have spent $0.90 of their $1.00 ceiling."
+      expect(notes.map((note) => note.includes(line))).toEqual([false, true, false])
+    }),
+  )
+
+  background.instance(
+    'a single foreground root launch past the cap returns "Queued" at once and its note arrives later',
+    () =>
+      Effect.gen(function* () {
+        const jobs = yield* BackgroundJob.Service
+        const { chat, assistant } = yield* root()
+        const def = yield* singleTaskDefinition(yield* TaskTool)
+        const notes: SessionPrompt.PromptInput[] = []
+        const children = gated(notes)
+        const ctx = taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps: children.ops(chat.id) })
+        const first = yield* def.execute({ ...brief("api"), background: true }, ctx)
+        const waiting = yield* awaitWithTimeout(
+          def.execute({ ...brief("web"), background: false }, ctx),
+          "a foreground launch past the cap must return at once",
+        )
+        expect(waiting.output).toContain("Queued: 1 subagents are already running")
+        expect(waiting.metadata.background).toBe(true)
+        expect(children.started).toEqual([first.metadata.sessionId])
+
+        yield* children.release(first.metadata.sessionId)
+        yield* pollWithTimeout(
+          Effect.sync(() => (children.started.length === 2 ? true : undefined)),
+          "the queued launch should start",
+        )
+        yield* children.release(waiting.metadata.sessionId)
+        yield* jobs.wait({ id: waiting.metadata.sessionId })
+        yield* pollWithTimeout(
+          Effect.sync(() =>
+            notes.some((note) => JSON.stringify(note.parts).includes(`report from ${waiting.metadata.sessionId}`))
+              ? true
+              : undefined,
+          ),
+          "the queued launch's report should reach the parent",
+        )
+      }),
+    capped({ running: 1 }),
+  )
+
+  background.instance(
+    "a multi-entry foreground batch that would wait is refused",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const { chat, assistant } = yield* root()
+        const def = yield* (yield* TaskTool).init()
+        const ctx = taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps: never })
+        yield* def.execute({ tasks: [brief("api")] }, ctx)
+        const exit = yield* def
+          .execute({ tasks: [brief("web"), brief("cli")], background: false }, ctx)
+          .pipe(Effect.exit)
+        expect(failure(exit)).toContain(
+          "This batch would wait for subagent slots while you wait for it. Launch it in the background (the default), or launch fewer. No child was started.",
+        )
+        expect(yield* sessions.children(chat.id)).toHaveLength(1)
+      }),
+    capped({ running: 1 }),
+  )
+
+  background.instance(
+    "a guest marked after a child launched gets the guest caps on that child's nested launch",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const guests = yield* FreeModelGuests.Service
+        const { chat, assistant } = yield* root()
+        const def = yield* singleTaskDefinition(yield* TaskTool)
+        const ctx = taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps: never })
+        const launched = yield* Effect.forEach(["api", "web", "cli", "docs"], (area) =>
+          def.execute({ ...brief(area), background: true }, ctx),
+        )
+        const child = launched[0].metadata.sessionId
+        const message = reply({ sessionID: child, parts: [] }, "Delegate a check")
+        yield* sessions.updateMessage(message.info)
+        const nested = taskContext({ sessionID: child, messageID: message.info.id, promptOps: stubOps() })
+        // Four of the owner's eight slots are held, so the child may launch.
+        expect((yield* def.execute({ ...brief("owner"), subagent_type: "general" }, nested)).output).toContain(
+          'state="completed"',
+        )
+        yield* guests.mark(chat.id)
+        const exit = yield* def.execute({ ...brief("guest"), subagent_type: "general" }, nested).pipe(Effect.exit)
+        expect(failure(exit)).toContain("All 4 subagent slots of this conversation are in use")
+      }),
+    { trusted: true, config: { agent: nesting } },
+  )
+
+  background.instance(
+    "two parallel-agent roots under one parent share the running cap",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const parent = yield* sessions.create({ title: "Workspace parent" })
+        const parallel = { vector: { kind: "parallel-agent", parentSessionId: parent.id } }
+        const left = yield* root(parallel)
+        const right = yield* root(parallel)
+        const def = yield* singleTaskDefinition(yield* TaskTool)
+        const launch = (target: typeof left, area: string) =>
+          def.execute(
+            { ...brief(area), background: true },
+            taskContext({ sessionID: target.chat.id, messageID: target.assistant.id, promptOps: never }),
+          )
+        const first = yield* launch(left, "api")
+        yield* launch(right, "web")
+        const third = yield* launch(left, "cli")
+        expect(third.output).toContain("Queued: 2 subagents are already running")
+        expect(SubagentLifecycle.read(yield* sessions.get(first.metadata.sessionId))?.conversationID).toBe(parent.id)
+        expect((yield* (yield* TaskLimits.Service).status(parent.id)).running).toBe(2)
+      }),
+    capped({ running: 2 }),
   )
 })

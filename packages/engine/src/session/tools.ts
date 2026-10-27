@@ -13,6 +13,7 @@ import { Truncate } from "@/tool/truncate"
 import { Plugin } from "@/plugin"
 import type { TaskPromptOps } from "@/tool/task"
 import type { TaskSizeContext } from "@/tool/escalate"
+import type { TaskLimits } from "@/task/limits"
 import { type Tool as AITool, tool, jsonSchema, type ToolExecutionOptions, asSchema } from "ai"
 import { Effect, Option, Result, Schema } from "effect"
 import { MessageV2 } from "./message-v2"
@@ -65,6 +66,8 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   personal?: boolean
   // A role whose output leaves the machine or reaches the web (section 6.4a): its tools find nothing personal.
   outward?: boolean
+  // The request a root session's subagent launches count against (multi-agent contract 5.B.2).
+  delegation?: TaskLimits.Context
 }) {
   const tools: Record<string, AITool> = {}
   const run = yield* EffectBridge.make()
@@ -113,6 +116,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
       invokedAgents: input.invokedAgents,
       promptOps: input.promptOps,
       ...(input.taskSize ? { taskSize: input.taskSize } : {}),
+      ...(input.delegation ? { delegation: input.delegation } : {}),
     },
     ownedPaths: SubagentLifecycle.read(input.session)?.ownedPaths,
     getOwnedPaths: () =>
