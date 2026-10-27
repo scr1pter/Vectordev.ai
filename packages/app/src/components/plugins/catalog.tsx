@@ -280,13 +280,12 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     category: "Source & deploy",
     logo: "railway",
     fill: "#f2f0f7",
-    auth: {
-      kind: "token",
-      fields: [{ key: "RAILWAY_API_TOKEN", label: "API token", placeholder: "Railway account token", secret: true }],
-      docsUrl: "https://railway.app/account/tokens",
-      docsLabel: "Create a token on railway.app",
-    },
-    build: (v) => local(["npx", "-y", "@railway/mcp-server"], { RAILWAY_API_TOKEN: v.RAILWAY_API_TOKEN }),
+    // Railway's hosted server. The old @railway/mcp-server package is deprecated
+    // and its repository archived; the CLI that replaced it downloads a native
+    // binary at install time that npm's integrity check does not cover. The
+    // hosted endpoint signs in with OAuth and registers its client dynamically.
+    auth: { kind: "oauth" },
+    build: () => remote("https://mcp.railway.com"),
   },
   {
     id: "render",
@@ -313,10 +312,21 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     auth: {
       kind: "token",
       fields: [{ key: "AWS_REGION", label: "Default region", placeholder: "us-east-1" }],
-      docsUrl: "https://awslabs.github.io/mcp/servers/aws-api-mcp-server",
+      docsUrl: "https://github.com/aws/mcp-proxy-for-aws",
       docsLabel: "How credentials are resolved",
     },
-    build: (v) => local(["uvx", "awslabs.aws-api-mcp-server@latest"], { AWS_REGION: v.AWS_REGION }),
+    // AWS superseded the local API server with its managed AWS MCP Server. The
+    // proxy signs each request with SigV4 from the local credential chain; the
+    // endpoint stays in us-east-1 and the region the user works in travels as
+    // request metadata, as AWS's migration guide does it.
+    build: (v) =>
+      local([
+        "uvx",
+        "mcp-proxy-for-aws-cli@1.7.0",
+        "https://aws-mcp.us-east-1.api.aws/mcp",
+        "--metadata",
+        `AWS_REGION=${v.AWS_REGION}`,
+      ]),
   },
 
   // ── Databases & payments ───────────────────────────────────────────
@@ -337,7 +347,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     // out its mutating tools. Vector still asks every time before execute_sql
     // and any tool that returns keys (McpCloud in the engine).
     build: (v) =>
-      local(["npx", "-y", "@supabase/mcp-server-supabase@latest", "--read-only"], {
+      local(["npx", "-y", "@supabase/mcp-server-supabase@0.14.0", "--read-only"], {
         SUPABASE_ACCESS_TOKEN: v.SUPABASE_ACCESS_TOKEN,
       }),
   },
@@ -358,6 +368,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     category: "Databases & payments",
     logo: "postgresql",
     fill: "#7B9FE8",
+    soon: true,
     auth: {
       kind: "token",
       fields: [
@@ -472,7 +483,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsLabel: "Create keys on datadoghq.com",
     },
     build: (v) =>
-      local(["npx", "-y", "@winor30/mcp-server-datadog"], {
+      local(["npx", "-y", "@winor30/mcp-server-datadog@1.8.0"], {
         DATADOG_API_KEY: v.DATADOG_API_KEY,
         DATADOG_APP_KEY: v.DATADOG_APP_KEY,
       }),
@@ -506,6 +517,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     category: "Docs & comms",
     logo: "slack",
     fill: "#E01E5A",
+    soon: true,
     auth: {
       kind: "token",
       fields: [
@@ -535,7 +547,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsUrl: "https://discord.com/developers/applications",
       docsLabel: "Create a bot on discord.com",
     },
-    build: (v) => local(["npx", "-y", "mcp-discord"], { DISCORD_TOKEN: v.DISCORD_TOKEN }),
+    build: (v) => local(["npx", "-y", "mcp-discord@1.3.4"], { DISCORD_TOKEN: v.DISCORD_TOKEN }),
   },
 
   // ── Design & browser ───────────────────────────────────────────────
@@ -557,7 +569,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     logo: "googlechrome",
     fill: "#8AB4F8",
     auth: { kind: "none" },
-    build: () => local(["npx", "-y", "chrome-devtools-mcp@latest"]),
+    build: () => local(["npx", "-y", "chrome-devtools-mcp@1.12.0"]),
   },
   {
     id: "computer-use",
@@ -571,7 +583,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     // Pin the interpreter: the package needs Python >= 3.10 and macOS still
     // ships 3.9, so without this uv resolves against the system Python and the
     // install fails with a dependency error rather than a missing runtime.
-    build: () => local(["uvx", "--python", "3.12", "computer-control-mcp@latest"]),
+    build: () => local(["uvx", "--python", "3.12", "computer-control-mcp@0.3.14"]),
   },
   {
     id: "playwright",
@@ -581,7 +593,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     logo: "playwright",
     fill: "#4FD1A5",
     auth: { kind: "none" },
-    build: () => local(["npx", "-y", "@playwright/mcp@latest"]),
+    build: () => local(["npx", "-y", "@playwright/mcp@0.0.83"]),
   },
   {
     id: "browserbase",
@@ -590,6 +602,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     category: "Design & browser",
     logo: "browserbase",
     fill: "#8AB4F8",
+    soon: true,
     auth: {
       kind: "token",
       fields: [
@@ -614,7 +627,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     fill: "#B28CFF",
     badge: "community",
     auth: { kind: "none" },
-    build: () => local(["npx", "-y", "@wonderwhy-er/desktop-commander@latest"]),
+    build: () => local(["npx", "-y", "@wonderwhy-er/desktop-commander@0.3.1"]),
   },
 
   // ── Search & knowledge ─────────────────────────────────────────────
@@ -626,7 +639,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     logo: "context7",
     fill: "#8AB4F8",
     auth: { kind: "none" },
-    build: () => local(["npx", "-y", "@upstash/context7-mcp"]),
+    build: () => local(["npx", "-y", "@upstash/context7-mcp@4.4.4"]),
   },
   {
     id: "firecrawl",
@@ -641,7 +654,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsUrl: "https://www.firecrawl.dev/app/api-keys",
       docsLabel: "Create a key on firecrawl.dev",
     },
-    build: (v) => local(["npx", "-y", "firecrawl-mcp"], { FIRECRAWL_API_KEY: v.FIRECRAWL_API_KEY }),
+    build: (v) => local(["npx", "-y", "firecrawl-mcp@3.35.0"], { FIRECRAWL_API_KEY: v.FIRECRAWL_API_KEY }),
   },
   {
     id: "brave-search",
@@ -657,7 +670,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsLabel: "Create a key on brave.com",
     },
     build: (v) =>
-      local(["npx", "-y", "@brave/brave-search-mcp-server", "--transport", "stdio"], {
+      local(["npx", "-y", "@brave/brave-search-mcp-server@2.1.4", "--transport", "stdio"], {
         BRAVE_API_KEY: v.BRAVE_API_KEY,
       }),
   },
@@ -669,7 +682,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     logo: "fetchglobe",
     fill: "#9E86FF",
     auth: { kind: "none" },
-    build: () => local(["uvx", "mcp-server-fetch"]),
+    build: () => local(["uvx", "mcp-server-fetch@2026.10.24"]),
   },
   {
     id: "memory",
@@ -679,7 +692,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     logo: "memorygraph",
     fill: "#B28CFF",
     auth: { kind: "none" },
-    build: () => local(["npx", "-y", "@modelcontextprotocol/server-memory"]),
+    build: () => local(["npx", "-y", "@modelcontextprotocol/server-memory@2.0.0"]),
   },
   {
     id: "greptile",
@@ -717,7 +730,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsUrl: "https://github.com/bradthebeeble/coderabbitai-mcp",
       docsLabel: "Community server · needs repo scope",
     },
-    build: (v) => local(["npx", "-y", "coderabbitai-mcp@latest"], { GITHUB_PAT: v.token }),
+    build: (v) => local(["npx", "-y", "coderabbitai-mcp@1.1.1"], { GITHUB_PAT: v.token }),
   },
   {
     id: "graphify",
@@ -732,7 +745,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     // from the cwd, so no environment is needed. Pin the interpreter: the
     // package needs Python >= 3.10 and macOS still ships 3.9, so without this
     // uv resolves against the system Python and the install fails.
-    build: () => local(["uvx", "--python", "3.12", "--from", "graphifyy[mcp]", "graphify-mcp"]),
+    build: () => local(["uvx", "--python", "3.12", "--from", "graphifyy[mcp]==0.9.96", "graphify-mcp"]),
   },
   {
     id: "sequential-thinking",
@@ -742,7 +755,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     logo: "chainsteps",
     fill: "#7DE8FF",
     auth: { kind: "none" },
-    build: () => local(["npx", "-y", "@modelcontextprotocol/server-sequential-thinking"]),
+    build: () => local(["npx", "-y", "@modelcontextprotocol/server-sequential-thinking@2.0.0"]),
   },
 
   // ── AI & media ─────────────────────────────────────────────────────
@@ -763,6 +776,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     category: "AI & media",
     logo: "elevenlabs",
     fill: "#f2f0f7",
+    soon: true,
     auth: {
       kind: "token",
       fields: [{ key: "ELEVENLABS_API_KEY", label: "API key", placeholder: "sk_…", secret: true }],
@@ -812,7 +826,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     fill: "#5B8DEF",
     badge: "community",
     auth: { kind: "none" },
-    build: () => local(["npx", "-y", "mcp-server-kubernetes"]),
+    build: () => local(["npx", "-y", "mcp-server-kubernetes@4.2.1"]),
   },
   {
     id: "terraform",
@@ -822,7 +836,15 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     logo: "terraform",
     fill: "#B28CFF",
     auth: { kind: "none" },
-    build: () => local(["docker", "run", "-i", "--rm", "hashicorp/terraform-mcp-server"]),
+    // The tag is for readers; Docker pulls by the digest, which is 1.4.1's manifest list.
+    build: () =>
+      local([
+        "docker",
+        "run",
+        "-i",
+        "--rm",
+        "hashicorp/terraform-mcp-server:1.4.1@sha256:11dd418bba6003dd5777e9d0979b68de59929a155b355f338f407947e00e9d80",
+      ]),
   },
   {
     id: "azure",
@@ -832,7 +854,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     logo: "azure",
     fill: "#8AB4F8",
     auth: { kind: "none" },
-    build: () => local(["npx", "-y", "@azure/mcp@latest", "server", "start"]),
+    build: () => local(["npx", "-y", "@azure/mcp@3.0.0", "server", "start"]),
   },
   {
     id: "gitlab",
@@ -864,7 +886,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsUrl: "https://devcenter.heroku.com/articles/heroku-mcp-server",
       docsLabel: "Create a token on heroku.com",
     },
-    build: (v) => local(["npx", "-y", "@heroku/mcp-server"], { HEROKU_API_KEY: v.HEROKU_API_KEY }),
+    build: (v) => local(["npx", "-y", "@heroku/mcp-server@1.2.12"], { HEROKU_API_KEY: v.HEROKU_API_KEY }),
   },
   {
     id: "digitalocean",
@@ -879,7 +901,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsUrl: "https://cloud.digitalocean.com/account/api/tokens",
       docsLabel: "Create a token on digitalocean.com",
     },
-    build: (v) => local(["npx", "-y", "@digitalocean/mcp"], { DIGITALOCEAN_API_TOKEN: v.DIGITALOCEAN_API_TOKEN }),
+    build: (v) => local(["npx", "-y", "@digitalocean/mcp@1.6.1"], { DIGITALOCEAN_API_TOKEN: v.DIGITALOCEAN_API_TOKEN }),
   },
   {
     id: "mongodb",
@@ -902,7 +924,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsLabel: "Connection string guide",
     },
     build: (v) =>
-      local(["npx", "-y", "mongodb-mcp-server@latest"], { MDB_MCP_CONNECTION_STRING: v.MDB_MCP_CONNECTION_STRING }),
+      local(["npx", "-y", "mongodb-mcp-server@3.1.0"], { MDB_MCP_CONNECTION_STRING: v.MDB_MCP_CONNECTION_STRING }),
   },
   {
     id: "redis",
@@ -922,7 +944,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsLabel: "Redis MCP setup guide",
     },
     build: (v) =>
-      local(["uvx", "--from", "redis-mcp-server@latest", "redis-mcp-server"], {
+      local(["uvx", "--from", "redis-mcp-server==0.5.1", "redis-mcp-server"], {
         REDIS_HOST: v.REDIS_HOST,
         REDIS_PORT: v.REDIS_PORT,
         REDIS_PWD: v.REDIS_PWD,
@@ -938,7 +960,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     logo: "shopify",
     fill: "#7AB55C",
     auth: { kind: "none" },
-    build: () => local(["npx", "-y", "@shopify/dev-mcp@latest"]),
+    build: () => local(["npx", "-y", "@shopify/dev-mcp@1.17.0"]),
   },
   {
     id: "paddle",
@@ -999,7 +1021,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsLabel: "WooCommerce > Settings > Advanced > REST API > Add key",
     },
     build: (v) =>
-      local(["npx", "-y", "@amitgurbani/mcp-server-woocommerce"], {
+      local(["npx", "-y", "@amitgurbani/mcp-server-woocommerce@1.2.0"], {
         WORDPRESS_SITE_URL: v.WORDPRESS_SITE_URL,
         WOOCOMMERCE_CONSUMER_KEY: v.WOOCOMMERCE_CONSUMER_KEY,
         WOOCOMMERCE_CONSUMER_SECRET: v.WOOCOMMERCE_CONSUMER_SECRET,
@@ -1131,7 +1153,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsLabel: "Create a Custom Connection on xero.com",
     },
     build: (v) =>
-      local(["npx", "-y", "@xeroapi/xero-mcp-server@latest"], {
+      local(["npx", "-y", "@xeroapi/xero-mcp-server@0.0.17"], {
         XERO_CLIENT_ID: v.XERO_CLIENT_ID,
         XERO_CLIENT_SECRET: v.XERO_CLIENT_SECRET,
       }),
@@ -1170,7 +1192,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsUrl: "https://hilfe.sevdesk.de/de/articles/9374740-wo-finde-ich-meinen-api-token-in-sevdesk",
       docsLabel: "Settings → Users → your user → API",
     },
-    build: (v) => local(["npx", "-y", "sevdesk-mcp"], { SEVDESK_API_TOKEN: v.SEVDESK_API_TOKEN }),
+    build: (v) => local(["npx", "-y", "sevdesk-mcp@0.5.0"], { SEVDESK_API_TOKEN: v.SEVDESK_API_TOKEN }),
   },
   {
     id: "lexware-office",
@@ -1188,7 +1210,8 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsUrl: "https://help.lexware.de/de-form/articles/548863-alles-rund-um-public-api",
       docsLabel: "Create an API key in Lexware Office",
     },
-    build: (v) => local(["npx", "-y", "@lazyants/lexware-mcp-server"], { LEXWARE_API_TOKEN: v.LEXWARE_API_TOKEN }),
+    build: (v) =>
+      local(["npx", "-y", "@lazyants/lexware-mcp-server@5.4.0"], { LEXWARE_API_TOKEN: v.LEXWARE_API_TOKEN }),
   },
   {
     id: "workday",
@@ -1265,7 +1288,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsLabel: "Create an access key in the AWS IAM console",
     },
     build: (v) =>
-      local(["uvx", "awslabs.redshift-mcp-server@latest"], {
+      local(["uvx", "awslabs.redshift-mcp-server@0.1.2"], {
         AWS_ACCESS_KEY_ID: v.AWS_ACCESS_KEY_ID,
         AWS_SECRET_ACCESS_KEY: v.AWS_SECRET_ACCESS_KEY,
         AWS_DEFAULT_REGION: v.AWS_DEFAULT_REGION,
@@ -1294,7 +1317,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsLabel: "Create an access key in the AWS IAM console",
     },
     build: (v) =>
-      local(["uvx", "awslabs.aws-dataprocessing-mcp-server@latest"], {
+      local(["uvx", "awslabs.aws-dataprocessing-mcp-server@0.2.2"], {
         AWS_ACCESS_KEY_ID: v.AWS_ACCESS_KEY_ID,
         AWS_SECRET_ACCESS_KEY: v.AWS_SECRET_ACCESS_KEY,
         AWS_REGION: v.AWS_REGION,
@@ -1363,7 +1386,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsLabel: "Set up Google Cloud credentials",
     },
     build: (v) =>
-      local(["pipx", "run", "analytics-mcp"], {
+      local(["pipx", "run", "analytics-mcp==0.8.0"], {
         GOOGLE_APPLICATION_CREDENTIALS: v.GOOGLE_APPLICATION_CREDENTIALS,
         GOOGLE_PROJECT_ID: v.GOOGLE_PROJECT_ID,
       }),
@@ -1389,7 +1412,9 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsLabel: "Create a service account key in Google Cloud",
     },
     build: (v) =>
-      local(["npx", "-y", "mcp-server-gsc"], { GOOGLE_APPLICATION_CREDENTIALS: v.GOOGLE_APPLICATION_CREDENTIALS }),
+      local(["npx", "-y", "mcp-server-gsc@0.3.0"], {
+        GOOGLE_APPLICATION_CREDENTIALS: v.GOOGLE_APPLICATION_CREDENTIALS,
+      }),
   },
   {
     id: "semrush",
@@ -1505,6 +1530,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     logo: "microsoftword",
     fill: "#41A5EE",
     badge: "community",
+    soon: true,
     auth: { kind: "none" },
     build: () => local(["uvx", "--from", "office-word-mcp-server", "word_mcp_server"]),
   },
@@ -1517,7 +1543,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     fill: "#33C481",
     badge: "community",
     auth: { kind: "none" },
-    build: () => local(["npx", "-y", "@negokaz/excel-mcp-server"]),
+    build: () => local(["npx", "-y", "@negokaz/excel-mcp-server@0.12.0"]),
   },
   {
     id: "microsoft-powerpoint",
@@ -1527,6 +1553,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     logo: "microsoftpowerpoint",
     fill: "#EB6C4D",
     badge: "community",
+    soon: true,
     auth: { kind: "none" },
     build: () => local(["uvx", "--from", "office-powerpoint-mcp-server", "ppt_mcp_server"]),
   },
@@ -1550,7 +1577,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     fill: "#B07BD4",
     badge: "community",
     auth: { kind: "none" },
-    build: () => local(["npx", "-y", "@softeria/ms-365-mcp-server", "--preset", "onenote"]),
+    build: () => local(["npx", "-y", "@softeria/ms-365-mcp-server@0.175.0", "--preset", "onenote"]),
   },
   {
     id: "microsoft-sharepoint",
@@ -1639,7 +1666,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsLabel: "Install the MCP Adapter plugin on your site",
     },
     build: (v) =>
-      local(["npx", "-y", "@automattic/mcp-wordpress-remote"], {
+      local(["npx", "-y", "@automattic/mcp-wordpress-remote@0.5.4"], {
         WP_API_URL: v.WP_API_URL,
         WP_API_USERNAME: v.WP_API_USERNAME,
         WP_API_PASSWORD: v.WP_API_PASSWORD,
@@ -1687,7 +1714,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsUrl: "https://app.mailgun.com/settings/api_security",
       docsLabel: "Create an API key in Mailgun settings",
     },
-    build: (v) => local(["npx", "-y", "@mailgun/mcp-server"], { MAILGUN_API_KEY: v.MAILGUN_API_KEY }),
+    build: (v) => local(["npx", "-y", "@mailgun/mcp-server@2.1.3"], { MAILGUN_API_KEY: v.MAILGUN_API_KEY }),
   },
   {
     id: "brevo",
@@ -1758,7 +1785,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsUrl: "https://docs.n8n.io/connect/n8n-api/authentication",
       docsLabel: "Create an API key in n8n Settings → API",
     },
-    build: (v) => local(["npx", "-y", "n8n-mcp"], { N8N_API_URL: v.N8N_API_URL, N8N_API_KEY: v.N8N_API_KEY }),
+    build: (v) => local(["npx", "-y", "n8n-mcp@2.99.2"], { N8N_API_URL: v.N8N_API_URL, N8N_API_KEY: v.N8N_API_KEY }),
   },
   {
     id: "inngest",
@@ -1907,7 +1934,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsLabel: "Register an app in the Twitch Developer Console",
     },
     build: (v) =>
-      local(["npx", "-y", "@mtane0412/twitch-mcp-server"], {
+      local(["npx", "-y", "@mtane0412/twitch-mcp-server@2.0.5"], {
         TWITCH_CLIENT_ID: v.TWITCH_CLIENT_ID,
         TWITCH_CLIENT_SECRET: v.TWITCH_CLIENT_SECRET,
       }),
@@ -1980,7 +2007,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsLabel: "Configure an AWS CLI profile with S3 Tables access",
     },
     build: (v) =>
-      local(["uvx", "awslabs.s3-tables-mcp-server@latest"], { AWS_PROFILE: v.AWS_PROFILE, AWS_REGION: v.AWS_REGION }),
+      local(["uvx", "awslabs.s3-tables-mcp-server@0.1.1"], { AWS_PROFILE: v.AWS_PROFILE, AWS_REGION: v.AWS_REGION }),
   },
 
   // ── Design & browser ──────────────────────────────────────────────────
