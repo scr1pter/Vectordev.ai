@@ -199,7 +199,9 @@ const layer = Layer.effect(
         reason: (current.reason ?? current.error ?? job?.error)?.slice(0, 1000),
         attempt: current.attempt ?? 1,
         budget: current.budget,
-        budgetScopes: ACTIVE.has(status) ? yield* guard.scopes(session.id) : current.budgetScopes,
+        budgetScopes: ACTIVE.has(status)
+          ? SubagentLifecycle.scopeFields(yield* guard.scopes(session.id)).budgetScopes
+          : current.budgetScopes,
         controls: {
           inspect: true,
           message: ACTIVE.has(status) && job?.status === "running" && !SubagentLifecycle.stopping.has(session.id),
@@ -462,7 +464,11 @@ const layer = Layer.effect(
                   if (!record || record.attempt !== entry.attempt) return yield* observe(current)
                   if (record.status === "running" || record.status === "queued")
                     yield* SubagentLifecycle.settle(sessions, session.id, { status: "cancelled" })
-                  yield* persist(session.id, { budgetScopes: yield* guard.scopes(session.id) }, entry.attempt)
+                  yield* persist(
+                    session.id,
+                    SubagentLifecycle.scopeFields(yield* guard.scopes(session.id)),
+                    entry.attempt,
+                  )
                   yield* guard.release(session.id)
                   return yield* get(session.id).pipe(Effect.flatMap(observe))
                 }),

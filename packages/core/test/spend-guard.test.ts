@@ -997,3 +997,289 @@ describe("SpendGuard task scopes", () => {
     }),
   )
 })
+
+describe("SpendGuard delegated ledger", () => {
+  const third = SessionID.make("ses_third_child")
+  const fourth = SessionID.make("ses_fourth_child")
+  const grandchild = SessionID.make("ses_grandchild")
+  const delegated = (
+    id: string,
+    budget: RunBudget.Info,
+    seed?: { spentUsd: number; steps: number; unpricedSteps: number },
+  ) => ({
+    delegated: { id, budget, ...(seed ? { seed } : {}) },
+  })
+  const ceiling = "ceiling for this request's subagents"
+
+  it.effect("1. children of two runs of one root, linked with one id, share its spend", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      yield* guard.begin(root, { usd: 100 })
+      yield* guard.link(child, root, delegated("req-1", { usd: 25 }))
+      yield* guard.record(child, step({ costUsd: 2 }))
+      yield* guard.end(root)
+      yield* guard.begin(root, { usd: 100 })
+      yield* guard.link(sibling, root, delegated("req-1", { usd: 25 }))
+      yield* guard.record(sibling, step({ costUsd: 3 }))
+      expect(yield* guard.delegated("req-1")).toMatchObject({ kind: "delegated", spentUsd: 5, steps: 2 })
+      expect((yield* guard.scopes(child)).find((scope) => scope.kind === "delegated")?.spentUsd).toBe(5)
+      // Each run of the root still counts only its own child.
+      expect((yield* guard.snapshot(root))?.spentUsd).toBe(3)
+    }),
+  )
+
+  it.effect("2. a grandchild inherits its parent's delegated ledger, with or without a root run", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      yield* guard.begin(root)
+      yield* guard.link(child, root, delegated("req-2", { usd: 25 }))
+      yield* guard.link(grandchild, child)
+      expect((yield* guard.scopes(grandchild)).map((scope) => scope.kind)).toEqual([
+        "run",
+        "delegated",
+        "child",
+        "child",
+      ])
+      yield* guard.record(grandchild, step({ costUsd: 1.5 }))
+      expect((yield* guard.delegated("req-2"))?.spentUsd).toBe(1.5)
+      yield* guard.end(root)
+
+      const idle = SessionID.make("ses_idle_root")
+      const nested = SessionID.make("ses_idle_nested")
+      yield* guard.link(sibling, idle, delegated("req-2-idle", { usd: 25 }))
+      yield* guard.link(nested, sibling)
+      expect((yield* guard.scopes(nested)).map((scope) => scope.kind)).toEqual(["delegated", "child", "child"])
+      yield* guard.record(nested, step({ costUsd: 0.5 }))
+      expect((yield* guard.delegated("req-2-idle"))?.spentUsd).toBe(0.5)
+    }),
+  )
+
+  it.effect("3. crossing the ceiling stops every child at its next step, never the root", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      yield* guard.begin(root)
+      yield* guard.link(child, root, delegated("req-3", { usd: 1 }))
+      yield* guard.link(sibling, root, delegated("req-3", { usd: 1 }))
+      expect((yield* guard.record(child, step({ costUsd: 0.5, continues: true }))).state).toBe("ok")
+      expect(yield* guard.record(sibling, step({ costUsd: 0.75, continues: true }))).toMatchObject({
+        state: "stopped",
+        reason: "cap",
+      })
+      expect(yield* guard.record(child, step({ costUsd: 0.25 }))).toMatchObject({ state: "stopped", reason: "cap" })
+      expect((yield* guard.stopped(child))?.reason).toBe("cap")
+      expect((yield* guard.stopped(sibling))?.reason).toBe("cap")
+      expect(yield* guard.stopped(root)).toBeUndefined()
+      expect((yield* guard.record(root, step({ costUsd: 5 }))).state).toBe("ok")
+      expect((yield* guard.snapshot(root))?.stopped).toBeUndefined()
+      expect((yield* guard.delegated("req-3"))?.spentUsd).toBe(1.5)
+    }),
+  )
+
+  it.effect("4. the cap, predicted and step stops, and the warning, name the subagent ceiling", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      yield* guard.link(child, root, delegated("req-4-cap", { usd: 1 }))
+      expect(yield* guard.record(child, step({ costUsd: 1.25, continues: true }))).toEqual({
+        state: "stopped",
+        reason: "cap",
+        message:
+          "Subagent spend ceiling reached: $1.25 spent against a $1.00 ceiling for this request's subagents. Vector stopped this subagent after the step that crossed it; what it did is kept, and the main agent carries on.",
+      })
+
+      yield* guard.link(sibling, root, delegated("req-4-predicted", { usd: 5 }))
+      const predicted = step({
+        costUsd: 4.62,
+        continues: true,
+        contextTokens: 317_000,
+        cachedTokens: 207_000,
+        price: { input: 3, output: 15, cacheRead: 0.3 },
+      })
+      expect(yield* guard.record(sibling, predicted)).toMatchObject({
+        state: "stopped",
+        reason: "predicted",
+        message:
+          "Subagent spend ceiling: $4.62 spent of a $5.00 ceiling for this request's subagents, and this subagent's next step was estimated at $0.41–$0.97 at catalog list prices. Vector stopped it before that step; what it did is kept, and the main agent carries on.",
+      })
+
+      yield* guard.link(third, root, delegated("req-4-steps", { steps: 2 }))
+      expect((yield* guard.record(third, step())).state).toBe("ok")
+      expect(yield* guard.record(third, step())).toEqual({
+        state: "stopped",
+        reason: "steps",
+        message:
+          "Subagent step limit reached: this request's subagents used 2 of their 2 steps. Vector stopped this subagent; what it did is kept, and the main agent carries on.",
+      })
+
+      yield* guard.link(fourth, root, delegated("req-4-warn", { usd: 5 }))
+      expect(yield* guard.record(fourth, step({ costUsd: 4.25 }))).toEqual({
+        state: "warn",
+        message: "Subagents in this request have spent $4.25 of their $5.00 ceiling.",
+      })
+    }),
+  )
+
+  it.effect("5. unknown-cost steps never stop on the unpriced rule unless unpricedSteps is set", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      yield* guard.link(child, root, delegated("req-5", { usd: 5 }))
+      const open = yield* Effect.forEach(Array.from({ length: 45 }), () =>
+        guard.record(child, step({ costKind: "unknown" })),
+      )
+      expect(open.every((verdict) => verdict.state === "ok")).toBe(true)
+      expect(yield* guard.delegated("req-5")).toMatchObject({ unpricedSteps: 45, spentUsd: 0, stopped: undefined })
+
+      yield* guard.link(sibling, root, delegated("req-5-limited", { usd: 5, unpricedSteps: 3 }))
+      const limited = yield* Effect.forEach([1, 2, 3], () => guard.record(sibling, step({ costKind: "unknown" })))
+      expect(limited.map((verdict) => verdict.state)).toEqual(["ok", "ok", "stopped"])
+      expect(limited[2]?.reason).toBe("unpriced")
+      expect(limited[2]?.message).toContain(ceiling)
+    }),
+  )
+
+  it.effect("6. delegated(id) returns the ledger with kind delegated", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      expect(yield* guard.delegated("req-6")).toBeUndefined()
+      yield* guard.link(child, root, delegated("req-6", { usd: 25 }))
+      expect(yield* guard.delegated("req-6")).toEqual({
+        kind: "delegated",
+        id: "req-6",
+        budget: { usd: 25 },
+        spentUsd: 0,
+        steps: 0,
+        unpricedSteps: 0,
+      })
+    }),
+  )
+
+  it.effect("7. scopes(child) lists the run, the delegated ledger and the child", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      yield* guard.begin(root, { usd: 100 })
+      yield* guard.link(child, root, { budget: { usd: 2 }, ...delegated("req-7", { usd: 25 }) })
+      yield* guard.link(sibling, root, { batch: { id: "batch-7" }, ...delegated("req-7", { usd: 25 }) })
+      yield* guard.record(child, step({ costUsd: 0.5 }))
+      expect((yield* guard.scopes(child)).map((scope) => [scope.kind, scope.spentUsd])).toEqual([
+        ["run", 0.5],
+        ["delegated", 0.5],
+        ["child", 0.5],
+      ])
+      expect((yield* guard.scopes(sibling)).map((scope) => scope.kind)).toEqual(["run", "delegated", "batch", "child"])
+    }),
+  )
+
+  it.effect("8. prune keeps the last 200 delegated ledgers, and one a live child counts on", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      const pinned = SessionID.make("ses_pinned")
+      yield* guard.link(pinned, root, delegated("req-8-pinned", { usd: 25 }))
+      const ids = Array.from({ length: SpendGuard.LAST_RUNS + 1 }, (_, index) => `req-8-${index}`)
+      const use = (id: string, name: string) =>
+        Effect.gen(function* () {
+          const helper = SessionID.make(name)
+          yield* guard.link(helper, root, delegated(id, { usd: 25 }))
+          yield* guard.record(helper, step({ costUsd: 0.25 }))
+          yield* guard.release(helper)
+        })
+      yield* Effect.forEach(ids, (id, index) => use(id, `ses_helper_${index}`), { discard: true })
+      expect(yield* guard.delegated(ids[0]!)).toBeUndefined()
+      expect((yield* guard.delegated(ids[1]!))?.spentUsd).toBe(0.25)
+      expect((yield* guard.delegated(ids.at(-1)!))?.spentUsd).toBe(0.25)
+      expect(yield* guard.delegated("req-8-pinned")).toBeDefined()
+      yield* guard.release(pinned)
+      expect(yield* guard.delegated("req-8-pinned")).toBeUndefined()
+
+      // Linking an id again makes it the most recent, so the next one out is the oldest after it.
+      yield* use(ids[1]!, "ses_helper_again")
+      yield* use("req-8-extra", "ses_helper_extra")
+      expect((yield* guard.delegated(ids[1]!))?.spentUsd).toBe(0.5)
+      expect(yield* guard.delegated(ids[2]!)).toBeUndefined()
+    }),
+  )
+
+  it.effect("9. linking with no active root run binds the child, and record counts its steps", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      // The root's last run stopped at its cap; a child linked after it ended is not held to it.
+      yield* guard.begin(root, { usd: 1 })
+      expect((yield* guard.record(root, step({ costUsd: 1.5 }))).state).toBe("stopped")
+      yield* guard.end(root)
+      yield* guard.link(child, root, delegated("req-9", { usd: 25 }))
+      expect(yield* guard.rootOf(child)).toBe(root)
+      expect((yield* guard.record(child, step({ costUsd: 0.5 }))).state).toBe("ok")
+      expect((yield* guard.record(child, step({ costUsd: 0.25 }))).state).toBe("ok")
+      expect(yield* guard.delegated("req-9")).toMatchObject({ spentUsd: 0.75, steps: 2 })
+      expect((yield* guard.scopes(child)).map((scope) => [scope.kind, scope.spentUsd])).toEqual([
+        ["delegated", 0.75],
+        ["child", 0.75],
+      ])
+      expect((yield* guard.snapshot(child))?.spentUsd).toBe(0.75)
+      expect(yield* guard.stopped(child)).toBeUndefined()
+      expect((yield* guard.snapshot(root))?.spentUsd).toBe(1.5)
+
+      // A root that never had a run, as after a restart.
+      const fresh = SessionID.make("ses_never_ran")
+      yield* guard.link(sibling, fresh, delegated("req-9-fresh", { usd: 25 }))
+      expect((yield* guard.record(sibling, step({ costUsd: 0.5 }))).state).toBe("ok")
+      expect((yield* guard.delegated("req-9-fresh"))?.spentUsd).toBe(0.5)
+      expect(yield* guard.snapshot(fresh)).toBeUndefined()
+      expect(yield* guard.running(sibling)).toBe(false)
+    }),
+  )
+
+  it.effect("10. re-arming with a higher ceiling after a stop clears it and keeps the spend", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      yield* guard.link(child, root, delegated("req-10", { usd: 1 }))
+      expect((yield* guard.record(child, step({ costUsd: 1.25 }))).reason).toBe("cap")
+      // The same budget again, as at the next launch, keeps the stop.
+      yield* guard.link(sibling, root, delegated("req-10", { usd: 1 }))
+      expect((yield* guard.delegated("req-10"))?.stopped?.reason).toBe("cap")
+      expect((yield* guard.record(sibling, step({ costUsd: 0.25 }))).state).toBe("stopped")
+      // A raised ceiling clears it and keeps what was spent; the warning comes again under it.
+      yield* guard.link(sibling, root, delegated("req-10", { usd: 5 }))
+      expect(yield* guard.delegated("req-10")).toMatchObject({ spentUsd: 1.5, steps: 2, budget: { usd: 5 } })
+      expect((yield* guard.delegated("req-10"))?.stopped).toBeUndefined()
+      expect((yield* guard.record(child, step({ costUsd: 0.5 }))).state).toBe("ok")
+      expect((yield* guard.record(child, step({ costUsd: 2 }))).state).toBe("warn")
+      // A ceiling lowered below the spend stops it at once, before any step.
+      yield* guard.link(sibling, root, delegated("req-10", { usd: 2 }))
+      expect((yield* guard.delegated("req-10"))?.stopped?.reason).toBe("cap")
+      expect((yield* guard.delegated("req-10"))?.stopped?.message).toContain(ceiling)
+
+      // A predicted stop holds under the same ceiling and clears only when it rises.
+      const big = step({
+        costUsd: 4.62,
+        continues: true,
+        contextTokens: 317_000,
+        cachedTokens: 207_000,
+        price: { input: 3, output: 15, cacheRead: 0.3 },
+      })
+      yield* guard.link(third, root, delegated("req-10-predicted", { usd: 5 }))
+      expect((yield* guard.record(third, big)).reason).toBe("predicted")
+      yield* guard.link(fourth, root, delegated("req-10-predicted", { usd: 5 }))
+      expect((yield* guard.delegated("req-10-predicted"))?.stopped?.reason).toBe("predicted")
+      yield* guard.link(fourth, root, delegated("req-10-predicted", { usd: 10 }))
+      expect((yield* guard.delegated("req-10-predicted"))?.stopped).toBeUndefined()
+    }),
+  )
+
+  it.effect("11. a seed starts a new ledger at the seeded spend, and an existing one ignores it", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      yield* guard.link(child, root, delegated("req-11", { usd: 25 }, { spentUsd: 3, steps: 7, unpricedSteps: 2 }))
+      expect(yield* guard.delegated("req-11")).toMatchObject({ spentUsd: 3, steps: 7, unpricedSteps: 2 })
+      yield* guard.record(child, step({ costUsd: 1 }))
+      yield* guard.link(sibling, root, delegated("req-11", { usd: 25 }, { spentUsd: 0, steps: 0, unpricedSteps: 0 }))
+      expect(yield* guard.delegated("req-11")).toMatchObject({ spentUsd: 4, steps: 8, unpricedSteps: 2 })
+      // A request that already spent its ceiling before a restart starts stopped, so the next launch is refused.
+      yield* guard.link(
+        third,
+        root,
+        delegated("req-11-spent", { usd: 25 }, { spentUsd: 26, steps: 40, unpricedSteps: 0 }),
+      )
+      expect((yield* guard.delegated("req-11-spent"))?.stopped?.reason).toBe("cap")
+      expect((yield* guard.record(third, step({ costKind: "free" }))).state).toBe("stopped")
+    }),
+  )
+})

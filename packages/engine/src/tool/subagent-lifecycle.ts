@@ -457,6 +457,29 @@ export function settle(
 }
 
 /**
+ * A child's spend scopes as its record keeps them: the delegated ledger in `delegatedScope`, never in `budgetScopes`,
+ * whose fixed kinds older versions decode (I29).
+ */
+export function scopeFields(
+  scopes: readonly SpendGuard.ScopeSnapshot[],
+): Pick<SubagentRecord, "budgetScopes" | "delegatedScope"> {
+  const delegated = scopes.find((scope) => scope.kind === "delegated")
+  return {
+    budgetScopes: scopes.filter((scope): scope is Task.BudgetScope => scope.kind !== "delegated"),
+    ...(delegated && {
+      delegatedScope: {
+        id: delegated.id,
+        budget: delegated.budget,
+        spentUsd: delegated.spentUsd,
+        steps: delegated.steps,
+        unpricedSteps: delegated.unpricedSteps,
+        ...(delegated.stopped && { stopped: delegated.stopped }),
+      },
+    }),
+  }
+}
+
+/**
  * Settles a child's run: its final record, its spend scopes, and what it read (for the parent's memory hold).
  * Undefined when the child has moved on to another attempt. Callers hold `controlLock` through `locked`.
  */
@@ -470,7 +493,7 @@ export const finish = Effect.fnUntraced(function* (
   const current = yield* sessions.get(taskID)
   if (read(current)?.attempt !== attempt) return undefined
   const settled = yield* settle(sessions, taskID, input)
-  yield* update(sessions, taskID, { budgetScopes: yield* guard.scopes(taskID) }, attempt)
+  yield* update(sessions, taskID, scopeFields(yield* guard.scopes(taskID)), attempt)
   yield* guard.release(taskID)
   const hold = SessionMemory.taint(
     yield* sessions

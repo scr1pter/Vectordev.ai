@@ -4,6 +4,8 @@ export * as SpendGuard from "./spend-guard"
 // their spend counts against the root. The guard counts money as it is spent and never reads session.cost, so a
 // revert cannot lower what a run has spent. The rules are pure; the service keeps one run per root in memory.
 // Vectorscope shares costKindOf and priceOf, so a review and the run guard agree on which models can be priced.
+// Every subagent one request starts also counts against that request's delegated ledger, found by its id, which the
+// root itself never counts against: at its ceiling the subagents stop and the main agent carries on.
 
 import { Context, Effect, Layer, Ref } from "effect"
 import { RunBudget } from "@vectordevai/schema/run-budget"
@@ -88,6 +90,8 @@ export type Run = {
   // Set while the budget is begin()'s fallback, which no one has armed over since, with every budget tighten() has
   // held it to: what refall() may move to another fallback. Unset once the owner arms a budget of their own.
   readonly fallback?: { readonly tightened?: RunBudget.Info }
+  // False turns the unpriced-step stop off, as on a delegated ledger whose budget sets no unpricedSteps.
+  readonly unpricedRule?: boolean
 }
 
 export type Step = {
@@ -124,6 +128,8 @@ export type StopDetail = {
   // The root's own step that crossed the cap ended its turn, so its answer stands and nothing was cut short. A
   // subagent's final step is not: the root it answers to is cut short at its next step.
   readonly final?: boolean
+  // The ledger that stopped. A delegated ledger's messages name the subagent ceiling instead of the run's cap.
+  readonly scope?: ScopeSnapshot["kind"]
 }
 
 export function start(rootID: SessionID, budget: RunBudget.Info, loopRules = true): Run {
@@ -167,8 +173,14 @@ export function tighter(base: RunBudget.Info | undefined, next: RunBudget.Info):
 
 // Called after every provider step of any session in the run, with the session that took the step. Spend and steps
 // count against the run; loops are detected per session. A stopped run keeps counting what in-flight steps spent,
-// and answers stop to every later step, which is how a stop reaches the rest of the lineage.
-export function afterStep(run: Run, step: Step, sessionID = run.rootID): { run: Run; verdict: Verdict } {
+// and answers stop to every later step, which is how a stop reaches the rest of the lineage. `scope` is the kind of
+// ledger `run` is, for the wording of its messages.
+export function afterStep(
+  run: Run,
+  step: Step,
+  sessionID = run.rootID,
+  scope?: ScopeSnapshot["kind"],
+): { run: Run; verdict: Verdict } {
   const counted = {
     ...run,
     steps: run.steps + 1,
@@ -178,7 +190,7 @@ export function afterStep(run: Run, step: Step, sessionID = run.rootID): { run: 
     kinds: { ...run.kinds, [step.costKind]: (run.kinds[step.costKind] ?? 0) + 1 },
   }
   if (run.stopped) return { run: counted, verdict: { state: "stopped", ...run.stopped } }
-  const limits = checkLimits(counted, step, sessionID)
+  const limits = checkLimits(counted, step, sessionID, scope)
   if (limits.state === "stopped") return stop(counted, limits)
   const loops = counted.loopRules
     ? checkLoops(counted, step, sessionID)
@@ -191,6 +203,19 @@ export function afterStep(run: Run, step: Step, sessionID = run.rootID): { run: 
 // The text a stopped run shows everywhere: the CLI, the TUI, the app and desktop logs.
 export function stopMessage(reason: RunBudget.StopReason, run: Run, detail: StopDetail = {}): string {
   const cap = formatUsd(run.budget.usd ?? 0)
+  // Only the subagent that stepped stops on a delegated ledger; the main agent is never counted against it.
+  if (detail.scope === "delegated") {
+    const ceiling = `${cap} ceiling for this request's subagents`
+    const kept = "what it did is kept, and the main agent carries on."
+    if (reason === "cap")
+      return `Subagent spend ceiling reached: ${formatUsd(run.spentUsd)} spent against a ${ceiling}. Vector stopped this subagent after the step that crossed it; ${kept}`
+    if (reason === "predicted")
+      return `Subagent spend ceiling: ${formatUsd(run.spentUsd)} spent of a ${ceiling}, and this subagent's next step was estimated at ${formatRange(detail.estimate ?? { lowUsd: 0, highUsd: 0 })} at catalog list prices. Vector stopped it before that step; ${kept}`
+    if (reason === "unpriced")
+      return `Subagent unpriced-step limit reached: this request's subagents took ${run.unpricedSteps} steps on models Vector has no per-token price for, so it cannot count them against the ${ceiling}. Vector stopped this subagent; ${kept}`
+    if (reason === "steps")
+      return `Subagent step limit reached: this request's subagents used ${run.steps} of their ${run.budget.steps ?? run.steps} steps. Vector stopped this subagent; ${kept}`
+  }
   if (reason === "cap" && detail.final)
     return `Spend cap reached: ${formatUsd(run.spentUsd)} spent against a ${cap} cap for this run, on a step that ended its turn. Its answer stands, and Vector starts no further step under this cap.`
   if (reason === "cap")
@@ -207,7 +232,9 @@ export function stopMessage(reason: RunBudget.StopReason, run: Run, detail: Stop
   return `Paused a repeating loop: \`${tool}\` returned the same result for the same input ${LOOP_REPEATS} times, with no new results or file changes in between.`
 }
 
-export function warnMessage(run: Run) {
+export function warnMessage(run: Run, scope?: ScopeSnapshot["kind"]) {
+  if (scope === "delegated")
+    return `Subagents in this request have spent ${formatUsd(run.spentUsd)} of their ${formatUsd(run.budget.usd ?? 0)} ceiling.`
   return `Approaching the spend cap: ${formatUsd(run.spentUsd)} of ${formatUsd(run.budget.usd ?? 0)} spent on this run.`
 }
 
@@ -234,19 +261,23 @@ function stop(run: Run, verdict: Stop & Verdict) {
 // local models are not billed per token, so only the step and loop limits stop them. The next step is predicted from this step's context, like Vectorscope does. A
 // final answer that reaches a limit still stops the run, so no other session of it starts another step, but the
 // answer itself stands: callers end a turn early only for a step that continues.
-function checkLimits(run: Run, step: Step, sessionID: SessionID): Verdict {
+function checkLimits(run: Run, step: Step, sessionID: SessionID, scope?: ScopeSnapshot["kind"]): Verdict {
   if (run.budget.steps !== undefined && run.steps >= run.budget.steps)
-    return { state: "stopped", reason: "steps", message: stopMessage("steps", run) }
+    return { state: "stopped", reason: "steps", message: stopMessage("steps", run, { scope }) }
   const usd = run.budget.usd
   if (usd === undefined || (step.costKind !== "priced" && step.costKind !== "unknown")) return { state: "ok" }
   if (run.spentUsd >= usd)
     return {
       state: "stopped",
       reason: "cap",
-      message: stopMessage("cap", run, { final: !step.continues && sessionID === run.rootID }),
+      message: stopMessage("cap", run, { final: !step.continues && sessionID === run.rootID, scope }),
     }
-  if (step.costKind === "unknown" && run.unpricedSteps >= (run.budget.unpricedSteps ?? UNPRICED_STEPS))
-    return { state: "stopped", reason: "unpriced", message: stopMessage("unpriced", run) }
+  if (
+    step.costKind === "unknown" &&
+    run.unpricedRule !== false &&
+    run.unpricedSteps >= (run.budget.unpricedSteps ?? UNPRICED_STEPS)
+  )
+    return { state: "stopped", reason: "unpriced", message: stopMessage("unpriced", run, { scope }) }
   const estimate =
     step.continues && step.price
       ? {
@@ -255,10 +286,15 @@ function checkLimits(run: Run, step: Step, sessionID: SessionID): Verdict {
         }
       : undefined
   if (estimate && run.spentUsd + estimate.lowUsd > usd)
-    return { state: "stopped", reason: "predicted", message: stopMessage("predicted", run, { estimate }), estimate }
+    return {
+      state: "stopped",
+      reason: "predicted",
+      message: stopMessage("predicted", run, { estimate, scope }),
+      estimate,
+    }
   const near =
     run.spentUsd >= usd * (run.budget.warnAt ?? WARN_AT) || (estimate && run.spentUsd + estimate.highUsd > usd)
-  if (near && !run.warned) return { state: "warn", message: warnMessage(run), ...(estimate ? { estimate } : {}) }
+  if (near && !run.warned) return { state: "warn", message: warnMessage(run, scope), ...(estimate ? { estimate } : {}) }
   return { state: "ok", ...(estimate ? { estimate } : {}) }
 }
 
@@ -330,10 +366,16 @@ export type LinkOptions = {
   readonly batch?: { readonly id: string; readonly budget?: RunBudget.Info }
   // A settled child starts a new attempt only on an explicit continuation.
   readonly renew?: boolean
+  // The request's delegated ledger: found by `id`, re-armed with `budget` on every link, else created at `seed`.
+  readonly delegated?: {
+    readonly id: string
+    readonly budget: RunBudget.Info
+    readonly seed?: { readonly spentUsd: number; readonly steps: number; readonly unpricedSteps: number }
+  }
 }
 
 export type ScopeSnapshot = {
-  readonly kind: "run" | "batch" | "child"
+  readonly kind: "run" | "batch" | "child" | "delegated"
   readonly id: string
   readonly budget: RunBudget.Info
   readonly spentUsd: number
@@ -366,7 +408,11 @@ export interface Interface {
   // step, cost and time limits, never edits files (so nothing would ever reset the loop window), and must account for
   // every stop it gets. Spend, step and cap checks still apply, in its own run or the run it is linked to.
   readonly ignoreLoops: (sessionID: SessionID) => Effect.Effect<void>
+  // Counts `childID` against the run its parent counts against, and its child, batch and delegated ledgers. With a
+  // delegated ledger and no active run of the root, that ledger is the run it counts against.
   readonly link: (childID: SessionID, parentID: SessionID, options?: LinkOptions) => Effect.Effect<void>
+  // The delegated ledger with this id, while it is kept.
+  readonly delegated: (id: string) => Effect.Effect<ScopeSnapshot | undefined>
   // Retains completed-attempt observations but allows old, unused launch ledgers to be reclaimed.
   readonly release: (sessionID: SessionID) => Effect.Effect<void>
   readonly scopes: (sessionID: SessionID) => Effect.Effect<ScopeSnapshot[]>
@@ -415,13 +461,20 @@ type State = {
   readonly bindings: ReadonlyMap<SessionID, Binding>
   readonly armed: ReadonlyMap<SessionID, Armed>
   readonly quiet: ReadonlySet<SessionID>
+  // Delegated ledger keys by id, the most recently linked last.
+  readonly delegations: ReadonlyMap<string, number>
 }
 
 // A live child pins its launch ledger even after the parent has answered or started another run. Completed
 // attempts keep observations for the same bounded history as roots, without retaining every old task forever.
+// The last LAST_RUNS delegated ledgers are kept the same way, and an older one stays while a kept child counts on it.
 function prune(current: State): State {
   const last = new Map([...current.last].slice(-LAST_RUNS))
-  const retained = new Set([...current.active.values(), ...last.values()])
+  const retained = new Set([
+    ...current.active.values(),
+    ...last.values(),
+    ...[...current.delegations.values()].slice(-LAST_RUNS),
+  ])
   current.bindings.forEach((binding) => {
     if (binding.live) retained.add(binding.run)
   })
@@ -440,6 +493,80 @@ function prune(current: State): State {
     roots,
     ledgers: new Map([...current.ledgers].filter(([id]) => referenced.has(id))),
     quiet: new Set([...current.quiet].filter((id) => roots.has(id) || current.active.has(id) || last.has(id))),
+    delegations: new Map([...current.delegations].filter(([, key]) => referenced.has(key))),
+  }
+}
+
+// A delegated ledger takes the budget from the current config at every link, keeping its spend. A stop the new budget
+// no longer justifies is cleared: a predicted one only when the ceiling rises. Spend already past a lowered limit
+// stops it at once, so a launch checked against it is refused. The warning comes again only under a new ceiling.
+function rearm(run: Run, budget: RunBudget.Info): Run {
+  const next = {
+    ...run,
+    budget,
+    unpricedRule: budget.unpricedSteps !== undefined,
+    warned: run.warned && run.budget.usd === budget.usd && run.budget.warnAt === budget.warnAt,
+    stopped: undefined,
+  }
+  const raised = budget.usd === undefined || budget.usd > (run.budget.usd ?? 0)
+  if (run.stopped?.reason === "loop" || (run.stopped?.reason === "predicted" && !raised))
+    return { ...next, stopped: run.stopped }
+  const reason =
+    budget.usd !== undefined && run.spentUsd >= budget.usd
+      ? "cap"
+      : budget.steps !== undefined && run.steps >= budget.steps
+        ? "steps"
+        : budget.usd !== undefined && budget.unpricedSteps !== undefined && run.unpricedSteps >= budget.unpricedSteps
+          ? "unpriced"
+          : undefined
+  if (reason === undefined) return next
+  return {
+    ...next,
+    stopped:
+      run.stopped?.reason === reason
+        ? run.stopped
+        : { reason, message: stopMessage(reason, next, { scope: "delegated" }) },
+  }
+}
+
+// Finds the request's delegated ledger by its id, in any lineage, and re-arms it, or creates it at the seeded spend.
+// Its id moves to the end of the retention order.
+function delegate(current: State, rootID: SessionID, input: NonNullable<LinkOptions["delegated"]>) {
+  const found = current.delegations.get(input.id)
+  const ledger = found === undefined ? undefined : current.ledgers.get(found)
+  const key = found !== undefined && ledger ? found : current.next
+  const delegations = new Map(current.delegations)
+  delegations.delete(input.id)
+  const seeded = {
+    ...start(rootID, {}, false),
+    spentUsd: input.seed?.spentUsd ?? 0,
+    steps: input.seed?.steps ?? 0,
+    unpricedSteps: input.seed?.unpricedSteps ?? 0,
+  }
+  const state: State = {
+    ...current,
+    next: ledger ? current.next : current.next + 1,
+    delegations: delegations.set(input.id, key),
+    ledgers: new Map(current.ledgers).set(key, {
+      kind: "delegated",
+      id: input.id,
+      lineage: key,
+      run: rearm(ledger?.run ?? seeded, input.budget),
+    }),
+  }
+  return { key, state }
+}
+
+function snapshotOf(ledger: Ledger): ScopeSnapshot {
+  return {
+    kind: ledger.kind,
+    id: ledger.id,
+    budget: ledger.run.budget,
+    spentUsd: ledger.run.spentUsd,
+    steps: ledger.run.steps,
+    unpricedSteps: ledger.run.unpricedSteps,
+    costKind: ledger.run.costKind,
+    stopped: ledger.run.stopped,
   }
 }
 
@@ -456,6 +583,7 @@ const layer = Layer.effect(
       bindings: new Map(),
       armed: new Map(),
       quiet: new Set(),
+      delegations: new Map(),
     })
     const rootIn = (current: State, sessionID: SessionID) => current.roots.get(sessionID) ?? sessionID
     const runKey = (current: State, sessionID: SessionID, previous = false) =>
@@ -476,7 +604,12 @@ const layer = Layer.effect(
           {
             key,
             ledger,
-            next: afterStep(ledger.run, current.quiet.has(sessionID) ? { ...step, tools: [] } : step, sessionID),
+            next: afterStep(
+              ledger.run,
+              current.quiet.has(sessionID) ? { ...step, tools: [] } : step,
+              sessionID,
+              ledger.kind,
+            ),
           },
         ]
       })
@@ -598,9 +731,12 @@ const layer = Layer.effect(
         })
       }),
       link: Effect.fn("SpendGuard.link")(function* (childID, parentID, options) {
-        yield* Ref.update(state, (current) => {
-          const rootID = rootIn(current, parentID)
-          if (childID === rootID) return current
+        yield* Ref.update(state, (prior) => {
+          const rootID = rootIn(prior, parentID)
+          // The root is never bound, so a delegated ledger never stops the main agent.
+          if (childID === rootID) return prior
+          const delegation = options?.delegated ? delegate(prior, rootID, options.delegated) : undefined
+          const current = delegation?.state ?? prior
           const roots = new Map(current.roots).set(childID, rootID)
           const existing = current.bindings.get(childID)
           // Repeated admission may tighten an active child's cap; it never resets the amount already spent.
@@ -617,12 +753,23 @@ const layer = Layer.effect(
               if (ledger && budget)
                 ledgers.set(key, { ...ledger, run: { ...ledger.run, budget: tighter(ledger.run.budget, budget) } })
             })
-            return { ...current, roots, ledgers }
+            const bindings = delegation
+              ? new Map(current.bindings).set(childID, {
+                  ...existing,
+                  scopes: [...new Set([...existing.scopes, delegation.key])],
+                })
+              : current.bindings
+            return { ...current, roots, ledgers, bindings }
           }
-          const launch = runKey(current, parentID, true)
+          // With no active run of its root, a delegated child counts against its request's ledger as its run, so a
+          // resume after a restart, a run the owner started, or a step after the root's run ended is still counted.
+          const launch = delegation
+            ? (current.bindings.get(parentID)?.run ?? current.active.get(rootID) ?? delegation.key)
+            : runKey(current, parentID, true)
           if (launch === undefined) return { ...current, roots }
           const ledgers = new Map(current.ledgers)
-          const scopes = [...(current.bindings.get(parentID)?.scopes ?? [])]
+          // Nested children inherit their parent's scopes, its delegated ledger among them.
+          const scopes = [...(current.bindings.get(parentID)?.scopes ?? []), ...(delegation ? [delegation.key] : [])]
           const batch = options?.batch
           const found = batch
             ? [...ledgers].find(
@@ -781,21 +928,14 @@ const layer = Layer.effect(
           ...new Set([...(key === undefined ? [] : [key]), ...(current.bindings.get(sessionID)?.scopes ?? [])]),
         ].flatMap((key) => {
           const ledger = current.ledgers.get(key)
-          return ledger
-            ? [
-                {
-                  kind: ledger.kind,
-                  id: ledger.id,
-                  budget: ledger.run.budget,
-                  spentUsd: ledger.run.spentUsd,
-                  steps: ledger.run.steps,
-                  unpricedSteps: ledger.run.unpricedSteps,
-                  costKind: ledger.run.costKind,
-                  stopped: ledger.run.stopped,
-                },
-              ]
-            : []
+          return ledger ? [snapshotOf(ledger)] : []
         })
+      }),
+      delegated: Effect.fn("SpendGuard.delegated")(function* (id) {
+        const current = yield* Ref.get(state)
+        const key = current.delegations.get(id)
+        const ledger = key === undefined ? undefined : current.ledgers.get(key)
+        return ledger ? snapshotOf(ledger) : undefined
       }),
     })
   }),
