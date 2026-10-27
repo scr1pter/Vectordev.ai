@@ -40,6 +40,19 @@ test("the desktop app docs describe today's Settings, not the removed pages", as
   expect(text).not.toMatch(/project/i)
 })
 
+test("the desktop app docs say where shortcuts and the terminal shell are changed", async () => {
+  // Both were only in the old settings dialog, which the app no longer opens.
+  expect(await section("desktop-app", "workspace-rail")).toContain(
+    "Shortcuts are editable in Settings → Keyboard shortcuts, which can also reset them to their defaults.",
+  )
+  const text = await section("desktop-app", "settings")
+  expect(text).toContain("Keyboard shortcuts")
+  expect(text).toContain("Backspace or Delete clears it, Escape cancels")
+  expect(text).toContain("Reset to defaults puts every shortcut back")
+  expect(text).toContain("General also has a Terminal card with the Terminal Shell picker, Auto by default")
+  expect(text).toContain("unless the picker marks it terminal only")
+})
+
 test("repository rules live in .vector/RULES.md, with no Project rules screen to open", async () => {
   const text = await section("vector-agent", "repository-rules")
   expect(text).toContain("Repository rules live in .vector/RULES.md")

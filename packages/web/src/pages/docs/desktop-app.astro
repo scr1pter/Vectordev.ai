@@ -53,7 +53,7 @@ export const prerender = true
             The slim rail down the left edge is the app's top-level navigation: Home, Agents, Search, Agent Dashboard, Browser, Pull Requests, Plugins, Connections and Settings, with a help cluster for Docs, Best practices, Changelog, Diagnostics, Support and Send feedback.
           </p>
           <ul class="feature-list">
-            <li><strong>Command palette</strong><span>Searches every action by category and runs it without the mouse. Shortcuts are editable and can be reset to their defaults, and some actions live only here, such as adding the current file selection to the prompt context.</span></li>
+            <li><strong>Command palette</strong><span>Searches every action by category and runs it without the mouse, and some actions live only here, such as adding the current file selection to the prompt context. Shortcuts are editable in Settings → Keyboard shortcuts, which can also reset them to their defaults.</span></li>
             <li><strong>Chat search</strong><span>A search overlay finds sessions and messages across the workspace, so you can return to a conversation without scrolling the sidebar. It closes on Escape.</span></li>
           </ul>
 
@@ -72,12 +72,16 @@ export const prerender = true
             <li><strong>Account</strong><span>Your Vector sign-in, your Vector Codium plan with the share of this month's credits left, and the way to delete your account. Desktop app only; signed out, it offers Sign in.</span></li>
             <li><strong>Notifications</strong><span>Desktop alerts, error alerts and sound effects.</span></li>
             <li><strong>Accessibility</strong><span>Interface scaling, high contrast, reduced motion, visible focus indicators and larger click targets.</span></li>
+            <li><strong>Keyboard shortcuts</strong><span>The app's commands with their shortcuts, grouped as General, Session, Navigation, Model and agent, Terminal and Prompt, with a search by name or keys. Click a shortcut and press the new keys: Backspace or Delete clears it, Escape cancels, and keys another command already uses are refused with a notice naming that command. <strong>Reset to defaults</strong> puts every shortcut back.</span></li>
           </ul>
           <p>
             Vector has one look, its own dark theme, and shows its interface in your computer's language. <strong>Vector Tab</strong>, the AI suggestions in the editor, is switched on and off from its label in the editor's status bar; the suggestions use the selected model.
           </p>
           <p>
             <strong>General</strong> holds the <strong>Share usage counts</strong> switch, on by default. While the app is open it reports how many sessions and subagent sessions were active that day (in UTC) and the totals from <strong>Usage &amp; streaks</strong>: tokens by type, recorded cost, tokens and tasks per day, the models and providers you use with their share of tokens, effort levels, chats and streaks. It checks about once an hour and sends only when something has gone up. Each report carries a random install ID, your Vector account when you are signed in, the app version, operating system and CPU architecture, and never your prompts, code, file names or model output. Turn it off there to stop sending.
+          </p>
+          <p>
+            <strong>General</strong> also has a <strong>Terminal</strong> card with the <strong>Terminal Shell</strong> picker, Auto by default: the shell the terminal and the composer's shell mode use. Agent tool calls use it too, unless the picker marks it terminal only, as it does fish.
           </p>
 
           <h2 id="help-assistant">Help inside the app</h2>

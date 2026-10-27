@@ -3,7 +3,9 @@ import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 import { Switch } from "@vectordevai/ui/v2/switch-v2"
 import { SelectV2 } from "@vectordevai/ui/v2/select-v2"
 import { Icon, type IconProps } from "@vectordevai/ui/icon"
+import { useLanguage } from "@/context/language"
 import { useSettings } from "@/context/settings"
+import { useShellPicker } from "./shell-picker"
 import "./settings-v2.css"
 
 import { usePlatform } from "@/context/platform"
@@ -155,6 +157,27 @@ const RangeRow: Component<{
   </div>
 )
 
+// Its own component so only the General page asks the server for its shells, not Notifications or Accessibility.
+const TerminalCard: Component = () => {
+  const language = useLanguage()
+  const shell = useShellPicker()
+  return (
+    <Card
+      icon="terminal"
+      title="Terminal"
+      description="The terminal and the composer's shell mode both use this shell."
+    >
+      <SelectRow
+        title={language.t("settings.general.row.shell.title")}
+        description={language.t("settings.general.row.shell.description")}
+        options={shell.options().map((option) => ({ value: option.id, label: option.label }))}
+        value={shell.selected().id}
+        onChange={(id) => shell.select(shell.options().find((option) => option.id === id))}
+      />
+    </Card>
+  )
+}
+
 export const SettingsGeneralV2: Component<{
   sessionID?: string
   section?: SettingsSection
@@ -193,7 +216,7 @@ export const SettingsGeneralV2: Component<{
     <Page
       eyebrow="General"
       title="General"
-      description="Manage Vector's local behavior, diagnostics, and verification defaults. Memory has a page of its own."
+      description="Manage Vector's local behavior, diagnostics, verification defaults, and terminal shell. Memory has a page of its own."
     >
       <div class="settings-v2-section-grid">
         <Card
@@ -281,6 +304,7 @@ export const SettingsGeneralV2: Component<{
             />
           </Show>
         </Card>
+        <TerminalCard />
       </div>
     </Page>
   )
