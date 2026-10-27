@@ -132,7 +132,13 @@ export type Found = {
 export type Current = Found | { readonly refused: string }
 
 export type Brief =
-  | { readonly type: "ok"; readonly prompt: string; readonly budget?: RunBudget.Info }
+  | {
+      readonly type: "ok"
+      readonly prompt: string
+      readonly budget?: RunBudget.Info
+      /** A lead's subagent slots held for its researchers, so they start without waiting (multi-agent 5.B.5). */
+      readonly reserve?: number
+    }
   | { readonly type: "refused"; readonly message: string }
 
 /** The sites the user chose for research: what may become a site: filter, and what reads as "You trust this site". */
@@ -584,6 +590,8 @@ const layer = Layer.effect(
           size && typeof size === "object" && "tier" in size && size.tier === "thorough" ? "deep" : "focused"
         const own = (yield* guard.snapshot(input.ctx.sessionID))?.budget
         const caps = yield* limits(depth)
+        // As many slots as the run may have researchers; none where it can launch none (offline, or "no subagents").
+        const capped = size && typeof size === "object" && "capped" in size && size.capped === true
         return {
           type: "ok",
           prompt: input.prompt,
@@ -591,6 +599,7 @@ const layer = Layer.effect(
           ...(own?.usd === undefined && own?.steps === undefined
             ? { budget: { usd: caps.usd, steps: caps.steps } }
             : {}),
+          ...(!capped && !offline() && caps.researchers > 0 ? { reserve: caps.researchers } : {}),
         } satisfies Brief
       }
       if (input.agent !== RESEARCHER) return { type: "ok", prompt: input.prompt } satisfies Brief

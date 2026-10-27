@@ -3936,6 +3936,56 @@ describe("task batches", () => {
     { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } },
   )
 
+  it.instance(
+    "a foreground batch's reports share the output: the short one whole, the long ones cut with saved files",
+    () =>
+      Effect.gen(function* () {
+        const { chat, assistant } = yield* seed()
+        const def = yield* foregroundTaskDefinition(yield* TaskTool)
+        // 40 KiB, 40 KiB and 1 KiB.
+        const long = (area: string) =>
+          Array.from({ length: 40 }, (_, line) => `${area} ${String(line).padStart(2, "0")} ${"x".repeat(1_014)}`).join(
+            "\n",
+          )
+        const reports: Record<string, string> = {
+          alpha: long("alpha"),
+          beta: long("beta"),
+          gamma: `gamma ${"y".repeat(1_018)}`,
+        }
+        const result = yield* def.execute(
+          { tasks: [brief("alpha"), brief("beta"), brief("gamma")] },
+          taskContext({
+            sessionID: chat.id,
+            messageID: assistant.id,
+            callID: "call_reports",
+            promptOps: {
+              ...stubOps(),
+              prompt: (input) =>
+                Effect.sync(() => {
+                  const text = input.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n")
+                  const area = Object.keys(reports).find((name) => text.includes(`Inspect ${name} and report`))!
+                  return reply(input, reports[area]!)
+                }),
+            },
+          }),
+        )
+        expect(Buffer.byteLength(reports.alpha!, "utf8")).toBeGreaterThan(40_000)
+        expect(result.metadata).toMatchObject({ taskBatch: 1, status: "completed", truncated: true })
+        expect(Buffer.byteLength(result.output, "utf8")).toBeLessThanOrEqual(Truncate.MAX_BYTES)
+        expect(result.output.match(/<task_entry index="\d" state="completed">/g)).toHaveLength(3)
+        // The last child's report is there whole, after the two cut ones.
+        expect(result.output).toContain(reports.gamma!)
+        expect(result.output.indexOf(reports.gamma!)).toBeGreaterThan(result.output.indexOf("beta 00"))
+        expect(result.output).toContain(reports.alpha!.slice(0, 4_096))
+        expect(result.output).toContain(reports.beta!.slice(0, 4_096))
+        const saved = [...result.output.matchAll(/Full output saved to: (\S+)/g)].map((match) => match[1]!)
+        expect(saved).toHaveLength(2)
+        const texts = yield* Effect.promise(() => Promise.all(saved.map((file) => fs.readFile(file, "utf8"))))
+        expect(texts.toSorted()).toEqual([reports.alpha, reports.beta])
+      }),
+    { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } },
+  )
+
   for (const invalid of [
     { name: "empty", input: { tasks: [] } },
     { name: "too many", input: { tasks: Array.from({ length: 9 }, (_, i) => brief(String(i))) } },

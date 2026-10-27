@@ -18,6 +18,18 @@ export const GLOB = path.join(TRUNCATION_DIR, "*")
 
 export type Result = { content: string; truncated: false } | { content: string; truncated: true; outputPath: string }
 
+// What output() writes beside the part of a text it keeps: how much it left out, and where the whole text is.
+// A Grep or a ranged Read of the saved file costs far less than a subagent that starts from an empty context.
+function notice(removed: number, unit: "bytes" | "lines", file: string) {
+  return `...${removed} ${unit} truncated...\n\nThe tool call succeeded but the output was truncated. Full output saved to: ${file}\nUse Grep to search the full content or Read with offset/limit to view specific sections.`
+}
+
+/** The most output() adds to the text it keeps when it cuts, for callers fitting several cut texts into one output. */
+export const NOTICE = {
+  bytes: Buffer.byteLength(`\n\n${notice(Number.MAX_SAFE_INTEGER, "bytes", path.join(DIR, `${"x".repeat(40)}.web`))}`),
+  lines: 5,
+} as const
+
 export interface Options {
   maxLines?: number
   maxBytes?: number
@@ -133,15 +145,10 @@ const layer = Layer.effect(
       const unit = hitBytes ? "bytes" : "lines"
       const preview = out.join("\n")
       const file = yield* write(options.save?.() ?? text)
-
-      // A Grep or a ranged Read of the saved file costs far less than a subagent that starts from an empty context.
-      const hint = `The tool call succeeded but the output was truncated. Full output saved to: ${file}\nUse Grep to search the full content or Read with offset/limit to view specific sections.`
+      const cut = notice(removed, unit, file)
 
       return {
-        content:
-          direction === "head"
-            ? `${preview}\n\n...${removed} ${unit} truncated...\n\n${hint}`
-            : `...${removed} ${unit} truncated...\n\n${hint}\n\n${preview}`,
+        content: direction === "head" ? `${preview}\n\n${cut}` : `${cut}\n\n${preview}`,
         truncated: true,
         outputPath: file,
       } as const

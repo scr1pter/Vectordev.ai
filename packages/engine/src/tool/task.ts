@@ -20,6 +20,7 @@ import {
 import { isNativeSpecialist } from "@vectordevai/core/agent/specialists"
 import { SubagentLifecycle } from "./subagent-lifecycle"
 import { Truncate } from "./truncate"
+import { TaskReport } from "./task-report"
 import type { SessionPrompt } from "../session/prompt"
 import { Config } from "@/config/config"
 import { Cause, Effect, Exit, Option, Schema, Scope, Semaphore } from "effect"
@@ -42,7 +43,6 @@ import { TaskNotify } from "@/task/notify"
 import { TaskLimits } from "@/task/limits"
 import { TaskSize } from "@vectordevai/core/task-size"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
-import { SessionTaskSize } from "../session/task-size"
 import { isRecord } from "@/util/record"
 
 export interface TaskPromptOps {
@@ -77,8 +77,7 @@ const BACKGROUND_QUEUED = [
   ...BACKGROUND_STILL_WORKING,
 ].join("\n")
 const MAX_SUBAGENT_DEPTH = 2
-/** Why a child is queued once its prerequisites are met: every subagent slot of its conversation is taken (5.B.3). */
-export const SLOT_REASON = "Waiting for a free subagent slot"
+export const SLOT_REASON = TaskLimits.SLOT_REASON
 /**
  * ctx.extra flag for a user's slash command (SessionPrompt.handleSubtask). It may wait for a slot on its card, where the
  * main agent's own foreground launch is moved to the background instead (5.B.4).
@@ -271,12 +270,19 @@ function assignmentPrompt(params: Schema.Schema.Type<typeof Parameters>, ownedPa
   ].join("\n")
 }
 
-function renderOutput(input: {
+type Report = {
   sessionID: SessionID
   state: "running" | "completed" | "error" | "cancelled"
   summary?: string
   text: string
-}) {
+}
+
+// A launch's result. A batch re-renders `report` once each entry's text is cut to its share of the output (5.C.5).
+function rendered<M extends object>(title: string, metadata: M, report: Report) {
+  return { title, metadata, output: renderOutput(report), report }
+}
+
+function renderOutput(input: Report) {
   const tag = input.state === "error" || input.state === "cancelled" ? "task_error" : "task_result"
   return [
     `<task id="${input.sessionID}" state="${input.state}">`,
@@ -326,37 +332,6 @@ export const TaskTool = Tool.define(
       return { root, depth }
     })
 
-    // The root's latest message from the user; a note, a judge's findings or a marker opens no request. A message
-    // with no parts yet counts as the user's.
-    const latestRequest = (rootID: SessionID) =>
-      sessions
-        .findMessage(
-          rootID,
-          (message) =>
-            message.info.role === "user" && (message.parts.length === 0 || SessionTaskSize.real(message)),
-        )
-        .pipe(
-          Effect.map((found): string => (Option.isSome(found) ? found.value.info.id : rootID)),
-          Effect.catchCause(() => Effect.succeed<string>(rootID)),
-        )
-
-    // The pool a root's launches count in (5.B.1). A desktop Parallel Workspace or Swarm root names the session it was
-    // started from, whose ancestors conversation() reads too.
-    const conversationOf = Effect.fn("TaskTool.conversationOf")(function* (root: Session.Info, guest: boolean) {
-      const known = new Map<string, Session.Info>([[root.id, root]])
-      const vector = root.metadata?.vector
-      let next = isRecord(vector) && typeof vector.parentSessionId === "string" ? vector.parentSessionId : undefined
-      for (let hops = 0; next !== undefined && !known.has(next) && hops <= MAX_SUBAGENT_DEPTH; hops++) {
-        const parsed = Schema.decodeUnknownOption(SessionID)(next)
-        if (Option.isNone(parsed)) break
-        const found = yield* sessions.get(parsed.value).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
-        if (!found) break
-        known.set(found.id, found)
-        next = found.parentID
-      }
-      return TaskLimits.conversation(root, (id) => known.get(id), guest)
-    })
-
     // What a launch counts against (5.B.2): its conversation's slots, and its request's launch count and delegated
     // spend ceiling. Undefined for Vector's own launches, such as the judge, which are never counted.
     const delegationOf = Effect.fn("TaskTool.delegationOf")(function* (
@@ -371,9 +346,9 @@ export const TaskTool = Tool.define(
       const requestID =
         SubagentLifecycle.read(parent)?.requestID ??
         (isRecord(context) && typeof context.requestID === "string" ? context.requestID : undefined) ??
-        (yield* latestRequest(root.id))
+        (yield* TaskLimits.currentRequest(sessions, root.id))
       return {
-        conversationID: yield* conversationOf(root, guest),
+        conversationID: yield* TaskLimits.conversationOf(sessions, root, guest),
         rootID: root.id,
         requestID,
         limits: TaskLimits.resolve(yield* config.get(), guest),
@@ -757,6 +732,10 @@ export const TaskTool = Tool.define(
               origin,
               count: 1,
               parentID: ctx.sessionID,
+              // A research lead holds its researchers' slots too, when it is shallow enough to launch them (5.B.5).
+              ...(brief?.type === "ok" && brief.reserve && depth + 2 <= MAX_SUBAGENT_DEPTH
+                ? { reserve: brief.reserve }
+                : {}),
             })
             .pipe(Effect.mapError((refused) => new Error(refused.message)))
         : undefined
@@ -1186,14 +1165,10 @@ export const TaskTool = Tool.define(
             Effect.ignore,
             Effect.forkIn(scope, { startImmediately: true }),
           )
-          return {
+          return rendered(
             title,
-            metadata: {
-              ...partMetadata(),
-              background: true,
-              jobId: nextSession.id,
-            },
-            output: renderOutput({
+            { ...partMetadata(), background: true, jobId: nextSession.id },
+            {
               sessionID: nextSession.id,
               state: "running",
               summary:
@@ -1201,8 +1176,8 @@ export const TaskTool = Tool.define(
                   ? "Message delivered to the running background task"
                   : "Message queued for the background task",
               text: added === "delivered" ? BACKGROUND_DELIVERED : BACKGROUND_QUEUED,
-            }),
-          }
+            },
+          )
         })
         // The child's loop runs in its own scope, so interrupting the job's fiber alone would leave it calling the
         // provider after a stop; every run, first or added, stops the child when interrupted. The loop returns normally
@@ -1372,7 +1347,10 @@ export const TaskTool = Tool.define(
                     SubagentLifecycle.update(sessions, nextSession.id, { background: true }),
                     notify(nextSession.id),
                   ]),
-              run: guardedRun(),
+              // A run that never took its slot, stopped first or failed on a prerequisite, gives back what was bound.
+              run: guardedRun().pipe(
+                Effect.ensuring(admission ? limits.release(admission, nextSession.id) : Effect.void),
+              ),
             })
           }),
         )
@@ -1413,14 +1391,10 @@ export const TaskTool = Tool.define(
         function backgroundResult() {
           // Still waiting for the slot its admission found taken.
           const queued = slotted && admission !== undefined && outcome.status === "queued"
-          return {
+          return rendered(
             title,
-            metadata: {
-              ...partMetadata(),
-              background: true,
-              jobId: info.id,
-            },
-            output: renderOutput({
+            { ...partMetadata(), background: true, jobId: info.id },
+            {
               sessionID: nextSession.id,
               state: "running",
               summary: queued ? `Queued: ${SLOT_REASON.toLowerCase()}` : "Background task started",
@@ -1428,8 +1402,8 @@ export const TaskTool = Tool.define(
                 queued ? queuedNote(admission.limits.running) : BACKGROUND_STARTED,
                 ...(busy && admission ? [busyNote(admission.active, admission.limits.running)] : []),
               ].join("\n"),
-            }),
-          }
+            },
+          )
         }
 
         if (runInBackground) {
@@ -1480,16 +1454,12 @@ export const TaskTool = Tool.define(
                   : state === "error"
                     ? [outcome.error, result?.output].filter(Boolean).join("\n\n")
                     : (result?.output ?? "")
-              return {
-                title,
-                metadata: partMetadata(),
-                output: renderOutput({
-                  sessionID: nextSession.id,
-                  state,
-                  ...(busy && admission ? { summary: busyNote(admission.active, admission.limits.running) } : {}),
-                  text,
-                }),
-              }
+              return rendered(title, partMetadata(), {
+                sessionID: nextSession.id,
+                state,
+                ...(busy && admission ? { summary: busyNote(admission.active, admission.limits.running) } : {}),
+                text,
+              })
             }),
           (_, exit) =>
             Effect.gen(function* () {
@@ -1636,6 +1606,7 @@ export const TaskTool = Tool.define(
           }),
         ),
       )
+      // Each entry's text, as it is saved when cut, and how it renders once cut to its share.
       const results = yield* Effect.forEach(
         launches,
         (launch, index) =>
@@ -1643,7 +1614,13 @@ export const TaskTool = Tool.define(
             const exit = yield* Effect.exit(launch)
             if (Exit.isSuccess(exit)) {
               yield* publish(index, exit.value.metadata)
-              return `<task_entry index="${index}" state="${items[index].status}">\n${exit.value.output}\n</task_entry>`
+              const head = `<task_entry index="${index}" state="${items[index].status}">`
+              const report = exit.value.report
+              return {
+                saved: report.text,
+                text: TaskSize.neutralizeTags(report.text),
+                render: (text: string) => `${head}\n${renderOutput({ ...report, text })}\n</task_entry>`,
+              }
             }
             const cancelled = Exit.hasInterrupts(exit)
             const error = Cause.pretty(exit.cause)
@@ -1654,13 +1631,32 @@ export const TaskTool = Tool.define(
                 error,
               })
             yield* publish(index, { status: cancelled ? "cancelled" : "error", error, completedAt: Date.now() })
-            return `<task_entry index="${index}" state="${cancelled ? "cancelled" : "error"}">\n${error}\n</task_entry>`
+            const head = `<task_entry index="${index}" state="${cancelled ? "cancelled" : "error"}">`
+            return { saved: error, text: error, render: (text: string) => `${head}\n${text}\n</task_entry>` }
           }),
         { concurrency: "unbounded" },
       )
       returned = true
       const busy = busiest.active > TaskLimits.BUSY ? [busyNote(busiest.active, busiest.limit)] : []
-      return { title, metadata: metadata(), output: [...results, ...busy].join("\n\n") }
+      // Every report shares the output fairly, so the last child's is never cut away by the ones before it (5.C.5).
+      const cuts = TaskReport.cuts(
+        results.map((result) => TaskReport.size(result.text)),
+        yield* truncate.limits(),
+        { reserved: TaskReport.size(busy.map((line) => `\n\n${line}`).join("")), notice: Truncate.NOTICE },
+      )
+      const entries = yield* Effect.forEach(results, (result, index) => {
+        const cut = cuts[index]
+        if (!cut) return Effect.succeed({ output: result.render(result.text), truncated: false })
+        return truncate
+          .output(result.text, { ...cut, save: () => result.saved })
+          .pipe(Effect.map((kept) => ({ output: result.render(kept.content), truncated: kept.truncated })))
+      })
+      return {
+        title,
+        // Set, so the tool wrapper does not cut the joined entries again.
+        metadata: { ...metadata(), truncated: entries.some((entry) => entry.truncated) },
+        output: [...entries.map((entry) => entry.output), ...busy].join("\n\n"),
+      }
     })
 
     return {

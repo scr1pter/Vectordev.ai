@@ -2584,6 +2584,8 @@ const layer = Layer.effect(
             const capped = SessionTaskSize.capped(build.result)
             for (const id of TaskSize.withheld(build.offered, build.result.agents.length))
               if (capped || id !== "task") delete tools[id]
+            // A capped lead has no researcher to launch, so none to manage either (5.B.5).
+            if (capped) for (const id of ["task", "task_manage"]) delete tools[id]
             if ((yield* guard.snapshot(sessionID))?.warned === true) delete tools.task
             delete tools.escalate
           } else if (build) {

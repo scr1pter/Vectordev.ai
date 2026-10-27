@@ -1228,6 +1228,10 @@ const scenarios: Scenario[] = [
   http.protected.get("/experimental/capabilities", "experimental.capabilities.get").json(200, (body) => {
     check(typeof body === "object" && body !== null, "capabilities should be an object")
     check("backgroundSubagents" in body, "capabilities should report background subagents")
+    check(
+      typeof (body as { subagentLimits?: unknown }).subagentLimits === "boolean",
+      "capabilities should report whether task lists carry subagent limits",
+    )
   }),
   http.protected
     .post("/experimental/session/{sessionID}/background", "experimental.session.background")
@@ -1252,6 +1256,23 @@ const scenarios: Scenario[] = [
       object(body)
       array(body.tasks)
       check(body.tasks.length === 0 && body.truncated === false, "a fresh task board should be empty")
+      object(body.limits)
+      const limits = body.limits as Record<string, unknown>
+      check(
+        ["running", "queued", "maxRunning", "launched", "maxPerRequest"].every(
+          (key) => typeof limits[key] === "number",
+        ),
+        "the task board should carry the conversation's subagent counts and limits",
+      )
+      check(
+        limits.running === 0 && limits.launched === 0 && limits.maxRunning === 8 && limits.maxPerRequest === 32,
+        "a fresh conversation should have no subagents and the default limits",
+      )
+      object(limits.spend)
+      check(
+        typeof (limits.spend as Record<string, unknown>).spentUsd === "number",
+        "the task board should carry the request's subagent spend",
+      )
     }),
   http.protected
     .get("/experimental/session/{sessionID}/tasks/{taskID}", "experimental.task.inspect.missing")

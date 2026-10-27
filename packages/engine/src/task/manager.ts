@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Option, Schema } from "effect"
 import { eq, sql } from "drizzle-orm"
 import { Task } from "@vectordevai/schema/task"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
@@ -16,7 +16,10 @@ import { TaskMailbox } from "@vectordevai/core/task-mailbox"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { ModelV2 } from "@vectordevai/core/model"
+import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
+import { Config } from "@/config/config"
 import { DesktopTasks } from "./desktop"
+import { TaskLimits } from "./limits"
 
 export class Error extends Schema.TaggedErrorClass<Error>()("TaskManager.Error", {
   code: Schema.Literals(["not_found", "forbidden", "invalid", "finished", "rate_limited"]),
@@ -65,6 +68,9 @@ const layer = Layer.effect(
     const database = yield* Database.Service
     const guard = yield* SpendGuard.Service
     const desktop = yield* DesktopTasks.Service
+    const limits = yield* TaskLimits.Service
+    const config = yield* Config.Service
+    const guests = yield* FreeModelGuests.Service
     const bridge = <A>(effect: Effect.Effect<A, DesktopTasks.Error>) =>
       effect.pipe(Effect.mapError((error) => new Error({ code: error.code, message: error.message })))
     const lock = SubagentLifecycle.controlLock
@@ -210,7 +216,48 @@ const layer = Layer.effect(
       }
     })
 
+    // The conversation's subagent limits as `session` sees them (5.B.10): its root's pool, and the request its launches
+    // count in, which for the root is its latest request, so a new request with no launches shows none started.
+    const limitsOf = Effect.fn("TaskManager.limits")(function* (session: Session.Info) {
+      let root = session
+      const seen = new Set<string>([root.id])
+      while (root.parentID && !seen.has(root.parentID) && seen.size <= MAX_TASKS) {
+        seen.add(root.parentID)
+        const parent = yield* sessions.get(root.parentID).pipe(Effect.option)
+        if (Option.isNone(parent)) break
+        root = parent.value
+      }
+      const guest = yield* guests.marked(root.id)
+      const status = yield* limits.status(
+        yield* TaskLimits.conversationOf(sessions, root, guest),
+        SubagentLifecycle.read(session)?.requestID ?? (yield* TaskLimits.currentRequest(sessions, root.id)),
+        TaskLimits.resolve(yield* config.get(), guest),
+      )
+      return {
+        running: status.running,
+        queued: status.queued,
+        maxRunning: status.limit,
+        launched: status.launched,
+        maxPerRequest: status.perRequest,
+        ...(status.spend ? { spend: status.spend } : {}),
+      } satisfies Task.Limits
+    })
+
     const list: Interface["list"] = Effect.fn("TaskManager.list")(function* (input) {
+      const session = yield* get(input.sessionID)
+      const result = yield* collect(input)
+      // The board never fails for want of its limits line.
+      const counted = yield* limitsOf(session).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("TaskManager.list: reading the subagent limits failed", { cause }).pipe(
+            Effect.as(undefined),
+          ),
+        ),
+      )
+      return counted ? { ...result, limits: counted } : result
+    })
+
+    const collect = Effect.fn("TaskManager.collect")(function* (input: Parameters<Interface["list"]>[0]) {
       yield* get(input.sessionID)
       const limit = Math.min(MAX_TASKS, Math.max(1, Math.floor(input.limit ?? 100)))
       const queue = [input.sessionID]
@@ -327,50 +374,77 @@ const layer = Layer.effect(
             { mailbox: [...mailbox.filter((item) => !item.deliveredAt || item.createdAt > now - 60_000), entry] },
             record.attempt,
           )
+          const delivery = Effect.gen(function* () {
+            const current = yield* get(session.id)
+            const value = SubagentLifecycle.read(current)!
+            if (value.attempt !== record.attempt) return ""
+            yield* persist(
+              session.id,
+              {
+                mailbox: (value.mailbox ?? []).map((item) =>
+                  item.id === entry.id ? { ...item, deliveredAt: Date.now() } : item,
+                ),
+                ...(value.slotReason === TaskLimits.SLOT_REASON
+                  ? { status: "running" as const, slotReason: undefined }
+                  : {}),
+              },
+              record.attempt,
+            )
+            const result = yield* ops.prompt({
+              sessionID: session.id,
+              messageID: entry.id,
+              agent: record.agent,
+              model: {
+                providerID: ProviderV2.ID.make(record.model.providerID),
+                modelID: ModelV2.ID.make(record.model.modelID),
+              },
+              variant: record.model.variant,
+              parts: [
+                {
+                  type: "text",
+                  synthetic: true,
+                  text: TaskMailbox.envelope(text, { sender: input.sessionID, recipient: session.id, relation }),
+                },
+              ],
+            })
+            const failed = result.info.role === "assistant" ? SubagentLifecycle.failure(result.info.error) : undefined
+            const output = result.parts
+              .flatMap((part) => (part.type === "text" && !part.synthetic && !part.ignored ? [part.text] : []))
+              .join("\n\n")
+            if (failed?.status === "cancelled") return yield* Effect.interrupt
+            if (failed) return yield* new BackgroundJob.RunFailed({ message: failed.error ?? "Task failed", output })
+            return output
+          }).pipe(Effect.onInterrupt(() => ops.cancel(session.id)))
+          // A run that starts after the child's own ended takes a subagent slot again, waiting for one when every slot
+          // is taken; one joining a running run shares its slot (5.B.3).
+          const conversationID = record.conversationID
+          const run = conversationID
+            ? limits.run(
+                {
+                  conversationID,
+                  childID: session.id,
+                  origin:
+                    record.workflow?.role === "agent"
+                      ? "workflow"
+                      : record.rootSessionID && session.parentID !== record.rootSessionID
+                        ? "nested"
+                        : "root",
+                  waiting: persist(
+                    session.id,
+                    { status: "queued", slotReason: TaskLimits.SLOT_REASON },
+                    record.attempt,
+                  ).pipe(Effect.ignore),
+                },
+                delivery,
+              )
+            : delivery
           const accepted = yield* jobs.extend({
             id: session.id,
             concurrent:
               entry.delivery === "steer" &&
               record.status !== "queued" &&
               (yield* statuses.get(session.id)).type !== "idle",
-            run: Effect.gen(function* () {
-              const current = yield* get(session.id)
-              const value = SubagentLifecycle.read(current)!
-              if (value.attempt !== record.attempt) return ""
-              yield* persist(
-                session.id,
-                {
-                  mailbox: (value.mailbox ?? []).map((item) =>
-                    item.id === entry.id ? { ...item, deliveredAt: Date.now() } : item,
-                  ),
-                },
-                record.attempt,
-              )
-              const result = yield* ops.prompt({
-                sessionID: session.id,
-                messageID: entry.id,
-                agent: record.agent,
-                model: {
-                  providerID: ProviderV2.ID.make(record.model.providerID),
-                  modelID: ModelV2.ID.make(record.model.modelID),
-                },
-                variant: record.model.variant,
-                parts: [
-                  {
-                    type: "text",
-                    synthetic: true,
-                    text: TaskMailbox.envelope(text, { sender: input.sessionID, recipient: session.id, relation }),
-                  },
-                ],
-              })
-              const failed = result.info.role === "assistant" ? SubagentLifecycle.failure(result.info.error) : undefined
-              const output = result.parts
-                .flatMap((part) => (part.type === "text" && !part.synthetic && !part.ignored ? [part.text] : []))
-                .join("\n\n")
-              if (failed?.status === "cancelled") return yield* Effect.interrupt
-              if (failed) return yield* new BackgroundJob.RunFailed({ message: failed.error ?? "Task failed", output })
-              return output
-            }).pipe(Effect.onInterrupt(() => ops.cancel(session.id))),
+            run,
           })
           if (!accepted) {
             yield* persist(session.id, { mailbox }, record.attempt)
@@ -403,7 +477,7 @@ const layer = Layer.effect(
       return yield* Effect.gen(function* () {
         const prepared = yield* SubagentLifecycle.locked(lock)(
           Effect.gen(function* () {
-            const board = yield* list({ sessionID: input.sessionID, descendants: true, limit: MAX_TASKS })
+            const board = yield* collect({ sessionID: input.sessionID, descendants: true, limit: MAX_TASKS })
             if (board.truncated)
               return yield* new Error({
                 code: "invalid",
@@ -547,6 +621,9 @@ export const node = LayerNode.make({
     Database.node,
     SpendGuard.node,
     DesktopTasks.node,
+    TaskLimits.node,
+    Config.node,
+    FreeModelGuests.node,
   ],
 })
 export * as TaskManager from "./manager"

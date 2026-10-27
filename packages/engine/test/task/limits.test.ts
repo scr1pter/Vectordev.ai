@@ -562,6 +562,41 @@ describe("TaskLimits slots", () => {
       expect(yield* service.status(CONVERSATION)).toMatchObject({ running: 0, queued: 0 })
     }),
   )
+
+  it.effect("a reserve never asks for every slot, and a lead stopped before its run gives its slots back", () =>
+    Effect.gen(function* () {
+      const service = yield* TaskLimits.Service
+      // A Deep lead's 1 + 4 in a conversation of 3 slots: the lead and 2 researchers.
+      const three = limits(3)
+      const lead = yield* Scope.make()
+      const admission = yield* Scope.provide(lead)(service.admit(admitInput("root", { limits: three, reserve: 4 })))
+      expect(admission).toMatchObject({ waits: false, prepaid: 3 })
+      yield* service.bind(admission, id("stopped_lead"))
+      yield* Scope.close(lead, Exit.void)
+      // The lead's job was stopped before its run took the slots: they would stay taken, so a launch would wait.
+      const started: string[] = []
+      const blocked = yield* holder(service, started, "blocked")
+      expect(started).toEqual([])
+      yield* service.release(admission, id("stopped_lead"))
+      yield* settle
+      expect(started).toEqual(["blocked"])
+      // A child that took its slots keeps them: release() gives back only what never started.
+      const second = yield* Scope.make()
+      const again = yield* Scope.provide(second)(service.admit(admitInput("root", { limits: three, reserve: 1 })))
+      yield* service.bind(again, id("running_lead"))
+      yield* Scope.close(second, Exit.void)
+      const running = yield* holder(service, started, "running_lead")
+      yield* service.release(again, id("running_lead"))
+      expect(yield* service.status(CONVERSATION)).toMatchObject({ running: 2, queued: 0 })
+      const late = yield* holder(service, started, "late")
+      expect(started).not.toContain("late")
+      yield* blocked.release
+      expect(started).toContain("late")
+      yield* running.release
+      yield* late.release
+      expect(yield* service.status(CONVERSATION)).toMatchObject({ running: 0, queued: 0 })
+    }),
+  )
 })
 
 describe("TaskLimits seed and status", () => {

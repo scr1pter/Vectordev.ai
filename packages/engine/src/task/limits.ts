@@ -1,9 +1,19 @@
 export * as TaskLimits from "./limits"
 
 import { sql } from "drizzle-orm"
-import { Context as ServiceContext, Deferred, Effect, Exit, Layer, Ref, Schema, Scope, SynchronizedRef } from "effect"
+import {
+  Context as ServiceContext,
+  Deferred,
+  Effect,
+  Exit,
+  Layer,
+  Option,
+  Ref,
+  Schema,
+  Scope,
+  SynchronizedRef,
+} from "effect"
 import type { RunBudget } from "@vectordevai/schema/run-budget"
-import type { SessionID } from "@vectordevai/schema/session-id"
 import type { Task } from "@vectordevai/schema/task"
 import { Database } from "@vectordevai/core/database/database"
 import { makeGlobalNode } from "@vectordevai/core/effect/app-node"
@@ -11,6 +21,9 @@ import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import type { Session } from "@/session/session"
+import { SessionID } from "@/session/schema"
+import { SessionTaskSize } from "@/session/task-size"
+import { isRecord } from "@/util/record"
 
 // How many subagents run at once in a conversation, how many one request may start, and whether the request's
 // delegated spend ceiling still lets a launch through (multi-agent contract 5.B). A conversation is a root session, or
@@ -33,6 +46,8 @@ export const MAX_PER_REQUEST = 1000
 export const WORKFLOW_RESERVE = 2
 /** Above this many running or waiting subagents, a launch tells the agent to say how many are working. */
 export const BUSY = 6
+/** Why a child is queued once its prerequisites are met: every subagent slot of its conversation is taken (5.B.3). */
+export const SLOT_REASON = "Waiting for a free subagent slot"
 // Conversations and requests kept in memory; one dropped later is counted again from the database.
 const POOLS = 256
 const REQUESTS = 64
@@ -167,6 +182,45 @@ function rootOf(session: Session.Info, parentOf: (id: string) => Session.Info | 
   return current
 }
 
+// Sessions above a root that conversation() reads: the session a desktop root names and that one's ancestors, at most
+// as many as a subagent tree is deep.
+const HOPS = 2
+
+/** conversation() for a root, reading the sessions it names from the database. */
+export const conversationOf = Effect.fnUntraced(function* (
+  sessions: Pick<Session.Interface, "get">,
+  root: Session.Info,
+  guest: boolean,
+) {
+  const known = new Map<string, Session.Info>([[root.id, root]])
+  const vector = root.metadata?.vector
+  let next = isRecord(vector) && typeof vector.parentSessionId === "string" ? vector.parentSessionId : undefined
+  for (let hops = 0; next !== undefined && !known.has(next) && hops <= HOPS; hops++) {
+    const parsed = Schema.decodeUnknownOption(SessionID)(next)
+    if (Option.isNone(parsed)) break
+    const found = yield* sessions.get(parsed.value).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+    if (!found) break
+    known.set(found.id, found)
+    next = found.parentID
+  }
+  return conversation(root, (id) => known.get(id), guest)
+})
+
+/**
+ * The request a root's launches count in now (5.B.2, 5.B.10): its latest message from the user. A note, a judge's
+ * findings or a marker opens no request; a message with no parts yet counts as the user's. The root's ID when none.
+ */
+export const currentRequest = (sessions: Pick<Session.Interface, "findMessage">, rootID: SessionID) =>
+  sessions
+    .findMessage(
+      rootID,
+      (message) => message.info.role === "user" && (message.parts.length === 0 || SessionTaskSize.real(message)),
+    )
+    .pipe(
+      Effect.map((found): string => (Option.isSome(found) ? found.value.info.id : rootID)),
+      Effect.catchCause(() => Effect.succeed<string>(rootID)),
+    )
+
 export type AdmitInput = {
   conversationID: string
   requestID: string
@@ -199,6 +253,8 @@ export interface Interface {
   readonly admit: (i: AdmitInput) => Effect.Effect<Admission, Refused, Scope.Scope>
   /** Makes one place of the admission admit() returned, and its reserved slots, the child's, before its job starts. */
   readonly bind: (admission: Admission, childID: SessionID) => Effect.Effect<void>
+  /** Gives back the slots bind() gave a child whose run never started, such as one stopped before its job ran. */
+  readonly release: (admission: Admission, childID: SessionID) => Effect.Effect<void>
   /** Runs `effect` holding the child's slot, waiting for one when needed. Reentrant per child. */
   readonly run: <A, E, R>(i: RunInput, effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
   /** The conversation's counts and the request's delegated spend. `limits` replaces the ones last seen. */
@@ -363,7 +419,8 @@ function place(pool: Pool, i: AdmitInput, id: number): readonly [Placed, Pool] {
   const current: Pool = { ...pool, limits: i.limits }
   if (counted && request.launched + request.pending + i.count > i.limits.perRequest)
     return [{ refused: perRequest(request.launched + request.pending, i.limits.perRequest) }, current]
-  const each = 1 + Math.max(0, Math.floor(i.reserve ?? 0))
+  // A reserve never asks for every slot of the conversation, so it can always be granted.
+  const each = 1 + Math.min(Math.max(0, Math.floor(i.reserve ?? 0)), i.limits.running - 1)
   const need = i.count * each
   const lender = i.parentID === undefined ? undefined : lenderOf(current, i.parentID)
   // A launch from a subagent, or a resume from one, cannot wait for a slot its own parent may be holding.
@@ -436,6 +493,22 @@ function bound(pool: Pool, id: number, childID: string): Pool {
     ...next,
     prepaid: new Map(next.prepaid).set(childID, { spare: open.each - 1, from: open.from, admission: id }),
   }
+}
+
+// A child whose run never started gives back what its admission bound to it; one that ran gave it back on leaving.
+function unstarted(pool: Pool, id: number, childID: string): Pool {
+  const paid = pool.prepaid.get(childID)
+  let next = pool
+  if (paid?.admission === id) {
+    const prepaid = new Map(pool.prepaid)
+    prepaid.delete(childID)
+    next = give({ ...pool, prepaid }, paid.from, 1 + paid.spare)
+  }
+  const waiting = next.held.has(childID) || next.queue.some((waiter) => waiter.childID === childID)
+  if (waiting || !next.reserves.has(childID)) return next
+  const reserves = new Map(next.reserves)
+  reserves.delete(childID)
+  return { ...next, reserves }
 }
 
 function closed(pool: Pool, id: number, failed: boolean): Pool {
@@ -709,6 +782,12 @@ const layer = Layer.effect(
       yield* settle(found.pool, (current) => bound(current, found.id, childID))
     })
 
+    const release = Effect.fn("TaskLimits.release")(function* (admission: Admission, childID: SessionID) {
+      const found = admissions.get(admission)
+      if (!found) return
+      yield* settle(found.pool, (current) => unstarted(current, found.id, childID))
+    })
+
     const run = <A, E, R>(i: RunInput, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
       Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
@@ -769,7 +848,7 @@ const layer = Layer.effect(
       }
     })
 
-    return Service.of({ capacity, admit, bind, run, status, seed })
+    return Service.of({ capacity, admit, bind, release, run, status, seed })
   }),
 )
 

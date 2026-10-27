@@ -6,6 +6,7 @@ import { Database } from "@vectordevai/core/database/database"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { TaskManager } from "@/task/manager"
+import { TaskLimits } from "@/task/limits"
 import { BackgroundJob } from "@/background/job"
 import { Session } from "@/session/session"
 import { SessionStatus } from "@/session/status"
@@ -14,10 +15,10 @@ import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
 import type { TaskPromptOps } from "@/tool/task"
 import type { SessionPrompt } from "@/session/prompt"
 import { disposeAllInstances } from "../fixture/fixture"
-import { testEffect } from "../lib/effect"
+import { pollWithTimeout, testEffect } from "../lib/effect"
 
 afterEach(disposeAllInstances)
-const it = testEffect(LayerNode.compile(LayerNode.group([TaskManager.node, Session.node, Database.node, BackgroundJob.node, SessionStatus.node])))
+const it = testEffect(LayerNode.compile(LayerNode.group([TaskManager.node, TaskLimits.node, Session.node, Database.node, BackgroundJob.node, SessionStatus.node])))
 const model = { providerID: ProviderV2.ID.make("local-test"), modelID: ModelV2.ID.make("fixture") }
 const child = Effect.fn("TaskManagerTest.child")(function* (parentID: SessionID, patch: object = {}) {
   const sessions = yield* Session.Service
@@ -250,6 +251,115 @@ describe("task management", () => {
     expect(Exit.isFailure(yield* manager.message({ sessionID: root.id, taskID: a.id, text: "Too many" }, ops).pipe(Effect.exit))).toBe(true)
     expect(SubagentLifecycle.read(yield* sessions.get(a.id))?.mailbox).toHaveLength(12)
     yield* jobs.cancel(a.id)
+  }))
+
+  it.instance("list returns the conversation's subagent limits for its latest request", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const limits = yield* TaskLimits.Service
+    const root = yield* sessions.create()
+    const fresh = yield* manager.list({ sessionID: root.id })
+    expect(fresh.limits).toEqual({
+      running: 0,
+      queued: 0,
+      maxRunning: 8,
+      launched: 0,
+      maxPerRequest: 32,
+      spend: { spentUsd: 0, limitUsd: 25, unknownSteps: 0, warned: false, stopped: false },
+    })
+    // A request that launched one child, which is running.
+    const request = MessageID.ascending()
+    yield* sessions.updateMessage({ id: request, role: "user", sessionID: root.id, agent: "build", model, time: { created: Date.now() } })
+    // Admitted before its session exists, as the task tool does.
+    const task = yield* Effect.scoped(Effect.gen(function* () {
+      const admission = yield* limits.admit({ conversationID: root.id, requestID: request, limits: TaskLimits.resolve({}, false), origin: "root", count: 1 })
+      const launched = yield* child(root.id, { conversationID: root.id, rootSessionID: root.id, requestID: request })
+      yield* limits.bind(admission, launched.id)
+      return launched
+    }))
+    const gate = yield* Deferred.make<void>()
+    const running = yield* limits.run({ conversationID: root.id, childID: task.id, origin: "root" }, Deferred.await(gate)).pipe(Effect.forkChild)
+    yield* pollWithTimeout(limits.status(root.id).pipe(Effect.map((status) => (status.running === 1 ? true : undefined))), "the child must hold its slot")
+    expect((yield* manager.list({ sessionID: root.id })).limits).toMatchObject({ running: 1, queued: 0, launched: 1, maxRunning: 8, maxPerRequest: 32 })
+    // The child sees the request it counts in, and the same pool.
+    expect((yield* manager.list({ sessionID: task.id })).limits).toMatchObject({ running: 1, launched: 1 })
+    // A new request with no launches shows none started, while the child still runs.
+    yield* sessions.updateMessage({ id: MessageID.ascending(), role: "user", sessionID: root.id, agent: "build", model, time: { created: Date.now() } })
+    expect((yield* manager.list({ sessionID: root.id })).limits).toMatchObject({ running: 1, launched: 0 })
+    yield* Deferred.succeed(gate, undefined)
+    yield* Fiber.join(running)
+  }))
+
+  it.instance("a message queued for a child whose run ended takes a subagent slot", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const jobs = yield* BackgroundJob.Service
+    const limits = yield* TaskLimits.Service
+    const root = yield* sessions.create()
+    const task = yield* child(root.id, { conversationID: root.id, rootSessionID: root.id })
+    const other = yield* child(root.id, { conversationID: root.id, rootSessionID: root.id })
+    // The conversation runs one subagent at a time, and the other child holds that slot.
+    yield* limits.status(root.id, undefined, { running: 1, perRequest: 32, budget: { usd: 25 } })
+    const release = yield* Deferred.make<void>()
+    const holding = yield* limits.run({ conversationID: root.id, childID: other.id, origin: "root" }, Deferred.await(release)).pipe(Effect.forkChild)
+    yield* pollWithTimeout(limits.status(root.id).pipe(Effect.map((status) => (status.running === 1 ? true : undefined))), "the other child must hold the slot")
+    // The child's own run, which holds no slot here, ends before the message runs.
+    const original = yield* Deferred.make<void>()
+    yield* jobs.start({ id: task.id, type: "task", run: Deferred.await(original).pipe(Effect.as("first answer")) })
+    const prompted = yield* Deferred.make<void>()
+    const receipt = yield* manager.message(
+      { sessionID: root.id, taskID: task.id, text: "Also check the tests", delivery: "queue" },
+      { ...ops, prompt: (input) => Deferred.succeed(prompted, undefined).pipe(Effect.as(reply(input))) },
+    )
+    expect(receipt.accepted).toBe(true)
+    yield* Deferred.succeed(original, undefined)
+    yield* pollWithTimeout(
+      sessions.get(task.id).pipe(Effect.map((session) => (SubagentLifecycle.read(session)?.slotReason === TaskLimits.SLOT_REASON ? true : undefined))),
+      "the queued message must wait for a slot",
+    )
+    expect(SubagentLifecycle.read(yield* sessions.get(task.id))?.status).toBe("queued")
+    expect((yield* manager.list({ sessionID: root.id })).tasks.find((item) => item.id === task.id)?.status).toBe("queued")
+    expect((yield* limits.status(root.id)).queued).toBe(1)
+    expect(yield* Deferred.isDone(prompted)).toBe(false)
+    // The slot frees, and the message runs holding it.
+    yield* Deferred.succeed(release, undefined)
+    yield* Fiber.join(holding)
+    yield* Deferred.await(prompted)
+    const done = yield* manager.wait({ sessionID: root.id, taskIDs: [task.id] })
+    expect(done.tasks[0].status).toBe("completed")
+    expect(SubagentLifecycle.read(yield* sessions.get(task.id))).toMatchObject({ status: "running" })
+    expect(SubagentLifecycle.read(yield* sessions.get(task.id))?.slotReason).toBeUndefined()
+    expect(yield* limits.status(root.id)).toMatchObject({ running: 0, queued: 0 })
+  }))
+
+  it.instance("a message steering a running child shares its slot", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const jobs = yield* BackgroundJob.Service
+    const statuses = yield* SessionStatus.Service
+    const limits = yield* TaskLimits.Service
+    const root = yield* sessions.create()
+    const task = yield* child(root.id, { conversationID: root.id, rootSessionID: root.id })
+    yield* limits.status(root.id, undefined, { running: 1, perRequest: 32, budget: { usd: 25 } })
+    const original = yield* Deferred.make<void>()
+    yield* jobs.start({
+      id: task.id,
+      type: "task",
+      run: limits.run({ conversationID: root.id, childID: task.id, origin: "root" }, Deferred.await(original).pipe(Effect.as("first"))),
+    })
+    yield* statuses.set(task.id, { type: "busy" })
+    yield* pollWithTimeout(limits.status(root.id).pipe(Effect.map((status) => (status.running === 1 ? true : undefined))), "the child must hold its slot")
+    const prompted = yield* Deferred.make<void>()
+    yield* manager.message(
+      { sessionID: root.id, taskID: task.id, text: "Keep the public API" },
+      { ...ops, prompt: (input) => Deferred.succeed(prompted, undefined).pipe(Effect.as(reply(input))) },
+    )
+    // With the only slot held by the child itself, the steer runs at once.
+    yield* Deferred.await(prompted)
+    expect(yield* limits.status(root.id)).toMatchObject({ running: 1, queued: 0 })
+    yield* Deferred.succeed(original, undefined)
+    yield* manager.wait({ sessionID: root.id, taskIDs: [task.id] })
+    expect(yield* limits.status(root.id)).toMatchObject({ running: 0, queued: 0 })
   }))
 
   it.instance("recovery attaches reports once, preserves launch checks, and starts no job", () => Effect.gen(function* () {

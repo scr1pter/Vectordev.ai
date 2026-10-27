@@ -91,12 +91,13 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       query: typeof TaskListQuery.Type
     }) {
       yield* access(ctx.params.sessionID)
-      return yield* shown(
-        ctx.params.sessionID,
-        yield* taskError(
-          tasks.list({ sessionID: ctx.params.sessionID, descendants: ctx.query.descendants, limit: ctx.query.limit }),
-        ),
+      const result = yield* taskError(
+        tasks.list({ sessionID: ctx.params.sessionID, descendants: ctx.query.descendants, limit: ctx.query.limit }),
       )
+      // The limits line carries the owner's configured limits, which only the owner sees (I19).
+      const { limits, ...rest } = result
+      const owner = (yield* RequestPrincipal).kind === "owner"
+      return yield* shown(ctx.params.sessionID, owner && limits ? { ...rest, limits } : rest)
     })
 
     const taskInspect = Effect.fn("ExperimentalHttpApi.taskInspect")(function* (ctx: {
@@ -177,7 +178,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     })
 
     const capabilities = Effect.fn("ExperimentalHttpApi.capabilities")(function* () {
-      return { backgroundSubagents: flags.backgroundSubagents }
+      return { backgroundSubagents: flags.backgroundSubagents, subagentLimits: true }
     })
 
     const tool = Effect.fn("ExperimentalHttpApi.tool")(function* (ctx: { query: typeof ToolListQuery.Type }) {

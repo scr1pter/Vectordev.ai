@@ -1325,6 +1325,11 @@ test("guests load the app's bootstrap routes, narrowed to their workspace", asyn
     const taskRoute = `/experimental/session/${ownerTasks.id}/tasks`
     // Seeing a shared workspace does not grant permission to steer or stop its owner's workers.
     expect((await call(taskRoute, { headers: guest })).status).toBe(200)
+    // The board's limits line carries the owner's configured limits, which a guest never sees (I19).
+    const limitsOf = async (headers: Record<string, string>) =>
+      ((await (await call(taskRoute, { headers })).json()) as { limits?: { maxRunning: number } }).limits
+    expect(await limitsOf(guest)).toBeUndefined()
+    expect((await limitsOf(owner))?.maxRunning).toBe(8)
     // Nor does it show a helper's absolute worktree, which goes only to the owner or a principal in control (I19).
     const registered = await call(`${taskRoute}/bridge/register`, {
       method: "POST",
