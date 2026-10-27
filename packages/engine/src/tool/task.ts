@@ -485,7 +485,7 @@ export const TaskTool = Tool.define(
       const reserved: SubagentLifecycle.Claim[] = []
       const release = () => Effect.sync(() => reserved.forEach((claim) => claims.delete(claim)))
       if (ownedPaths.length > 0) {
-        const conflicts = yield* claimLock.withPermits(1)(
+        const conflicts = yield* SubagentLifecycle.locked(claimLock)(
           Effect.gen(function* () {
             const running = (yield* background.list()).filter((job) => job.status === "running")
             const active = [
@@ -939,7 +939,7 @@ export const TaskTool = Tool.define(
           settledPart(done.settled, done.hold)
           if (persist) yield* persistPart()
           else if (batch) yield* ctx.metadata({ title, metadata: partMetadata() })
-        }, claimLock.withPermits(1))
+        }, SubagentLifecycle.locked(claimLock))
 
         const runTask = Effect.fn("TaskTool.runTask")(function* () {
           // Observe every prerequisite together so a later failure or stop can settle this task immediately.
@@ -1004,8 +1004,6 @@ export const TaskTool = Tool.define(
               title,
               startedAt,
               launchID: ctx.messageID,
-              ...(ctx.callID ? { callID: ctx.callID } : {}),
-              ...(batch ? { batchIndex: batch.index } : {}),
               ops,
               agent: ctx.agent,
               variant,
@@ -1161,7 +1159,7 @@ export const TaskTool = Tool.define(
             return busy ? ("delivered" as const) : ("queued" as const)
           },
           Effect.uninterruptible,
-          claimLock.withPermits(1),
+          SubagentLifecycle.locked(claimLock),
         )
         // A foreground run reports its result to the call that started it, so another call cannot add to it and be told
         // it will be notified later.
@@ -1184,7 +1182,7 @@ export const TaskTool = Tool.define(
         // The cycle check and the start hold the claim lock follow-ups take, so two calls cannot each pass the check and
         // then close a cycle together. A resumed child's record moves to this call only after its check passed, so a
         // call refused here leaves the record describing the run it already had.
-        const info = yield* claimLock.withPermits(1)(
+        const info = yield* SubagentLifecycle.locked(claimLock)(
           Effect.gen(function* () {
             if (SubagentLifecycle.stopping.has(nextSession.id))
               return yield* Effect.fail(
@@ -1419,11 +1417,12 @@ export const TaskTool = Tool.define(
               Object.assign(items[index], SubagentLifecycle.defined(patch))
               if (!returned) return yield* ctx.metadata({ title, metadata: metadata() })
               if (!ctx.callID) return
+              // Only this entry: a stop or resume may have patched a sibling's entry since the call returned.
               yield* SubagentLifecycle.patchPart({
                 sessions,
                 messageID: ctx.messageID,
                 callID: ctx.callID,
-                patch: metadata,
+                patch: (stored) => SubagentLifecycle.batchEntry(stored, index, items[index]) ?? metadata(),
               })
             }),
           )

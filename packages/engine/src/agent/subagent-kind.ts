@@ -112,7 +112,14 @@ export type SubagentRecord = {
   resultRef?: string
   resultSummary?: string
   reason?: string
-  notification?: { text: string; state: "completed" | "error" | "cancelled"; launchID: string; messageID?: string }
+  /** An undelivered result note. `messageID` claims it for one parent message; `claimedAt` dates that claim. */
+  notification?: {
+    text: string
+    state: "completed" | "error" | "cancelled"
+    launchID: string
+    messageID?: string
+    claimedAt?: number
+  }
   budgetScopes?: readonly import("@vectordevai/schema/task").Task.BudgetScope[]
   budget?: import("@vectordevai/schema/run-budget").RunBudget.Info
   mailbox?: Array<{ id: string; sender: string; text: string; delivery: "steer" | "queue"; createdAt: number; deliveredAt?: number }>
@@ -158,8 +165,11 @@ export type SubagentRecord = {
   reports?: { at: number[]; wakes: number }
   /** Why the child is queued, such as "Waiting for a free subagent slot". */
   slotReason?: string
-  /** Display copy only: destructive isolation steps read the registry file under Vector's data folder. */
-  isolation?: Task.Isolation
+  /**
+   * Display copy only: destructive isolation steps read the registry file under Vector's data folder. Never the
+   * absolute directory: guests and `vector export` read session metadata (I19).
+   */
+  isolation?: Omit<Task.Isolation, "directory">
   workflow?: SubagentWorkflow
 }
 

@@ -9,7 +9,9 @@ import { SessionPrompt } from "@/session/prompt"
 import { TaskManager } from "@/task/manager"
 import { DesktopTasks } from "@/task/desktop"
 import { TaskBridge } from "@vectordevai/schema/task-bridge"
+import type { Task } from "@vectordevai/schema/task"
 import type { TaskPromptOps } from "@/tool/task"
+import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
 import type { SessionID } from "@/session/schema"
 import { ToolJsonSchema } from "@/tool/json-schema"
 import { ToolRegistry } from "@/tool/registry"
@@ -36,6 +38,21 @@ function mapWorktreeError<A, R>(self: Effect.Effect<A, Worktree.Error, R>) {
   return self.pipe(
     Effect.mapError((error) => new WorktreeApiError({ name: error._tag, data: { message: error.message } })),
   )
+}
+
+type TaskResult = { readonly task?: Task.Info; readonly tasks?: readonly Task.Info[] }
+
+// A task result without any helper's absolute isolation directory.
+function withoutDirectories<T extends TaskResult>(result: T): T {
+  const hide = (task: Task.Info): Task.Info =>
+    task.isolation?.directory === undefined
+      ? task
+      : { ...task, isolation: SubagentLifecycle.withoutDirectory(task.isolation) }
+  return {
+    ...result,
+    ...(result.task ? { task: hide(result.task) } : {}),
+    ...(result.tasks ? { tasks: result.tasks.map(hide) } : {}),
+  }
 }
 
 export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "experimental", (handlers) =>
@@ -65,14 +82,20 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     })
     const taskError = <A, R>(effect: Effect.Effect<A, TaskManager.Error, R>) =>
       effect.pipe(Effect.mapError((error) => new TaskApiError({ code: error.code, message: error.message })))
+    // A helper's absolute isolation directory goes only to the owner or a principal in control of the session (I19).
+    const shown = <T extends TaskResult>(sessionID: SessionID, result: T) =>
+      Effect.map(RequestPrincipal, (principal) => (allowsSession(principal, sessionID) ? result : withoutDirectories(result)))
 
     const taskList = Effect.fn("ExperimentalHttpApi.taskList")(function* (ctx: {
       params: { sessionID: SessionID }
       query: typeof TaskListQuery.Type
     }) {
       yield* access(ctx.params.sessionID)
-      return yield* taskError(
-        tasks.list({ sessionID: ctx.params.sessionID, descendants: ctx.query.descendants, limit: ctx.query.limit }),
+      return yield* shown(
+        ctx.params.sessionID,
+        yield* taskError(
+          tasks.list({ sessionID: ctx.params.sessionID, descendants: ctx.query.descendants, limit: ctx.query.limit }),
+        ),
       )
     })
 
@@ -80,7 +103,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       params: { sessionID: SessionID; taskID: string }
     }) {
       yield* access(ctx.params.sessionID)
-      return yield* taskError(tasks.inspect(ctx.params))
+      return yield* shown(ctx.params.sessionID, yield* taskError(tasks.inspect(ctx.params)))
     })
 
     const taskMessage = Effect.fn("ExperimentalHttpApi.taskMessage")(function* (ctx: {
@@ -108,7 +131,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       payload: typeof TaskStopInput.Type
     }) {
       yield* access(ctx.params.sessionID, true)
-      return yield* taskError(tasks.stop({ ...ctx.params, ...ctx.payload }, taskPrompts))
+      return yield* shown(ctx.params.sessionID, yield* taskError(tasks.stop({ ...ctx.params, ...ctx.payload }, taskPrompts)))
     })
 
     const taskWait = Effect.fn("ExperimentalHttpApi.taskWait")(function* (ctx: {
@@ -116,7 +139,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       payload: typeof TaskWaitInput.Type
     }) {
       yield* access(ctx.params.sessionID)
-      return yield* taskError(tasks.wait({ ...ctx.params, ...ctx.payload }))
+      return yield* shown(ctx.params.sessionID, yield* taskError(tasks.wait({ ...ctx.params, ...ctx.payload })))
     })
 
     const owner = Effect.gen(function* () {

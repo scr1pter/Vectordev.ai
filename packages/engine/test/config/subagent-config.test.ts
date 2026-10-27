@@ -416,4 +416,31 @@ describe("loading a repository's subagent keys", () => {
       }),
     ),
   )
+
+  it.live("a file already noticed for budget.run is noticed again for a subagent spend key it adds", () =>
+    withGlobal(
+      {},
+      Effect.gen(function* () {
+        const seen = yield* notices
+        const directory = yield* tmpdirScoped({ git: true })
+        const file = path.join(directory, ".vector")
+        yield* write(file, { budget: { run: { usd: 1 } } })
+        yield* Effect.promise(() => trustWorkspace(directory))
+        yield* withInstance(directory, Config.use.get())
+        expect(seen).toHaveLength(1)
+        expect(seen[0]).toContain("sets budget.run,")
+
+        yield* write(file, { budget: { run: { usd: 1 }, subagents: { usd: 500 } } })
+        yield* Effect.promise(clear)
+        yield* withInstance(directory, Config.use.get())
+        expect(seen).toHaveLength(2)
+        expect(seen[1]).toContain(`This repository's ${path.join(".vector", "vector.json")} sets budget.subagents.usd,`)
+        expect(seen[1]).not.toContain("budget.run")
+
+        yield* Effect.promise(clear)
+        yield* withInstance(directory, Config.use.get())
+        expect(seen).toHaveLength(2)
+      }),
+    ),
+  )
 })

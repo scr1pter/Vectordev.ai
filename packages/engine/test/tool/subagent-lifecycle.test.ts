@@ -163,6 +163,65 @@ describe("SubagentLifecycle.claimNotification", () => {
       expect(recovered.flat()[0]?.text).toBe("A compact finding")
     }),
   )
+
+  it.instance("a claim whose message was never written is recovered once its grace has passed", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const database = yield* Database.Service
+      const { id, launch } = yield* parent()
+      const old = Date.now() - SubagentLifecycle.CLAIM_GRACE - 1_000
+      const note = { text: "Report", state: "completed" as const, launchID: launch }
+      // The engine claimed it and stopped before it wrote the message.
+      const lost = yield* child(id, launch, { notification: { ...note, messageID: MessageID.ascending(), claimedAt: old } })
+      // An older version's claim, without a date.
+      const legacy = yield* child(id, launch, { notification: { ...note, messageID: MessageID.ascending() } })
+      // Still its claimer's to write.
+      const writing = MessageID.ascending()
+      const fresh = yield* child(id, launch, { notification: { ...note, messageID: writing, claimedAt: Date.now() } })
+      // Delivered: its message exists.
+      const delivered = yield* child(id, launch, { notification: { ...note, messageID: launch, claimedAt: old } })
+
+      const human = [MessageID.ascending(), MessageID.ascending()]
+      const recovered = yield* Effect.all(
+        human.map((messageID) => SubagentLifecycle.recover(sessions, database, id, messageID)),
+        { concurrency: "unbounded" },
+      )
+      expect(
+        recovered
+          .flat()
+          .map((part) => part.metadata.taskNotification.taskID)
+          .toSorted(),
+      ).toEqual([lost, legacy].toSorted())
+      for (const taskID of [lost, legacy]) {
+        const claim = SubagentLifecycle.read(yield* sessions.get(taskID))?.notification
+        expect(human).toContain(claim?.messageID as MessageID)
+        expect(claim?.claimedAt).toBeGreaterThan(old)
+      }
+      expect(SubagentLifecycle.read(yield* sessions.get(fresh))?.notification?.messageID).toBe(writing)
+      expect(SubagentLifecycle.read(yield* sessions.get(delivered))?.notification?.messageID).toBe(launch)
+    }),
+  )
+
+  it.instance("a claim is released only when its message was never written", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const database = yield* Database.Service
+      const { id, launch } = yield* parent()
+      const note = { text: "Report", state: "completed" as const, launchID: launch }
+      const failed = MessageID.ascending()
+      const unwritten = yield* child(id, launch, { notification: { ...note, messageID: failed, claimedAt: 1 } })
+      const other = yield* child(id, launch, {
+        notification: { ...note, messageID: MessageID.ascending(), claimedAt: 1 },
+      })
+      const written = yield* child(id, launch, { notification: { ...note, messageID: launch, claimedAt: 1 } })
+
+      yield* SubagentLifecycle.releaseNotifications(sessions, database, id, failed, [unwritten, other])
+      yield* SubagentLifecycle.releaseNotifications(sessions, database, id, launch, [written])
+      expect(SubagentLifecycle.read(yield* sessions.get(unwritten))?.notification).toEqual(note)
+      expect(SubagentLifecycle.read(yield* sessions.get(other))?.notification?.messageID).toBeDefined()
+      expect(SubagentLifecycle.read(yield* sessions.get(written))?.notification?.messageID).toBe(launch)
+    }),
+  )
 })
 
 describe("SubagentLifecycle.patchEntry", () => {
@@ -229,6 +288,43 @@ describe("SubagentLifecycle.patchEntry", () => {
       ).toBe(false)
       const part = yield* stored(launch, batch)
       expect(part.state.status === "completed" ? part.state.metadata.tasks : undefined).toEqual(entries().slice(0, 2))
+    }),
+  )
+})
+
+describe("a returned batch's own writes", () => {
+  it.instance("merge only their entry, so a sibling's patched entry survives", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { id, launch } = yield* parent()
+      const tasks = [
+        { index: 0, title: "Map auth", status: "running", sessionId: "ses_a" },
+        { index: 1, title: "Map routes", status: "running", sessionId: "ses_b" },
+      ]
+      const callID = yield* toolPart(id, launch, {
+        status: "completed",
+        input: {},
+        output: "",
+        title: "2 subagent tasks",
+        metadata: { taskBatch: 1, status: "running", tasks },
+        time: { start: 1, end: 2 },
+      })
+      // A stop settles entry 0 while entry 1 still runs.
+      yield* SubagentLifecycle.patchEntry({ sessions, messageID: launch, callID, index: 0, patch: { status: "cancelled" } })
+      // Entry 1 settles; the batch's memory still says entry 0 is running.
+      yield* SubagentLifecycle.patchPart({
+        sessions,
+        messageID: launch,
+        callID,
+        patch: (metadata) => SubagentLifecycle.batchEntry(metadata, 1, { ...tasks[1], status: "completed" }) ?? {},
+      })
+      const part = yield* stored(launch, callID)
+      const metadata = part.state.status === "completed" ? part.state.metadata : {}
+      expect(metadata.tasks).toEqual([
+        { ...tasks[0], status: "cancelled" },
+        { ...tasks[1], status: "completed" },
+      ])
+      expect(metadata.status).toBe("cancelled")
     }),
   )
 })

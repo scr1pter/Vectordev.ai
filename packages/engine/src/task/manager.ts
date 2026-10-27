@@ -291,7 +291,7 @@ const layer = Layer.effect(
       const invalid = TaskMailbox.bodyError(text)
       if (invalid) return yield* new Error({ code: "invalid", message: invalid })
       if (DesktopTasks.owns(input.taskID)) return yield* bridge(desktop.message({ ...input, text }))
-      return yield* lock.withPermits(1)(
+      return yield* SubagentLifecycle.locked(lock)(
         Effect.gen(function* () {
           const session = yield* requireTask(input.sessionID, input.taskID, true)
           if (SubagentLifecycle.stopping.has(session.id))
@@ -399,7 +399,7 @@ const layer = Layer.effect(
         return yield* new Error({ code: "invalid", message: "Stop reasons are limited to 1000 characters." })
       const claimed = new Set<SessionID>()
       return yield* Effect.gen(function* () {
-        const prepared = yield* lock.withPermits(1)(
+        const prepared = yield* SubagentLifecycle.locked(lock)(
           Effect.gen(function* () {
             const board = yield* list({ sessionID: input.sessionID, descendants: true, limit: MAX_TASKS })
             if (board.truncated)
@@ -453,7 +453,7 @@ const layer = Layer.effect(
               const session = entry.session
               yield* jobs.cancel(session.id)
               yield* ops.cancel(session.id)
-              return yield* lock.withPermits(1)(
+              return yield* SubagentLifecycle.locked(lock)(
                 Effect.gen(function* () {
                   SubagentLifecycle.stopping.delete(session.id)
                   claimed.delete(session.id)
@@ -505,7 +505,7 @@ const layer = Layer.effect(
         (input.timeout ?? 30_000) > 60_000
       )
         return yield* new Error({ code: "invalid", message: "Wait timeout must be between 0 and 60000 milliseconds." })
-      const before = yield* lock.withPermits(1)(select(input.sessionID, input.taskIDs))
+      const before = yield* SubagentLifecycle.locked(lock)(select(input.sessionID, input.taskIDs))
       const settled = (tasks: readonly Task.Info[]) =>
         input.mode === "all"
           ? tasks.every((task) => !ACTIVE.has(task.status))

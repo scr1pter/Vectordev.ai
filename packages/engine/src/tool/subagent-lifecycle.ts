@@ -35,13 +35,14 @@ import { SessionMemory } from "@/session/memory"
 export const METADATA_KEY = "subagent"
 // Observation identity only: this never claims durable or clustered execution ownership.
 export const RUNTIME_ID = randomUUID()
-// Admission, messaging and Stop share one short critical section; execution runs outside it.
+// Admission, messaging and Stop share one short critical section; execution runs outside it. Take it with `locked`, so
+// an interrupted caller cannot keep it, and hold it only for in-memory and database steps.
 export const controlLock = Semaphore.makeUnsafe(1)
 // Stop releases the admission lock while interrupting nested runners; these claims block new work until cleanup ends.
 export const stopping = new Set<SessionID>()
 // Independent of admission: callers may already hold controlLock. Serialize metadata read/merge/write.
 const metadataLock = Semaphore.makeUnsafe(1)
-// Read-modify-write of a stored tool part that no live call is writing (patchEntry, settleOrphanPart).
+// Read-modify-write of a stored, settled tool part (patchPart, patchEntry, settleOrphanPart).
 const partLock = Semaphore.makeUnsafe(1)
 
 /** Owned paths a task call holds before its job lists them, or that a follow-up hands a task already running. */
@@ -163,6 +164,11 @@ function decoded<S extends Schema.Decoder<unknown, never>>(schema: S, input: unk
   return result._tag === "Some" ? result.value : undefined
 }
 
+/** An isolation view without its absolute directory, for anyone but the owner or a principal in control (I19). */
+export function withoutDirectory<T extends { directory?: string }>({ directory: _, ...rest }: T): Omit<T, "directory"> {
+  return rest
+}
+
 // The fields added for multi-agent work: each one valid, or undefined so the spread original is not kept.
 function extensions(value: Record<string, unknown>): Partial<SubagentRecord> {
   const oneOf = <T extends string>(input: unknown, values: readonly T[]) =>
@@ -171,6 +177,7 @@ function extensions(value: Record<string, unknown>): Partial<SubagentRecord> {
   const structured = decoded(Structured, value.structured)
   const interruption = decoded(Interruption, value.interruption)
   const reports = decoded(Reports, value.reports)
+  const isolation = decoded(Task.Isolation, value.isolation)
   return {
     conversationID: text(value.conversationID),
     rootSessionID: text(value.rootSessionID),
@@ -192,7 +199,8 @@ function extensions(value: Record<string, unknown>): Partial<SubagentRecord> {
     waiting: decoded(Waiting, value.waiting),
     stop: decoded(Stop, value.stop),
     reports: reports ? { at: reports.at.slice(-REPORTS_KEPT), wakes: reports.wakes } : undefined,
-    isolation: decoded(Task.Isolation, value.isolation),
+    // The absolute directory never stays in the record, which guests can read (I19); the isolation registry holds it.
+    isolation: isolation ? withoutDirectory(isolation) : undefined,
     workflow: decoded(Workflow, value.workflow) as SubagentRecord["workflow"],
   }
 }
@@ -218,7 +226,10 @@ export function read(info: Pick<Session.Info, "metadata">): SubagentRecord | und
     budget: budget._tag === "Some" ? budget.value : undefined,
     budgetScopes: scopes._tag === "Some" ? scopes.value : undefined,
     notification: isRecord(value.notification) && typeof value.notification.text === "string" && typeof value.notification.launchID === "string" && ["completed", "error", "cancelled"].includes(String(value.notification.state))
-      ? { ...value.notification, messageID: optionalString(value.notification.messageID) } : undefined,
+      ? {
+        ...value.notification, messageID: optionalString(value.notification.messageID),
+        claimedAt: typeof value.notification.claimedAt === "number" && Number.isFinite(value.notification.claimedAt) ? value.notification.claimedAt : undefined,
+      } : undefined,
     mailbox: Array.isArray(value.mailbox) ? value.mailbox.filter((item) => isRecord(item) && typeof item.id === "string" && typeof item.sender === "string" && typeof item.text === "string" && ["steer", "queue"].includes(String(item.delivery)) && typeof item.createdAt === "number" && Number.isFinite(item.createdAt)) : undefined,
     ...extensions(value),
   } as SubagentRecord
@@ -268,28 +279,76 @@ export function update(sessions: Session.Interface, sessionID: SessionID, patch:
   )
 }
 
+type Notification = NonNullable<SubagentRecord["notification"]>
+
+/** How long a claim stays its claimer's to write its message before recovery may take it over. */
+export const CLAIM_GRACE = 60_000
+
 /**
- * Claims a child's undelivered completion note for the parent message `messageID`: sets `notification.messageID` only
- * while it is unset, for this attempt. Returns whether this call won, so every path that delivers recovered notes
- * delivers each one once.
+ * Claims a child's undelivered completion note for the parent message `messageID`, for this attempt: sets
+ * `notification.messageID` while it is unset, or while it is still `stale` (a claim whose message was never written).
+ * `note` is stored when the record has none. Returns whether this call won, so each note is delivered once.
  */
 export function claimNotification(
   sessions: Session.Interface,
   childID: SessionID,
   attempt: number | undefined,
   messageID: MessageID,
+  options: { stale?: string; note?: Omit<Notification, "messageID" | "claimedAt"> } = {},
 ) {
   return Effect.gen(function* () {
     const info = yield* sessions.get(childID)
     const record = read(info)
-    const note = record?.notification
-    if (!record || !note || note.messageID || (attempt !== undefined && record.attempt !== attempt)) return false
+    const stored = record?.notification
+    const note = stored ?? options.note
+    if (!record || !note || (attempt !== undefined && record.attempt !== attempt)) return false
+    if (stored?.messageID !== undefined && stored.messageID !== options.stale) return false
     yield* sessions.setMetadata({
       sessionID: childID,
-      metadata: { ...info.metadata, [METADATA_KEY]: merge(record, { notification: { ...note, messageID } }) },
+      metadata: {
+        ...info.metadata,
+        [METADATA_KEY]: merge(record, { notification: { ...note, messageID, claimedAt: Date.now() } }),
+      },
     })
     return true
   }).pipe(locked(metadataLock))
+}
+
+const written = (database: Database.Interface, sessionID: SessionID, messageID: string) =>
+  MessageV2.get({ sessionID, messageID: messageID as MessageID }).pipe(
+    Effect.provideService(Database.Service, database),
+    Effect.option,
+    Effect.map((found) => found._tag === "Some"),
+  )
+
+/**
+ * Undoes the claims `childIDs` hold for the parent message `messageID` when that message was never written (its prompt
+ * failed), so the next recovery delivers those notes. Logs its own failures.
+ */
+export function releaseNotifications(
+  sessions: Session.Interface,
+  database: Database.Interface,
+  parentID: SessionID,
+  messageID: MessageID,
+  childIDs: readonly SessionID[],
+) {
+  return Effect.gen(function* () {
+    if (childIDs.length === 0 || (yield* written(database, parentID, messageID))) return
+    yield* Effect.forEach(childIDs, (childID) =>
+      Effect.gen(function* () {
+        const info = yield* sessions.get(childID)
+        const record = read(info)
+        if (!record?.notification || record.notification.messageID !== messageID) return
+        const { messageID: _, claimedAt: __, ...unclaimed } = record.notification
+        yield* sessions.setMetadata({
+          sessionID: childID,
+          metadata: { ...info.metadata, [METADATA_KEY]: merge(record, { notification: unclaimed }) },
+        })
+      }).pipe(locked(metadataLock)),
+    )
+  }).pipe(
+    Effect.catchCause((cause) => Effect.logWarning("task note claims could not be released", { parentID, cause })),
+  )
 }
 
 /** Recover undelivered reports only into a human's next prompt, never into a paid retry after a crash. */
@@ -299,15 +358,16 @@ export function recover(sessions: Session.Interface, database: Database.Interfac
     return (yield* Effect.forEach(children, (child) => Effect.gen(function* () {
       const record = read(child)
       const note = record?.notification
-      if (!note || note.messageID || record.runtimeID === RUNTIME_ID) return []
-      const launched = yield* MessageV2.get({ sessionID: parentID, messageID: note.launchID as MessageID }).pipe(
-        Effect.provideService(Database.Service, database), Effect.option,
-      )
-      if (launched._tag === "None") {
+      if (!note || record.runtimeID === RUNTIME_ID) return []
+      // A claim whose message was never written (its engine stopped first) is taken over once its grace has passed.
+      const stale = note.messageID
+      if (stale && ((note.claimedAt ?? 0) > Date.now() - CLAIM_GRACE || (yield* written(database, parentID, stale))))
+        return []
+      if (!(yield* written(database, parentID, note.launchID))) {
         yield* write(sessions, child.id, { notification: undefined }, record.attempt)
         return []
       }
-      if (!(yield* claimNotification(sessions, child.id, record.attempt, messageID))) return []
+      if (!(yield* claimNotification(sessions, child.id, record.attempt, messageID, { stale }))) return []
       return [{ type: "text" as const, synthetic: true, text: note.text, metadata: { taskNotification: { taskID: child.id, state: note.state, recovered: true } } }]
     }))).flat()
   })
@@ -398,7 +458,7 @@ export function settle(
 
 /**
  * Settles a child's run: its final record, its spend scopes, and what it read (for the parent's memory hold).
- * Undefined when the child has moved on to another attempt. Callers hold `controlLock`.
+ * Undefined when the child has moved on to another attempt. Callers hold `controlLock` through `locked`.
  */
 export const finish = Effect.fnUntraced(function* (
   sessions: Session.Interface,
@@ -440,13 +500,14 @@ export const settleRun = Effect.fnUntraced(function* (result: SessionV1.WithPart
  * writes the tool's returned metadata when it settles the call, so a part
  * that is still pending or running is retried briefly instead of patched. A
  * part that does not exist (a caller without a processor) is skipped. A
- * function `patch` is read when the write lands, so it carries the latest state.
+ * function `patch` is read when the write lands, from the stored metadata, so it
+ * carries the latest state. Each write holds partLock, as patchEntry does.
  */
 export function patchPart(input: {
   sessions: Session.Interface
   messageID: MessageID
   callID: string
-  patch: object | (() => object)
+  patch: object | ((stored: Record<string, unknown> | undefined) => object)
 }) {
   const attempt = Effect.gen(function* () {
     const part = (yield* MessageV2.parts(input.messageID)).find(
@@ -454,13 +515,13 @@ export function patchPart(input: {
     )
     if (!part) return "missing" as const
     if (part.state.status !== "completed" && part.state.status !== "error") return "pending" as const
-    const patch = typeof input.patch === "function" ? input.patch() : input.patch
+    const patch = typeof input.patch === "function" ? input.patch(part.state.metadata) : input.patch
     yield* input.sessions.updatePart({
       ...part,
       state: { ...part.state, metadata: merge(part.state.metadata, patch) },
     })
     return "done" as const
-  })
+  }).pipe(locked(partLock))
   return Effect.gen(function* () {
     for (let index = 0; index < PART_QUICK_ATTEMPTS + PART_SLOW_ATTEMPTS; index++) {
       if ((yield* attempt) !== "pending") return
@@ -534,14 +595,20 @@ function patchedBatch(
   return picked ? { ...metadata, tasks: next, status: batchStatus(next.filter(isRecord)) } : undefined
 }
 
+/** Batch metadata with `patch` merged into entry `index` and the status recomputed; undefined when it is not a batch's. */
+export function batchEntry(metadata: Record<string, unknown> | undefined, index: number, patch: object) {
+  return patchedBatch(metadata, (_, position) => position === index, patch)
+}
+
 /**
  * Merges `patch` into entry `index` of a batch task part's `metadata.tasks` and recomputes the batch status. For a part
- * no live call is writing: an orphaned one, or one whose call has returned. Returns whether the part changed.
+ * no live call is writing: an orphaned one, or one whose call has returned. A returned batch writes only its own
+ * entries, under the same lock, so a sibling still running keeps this change. Returns whether the part changed.
  */
 export function patchEntry(input: PartInput & { index: number; patch: object }) {
   return editPart(input, "SubagentLifecycle.patchEntry", (part) => {
     if (part.state.status === "pending") return undefined
-    const metadata = patchedBatch(part.state.metadata, (_, position) => position === input.index, input.patch)
+    const metadata = batchEntry(part.state.metadata, input.index, input.patch)
     return metadata ? { ...part.state, metadata } : undefined
   })
 }

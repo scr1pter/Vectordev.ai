@@ -37,11 +37,8 @@ export type Note = {
   text: string
   /** Whether the note may start a parent turn. */
   wake: boolean
-  hold?: BrainSchema.Hold
   recovered?: boolean
   quiet?: boolean
-  /** A workflow run's result. */
-  run?: boolean
 }
 
 export type ResultInput = {
@@ -57,8 +54,6 @@ export type ResultInput = {
   ops: TaskPromptOps
   agent: string
   variant?: string
-  hold?: BrainSchema.Hold
-  format?: "json"
 }
 
 export type WatchInput = {
@@ -69,12 +64,13 @@ export type WatchInput = {
   title: string
   startedAt: number
   launchID: MessageID
-  callID?: string
-  batchIndex?: number
   ops: TaskPromptOps
   agent: string
   variant?: string
-  /** Runs once the child's record is settled, before its note is written, under the control lock. */
+  /**
+   * Runs once the child's record is settled, before its note is written, under the control lock: it must not wait, so
+   * it forks any part write.
+   */
   onSettled?: (outcome: SubagentLifecycle.Outcome, hold?: BrainSchema.Hold) => Effect.Effect<void>
 }
 
@@ -202,9 +198,10 @@ type Window = {
   timer?: Fiber.Fiber<void>
 }
 
+// One instance's windows. Their fibers run in the node's own scope, not the instance's: disposing an instance (saving
+// the global config does) must neither drop a held note nor stop a watcher before its child is settled.
 type State = {
   windows: Map<SessionID, Window>
-  scope: Scope.Scope
   // Guards every window change; held only for short, in-memory steps.
   lock: Semaphore.Semaphore
 }
@@ -212,6 +209,7 @@ type State = {
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
+    const scope = yield* Scope.Scope
     const sessions = yield* Session.Service
     const statuses = yield* SessionStatus.Service
     const background = yield* BackgroundJob.Service
@@ -290,13 +288,13 @@ const layer = Layer.effect(
         window.timer = yield* Effect.sleep(wait).pipe(
           Effect.andThen(st.lock.withPermits(1)(fire(st, parentID))),
           Effect.interruptible,
-          Effect.forkIn(st.scope, { startImmediately: true }),
+          Effect.forkIn(scope, { startImmediately: true }),
         )
       },
     )
 
-    // Takes the whole batch and hands it to a delivery fiber of its own, which nothing interrupts but the instance's
-    // end. Runs under the lock.
+    // Takes the whole batch and hands it to a delivery fiber of its own, which nothing interrupts but the engine's end.
+    // Runs under the lock.
     const fire = (st: State, parentID: SessionID): Effect.Effect<void> =>
       Effect.gen(function* () {
         const window = st.windows.get(parentID)
@@ -305,7 +303,7 @@ const layer = Layer.effect(
         window.pending = []
         window.timer = undefined
         window.phase = "delivering"
-        yield* deliver(st, parentID, batch).pipe(
+        yield* deliver(parentID, batch).pipe(
           Effect.catchCause((cause) =>
             Cause.hasInterrupts(cause)
               ? Effect.void
@@ -313,7 +311,7 @@ const layer = Layer.effect(
           ),
           Effect.ensuring(SubagentLifecycle.locked(st.lock)(delivered(st, parentID))),
           Effect.interruptible,
-          Effect.forkIn(st.scope, { startImmediately: true }),
+          Effect.forkIn(scope, { startImmediately: true }),
         )
       })
 
@@ -326,14 +324,13 @@ const layer = Layer.effect(
         else st.windows.delete(parentID)
       })
 
-    const deliver = Effect.fnUntraced(function* (st: State, parentID: SessionID, batch: readonly Pending[]) {
+    const deliver = Effect.fnUntraced(function* (parentID: SessionID, batch: readonly Pending[]) {
       // A revert started while the notes were held is waited out here too.
       yield* unreverted(parentID, 1_000)
       const kept = (yield* Effect.forEach(batch, (item) =>
         current(parentID, item.note).pipe(Effect.map((ok) => (ok ? [item] : []))),
       )).flat()
-      const first = kept[0]
-      if (!first) return
+      if (kept.length === 0) return
       // Carry the parent's current turn settings: without a model the note would switch the parent to its agent's
       // configured model, and a note landing mid-run would drop the turn's fast mode or structured output.
       const latest = yield* sessions
@@ -353,25 +350,35 @@ const layer = Layer.effect(
       // a batch with nothing in it that wakes, such as stopped subagents: stopping work never makes the agent carry on
       // alone.
       const halted = (yield* guard.snapshot(parentID))?.stopped !== undefined
-      const silent = fenced.has(parentID) || halted || !kept.some((item) => wakes(item.note))
       const messageID = MessageID.ascending()
-      yield* Effect.forEach(kept, ({ note }) =>
-        note.kind === "result" && note.taskID && note.launchID && final(note.state)
-          ? SubagentLifecycle.write(
-              sessions,
-              note.taskID,
-              { notification: { text: note.text, state: note.state, launchID: note.launchID, messageID } },
-              note.attempt,
-            )
-          : Effect.void,
-      )
+      // Each result note is claimed for this message, so it is sent once: another engine on this database may have
+      // recovered it into a human's prompt while it was held.
+      const claimed: SessionID[] = []
+      const sent = (yield* Effect.forEach(kept, (item) => {
+        const { note } = item
+        if (note.kind !== "result" || !note.taskID || !note.launchID || !final(note.state)) return Effect.succeed([item])
+        const taskID = note.taskID
+        return SubagentLifecycle.claimNotification(sessions, taskID, note.attempt, messageID, {
+          note: { text: note.text, state: note.state, launchID: note.launchID },
+        }).pipe(
+          Effect.catch(() => Effect.succeed(false)),
+          Effect.map((won) => {
+            if (!won) return []
+            claimed.push(taskID)
+            return [item]
+          }),
+        )
+      })).flat()
+      const lead = sent[0]
+      if (!lead) return
+      const silent = fenced.has(parentID) || halted || !sent.some((item) => wakes(item.note))
       // The parent's turn runs on its own: the window is free again once the message is on its way, so a note landing
-      // during that turn joins it.
-      yield* first.ops
+      // during that turn joins it. A prompt that never wrote the message gives its claims back for recovery.
+      yield* lead.ops
         .prompt({
           sessionID: parentID,
           messageID,
-          agent: first.agent,
+          agent: lead.agent,
           ...(latest
             ? {
                 model: { providerID: latest.model.providerID, modelID: latest.model.modelID },
@@ -379,9 +386,9 @@ const layer = Layer.effect(
                 ...(latest.executionMode ? { executionMode: latest.executionMode } : {}),
                 ...(latest.format ? { format: latest.format } : {}),
               }
-            : { variant: first.variant }),
+            : { variant: lead.variant }),
           ...(silent ? { noReply: true } : {}),
-          parts: kept.map(({ note }) => ({
+          parts: sent.map(({ note }) => ({
             type: "text" as const,
             synthetic: true,
             text: note.text,
@@ -389,20 +396,21 @@ const layer = Layer.effect(
           })),
         })
         .pipe(
+          Effect.onError(() => SubagentLifecycle.releaseNotifications(sessions, database, parentID, messageID, claimed)),
           Effect.catchCause((cause) =>
             Cause.hasInterrupts(cause)
               ? Effect.void
               : Effect.logWarning("the parent could not take its task notes", { parentID, cause }),
           ),
           Effect.interruptible,
-          Effect.forkIn(st.scope, { startImmediately: true }),
+          Effect.forkIn(scope, { startImmediately: true }),
         )
     })
 
     const state = yield* InstanceState.make<State>(
       Effect.fn("TaskNotify.state")(function* () {
-        const st: State = { windows: new Map(), scope: yield* Scope.Scope, lock: Semaphore.makeUnsafe(1) }
-        // A turn the user starts takes the held notes with it.
+        const st: State = { windows: new Map(), lock: Semaphore.makeUnsafe(1) }
+        // A turn the user starts takes the held notes with it. This subscription is the instance's own.
         yield* events.subscribe(SessionStatus.Event.Status).pipe(
           Stream.runForEach((event) => {
             const parentID = SessionID.make(event.data.sessionID)
@@ -411,7 +419,7 @@ const layer = Layer.effect(
               : SubagentLifecycle.locked(st.lock)(schedule(st, parentID, true))
           }),
           Effect.interruptible,
-          Effect.forkIn(st.scope, { startImmediately: true }),
+          Effect.forkScoped({ startImmediately: true }),
         )
         return st
       }),
@@ -479,7 +487,6 @@ const layer = Layer.effect(
             state: input.state,
             text,
             wake: input.state !== "cancelled",
-            ...(input.hold ? { hold: input.hold } : {}),
           },
           ops: input.ops,
           agent: parent.agent ?? input.agent,
@@ -517,7 +524,6 @@ const layer = Layer.effect(
         ops: input.ops,
         agent: input.agent,
         variant: input.variant,
-        hold: done.hold,
       }
       const ended = outcome.status === "completed" || outcome.status === "error" ? outcome.status : "cancelled"
       yield* result({
@@ -534,7 +540,6 @@ const layer = Layer.effect(
     })
 
     const watch = Effect.fn("TaskNotify.watch")(function* (input: WatchInput) {
-      const st = yield* InstanceState.get(state)
       yield* background.wait({ id: input.jobID }).pipe(
         Effect.flatMap((waited) => settled(input, waited.info)),
         Effect.catchCause((cause) =>
@@ -543,7 +548,7 @@ const layer = Layer.effect(
             : Effect.logWarning("task completion was not reported", { taskID: input.taskID, cause }),
         ),
         Effect.interruptible,
-        Effect.forkIn(st.scope, { startImmediately: true }),
+        Effect.forkIn(scope, { startImmediately: true }),
       )
     })
 

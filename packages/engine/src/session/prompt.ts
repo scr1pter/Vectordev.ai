@@ -1974,8 +1974,22 @@ const layer = Layer.effect(
         ? yield* SubagentLifecycle.recover(sessions, database, input.sessionID, messageID).pipe(Effect.orDie)
         : []
       // Reports recovered after a restart precede the actual human text in the same input; they cannot become
-      // a newer synthetic user turn or start model execution on their own.
-      const message = yield* createUserMessage({ ...input, messageID, parts: [...recovered, ...input.parts] }, options)
+      // a newer synthetic user turn or start model execution on their own. A message refused before it was saved, such
+      // as a guest's to a model that may train, gives their claims back.
+      const message = yield* createUserMessage(
+        { ...input, messageID, parts: [...recovered, ...input.parts] },
+        options,
+      ).pipe(
+        Effect.onError(() =>
+          SubagentLifecycle.releaseNotifications(
+            sessions,
+            database,
+            input.sessionID,
+            messageID,
+            recovered.map((part) => part.metadata.taskNotification.taskID),
+          ),
+        ),
+      )
       yield* sessions.touch(input.sessionID)
 
       const permissions: PermissionV1.Rule[] = []

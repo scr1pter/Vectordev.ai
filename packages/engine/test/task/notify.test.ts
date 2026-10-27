@@ -16,7 +16,7 @@ import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
 import type { TaskPromptOps } from "@/tool/task"
 import type { SessionPrompt } from "@/session/prompt"
 import { TaskNotify } from "@/task/notify"
-import { disposeAllInstances } from "../fixture/fixture"
+import { disposeAllInstances, disposeAllInstancesEffect } from "../fixture/fixture"
 import { pollWithTimeout, testEffect } from "../lib/effect"
 
 // The note pipeline on its own: one window per parent, which notes start a turn, and what a note says.
@@ -504,6 +504,127 @@ describe("TaskNotify", () => {
         executionMode: "fast",
         format,
       })
+    }),
+  )
+
+  it.instance("a held note another engine recovered meanwhile is not sent again", () =>
+    Effect.gen(function* () {
+      const notify = yield* TaskNotify.Service
+      const sessions = yield* Session.Service
+      const { prompts, ops } = recorder()
+      const { id, launch } = yield* parent()
+      const taken = yield* child(id, launch)
+      const kept = yield* child(id, launch)
+
+      yield* notify.enqueue({ parentID: id, note: result(taken, launch), ops, agent: "build" })
+      yield* notify.enqueue({ parentID: id, note: result(kept, launch), ops, agent: "build" })
+      // A second engine on this database recovers the held note into a human's prompt.
+      yield* SubagentLifecycle.write(sessions, taken, {
+        notification: { text: "report", state: "completed", launchID: launch },
+      })
+      const human = MessageID.ascending()
+      expect(yield* SubagentLifecycle.claimNotification(sessions, taken, 1, human)).toBe(true)
+
+      yield* arrived(prompts)
+      yield* Effect.sleep(`${QUIET * 2} millis`)
+      expect(prompts).toHaveLength(1)
+      expect(notifications(prompts[0])).toEqual([{ taskID: kept, state: "completed" }])
+      expect(SubagentLifecycle.read(yield* sessions.get(taken))?.notification?.messageID).toBe(human)
+    }),
+  )
+
+  it.instance("a delivery whose prompt fails gives its claims back, so a later recovery sends the note", () =>
+    Effect.gen(function* () {
+      const notify = yield* TaskNotify.Service
+      const sessions = yield* Session.Service
+      const database = yield* Database.Service
+      const { id, launch } = yield* parent()
+      const task = yield* child(id, launch)
+      let tried = 0
+      const ops: TaskPromptOps = {
+        cancel: () => Effect.void,
+        resolvePromptParts: (text) => Effect.succeed([{ type: "text", text }]),
+        // The parent's agent was removed: the message is refused before it is saved.
+        prompt: () =>
+          Effect.sync(() => {
+            tried += 1
+          }).pipe(Effect.andThen(Effect.die(new Error('Agent not found: "build"')))),
+      }
+
+      yield* notify.enqueue({ parentID: id, note: result(task, launch), ops, agent: "build" })
+      yield* pollWithTimeout(
+        Effect.gen(function* () {
+          const note = SubagentLifecycle.read(yield* sessions.get(task))?.notification
+          return tried > 0 && note && note.messageID === undefined ? note : undefined
+        }),
+        "expected the failed delivery to give its claim back",
+        "5 seconds",
+      )
+
+      // After a restart, the next human prompt recovers it.
+      yield* SubagentLifecycle.write(sessions, task, { runtimeID: "previous-process" })
+      const recovered = yield* SubagentLifecycle.recover(sessions, database, id, MessageID.ascending())
+      expect(recovered.map((part) => part.metadata.taskNotification)).toEqual([
+        { taskID: task, state: "completed", recovered: true },
+      ])
+    }),
+  )
+
+  it.instance("disposing the instance neither drops a held note nor leaves a watched child running", () =>
+    Effect.gen(function* () {
+      const notify = yield* TaskNotify.Service
+      const jobs = yield* BackgroundJob.Service
+      const sessions = yield* Session.Service
+      const { prompts, ops } = recorder()
+      const { id, launch } = yield* parent()
+      const held = yield* child(id, launch)
+      const running = yield* child(id, launch)
+      yield* SubagentLifecycle.write(sessions, running, { status: "running" })
+      yield* jobs.start({
+        id: running,
+        type: "task",
+        metadata: { parentSessionId: id, background: true },
+        run: Effect.never,
+      })
+      const settled: SubagentLifecycle.Outcome[] = []
+      yield* notify.watch({
+        jobID: running,
+        parentID: id,
+        taskID: running,
+        attempt: 1,
+        title: "Survey",
+        startedAt: Date.now(),
+        launchID: launch,
+        ops,
+        agent: "build",
+        onSettled: (outcome) =>
+          Effect.sync(() => {
+            settled.push(outcome)
+          }),
+      })
+      // The running sibling holds this note for the whole HOLD.
+      yield* notify.enqueue({ parentID: id, note: result(held, launch), ops, agent: "build" })
+      yield* Effect.sleep("100 millis")
+      expect(prompts).toHaveLength(0)
+
+      // As saving the global config does.
+      yield* disposeAllInstancesEffect
+
+      const delivered = yield* pollWithTimeout(
+        Effect.sync(() => {
+          const notes = prompts.flatMap(notifications)
+          return notes.length >= 2 ? notes : undefined
+        }),
+        "expected both notes after the instance was disposed",
+        "5 seconds",
+      )
+      expect(delivered).toContainEqual({ taskID: held, state: "completed" })
+      expect(delivered).toContainEqual({ taskID: running, state: "cancelled" })
+      // The child is settled and its card was told so.
+      expect(settled.map((outcome) => outcome.status)).toEqual(["cancelled"])
+      const record = SubagentLifecycle.read(yield* sessions.get(running))
+      expect(record?.status).toBe("cancelled")
+      expect(record?.notification?.messageID).toBeDefined()
     }),
   )
 })

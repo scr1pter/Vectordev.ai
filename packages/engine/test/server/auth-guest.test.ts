@@ -1325,6 +1325,39 @@ test("guests load the app's bootstrap routes, narrowed to their workspace", asyn
     const taskRoute = `/experimental/session/${ownerTasks.id}/tasks`
     // Seeing a shared workspace does not grant permission to steer or stop its owner's workers.
     expect((await call(taskRoute, { headers: guest })).status).toBe(200)
+    // Nor does it show a helper's absolute worktree, which goes only to the owner or a principal in control (I19).
+    const registered = await call(`${taskRoute}/bridge/register`, {
+      method: "POST",
+      headers: owner,
+      body: JSON.stringify({
+        tasks: [
+          {
+            id: "workspace:isolated",
+            parentSessionID: ownerTasks.id,
+            source: "team",
+            title: "Isolated helper",
+            status: "completed",
+            startedAt: Date.now(),
+            elapsedMs: 0,
+            ownedPaths: [],
+            dependsOn: [],
+            resultAvailable: false,
+            attempt: 1,
+            controls: { inspect: true, message: false, stop: false },
+            isolation: { mode: "worktree", state: "active", branch: "vector/isolated", directory: other.path },
+          },
+        ],
+      }),
+    })
+    expect(registered.status).toBe(200)
+    const isolation = async (headers: Record<string, string>) =>
+      (
+        (await (await call(taskRoute, { headers })).json()) as {
+          tasks: Array<{ id: string; isolation?: Record<string, unknown> }>
+        }
+      ).tasks.find((task) => task.id === "workspace:isolated")?.isolation
+    expect(await isolation(guest)).toEqual({ mode: "worktree", state: "active", branch: "vector/isolated" })
+    expect((await isolation(owner))?.directory).toBe(other.path)
     expect(
       (
         await call(`${taskRoute}/wait`, {

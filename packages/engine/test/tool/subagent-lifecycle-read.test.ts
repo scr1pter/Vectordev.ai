@@ -159,4 +159,9 @@ describe("SubagentLifecycle.read", () => {
       state: "archived",
     })
   })
+
+  test("a stored isolation directory does not survive, since guests can read the record (I19)", () => {
+    const isolation = { ...fields.isolation, directory: "/Users/owner/.vector/worktrees/task-1" }
+    expect(read({ ...base, isolation })?.isolation).toEqual(fields.isolation)
+  })
 })

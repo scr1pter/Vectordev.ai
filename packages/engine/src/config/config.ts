@@ -1808,11 +1808,11 @@ const layer = Layer.effect(
 
     // A repository's budget.run stopped applying when spend limits became one overall set, and its subagent spend
     // limits (budget.subagents usd, steps, warnAt, unpricedSteps) never apply. Say so once per repository
-    // file, so a cap someone relied on does not disappear silently, without repeating it on every load. Parallel agents
-    // and copies of a repository load it from new folders, so a file is remembered by the repository it belongs to
-    // (its remote or first commit, which worktrees and copies share) and its path inside it rather than by where it
-    // sits on disk. A folder without Git has no such identity; its copies share the file's content instead. Only the
-    // most recent files are remembered, so the list cannot grow without bound.
+    // file and key, so a cap someone relied on does not disappear silently, without repeating it on every load. Parallel
+    // agents and copies of a repository load it from new folders, so a file is remembered by the repository it belongs
+    // to (its remote or first commit, which worktrees and copies share) and its path inside it rather than by where it
+    // sits on disk, with each key it was named for. A folder without Git has no such identity; its copies share the
+    // file's content instead. Only the most recent entries are remembered, so the list cannot grow without bound.
     const noticeIgnoredRunBudgets = Effect.fn("Config.noticeIgnoredRunBudgets")(function* (
       workspace: string,
       repository: string,
@@ -1828,21 +1828,25 @@ const layer = Layer.effect(
         ),
         Effect.orElseSucceed((): string[] => []),
       )
-      const entries = yield* Effect.forEach(ignored, ({ source, keys: settings }) =>
+      const entries = yield* Effect.forEach(ignored, ({ source, keys: dropped }) =>
         Effect.gen(function* () {
           const relative = path.relative(workspace, source) || source
-          if (repository !== "global") return { relative, settings, key: `${repository}:${relative}` }
-          const content = (yield* fs.readFileStringSafe(source).pipe(Effect.orElseSucceed(() => undefined))) ?? ""
-          return {
-            relative,
-            settings,
-            key: `content:${createHash("sha256").update(`${relative}\n${content}`).digest("hex").slice(0, 32)}`,
+          if (repository !== "global") {
+            const id = `${repository}:${relative}`
+            // An entry without a key is from 1.99.111, which named budget.run alone.
+            const settings = dropped.filter(
+              (setting) => !noticed.includes(`${id}#${setting}`) && !(setting === "budget.run" && noticed.includes(id)),
+            )
+            return { relative, settings, keys: settings.map((setting) => `${id}#${setting}`) }
           }
+          const content = (yield* fs.readFileStringSafe(source).pipe(Effect.orElseSucceed(() => undefined))) ?? ""
+          const key = `content:${createHash("sha256").update(`${relative}\n${content}`).digest("hex").slice(0, 32)}`
+          return { relative, settings: noticed.includes(key) ? [] : dropped, keys: [key] }
         }),
       )
-      const fresh = entries.filter((entry) => !noticed.includes(entry.key))
+      const fresh = entries.filter((entry) => entry.settings.length > 0)
       if (!fresh.length) return
-      const keys = fresh.map((entry) => entry.key)
+      const keys = fresh.flatMap((entry) => entry.keys)
       yield* fs
         .writeWithDirs(
           file,

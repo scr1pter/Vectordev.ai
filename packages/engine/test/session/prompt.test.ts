@@ -58,6 +58,7 @@ import { SystemPrompt } from "../../src/session/system"
 import { Shell } from "@vectordevai/core/shell"
 import { Snapshot } from "../../src/snapshot"
 import { ToolRegistry } from "@/tool/registry"
+import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
 import { Truncate } from "@/tool/truncate"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { Ripgrep } from "@vectordevai/core/ripgrep"
@@ -4013,6 +4014,60 @@ trainingPrompts.instance(
       expect(
         (yield* prompt.prompt({ sessionID: chat.id, model: freeRef, noReply: true, parts }, guest)).info,
       ).toMatchObject({ model: freeRef })
+    }),
+  { trusted: true },
+)
+
+trainingPrompts.instance(
+  "a guest's refused prompt gives back the task notes it recovered, so the next prompt carries them",
+  () =>
+    Effect.gen(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const laguna = { providerID: ProviderV2.ID.openrouter, modelID: ModelV2.ID.make(lagunaFree.id) }
+      const chat = yield* sessions.create({ title: "Shared" })
+      const parts = [{ type: "text" as const, text: "hello" }]
+      const launch = yield* prompt.prompt({ sessionID: chat.id, model: freeRef, noReply: true, parts })
+      // A helper the last engine ran, whose report never reached the parent before a restart.
+      const helper = yield* sessions.create({
+        parentID: chat.id,
+        metadata: {
+          subagent: {
+            kind: "subagent",
+            custom: false,
+            agent: "general",
+            title: "Survey",
+            parentSessionID: chat.id,
+            parentMessageID: launch.info.id,
+            model: freeRef,
+            background: true,
+            status: "completed",
+            startedAt: Date.now(),
+            runtimeID: "previous-process",
+            attempt: 1,
+            notification: { text: "A compact finding", state: "completed", launchID: launch.info.id },
+          },
+        },
+      })
+
+      const refused = yield* prompt
+        .prompt(
+          { sessionID: chat.id, model: laguna, noReply: true, parts },
+          { tightenBudget: true, refuseTrainingFreeModels: true },
+        )
+        .pipe(Effect.exit)
+      expect(Exit.isFailure(refused)).toBe(true)
+      expect(SubagentLifecycle.read(yield* sessions.get(helper.id))?.notification).toEqual({
+        text: "A compact finding",
+        state: "completed",
+        launchID: launch.info.id,
+      })
+
+      const next = yield* prompt.prompt({ sessionID: chat.id, model: freeRef, noReply: true, parts })
+      expect(
+        next.parts.flatMap((part) => (part.type === "text" && part.synthetic ? [part.metadata?.taskNotification] : [])),
+      ).toEqual([{ taskID: helper.id, state: "completed", recovered: true }])
+      expect(SubagentLifecycle.read(yield* sessions.get(helper.id))?.notification?.messageID).toBe(next.info.id)
     }),
   { trusted: true },
 )
