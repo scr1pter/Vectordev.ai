@@ -63,6 +63,7 @@ import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { BrainSkill } from "@vectordevai/core/brain/skill"
 import { BrainWorkflow } from "@vectordevai/core/brain/workflow"
 import { LearnedSkill } from "@/skill/learned"
+import { TaskNotify } from "@/task/notify"
 
 export const AppLayer = AppNodeBuilderV1.build(
   LayerNode.group([
@@ -88,6 +89,7 @@ export const AppLayer = AppNodeBuilderV1.build(
     SessionProjector.node,
     SessionStatus.node,
     BackgroundJob.node,
+    TaskNotify.node,
     RuntimeFlags.node,
     EventV2Bridge.node,
     SessionRunState.node,

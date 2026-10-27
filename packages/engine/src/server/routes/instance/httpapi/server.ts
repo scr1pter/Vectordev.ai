@@ -10,6 +10,7 @@ import { Agent } from "@/agent/agent"
 import { Auth } from "@/auth"
 import { BackgroundJob } from "@/background/job"
 import { TaskManager } from "@/task/manager"
+import { TaskNotify } from "@/task/notify"
 import { DesktopTasks } from "@/task/desktop"
 import { Command } from "@/command"
 import { Config } from "@/config/config"
@@ -271,6 +272,7 @@ const app = LayerNode.group([
   SessionStatus.node,
   BackgroundJob.node,
   TaskManager.node,
+  TaskNotify.node,
   DesktopTasks.node,
   RuntimeFlags.node,
   EventV2Bridge.node,

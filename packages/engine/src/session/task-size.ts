@@ -391,6 +391,18 @@ export function real(message: SessionV1.WithParts) {
   )
 }
 
+/** Where a note Vector recorded without starting a turn is marked, on its text parts' metadata. */
+export const QUIET = "taskQuiet"
+
+// A user message made only of such notes.
+function quiet(message: SessionV1.WithParts) {
+  return (
+    message.info.role === "user" &&
+    message.parts.length > 0 &&
+    message.parts.every((part) => part.type === "text" && part.metadata?.[QUIET] === true)
+  )
+}
+
 type Group = { users: SessionV1.WithParts[]; messages: SessionV1.WithParts[]; closed: boolean; carried?: Carried }
 
 function groups(messages: readonly SessionV1.WithParts[]) {
@@ -413,6 +425,8 @@ function groups(messages: readonly SessionV1.WithParts[]) {
         },
       ]
     }
+    // A note recorded without a turn (noReply) belongs to no request, so it never reopens a finished one.
+    if (quiet(message)) return list
     const current = list.at(-1)
     if (real(message)) {
       // A message sent while the run is going joins it; one sent after the run answered opens the next request.

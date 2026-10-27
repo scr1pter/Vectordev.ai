@@ -21,6 +21,7 @@ import { SessionRevert } from "@/session/revert"
 import { SessionStatus } from "@/session/status"
 
 import { TaskTool, type TaskPromptOps } from "../../src/tool/task"
+import { TaskNotify } from "@/task/notify"
 import { Truncate } from "@/tool/truncate"
 import { ToolRegistry } from "@/tool/registry"
 import { Provider } from "@/provider/provider"
@@ -61,8 +62,10 @@ const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
       Ripgrep.node,
       Provider.node,
       SpendGuard.node,
+      TaskNotify.node,
     ]),
-    [[RuntimeFlags.node, RuntimeFlags.layer(flags)]],
+    // The note window runs in milliseconds here: 300 of quiet, held at most a second.
+    [[RuntimeFlags.node, RuntimeFlags.layer({ noteQuietMs: 300, noteHoldMs: 1_000, ...flags })]],
   )
 
 const it = testEffect(layer())

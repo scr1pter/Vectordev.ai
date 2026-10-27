@@ -89,6 +89,22 @@ export function label(tier: Tier) {
   return { chat: "Chat", light: "Light", standard: "Standard", thorough: "Thorough" }[tier]
 }
 
+// Tags that frame instructions, messages or Vector's own task results. Text a model or a child wrote must not be able to
+// open or close one of them. Matched exactly as written, lowercase, so code such as `useState<User>` or `Array<Task>`
+// keeps its characters; so do YAML keys such as `user:`, since speaker labels are capitalized.
+const CONTROL_TAG =
+  /<(\/?)(system-reminder|system|task-notification|task|task_result|task_error|summary|orchestration_assignment|env|user|human|assistant|[a-z_]+_policy|[a-z_]+_instructions|vector_[a-z_]+)(?=[\s/>])/g
+const SPEAKER = /^([ \t]*)(Human|Assistant|System|User):/gm
+
+/**
+ * Text written by a model or a child, made safe to place inside another prompt: a backslash after the "<" of a control
+ * tag, and before a speaker label at the start of a line, keeps every character while it stops reading as markup or as
+ * another turn.
+ */
+export function neutralizeTags(text: string) {
+  return text.replace(CONTROL_TAG, "<\\$1$2").replace(SPEAKER, "$1\\$2:")
+}
+
 /**
  * Built-in tools a request of this size is not offered. Chat is offered no tools at all and goes out on its own lane,
  * so this is for Work and Thorough. MCP, plugin and custom tools are never removed: the user installed them.

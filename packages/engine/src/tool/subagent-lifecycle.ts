@@ -200,6 +200,16 @@ export function defined<T extends object>(value: T): Partial<T> {
   return Object.fromEntries(Object.entries(value).filter((entry) => entry[1] !== undefined)) as Partial<T>
 }
 
+/**
+ * Runs `effect` holding one permit of `lock`, which it takes uninterruptibly: a fiber interrupted at a yield just as it
+ * took the permit would otherwise keep it for good, and every later caller would wait forever. The effect itself stays
+ * as interruptible as the caller.
+ */
+export const locked =
+  (lock: Semaphore.Semaphore) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    Effect.uninterruptibleMask((restore) => lock.withPermits(1)(restore(effect)))
+
 /** Merges a patch into the child's record. setMetadata replaces the whole metadata object, so this reads first. */
 export function write(sessions: Session.Interface, sessionID: SessionID, patch: Partial<SubagentRecord>, attempt?: number) {
   return Effect.gen(function* () {
@@ -209,7 +219,7 @@ export function write(sessions: Session.Interface, sessionID: SessionID, patch: 
       sessionID,
       metadata: { ...info.metadata, [METADATA_KEY]: merge(read(info), patch) },
     })
-  }).pipe(metadataLock.withPermits(1))
+  }).pipe(locked(metadataLock))
 }
 
 export function update(sessions: Session.Interface, sessionID: SessionID, patch: Partial<SubagentRecord>, attempt?: number) {

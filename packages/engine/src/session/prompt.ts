@@ -61,6 +61,7 @@ import { Cause, Deferred, Effect, Exit, Fiber, Latch, Layer, Option, Scope, Cont
 
 import { InstanceState } from "@/effect/instance-state"
 import { TaskTool, type TaskPromptOps } from "@/tool/task"
+import { TaskNotify } from "@/task/notify"
 import { QUICK_DESCRIPTION } from "@/tool/escalate"
 import { SessionRunState } from "./run-state"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -282,6 +283,7 @@ const layer = Layer.effect(
     const skillLearn = yield* SessionSkillLearn.Service
     const workflowSession = yield* SessionWorkflow.Service
     const jobs = yield* BackgroundJob.Service
+    const taskNotes = yield* TaskNotify.Service
     const { db } = database
     const backgroundTasks = yield* InstanceState.make(
       Effect.fnUntraced(function* () {
@@ -1965,7 +1967,10 @@ const layer = Layer.effect(
         options?.tightenBudget ? guard.tighten(input.sessionID, budget) : guard.arm(input.sessionID, budget)
       if (input.budget) yield* arm(input.budget)
       const messageID = input.messageID ?? MessageID.ascending()
-      const recovered = input.parts.some((part) => part.type !== "text" || !part.synthetic)
+      const human = input.parts.some((part) => part.type !== "text" || !part.synthetic)
+      // The user writing again lifts "stop including helpers": their notes may start turns again.
+      if (human) yield* taskNotes.unfence(input.sessionID)
+      const recovered = human
         ? yield* SubagentLifecycle.recover(sessions, database, input.sessionID, messageID).pipe(Effect.orDie)
         : []
       // Reports recovered after a restart precede the actual human text in the same input; they cannot become
@@ -4394,6 +4399,7 @@ export const node = LayerNode.make({
     SessionSkillLearn.node,
     SessionWorkflow.node,
     BackgroundJob.node,
+    TaskNotify.node,
     FreeModelGuests.node,
     Git.node,
     ResearchStore.node,

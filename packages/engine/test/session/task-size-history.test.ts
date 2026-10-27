@@ -327,6 +327,37 @@ describe("SessionTaskSize.size", () => {
     expect(requests[0]?.messages).toHaveLength(4)
   })
 
+  test("a note recorded without a turn does not reopen a finished request", () => {
+    const note = (quiet: boolean) => {
+      const message = user('<task-notification id="ses_child" state="completed">Done.</task-notification>', {
+        synthetic: true,
+      })
+      for (const part of message.parts)
+        if (part.type === "text")
+          part.metadata = {
+            taskNotification: { taskID: "ses_child", state: "completed" },
+            ...(quiet ? { [SessionTaskSize.QUIET]: true } : {}),
+          }
+      return message
+    }
+    const history = (quiet: boolean) => [
+      user("fix the typo in README.md"),
+      assistant("Fixed it."),
+      note(quiet),
+      user("thanks"),
+      assistant("You're welcome!"),
+    ]
+    // A note that starts a turn continues the request it belongs to, so the user's next message joins it.
+    expect(size(history(false))).toHaveLength(1)
+    // A quiet one belongs to no request: the finished work stays finished, and "thanks" is a request of its own.
+    const requests = size(history(true))
+    expect(requests.map((request) => [request.tier, request.users.length])).toEqual([
+      ["standard", 1],
+      ["chat", 1],
+    ])
+    expect(requests.flatMap((request) => request.messages)).toHaveLength(4)
+  })
+
   test("on a caching provider the offered size stays the highest while the cache is warm, and resets once cold", () => {
     const warm = size([user(LARGE), assistant("Done."), user(UNRELATED)], true)
     expect(warm.map((request) => [request.tier, request.offered])).toEqual([
