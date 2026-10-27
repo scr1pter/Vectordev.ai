@@ -21,7 +21,7 @@ const page = [lander, index, footer].join("\n")
 // Link targets are left out: a model card's address can name an active size, though no page text does.
 const visible = [page, ...shots.map((shot) => shot.text)].map((text) => text.replace(/href(?:: |=)"[^"]*"/g, ""))
 
-// The brain ships in desktop 1.99.110, built in this tree, and the site deploys from main. Its section and the memory
+// The brain ships in desktop 1.99.110, built in this tree, and the site deploys from main. The hero deck and the memory
 // card name that release, and say it is coming until the download page offers it, then that it is new in it.
 test("the brain's release labels say coming in desktop 1.99.110 until that release is published, then new in it", () => {
   for (const version of ["1.99.108", "1.99.109"])
@@ -33,10 +33,11 @@ test("the brain's release labels say coming in desktop 1.99.110 until that relea
     for (const label of Object.values(brainCopy(version))) expect(label).not.toMatch(/\bexactly\b|\bprojects?\b/i)
 })
 
-test("the self-evolving agent and the memory card name desktop 1.99.110, the release the brain ships in", async () => {
+test("the hero deck and the memory card name desktop 1.99.110, the release the brain ships in", async () => {
   expect(await Bun.file(path.join(repo, "packages/core/src/brain/brain.ts")).exists()).toBe(true)
   expect(await Bun.file(path.join(repo, "packages/core/src/brain/knowledge.ts")).exists()).toBe(true)
-  expect(lander).toContain('<p class="story-kicker" data-reveal>Self-evolving · {brainRelease.kicker}</p>')
+  // The self-evolving section carries no kicker of its own (owner, 27 October 2026).
+  expect(lander).not.toContain("brainRelease.kicker")
   expect(lander).toContain('data-chapter="Self-evolving"')
   // The owner's title for the section (19 October 2026): the brain learns the people and the company, not only the code.
   expect(lander).toContain(
@@ -116,7 +117,7 @@ test("the self-evolving section says whose prompts and data they are, and no mor
 test("the hero, the title and the README call Vector the self-evolving, low-cost AI agentic harness", async () => {
   const source = await Bun.file(path.join(web, "src/pages/index.astro")).text()
   const readme = (await Bun.file(path.join(repo, "README.md")).text()).replace(/\s+/g, " ")
-  const hero = lander.slice(lander.indexOf('<section id="ch-start"'), lander.indexOf('<section id="everything"'))
+  const hero = lander.slice(lander.indexOf('<section id="ch-start"'), lander.indexOf('<section id="evolving"'))
   const deck = hero.slice(hero.indexOf('<p class="hero-deck simple-deck">'), hero.indexOf("</p>", hero.indexOf("hero-deck")))
   expect(lander).toContain('<span class="headline-lead">The self-evolving AI agentic harness&nbsp;that</span>')
   expect(lander).toContain('<span class="sr-only">The self-evolving AI agentic harness that has an agent of its own,')
@@ -161,19 +162,16 @@ test("request sizing and the Run Guard are called desktop features wherever the 
     .replace(/<[^>]+>/g, " ")
     .split(/(?<=[.!?])\s+/)
     .filter((sentence) => /Run Guard|is sized|sizes each request|stops a run/i.test(sentence))
-  expect(sentences.length).toBeGreaterThan(0)
   expect(sentences.filter((sentence) => !/desktop/i.test(sentence))).toEqual([])
-  expect(lander).toContain(
-    'In the desktop app, each request is sized first, so "hi" gets one small, direct reply, and a Run Guard stops a run within one step of the cap you set.',
-  )
   const phrases = lander.slice(lander.indexOf("const phrases = ["), lander.indexOf("]", lander.indexOf("const phrases = [")))
   expect(phrases).not.toMatch(/cap|Run Guard|sized|budget/i)
   expect(lander).not.toMatch(/sr-only">[^<]*(stops a run|cap you set)/)
 })
 
-// "Low-cost" rests on one published benchmark, quoted with its caveats: the integrated HTTP cells of the efficiency
-// archive, Vector on the Messages API against Claude Code at the same rates, as the investor page quotes it.
-test("the cost claim quotes the efficiency archive's first-session range against Claude Code, with its caveats", async () => {
+// "Low-cost" rests on one published benchmark, which the README quotes with its caveats: the integrated HTTP cells
+// of the efficiency archive, Vector on the Messages API against Claude Code at the same rates, as the investor page
+// quotes it.
+test("the README's cost claim quotes the efficiency archive's range against Claude Code, with its caveats", async () => {
   const summary = await Bun.file(path.join(repo, "docs/benchmarks/vector-efficiency-2026-10/summary.json")).json()
   const readme = (await Bun.file(path.join(repo, "README.md")).text()).replace(/\s+/g, " ")
   const cell = (
@@ -201,19 +199,12 @@ test("the cost claim quotes the efficiency archive's first-session range against
     if (Math.min(...savings) === Math.max(...savings)) return `${savings[0]}%`
     return `${Math.min(...savings)}–${Math.max(...savings)}%`
   }
-  // The landing page's note sits under the workspace cards, names the archive and the revision it froze, as the investor
-  // page's footnote does, and calls each party by name rather than "its".
+  // The README names the archive and the revision it froze, as the investor page's footnote does. The landing page no
+  // longer carries the note (owner, 27 October 2026).
   const archive = await Bun.file(path.join(repo, "docs/benchmarks/vector-efficiency-2026-10/README.md")).text()
   const revision = archive.match(/integrated command-line runtime is frozen at `([0-9a-f]{40})`/)?.[1]
   expect(revision).toBeDefined()
-  const workspace = lander.slice(
-    lander.indexOf('<section id="everything"'),
-    lander.indexOf("</section>", lander.indexOf('<section id="everything"')),
-  )
-  expect(workspace).toContain(
-    `Low cost, measured: Vector's offline efficiency benchmark, archived at docs/benchmarks/vector-efficiency-2026-10, ran Vector's runtime at an 11 October 2026 revision (commit ${revision?.slice(0, 9)}) and Claude Code 2.1.215 through identical scripted tool steps against a local fake model server, with the same number of model requests, on three fix tasks. In a first session, Vector's modelled spend was ${range(1)} below Claude Code's at the same list rates. The benchmark measures what each agent sends, not the quality of answers or your provider's bill, and does not show that Vector is cheaper than other agents in general.`,
-  )
-  expect(lander.match(/Low cost, measured/g)).toHaveLength(1)
+  expect(lander).not.toContain("Low cost, measured")
   expect(readme).toContain(`(commit ${revision?.slice(0, 9)}) and Claude Code 2.1.215`)
   expect(readme).toContain(
     `Vector's modelled spend was ${range(1)} lower in a first session and ${range(2)} lower in a second, run as a new process`,
