@@ -13,10 +13,44 @@ export const prerender = true
 
           <h2 id="skills">Skills</h2>
           <p>
-            Vector finds a skill as a <code>SKILL.md</code> (or <code>&lt;name&gt;.md</code>) in a skill folder, in the repository or global, and the agent calls it by name from the list of available skills.
+            A skill is a folder with a Markdown file named <code>SKILL.md</code>, in capitals, since on Linux the case
+            matters. Its frontmatter gives the skill's <code>name</code> and <code>description</code>, and its body
+            holds the instructions. Vector reads no other file name, so a skill saved as <code>&lt;name&gt;.md</code>
+            is not found, and a <code>SKILL.md</code> without a <code>name</code> is skipped. The name comes from the
+            frontmatter, not the folder; give each skill its own, because when two share one Vector logs a warning and
+            keeps only one. The agent sees each skill that has a description, by name and description, and loads one
+            by name, along with a sample of the files beside it.
+          </p>
+          <p>Vector looks for <code>SKILL.md</code> files at any depth under these folders:</p>
+          <ul>
+            <li>
+              <code>skill/</code> or <code>skills/</code> in Vector's own config folder (beside the
+              <code>AGENTS.md</code> that <a href="/docs/vector-agent#repository-rules">Repository rules</a>
+              describes), in a <code>.vector</code> folder in your home folder, and in the repository's
+              <code>.vector</code> folders, from the folder you work in up to the repository's root.
+            </li>
+            <li>
+              <code>.claude/skills/</code> and <code>.agents/skills/</code>, in your home folder and in the repository,
+              from the folder you work in up to its root. Setting <code>VECTOR_DISABLE_EXTERNAL_SKILLS</code> turns
+              these off.
+            </li>
+            <li>
+              Each folder listed in <code>skills.paths</code> in your settings. A path starting with <code>~/</code> is
+              in your home folder, and a relative path starts from the folder you work in.
+            </li>
+            <li>The skills downloaded from each address in <code>skills.urls</code>.</li>
+          </ul>
+          <p>
+            The repository's folders are read only once you trust the repository. A permission rule for
+            <code>skill</code>, whose pattern is the skill's name, can keep a skill from an agent: a skill it denies is
+            left out of that agent's list.
           </p>
           <p>
-            Downloaded skills are cached under a versioned directory, so updating one is clean rather than a manual copy. Skills are a Vector mechanism, not an MCP server.
+            An address in <code>skills.urls</code> serves an <code>index.json</code> that lists its skills and their
+            files, and Vector downloads them into its cache, one folder for each address and skill. When the index
+            gives a skill a <code>version</code>, a changed version is downloaded whole and replaces the old folder;
+            without one, files already downloaded are not fetched again. A downloaded skill too loads only from its
+            <code>SKILL.md</code>. Skills are a Vector mechanism, not an MCP server.
           </p>
 
           <h2 id="commands">Custom commands</h2>
