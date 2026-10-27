@@ -149,15 +149,16 @@ test("the download page points installed copies at Check for Updates and install
   expect(install).toContain("free Vector account")
 })
 
-test("visitors without an account reach the account download from the footer and the sign-in page", async () => {
-  // /download and the footer's platform links send anonymous visitors to /login, so the sign-in page has to say
-  // that a free account is the way to every installer.
+test("visitors without an account reach the installers from the footer and can sign up on the sign-in page", async () => {
+  // /download and the footer's platform links send anonymous visitors to /login, where a free account is one
+  // step away: the form's Sign up link switches it to creating one.
   expect(await Bun.file(`${web}src/components/marketing/SiteFooter.astro`).text()).toContain(
     '["All installers", "/download"]',
   )
-  const login = await Bun.file(`${web}src/pages/login.astro`).text()
-  expect(login).toContain(accountDownload)
-  expect(login).toContain("Create a free one")
+  const signIn = await Bun.file(`${web}src/components/marketing/account/AuthPage.tsx`).text()
+  expect(signIn).toContain("Don’t have an account?")
+  expect(signIn).toContain('"Sign up"')
+  expect(signIn).toContain('"Create account"')
 })
 
 test("troubleshooting explains in-app updates and their fallbacks", async () => {
