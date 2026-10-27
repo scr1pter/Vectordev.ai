@@ -705,3 +705,220 @@ describe("SessionTaskSize.size", () => {
     expect(SessionTaskSize.changedFiles(request, request.messages.at(-1)?.info.id)).toEqual([])
   })
 })
+
+// A background launch of one child, as the task call's settled part records it.
+function launched(child: string, text = "Launched a subagent.") {
+  return assistant(text, "stop", [{ tool: "task", metadata: { sessionId: child, background: true } }])
+}
+
+// A child's completion note, as TaskNotify writes it into the parent.
+function noteFrom(child: string, state = "completed", extra: Record<string, unknown> = {}) {
+  const message = user(`<task-notification id="${child}" state="${state}">Done.</task-notification>`, {
+    synthetic: true,
+  })
+  for (const part of message.parts)
+    if (part.type === "text") part.metadata = { taskNotification: { taskID: child, state, ...extra } }
+  return message
+}
+
+// A user message with a size the sender picked.
+function picked(text: string, size: "light" | "standard" | "thorough") {
+  const message = user(text)
+  if (message.info.role === "user") message.info.size = size
+  return message
+}
+
+function withPart(message: SessionV1.WithParts, part: { text: string; metadata: Record<string, unknown> }) {
+  message.parts.unshift({
+    id: PartID.ascending(),
+    sessionID,
+    messageID: message.info.id,
+    type: "text",
+    text: part.text,
+    synthetic: true,
+    metadata: part.metadata,
+  } as SessionV1.Part)
+  return message
+}
+
+describe("SessionTaskSize request model", () => {
+  test("a snapshot part on the opener is read back, and a compaction carries it", () => {
+    const children = [
+      { id: "ses_snap_a", title: "Port the lexer" },
+      { id: "ses_snap_b", title: "Port the parser" },
+    ]
+    const part = SessionTaskSize.snapshotPart(children, 5)
+    expect(part.text).toContain('"Port the lexer" (ses_snap_a)')
+    const opener = withPart(user("now add a settings page with a dark mode toggle"), part)
+    const reading = assistant("Adding it.", "tool-calls", [{ tool: "read" }])
+    const joined = user("and a test for it")
+    const history = [opener, reading, joined, assistant("Added.")]
+    const requests = size(history)
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.snapshot).toEqual(children)
+    expect(SessionTaskSize.snapshotOf(opener)).toEqual(children)
+    // A message without the part records nothing; the next request's opener has none.
+    expect(SessionTaskSize.snapshotOf(joined)).toBeUndefined()
+    expect(size([...history, user(UNRELATED)])[1]?.snapshot).toEqual([])
+    // A recorded empty snapshot reads back empty, not missing.
+    expect(SessionTaskSize.snapshotOf(withPart(user("x"), SessionTaskSize.snapshotPart([], 1)))).toEqual([])
+    // The compaction that replaces the opener records the snapshot, and the request goes on reading it.
+    const carried = SessionTaskSize.carry(requests[0]!, () => true)!
+    expect(carried.snapshot).toEqual(children)
+    const compaction = marker(carried)
+    const after = size([compaction, summary(compaction), user("Continue if you have next steps.", { synthetic: true })])
+    expect(after).toHaveLength(1)
+    expect(after[0]?.carried?.opened).toBe(opener.info.id)
+    expect(after[0]?.snapshot).toEqual(children)
+  })
+
+  test("notified counts a note at or before the step, including a recovered note placed on the opener", () => {
+    // A Light request a child's report joined may act on it at the size of the request that launched the child.
+    // Message IDs are ordered, so each history is made in the order it happened.
+    const history = [
+      user("migrate the parser and the lexer to the new tokenizer"),
+      launched("ses_light"),
+      picked("rename the README heading", "light"),
+      assistant("Renamed."),
+    ]
+    const light = history[2]!
+    const requests = size([...history, noteFrom("ses_light")])
+    expect(requests.map((request) => request.tier)).toEqual(["standard", "light"])
+    expect(requests[1]?.notified).toBe("standard")
+    expect(requests[0]?.notified).toBeUndefined()
+    // Before the report arrives, nothing is notified.
+    expect(size(history)[1]?.notified).toBeUndefined()
+    // A report recovered after a restart rides on the user's next message, the request's opener, and counts there.
+    const thorough = user(LARGE)
+    const launch = launched("ses_recovered")
+    const recovered = noteFrom("ses_recovered")
+    const opener = user("fix the typo in README.md")
+    opener.parts.unshift(...recovered.parts.map((part) => ({ ...part, messageID: opener.info.id })))
+    const after = size([thorough, launch, opener])
+    expect(after).toHaveLength(2)
+    expect(after[1]?.notified).toBe("thorough")
+    // The child the request launched itself reports at the request's own size.
+    const own = size([user("fix the login bug in src/auth.ts"), launched("ses_own"), noteFrom("ses_own")])
+    expect(own).toHaveLength(1)
+    expect(own[0]?.notified).toBe("standard")
+    // A note whose launch is out of view (a compaction summarised it) counts as Work.
+    expect(size([light, noteFrom("ses_unknown")])[0]?.notified).toBe("standard")
+  })
+
+  test("a joined message that keeps the tier adds no note entry and leaves the first entry unchanged", () => {
+    const opener = user("fix the typo in README.md")
+    const reading = assistant("Reading it.", "tool-calls", [{ tool: "read" }])
+    const before = size([opener, reading])[0]!
+    expect(before.notes).toHaveLength(1)
+    expect(before.notes[0]?.user).toBe(opener)
+    const after = size([opener, reading, user("and the one in CONTRIBUTING.md"), assistant("Fixed both.")])[0]!
+    expect(after.users).toHaveLength(2)
+    expect(after.notes).toEqual(before.notes)
+    expect(after.notes[0]).toMatchObject({ result: { tier: "standard" }, judge: "off" })
+  })
+
+  test("a joined be thorough adds a Thorough entry", () => {
+    const opener = user("fix the typo in README.md")
+    const reading = assistant("Reading it.", "tool-calls", [{ tool: "read" }])
+    const first = size([opener, reading])[0]!.notes
+    const thorough = user("actually, be thorough and check every page")
+    const request = size([opener, reading, thorough, assistant("Done.")])[0]!
+    expect(request.tier).toBe("thorough")
+    expect(request.notes.map((note) => [note.user.info.id, note.result.tier])).toEqual([
+      [opener.info.id, "standard"],
+      [thorough.info.id, "thorough"],
+    ])
+    expect(request.notes[0]).toEqual(first[0]!)
+    // A join that asks for the judge is a change of its own.
+    const judged = size([opener, reading, user("run the judge on it when you are done")])[0]!
+    expect(judged.notes.map((note) => note.judge)).toEqual(["off", "thorough"])
+  })
+
+  test("a joined no subagents adds capped:joined, keeps tier and escalation, also when it raised the tier", () => {
+    // Joined without raising: the escalated request stays Thorough, and launches stop from here.
+    const opener = user("switch the codebase to Go")
+    const escalate = assistant("This touches every package.", "tool-calls", [
+      { tool: "escalate", metadata: { from: "standard", to: "thorough" } },
+    ])
+    const cap = user("no subagents please")
+    const request = size([opener, escalate, cap, assistant("Ported it.")])[0]!
+    expect(request.result.reasons).toContain(SessionTaskSize.CAPPED_JOINED)
+    expect(SessionTaskSize.capped(request.result)).toBe(true)
+    expect(request).toMatchObject({ tier: "thorough", escalated: true })
+    expect(request.notes.map((note) => [note.user.info.id, SessionTaskSize.capped(note.result)])).toEqual([
+      [opener.info.id, false],
+      [cap.info.id, true],
+    ])
+    // Joined and raising Light to Work: the escalation still holds.
+    const light = picked("rename the README heading", "light")
+    const raise = assistant("This needs more.", "tool-calls", [
+      { tool: "escalate", metadata: { from: "light", to: "thorough" } },
+    ])
+    const raising = user("also update the docs across the whole site, no subagents")
+    const raised = size([light, raise, raising, assistant("Updated.")])[0]!
+    expect(raised.result.tier).toBe("standard")
+    expect(raised.result.reasons).toContain(SessionTaskSize.CAPPED_JOINED)
+    expect(raised).toMatchObject({ tier: "thorough", escalated: true })
+    expect(raised.notes.map((note) => note.result.tier)).toEqual(["light", "standard"])
+    // Said in the opening message, it still keeps the request at Work.
+    const asked = user("switch the codebase to Go, no subagents")
+    const opened = size([
+      asked,
+      assistant("This touches every package.", "tool-calls", [
+        { tool: "escalate", metadata: { from: "standard", to: "thorough" } },
+      ]),
+    ])[0]!
+    expect(opened.result.reasons).not.toContain(SessionTaskSize.CAPPED_JOINED)
+    expect(opened).toMatchObject({ tier: "standard", escalated: false })
+  })
+
+  test("a Chat group carrying a non-cancelled note becomes standard with reason notified, on the launching request's ledger", () => {
+    // Message IDs are ordered, so each history is made in the order it happened.
+    const thanked = (ask: string, launch = true) => [
+      user(ask),
+      launch ? launched("ses_chat") : assistant("Done."),
+      user("thanks", { agent: "quick" }),
+      assistant("You're welcome!", "stop", [], "quick"),
+    ]
+    const history = thanked("fix the parser bug in src/parser.ts")
+    const [work, , thanks] = history
+    expect(size(history)[1]).toMatchObject({ tier: "chat", ledgerRequestID: thanks!.info.id })
+    const requests = size([...history, noteFrom("ses_chat")])
+    expect(requests).toHaveLength(2)
+    expect(requests[1]?.result).toMatchObject({ tier: "standard", source: "auto", reasons: ["notified"] })
+    expect(requests[1]).toMatchObject({ tier: "standard", notified: "standard" })
+    expect(requests[1]?.ledgerRequestID).toBe(work!.info.id)
+    expect(requests[0]?.ledgerRequestID).toBe(work!.info.id)
+    // Its note is the size it runs at.
+    expect(requests[1]?.notes.map((note) => [note.user.info.id, note.result.tier])).toEqual([
+      [thanks!.info.id, "standard"],
+    ])
+    // A Thorough launch makes the report's turn Thorough.
+    const large = thanked(LARGE)
+    expect(size([...large, noteFrom("ses_chat")])[1]).toMatchObject({
+      tier: "thorough",
+      ledgerRequestID: large[0]!.info.id,
+    })
+    // A cancelled or quiet note leaves the thanks on the quick lane.
+    for (const quiet of [false, true]) {
+      const again = thanked("fix the parser bug in src/parser.ts")
+      const note = quiet ? noteFrom("ses_chat", "completed", { quiet: true }) : noteFrom("ses_chat", "cancelled")
+      expect(size([...again, note])[1]).toMatchObject({ tier: "chat" })
+    }
+    // With the launch out of view, the ledger is the work before the thanks.
+    const unseen = thanked("fix the parser bug in src/parser.ts", false)
+    expect(size([...unseen, noteFrom("ses_unseen")])[1]).toMatchObject({
+      tier: "standard",
+      ledgerRequestID: unseen[0]!.info.id,
+    })
+  })
+
+  test("every request's ledger is its opener, or the summarised opener after a compaction", () => {
+    const history = [user("fix the typo in README.md"), assistant("Fixed."), user(UNRELATED), assistant("Added.")]
+    const requests = size(history)
+    expect(requests.map((request) => request.ledgerRequestID)).toEqual([history[0]!.info.id, history[2]!.info.id])
+    const opening = MessageID.ascending()
+    const compaction = marker({ opened: opening, tier: "standard", judge: "off", text: "x", files: [], agents: [] })
+    expect(size([compaction, summary(compaction)])[0]?.ledgerRequestID).toBe(opening)
+  })
+})

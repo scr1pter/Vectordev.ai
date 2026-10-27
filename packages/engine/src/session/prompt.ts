@@ -2305,15 +2305,14 @@ const layer = Layer.effect(
           fiber.addObserver(() => background.titles.delete(fiber))
         }
         const task = tasks.pop()
-        // The request a root session's subagent launches count against (5.B.2): the message that opened it.
+        // The request a root session's subagent launches count against (5.B.2): the message that opened it, or for a
+        // Chat message a completion note made work, the request that launched that subagent.
         const delegationContext: TaskLimits.Context | undefined =
           session.parentID || session.internal
             ? undefined
             : {
-                // A compaction that replaced the opening message recorded it.
                 requestID:
-                  sized?.carried?.opened ??
-                  sized?.users[0]?.info.id ??
+                  sized?.ledgerRequestID ??
                   msgs.findLast((message) => SessionTaskSize.real(message))?.info.id ??
                   lastUser.id,
               }
@@ -2582,14 +2581,14 @@ const layer = Layer.effect(
             // and the lead's permissions let it launch nothing else. The user's "no subagents" keeps the lead on its
             // own, and once Run Guard warns no new researcher starts.
             const capped = SessionTaskSize.capped(build.result)
-            for (const id of TaskSize.withheld(build.offered, build.result.agents.length))
+            for (const id of withheldOnWork(build.offered, build.result.agents.length))
               if (capped || id !== "task") delete tools[id]
             // A capped lead has no researcher to launch, so none to manage either (5.B.5).
             if (capped) for (const id of ["task", "task_manage"]) delete tools[id]
             if ((yield* guard.snapshot(sessionID))?.warned === true) delete tools.task
             delete tools.escalate
           } else if (build) {
-            for (const id of TaskSize.withheld(build.offered, build.result.agents.length)) delete tools[id]
+            for (const id of withheldOnWork(build.offered, build.result.agents.length)) delete tools[id]
             // A thorough request has nothing to raise to, and the user kept a capped one at Work. On a caching provider
             // the tool keeps its place so a smaller follow-up sends the same definitions and reads the cached prefix;
             // it refuses to raise a capped request.
@@ -4052,6 +4051,15 @@ function workflowNotes(requests: readonly SessionTaskSize.Request[], current: Se
       return user && workflow ? [[user.info.id, workflow] as const] : []
     }),
   )
+}
+
+// Work requests keep the tools they had before the offer rules: below Thorough, no task or task_manage unless the
+// user named a subagent. Removed once delegation on Work is wired in with its policy and capability flag.
+function withheldOnWork(tier: TaskSize.Tier, agents: number) {
+  return new Set([
+    ...TaskSize.withheld(tier, agents),
+    ...(tier !== "thorough" && agents === 0 ? ["task", "task_manage"] : []),
+  ])
 }
 
 // Below Thorough the task tool may stay in a cached request's definitions; only a subagent the user named runs.
