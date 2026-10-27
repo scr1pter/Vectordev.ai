@@ -72,6 +72,66 @@ export const prerender = true
           </p>
           <p class="doc-cmd"><code>vector agent create --description "reviews SQL migrations" --mode subagent
 vector agent list</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <h3 id="agent-files">Agent files</h3>
+          <p>
+            An agent is a Markdown file in an <code>agents/</code> or <code>agent/</code> folder: the repository's
+            <code>.vector/agents/</code>, <code>~/.vector/agents/</code>, or <code>agents/</code> in Vector's own config
+            folder, which <a href="/docs/vector-agent#repository-rules">Repository rules</a> says where to find. The
+            file's path is the agent's name, so <code>.vector/agents/sql-review.md</code> is <code>sql-review</code>;
+            the frontmatter holds its settings and the body is its prompt. <code>vector agent create</code> writes such
+            a file in your config folder or the repository's <code>.vector/agents/</code>. A repository's agents load
+            once you trust it.
+          </p>
+          <pre><code>{`---
+description: Reviews SQL migrations for locking, data loss and missing rollbacks.
+mode: subagent
+model: anthropic/claude-sonnet-5
+temperature: 0.1
+steps: 30
+permission:
+  edit: deny
+  bash:
+    "*": ask
+    "git diff*": allow
+---
+You review SQL migrations. For each one, say which tables it locks and for how long,
+whether it can lose data, and whether it can be rolled back.`}</code></pre>
+          <h3 id="agent-fields">Agent fields</h3>
+          <dl class="doc-rows">
+            <div><dt>description</dt><dd>When to use the agent. Vector's agent reads it to decide what to hand this one.</dd></div>
+            <div><dt>mode</dt><dd><code>primary</code> for an agent you pick to answer, <code>subagent</code> for one the main agent hands work to and you can call with <code>@</code> and its name, or <code>all</code> for both, the default for an agent you add.</dd></div>
+            <div><dt>model</dt><dd>The model it runs on, as <code>provider/model</code>.</dd></div>
+            <div><dt>variant</dt><dd>The effort level it uses when it runs on its own <code>model</code>.</dd></div>
+            <div><dt>prompt</dt><dd>Its instructions. In a file, the body is the prompt.</dd></div>
+            <div><dt>temperature and top_p</dt><dd>Sampling settings for its requests. Vector sends a temperature only to a model that takes one.</dd></div>
+            <div><dt>steps</dt><dd>How many model steps it may take before it has to answer in text alone.</dd></div>
+            <div><dt>permission</dt><dd>Rules of its own, which come after your general rules; see <a href="/docs/permissions#rule-order">Which rule decides</a>.</dd></div>
+            <div><dt>color</dt><dd>A hex colour such as <code>#3B82F6</code>, or <code>primary</code>, <code>secondary</code>, <code>accent</code>, <code>success</code>, <code>warning</code>, <code>error</code> or <code>info</code>.</dd></div>
+            <div><dt>hidden</dt><dd><code>true</code> keeps a subagent out of the <code>@</code> list; Vector's agent can still hand it work.</dd></div>
+            <div><dt>disable</dt><dd><code>true</code> removes the agent. For one of the eight specialists it is the same as switching it off in Settings → Agents.</dd></div>
+            <div><dt>any other key</dt><dd>Sent to the model provider as an option with each of the agent's requests.</dd></div>
+          </dl>
+          <h3 id="agents-in-vector-json">Agents in vector.json</h3>
+          <p>
+            The <code>agent</code> key in <code>vector.json</code> takes the same fields, with the prompt as text or as
+            <code>{"{file:./path}"}</code> (see <a href="/docs/configuration#substitution">Configuration files</a>). An
+            entry named after a built-in agent changes that agent: <code>build</code> is the main agent and
+            <code>plan</code> is Plan mode. The read-only specialists stay read-only, since your rules can only narrow
+            them. <code>default_agent</code> names the agent that answers when you do not pick one; it must be a primary
+            agent that is not hidden.
+          </p>
+          <pre><code>{`{
+  "default_agent": "build",
+  "agent": {
+    "build": { "model": "anthropic/claude-opus-5" },
+    "sql-review": {
+      "description": "Reviews SQL migrations for locking, data loss and missing rollbacks.",
+      "mode": "subagent",
+      "prompt": "{file:./prompts/sql-review.md}",
+      "permission": { "edit": "deny" }
+    }
+  }
+}`}</code></pre>
           <p class="note">
             Past six running siblings Vector tells the model to mention the spend, because each subagent spends on your keys.
           </p>

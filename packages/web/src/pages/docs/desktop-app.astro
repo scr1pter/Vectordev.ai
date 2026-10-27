@@ -84,6 +84,39 @@ export const prerender = true
             <strong>General</strong> also has a <strong>Terminal</strong> card with the <strong>Terminal Shell</strong> picker, Auto by default: the shell the terminal and the composer's shell mode use. Agent tool calls use it too, unless the picker marks it terminal only, as it does fish.
           </p>
 
+          <h2 id="remote-servers">Connect to a Vector server on another machine</h2>
+          <p>
+            The desktop app runs its own engine on your computer, and it can also work with a Vector server on another
+            machine, such as a workstation that holds your repositories, started there with <code>vector serve</code>.
+            Repositories you open on that server, and the provider keys, custom providers and MCP servers you add while
+            working on it, are on that machine.
+          </p>
+          <ol class="steps">
+            <li><span>1</span><div><strong>Start the server with a password</strong><p>On the other machine, set <code>VECTOR_SERVER_PASSWORD</code> from a protected secret source, and <code>VECTOR_SERVER_USERNAME</code> if you want a username other than <code>vector</code>. Then run <code>vector serve</code> with a <code>--port</code> and the <code>--hostname</code> to listen on. Read the rules below before it listens beyond loopback.</p></div></li>
+            <li><span>2</span><div><strong>Add it in Settings</strong><p>In Settings → Environment &amp; servers, choose <strong>Add server</strong>. Enter the server address with its port, such as <code>http://192.168.1.20:4096</code>, an optional name, and under <strong>Authentication</strong> the username and password the server was started with. Vector checks the address as you type and adds the server only once it answers.</p></div></li>
+            <li><span>3</span><div><strong>Work on it</strong><p>With more than one server, Home lists each one under <strong>Agents</strong> with its repositories, and <strong>Open repository</strong> beside a server lets you pick a folder on that machine. <strong>Set as default</strong> in a server's menu opens the app on that server the next time it starts, and <strong>Remove default</strong> goes back to the app's own engine.</p></div></li>
+          </ol>
+          <p>
+            Each server in the list shows whether it answers, its version and its username. Its menu also has
+            <strong>Edit</strong> and <strong>Delete</strong>. An address typed without <code>http://</code> or
+            <code>https://</code> uses <code>http://</code> for this computer or your own network (private, link-local
+            and CGNAT addresses such as Tailscale's, and names such as <code>gpu-box</code> or
+            <code>nas.local</code>) and <code>https://</code> for anything else. Vector refuses an address with a
+            username or password inside it, and sends a password over plain HTTP only to this computer or your own
+            network: <em>A password is sent over plain HTTP only to this computer or your own network. Use an https://
+            address for this server.</em>
+          </p>
+          <p class="note is-caution">
+            A server on your network is reachable by anyone who can reach that port. From 1.99.99 a server listening
+            beyond loopback needs <code>VECTOR_SERVER_PASSWORD</code> unless you pass <code>--unsecured</code>; do not
+            pass it on a shared network. From the next CLI release a server with a password also refuses to listen beyond
+            loopback unless you pass <code>--trusted-network</code>, which is for a network you trust, such as a private LAN,
+            because plain HTTP carries the password in every request. From anywhere else, keep the server on loopback
+            behind a TLS reverse proxy or tunnel and add its <code>https://</code> address. Releases before 1.99.99 do
+            not enforce the password rule, so keep them on loopback. See
+            <a href="/docs/terminal-agent#cli-server">Server, web and editors</a>.
+          </p>
+
           <h2 id="help-assistant">Help inside the app</h2>
           <p>
             The help panel answers questions without leaving Vector. Its <strong>Assistant</strong> tab replies only from Vector's own documentation, and says plainly when it cannot reach the service or has nothing to offer rather than inventing an answer; the <strong>Documentation</strong> tab browses the same material.
