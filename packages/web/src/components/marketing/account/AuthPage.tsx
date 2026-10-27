@@ -65,7 +65,7 @@ export function AuthPage() {
 
   useEffect(() => {
     if (revealed) firstRevealed.current?.focus()
-  }, [revealed])
+  }, [revealed, mode])
 
   const google = () => {
     setError("")

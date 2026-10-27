@@ -72,5 +72,30 @@ test("/login is two panels: Vector's art and logo beside the form, with the load
   expect(page).not.toContain("MatrixRain")
   const css = await Bun.file(`${web}src/components/marketing/account/account.css`).text()
   expect(css).toMatch(/\.signin-form \{[^}]*width: min\(384px, 100%\);/)
-  expect(css).toMatch(/@media \(max-width: 767px\) \{[\s\S]*?\.signin-art \{\s*display: none;/)
+  // The art panel hides inside the phone-width block itself, not in some later rule.
+  const start = css.indexOf("@media (max-width: 767px) {")
+  expect(start).toBeGreaterThan(-1)
+  let depth = 0
+  let end = start
+  for (let index = css.indexOf("{", start); index < css.length; index++) {
+    if (css[index] === "{") depth++
+    if (css[index] === "}" && --depth === 0) {
+      end = index
+      break
+    }
+  }
+  expect(css.slice(start, end)).toMatch(/\.signin-art \{\s*display: none;/)
+})
+
+test("Continue asks for the email first, then the same form signs in or creates the account as before", async () => {
+  const source = await Bun.file(`${web}src/components/marketing/account/AuthPage.tsx`).text()
+  const guard = source.indexOf("if (!revealed) {")
+  expect(guard).toBeGreaterThan(-1)
+  expect(source.indexOf("setRevealed(true)", guard)).toBeGreaterThan(guard)
+  // The guard returns before any account call, and the second submit makes the same calls the old page made.
+  expect(source.indexOf("signInWithPassword({ email, password })")).toBeGreaterThan(guard)
+  expect(source.indexOf("client.auth.signUp(")).toBeGreaterThan(guard)
+  expect(source).toContain("emailRedirectTo: `${location.origin}/account`")
+  // A fresh sign-in before account deletion still makes Google ask which account.
+  expect(source).toContain('...(reauth ? { queryParams: { prompt: "select_account" } } : {})')
 })

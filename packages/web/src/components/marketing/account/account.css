@@ -530,7 +530,7 @@
 }
 
 .signin-input::placeholder {
-  color: rgba(184, 170, 200, 0.46);
+  color: rgba(184, 170, 200, 0.7);
 }
 
 .signin-password {
