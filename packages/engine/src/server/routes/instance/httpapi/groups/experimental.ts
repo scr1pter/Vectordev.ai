@@ -51,8 +51,19 @@ export const TaskWaitInput = Schema.Struct({
   timeout: Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 60_000 }))),
 })
 
+// A client uses a feature only when its flag is true; a missing flag means the engine lacks it. The flags expose no
+// limit values.
 const CapabilitiesResponse = Schema.Struct({
   backgroundSubagents: Schema.Boolean,
+  workDelegation: Schema.optional(Schema.Boolean),
+  subagentLimits: Schema.optional(Schema.Boolean),
+  sessionStop: Schema.optional(Schema.Boolean),
+  taskPromote: Schema.optional(Schema.Boolean),
+  taskResume: Schema.optional(Schema.Boolean),
+  taskAttention: Schema.optional(Schema.Boolean),
+  taskIsolation: Schema.optional(Schema.Boolean),
+  workflows: Schema.optional(Schema.Boolean),
+  backgroundShells: Schema.optional(Schema.Boolean),
 }).annotate({ identifier: "ExperimentalCapabilities" })
 
 const ToolIDs = Schema.Array(Schema.String).annotate({ identifier: "ToolIDs" })

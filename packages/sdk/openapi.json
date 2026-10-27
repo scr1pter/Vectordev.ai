@@ -33639,6 +33639,81 @@
                   }
                 },
                 "additionalProperties": false
+              },
+              "subagents": {
+                "type": "object",
+                "properties": {
+                  "usd": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "steps": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "warnAt": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "unpricedSteps": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "running": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 16
+                  },
+                  "per_request": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000
+                  }
+                },
+                "additionalProperties": false
+              },
+              "workflow": {
+                "type": "object",
+                "properties": {
+                  "max_agents": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000
+                  },
+                  "concurrency": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 16
+                  },
+                  "usd": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "tokens": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "steps": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "per_agent_steps": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "minutes": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1440
+                  },
+                  "runs": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4
+                  }
+                },
+                "additionalProperties": false
               }
             },
             "additionalProperties": false
@@ -33654,6 +33729,51 @@
               },
               "learn": {
                 "type": "boolean"
+              },
+              "subagents": {
+                "type": "object",
+                "properties": {
+                  "fork": {
+                    "type": "boolean"
+                  },
+                  "models": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 32
+                  },
+                  "ask_timeout": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1440
+                  },
+                  "isolation": {
+                    "type": "object",
+                    "properties": {
+                      "lsp": {
+                        "type": "boolean"
+                      },
+                      "mcp": {
+                        "type": "boolean"
+                      },
+                      "link": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "maxItems": 16
+                      },
+                      "max_kept": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 200
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
               }
             },
             "additionalProperties": false
@@ -34148,6 +34268,81 @@
                   }
                 },
                 "additionalProperties": false
+              },
+              "subagents": {
+                "type": "object",
+                "properties": {
+                  "usd": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "steps": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "warnAt": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "unpricedSteps": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "running": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 16
+                  },
+                  "per_request": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000
+                  }
+                },
+                "additionalProperties": false
+              },
+              "workflow": {
+                "type": "object",
+                "properties": {
+                  "max_agents": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000
+                  },
+                  "concurrency": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 16
+                  },
+                  "usd": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "tokens": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "steps": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "per_agent_steps": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "minutes": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1440
+                  },
+                  "runs": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4
+                  }
+                },
+                "additionalProperties": false
               }
             },
             "additionalProperties": false
@@ -34163,6 +34358,51 @@
               },
               "learn": {
                 "type": "boolean"
+              },
+              "subagents": {
+                "type": "object",
+                "properties": {
+                  "fork": {
+                    "type": "boolean"
+                  },
+                  "models": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 32
+                  },
+                  "ask_timeout": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1440
+                  },
+                  "isolation": {
+                    "type": "object",
+                    "properties": {
+                      "lsp": {
+                        "type": "boolean"
+                      },
+                      "mcp": {
+                        "type": "boolean"
+                      },
+                      "link": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "maxItems": 16
+                      },
+                      "max_kept": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 200
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
               }
             },
             "additionalProperties": false
@@ -34706,6 +34946,33 @@
         "type": "object",
         "properties": {
           "backgroundSubagents": {
+            "type": "boolean"
+          },
+          "workDelegation": {
+            "type": "boolean"
+          },
+          "subagentLimits": {
+            "type": "boolean"
+          },
+          "sessionStop": {
+            "type": "boolean"
+          },
+          "taskPromote": {
+            "type": "boolean"
+          },
+          "taskResume": {
+            "type": "boolean"
+          },
+          "taskAttention": {
+            "type": "boolean"
+          },
+          "taskIsolation": {
+            "type": "boolean"
+          },
+          "workflows": {
+            "type": "boolean"
+          },
+          "backgroundShells": {
             "type": "boolean"
           }
         },
@@ -47283,6 +47550,244 @@
         "required": ["kind", "id", "budget", "spentUsd", "steps", "unpricedSteps"],
         "additionalProperties": false
       },
+      "TaskModel": {
+        "type": "object",
+        "properties": {
+          "providerID": {
+            "type": "string"
+          },
+          "modelID": {
+            "type": "string"
+          },
+          "variant": {
+            "type": "string"
+          }
+        },
+        "required": ["providerID", "modelID"],
+        "additionalProperties": false
+      },
+      "TaskInterrupted": {
+        "type": "object",
+        "properties": {
+          "at": {
+            "type": "number"
+          },
+          "cause": {
+            "type": "string"
+          },
+          "reported": {
+            "type": "boolean"
+          },
+          "resumedAt": {
+            "type": "number"
+          },
+          "dismissedAt": {
+            "type": "number"
+          }
+        },
+        "required": ["at", "cause"],
+        "additionalProperties": false
+      },
+      "TaskWaiting": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "since": {
+            "type": "number"
+          },
+          "requestID": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "number"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": ["kind", "since"],
+        "additionalProperties": false
+      },
+      "TaskResult": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string"
+          },
+          "valid": {
+            "type": "boolean"
+          },
+          "attempts": {
+            "type": "number"
+          }
+        },
+        "required": ["format"],
+        "additionalProperties": false
+      },
+      "TaskIsolation": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "directory": {
+            "type": "string"
+          },
+          "files": {
+            "type": "number"
+          },
+          "additions": {
+            "type": "number"
+          },
+          "deletions": {
+            "type": "number"
+          },
+          "merged": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "skipped": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "conflicts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": ["mode", "state"],
+        "additionalProperties": false
+      },
+      "TaskWorkflowStage": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "total": {
+            "type": "number"
+          },
+          "done": {
+            "type": "number"
+          },
+          "failed": {
+            "type": "number"
+          },
+          "skipped": {
+            "type": "number"
+          },
+          "running": {
+            "type": "number"
+          },
+          "waiting": {
+            "type": "number"
+          }
+        },
+        "required": ["id", "title", "phase", "done", "failed", "skipped", "running", "waiting"],
+        "additionalProperties": false
+      },
+      "TaskWorkflow": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string"
+          },
+          "runID": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "stage": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "item": {
+            "type": "string"
+          },
+          "round": {
+            "type": "number"
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "stages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskWorkflowStage"
+            }
+          },
+          "agents": {
+            "type": "object",
+            "properties": {
+              "launched": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              },
+              "running": {
+                "type": "number"
+              }
+            },
+            "required": ["launched", "max", "running"],
+            "additionalProperties": false
+          },
+          "tokens": {
+            "type": "object",
+            "properties": {
+              "used": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              }
+            },
+            "required": ["used"],
+            "additionalProperties": false
+          },
+          "stop": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["reason", "message"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["role", "runID"],
+        "additionalProperties": false
+      },
       "TaskInfo": {
         "type": "object",
         "properties": {
@@ -47386,9 +47891,61 @@
               },
               "stop": {
                 "type": "boolean"
+              },
+              "resume": {
+                "type": "boolean"
+              },
+              "background": {
+                "type": "boolean"
+              },
+              "merge": {
+                "type": "boolean"
+              },
+              "discard": {
+                "type": "boolean"
               }
             },
             "required": ["inspect", "message", "stop"],
+            "additionalProperties": false
+          },
+          "model": {
+            "$ref": "#/components/schemas/TaskModel"
+          },
+          "effort": {
+            "type": "string"
+          },
+          "background": {
+            "type": "boolean"
+          },
+          "fork": {
+            "type": "boolean"
+          },
+          "queuedReason": {
+            "type": "string"
+          },
+          "interrupted": {
+            "$ref": "#/components/schemas/TaskInterrupted"
+          },
+          "waiting": {
+            "$ref": "#/components/schemas/TaskWaiting"
+          },
+          "result": {
+            "$ref": "#/components/schemas/TaskResult"
+          },
+          "isolation": {
+            "$ref": "#/components/schemas/TaskIsolation"
+          },
+          "workflow": {
+            "$ref": "#/components/schemas/TaskWorkflow"
+          },
+          "inbox": {
+            "type": "object",
+            "properties": {
+              "unread": {
+                "type": "number"
+              }
+            },
+            "required": ["unread"],
             "additionalProperties": false
           }
         },
@@ -47408,6 +47965,84 @@
         ],
         "additionalProperties": false
       },
+      "TaskLimits": {
+        "type": "object",
+        "properties": {
+          "running": {
+            "type": "number"
+          },
+          "queued": {
+            "type": "number"
+          },
+          "maxRunning": {
+            "type": "number"
+          },
+          "launched": {
+            "type": "number"
+          },
+          "maxPerRequest": {
+            "type": "number"
+          },
+          "spend": {
+            "type": "object",
+            "properties": {
+              "spentUsd": {
+                "type": "number"
+              },
+              "limitUsd": {
+                "type": "number"
+              },
+              "unknownSteps": {
+                "type": "number"
+              },
+              "warned": {
+                "type": "boolean"
+              },
+              "stopped": {
+                "type": "boolean"
+              }
+            },
+            "required": ["spentUsd", "unknownSteps", "warned", "stopped"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["running", "queued", "maxRunning", "launched", "maxPerRequest"],
+        "additionalProperties": false
+      },
+      "TaskShell": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "number"
+          },
+          "completedAt": {
+            "type": "number"
+          },
+          "exitCode": {
+            "type": "number"
+          },
+          "outputPath": {
+            "type": "string"
+          },
+          "outputBytes": {
+            "type": "number"
+          }
+        },
+        "required": ["id", "title", "command", "status", "startedAt", "outputBytes"],
+        "additionalProperties": false
+      },
       "TaskListResult": {
         "type": "object",
         "properties": {
@@ -47419,9 +48054,43 @@
           },
           "truncated": {
             "type": "boolean"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/TaskLimits"
+          },
+          "shells": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskShell"
+            }
           }
         },
         "required": ["tasks", "truncated"],
+        "additionalProperties": false
+      },
+      "TaskMessage": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "direction": {
+            "type": "string"
+          },
+          "sender": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "deliveredAt": {
+            "type": "number"
+          }
+        },
+        "required": ["id", "direction", "sender", "text", "createdAt"],
         "additionalProperties": false
       },
       "TaskInspectResult": {
@@ -47454,6 +48123,28 @@
           },
           "truncated": {
             "type": "boolean"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskMessage"
+            }
+          },
+          "structured": {
+            "type": "object",
+            "properties": {
+              "json": {
+                "type": "string"
+              },
+              "valid": {
+                "type": "boolean"
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            },
+            "required": ["json", "valid", "truncated"],
+            "additionalProperties": false
           }
         },
         "required": ["task", "steps", "output", "truncated"],
@@ -47504,6 +48195,12 @@
           },
           "timedOut": {
             "type": "boolean"
+          },
+          "attention": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": ["tasks", "timedOut"],

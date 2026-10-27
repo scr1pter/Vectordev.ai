@@ -82,8 +82,11 @@ function normalizeLoadedConfig(data: unknown) {
   return copy
 }
 
-function projectExecutableConfig(config: Info, trusted: boolean, base: Info): Info {
-  const next = { ...config }
+/** What a repository's config may set, given the merged config before it (`base`). Exported for tests. */
+export function projectExecutableConfig(config: Info, trusted: boolean, base: Info): Info {
+  // Subagent and workflow limits only narrow the user's, trusted or not. An untrusted repository's budget and sizing
+  // then collapse below.
+  const next = repositorySubagents(config, base)
   // A repository's own local block never applies, trusted or not: only the user's config and the company's policy
   // set Vector Local, so a cloned repository can neither loosen it nor turn it off.
   delete next.local
@@ -161,6 +164,91 @@ function projectExecutableConfig(config: Info, trusted: boolean, base: Info): In
     next.provider = Object.fromEntries(
       Object.entries(next.provider).filter(([, provider]) => projectProviderEndpointsAllowed(provider)),
     )
+  }
+  return next
+}
+
+// A repository's budget keys that are the user's alone: spend limits cover every repository together, so these are
+// dropped, with a notice once per file.
+export function ignoredSpendKeys(config: Info): string[] {
+  const subagents = config.budget?.subagents
+  return [
+    ...(config.budget?.run ? ["budget.run"] : []),
+    ...(["usd", "steps", "warnAt", "unpricedSteps"] as const)
+      .filter((key) => subagents?.[key] !== undefined)
+      .map((key) => `budget.subagents.${key}`),
+  ]
+}
+
+const lower = (repository: number | undefined, user: number | undefined, fallback?: number) =>
+  repository === undefined ? undefined : Math.min(repository, user ?? fallback ?? repository)
+
+const present = <T extends object>(value: T) => {
+  const kept = Object.fromEntries(Object.entries(value).filter((entry) => entry[1] !== undefined))
+  return Object.keys(kept).length ? (kept as T) : undefined
+}
+
+// What a repository's subagent and workflow keys may set, trusted or not (multi-agent contract 4.2): the counts and
+// every workflow ceiling only lower the user's value or the default, forks only turn off, models only narrow the user's
+// list, and ask_timeout only shortens the user's own. The subagents' shared spend ceiling and isolation are the user's
+// alone. Exported for tests.
+export function repositorySubagents(config: Info, base: Info): Info {
+  const next = { ...config }
+  if (next.budget?.subagents || next.budget?.workflow) {
+    const budget = { ...next.budget }
+    const user = base.budget
+    const repository = budget.subagents
+    const subagents = repository
+      ? present({
+          running: lower(repository.running, user?.subagents?.running, ConfigV1.SubagentDefaults.running),
+          per_request: lower(
+            repository.per_request,
+            user?.subagents?.per_request,
+            ConfigV1.SubagentDefaults.per_request,
+          ),
+        })
+      : undefined
+    const flow = budget.workflow
+    const defaults = ConfigV1.WorkflowDefaults
+    const maxAgents = user?.workflow?.max_agents ?? defaults.max_agents
+    const workflow = flow
+      ? present({
+          max_agents: lower(flow.max_agents, user?.workflow?.max_agents, defaults.max_agents),
+          concurrency: lower(flow.concurrency, user?.workflow?.concurrency, defaults.concurrency),
+          usd: lower(flow.usd, user?.workflow?.usd),
+          tokens: lower(flow.tokens, user?.workflow?.tokens),
+          steps: lower(flow.steps, user?.workflow?.steps, maxAgents * defaults.steps_per_agent),
+          per_agent_steps: lower(flow.per_agent_steps, user?.workflow?.per_agent_steps, defaults.per_agent_steps),
+          minutes: lower(flow.minutes, user?.workflow?.minutes, defaults.minutes),
+          runs: lower(flow.runs, user?.workflow?.runs, defaults.runs),
+        })
+      : undefined
+    if (subagents) budget.subagents = subagents
+    else delete budget.subagents
+    if (workflow) budget.workflow = workflow
+    else delete budget.workflow
+    if (Object.keys(budget).length) next.budget = budget
+    else delete next.budget
+  }
+  const repository = next.sizing?.subagents
+  if (repository) {
+    const sizing = { ...next.sizing }
+    const user = base.sizing?.subagents
+    const allowed = user?.models
+    const subagents = present({
+      fork: repository.fork === false ? (false as const) : undefined,
+      models: repository.models && allowed ? repository.models.filter((model) => allowed.includes(model)) : undefined,
+      ask_timeout:
+        repository.ask_timeout !== undefined &&
+        user?.ask_timeout !== undefined &&
+        repository.ask_timeout < user.ask_timeout
+          ? repository.ask_timeout
+          : undefined,
+    })
+    if (subagents) sizing.subagents = subagents
+    else delete sizing.subagents
+    if (Object.keys(sizing).length) next.sizing = sizing
+    else delete next.sizing
   }
   return next
 }
@@ -1718,7 +1806,8 @@ const layer = Layer.effect(
       return yield* Effect.uninterruptible(cachedGlobal)
     })
 
-    // A repository's budget.run stopped applying when spend limits became one overall set. Say so once per repository
+    // A repository's budget.run stopped applying when spend limits became one overall set, and its subagent spend
+    // limits (budget.subagents usd, steps, warnAt, unpricedSteps) never apply. Say so once per repository
     // file, so a cap someone relied on does not disappear silently, without repeating it on every load. Parallel agents
     // and copies of a repository load it from new folders, so a file is remembered by the repository it belongs to
     // (its remote or first commit, which worktrees and copies share) and its path inside it rather than by where it
@@ -1727,10 +1816,10 @@ const layer = Layer.effect(
     const noticeIgnoredRunBudgets = Effect.fn("Config.noticeIgnoredRunBudgets")(function* (
       workspace: string,
       repository: string,
-      sources: string[],
+      ignored: { source: string; keys: string[] }[],
     ) {
-      yield* Effect.logWarning("ignoring budget.run in repository config; spend limits cover every repository", {
-        sources,
+      yield* Effect.logWarning("ignoring spend limits in repository config; spend limits cover every repository", {
+        ignored,
       })
       const file = path.join(Global.Path.state, "ignored-repository-budgets.json")
       const noticed = yield* fs.readJson(file).pipe(
@@ -1739,13 +1828,14 @@ const layer = Layer.effect(
         ),
         Effect.orElseSucceed((): string[] => []),
       )
-      const entries = yield* Effect.forEach(sources, (source) =>
+      const entries = yield* Effect.forEach(ignored, ({ source, keys: settings }) =>
         Effect.gen(function* () {
           const relative = path.relative(workspace, source) || source
-          if (repository !== "global") return { relative, key: `${repository}:${relative}` }
+          if (repository !== "global") return { relative, settings, key: `${repository}:${relative}` }
           const content = (yield* fs.readFileStringSafe(source).pipe(Effect.orElseSucceed(() => undefined))) ?? ""
           return {
             relative,
+            settings,
             key: `content:${createHash("sha256").update(`${relative}\n${content}`).digest("hex").slice(0, 32)}`,
           }
         }),
@@ -1760,16 +1850,18 @@ const layer = Layer.effect(
         )
         .pipe(Effect.ignore)
       const files = fresh.map((entry) => entry.relative).join(" and ")
+      const settings = [...new Set(fresh.flatMap((entry) => entry.settings))]
+      const named = settings.join(" and ")
       GlobalBus.emit("event", {
         directory: "global",
         payload: {
           type: TuiEvent.ToastShow.type,
           properties: {
             title: "Repository spend cap ignored",
-            message: `This repository's ${files} ${fresh.length === 1 ? "sets" : "set"} budget.run, which no longer applies: spend limits now cover all your repositories together. ${
+            message: `This repository's ${files} ${fresh.length === 1 ? "sets" : "set"} ${named}, which ${settings.length === 1 ? "does" : "do"} not apply from a repository: spend limits now cover all your repositories together. ${
               Flag.VECTOR_CLIENT === "desktop"
                 ? "Set your limits in Settings, under Spend limits."
-                : `Set budget.run in ${path.join(Global.Path.config, "vector.json")} instead, or pass --max-cost to vector run.`
+                : `Set ${named} in ${path.join(Global.Path.config, "vector.json")} instead${settings.includes("budget.run") ? ", or pass --max-cost to vector run" : ""}.`
             }`,
             variant: "warning",
             duration: 15_000,
@@ -1973,8 +2065,8 @@ const layer = Layer.effect(
         // config, never this one.
         let userResearch: Pick<Info, "research"> = {}
         let projectGrants = false
-        // Repository files whose budget.run was dropped, for the notice once loading ends.
-        const ignoredRunBudgets: string[] = []
+        // Repository files whose budget.run or subagent spend limits were dropped, for the notice once loading ends.
+        const ignoredRunBudgets: { source: string; keys: string[] }[] = []
 
         // Only Config.local() says what Vector Local is: it was resolved at start from the user's own config files and
         // the company's policy (refreshLocal), so no source's local block reaches the merged config. A repository's is
@@ -1997,7 +2089,8 @@ const layer = Layer.effect(
           const kept = companyFiles.has(source) ? [] : locked.filter((key) => values[key] !== undefined)
           const dropped = [...(input.local === undefined ? [] : ["local"]), ...kept]
           const next = dropped.length === 0 ? input : (omit(input, dropped as (keyof Info)[]) as Info)
-          if (projectSource && next.budget?.run) ignoredRunBudgets.push(source)
+          const spendKeys = projectSource ? ignoredSpendKeys(next) : []
+          if (spendKeys.length) ignoredRunBudgets.push({ source, keys: spendKeys })
           const safe = projectSource ? projectExecutableConfig(next, trusted, result) : next
           if (projectSource) projectGrants ||= grantsPermission(safe)
           // Only the keys a source sets: merging an undefined key would erase what an earlier user source declared,

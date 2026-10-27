@@ -2383,11 +2383,40 @@ export type ConfigWithLocks = {
     loop?: {
       enabled?: boolean
     }
+    subagents?: {
+      usd?: number
+      steps?: number
+      warnAt?: number
+      unpricedSteps?: number
+      running?: number
+      per_request?: number
+    }
+    workflow?: {
+      max_agents?: number
+      concurrency?: number
+      usd?: number
+      tokens?: number
+      steps?: number
+      per_agent_steps?: number
+      minutes?: number
+      runs?: number
+    }
   }
   sizing?: {
     auto?: boolean
     judge?: TaskJudgeMode
     learn?: boolean
+    subagents?: {
+      fork?: boolean
+      models?: Array<string>
+      ask_timeout?: number
+      isolation?: {
+        lsp?: boolean
+        mcp?: boolean
+        link?: Array<string>
+        max_kept?: number
+      }
+    }
   }
   local?: LocalConfig
   research?: ResearchConfig
@@ -2550,11 +2579,40 @@ export type Config = {
     loop?: {
       enabled?: boolean
     }
+    subagents?: {
+      usd?: number
+      steps?: number
+      warnAt?: number
+      unpricedSteps?: number
+      running?: number
+      per_request?: number
+    }
+    workflow?: {
+      max_agents?: number
+      concurrency?: number
+      usd?: number
+      tokens?: number
+      steps?: number
+      per_agent_steps?: number
+      minutes?: number
+      runs?: number
+    }
   }
   sizing?: {
     auto?: boolean
     judge?: TaskJudgeMode
     learn?: boolean
+    subagents?: {
+      fork?: boolean
+      models?: Array<string>
+      ask_timeout?: number
+      isolation?: {
+        lsp?: boolean
+        mcp?: boolean
+        link?: Array<string>
+        max_kept?: number
+      }
+    }
   }
   local?: LocalConfig
   research?: ResearchConfig
@@ -2731,6 +2789,15 @@ export type Provider = {
 
 export type ExperimentalCapabilities = {
   backgroundSubagents: boolean
+  workDelegation?: boolean
+  subagentLimits?: boolean
+  sessionStop?: boolean
+  taskPromote?: boolean
+  taskResume?: boolean
+  taskAttention?: boolean
+  taskIsolation?: boolean
+  workflows?: boolean
+  backgroundShells?: boolean
 }
 
 export type ToolListItem = {
@@ -6815,6 +6882,85 @@ export type TaskBudgetScope = {
   }
 }
 
+export type TaskModel = {
+  providerID: string
+  modelID: string
+  variant?: string
+}
+
+export type TaskInterrupted = {
+  at: number
+  cause: string
+  reported?: boolean
+  resumedAt?: number
+  dismissedAt?: number
+}
+
+export type TaskWaiting = {
+  kind: string
+  since: number
+  requestID?: string
+  expiresAt?: number
+  summary?: string
+}
+
+export type TaskResult = {
+  format: string
+  valid?: boolean
+  attempts?: number
+}
+
+export type TaskIsolation = {
+  mode: string
+  state: string
+  branch?: string
+  directory?: string
+  files?: number
+  additions?: number
+  deletions?: number
+  merged?: Array<string>
+  skipped?: Array<string>
+  conflicts?: Array<string>
+  error?: string
+}
+
+export type TaskWorkflowStage = {
+  id: string
+  title: string
+  phase: string
+  total?: number
+  done: number
+  failed: number
+  skipped: number
+  running: number
+  waiting: number
+}
+
+export type TaskWorkflow = {
+  role: string
+  runID: string
+  title?: string
+  stage?: string
+  phase?: string
+  item?: string
+  round?: number
+  verified?: boolean
+  stages?: Array<TaskWorkflowStage>
+  agents?: {
+    launched: number
+    max: number
+    running: number
+  }
+  tokens?: {
+    used: number
+    max?: number
+  }
+  stop?: {
+    reason: string
+    message: string
+  }
+}
+
 export type TaskInfo = {
   id: string
   sessionID?: string
@@ -6846,12 +6992,67 @@ export type TaskInfo = {
     inspect: boolean
     message: boolean
     stop: boolean
+    resume?: boolean
+    background?: boolean
+    merge?: boolean
+    discard?: boolean
   }
+  model?: TaskModel
+  effort?: string
+  background?: boolean
+  fork?: boolean
+  queuedReason?: string
+  interrupted?: TaskInterrupted
+  waiting?: TaskWaiting
+  result?: TaskResult
+  isolation?: TaskIsolation
+  workflow?: TaskWorkflow
+  inbox?: {
+    unread: number
+  }
+}
+
+export type TaskLimits = {
+  running: number
+  queued: number
+  maxRunning: number
+  launched: number
+  maxPerRequest: number
+  spend?: {
+    spentUsd: number
+    limitUsd?: number
+    unknownSteps: number
+    warned: boolean
+    stopped: boolean
+  }
+}
+
+export type TaskShell = {
+  id: string
+  title: string
+  command: string
+  status: string
+  startedAt: number
+  completedAt?: number
+  exitCode?: number
+  outputPath?: string
+  outputBytes: number
 }
 
 export type TaskListResult = {
   tasks: Array<TaskInfo>
   truncated: boolean
+  limits?: TaskLimits
+  shells?: Array<TaskShell>
+}
+
+export type TaskMessage = {
+  id: string
+  direction: string
+  sender: string
+  text: string
+  createdAt: number
+  deliveredAt?: number
 }
 
 export type TaskInspectResult = {
@@ -6863,6 +7064,12 @@ export type TaskInspectResult = {
   }>
   output: string
   truncated: boolean
+  messages?: Array<TaskMessage>
+  structured?: {
+    json: string
+    valid: boolean
+    truncated: boolean
+  }
 }
 
 export type TaskMessageResult = {
@@ -6879,6 +7086,7 @@ export type TaskStopResult = {
 export type TaskWaitResult = {
   tasks: Array<TaskInfo>
   timedOut: boolean
+  attention?: Array<string>
 }
 
 export type TaskBridgeRegisterInput = {

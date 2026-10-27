@@ -3,7 +3,14 @@ import type { SessionV1 } from "@vectordevai/core/v1/session"
 import type { Session } from "@/session/session"
 import { MessageV2 } from "@/session/message-v2"
 import type { MessageID, SessionID } from "@/session/schema"
-import type { SubagentRecord, SubagentStatus, SubagentUsage } from "@/agent/subagent-kind"
+import {
+  SUBAGENT_EFFORTS,
+  SUBAGENT_INTERRUPTION_CAUSES,
+  SUBAGENT_MODEL_SOURCES,
+  type SubagentRecord,
+  type SubagentStatus,
+  type SubagentUsage,
+} from "@/agent/subagent-kind"
 import { isRecord } from "@/util/record"
 import { randomUUID } from "node:crypto"
 import { RunBudget } from "@vectordevai/schema/run-budget"
@@ -47,6 +54,110 @@ const PART_QUICK_RETRY = "200 millis"
 const PART_SLOW_ATTEMPTS = 120
 const PART_SLOW_RETRY = "5 seconds"
 
+// Shapes of the record's optional fields, checked one by one so a malformed field is dropped, never the record.
+const Fork = Schema.Struct({
+  point: Schema.String,
+  callID: Schema.optional(Schema.String),
+  from: Schema.optional(Schema.String),
+  warm: Schema.optional(Schema.Boolean),
+})
+const STRUCTURED_SCHEMA_MAX = 16 * 1024
+const Structured = Schema.Struct({
+  schema: Schema.Record(Schema.String, Schema.Unknown),
+  schemaHash: Schema.String,
+  attempts: Schema.Finite,
+  valid: Schema.optional(Schema.Boolean),
+})
+const DelegatedScope = Schema.Struct({
+  id: Schema.String,
+  budget: RunBudget.Info,
+  spentUsd: Schema.Finite,
+  steps: Schema.Finite,
+  unpricedSteps: Schema.Finite,
+  stopped: Schema.optional(Schema.Struct({ reason: Schema.String, message: Schema.String })),
+})
+const Owner = Schema.Struct({ pid: Schema.Int, boot: Schema.Finite })
+const Interruption = Schema.Struct({
+  at: Schema.Finite,
+  cause: Schema.String,
+  reportedAt: Schema.optional(Schema.Finite),
+  resumedAt: Schema.optional(Schema.Finite),
+  dismissedAt: Schema.optional(Schema.Finite),
+})
+const Waiting = Schema.Struct({
+  kind: Schema.Literals(["permission", "question"]),
+  requestID: Schema.String,
+  since: Schema.Finite,
+  expiresAt: Schema.optional(Schema.Finite),
+  notedAt: Schema.optional(Schema.Finite),
+  summary: Schema.optional(Schema.String),
+})
+const Stop = Schema.Struct({ by: Schema.Literals(["user", "agent", "system"]), at: Schema.Finite })
+const Reports = Schema.Struct({ at: Schema.Array(Schema.Finite), wakes: Schema.Finite })
+const REPORTS_KEPT = 12
+const Workflow = Schema.Union([
+  Schema.Struct({
+    role: Schema.Literal("run"),
+    title: Schema.String,
+    revision: Schema.Finite,
+    quiet: Schema.optional(Schema.Boolean),
+    progress: Schema.Record(Schema.String, Schema.Unknown),
+  }),
+  Schema.Struct({
+    role: Schema.Literal("agent"),
+    runID: Schema.String,
+    stage: Schema.String,
+    phase: Schema.String,
+    item: Schema.String,
+    key: Schema.String,
+    round: Schema.optional(Schema.Finite),
+    verifier: Schema.optional(Schema.Boolean),
+    final: Schema.optional(Schema.Boolean),
+    verified: Schema.optional(Schema.Boolean),
+    output: Schema.optional(Schema.Literals(["structured", "text"])),
+  }),
+])
+
+function decoded<S extends Schema.Decoder<unknown, never>>(schema: S, input: unknown): S["Type"] | undefined {
+  if (input === undefined) return undefined
+  const result = Schema.decodeUnknownOption(schema)(input)
+  return result._tag === "Some" ? result.value : undefined
+}
+
+// The fields added for multi-agent work: each one valid, or undefined so the spread original is not kept.
+function extensions(value: Record<string, unknown>): Partial<SubagentRecord> {
+  const oneOf = <T extends string>(input: unknown, values: readonly T[]) =>
+    values.includes(input as T) ? (input as T) : undefined
+  const text = (input: unknown) => (typeof input === "string" ? input : undefined)
+  const structured = decoded(Structured, value.structured)
+  const interruption = decoded(Interruption, value.interruption)
+  const reports = decoded(Reports, value.reports)
+  return {
+    conversationID: text(value.conversationID),
+    rootSessionID: text(value.rootSessionID),
+    requestID: text(value.requestID),
+    slotReason: text(value.slotReason),
+    effort: oneOf(value.effort, SUBAGENT_EFFORTS),
+    modelSource: oneOf(value.modelSource, SUBAGENT_MODEL_SOURCES),
+    fork: decoded(Fork, value.fork),
+    structured:
+      structured && JSON.stringify(structured.schema).length <= STRUCTURED_SCHEMA_MAX
+        ? { ...structured, schema: { ...structured.schema } }
+        : undefined,
+    delegatedScope: decoded(DelegatedScope, value.delegatedScope),
+    owner: decoded(Owner, value.owner),
+    // A cause a newer version added reads as unknown rather than losing the interruption.
+    interruption: interruption
+      ? { ...interruption, cause: oneOf(interruption.cause, SUBAGENT_INTERRUPTION_CAUSES) ?? "unknown" }
+      : undefined,
+    waiting: decoded(Waiting, value.waiting),
+    stop: decoded(Stop, value.stop),
+    reports: reports ? { at: reports.at.slice(-REPORTS_KEPT), wakes: reports.wakes } : undefined,
+    isolation: decoded(Task.Isolation, value.isolation),
+    workflow: decoded(Workflow, value.workflow) as SubagentRecord["workflow"],
+  }
+}
+
 export function read(info: Pick<Session.Info, "metadata">): SubagentRecord | undefined {
   const value = info.metadata?.[METADATA_KEY]
   if (!isRecord(value) || typeof value.title !== "string" || typeof value.agent !== "string" ||
@@ -70,6 +181,7 @@ export function read(info: Pick<Session.Info, "metadata">): SubagentRecord | und
     notification: isRecord(value.notification) && typeof value.notification.text === "string" && typeof value.notification.launchID === "string" && ["completed", "error", "cancelled"].includes(String(value.notification.state))
       ? { ...value.notification, messageID: optionalString(value.notification.messageID) } : undefined,
     mailbox: Array.isArray(value.mailbox) ? value.mailbox.filter((item) => isRecord(item) && typeof item.id === "string" && typeof item.sender === "string" && typeof item.text === "string" && ["steer", "queue"].includes(String(item.delivery)) && typeof item.createdAt === "number" && Number.isFinite(item.createdAt)) : undefined,
+    ...extensions(value),
   } as SubagentRecord
 }
 
