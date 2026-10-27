@@ -8,23 +8,24 @@ export const prerender = true
 
           <p>
             Vector's settings are JSON files named <code>vector.json</code>, or <code>vector.jsonc</code>, which may
-            carry comments. Some of the desktop app's Settings save there for you, such as a custom provider or a
-            subagent switch, and the keys this page lists are ones you can write yourself. Start a file with
+            carry comments. Some of the desktop app's Settings, such as a custom provider or a subagent switch, save
+            to one of these files for you (see below for which), and the keys this page lists are ones you can write
+            yourself. Start a file with
             <code>{`"$schema": "https://vectordev.ai/config.json"`}</code> for completion and checks in your editor.
           </p>
 
           <h2 id="files">Where Vector reads them</h2>
           <dl class="doc-rows">
-            <div><dt>A repository</dt><dd><code>vector.json</code> or <code>vector.jsonc</code> in the folder you work in and in each folder above it up to the repository's root, and the same names in the repository's <code>.vector</code> folders. They apply once you trust the repository.</dd></div>
-            <div><dt>Every repository, in the desktop app</dt><dd><code>vector.json</code> in the desktop app's own config folder: <code>~/Library/Application Support/ai.vector.app/config/vector/</code> on macOS, <code>%APPDATA%\ai.vector.app\config\vector\</code> on Windows and <code>~/.config/ai.vector.app/config/vector/</code> on Linux.</dd></div>
+            <div><dt>A repository</dt><dd><code>vector.json</code> or <code>vector.jsonc</code> in the folder you work in and in each folder above it up to the repository's root, and the same names in the repository's <code>.vector</code> folders. Keys that could run code or send your work elsewhere apply once you trust the repository; see <a href="#trust">Before you trust a repository</a>.</dd></div>
+            <div><dt>Every repository, in the desktop app</dt><dd>The desktop app has two config folders of its own. Its Settings save to <code>vector.jsonc</code>, or to <code>vector.json</code> when only that one exists, in <code>~/Library/Application Support/ai.vector.app/xdg-config/vector/</code> on macOS, <code>%APPDATA%\ai.vector.app\xdg-config\vector\</code> on Windows and <code>~/.config/ai.vector.app/xdg-config/vector/</code> on Linux (in <code>vector</code> under <code>XDG_CONFIG_HOME</code> instead, when the app was started with that variable set). A <code>vector.json</code> or <code>vector.jsonc</code> you write in its own config folder, <code>~/Library/Application Support/ai.vector.app/config/vector/</code> on macOS, <code>%APPDATA%\ai.vector.app\config\vector\</code> on Windows and <code>~/.config/ai.vector.app/config/vector/</code> on Linux, is read after the one Settings save to, so where both set a key, yours wins.</dd></div>
             <div><dt>Every repository, in the terminal</dt><dd>The terminal reads <code>~/.config/vector/vector.json</code> (<code>%USERPROFILE%\.config\vector\vector.json</code> on Windows) instead, so a setting there does not reach the desktop app.</dd></div>
             <div><dt>Both</dt><dd><code>~/.vector/vector.json</code> (<code>%USERPROFILE%\.vector\vector.json</code> on Windows) is read by the desktop app and the terminal alike.</dd></div>
           </dl>
           <p>
             Vector merges every file it reads. Objects such as <code>provider</code>, <code>mcp</code>,
             <code>agent</code> and <code>command</code> combine entry by entry, so each file can add entries of its own,
-            and the <code>instructions</code> of every file add up. A company can also set a policy that Vector reads
-            before anything else and that can lock keys; see <a href="/docs/local#companies">For companies</a>.
+            and the <code>instructions</code> of every file add up. A company can also set a policy that overrides your
+            own and a repository's settings and can lock keys; see <a href="/docs/local#companies">For companies</a>.
           </p>
 
           <h2 id="substitution">Values from the environment and from files</h2>

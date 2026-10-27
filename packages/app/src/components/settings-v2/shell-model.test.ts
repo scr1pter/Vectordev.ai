@@ -47,6 +47,13 @@ describe("Terminal shell options", () => {
     expect(shellSelectOptions({ shells: [zsh, bash], current: "bash", ...labels })).toHaveLength(3)
   })
 
+  test("treats a listed shell saved by its path as that shell, without a second option for it", () => {
+    const options = shellSelectOptions({ shells: [zsh, bash], current: "/bin/zsh", ...labels })
+    expect(options).toHaveLength(3)
+    expect(new Set(options.map((option) => option.id)).size).toBe(options.length)
+    expect(selectedShellOption(options, "/bin/zsh")).toEqual({ id: "/bin/zsh", value: "zsh", label: "zsh" })
+  })
+
   test("selects the saved shell, and Auto when none is saved", () => {
     const options = shellSelectOptions({ shells: [zsh, bash], current: "zsh", ...labels })
     expect(selectedShellOption(options, "zsh").id).toBe("/bin/zsh")

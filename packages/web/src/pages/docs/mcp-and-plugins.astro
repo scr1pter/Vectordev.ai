@@ -41,7 +41,8 @@ vector mcp list</code><button class="doc-cmd-copy" type="button" aria-label="Cop
           <p>
             Servers live under the <code>mcp</code> key of <code>vector.json</code>, where <code>vector mcp add</code>
             writes them and where you can write them yourself (see <a href="/docs/configuration">Configuration
-            files</a>). Each entry's key is the server's name, and <code>type</code> says how Vector reaches it:
+            files</a>). Servers you add in the desktop app are kept per repository in Vector's own state folder, not
+            in <code>vector.json</code>. Each entry's key is the server's name, and <code>type</code> says how Vector reaches it:
             <code>remote</code> for a server at an address, <code>local</code> for a program Vector starts on this
             computer.
           </p>
@@ -66,8 +67,8 @@ vector mcp list</code><button class="doc-cmd-copy" type="button" aria-label="Cop
             <div><dt>oauth (remote)</dt><dd>Vector detects OAuth by itself: a server that asks for a sign-in shows as needing authentication, and <code>vector mcp auth &lt;name&gt;</code> runs the flow. Without <code>clientId</code>, Vector registers itself with the server; a server that does not allow that needs <code>oauth.clientId</code>, and <code>clientSecret</code> if it requires one. <code>scope</code> sets the scopes asked for, and the sign-in returns to <code>http://127.0.0.1:19876/mcp/oauth/callback</code> unless you set <code>redirectUri</code>, or <code>callbackPort</code> for another port. <code>"oauth": false</code> turns detection off, for a server you authenticate with headers.</dd></div>
             <div><dt>command (local)</dt><dd>The program and its arguments, as a list.</dd></div>
             <div><dt>environment (local)</dt><dd>Variables added to the environment Vector passes on to the program.</dd></div>
-            <div><dt>cwd (local)</dt><dd>The program's working folder, relative to the folder you work in. Until you trust the repository, a server from your own settings starts in an empty folder of Vector's instead, so the repository's files cannot steer it.</dd></div>
-            <div><dt>timeout</dt><dd>How long Vector waits, in milliseconds, for the server to connect and list its tools (30 seconds by default), and for each request to it, tool calls included. A tool call that reports progress starts its wait again. After two requests in a row time out, Vector disconnects the server and marks it failed until you connect it again.</dd></div>
+            <div><dt>cwd (local)</dt><dd>The program's working folder, relative to the folder you work in (for a repository's own server, the repository's root). Until you trust the repository, a server from your own settings starts in an empty folder of Vector's instead, so the repository's files cannot steer it.</dd></div>
+            <div><dt>timeout</dt><dd>How long Vector waits, in milliseconds, for the server to connect and list its tools (30 seconds by default), and for each request to it, tool calls included (by default <code>experimental.mcp_timeout</code>, or 60 seconds when that is not set). A tool call that reports progress starts its wait again. After two requests in a row time out, Vector disconnects the server and marks it failed until you connect it again.</dd></div>
             <div><dt>enabled</dt><dd><code>false</code> keeps the server in your settings without starting it. An entry with only <code>"enabled": false</code> turns off a server that another settings file defines.</dd></div>
           </dl>
           <p>

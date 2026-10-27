@@ -71,6 +71,17 @@ describe("plugin supply-chain policy", () => {
     ).toEqual([])
   })
 
+  test("every uvx connector that can be installed names a Python new enough for it", () => {
+    // uvx otherwise resolves against the first Python it finds, and macOS ships 3.9, older than these servers need.
+    const unpinned = PLUGIN_CATALOG.filter((plugin) => !plugin.soon && plugin.build).flatMap((plugin) => {
+      const config = plugin.build!(sampleValues(plugin))
+      if (config.type !== "local" || config.command[0] !== "uvx") return []
+      const python = config.command.indexOf("--python")
+      return python === 1 && config.command[2] === "3.12" ? [] : [plugin.id]
+    })
+    expect(unpinned).toEqual([])
+  })
+
   test("starts the Supabase server read-only", () => {
     const config = PLUGIN_CATALOG.find((item) => item.id === "supabase")?.build?.({ SUPABASE_ACCESS_TOKEN: "sbp_test" })
     expect(config?.type === "local" ? config.command : []).toContain("--read-only")

@@ -241,8 +241,12 @@ vector models anthropic --verbose</code><button class="doc-cmd-copy" type="butto
             <code>variants</code> are the effort levels <code>--variant</code> chooses by name and the desktop's effort
             slider moves across. Each is a set of provider options sent with the request, in the form the model's
             package takes them. A model with <code>reasoning</code> on already has the levels Vector knows for its
-            package, such as low, medium and high, set with <code>reasoningEffort</code>, for most models on
-            <code>@ai-sdk/openai-compatible</code>. Your entries add levels or change them, and
+            package, such as low, medium and high, set with <code>reasoningEffort</code>, for many models on
+            <code>@ai-sdk/openai-compatible</code>. A model whose ID contains <code>qwen</code>, <code>kimi</code>,
+            <code>glm</code>, <code>minimax</code>, <code>grok</code>, <code>deepseek-r1</code>,
+            <code>deepseek-v3</code>, <code>deepseek-chat</code> or <code>deepseek-reasoner</code>, common on
+            self-hosted servers, gets none or only a fixed pair, so write its <code>variants</code> yourself. Your
+            entries add levels or change them, and
             <code>"disabled": true</code> removes one. Here a server that accepts a higher setting gets a
             <code>max</code> level, and <code>low</code> goes:
           </p>

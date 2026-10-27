@@ -40,13 +40,25 @@ export function shellSelectOptions(input: {
     }),
   ]
 
-  if (input.current && !options.some((option) => option.value === input.current))
-    options.push({ id: input.current, value: input.current, label: input.current })
+  // A listed shell saved by its path (zsh listed as "zsh", saved as "/bin/zsh") is that shell, not another option: a
+  // second option would repeat its id, and the picker keys options by id.
+  const current = input.current
+  if (current && !options.some((option) => savedAs(option, current)))
+    options.push({ id: current, value: current, label: current })
 
   return options
 }
 
 /** The option for the saved shell, or Auto when none is saved. */
 export function selectedShellOption(options: readonly ShellSelectOption[], current: string) {
-  return options.find((option) => option.value === current) ?? options[0]!
+  return (
+    options.find((option) => option.value === current) ??
+    options.find((option) => savedAs(option, current)) ??
+    options[0]!
+  )
+}
+
+/** Whether `current`, the saved shell, names this option, by the value it saves or by its shell's path. */
+function savedAs(option: ShellSelectOption, current: string) {
+  return option.value === current || (option.value !== "" && option.id === current)
 }

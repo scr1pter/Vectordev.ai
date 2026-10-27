@@ -180,6 +180,10 @@ export type PluginDef = {
   build?: (values: Record<string, string>) => McpLocalConfig | McpRemoteConfig
 }
 
+// Every local connector runs an exact version. Each pin is the newest stable release that was at least three days
+// old when it was chosen, the minimumReleaseAge bunfig.toml sets for Vector's own dependencies, so a bad release has
+// time to be caught first. An entry that keeps a newer release says why. A uvx connector that can be installed names
+// `--python 3.12`: these servers need Python >= 3.10, and macOS ships 3.9 (see computer-use).
 export function isPinnedPluginCommand(command: readonly string[]) {
   if (command[0] === "docker") return /@sha256:[a-f\d]{64}$/i.test(command.at(-1) ?? "")
   if (command[0] === "pipx") return /^[a-z\d._-]+==\d+\.\d+\.\d+(?:[a-z\d.+-]*)$/i.test(command[2] ?? "")
@@ -322,6 +326,8 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     build: (v) =>
       local([
         "uvx",
+        "--python",
+        "3.12",
         "mcp-proxy-for-aws-cli@1.7.0",
         "https://aws-mcp.us-east-1.api.aws/mcp",
         "--metadata",
@@ -368,6 +374,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     category: "Databases & payments",
     logo: "postgresql",
     fill: "#7B9FE8",
+    // Soon: @modelcontextprotocol/server-postgres is deprecated on npm.
     soon: true,
     auth: {
       kind: "token",
@@ -517,6 +524,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     category: "Docs & comms",
     logo: "slack",
     fill: "#E01E5A",
+    // Soon: @modelcontextprotocol/server-slack is deprecated on npm.
     soon: true,
     auth: {
       kind: "token",
@@ -583,6 +591,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     // Pin the interpreter: the package needs Python >= 3.10 and macOS still
     // ships 3.9, so without this uv resolves against the system Python and the
     // install fails with a dependency error rather than a missing runtime.
+    // 0.3.14 caps pydantic below 2.12 so the server can import, a fix 0.3.13 lacks.
     build: () => local(["uvx", "--python", "3.12", "computer-control-mcp@0.3.14"]),
   },
   {
@@ -602,6 +611,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     category: "Design & browser",
     logo: "browserbase",
     fill: "#8AB4F8",
+    // Soon: the server's repository, browserbase/mcp-server-browserbase, is archived.
     soon: true,
     auth: {
       kind: "token",
@@ -626,6 +636,10 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     logo: "desktopcommander",
     fill: "#B28CFF",
     badge: "community",
+    // Soon: installing it downloads a browser that npm's integrity check does not cover, the reason Railway's CLI was
+    // turned down: its md-to-pdf dependency brings puppeteer, whose postinstall downloads Chrome. Its own postinstall
+    // also runs dist/track-installation.js.
+    soon: true,
     auth: { kind: "none" },
     build: () => local(["npx", "-y", "@wonderwhy-er/desktop-commander@0.3.1"]),
   },
@@ -654,7 +668,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsUrl: "https://www.firecrawl.dev/app/api-keys",
       docsLabel: "Create a key on firecrawl.dev",
     },
-    build: (v) => local(["npx", "-y", "firecrawl-mcp@3.35.0"], { FIRECRAWL_API_KEY: v.FIRECRAWL_API_KEY }),
+    build: (v) => local(["npx", "-y", "firecrawl-mcp@3.34.1"], { FIRECRAWL_API_KEY: v.FIRECRAWL_API_KEY }),
   },
   {
     id: "brave-search",
@@ -682,7 +696,9 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     logo: "fetchglobe",
     fill: "#9E86FF",
     auth: { kind: "none" },
-    build: () => local(["uvx", "mcp-server-fetch@2026.10.24"]),
+    // 2026.10.24 fixes two security advisories in fetch (robots.txt handling and the host name a connection uses), so
+    // it is kept although newer than three days. Pin the interpreter: it needs Python >= 3.10, as computer-use explains.
+    build: () => local(["uvx", "--python", "3.12", "mcp-server-fetch@2026.10.24"]),
   },
   {
     id: "memory",
@@ -745,7 +761,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     // from the cwd, so no environment is needed. Pin the interpreter: the
     // package needs Python >= 3.10 and macOS still ships 3.9, so without this
     // uv resolves against the system Python and the install fails.
-    build: () => local(["uvx", "--python", "3.12", "--from", "graphifyy[mcp]==0.9.96", "graphify-mcp"]),
+    build: () => local(["uvx", "--python", "3.12", "--from", "graphifyy[mcp]==0.9.95", "graphify-mcp"]),
   },
   {
     id: "sequential-thinking",
@@ -776,6 +792,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     category: "AI & media",
     logo: "elevenlabs",
     fill: "#f2f0f7",
+    // Soon: the server's repository, elevenlabs/elevenlabs-mcp, is archived.
     soon: true,
     auth: {
       kind: "token",
@@ -826,6 +843,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     fill: "#5B8DEF",
     badge: "community",
     auth: { kind: "none" },
+    // 4.2.x hardens kubectl argument handling, so it is kept although newer than three days.
     build: () => local(["npx", "-y", "mcp-server-kubernetes@4.2.1"]),
   },
   {
@@ -944,7 +962,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsLabel: "Redis MCP setup guide",
     },
     build: (v) =>
-      local(["uvx", "--from", "redis-mcp-server==0.5.1", "redis-mcp-server"], {
+      local(["uvx", "--python", "3.12", "--from", "redis-mcp-server==0.5.1", "redis-mcp-server"], {
         REDIS_HOST: v.REDIS_HOST,
         REDIS_PORT: v.REDIS_PORT,
         REDIS_PWD: v.REDIS_PWD,
@@ -1211,7 +1229,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsLabel: "Create an API key in Lexware Office",
     },
     build: (v) =>
-      local(["npx", "-y", "@lazyants/lexware-mcp-server@5.4.0"], { LEXWARE_API_TOKEN: v.LEXWARE_API_TOKEN }),
+      local(["npx", "-y", "@lazyants/lexware-mcp-server@5.3.2"], { LEXWARE_API_TOKEN: v.LEXWARE_API_TOKEN }),
   },
   {
     id: "workday",
@@ -1288,7 +1306,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsLabel: "Create an access key in the AWS IAM console",
     },
     build: (v) =>
-      local(["uvx", "awslabs.redshift-mcp-server@0.1.2"], {
+      local(["uvx", "--python", "3.12", "awslabs.redshift-mcp-server@0.1.2"], {
         AWS_ACCESS_KEY_ID: v.AWS_ACCESS_KEY_ID,
         AWS_SECRET_ACCESS_KEY: v.AWS_SECRET_ACCESS_KEY,
         AWS_DEFAULT_REGION: v.AWS_DEFAULT_REGION,
@@ -1317,7 +1335,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsLabel: "Create an access key in the AWS IAM console",
     },
     build: (v) =>
-      local(["uvx", "awslabs.aws-dataprocessing-mcp-server@0.2.2"], {
+      local(["uvx", "--python", "3.12", "awslabs.aws-dataprocessing-mcp-server@0.2.2"], {
         AWS_ACCESS_KEY_ID: v.AWS_ACCESS_KEY_ID,
         AWS_SECRET_ACCESS_KEY: v.AWS_SECRET_ACCESS_KEY,
         AWS_REGION: v.AWS_REGION,
@@ -1530,6 +1548,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     logo: "microsoftword",
     fill: "#41A5EE",
     badge: "community",
+    // Soon: the server's repository, GongRzhe/Office-Word-MCP-Server, is archived.
     soon: true,
     auth: { kind: "none" },
     build: () => local(["uvx", "--from", "office-word-mcp-server", "word_mcp_server"]),
@@ -1553,6 +1572,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     logo: "microsoftpowerpoint",
     fill: "#EB6C4D",
     badge: "community",
+    // Soon: the server's repository, GongRzhe/Office-PowerPoint-MCP-Server, is archived.
     soon: true,
     auth: { kind: "none" },
     build: () => local(["uvx", "--from", "office-powerpoint-mcp-server", "ppt_mcp_server"]),
@@ -1577,7 +1597,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     fill: "#B07BD4",
     badge: "community",
     auth: { kind: "none" },
-    build: () => local(["npx", "-y", "@softeria/ms-365-mcp-server@0.175.0", "--preset", "onenote"]),
+    build: () => local(["npx", "-y", "@softeria/ms-365-mcp-server@0.171.0", "--preset", "onenote"]),
   },
   {
     id: "microsoft-sharepoint",
@@ -1785,6 +1805,8 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsUrl: "https://docs.n8n.io/connect/n8n-api/authentication",
       docsLabel: "Create an API key in n8n Settings → API",
     },
+    // 2.99.x are security releases (2.99.2 fixes SSRF hostname and session handling), so 2.99.2 is kept although
+    // newer than three days.
     build: (v) => local(["npx", "-y", "n8n-mcp@2.99.2"], { N8N_API_URL: v.N8N_API_URL, N8N_API_KEY: v.N8N_API_KEY }),
   },
   {
@@ -2007,7 +2029,10 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsLabel: "Configure an AWS CLI profile with S3 Tables access",
     },
     build: (v) =>
-      local(["uvx", "awslabs.s3-tables-mcp-server@0.1.1"], { AWS_PROFILE: v.AWS_PROFILE, AWS_REGION: v.AWS_REGION }),
+      local(["uvx", "--python", "3.12", "awslabs.s3-tables-mcp-server@0.1.1"], {
+        AWS_PROFILE: v.AWS_PROFILE,
+        AWS_REGION: v.AWS_REGION,
+      }),
   },
 
   // ── Design & browser ──────────────────────────────────────────────────

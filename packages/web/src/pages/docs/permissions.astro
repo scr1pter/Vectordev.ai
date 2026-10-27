@@ -34,7 +34,11 @@ export const prerender = true
               Vector's defaults, which allow most actions and ask first for some, such as web fetches, files outside
               the repository and secret files such as <code>.env</code>.
             </li>
-            <li>The agent's own rules, such as plan mode's deny on edits outside its plan files.</li>
+            <li>
+              The agent's own rules, such as plan mode's deny on edits outside its plan files. Vector's lightweight
+              Quick lane and its hidden editor-completion and document helpers are the exception: their own deny on
+              everything comes after your <code>permission</code> rules instead.
+            </li>
             <li>
               The <code>permission</code> rules in your settings, in the order you wrote them: keys from first to last,
               and the patterns inside each key from first to last. A single effect such as <code>"edit": "deny"</code>

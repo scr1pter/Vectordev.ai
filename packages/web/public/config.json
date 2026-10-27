@@ -601,7 +601,7 @@
           "exclusiveMinimum": 0,
           "type": "integer",
           "maximum": 9007199254740991,
-          "description": "Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified."
+          "description": "Timeout in ms for connecting to the MCP server and listing its tools (default 30000) and for each request to it, tool calls included (default experimental.mcp_timeout, else 60000)."
         }
       },
       "required": [
@@ -681,7 +681,7 @@
           "exclusiveMinimum": 0,
           "type": "integer",
           "maximum": 9007199254740991,
-          "description": "Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified."
+          "description": "Timeout in ms for connecting to the MCP server and listing its tools (default 30000) and for each request to it, tool calls included (default experimental.mcp_timeout, else 60000)."
         }
       },
       "required": [
