@@ -4,7 +4,6 @@ import { Database } from "@vectordevai/core/database/database"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { TaskSize } from "@vectordevai/core/task-size"
 import type { BrainSchema } from "@vectordevai/core/brain/schema"
-import type { SessionV1 } from "@vectordevai/core/v1/session"
 import { BackgroundJob } from "@/background/job"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { InstanceState } from "@/effect/instance-state"
@@ -12,7 +11,6 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Session } from "@/session/session"
 import { SessionStatus } from "@/session/status"
 import { MessageV2 } from "@/session/message-v2"
-import { SessionMemory } from "@/session/memory"
 import { SessionTaskSize } from "@/session/task-size"
 import { MessageID, SessionID } from "@/session/schema"
 import type { SubagentUsage } from "@/agent/subagent-kind"
@@ -161,30 +159,6 @@ export function render(input: {
     "</task-notification>",
   ].join("\n")
 }
-
-/**
- * Settles a child's run: its final record, its spend scopes, and what it read (for the parent's memory hold).
- * Undefined when the child has moved on to another attempt. Callers hold `SubagentLifecycle.controlLock`.
- */
-export const finishRun = Effect.fnUntraced(function* (
-  sessions: Session.Interface,
-  guard: SpendGuard.Interface,
-  taskID: SessionID,
-  attempt: number,
-  input: { status: SubagentLifecycle.FinalStatus; error?: string },
-) {
-  const current = yield* sessions.get(taskID)
-  if (SubagentLifecycle.read(current)?.attempt !== attempt) return undefined
-  const settled = yield* SubagentLifecycle.settle(sessions, taskID, input)
-  yield* SubagentLifecycle.update(sessions, taskID, { budgetScopes: yield* guard.scopes(taskID) }, attempt)
-  yield* guard.release(taskID)
-  const hold = SessionMemory.taint(
-    yield* sessions
-      .messages({ sessionID: taskID })
-      .pipe(Effect.catch(() => Effect.succeed([] as SessionV1.WithParts[]))),
-  )
-  return { settled, hold }
-})
 
 function final(state: string): state is SubagentLifecycle.FinalStatus {
   return state === "completed" || state === "error" || state === "cancelled"
@@ -520,7 +494,7 @@ const layer = Layer.effect(
       const status = info.status
       const done = yield* SubagentLifecycle.locked(SubagentLifecycle.controlLock)(
         Effect.gen(function* () {
-          const finished = yield* finishRun(sessions, guard, input.taskID, input.attempt, {
+          const finished = yield* SubagentLifecycle.finish(sessions, guard, input.taskID, input.attempt, {
             status,
             error: info.error,
           })

@@ -16,6 +16,9 @@ import { randomUUID } from "node:crypto"
 import { RunBudget } from "@vectordevai/schema/run-budget"
 import { Task } from "@vectordevai/schema/task"
 import { Database } from "@vectordevai/core/database/database"
+import type { SpendGuard } from "@vectordevai/core/spend-guard"
+import { BackgroundJob } from "@/background/job"
+import { SessionMemory } from "@/session/memory"
 
 /*
  * Lifecycle bookkeeping for task-tool subagents.
@@ -38,11 +41,47 @@ export const controlLock = Semaphore.makeUnsafe(1)
 export const stopping = new Set<SessionID>()
 // Independent of admission: callers may already hold controlLock. Serialize metadata read/merge/write.
 const metadataLock = Semaphore.makeUnsafe(1)
+// Read-modify-write of a stored tool part that no live call is writing (patchEntry, settleOrphanPart).
+const partLock = Semaphore.makeUnsafe(1)
+
+/** Owned paths a task call holds before its job lists them, or that a follow-up hands a task already running. */
+export type Claim = {
+  parentSessionID: SessionID
+  taskID?: string
+  title: string
+  paths: string[]
+  /** Held for a running task until it settles, rather than for the length of one call. */
+  held?: boolean
+}
+// Checked and added under controlLock. Sibling calls in one message run concurrently, so the job list alone cannot see
+// each other's paths. Session IDs are unique, so one set serves every instance.
+export const claims = new Set<Claim>()
+
+/** The reason an interrupted helper's record carries. */
+export const INTERRUPTED_REASON = "Interrupted when Vector stopped (an update, restart or crash); partial work was kept."
+/** The error an orphaned launching tool part is settled with. */
+export const INTERRUPTED_ERROR = "Interrupted when Vector stopped"
+/** The brief a resumed interrupted helper starts from. */
+export const RESUME_BRIEF =
+  "[vector:resume] Vector stopped while you were working (an update, restart or crash). Your conversation and the files you changed are as you left them; tool calls that were running did not finish. Check the state of your work, then continue your assignment from where you stopped. Do not redo finished steps."
+/** The brief a resumed helper the user stopped starts from. */
+export const RESUME_STOPPED_BRIEF =
+  "[vector:resume] The user stopped you and has now asked you to continue. Check the state of your work, then continue your assignment from where you stopped. Do not redo finished steps."
 
 export type FinalStatus = Extract<SubagentStatus, "completed" | "error" | "cancelled">
 
 /** Lifecycle fields that change after launch. In a patch, `undefined` clears the field. */
 export type Outcome = Partial<Pick<SubagentRecord, "status" | "completedAt" | "usage" | "error">>
+
+/** Whether the record still describes work in flight: queued or running. */
+export function open(record: Pick<SubagentRecord, "status"> | undefined) {
+  return record?.status === "queued" || record?.status === "running"
+}
+
+/** Whether resuming this helper waits for the user: it was interrupted and not resumed since, or the user stopped it. */
+export function needsHuman(record: Pick<SubagentRecord, "interruption" | "stop">) {
+  return (record.interruption !== undefined && record.interruption.resumedAt === undefined) || record.stop?.by === "user"
+}
 
 // A background launch's part is completed right after the launch returns, and
 // a foreground part turns to error as soon as the call fails, so the first
@@ -229,6 +268,30 @@ export function update(sessions: Session.Interface, sessionID: SessionID, patch:
   )
 }
 
+/**
+ * Claims a child's undelivered completion note for the parent message `messageID`: sets `notification.messageID` only
+ * while it is unset, for this attempt. Returns whether this call won, so every path that delivers recovered notes
+ * delivers each one once.
+ */
+export function claimNotification(
+  sessions: Session.Interface,
+  childID: SessionID,
+  attempt: number | undefined,
+  messageID: MessageID,
+) {
+  return Effect.gen(function* () {
+    const info = yield* sessions.get(childID)
+    const record = read(info)
+    const note = record?.notification
+    if (!record || !note || note.messageID || (attempt !== undefined && record.attempt !== attempt)) return false
+    yield* sessions.setMetadata({
+      sessionID: childID,
+      metadata: { ...info.metadata, [METADATA_KEY]: merge(record, { notification: { ...note, messageID } }) },
+    })
+    return true
+  }).pipe(locked(metadataLock))
+}
+
 /** Recover undelivered reports only into a human's next prompt, never into a paid retry after a crash. */
 export function recover(sessions: Session.Interface, database: Database.Interface, parentID: SessionID, messageID: MessageID) {
   return Effect.gen(function* () {
@@ -236,16 +299,15 @@ export function recover(sessions: Session.Interface, database: Database.Interfac
     return (yield* Effect.forEach(children, (child) => Effect.gen(function* () {
       const record = read(child)
       const note = record?.notification
-      if (!note || record.runtimeID === RUNTIME_ID) return []
-      const exists = (id: string) => MessageV2.get({ sessionID: parentID, messageID: id as MessageID }).pipe(
+      if (!note || note.messageID || record.runtimeID === RUNTIME_ID) return []
+      const launched = yield* MessageV2.get({ sessionID: parentID, messageID: note.launchID as MessageID }).pipe(
         Effect.provideService(Database.Service, database), Effect.option,
       )
-      if ((yield* exists(note.launchID))._tag === "None") {
+      if (launched._tag === "None") {
         yield* write(sessions, child.id, { notification: undefined }, record.attempt)
         return []
       }
-      if (note.messageID && (yield* exists(note.messageID))._tag === "Some") return []
-      yield* write(sessions, child.id, { notification: { ...note, messageID } }, record.attempt)
+      if (!(yield* claimNotification(sessions, child.id, record.attempt, messageID))) return []
       return [{ type: "text" as const, synthetic: true, text: note.text, metadata: { taskNotification: { taskID: child.id, state: note.state, recovered: true } } }]
     }))).flat()
   })
@@ -335,6 +397,44 @@ export function settle(
 }
 
 /**
+ * Settles a child's run: its final record, its spend scopes, and what it read (for the parent's memory hold).
+ * Undefined when the child has moved on to another attempt. Callers hold `controlLock`.
+ */
+export const finish = Effect.fnUntraced(function* (
+  sessions: Session.Interface,
+  guard: SpendGuard.Interface,
+  taskID: SessionID,
+  attempt: number,
+  input: { status: FinalStatus; error?: string },
+) {
+  const current = yield* sessions.get(taskID)
+  if (read(current)?.attempt !== attempt) return undefined
+  const settled = yield* settle(sessions, taskID, input)
+  yield* update(sessions, taskID, { budgetScopes: yield* guard.scopes(taskID) }, attempt)
+  yield* guard.release(taskID)
+  const hold = SessionMemory.taint(
+    yield* sessions
+      .messages({ sessionID: taskID })
+      .pipe(Effect.catch(() => Effect.succeed([] as SessionV1.WithParts[]))),
+  )
+  return { settled, hold }
+})
+
+/**
+ * How a child's run ends, from its last message: a stopped child cancels the job, and a failed one fails it while
+ * keeping what it wrote.
+ */
+export const settleRun = Effect.fnUntraced(function* (result: SessionV1.WithParts) {
+  const text = result.parts
+    .flatMap((item) => (item.type === "text" && !item.synthetic && !item.ignored && item.text ? [item.text] : []))
+    .join("\n\n")
+  const failed = result.info.role === "assistant" ? failure(result.info.error) : undefined
+  if (!failed) return text
+  if (failed.status === "cancelled") return yield* Effect.interrupt
+  return yield* new BackgroundJob.RunFailed({ message: failed.error ?? "Task failed", output: text })
+})
+
+/**
  * Merges `patch` into the metadata of the parent's task tool part, found by
  * message and call id, and publishes message.part.updated. The processor
  * writes the tool's returned metadata when it settles the call, so a part
@@ -376,6 +476,112 @@ export function patchPart(input: {
     ),
     Effect.withSpan("SubagentLifecycle.patchPart"),
   )
+}
+
+// A batch entry's status: a record status, or pending before its child exists.
+const unsettled = (status: unknown) => status === "pending" || status === "queued" || status === "running"
+
+/** A batch part's status from its entries: running while any runs, then error, then cancelled, else completed. */
+export function batchStatus(tasks: readonly { status?: unknown }[]): "running" | "completed" | "error" | "cancelled" {
+  if (tasks.some((item) => unsettled(item.status))) return "running"
+  if (tasks.some((item) => item.status === "error")) return "error"
+  if (tasks.some((item) => item.status === "cancelled")) return "cancelled"
+  return "completed"
+}
+
+type PartInput = { sessions: Session.Interface; messageID: MessageID; callID: string }
+
+// Rewrites one stored tool part under partLock. `edit` returns the new state, or undefined to leave the part as it is.
+function editPart(
+  input: PartInput,
+  span: string,
+  edit: (part: SessionV1.ToolPart) => SessionV1.ToolPart["state"] | undefined,
+) {
+  return Effect.gen(function* () {
+    const part = (yield* MessageV2.parts(input.messageID)).find(
+      (item): item is SessionV1.ToolPart => item.type === "tool" && item.callID === input.callID,
+    )
+    const state = part ? edit(part) : undefined
+    if (!part || !state) return false
+    yield* input.sessions.updatePart({ ...part, state })
+    return true
+  }).pipe(
+    locked(partLock),
+    Effect.catchCause((cause) =>
+      Effect.logWarning("subagent tool part edit failed", { messageID: input.messageID, callID: input.callID, cause }).pipe(
+        Effect.as(false),
+      ),
+    ),
+    Effect.withSpan(span),
+  )
+}
+
+// A batch part's metadata with `patch` merged into the entries `pick` chooses, and its status recomputed. Undefined
+// when the metadata is not a batch's, or it picks no entry.
+function patchedBatch(
+  metadata: Record<string, unknown> | undefined,
+  pick: (entry: Record<string, unknown>, position: number) => boolean,
+  patch: object,
+): Record<string, unknown> | undefined {
+  if (!metadata || metadata.taskBatch !== 1 || !Array.isArray(metadata.tasks)) return undefined
+  const tasks: unknown[] = metadata.tasks
+  let picked = false
+  const next = tasks.map((entry, position) => {
+    if (!isRecord(entry) || !pick(entry, position)) return entry
+    picked = true
+    return merge(entry, patch)
+  })
+  return picked ? { ...metadata, tasks: next, status: batchStatus(next.filter(isRecord)) } : undefined
+}
+
+/**
+ * Merges `patch` into entry `index` of a batch task part's `metadata.tasks` and recomputes the batch status. For a part
+ * no live call is writing: an orphaned one, or one whose call has returned. Returns whether the part changed.
+ */
+export function patchEntry(input: PartInput & { index: number; patch: object }) {
+  return editPart(input, "SubagentLifecycle.patchEntry", (part) => {
+    if (part.state.status === "pending") return undefined
+    const metadata = patchedBatch(part.state.metadata, (_, position) => position === input.index, input.patch)
+    return metadata ? { ...part.state, metadata } : undefined
+  })
+}
+
+/**
+ * Settles the launching task part of a child whose run Vector lost (an update, restart or crash). A part still pending
+ * or running becomes an error marked `interrupted`, with its unsettled entries cancelled; a settled part (a background
+ * launch) has only this child's entry, or its own status, moved from running to cancelled. Call it only when the
+ * part's owner is gone, since it writes over a part that is not settled. Returns whether the part changed.
+ */
+export function settleOrphanPart(input: PartInput & { index?: number }) {
+  return editPart(input, "SubagentLifecycle.settleOrphanPart", (part) => {
+    const now = Date.now()
+    const cancelled = { status: "cancelled", interrupted: true, completedAt: now }
+    const state = part.state
+    if (state.status === "pending" || state.status === "running") {
+      const metadata = state.status === "running" ? (state.metadata ?? {}) : {}
+      return {
+        status: "error",
+        input: state.input,
+        error: INTERRUPTED_ERROR,
+        metadata: {
+          ...(patchedBatch(metadata, (entry) => unsettled(entry.status), cancelled) ??
+            (unsettled(metadata.status) ? merge(metadata, cancelled) : metadata)),
+          interrupted: true,
+        },
+        time: { start: state.status === "running" ? state.time.start : now, end: now },
+      }
+    }
+    const metadata = state.metadata ?? {}
+    if (metadata.taskBatch === 1) {
+      const next = patchedBatch(
+        metadata,
+        (entry, position) => position === input.index && unsettled(entry.status),
+        cancelled,
+      )
+      return next ? { ...state, metadata: next } : undefined
+    }
+    return unsettled(metadata.status) ? { ...state, metadata: merge(metadata, cancelled) } : undefined
+  })
 }
 
 export * as SubagentLifecycle from "./subagent-lifecycle"

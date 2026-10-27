@@ -276,18 +276,6 @@ function renderOutput(input: {
   ].join("\n")
 }
 
-// How a child's run ends, from its last message: a stopped child cancels the job, and a failed one fails it while
-// keeping what it wrote.
-const settleRun = Effect.fnUntraced(function* (result: SessionV1.WithParts) {
-  const text = result.parts
-    .flatMap((item) => (item.type === "text" && !item.synthetic && !item.ignored && item.text ? [item.text] : []))
-    .join("\n\n")
-  const failed = result.info.role === "assistant" ? SubagentLifecycle.failure(result.info.error) : undefined
-  if (!failed) return text
-  if (failed.status === "cancelled") return yield* Effect.interrupt
-  return yield* new BackgroundJob.RunFailed({ message: failed.error ?? "Task failed", output: text })
-})
-
 export const TaskTool = Tool.define(
   id,
   Effect.gen(function* () {
@@ -309,16 +297,8 @@ export const TaskTool = Tool.define(
     const researchAgents = new Set([ResearchRun.LEAD, ResearchRun.RESEARCHER, ResearchRun.JUDGE])
     // Completion notes reach the parent through one window per parent, with every other note it gets.
     const notifier = yield* TaskNotify.Service
-    // Ownership claimed by task calls that have not registered their job yet. Sibling calls
-    // in one message run concurrently, so the job list alone cannot see each other's paths.
-    const claims = new Set<{
-      parentSessionID: SessionID
-      taskID?: string
-      title: string
-      paths: string[]
-      // Held for a running task until it settles, rather than for the length of one call.
-      held?: boolean
-    }>()
+    // Ownership claimed by task calls that have not registered their job yet.
+    const claims = SubagentLifecycle.claims
     const claimLock = SubagentLifecycle.controlLock
     // A follow-up can add prerequisites without replacing the job's original metadata. Keep those edges visible
     // until its run settles, so another follow-up cannot close a cycle through an otherwise invisible edge.
@@ -502,7 +482,7 @@ export const TaskTool = Tool.define(
         },
         catch: (error) => (error instanceof Error ? error : new Error(String(error))),
       })
-      const reserved: Array<{ parentSessionID: SessionID; taskID?: string; title: string; paths: string[] }> = []
+      const reserved: SubagentLifecycle.Claim[] = []
       const release = () => Effect.sync(() => reserved.forEach((claim) => claims.delete(claim)))
       if (ownedPaths.length > 0) {
         const conflicts = yield* claimLock.withPermits(1)(
@@ -954,7 +934,7 @@ export const TaskTool = Tool.define(
           error: string | undefined,
           persist: boolean,
         ) {
-          const done = yield* TaskNotify.finishRun(sessions, guard, nextSession.id, attempt, { status, error })
+          const done = yield* SubagentLifecycle.finish(sessions, guard, nextSession.id, attempt, { status, error })
           if (!done) return
           settledPart(done.settled, done.hold)
           if (persist) yield* persistPart()
@@ -1099,7 +1079,7 @@ export const TaskTool = Tool.define(
         const guardedRun = () =>
           runTask().pipe(
             Effect.onInterrupt(() => ops.cancel(nextSession.id)),
-            Effect.flatMap(settleRun),
+            Effect.flatMap(SubagentLifecycle.settleRun),
             // A researcher hands back 1,500 characters at most, and the notes it saved in the run, whether it finished
             // or failed partway: a failed run's text reaches the lead too.
             Effect.flatMap((text) =>
@@ -1428,13 +1408,7 @@ export const TaskTool = Tool.define(
       )
       const metadata = (): BatchMetadata => ({
         taskBatch: 1,
-        status: items.some((item) => item.status === "pending" || item.status === "queued" || item.status === "running")
-          ? "running"
-          : items.some((item) => item.status === "error")
-            ? "error"
-            : items.some((item) => item.status === "cancelled")
-              ? "cancelled"
-              : "completed",
+        status: SubagentLifecycle.batchStatus(items),
         tasks: items.map((item) => ({ ...item })),
       })
       const title = `${items.length} subagent task${items.length === 1 ? "" : "s"}`
