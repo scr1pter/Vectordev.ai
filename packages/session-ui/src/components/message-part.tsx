@@ -67,6 +67,7 @@ import { useLocation } from "@solidjs/router"
 import { attached, inline, kind } from "./message-file"
 import { readPartText } from "./message-part-text"
 import { memoryLearned } from "./memory-learned"
+import { ReplyFooter } from "./reply-footer"
 import { chipTitle, cites, decorateCitations, delivered, segments, type KnowledgeCard } from "./knowledge-citations"
 import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 
@@ -1409,20 +1410,9 @@ export const ToolRegistry = {
   render: getTool,
 }
 
-/** What the app draws under a finished reply, below its copy button and details. */
-export type ReplyFooterComponent = Component<{ message: AssistantMessage }>
-
-const replyFooter: { component?: ReplyFooterComponent } = {}
-
-/**
- * The app's slot under a reply, such as the "Learned 2 things" chip for what Vector learned from the request it
- * answers. session-ui has no engine client of its own, so the app registers the component that reads one.
- */
-export const ReplyFooter = {
-  register(component: ReplyFooterComponent) {
-    replyFooter.component = component
-  },
-}
+// What the app draws under a finished reply: every registered component, in registration order (reply-footer.ts).
+export { ReplyFooter } from "./reply-footer"
+export type { ReplyFooterComponent } from "./reply-footer"
 
 function ToolFileAccordion(props: { path: string; actions?: JSX.Element; children: JSX.Element }) {
   const value = createMemo(() => props.path || "tool-file")
@@ -1733,10 +1723,10 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
             </Show>
           </div>
         </Show>
-        <Show
-          when={showCopy() && props.message.role === "assistant" && !streaming() ? replyFooter.component : undefined}
-        >
-          {(footer) => <Dynamic component={footer()} message={props.message as AssistantMessage} />}
+        <Show when={showCopy() && props.message.role === "assistant" && !streaming()}>
+          <For each={ReplyFooter.list()}>
+            {(footer) => <Dynamic component={footer} message={props.message as AssistantMessage} />}
+          </For>
         </Show>
       </div>
     </Show>

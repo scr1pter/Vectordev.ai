@@ -2523,6 +2523,7 @@ const layer = Layer.effect(
             Effect.provideService(MCP.Service, mcp),
             Effect.provideService(Truncate.Service, truncate),
             Effect.provideService(Brain.Service, brain),
+            Effect.provideService(Config.Service, config),
           )
 
           // A request is offered what its size needs. On a caching provider the size here is the session's highest

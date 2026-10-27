@@ -51,6 +51,15 @@ function data(validate: (value: any) => void) {
   }
 }
 
+// An unknown learned skill reaches the memory handler and is refused as not found, whatever the route asks of it.
+function skillNotFound(body: unknown) {
+  object(body)
+  check(
+    body.name === "MemoryError" && isRecord(body.data) && body.data.code === "not-found",
+    "a learned skill that is not there should be refused as not found",
+  )
+}
+
 function locationData(validate: (value: any) => void) {
   return (body: any) => {
     object(body)
@@ -235,6 +244,42 @@ const scenarios: Scenario[] = [
       },
       "status",
     ),
+  // The first start records the owner's global prompt files as they are (section 8.3), so nothing is held here.
+  http.protected.get("/config/prompt-trust", "config.promptTrust.get").json(
+    200,
+    (body) => {
+      object(body)
+      array(body.held)
+      array(body.files)
+      check(
+        body.held.length === 0 && body.files.length === 0,
+        "the first start records the owner's prompt files as they are, so nothing is held",
+      )
+    },
+    "status",
+  ),
+  http.protected
+    .post("/config/prompt-trust/approve", "config.promptTrust.approve")
+    .mutating()
+    .at((ctx) => ({ path: "/config/prompt-trust/approve", headers: ctx.headers(), body: { files: [] } }))
+    .json(
+      200,
+      (body) => {
+        object(body)
+        check(body.approved === 0, "approving the empty list the owner was shown approves nothing")
+      },
+      "status",
+    ),
+  // A file the owner was never shown is never approved unseen: the list must be read again.
+  http.protected
+    .post("/config/prompt-trust/approve", "config.promptTrust.approve.stale")
+    .mutating()
+    .at((ctx) => ({
+      path: "/config/prompt-trust/approve",
+      headers: ctx.headers(),
+      body: { files: [{ path: "/nowhere/.vector/agents/unseen.md", fingerprint: "0".repeat(64) }] },
+    }))
+    .status(409),
   http.protected.get("/project", "project.list").json(200, array, "status"),
   http.protected.get("/project/current", "project.current").json(
     200,
@@ -829,6 +874,83 @@ const scenarios: Scenario[] = [
       check(typeof body.repositoryDocs === "boolean", "memory settings should say whether repository docs are read")
       check(body.keepOriginals === false, "originals are not kept unless the user turns it on")
     }),
+  http.protected.get("/memory/skills", "memory.skills.list").json(200, (body) => {
+    object(body)
+    check(Array.isArray(body.skills) && body.skills.length === 0, "a new repository has no learned skills")
+    check(
+      isRecord(body.settings) && body.settings.skills === "review" && body.settings.skillDrafter === "local-only",
+      "skills wait for review and drafts are worded locally by default",
+    )
+  }),
+  http.protected
+    .get("/memory/skills", "memory.skills.list.review")
+    .at((ctx) => ({ path: "/memory/skills?filter=review", headers: ctx.headers() }))
+    .json(200, (body) => {
+      object(body)
+      check(Array.isArray(body.skills) && body.skills.length === 0, "no drafts wait in a new repository")
+    }),
+  http.protected
+    .get("/memory/skills/{memoryID}", "memory.skills.get.missing")
+    .at((ctx) => ({ path: route("/memory/skills/{memoryID}", { memoryID: "s0none" }), headers: ctx.headers() }))
+    .json(400, skillNotFound, "status"),
+  http.protected
+    .patch("/memory/skills/{memoryID}", "memory.skills.update.missing")
+    .mutating()
+    .at((ctx) => ({
+      path: route("/memory/skills/{memoryID}", { memoryID: "s0none" }),
+      headers: ctx.headers(),
+      body: { action: "approve" },
+    }))
+    .json(400, skillNotFound, "status"),
+  http.protected
+    .delete("/memory/skills/{memoryID}", "memory.skills.forget.missing")
+    .mutating()
+    .at((ctx) => ({ path: route("/memory/skills/{memoryID}", { memoryID: "s0none" }), headers: ctx.headers() }))
+    .json(400, skillNotFound, "status"),
+  http.protected
+    .get("/memory/skills/{memoryID}/share", "memory.skills.sharePreview.missing")
+    .at((ctx) => ({ path: route("/memory/skills/{memoryID}/share", { memoryID: "s0none" }), headers: ctx.headers() }))
+    .json(400, skillNotFound, "status"),
+  http.protected
+    .post("/memory/skills/{memoryID}/share", "memory.skills.share.missing")
+    .mutating()
+    .at((ctx) => ({
+      path: route("/memory/skills/{memoryID}/share", { memoryID: "s0none" }),
+      headers: ctx.headers(),
+      body: {},
+    }))
+    .json(400, skillNotFound, "status"),
+  http.protected.get("/memory/workflow", "memory.workflow.get").json(200, (body) => {
+    object(body)
+    check(
+      body.mode === "apply" && body.explore === false,
+      "workflow insights apply learned defaults and do not explore by default",
+    )
+    check(
+      Array.isArray(body.tiers) &&
+        body.tiers.map((item) => (isRecord(item) ? item.tier : undefined)).join(",") === "light,standard,thorough",
+      "workflow insights should list every size",
+    )
+    check(
+      body.tiers.every((item) => isRecord(item) && Array.isArray(item.arms) && item.arms.length === 0),
+      "a new repository has no runs",
+    )
+  }),
+  http.protected
+    .delete("/memory/workflow", "memory.workflow.reset")
+    .mutating()
+    .json(
+      200,
+      (body) => {
+        object(body)
+        check(body.removed === 0, "a repository with no runs forgets none")
+      },
+      "status",
+    ),
+  http.protected
+    .delete("/memory/workflow", "memory.workflow.reset.invalid")
+    .at((ctx) => ({ path: "/memory/workflow?tier=chat", headers: ctx.headers() }))
+    .status(400),
   http.protected.get("/memory/model", "memory.model.get").json(200, (body) => {
     object(body)
     check(body.state === "absent", "no search model is downloaded until the user asks")

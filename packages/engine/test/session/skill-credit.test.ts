@@ -7,7 +7,7 @@ import { BrainSkill } from "@vectordevai/core/brain/skill"
 import { Session } from "@/session/session"
 import { SessionRevert } from "../../src/session/revert"
 import { TestLLMServer } from "../lib/llm-server"
-import { chat, engine, learned, recover, send, settle, setup, until } from "./learning-fixture"
+import { CHECK, chat, engine, learned, recover, send, settle, setup, until } from "./learning-fixture"
 
 // Learned skills earn credit by their own check alone (section 5.5), end to end against the fake LLM server: a load
 // whose check never ran is ignored, one followed by its check passing passes, and another check passing credits
@@ -15,7 +15,7 @@ import { chat, engine, learned, recover, send, settle, setup, until } from "./le
 
 const it = engine()
 
-// A skill in use: drafted from a run that turned `CI=1 bun typecheck` green, and approved by the owner.
+// A skill in use: drafted from a run that turned the fixture's typecheck (`CHECK`) green, and approved by the owner.
 const approved = Effect.fn("test.approved")(function* (dir: string, place: Brain.Place) {
   yield* recover(dir)
   yield* send(yield* chat(), "The typecheck fails, fix it", { size: "standard" })
@@ -48,7 +48,7 @@ it.instance(
 
       // Loaded, then its own check run and passing.
       yield* llm.tool("skill", { name: "learned-bun-typecheck-src" })
-      yield* llm.tool("bash", { command: "CI=1 bun typecheck", description: "Run the check" })
+      yield* llm.tool("bash", { command: CHECK, description: "Run the check" })
       yield* llm.text("The typecheck passes.")
       yield* send(yield* chat(), "Check the typecheck passes", { size: "standard" })
       const passed = yield* until(uses(place, id), (now) => now.passes === 1)
@@ -80,7 +80,7 @@ it.instance(
       // One run: the skill's check passes after it loads, and the lint goes green, which drafts a second skill.
       const sessionID = yield* chat()
       yield* llm.tool("skill", { name: "learned-bun-typecheck-src" })
-      yield* llm.tool("bash", { command: "CI=1 bun typecheck", description: "Run the check" })
+      yield* llm.tool("bash", { command: CHECK, description: "Run the check" })
       yield* recover(dir, { check: "bun lint", fix: "src/linted.ts" })
       yield* send(sessionID, "Get the typecheck and the lint passing", { size: "standard" })
       yield* until(uses(place, id), (now) => now.passes === 1)

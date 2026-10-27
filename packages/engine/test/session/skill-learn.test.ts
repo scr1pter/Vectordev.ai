@@ -13,7 +13,7 @@ import { EventV2Bridge } from "../../src/event-v2-bridge"
 import { SessionSkillLearn } from "../../src/session/skill-learn"
 import { Session } from "../../src/session/session"
 import { reply, TestLLMServer } from "../lib/llm-server"
-import { chat, engine, learned, recover, send, settle, setup, until } from "./learning-fixture"
+import { CHECK, chat, engine, learned, recover, send, settle, setup, until } from "./learning-fixture"
 
 // Learned skills drafted end to end (section 5.1), against the fake LLM server with no paid model call: a run whose
 // check went from failing to passing drafts a skill that waits for the owner, with the command as the agent typed it.
@@ -36,7 +36,7 @@ const drafter = Effect.fn("test.drafter")(function* (setting: Brain.LearnSetting
 
 const WORDED = JSON.stringify({
   description: "When the typecheck fails in src: add the file it misses.",
-  steps: ["Run `CI=1 bun typecheck`", "Read `src/app.ts`", "Add `src/fixed.ts`", "Run `CI=1 bun typecheck` again"],
+  steps: [`Run \`${CHECK}\``, "Read `src/app.ts`", "Add `src/fixed.ts`", `Run \`${CHECK}\` again`],
 })
 
 it.instance(
@@ -67,11 +67,11 @@ it.instance(
       expect(announced).toEqual([{ sessionID, entryIDs: [skill!.id], messageID: request!.info.id }])
       expect(skill?.status).toBe("proposed")
       expect(skill?.skill?.name).toBe("learned-bun-typecheck-src")
-      expect(skill?.skill?.checks).toEqual(["CI=1 bun typecheck"])
+      expect(skill?.skill?.checks).toEqual([CHECK])
       expect(skill?.skill?.commands).toEqual(["git status --short"])
       expect(skill?.skill?.drafter).toBe("rules")
       expect(skill?.paths).toEqual(["src/fixed.ts", "src/app.ts"])
-      expect(skill?.skill?.procedure).toContain("`CI=1 bun typecheck`")
+      expect(skill?.skill?.procedure).toContain(`\`${CHECK}\``)
       // Default settings: the model drafter runs only with Vector Local on, which it is not.
       expect((yield* (yield* TestLLMServer).hits).some(drafting)).toBe(false)
     }),
@@ -256,7 +256,7 @@ it.instance(
       const [skill] = yield* until(learned(place), (list) => list.length > 0)
       expect(skill?.skill?.drafter).toBe("model")
       expect(skill?.skill?.description).toBe("When the typecheck fails in src: add the file it misses.")
-      expect(skill?.skill?.checks).toEqual(["CI=1 bun typecheck"])
+      expect(skill?.skill?.checks).toEqual([CHECK])
       // Model drafts wait for the owner, whatever the mode.
       expect(skill?.status).toBe("proposed")
       // The trace went as data, with nothing of the conversation but the run's commands and files.

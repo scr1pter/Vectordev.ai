@@ -14,7 +14,7 @@ import { ConfigPlugin } from "@/config/plugin"
 import { CurrentWorkingDirectory } from "@/config/tui-cwd"
 import { PluginLoader } from "@/plugin/loader"
 import { TuiConfig } from "../../src/config/tui"
-import { TestInstance } from "../fixture/fixture"
+import { resetPromptTrust, TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
 const it = testEffect(LayerNode.compile(LayerNode.group([Config.node, FSUtil.node])))
@@ -28,6 +28,8 @@ const cleanState = Effect.gen(function* () {
   const fs = yield* FSUtil.Service
   delete process.env.VECTOR_AGENT_CONFIG
   delete process.env.VECTOR_TUI_CONFIG
+  // The global files these tests write are the owner's own config, not a change made after an approval.
+  resetPromptTrust()
   yield* Effect.forEach(globalConfigFiles, (file) => fs.remove(file, { force: true }).pipe(Effect.ignore), {
     discard: true,
   })

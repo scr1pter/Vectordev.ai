@@ -5,14 +5,14 @@ import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Ripgrep } from "@vectordevai/core/ripgrep"
 import { Cause, Effect, Exit, Layer } from "effect"
-import { afterEach, describe, expect } from "bun:test"
+import { afterEach, beforeEach, describe, expect } from "bun:test"
 import path from "path"
 import fs from "node:fs/promises"
 import type { Permission } from "../../src/permission"
 import type { Tool } from "@/tool/tool"
 import { SkillTool } from "../../src/tool/skill"
 import { ToolRegistry } from "@/tool/registry"
-import { disposeAllInstances, TestInstance, trustWorkspace } from "../fixture/fixture"
+import { disposeAllInstances, resetPromptTrust, TestInstance, trustWorkspace } from "../fixture/fixture"
 import { SessionID, MessageID, PartID } from "../../src/session/schema"
 import { SessionMemory } from "../../src/session/memory"
 import { SessionV1 } from "@vectordevai/core/v1/session"
@@ -36,6 +36,9 @@ const baseCtx: Omit<Tool.Context, "ask"> = {
   messages: [],
   metadata: () => Effect.void,
 }
+
+// A skills folder a test adds is one the owner already had, so no earlier test's prompt-trust baseline holds it.
+beforeEach(() => resetPromptTrust())
 
 afterEach(async () => {
   await disposeAllInstances()

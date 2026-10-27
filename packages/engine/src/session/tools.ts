@@ -75,6 +75,8 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   const mcp = yield* MCP.Service
   const truncate = yield* Truncate.Service
   const brain = yield* Brain.Service
+  // The prompt guard reads what this directory's prompts come from, so every caller must hand it the config.
+  const config = yield* Config.Service
   // What a compaction folded away still counts for the rules that ask about outside content, so they read the session's
   // stored messages as well as the window the model sees.
   const history = () =>
@@ -87,11 +89,9 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   const prompted = new Map<string, string[]>()
   // What this directory's prompts are read from (section 8.2), worked out for each edit a tool call asks for.
   const prompts = Effect.fnUntraced(function* () {
-    const config = yield* Effect.serviceOption(Config.Service)
-    if (Option.isNone(config)) return yield* Effect.die(new Error("The prompt guard needs the config service"))
     const instance = yield* InstanceState.context
     return yield* PromptSource.sources({
-      config: config.value,
+      config,
       global: Option.getOrElse(yield* Effect.serviceOption(Global.Service), () => Global.make()),
       directory: instance.directory,
       worktree: instance.worktree,

@@ -469,6 +469,13 @@ function expand(text: string, cwd: string, shell: string) {
 function shellWord(arg: string, cwd: string, ps: boolean, shell: string) {
   if (ps) return expand(arg, cwd, shell).replace(/`([\s\S])/g, "$1")
   if (Shell.name(shell) === "cmd") return home(cmdWord(unquote(arg)))
+  return home(bashWord(arg))
+}
+
+// A word a command writes to, read as shellWord reads it, except that bash and zsh also expand a leading $HOME or
+// $XDG_CONFIG_HOME (see posixHome).
+function targetWord(arg: string, cwd: string, ps: boolean, shell: string) {
+  if (ps || Shell.name(shell) === "cmd") return shellWord(arg, cwd, ps, shell)
   return home(posixHome(arg, bashWord(arg)))
 }
 
@@ -488,6 +495,9 @@ export function dropsMarker(command: string) {
 // in double quotes, before the program sees it: the commonest spelling of a global prompt file
 // (`cp x $HOME/.config/vector/AGENTS.md`), which the scan would otherwise ask for as written, inside the worktree. The
 // shell Vector starts inherits this process's environment. Single quotes and a backslash keep the text as written.
+// Only write targets are read this way (section 8.2), so the edit rules and the prompt guard see the file a write lands
+// on. Reads, git diff paths and input redirects keep `$HOME` unknown, as the shell decides where it points, so the
+// read-only agents still refuse them.
 function posixHome(raw: string, word: string) {
   if (!/^"?\$\{?(?:HOME|XDG_CONFIG_HOME)\b/.test(raw)) return word
   return word.replace(/^\$(?:\{(HOME|XDG_CONFIG_HOME)\}|(HOME|XDG_CONFIG_HOME))(?=$|\/)/, (match, braced, bare) => {
@@ -607,10 +617,14 @@ function pathArgs(list: Part[], ps: boolean, cmd = false) {
 // Options of cp, mv, install and ln whose value is the next word.
 const VALUED = new Set(["-t", "--target-directory", "-m", "--mode", "-o", "--owner", "-g", "--group", "-S", "--suffix"])
 
+type Write = { target: string; sources: string[]; folder: boolean }
+// The commands writes() reads.
+const WRITERS = new Set(["cp", "mv", "install", "ln", "tee", "sed", "dd"])
+
 // The files a bash command writes by name rather than through a redirect (section 8.2), best effort: the last operand of
 // cp, mv, install and ln, or the folder -t names, every file of tee and of sed -i, and dd's of=. Interpreters, git
-// apply and patch write files this does not see.
-function writes(cmd: string, words: readonly string[]): { target: string; sources: string[]; folder: boolean }[] {
+// apply and patch write files this does not see. PowerShell's and cmd's forms of these are psWrites and cmdWrites.
+function writes(cmd: string, words: readonly string[]): Write[] {
   const file = (target: string) => ({ target, sources: [], folder: false })
   if (cmd === "dd") return words.flatMap((word) => (word.startsWith("of=") ? [file(word.slice(3))] : []))
   if (cmd === "tee") return words.filter((word) => !word.startsWith("-")).map(file)
@@ -640,6 +654,176 @@ function edited(words: readonly string[]) {
   )
   const scripted = words.some((word) => scripts(word) || /^--(expression|file)=/.test(word))
   return scripted ? operands : operands.slice(1)
+}
+
+// PowerShell's common parameters, which every cmdlet takes.
+const PS_COMMON = [
+  "-verbose",
+  "-debug",
+  "-erroraction",
+  "-warningaction",
+  "-informationaction",
+  "-progressaction",
+  "-errorvariable",
+  "-warningvariable",
+  "-informationvariable",
+  "-outvariable",
+  "-outbuffer",
+  "-pipelinevariable",
+]
+// The switches among the parameters below, which take a value only after a colon (`-Recurse:$false`).
+const PS_SWITCHES = new Set([
+  "-verbose",
+  "-debug",
+  "-container",
+  "-force",
+  "-recurse",
+  "-passthru",
+  "-whatif",
+  "-confirm",
+  "-append",
+])
+// The aliases PowerShell gives these parameters.
+const PS_PARAMETER_ALIASES = new Map([
+  ["-lp", "-literalpath"],
+  ["-pspath", "-literalpath"],
+  ["-ea", "-erroraction"],
+  ["-wa", "-warningaction"],
+  ["-infa", "-informationaction"],
+  ["-proga", "-progressaction"],
+  ["-ev", "-errorvariable"],
+  ["-wv", "-warningvariable"],
+  ["-iv", "-informationvariable"],
+  ["-ov", "-outvariable"],
+  ["-ob", "-outbuffer"],
+  ["-pv", "-pipelinevariable"],
+  ["-vb", "-verbose"],
+  ["-db", "-debug"],
+  ["-wi", "-whatif"],
+  ["-cf", "-confirm"],
+])
+// The parameters of Copy-Item and Move-Item (`cp`, `mv`, `copy`, `cpi`, `move`, `mi`), and of Tee-Object (`tee`).
+const PS_COPY = [
+  "-path",
+  "-literalpath",
+  "-destination",
+  "-container",
+  "-force",
+  "-filter",
+  "-include",
+  "-exclude",
+  "-recurse",
+  "-passthru",
+  "-credential",
+  "-fromsession",
+  "-tosession",
+  "-whatif",
+  "-confirm",
+  ...PS_COMMON,
+]
+const PS_TEE = ["-inputobject", "-filepath", "-literalpath", "-append", "-encoding", "-variable", ...PS_COMMON]
+
+// The parameter a PowerShell parameter word names: its alias, or the one parameter whose name it begins, as PowerShell
+// accepts `-Dest` for `-Destination`. An ambiguous prefix (`-d`) names none, and PowerShell refuses the command.
+function psParameter(text: string, names: readonly string[]) {
+  const flag = text.toLowerCase().replace(/:.*$/s, "")
+  const name = PS_PARAMETER_ALIASES.get(flag) ?? flag
+  if (names.includes(name)) return name
+  const found = names.filter((item) => item.startsWith(name))
+  return found.length === 1 ? found[0] : undefined
+}
+
+type PsArgument = { type: string; text: string; colon: boolean }
+
+// A PowerShell command's arguments as written, each parameter marked when a colon joins it to its value
+// (`-Destination:x`, `-Recurse:$false`), which parts() drops.
+function psArguments(node: Node) {
+  const out: PsArgument[] = []
+  for (const child of node.children) {
+    if (child?.type !== "command_elements") continue
+    for (const item of child.children) {
+      if (!item || item.type === "redirection") continue
+      const last = out[out.length - 1]
+      if (item.type === "command_argument_sep") {
+        if (item.text === ":" && last?.type === "command_parameter") last.colon = true
+        continue
+      }
+      out.push({ type: item.type, text: item.text, colon: false })
+    }
+  }
+  return out
+}
+
+// The files a PowerShell command writes by name (section 8.2), as writes() finds them for bash: the destination of
+// Copy-Item and Move-Item, named or second by position (first when the source is named), or the current location when
+// none is given, and Tee-Object's file. `cmd` is the command's name through PS_ALIASES, so `copy`, `cpi`, `move` and
+// `mi` arrive as the cmdlets they run. `cp`, `mv` and `tee` are the cmdlets' aliases only on Windows: elsewhere they
+// run the native tools, as install, ln, dd and sed do everywhere, and writes() reads their words as under bash, `-t`
+// included. An array argument (`a.txt,b.txt`), which the grammar splits before each comma, reaches them word by word.
+function psWrites(cmd: string, args: readonly PsArgument[]): Write[] {
+  if (WRITERS.has(cmd) && (process.platform !== "win32" || !["cp", "mv", "tee"].includes(cmd)))
+    return writes(
+      cmd,
+      args.map((arg) => (arg.type !== "command_parameter" && arg.text.startsWith(",") ? arg.text.slice(1) : arg.text)),
+    )
+  const copy = ["cp", "mv", "copy-item", "move-item"].includes(cmd)
+  if (!copy && cmd !== "tee" && cmd !== "tee-object") return []
+  const names = copy ? PS_COPY : PS_TEE
+  const named = new Map<string, string[]>()
+  const positional: string[][] = []
+  let want: string | undefined
+  let last: string[] | undefined
+  for (const arg of args) {
+    // `a.txt,b.txt` is one array argument, which the grammar splits before each comma.
+    if (arg.type !== "command_parameter" && arg.text.startsWith(",") && last) {
+      last.push(arg.text.slice(1))
+      continue
+    }
+    if (want !== undefined) {
+      last = named.get(want) ?? []
+      named.set(want, last)
+      last.push(arg.text)
+      want = undefined
+      continue
+    }
+    if (arg.type === "command_parameter") {
+      const name = psParameter(arg.text, names)
+      const inline = arg.text.includes(":") ? arg.text.slice(arg.text.indexOf(":") + 1) : ""
+      last = undefined
+      // A switch takes a value only after a colon (`-Recurse:$false`), and that value names no file.
+      if (!name || PS_SWITCHES.has(name)) {
+        if (arg.colon) want = ""
+        continue
+      }
+      if (inline) named.set(name, [...(named.get(name) ?? []), inline])
+      else want = name
+      continue
+    }
+    last = [arg.text]
+    positional.push(last)
+  }
+  if (!copy) {
+    if (named.has("-variable")) return []
+    const target = named.get("-filepath")?.[0] ?? named.get("-literalpath")?.[0] ?? positional[0]?.[0]
+    return target ? [{ target, sources: [], folder: false }] : []
+  }
+  const given = named.get("-path") ?? named.get("-literalpath")
+  const sources = given ?? positional[0] ?? []
+  const target = named.get("-destination")?.[0] ?? positional[given ? 0 : 1]?.[0]
+  if (target) return [{ target, sources, folder: false }]
+  // Without a destination the cmdlets copy or move into the current location, which the bash tool's workdir may set.
+  return sources.length > 0 ? [{ target: ".", sources, folder: true }] : []
+}
+
+// The files cmd's copy and move write: the last operand, when there are two or more, as writes() reads cp and mv, and
+// for a copy of one source, that source's name in the current folder, where copy puts it without a destination.
+// Switches (`/Y`) may stand anywhere. `words` are as written, so the operands are read as cmd reads them later.
+function cmdWrites(cmd: string, words: readonly string[]): Write[] {
+  if (cmd !== "copy" && cmd !== "move") return []
+  const operands = words.filter((word) => !cmdWord(unquote(word)).startsWith("/"))
+  if (cmd === "copy" && operands.length === 1) return [{ target: ".", sources: operands, folder: true }]
+  if (operands.length < 2) return []
+  return [{ target: operands[operands.length - 1], sources: operands.slice(0, -1), folder: false }]
 }
 
 function preview(text: string) {
@@ -1016,6 +1200,16 @@ export const ShellTool = Tool.define(
       return yield* wordPath(shellWord(arg, cwd, ps, shell), cwd, ps, shell)
     })
 
+    // The path a command writes to, with bash's and zsh's leading `$HOME` expanded (see targetWord).
+    const targetPath = Effect.fn("ShellTool.targetPath")(function* (
+      arg: string,
+      cwd: string,
+      ps: boolean,
+      shell: string,
+    ) {
+      return yield* wordPath(targetWord(arg, cwd, ps, shell), cwd, ps, shell)
+    })
+
     // The path a word names once its shell has read it (see shellWord), or nothing when the scan cannot know it.
     const wordPath = Effect.fn("ShellTool.wordPath")(function* (text: string, cwd: string, ps: boolean, shell: string) {
       const file = text && prefix(text)
@@ -1202,18 +1396,26 @@ export const ShellTool = Tool.define(
         for (const arg of item.command.slice(1)) yield* envRead(arg.text)
 
         // A file a command writes by name asks what the edit tool asks, as a redirect's does, so the edit rules and the
-        // prompt guard see it. A copy into a folder writes each source's name inside it.
-        if (!win && cmd) {
-          for (const write of writes(cmd, tokens.slice(1))) {
-            const resolved = yield* argPath(write.target, cwd, ps, shell)
+        // prompt guard see it, under PowerShell and cmd as under bash. A copy into a folder writes each source's name
+        // inside it.
+        if (cmd) {
+          const found = ps
+            ? psWrites(cmd, psArguments(item.node))
+            : shellKind === "cmd"
+              ? cmdWrites(cmd, tokens.slice(1))
+              : writes(cmd, tokens.slice(1))
+          for (const write of found) {
+            const resolved = yield* targetPath(write.target, cwd, ps, shell)
             const into =
               resolved !== undefined &&
               write.sources.length > 0 &&
-              (write.folder || write.target.endsWith("/") || (yield* fs.isDir(resolved)))
+              (write.folder ||
+                (win ? /[\\/]$/ : /\/$/).test(targetWord(write.target, cwd, ps, shell)) ||
+                (yield* fs.isDir(resolved)))
+            const name = (source: string) =>
+              win ? path.win32.basename(shellWord(source, cwd, ps, shell)) : path.basename(bashWord(source))
             const files =
-              resolved && into
-                ? write.sources.map((source) => path.join(resolved, path.basename(bashWord(source))))
-                : [resolved]
+              resolved && into ? write.sources.map((source) => path.join(resolved, name(source))) : [resolved]
             for (const file of files) {
               scan.writes.add(file ? path.relative(instance.worktree, file) : write.target)
               if (file && !containsPath(file, instance)) scan.dirs.add(path.dirname(file))
@@ -1307,7 +1509,7 @@ export const ShellTool = Tool.define(
 
       // A target that cannot be resolved (`> "$OUT"`) is asked for as written, so a rule that denies edits denies it.
       for (const target of redirects(root, ps)) {
-        const resolved = yield* argPath(target, cwd, ps, shell)
+        const resolved = yield* targetPath(target, cwd, ps, shell)
         scan.writes.add(resolved ? path.relative(instance.worktree, resolved) : target)
         if (!resolved || containsPath(resolved, instance)) continue
         scan.dirs.add(path.dirname(resolved))

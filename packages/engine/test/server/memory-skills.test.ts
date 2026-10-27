@@ -257,10 +257,12 @@ describe("memory skill routes", () => {
     const folder = path.join(tmp.path, ".vector", "skills", entry.skill!.name)
     await using outside = await tmpdir()
     await fs.mkdir(path.dirname(folder), { recursive: true })
-    await fs.symlink(outside.path, folder)
+    // A junction on Windows, as elsewhere in these tests. Only the link is removed: unlink drops a junction without
+    // following it, where Bun's rm on Windows fails on a link to a folder.
+    await fs.symlink(outside.path, folder, process.platform === "win32" ? "junction" : "dir")
     expect(await (await share(entry.id)).json()).toMatchObject({ data: { reason: "outside" } })
     expect(await fs.readdir(outside.path)).toEqual([])
-    await fs.rm(folder)
+    await fs.unlink(folder)
 
     // A file already there is replaced only with force.
     const file = path.join(folder, "SKILL.md")

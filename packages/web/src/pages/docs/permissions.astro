@@ -71,7 +71,9 @@ export const prerender = true
             your global <code>AGENTS.md</code> and <code>~/.claude/CLAUDE.md</code>, and instruction files outside the
             repository. Vector asks before its edit, write and patch tools change one, and before a shell redirect or
             one of the common write commands (<code>cp</code>, <code>mv</code>, <code>install</code>, <code>ln</code>,
-            <code>tee</code>, <code>sed -i</code> and <code>dd</code>) does, a target spelled with
+            <code>tee</code>, <code>sed -i</code> and <code>dd</code>, and on Windows PowerShell's
+            <code>Copy-Item</code>, <code>Move-Item</code> and <code>Tee-Object</code> and cmd's <code>copy</code> and
+            <code>move</code>) does, a target spelled with
             <code>$HOME</code> or <code>$XDG_CONFIG_HOME</code> included. A repository's own <code>AGENTS.md</code>
             is not one: you often ask the agent to edit it, and the change shows in <code>git diff</code>. A
             <code>vector.json</code> that Vector does not load, such as a test fixture, is edited like any other file,

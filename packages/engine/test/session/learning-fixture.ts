@@ -17,6 +17,7 @@ import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { Database } from "@vectordevai/core/database/database"
 import { SessionProjector } from "@vectordevai/core/session/projector"
 import { Ripgrep } from "@vectordevai/core/ripgrep"
+import { Shell } from "@vectordevai/core/shell"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
@@ -274,6 +275,13 @@ export const send = Effect.fn("learning.send")(function* (
 })
 
 /**
+ * The check the fake model runs by default, as the agent would type it in the shell the bash tool uses. A POSIX shell
+ * keeps the `CI=1` prefix, so a draft shows the command with its env as typed. PowerShell and cmd, Vector's default
+ * shells on Windows, read `CI=1` as a command name and cannot run that prefix, so there the check is plain.
+ */
+export const CHECK = Shell.posix(Shell.acceptable()) ? "CI=1 bun typecheck" : "bun typecheck"
+
+/**
  * The fake model's turn for a run whose check fails, the agent fixes it, and the check passes: the check, a read, a
  * helper command, the fix and the check again. `load` first loads that learned skill; `helper` may be a command whose
  * output is not this computer's.
@@ -289,7 +297,7 @@ export const recover = Effect.fn("learning.recover")(function* (
   } = {},
 ) {
   const llm = yield* TestLLMServer
-  const check = input.check ?? "CI=1 bun typecheck"
+  const check = input.check ?? CHECK
   if (input.load) yield* llm.tool("skill", { name: input.load })
   yield* llm.tool("bash", { command: check, description: "Run the check" })
   yield* llm.tool("read", { filePath: path.join(dir, input.read ?? "src/app.ts") })
