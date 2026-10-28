@@ -362,6 +362,16 @@ describe("computer bridge protocol", () => {
     rejects(Computer.BridgeRequest, { ...envelope, command: "hideOverlay" })
   })
 
+  test("queued cancellation needs no lease but still requires its root envelope", () => {
+    const queued = { ...envelope, v: Computer.PROTOCOL, command: "cancel" } as const
+    expect(strict(Computer.BridgeRequest)(queued)).toEqual(queued)
+    expect(Schema.encodeSync(Computer.BridgeCommands.cancel.request)({ ...queued, lease: undefined })).toEqual(queued)
+    accepts(Computer.BridgeCommands.cancel.request, { ...queued, lease })
+    rejects(Computer.BridgeCommands.cancel.request, { command: "cancel" })
+    rejects(Computer.BridgeCommands.cancel.request, { ...queued, rootSessionID: "" })
+    rejects(Computer.BridgeCommands.cancel.request, { ...queued, lease: 0 })
+  })
+
   test("nested unknown fields are rejected too", () => {
     const grant = { ...envelope, command: "grant", lease, level: "interact", requestID: "per_1" }
     rejects(Computer.BridgeRequest, { ...grant, identity: { ...mac, granted: true } })

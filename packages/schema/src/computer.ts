@@ -994,7 +994,11 @@ export const BridgeCommands = {
     response: Schema.Struct({ result: Schema.Literals(["resumed", "stopped", "declined", "pending"]) }),
   },
   heartbeat: { request: command("heartbeat", { lease: Lease }), response: Schema.Struct({ state: ComputerState }) },
-  cancel: { request: command("cancel", { lease: Lease, requestId: optional(Id) }), response: Ok },
+  cancel: {
+    // Without a lease, cancel only this root's queued acquire. Never stop or release an active holder.
+    request: command("cancel", { lease: optional(Lease), requestId: optional(Id) }),
+    response: Ok,
+  },
 } as const
 
 export type BridgeCommandName = keyof typeof BridgeCommands
