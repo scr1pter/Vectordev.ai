@@ -628,6 +628,9 @@ export const TaskTool = Tool.define(
       }
 
       const { root, depth } = yield* lineage(parent)
+      const resumed = session && SubagentLifecycle.read(session)
+      if (resumed && !(yield* SubagentLifecycle.agentMayResume(sessions, root.id, resumed)))
+        return yield* Effect.fail(new Error(SubagentLifecycle.HUMAN_FIRST))
       if (depth >= MAX_SUBAGENT_DEPTH) {
         return yield* Effect.fail(
           new Error(
@@ -1329,8 +1332,9 @@ export const TaskTool = Tool.define(
             const existing = yield* background.get(nextSession.id)
             if (existing?.status === "running") return existing
             yield* assertDependencies(nextSession.id, dependencies)
+            const prior = session && SubagentLifecycle.read(yield* sessions.get(nextSession.id))
             if (session) {
-              attempt = (SubagentLifecycle.read(yield* sessions.get(nextSession.id))?.attempt ?? 0) + 1
+              attempt = (prior?.attempt ?? 0) + 1
               record.attempt = attempt
               metadata.attempt = attempt
             }
@@ -1354,6 +1358,11 @@ export const TaskTool = Tool.define(
                 resultSummary: undefined,
                 reason: undefined,
                 slotReason: record.slotReason,
+                // Resumed: neither its interruption nor a stop holds it for the user any more (D.3).
+                ...(prior?.interruption && { interruption: { ...prior.interruption, resumedAt: startedAt } }),
+                stop: undefined,
+                waiting: undefined,
+                reports: undefined,
               })
             // The admission's place and any slot it reserved become the child's before its run can start.
             if (admission) yield* limits.bind(admission, nextSession.id)

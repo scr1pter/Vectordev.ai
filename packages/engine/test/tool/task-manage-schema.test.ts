@@ -54,7 +54,7 @@ describe("task_manage provider schema", () => {
         expect(parameters).toMatchObject({
           type: "object",
           properties: {
-            action: { enum: ["list", "inspect", "message", "stop", "wait"] },
+            action: { enum: ["list", "inspect", "message", "stop", "wait", "resume"] },
             task_id: { type: "string" },
             task_ids: { type: "array", minItems: 1, maxItems: 200 },
             text: { type: "string" },
@@ -94,6 +94,9 @@ describe("task_manage provider schema", () => {
         { action: "wait", task_ids: [] },
         { action: "wait", task_ids: ["ses_child"], timeout: -1 },
         { action: "wait", task_ids: ["ses_child"], timeout: 60001 },
+        { action: "resume" },
+        { action: "resume", task_ids: [] },
+        { action: "resume", task_ids: Array.from({ length: 9 }, (_, index) => `ses_child_${index}`) },
       ]) {
         const exit = yield* tool.execute(input, context).pipe(Effect.exit)
         expect(Exit.isFailure(exit)).toBe(true)
@@ -107,6 +110,8 @@ describe("task_manage provider schema", () => {
         { action: "message", task_id: "ses_child", text: "Correct the parser", delivery: "steer" },
         { action: "stop", task_ids: ["ses_child"], reason: "Assignment changed" },
         { action: "wait", task_ids: ["ses_child"], mode: "all", timeout: 60000 },
+        { action: "resume", task_ids: ["ses_child"] },
+        { action: "resume", task_ids: ["ses_child"], text: "Also check the parser" },
       ]) {
         expect(Schema.decodeUnknownSync(tool.parameters)(input)).toEqual(input)
       }

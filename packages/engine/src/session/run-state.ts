@@ -111,6 +111,8 @@ const layer = Layer.effect(
       )
       if (record?.status !== "queued" && record?.status !== "running") return
       yield* SubagentLifecycle.settle(sessions, sessionID, { status: "cancelled" })
+      // The user stopped it, so the agent resumes it only after the user writes again (D.3).
+      yield* SubagentLifecycle.update(sessions, sessionID, { stop: { by: "user", at: Date.now() } }, record.attempt)
     })
 
     const ensureRunning = Effect.fn("SessionRunState.ensureRunning")(function* (

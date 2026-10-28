@@ -4,7 +4,7 @@ import { connect } from "node:net"
 import path from "path"
 import { afterEach, describe, expect, test } from "bun:test"
 import { Effect, Layer, Option, Queue, Redacted, Schema, Stream } from "effect"
-import { HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/unstable/http"
+import { HttpClient, HttpClientRequest, HttpRouter, HttpServer, HttpServerRequest } from "effect/unstable/http"
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { ServerAuth } from "../../src/server/auth"
 import { Authorization, authorizationLayer } from "../../src/server/routes/instance/httpapi/middleware/authorization"
@@ -19,6 +19,29 @@ import { Server } from "../../src/server/server"
 import { Flag } from "@vectordevai/core/flag/flag"
 import { Global } from "@vectordevai/core/global"
 import { SessionV2 } from "@vectordevai/core/session"
+import { ProjectV2 } from "@vectordevai/core/project"
+import type { SessionV1 } from "@vectordevai/core/v1/session"
+import { Agent } from "@/agent/agent"
+import { MCP } from "@/mcp"
+import { Project } from "@/project/project"
+import { Provider } from "@/provider/provider"
+import { RuntimeFlags } from "@/effect/runtime-flags"
+import { Session } from "@/session/session"
+import { SessionPrompt } from "@/session/prompt"
+import { SessionID } from "@/session/schema"
+import { TaskManager } from "@/task/manager"
+import { DesktopTasks } from "@/task/desktop"
+import { ToolRegistry } from "@/tool/registry"
+import { Worktree } from "@/worktree"
+import { FREE_MODEL_TRAINING_OWNER_ONLY } from "@vectordevai/core/free-model-choice"
+import { ExperimentalApi } from "../../src/server/routes/instance/httpapi/groups/experimental"
+import { experimentalHandlers } from "../../src/server/routes/instance/httpapi/handlers/experimental"
+import { InstanceContextMiddleware } from "../../src/server/routes/instance/httpapi/middleware/instance-context"
+import { schemaErrorLayer } from "../../src/server/routes/instance/httpapi/middleware/schema-error"
+import {
+  WorkspaceRouteContext,
+  WorkspaceRoutingMiddleware,
+} from "../../src/server/routes/instance/httpapi/middleware/workspace-routing"
 
 const credential = (username: string, password: string) => ({ username, password: Redacted.make(password) })
 
@@ -1593,6 +1616,148 @@ test("a guest's global config leaves out the owner's Vector Local block", async 
     }
   }
 }, 30_000)
+
+// A guest's resume (D.3, I11): it runs under the guest limits, and never reaches a free model that may train through
+// the owner's acceptance. TaskManager.resume itself is tested in tool/task-manage.test.ts.
+describe("a guest's task resume", () => {
+  const rootID = SessionID.make("ses_guest_resume_root")
+  const trains = SessionID.make("ses_guest_resume_trains")
+  const keeps = SessionID.make("ses_guest_resume_keeps")
+  const models: Record<string, string> = { [trains]: "acme/trains:free", [keeps]: "acme/keeps:free" }
+  const resumed: Array<{ guest: boolean; origin: string; refuses: boolean }> = []
+  // A request with an `x-test-guest` header runs as a guest in control of the sessions it lists.
+  const authorization = Authorization.of((effect) =>
+    Effect.gen(function* () {
+      const claims = (yield* HttpServerRequest.HttpServerRequest).headers["x-test-guest"]
+      if (claims === undefined) return yield* effect
+      return yield* effect.pipe(
+        Effect.provideService(RequestPrincipal, {
+          kind: "guest",
+          username: "guest",
+          workspaceIDs: new Set<string>(),
+          workspaceDirectories: new Map<string, string>(),
+          sessionIDs: new Set(claims.split(",").filter(Boolean)),
+        }),
+      )
+    }),
+  )
+  const session = (id: SessionID): Session.Info => ({
+    id,
+    slug: "test",
+    projectID: ProjectV2.ID.make("project_test"),
+    directory: process.cwd(),
+    title: "test",
+    version: "test",
+    time: { created: 1, updated: 1 },
+    ...(models[id]
+      ? {
+          parentID: rootID,
+          metadata: {
+            subagent: {
+              kind: "subagent",
+              custom: false,
+              agent: "general",
+              title: "Survey",
+              parentSessionID: rootID,
+              parentMessageID: "msg_guest_resume_launch",
+              model: { providerID: "openrouter", modelID: models[id] },
+              background: true,
+              status: "cancelled",
+              startedAt: 1,
+              attempt: 1,
+            },
+          },
+        }
+      : {}),
+  })
+  const it = testEffect(
+    HttpRouter.serve(
+      HttpApiBuilder.layer(HttpApi.make("vector-instance").addHttpApi(ExperimentalApi)).pipe(
+        Layer.provide(experimentalHandlers),
+        Layer.provide([
+          schemaErrorLayer,
+          Layer.succeed(Authorization, authorization),
+          Layer.succeed(
+            InstanceContextMiddleware,
+            InstanceContextMiddleware.of((effect) => effect),
+          ),
+          Layer.succeed(
+            WorkspaceRoutingMiddleware,
+            WorkspaceRoutingMiddleware.of((effect) =>
+              effect.pipe(Effect.provideService(WorkspaceRouteContext, { directory: process.cwd() })),
+            ),
+          ),
+          RuntimeFlags.layer({ backgroundSubagents: true }),
+          // These unrelated experimental endpoints are never called by this test.
+          Layer.mock(Agent.Service)({}),
+          Layer.mock(MCP.Service)({}),
+          Layer.mock(Project.Service)({}),
+          Layer.mock(ToolRegistry.Service)({}),
+          Layer.mock(Worktree.Service)({}),
+          Layer.mock(DesktopTasks.Service)({}),
+          Layer.mock(Session.Service)({ get: (id) => Effect.succeed(session(id)) }),
+          // The free model whose provider may train on prompts, and one that keeps them private.
+          Layer.mock(Provider.Service)({
+            getModel: (_, modelID) =>
+              Effect.succeed({
+                freeModel: {
+                  source: "openrouter",
+                  dataPolicy: modelID === models[trains] ? "may-train" : "no-training",
+                },
+              } as unknown as Provider.Model),
+          }),
+          // Records whether the prompts a resume sends would refuse such a model.
+          Layer.mock(SessionPrompt.Service)({
+            prompt: (input, options) =>
+              Effect.succeed({
+                info: { id: "msg_guest_resume_reply", sessionID: input.sessionID, role: "user" },
+                parts: [],
+                refuses: options?.refuseTrainingFreeModels === true,
+              } as unknown as SessionV1.WithParts),
+          }),
+          Layer.mock(TaskManager.Service)({
+            resume: (input, ops) =>
+              ops.prompt({ sessionID: input.sessionID, parts: [] }).pipe(
+                Effect.map((reply) => {
+                  const refuses = (reply as unknown as { refuses: boolean }).refuses
+                  resumed.push({ guest: input.guest, origin: input.origin, refuses })
+                  return { tasks: [] }
+                }),
+              ),
+          }),
+        ]),
+      ),
+      { disableListenLog: true, disableLogger: true },
+    ).pipe(Layer.provideMerge(NodeHttpServer.layerTest)),
+  )
+  const resume = (taskIDs: string[], headers: Record<string, string>) =>
+    HttpClientRequest.post(`/experimental/session/${rootID}/tasks/resume`).pipe(
+      HttpClientRequest.setHeaders(headers),
+      HttpClientRequest.bodyJsonUnsafe({ taskIDs }),
+      HttpClient.execute,
+    )
+
+  it.live("a guest resume refuses training models and runs under the guest limits", () =>
+    Effect.gen(function* () {
+      resumed.length = 0
+      const guest = { "x-test-guest": rootID }
+      // A helper on a free model that may train is refused at once, before anything resumes.
+      const refused = yield* resume([keeps, trains], guest)
+      expect(refused.status).toBe(400)
+      expect(yield* refused.json).toEqual({ code: "forbidden", message: FREE_MODEL_TRAINING_OWNER_ONLY })
+      expect(resumed).toEqual([])
+      // One on a private free model resumes, as a guest whose prompts refuse such a model.
+      expect((yield* resume([keeps], guest)).status).toBe(200)
+      expect(resumed).toEqual([{ guest: true, origin: "user", refuses: true }])
+      // A guest without control of the session is refused before the manager is reached.
+      expect((yield* resume([keeps], { "x-test-guest": "" })).status).toBe(403)
+      // The owner accepted the training notice, so the owner may resume it.
+      expect((yield* resume([trains], {})).status).toBe(200)
+      expect(resumed[1]).toEqual({ guest: false, origin: "user", refuses: false })
+      expect(resumed).toHaveLength(2)
+    }),
+  )
+})
 
 // Presence on the directory event stream. This test server has no password,
 // so every connection has the default owner principal regardless of headers.

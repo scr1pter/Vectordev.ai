@@ -11,11 +11,15 @@ import { TaskBridge } from "@vectordevai/schema/task-bridge"
 import type { Task } from "@vectordevai/schema/task"
 import type { TaskPromptOps } from "@/tool/task"
 import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
-import type { SessionID } from "@/session/schema"
+import { SessionID } from "@/session/schema"
 import { ToolJsonSchema } from "@/tool/json-schema"
 import { ToolRegistry } from "@/tool/registry"
 import { Worktree } from "@/worktree"
-import { Effect } from "effect"
+import { Effect, Option, Schema } from "effect"
+import { Provider } from "@/provider/provider"
+import { ProviderV2 } from "@vectordevai/core/provider"
+import { ModelV2 } from "@vectordevai/core/model"
+import { freeModelMayTrain, FREE_MODEL_TRAINING_OWNER_ONLY } from "@vectordevai/core/free-model-choice"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
@@ -28,6 +32,7 @@ import {
   TaskApiError,
   TaskListQuery,
   TaskMessageInput,
+  TaskResumeInput,
   TaskStopInput,
   TaskWaitInput,
 } from "../groups/experimental"
@@ -68,10 +73,17 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     const tasks = yield* TaskManager.Service
     const desktop = yield* DesktopTasks.Service
     const prompts = yield* SessionPrompt.Service
+    // The server provides it to every handler; a test that builds these handlers alone may leave it out.
+    const provider = yield* Effect.serviceOption(Provider.Service)
     const taskPrompts: TaskPromptOps = {
       cancel: prompts.cancel,
       resolvePromptParts: prompts.resolvePromptParts,
       prompt: (input) => prompts.prompt(input).pipe(Effect.orDie),
+    }
+    // A guest's work must not reach a free model that may train through the owner's acceptance.
+    const guestPrompts: TaskPromptOps = {
+      ...taskPrompts,
+      prompt: (input) => prompts.prompt(input, { refuseTrainingFreeModels: true }).pipe(Effect.orDie),
     }
 
     const access = Effect.fn("ExperimentalHttpApi.taskAccess")(function* (sessionID: SessionID, control = false) {
@@ -117,17 +129,42 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       payload: typeof TaskMessageInput.Type
     }) {
       yield* access(ctx.params.sessionID, true)
-      // A guest's message to a worker must not reach a free model that may train through the owner's acceptance.
       const guest = (yield* RequestPrincipal).kind !== "owner"
-      return yield* taskError(
-        tasks.message(
-          { ...ctx.params, ...ctx.payload },
-          guest
-            ? {
-                ...taskPrompts,
-                prompt: (input) => prompts.prompt(input, { refuseTrainingFreeModels: true }).pipe(Effect.orDie),
-              }
-            : taskPrompts,
+      return yield* taskError(tasks.message({ ...ctx.params, ...ctx.payload }, guest ? guestPrompts : taskPrompts))
+    })
+
+    // Resume (D.3): the user continues stopped, failed or interrupted helpers. A guest's resume runs under the guest
+    // limits and budget, and is refused at once for a helper on a free model that may train.
+    const taskResume = Effect.fn("ExperimentalHttpApi.taskResume")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: typeof TaskResumeInput.Type
+    }) {
+      yield* access(ctx.params.sessionID, true)
+      const guest = (yield* RequestPrincipal).kind !== "owner"
+      if (guest && Option.isSome(provider))
+        for (const taskID of new Set(ctx.payload.taskIDs)) {
+          const id = Schema.decodeUnknownOption(SessionID)(taskID)
+          const record = Option.isNone(id)
+            ? undefined
+            : yield* sessions.get(id.value).pipe(
+                Effect.map(SubagentLifecycle.read),
+                Effect.catchCause(() => Effect.succeed(undefined)),
+              )
+          const model =
+            record &&
+            (yield* provider.value
+              .getModel(ProviderV2.ID.make(record.model.providerID), ModelV2.ID.make(record.model.modelID))
+              .pipe(Effect.catchCause(() => Effect.succeed(undefined))))
+          if (model && freeModelMayTrain(model))
+            return yield* new TaskApiError({ code: "forbidden", message: FREE_MODEL_TRAINING_OWNER_ONLY })
+        }
+      return yield* shown(
+        ctx.params.sessionID,
+        yield* taskError(
+          tasks.resume(
+            { sessionID: ctx.params.sessionID, ...ctx.payload, origin: "user", guest },
+            guest ? guestPrompts : taskPrompts,
+          ),
         ),
       )
     })
@@ -216,6 +253,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
         workDelegation: true,
         sessionStop: true,
         taskPromote: true,
+        taskResume: true,
       }
     })
 
@@ -327,6 +365,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       .handle("taskStop", taskStop)
       .handle("taskWait", taskWait)
       .handle("taskBackground", taskBackground)
+      .handle("taskResume", taskResume)
       .handle("taskBridgeRegister", taskBridgeRegister)
       .handle("taskBridgePoll", taskBridgePoll)
       .handle("taskBridgeReceipt", taskBridgeReceipt)

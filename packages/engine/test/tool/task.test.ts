@@ -5446,3 +5446,72 @@ describe("task shutdown", () => {
     { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } },
   )
 })
+
+// A helper a restart interrupted, or the user stopped, resumes only after the user writes again (D.3, I6).
+describe("task resume gate", () => {
+  it.instance("task_id on an interrupted child fails before a human message and succeeds after one", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const reported = Date.now() - 1_000
+      const child = yield* sessions.create({
+        parentID: chat.id,
+        title: "Interrupted child",
+        metadata: {
+          subagent: {
+            kind: "subagent",
+            custom: false,
+            agent: "general",
+            title: "Interrupted child",
+            parentSessionID: chat.id,
+            parentMessageID: assistant.id,
+            model: ref,
+            background: true,
+            status: "cancelled",
+            startedAt: reported,
+            runtimeID: "previous-process",
+            attempt: 1,
+            interruption: { at: reported, cause: "crash", reportedAt: reported },
+          },
+        },
+      })
+      const def = yield* singleTaskDefinition(yield* TaskTool)
+      const prompts: SessionPrompt.PromptInput[] = []
+      const ctx = taskContext({
+        sessionID: chat.id,
+        messageID: assistant.id,
+        promptOps: stubOps({ onPrompt: (input) => prompts.push(input) }),
+      })
+      const params = { description: "Continue the audit", prompt: "Continue the audit.", task_id: child.id }
+
+      // The seeded user message has no text, so nothing the user wrote is newer than the report.
+      const refused = yield* def.execute(params, ctx).pipe(Effect.exit)
+      expect(Exit.isFailure(refused) ? Cause.pretty(refused.cause) : "").toContain(SubagentLifecycle.HUMAN_FIRST)
+      expect(prompts).toEqual([])
+      expect(SubagentLifecycle.read(yield* sessions.get(child.id))).toMatchObject({ status: "cancelled", attempt: 1 })
+
+      const asked = MessageID.ascending()
+      yield* sessions.updateMessage({
+        id: asked,
+        role: "user",
+        sessionID: chat.id,
+        agent: "build",
+        model: ref,
+        time: { created: Date.now() },
+      })
+      yield* sessions.updatePart({
+        id: PartID.ascending(),
+        messageID: asked,
+        sessionID: chat.id,
+        type: "text",
+        text: "Resume the audit.",
+      })
+      const result = yield* def.execute(params, ctx)
+      expect(result.output).toContain('state="completed"')
+      expect(prompts.map((input) => input.sessionID)).toEqual([child.id])
+      const record = SubagentLifecycle.read(yield* sessions.get(child.id))
+      expect(record).toMatchObject({ attempt: 2, status: "completed" })
+      expect(record?.interruption?.resumedAt).toEqual(expect.any(Number))
+    }),
+  )
+})

@@ -3190,6 +3190,112 @@
         ]
       }
     },
+    "/experimental/session/{sessionID}/tasks/resume": {
+      "post": {
+        "tags": ["experimental"],
+        "operationId": "experimental.task.resume",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tasks resumed in the background",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskResumeResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "TaskApiError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TaskApiError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Continue the session's stopped, failed or interrupted subagents in the background, each in a new attempt. A completed subagent continues only with text. Nothing resumes on its own.",
+        "summary": "Resume session tasks",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "taskIDs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "maxItems": 32
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  }
+                },
+                "required": ["taskIDs"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.experimental.task.resume({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/experimental/session/{sessionID}/tasks/bridge/register": {
       "post": {
         "tags": ["experimental"],
@@ -35752,7 +35858,7 @@
         "properties": {
           "code": {
             "type": "string",
-            "enum": ["not_found", "forbidden", "invalid", "finished", "rate_limited"]
+            "enum": ["not_found", "forbidden", "invalid", "finished", "rate_limited", "limit", "conflict", "running"]
           },
           "message": {
             "type": "string"
@@ -48441,6 +48547,19 @@
         "additionalProperties": false
       },
       "TaskPromoteResult": {
+        "type": "object",
+        "properties": {
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskInfo"
+            }
+          }
+        },
+        "required": ["tasks"],
+        "additionalProperties": false
+      },
+      "TaskResumeResult": {
         "type": "object",
         "properties": {
           "tasks": {

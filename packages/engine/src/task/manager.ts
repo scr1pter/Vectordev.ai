@@ -8,6 +8,8 @@ import { BackgroundJob } from "@/background/job"
 import { Session } from "@/session/session"
 import { SessionStatus } from "@/session/status"
 import { SessionID, MessageID } from "@/session/schema"
+import { SessionTaskSize } from "@/session/task-size"
+import type { SubagentRecord } from "@/agent/subagent-kind"
 import { Permission } from "@/permission"
 import { Question } from "@/question"
 import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
@@ -27,7 +29,16 @@ import { TaskLimits } from "./limits"
 import { TaskNotify } from "./notify"
 
 export class Error extends Schema.TaggedErrorClass<Error>()("TaskManager.Error", {
-  code: Schema.Literals(["not_found", "forbidden", "invalid", "finished", "rate_limited"]),
+  code: Schema.Literals([
+    "not_found",
+    "forbidden",
+    "invalid",
+    "finished",
+    "rate_limited",
+    "limit",
+    "conflict",
+    "running",
+  ]),
   message: Schema.String,
 }) {}
 
@@ -65,6 +76,21 @@ export interface Interface {
     sessionID: SessionID
     taskIDs?: readonly string[]
   }) => Effect.Effect<Task.PromoteResult, Error>
+  /**
+   * Continues stopped, failed or interrupted children of a root session in the background, each in a new attempt (D.3).
+   * A completed child continues only from the user, with `text`.
+   */
+  readonly resume: (
+    input: {
+      sessionID: SessionID
+      taskIDs: readonly string[]
+      text?: string
+      origin: "agent" | "user"
+      /** A guest asked: the guest limits and budget apply. */
+      guest: boolean
+    },
+    ops: TaskPromptOps,
+  ) => Effect.Effect<Task.ResumeResult, Error>
   readonly wait: (input: {
     sessionID: SessionID
     taskIDs: readonly string[]
@@ -85,6 +111,12 @@ const SWEEPS = 4
 const STOP_REASON = "Stopped by the parent session; partial work was retained."
 const INTERRUPT_REASON = "Stopped with the main agent; partial work was kept."
 const OUTPUT_LIMIT = 4096
+// The most children one resume call continues.
+const MAX_RESUME = 32
+// Research agents (Agent.RESEARCH, RESEARCHER and RESEARCH_JUDGE) start from a checked brief, which a resume would skip.
+const RESEARCH_AGENTS = new Set(["research", "researcher", "research-judge"])
+const overlaps = (a: string, b: string) =>
+  a === "." || b === "." || a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`)
 // A record whose engine is gone, found before TaskRecovery reported it: why it stopped is unknown (D.3).
 const abandon = (at: number) => ({
   status: "cancelled" as const,
@@ -168,24 +200,28 @@ const layer = Layer.effect(
       )
     })
 
-    // Move to background is offered for a running foreground child of a root session (5.D.2): a subagent's own children
-    // stay in its run, since their reports would start a turn of the subagent after that run ended.
-    const movable = Effect.fn("TaskManager.movable")(function* (
+    // Move to background (5.D.2) and resume (D.3) are offered only for a direct child of a root session: a subagent's own
+    // children stay in its run, since their reports would start a turn of the subagent after that run ended. Resume is
+    // offered for a finished child that started, so the user can continue it.
+    const offers = Effect.fn("TaskManager.offers")(function* (
       session: Session.Info,
+      record: SubagentRecord,
       job: BackgroundJob.Info | undefined,
       status: Task.Status,
+      started: boolean,
     ) {
-      if (
-        !flags.backgroundSubagents ||
-        !ACTIVE.has(status) ||
-        job?.status !== "running" ||
-        job.metadata?.background === true ||
-        SubagentLifecycle.stopping.has(session.id) ||
-        !session.parentID
-      )
-        return false
+      if (!flags.backgroundSubagents || SubagentLifecycle.stopping.has(session.id) || !session.parentID) return {}
+      const background = ACTIVE.has(status) && job?.status === "running" && job.metadata?.background !== true
+      const resume =
+        !ACTIVE.has(status) &&
+        job?.status !== "running" &&
+        started &&
+        !RESEARCH_AGENTS.has(record.agent) &&
+        record.interruption?.dismissedAt === undefined
+      if (!background && !resume) return {}
       const parent = yield* sessions.get(session.parentID).pipe(Effect.option)
-      return Option.isSome(parent) && !parent.value.parentID
+      if (Option.isNone(parent) || parent.value.parentID) return {}
+      return background ? { background: true } : { resume: true }
     })
 
     const observe = Effect.fn("TaskManager.observe")(function* (
@@ -284,7 +320,7 @@ const layer = Layer.effect(
           inspect: true,
           message: ACTIVE.has(status) && job?.status === "running" && !SubagentLifecycle.stopping.has(session.id),
           stop: ACTIVE.has(status) && !SubagentLifecycle.stopping.has(session.id),
-          ...((yield* movable(session, job, status)) ? { background: true } : {}),
+          ...(yield* offers(session, current, job, status, recent.length > 0)),
         },
         ...(current.interruption
           ? {
@@ -770,6 +806,276 @@ const layer = Layer.effect(
       return { tasks: tasks.filter((task) => task !== undefined) }
     })
 
+    // Resume checks one child (D.3 checks 1 to 9): a direct child of the root, not running here or in another live
+    // engine, finished as stopped or failed (completed only from the user, with a message), not a research agent, started,
+    // not dismissed, its launch message kept, and for the agent, the user asked after it was interrupted or stopped.
+    const resumable = Effect.fn("TaskManager.resumable")(function* (
+      root: Session.Info,
+      taskID: string,
+      origin: "agent" | "user",
+      text: string | undefined,
+    ) {
+      const found = yield* requireTask(root.id, taskID)
+      if (found.parentID !== root.id)
+        return yield* new Error({
+          code: "invalid",
+          message: "Only helpers the main agent launched resume this way; resume the helper that launched this one.",
+        })
+      // A record whose engine is gone is settled first, as the board settles it.
+      yield* observe(found)
+      const session = yield* get(found.id)
+      const record = SubagentLifecycle.read(session)!
+      const running = new Error({ code: "running", message: "This task is still running; send it a message instead." })
+      if ((yield* jobs.get(session.id))?.status === "running" || SubagentLifecycle.stopping.has(session.id))
+        return yield* running
+      if (!SubagentLifecycle.ownedHere(record)) {
+        const owner = yield* SubagentLifecycle.liveness(store, session.id, record)
+        // The user is asked to confirm an owner Vector cannot reach; the agent never resumes one.
+        if (owner === "alive" || (owner === "unknown" && origin === "agent"))
+          return yield* new Error({
+            code: "running",
+            message:
+              owner === "alive"
+                ? "Another Vector process is still running this task."
+                : "Another Vector process may still be running this task; ask the user before resuming it.",
+          })
+      }
+      if (record.status === "completed" && origin === "agent")
+        return yield* new Error({
+          code: "finished",
+          message: "This task completed; to give it more work, call task with its task_id and a new brief.",
+        })
+      if (record.status === "completed" && !text)
+        return yield* new Error({ code: "invalid", message: "A completed task continues only with a message." })
+      if (SubagentLifecycle.open(record)) return yield* running
+      if (RESEARCH_AGENTS.has(record.agent))
+        return yield* new Error({ code: "invalid", message: "A research agent cannot be resumed; start a new one." })
+      if (Option.isNone(yield* sessions.findMessage(session.id, SessionTaskSize.real).pipe(Effect.orDie)))
+        return yield* new Error({ code: "invalid", message: "This task never started; relaunch it with task." })
+      if (record.interruption?.dismissedAt !== undefined)
+        return yield* new Error({
+          code: "invalid",
+          message: "This task was dismissed; relaunch it with task if needed.",
+        })
+      if (!(yield* SubagentLifecycle.written(database, root.id, record.parentMessageID)))
+        return yield* new Error({
+          code: "invalid",
+          message: "The message that launched this task was reverted; relaunch it with task if needed.",
+        })
+      if (origin === "agent" && !(yield* SubagentLifecycle.agentMayResume(sessions, root.id, record)))
+        return yield* new Error({ code: "forbidden", message: SubagentLifecycle.HUMAN_FIRST })
+      return { session, record }
+    })
+
+    // Resume (D.3): every child is checked, its owned paths are free and its admission taken before any of them starts.
+    const resume: Interface["resume"] = Effect.fn("TaskManager.resume")(function* (input, ops) {
+      const ids = [...new Set(input.taskIDs)]
+      if (ids.length === 0 || ids.length > MAX_RESUME)
+        return yield* new Error({ code: "invalid", message: `Choose 1–${MAX_RESUME} task IDs.` })
+      const text = input.text?.trim() || undefined
+      const invalid = text === undefined ? undefined : TaskMailbox.bodyError(text)
+      if (invalid) return yield* new Error({ code: "invalid", message: invalid })
+      const root = yield* get(input.sessionID)
+      if (root.parentID)
+        return yield* new Error({
+          code: "forbidden",
+          message: "Only the main agent resumes helpers this way; continue your own child with task and its task_id.",
+        })
+      if (!flags.backgroundSubagents)
+        return yield* new Error({
+          code: "invalid",
+          message: "Background subagents are turned off (VECTOR_DISABLE_BACKGROUND_SUBAGENTS), so nothing can resume.",
+        })
+      const guest = input.guest || (yield* guests.marked(root.id))
+      const conversationID = yield* TaskLimits.conversationOf(sessions, root, guest)
+      const requestID = yield* TaskLimits.requestFor(limits, sessions, SessionID.make(conversationID))
+      const resolved = TaskLimits.resolve(yield* config.get(), guest)
+      const directory = yield* InstanceState.directory
+      const started = yield* SubagentLifecycle.locked(lock)(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const checked = yield* Effect.forEach(ids, (id) => resumable(root, id, input.origin, text))
+            const resuming = new Set<string>(checked.map((item) => item.session.id))
+            // Owned paths stay exclusive among the conversation's active children (check 11).
+            const running = (yield* jobs.list()).filter((job) => job.type === "task" && job.status === "running")
+            const active = [
+              ...running
+                .filter((job) => job.metadata?.parentSessionId === root.id && !resuming.has(job.id))
+                .map((job) => ({
+                  label: job.title ?? job.id,
+                  paths: Array.isArray(job.metadata?.ownedPaths)
+                    ? job.metadata.ownedPaths.filter((item): item is string => typeof item === "string")
+                    : [],
+                })),
+              ...[...SubagentLifecycle.claims]
+                .filter(
+                  (claim) =>
+                    claim.parentSessionID === root.id &&
+                    !(claim.taskID && resuming.has(claim.taskID)) &&
+                    (!claim.held || running.some((job) => job.id === claim.taskID)),
+                )
+                .map((claim) => ({ label: claim.title, paths: claim.paths })),
+            ]
+            const conflicts = new Set(
+              checked.flatMap(({ record }) =>
+                (record.ownedPaths ?? []).flatMap((owned) =>
+                  active.flatMap((item) =>
+                    item.paths
+                      .filter((path) => overlaps(owned, path))
+                      .map((path) => `${item.label}: ${owned} overlaps ${path}`),
+                  ),
+                ),
+              ),
+            )
+            if (conflicts.size > 0)
+              return yield* new Error({
+                code: "conflict",
+                message: [
+                  "Owned paths overlap active work:",
+                  ...[...conflicts].map((item) => `- ${item}`),
+                  "Wait for that task or stop it first.",
+                ].join("\n"),
+              })
+            const admitted = yield* Effect.forEach(checked, (item) =>
+              limits.admit({ conversationID, requestID, limits: resolved, origin: "resume", count: 1 }).pipe(
+                Effect.map((admission) => ({ ...item, admission })),
+                Effect.mapError((refused) => new Error({ code: "limit", message: refused.message })),
+              ),
+            )
+            const delegated = {
+              id: TaskLimits.ledger(conversationID, requestID),
+              budget: resolved.budget,
+              seed: yield* limits.seed(conversationID, requestID),
+            }
+            return yield* Effect.forEach(admitted, ({ session, record, admission }) =>
+              Effect.gen(function* () {
+                const id = session.id
+                const attempt = (record.attempt ?? 1) + 1
+                const now = Date.now()
+                const lease = yield* jobs.lease()
+                let queued = admission.waits
+                yield* guard.link(id, root.id, { budget: record.budget, renew: true, delegated })
+                yield* persist(
+                  id,
+                  {
+                    attempt,
+                    status: queued ? "queued" : "running",
+                    slotReason: queued ? TaskLimits.SLOT_REASON : undefined,
+                    background: true,
+                    startedAt: now,
+                    runtimeID: lease?.runtime ?? SubagentLifecycle.RUNTIME_ID,
+                    owner: lease ? { pid: lease.pid, boot: lease.boot } : undefined,
+                    conversationID,
+                    rootSessionID: root.id,
+                    requestID,
+                    completedAt: undefined,
+                    usage: undefined,
+                    budgetScopes: undefined,
+                    error: undefined,
+                    notification: undefined,
+                    resultRef: undefined,
+                    resultSummary: undefined,
+                    reason: undefined,
+                    ...(record.interruption && { interruption: { ...record.interruption, resumedAt: now } }),
+                    stop: undefined,
+                    waiting: undefined,
+                    reports: undefined,
+                  },
+                  record.attempt,
+                )
+                const brief = [
+                  ...(record.status === "completed"
+                    ? []
+                    : [
+                        record.stop?.by === "user"
+                          ? SubagentLifecycle.RESUME_STOPPED_BRIEF
+                          : record.interruption
+                            ? SubagentLifecycle.RESUME_BRIEF
+                            : SubagentLifecycle.RESUME_ENDED_BRIEF,
+                      ]),
+                  ...(text ? [TaskMailbox.envelope(text, { sender: root.id, recipient: id, relation: "parent" })] : []),
+                ].join("\n\n")
+                const work = Effect.gen(function* () {
+                  // Queued for a slot until now; running clears the reason.
+                  if (queued) {
+                    queued = false
+                    yield* SubagentLifecycle.update(sessions, id, { status: "running", slotReason: undefined }, attempt)
+                  }
+                  return yield* ops.prompt({
+                    sessionID: id,
+                    messageID: MessageID.ascending(),
+                    agent: record.agent,
+                    model: {
+                      providerID: ProviderV2.ID.make(record.model.providerID),
+                      modelID: ModelV2.ID.make(record.model.modelID),
+                    },
+                    variant: record.model.variant,
+                    parts: [{ type: "text", synthetic: true, text: brief }],
+                  })
+                })
+                const waiting = Effect.sync(() => {
+                  queued = true
+                }).pipe(
+                  Effect.andThen(
+                    SubagentLifecycle.update(
+                      sessions,
+                      id,
+                      { status: "queued", slotReason: TaskLimits.SLOT_REASON },
+                      attempt,
+                    ),
+                  ),
+                )
+                yield* limits.bind(admission, id)
+                yield* jobs.start({
+                  id,
+                  type: "task",
+                  title: record.title,
+                  metadata: {
+                    parentSessionId: root.id,
+                    sessionId: id,
+                    projectId: root.projectID,
+                    directory: root.directory,
+                    model: record.model,
+                    kind: record.kind,
+                    agent: record.agent,
+                    custom: record.custom,
+                    title: record.title,
+                    parentMessageId: record.parentMessageID,
+                    startedAt: now,
+                    attempt,
+                    ...(record.ownedPaths?.length ? { ownedPaths: record.ownedPaths } : {}),
+                    background: true,
+                  },
+                  // A row in vector.db, so a restart can tell the parent this child was interrupted again.
+                  durable: { parentSessionID: root.id, sessionID: id, directory, attempt },
+                  run: limits.run({ conversationID, childID: id, origin: "resume", waiting }, work).pipe(
+                    Effect.onInterrupt(() => ops.cancel(id)),
+                    Effect.flatMap(SubagentLifecycle.settleRun),
+                    Effect.ensuring(limits.release(admission, id)),
+                  ),
+                })
+                yield* notify.watch({
+                  jobID: id,
+                  parentID: root.id,
+                  taskID: id,
+                  attempt,
+                  title: record.title,
+                  startedAt: now,
+                  launchID: MessageID.make(record.parentMessageID),
+                  ops,
+                  agent: root.agent ?? "build",
+                })
+                return id
+              }),
+            )
+          }),
+        ),
+      )
+      return {
+        tasks: yield* Effect.forEach(started, (id) => get(id).pipe(Effect.flatMap(observe)), { concurrency: 4 }),
+      }
+    })
+
     const wait: Interface["wait"] = Effect.fn("TaskManager.wait")(function* (input) {
       if (
         !Number.isFinite(input.timeout ?? 30_000) ||
@@ -797,7 +1103,7 @@ const layer = Layer.effect(
       return { tasks, timedOut: done._tag === "None" || !settled(tasks) }
     })
 
-    return Service.of({ list, inspect, message, stop, interrupt, promote, wait })
+    return Service.of({ list, inspect, message, stop, interrupt, promote, resume, wait })
   }),
 )
 

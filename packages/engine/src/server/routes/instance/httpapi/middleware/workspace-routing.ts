@@ -386,6 +386,7 @@ function routeHttpApiWorkspace<E>(
           "/experimental/session/:sessionID/stop",
           "/experimental/session/:sessionID/background",
           "/experimental/session/:sessionID/tasks/background",
+          "/experimental/session/:sessionID/tasks/resume",
           "/experimental/session/:sessionID/tasks/stop",
           "/experimental/session/:sessionID/tasks/:taskID/message",
         ].includes(route.route.path) &&

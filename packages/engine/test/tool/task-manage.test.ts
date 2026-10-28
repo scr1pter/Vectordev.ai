@@ -17,13 +17,14 @@ import type { SessionPrompt } from "@/session/prompt"
 import { TaskNotify } from "@/task/notify"
 import { DesktopTasks } from "@/task/desktop"
 import { Storage } from "@/storage/storage"
+import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { InstanceState } from "@/effect/instance-state"
 import type { Task } from "@vectordevai/schema/task"
 import { disposeAllInstances } from "../fixture/fixture"
 import { pollWithTimeout, testEffect } from "../lib/effect"
 
 afterEach(disposeAllInstances)
-const it = testEffect(LayerNode.compile(LayerNode.group([TaskManager.node, TaskLimits.node, Session.node, Database.node, BackgroundJob.node, SessionStatus.node, TaskNotify.node, DesktopTasks.node, Storage.node])))
+const it = testEffect(LayerNode.compile(LayerNode.group([TaskManager.node, TaskLimits.node, Session.node, Database.node, BackgroundJob.node, SessionStatus.node, TaskNotify.node, DesktopTasks.node, Storage.node, SpendGuard.node])))
 const model = { providerID: ProviderV2.ID.make("local-test"), modelID: ModelV2.ID.make("fixture") }
 const child = Effect.fn("TaskManagerTest.child")(function* (parentID: SessionID, patch: object = {}) {
   const sessions = yield* Session.Service
@@ -583,5 +584,157 @@ describe("task management", () => {
     yield* SubagentLifecycle.update(sessions, a.id, { notification: { text: "Removed launch", state: "completed", launchID: MessageID.ascending() } })
     expect(yield* SubagentLifecycle.recover(sessions, database, root.id, MessageID.ascending())).toEqual([])
     expect(SubagentLifecycle.read(yield* sessions.get(a.id))?.notification).toBeUndefined()
+  }))
+  // Resume (D.3): a root with the message that launched its helpers, and helpers that started from a brief.
+  const launched = Effect.fn("TaskManagerTest.launched")(function* () {
+    const sessions = yield* Session.Service
+    const root = yield* sessions.create()
+    const launch = reply({ sessionID: root.id, parts: [] })
+    yield* sessions.updateMessage(launch.info)
+    return { root, launch: launch.info.id }
+  })
+  const said = Effect.fn("TaskManagerTest.said")(function* (sessionID: SessionID, text: string, created = Date.now()) {
+    const sessions = yield* Session.Service
+    const id = MessageID.ascending()
+    yield* sessions.updateMessage({ id, role: "user", sessionID, agent: "build", model, time: { created } })
+    yield* sessions.updatePart({ id: PartID.ascending(), messageID: id, sessionID, type: "text", text })
+    return id
+  })
+  const helper = Effect.fn("TaskManagerTest.helper")(function* (parentID: SessionID, launch: MessageID, patch: object = {}) {
+    const task = yield* child(parentID, { parentMessageID: launch, status: "cancelled", ...patch })
+    yield* said(task.id, "Verify the component")
+    return task
+  })
+  const interrupted = (at: number) => ({ interruption: { at, cause: "shutdown", reportedAt: at } })
+  const briefs = (prompts: SessionPrompt.PromptInput[], id: string) =>
+    prompts.filter((input) => input.sessionID === id).map((input) => (input.parts[0]?.type === "text" ? input.parts[0].text : ""))
+
+  it.instance("resuming two interrupted children starts both in the background with attempt + 1 and the resume brief", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const jobs = yield* BackgroundJob.Service
+    const { root, launch } = yield* launched()
+    const at = Date.now() - 1_000
+    const a = yield* helper(root.id, launch, interrupted(at))
+    const b = yield* helper(root.id, launch, interrupted(at))
+    // The user asked after the restart report, so the agent may resume them.
+    yield* said(root.id, "Resume the helpers")
+    const gate = yield* Deferred.make<void>()
+    const prompts: SessionPrompt.PromptInput[] = []
+    const resumeOps: TaskPromptOps = {
+      ...ops,
+      prompt: (input) => Effect.sync(() => void prompts.push(input)).pipe(Effect.andThen(Deferred.await(gate)), Effect.as(reply(input))),
+    }
+    const result = yield* manager.resume({ sessionID: root.id, taskIDs: [a.id, b.id], origin: "agent", guest: false }, resumeOps)
+    expect(result.tasks.map((task) => task.id).sort()).toEqual([a.id, b.id].sort())
+    expect(result.tasks.every((task) => task.attempt === 2 && task.status === "running")).toBe(true)
+    for (const task of [a, b]) {
+      const record = SubagentLifecycle.read(yield* sessions.get(task.id))!
+      expect(record).toMatchObject({ attempt: 2, status: "running", background: true, conversationID: root.id, rootSessionID: root.id })
+      expect(record.interruption).toEqual({ at, cause: "shutdown", reportedAt: at, resumedAt: expect.any(Number) })
+      expect(SubagentLifecycle.needsHuman(record)).toBe(false)
+      expect((yield* jobs.get(task.id))?.metadata).toMatchObject({ parentSessionId: root.id, background: true, attempt: 2 })
+      yield* pollWithTimeout(Effect.sync(() => (briefs(prompts, task.id).length > 0 ? true : undefined)), "the child must be prompted")
+      expect(briefs(prompts, task.id)).toEqual([SubagentLifecycle.RESUME_BRIEF])
+    }
+    yield* Deferred.succeed(gate, undefined)
+    for (const task of [a, b]) expect((yield* jobs.wait({ id: task.id })).info?.status).toBe("completed")
+  }))
+
+  it.instance("a user-stopped child gets the stopped brief, with the user's message after it", () => Effect.gen(function* () {
+    const manager = yield* TaskManager.Service
+    const jobs = yield* BackgroundJob.Service
+    const { root, launch } = yield* launched()
+    const task = yield* helper(root.id, launch, { stop: { by: "user", at: Date.now() } })
+    const prompts: SessionPrompt.PromptInput[] = []
+    const resumeOps: TaskPromptOps = { ...ops, prompt: (input) => Effect.sync(() => void prompts.push(input)).pipe(Effect.as(reply(input))) }
+    yield* manager.resume({ sessionID: root.id, taskIDs: [task.id], text: "Check the parser too", origin: "user", guest: false }, resumeOps)
+    yield* jobs.wait({ id: task.id })
+    const [brief] = briefs(prompts, task.id)
+    expect(brief?.startsWith(`${SubagentLifecycle.RESUME_STOPPED_BRIEF}\n\n`)).toBe(true)
+    expect(brief).toContain("Check the parser too")
+    expect(brief).not.toContain(SubagentLifecycle.RESUME_BRIEF)
+  }))
+
+  it.instance("resume refuses what it may not continue, before any child starts", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const jobs = yield* BackgroundJob.Service
+    const { root, launch } = yield* launched()
+    const at = Date.now() - 1_000
+    const refused = (sessionID: SessionID, taskID: string, origin: "agent" | "user" = "agent", text?: string) =>
+      manager.resume({ sessionID, taskIDs: [taskID], text, origin, guest: false }, ops).pipe(Effect.flip)
+    const completed = yield* helper(root.id, launch, { status: "completed" })
+    expect(yield* refused(root.id, completed.id)).toMatchObject({ code: "finished", message: expect.stringContaining("call task with its task_id") })
+    expect(yield* refused(root.id, completed.id, "user")).toMatchObject({ code: "invalid" })
+    const running = yield* helper(root.id, launch, { status: "running" })
+    yield* jobs.start({ id: running.id, type: "task", run: Effect.never })
+    expect(yield* refused(root.id, running.id, "user")).toMatchObject({ code: "running" })
+    const parent = yield* helper(root.id, launch, { status: "completed" })
+    const grandchild = yield* helper(parent.id, launch)
+    expect(yield* refused(root.id, grandchild.id, "user")).toMatchObject({ code: "invalid" })
+    // A subagent continues its own child with task_id instead.
+    expect(yield* refused(parent.id, grandchild.id, "user")).toMatchObject({ code: "forbidden" })
+    const researcher = yield* helper(root.id, launch, { agent: "researcher" })
+    expect(yield* refused(root.id, researcher.id, "user")).toMatchObject({ code: "invalid", message: expect.stringContaining("research") })
+    const never = yield* child(root.id, { parentMessageID: launch, status: "cancelled" })
+    expect(yield* refused(root.id, never.id, "user")).toMatchObject({ code: "invalid", message: expect.stringContaining("never started") })
+    const dismissed = yield* helper(root.id, launch, { interruption: { at, cause: "crash", reportedAt: at, dismissedAt: at } })
+    expect(yield* refused(root.id, dismissed.id, "user")).toMatchObject({ code: "invalid", message: expect.stringContaining("dismissed") })
+    const reverted = yield* helper(root.id, MessageID.ascending())
+    expect(yield* refused(root.id, reverted.id, "user")).toMatchObject({ code: "invalid", message: expect.stringContaining("reverted") })
+    // Interrupted or stopped by the user: the agent waits for the user to write after the report or the stop.
+    const waiting = yield* helper(root.id, launch, interrupted(Date.now()))
+    const stopped = yield* helper(root.id, launch, { stop: { by: "user", at: Date.now() } })
+    for (const task of [waiting, stopped])
+      expect(yield* refused(root.id, task.id)).toMatchObject({ code: "forbidden", message: SubagentLifecycle.HUMAN_FIRST })
+    // A batch with one refused child starts none of them.
+    const fine = yield* helper(root.id, launch)
+    expect(yield* manager.resume({ sessionID: root.id, taskIDs: [fine.id, waiting.id], origin: "agent", guest: false }, ops).pipe(Effect.flip)).toMatchObject({ code: "forbidden" })
+    expect((yield* jobs.list()).map((job) => job.id)).toEqual([running.id])
+    expect(SubagentLifecycle.read(yield* sessions.get(fine.id))).toMatchObject({ status: "cancelled", attempt: 1 })
+    yield* jobs.cancel(running.id)
+  }))
+
+  it.instance("a completed child continues from the user with a message", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const jobs = yield* BackgroundJob.Service
+    const { root, launch } = yield* launched()
+    const task = yield* helper(root.id, launch, { status: "completed", completedAt: Date.now() })
+    const prompts: SessionPrompt.PromptInput[] = []
+    const resumeOps: TaskPromptOps = { ...ops, prompt: (input) => Effect.sync(() => void prompts.push(input)).pipe(Effect.as(reply(input))) }
+    const result = yield* manager.resume({ sessionID: root.id, taskIDs: [task.id], text: "Also cover the error path", origin: "user", guest: false }, resumeOps)
+    expect(result.tasks.map((item) => item.id)).toEqual([task.id])
+    yield* jobs.wait({ id: task.id })
+    const [brief] = briefs(prompts, task.id)
+    expect(brief).toContain("Also cover the error path")
+    expect(brief).not.toContain("[vector:resume]")
+    expect(SubagentLifecycle.read(yield* sessions.get(task.id))?.attempt).toBe(2)
+  }))
+
+  it.instance("a resume the request's spend ceiling refuses fails with code limit", () => Effect.gen(function* () {
+    const manager = yield* TaskManager.Service
+    const guard = yield* SpendGuard.Service
+    const jobs = yield* BackgroundJob.Service
+    const { root, launch } = yield* launched()
+    const task = yield* helper(root.id, launch, interrupted(Date.now()))
+    // The request's subagents already spent past the default $25 ceiling. With no user message, the request is the root.
+    yield* guard.rearm(root.id, { id: TaskLimits.ledger(root.id, root.id), budget: { usd: 25 }, seed: { spentUsd: 30, steps: 0, unpricedSteps: 0 } })
+    const error = yield* manager.resume({ sessionID: root.id, taskIDs: [task.id], origin: "user", guest: false }, ops).pipe(Effect.flip)
+    expect(error).toMatchObject({ code: "limit", message: expect.stringContaining("spend ceiling") })
+    expect(yield* jobs.list()).toEqual([])
+  }))
+
+  it.instance("the board offers resume for a finished direct child that started", () => Effect.gen(function* () {
+    const manager = yield* TaskManager.Service
+    const { root, launch } = yield* launched()
+    const task = yield* helper(root.id, launch, interrupted(Date.now()))
+    const never = yield* child(root.id, { parentMessageID: launch, status: "cancelled" })
+    const nested = yield* helper(task.id, launch)
+    const board = (yield* manager.list({ sessionID: root.id, descendants: true })).tasks
+    expect(board.find((item) => item.id === task.id)?.controls.resume).toBe(true)
+    expect(board.find((item) => item.id === never.id)?.controls.resume).toBeUndefined()
+    expect(board.find((item) => item.id === nested.id)?.controls.resume).toBeUndefined()
   }))
 })

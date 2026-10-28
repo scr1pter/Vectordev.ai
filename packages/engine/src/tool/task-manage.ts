@@ -9,10 +9,12 @@ const ids = Schema.Array(Schema.String).check(Schema.isMinLength(1), Schema.isMa
 // Provider adapters flatten root unions and can lose their action discriminators.
 // Advertise one object, but validate each action against Parameters before execution.
 export const PublicParameters = Schema.Struct({
-  action: Schema.Literals(["list", "inspect", "message", "stop", "wait"]),
+  action: Schema.Literals(["list", "inspect", "message", "stop", "wait", "resume"]),
   task_id: Schema.optional(Schema.String).annotate({ description: "Required for inspect and message" }),
-  task_ids: Schema.optional(ids).annotate({ description: "Required for wait; selects tasks for stop" }),
-  text: Schema.optional(Schema.String).annotate({ description: "Required for message: instructions or a correction" }),
+  task_ids: Schema.optional(ids).annotate({ description: "Required for wait and resume; selects tasks for stop" }),
+  text: Schema.optional(Schema.String).annotate({
+    description: "Required for message, optional for resume: instructions or a correction",
+  }),
   descendants: Schema.optional(Schema.Boolean).annotate({ description: "Include descendants in list" }),
   delivery: Schema.optional(Schema.Literals(["steer", "queue"])),
   all: Schema.optional(Schema.Boolean).annotate({ description: "Stop all tasks instead of selecting task_ids" }),
@@ -42,6 +44,11 @@ export const Parameters = Schema.Union([
     mode: Schema.optional(Schema.Literals(["any", "all"])),
     timeout: Schema.optional(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 60000 }))),
   }),
+  Schema.Struct({
+    action: Schema.Literal("resume"),
+    task_ids: Schema.Array(Schema.String).check(Schema.isMinLength(1), Schema.isMaxLength(8)),
+    text: Schema.optional(Schema.String),
+  }),
 ])
 
 export const TaskManageTool = Tool.define(
@@ -53,13 +60,13 @@ export const TaskManageTool = Tool.define(
     const research = yield* Effect.serviceOption(ResearchRun.Service)
     return {
       description:
-        "Manage delegated tasks without starting a model. list gives compact status, spend and dependencies; inspect gives bounded recent progress and partial output; message sends your instructions or the user’s correction to a running child at the next safe provider-turn boundary or queues until current work ends; stop settles selected tasks (or all) and retains partial work; wait is event-driven for any/all task IDs with a 0–60000 ms timeout. Parent instructions stay within the existing assignment and cannot widen a child's permissions.",
+        "Manage delegated tasks without starting a model. list gives compact status, spend and dependencies; inspect gives bounded recent progress and partial output; message sends your instructions or the user’s correction to a running child at the next safe provider-turn boundary or queues until current work ends; stop settles selected tasks (or all) and retains partial work; resume continues stopped, failed or interrupted children in the background; wait is event-driven for any/all task IDs with a 0–60000 ms timeout. Parent instructions stay within the existing assignment and cannot widen a child's permissions.",
       parameters: Parameters,
       jsonSchema: ToolJsonSchema.fromSchema(PublicParameters),
       execute: (input: typeof Parameters.Type, context: Tool.Context) =>
         Effect.gen(function* () {
           const ops = context.extra?.promptOps as TaskPromptOps | undefined
-          if ((input.action === "message" || input.action === "stop") && !ops)
+          if ((input.action === "message" || input.action === "stop" || input.action === "resume") && !ops)
             return yield* Effect.die(new Error("Task management requires prompt operations"))
           if (input.action === "message" && Option.isSome(research)) {
             const screened = yield* research.value.message({ ctx: context, taskID: input.task_id, text: input.text })
@@ -79,12 +86,23 @@ export const TaskManageTool = Tool.define(
                       { sessionID: context.sessionID, taskIDs: input.task_ids, all: input.all, reason: input.reason },
                       ops!,
                     )
-                  : tasks.wait({
-                      sessionID: context.sessionID,
-                      taskIDs: input.task_ids,
-                      mode: input.mode,
-                      timeout: input.timeout,
-                    })
+                  : input.action === "resume"
+                    ? tasks.resume(
+                        {
+                          sessionID: context.sessionID,
+                          taskIDs: input.task_ids,
+                          text: input.text,
+                          origin: "agent",
+                          guest: false,
+                        },
+                        ops!,
+                      )
+                    : tasks.wait({
+                        sessionID: context.sessionID,
+                        taskIDs: input.task_ids,
+                        mode: input.mode,
+                        timeout: input.timeout,
+                      })
           return { title: `Task ${input.action}`, metadata: { action: input.action }, output: JSON.stringify(result) }
         }).pipe(Effect.orDie),
     }

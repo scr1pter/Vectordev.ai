@@ -1,4 +1,4 @@
-import { Effect, Schema, Semaphore } from "effect"
+import { Effect, Option, Schema, Semaphore } from "effect"
 import type { SessionV1 } from "@vectordevai/core/v1/session"
 import type { Session } from "@/session/session"
 import { MessageV2 } from "@/session/message-v2"
@@ -20,6 +20,7 @@ import type { SpendGuard } from "@vectordevai/core/spend-guard"
 import { BackgroundJobStore } from "@vectordevai/core/background-job-store"
 import { BackgroundJob } from "@/background/job"
 import { SessionMemory } from "@/session/memory"
+import { SessionTaskSize } from "@/session/task-size"
 
 /*
  * Lifecycle bookkeeping for task-tool subagents.
@@ -69,6 +70,9 @@ export const RESUME_BRIEF =
 /** The brief a resumed helper the user stopped starts from. */
 export const RESUME_STOPPED_BRIEF =
   "[vector:resume] The user stopped you and has now asked you to continue. Check the state of your work, then continue your assignment from where you stopped. Do not redo finished steps."
+/** The brief a resumed helper that failed, or that its parent stopped, starts from. */
+export const RESUME_ENDED_BRIEF =
+  "[vector:resume] Your run ended before you finished, and you are asked to continue. Check the state of your work, then continue your assignment from where you stopped. Do not redo finished steps."
 
 export type FinalStatus = Extract<SubagentStatus, "completed" | "error" | "cancelled">
 
@@ -119,6 +123,30 @@ export const liveness = Effect.fnUntraced(function* (
 export function needsHuman(record: Pick<SubagentRecord, "interruption" | "stop">) {
   return (record.interruption !== undefined && record.interruption.resumedAt === undefined) || record.stop?.by === "user"
 }
+
+/** Why the agent may not resume a helper that `needsHuman` holds for. */
+export const HUMAN_FIRST = "Interrupted or user-stopped helpers resume only after the user asks; tell the user."
+
+/**
+ * Whether the agent may resume this helper now (D.3): it needs no human, or the root has a message from the user newer
+ * than the report of its interruption and the user's stop.
+ */
+export const agentMayResume = Effect.fnUntraced(function* (
+  sessions: Pick<Session.Interface, "findMessage">,
+  rootID: SessionID,
+  record: Pick<SubagentRecord, "interruption" | "stop">,
+) {
+  if (!needsHuman(record)) return true
+  const interruption = record.interruption?.resumedAt === undefined ? record.interruption : undefined
+  const since = Math.max(
+    interruption ? (interruption.reportedAt ?? interruption.at) : 0,
+    record.stop?.by === "user" ? record.stop.at : 0,
+  )
+  const latest = yield* sessions
+    .findMessage(rootID, SessionTaskSize.real)
+    .pipe(Effect.catchCause(() => Effect.succeed(Option.none<SessionV1.WithParts>())))
+  return Option.isSome(latest) && latest.value.info.time.created > since
+})
 
 // A background launch's part is completed right after the launch returns, and
 // a foreground part turns to error as soon as the call fails, so the first
@@ -350,7 +378,8 @@ export function claimNotification(
   }).pipe(locked(metadataLock))
 }
 
-const written = (database: Database.Interface, sessionID: SessionID, messageID: string) =>
+/** Whether the session still has the message: it was saved and not reverted since. */
+export const written = (database: Database.Interface, sessionID: SessionID, messageID: string) =>
   MessageV2.get({ sessionID, messageID: messageID as MessageID }).pipe(
     Effect.provideService(Database.Service, database),
     Effect.option,

@@ -1244,6 +1244,10 @@ const scenarios: Scenario[] = [
       (body as { taskPromote?: unknown }).taskPromote === true,
       "capabilities should report the route that moves a session's tasks to the background",
     )
+    check(
+      (body as { taskResume?: unknown }).taskResume === true,
+      "capabilities should report the route that resumes a session's stopped or interrupted tasks",
+    )
   }),
   http.protected
     .post("/experimental/session/{sessionID}/background", "experimental.session.background")
@@ -1367,6 +1371,24 @@ const scenarios: Scenario[] = [
       array(body.tasks)
       check(body.tasks.length === 0, "a fresh session should have no task to move to the background")
     }),
+  http.protected
+    .post("/experimental/session/{sessionID}/tasks/resume", "experimental.task.resume.missing")
+    .seeded((ctx) => ctx.session({ title: "Task resume owner" }))
+    .at((ctx) => ({
+      path: route("/experimental/session/{sessionID}/tasks/resume", { sessionID: ctx.state.id }),
+      headers: ctx.headers(),
+      body: { taskIDs: ["ses_missing"] },
+    }))
+    .status(400),
+  http.protected
+    .post("/experimental/session/{sessionID}/tasks/resume", "experimental.task.resume.invalid")
+    .seeded((ctx) => ctx.session({ title: "Task resume owner" }))
+    .at((ctx) => ({
+      path: route("/experimental/session/{sessionID}/tasks/resume", { sessionID: ctx.state.id }),
+      headers: ctx.headers(),
+      body: { taskIDs: [] },
+    }))
+    .status(400),
   http.protected
     .post("/experimental/session/{sessionID}/tasks/wait", "experimental.task.wait.invalid")
     .seeded((ctx) => ctx.session({ title: "Task wait owner" }))

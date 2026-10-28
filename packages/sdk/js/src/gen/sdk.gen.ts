@@ -102,6 +102,9 @@ import type {
   ExperimentalTaskMessageData,
   ExperimentalTaskMessageErrors,
   ExperimentalTaskMessageResponses,
+  ExperimentalTaskResumeData,
+  ExperimentalTaskResumeErrors,
+  ExperimentalTaskResumeResponses,
   ExperimentalTaskStopData,
   ExperimentalTaskStopErrors,
   ExperimentalTaskStopResponses,
@@ -1327,6 +1330,26 @@ export class Task extends HeyApiClient {
       ThrowOnError
     >({
       url: "/experimental/session/{sessionID}/tasks/background",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+    })
+  }
+
+  /**
+   * Resume session tasks
+   *
+   * Continue the session's stopped, failed or interrupted subagents in the background, each in a new attempt. A completed subagent continues only with text. Nothing resumes on its own.
+   */
+  public resume<ThrowOnError extends boolean = false>(options: Options<ExperimentalTaskResumeData, ThrowOnError>) {
+    return (options.client ?? this.client).post<
+      ExperimentalTaskResumeResponses,
+      ExperimentalTaskResumeErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/session/{sessionID}/tasks/resume",
       ...options,
       headers: {
         "Content-Type": "application/json",

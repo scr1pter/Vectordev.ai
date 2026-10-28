@@ -2976,7 +2976,7 @@ export type SessionUsageSummary = {
 }
 
 export type TaskApiError = {
-  code: "not_found" | "forbidden" | "invalid" | "finished" | "rate_limited"
+  code: "not_found" | "forbidden" | "invalid" | "finished" | "rate_limited" | "limit" | "conflict" | "running"
   message: string
 }
 
@@ -7098,6 +7098,10 @@ export type TaskWaitResult = {
 }
 
 export type TaskPromoteResult = {
+  tasks: Array<TaskInfo>
+}
+
+export type TaskResumeResult = {
   tasks: Array<TaskInfo>
 }
 
@@ -12017,6 +12021,43 @@ export type ExperimentalTaskBackgroundResponses = {
 
 export type ExperimentalTaskBackgroundResponse =
   ExperimentalTaskBackgroundResponses[keyof ExperimentalTaskBackgroundResponses]
+
+export type ExperimentalTaskResumeData = {
+  body?: {
+    taskIDs: Array<string>
+    text?: string
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/session/{sessionID}/tasks/resume"
+}
+
+export type ExperimentalTaskResumeErrors = {
+  /**
+   * TaskApiError | InvalidRequestError
+   */
+  400: TaskApiError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type ExperimentalTaskResumeError = ExperimentalTaskResumeErrors[keyof ExperimentalTaskResumeErrors]
+
+export type ExperimentalTaskResumeResponses = {
+  /**
+   * Tasks resumed in the background
+   */
+  200: TaskResumeResult
+}
+
+export type ExperimentalTaskResumeResponse = ExperimentalTaskResumeResponses[keyof ExperimentalTaskResumeResponses]
 
 export type ExperimentalTaskBridgeRegisterData = {
   body?: TaskBridgeRegisterInput

@@ -22,7 +22,16 @@ import { TaskBridge } from "@vectordevai/schema/task-bridge"
 
 export class TaskApiError extends Schema.ErrorClass<TaskApiError>("TaskApiError")(
   {
-    code: Schema.Literals(["not_found", "forbidden", "invalid", "finished", "rate_limited"]),
+    code: Schema.Literals([
+      "not_found",
+      "forbidden",
+      "invalid",
+      "finished",
+      "rate_limited",
+      "limit",
+      "conflict",
+      "running",
+    ]),
     message: Schema.String,
   },
   { httpApiStatus: 400 },
@@ -48,6 +57,11 @@ export const TaskStopInput = Schema.Struct({
 
 export const TaskBackgroundInput = Schema.Struct({
   taskIDs: Schema.optional(Schema.Array(Schema.String).check(Schema.isMinLength(1), Schema.isMaxLength(200))),
+})
+
+export const TaskResumeInput = Schema.Struct({
+  taskIDs: Schema.Array(Schema.String).check(Schema.isMinLength(1), Schema.isMaxLength(32)),
+  text: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4096))),
 })
 
 export const SessionStopInput = Schema.Struct({
@@ -137,6 +151,7 @@ export const ExperimentalPaths = {
   taskStop: "/experimental/session/:sessionID/tasks/stop",
   taskWait: "/experimental/session/:sessionID/tasks/wait",
   taskBackground: "/experimental/session/:sessionID/tasks/background",
+  taskResume: "/experimental/session/:sessionID/tasks/resume",
   taskBridgeRegister: "/experimental/session/:sessionID/tasks/bridge/register",
   taskBridgePoll: "/experimental/session/:sessionID/tasks/bridge/poll",
   taskBridgeReceipt: "/experimental/session/:sessionID/tasks/bridge/receipt",
@@ -355,6 +370,20 @@ export const ExperimentalApi = HttpApi.make("experimental")
             summary: "Move session tasks to the background",
             description:
               "Move the session's running foreground subagents, or the selected ones, to the background, batch entries included. Each keeps running and reports later on its own.",
+          }),
+        ),
+        HttpApiEndpoint.post("taskResume", ExperimentalPaths.taskResume, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          payload: TaskResumeInput,
+          success: described(Task.ResumeResult, "Tasks resumed in the background"),
+          error: TaskApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "experimental.task.resume",
+            summary: "Resume session tasks",
+            description:
+              "Continue the session's stopped, failed or interrupted subagents in the background, each in a new attempt. A completed subagent continues only with text. Nothing resumes on its own.",
           }),
         ),
         HttpApiEndpoint.post("taskBridgeRegister", ExperimentalPaths.taskBridgeRegister, {
