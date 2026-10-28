@@ -27,3 +27,12 @@ ten assertions). It records two provider requests: one main response and one
 title request, with one ancillary-usage row. A client-named-session regression
 will check the corresponding path after the change. These are request counts
 against a fake provider, not measured live dollars or provider caching.
+
+The failed child selector targeted an obsolete task-card anchor. Current timeline
+code renders task parts as `SubagentTaskChip` buttons; Control/Meta-click opens a
+single agent's child session. The existing
+`e2e/regression/subagent-child-navigation.spec.ts` uses that gesture. The
+benchmark-only repair adopts it while preserving the measured navigation,
+destination title, blank/unknown assertions, and existing deadlines. The original
+failed records remain intact. Record a fresh baseline with this repaired fixture
+before applying any desktop-title change, then reuse that fixture for comparison.
