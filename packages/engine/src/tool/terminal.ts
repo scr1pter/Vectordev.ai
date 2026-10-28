@@ -1,6 +1,7 @@
 import { Clock, Effect, Option, Schema } from "effect"
 import stripAnsi from "strip-ansi"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { Egress } from "@vectordevai/core/local-mode/egress"
 import { Location } from "@vectordevai/core/location"
@@ -121,6 +122,9 @@ export const POLLING_ACTIONS: ReadonlySet<string> = new Set(["list", "read", "wa
 const OFFLINE =
   "Vector did not use the terminal. With Web access None in Vector Local, commands run only inside Vector's sandbox, and a terminal cannot run there. Use the shell tool, or change Web access in Vector Local."
 
+const GUESTED =
+  "In a session an invited guest has acted in, you can use only the terminals you opened: the user's terminals and other sessions' stay with the user."
+
 // The bytes each key sends. A ctrl-<letter> key not listed sends the letter's control code.
 const SEQUENCES: Partial<Record<Key, string>> = {
   enter: "\r",
@@ -174,7 +178,12 @@ const EMPTY: Line = { text: "", exact: true }
 export const TerminalTool = Tool.define<
   typeof Parameters,
   Metadata,
-  Config.Service | Plugin.Service | LocationServiceMap.Service | ChildProcessSpawner | FSUtil.Service
+  | Config.Service
+  | Plugin.Service
+  | LocationServiceMap.Service
+  | ChildProcessSpawner
+  | FSUtil.Service
+  | FreeModelGuests.Service
 >(
   "terminal",
   Effect.gen(function* () {
@@ -182,12 +191,31 @@ export const TerminalTool = Tool.define<
     const plugin = yield* Plugin.Service
     const locations = yield* LocationServiceMap.Service
     const permission = yield* ShellPermission
+    const guests = yield* FreeModelGuests.Service
     // By terminal. Lines the user types themselves are not here: the scan sees only what the agent typed.
     const pending = new Map<PtyID, Line>()
 
+    // In a session an invited guest has acted in, the terminals the agent did not open (the user's, such as the one a
+    // Host locally agent runs in, and other sessions') are neither listed nor used: what the agent reads there would
+    // reach the transcript the guest sees, and Full access would approve the asks for them on its own.
+    const guested = (ctx: Tool.Context) => guests.marked(ctx.sessionID)
+
+    // Reading, waiting on, resizing or closing a terminal the agent did not open asks first, under other:<id>.
+    const askOther = Effect.fn("TerminalTool.askOther")(function* (params: Params, ctx: Tool.Context, info: Pty.Info) {
+      if (own(info, ctx)) return
+      const pattern = `${PermissionPolicy.TERMINAL_OTHER}${info.id}`
+      yield* ctx.ask({
+        permission: PermissionPolicy.TERMINAL,
+        patterns: [pattern],
+        always: [pattern],
+        metadata: { action: params.action, id: info.id, title: info.title },
+      })
+    })
+
     const list = Effect.fn("TerminalTool.list")(function* (ctx: Tool.Context) {
       const pty = yield* Pty.Service
-      const infos = yield* pty.list()
+      const all = yield* pty.list()
+      const infos = (yield* guested(ctx)) ? all.filter((info) => own(info, ctx)) : all
       return {
         title: "Terminals",
         metadata: { action: "list" as const },
@@ -271,6 +299,7 @@ export const TerminalTool = Tool.define<
 
     const read = Effect.fn("TerminalTool.read")(function* (params: Params, ctx: Tool.Context, info: Pty.Info) {
       const pty = yield* Pty.Service
+      yield* askOther(params, ctx, info)
       const read = yield* params.cursor === undefined
         ? pty.read(info.id, { lines: Math.min(params.lines ?? 200, 2000), limit: 256_000 })
         : pty.read(info.id, { cursor: params.cursor, limit: 32_000 })
@@ -310,6 +339,7 @@ export const TerminalTool = Tool.define<
           id: info.id,
           title: info.title,
           ...(params.text === undefined ? {} : { text: params.text }),
+          ...(params.text !== undefined && params.enter ? { enter: true } : {}),
           ...(params.keys === undefined ? {} : { keys: params.keys }),
         },
       })
@@ -369,6 +399,7 @@ export const TerminalTool = Tool.define<
       const pty = yield* Pty.Service
       if (params.pattern === undefined && params.exit !== true && params.quiet === undefined)
         return usage(params, "wait needs pattern, exit: true or quiet, to know what to wait for.")
+      yield* askOther(params, ctx, info)
       const pattern = params.pattern === undefined ? undefined : matcher(params.pattern)
       const timeout = Math.min(params.timeout ?? 30_000, 60_000)
       const started = yield* Clock.currentTimeMillis
@@ -425,15 +456,7 @@ export const TerminalTool = Tool.define<
 
     const change = Effect.fn("TerminalTool.change")(function* (params: Params, ctx: Tool.Context, info: Pty.Info) {
       const pty = yield* Pty.Service
-      if (!own(info, ctx)) {
-        const pattern = `${PermissionPolicy.TERMINAL_OTHER}${info.id}`
-        yield* ctx.ask({
-          permission: PermissionPolicy.TERMINAL,
-          patterns: [pattern],
-          always: [pattern],
-          metadata: { action: params.action, id: info.id, title: info.title },
-        })
-      }
+      yield* askOther(params, ctx, info)
       if (params.action === "close") {
         yield* pty.remove(info.id)
         pending.delete(info.id)
@@ -480,6 +503,8 @@ export const TerminalTool = Tool.define<
       if (id === undefined) return notFound(params, params.id)
       const pty = yield* Pty.Service
       const info = yield* pty.get(id)
+      if (!own(info, ctx) && (yield* guested(ctx)))
+        return { title: params.action, metadata: { action: params.action, id: info.id }, output: GUESTED }
       if (params.action === "read") return yield* read(params, ctx, info)
       if (params.action === "wait") return yield* wait(params, ctx, info)
       if (params.action === "reveal") return yield* reveal(params, info)

@@ -49,7 +49,10 @@ export const AFTER_WEB = "after-web "
 export const AFTER_WEB_REASON =
   "This conversation read the web, and this address is new: neither you nor an earlier result gave it. A page can steer the agent into putting your data in an address."
 
-/** Resizing or closing a terminal, asked by the terminal tool for a terminal the agent did not open. */
+/**
+ * Reading, waiting on, resizing or closing a terminal, asked by the terminal tool for a terminal the agent did not
+ * open.
+ */
 export const TERMINAL = "terminal"
 
 /** Typing or pressing keys in a terminal. A line it submits is also asked as the shell command it is. */

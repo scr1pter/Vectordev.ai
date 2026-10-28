@@ -674,7 +674,7 @@ export const MemoryApi = HttpApi.make("memory")
             identifier: "memory.eraseSession",
             summary: "Erase what Vector learned in a session",
             description:
-              "Forget every entry Vector learned whose only evidence is this session, so it is not learned again, and the Deep research runs the session started. What you wrote and what other sessions also taught stay. The session keeps its messages until you delete them.",
+              "Forget every entry Vector learned whose only evidence is this session, so it is not learned again. The Deep research runs the session started are forgotten too. What you wrote and what other sessions also taught stay. The session keeps its messages until you delete them.",
           }),
         ),
         HttpApiEndpoint.get("export", `${root}/export`, {

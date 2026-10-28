@@ -4,6 +4,7 @@ import { Cause, Effect, Exit, Layer } from "effect"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { EventV2 } from "@vectordevai/core/event"
+import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { Egress } from "@vectordevai/core/local-mode/egress"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
@@ -50,6 +51,7 @@ const it = testEffect(
         RuntimeFlags.node,
         Permission.node,
         EventV2.node,
+        FreeModelGuests.node,
         locations,
       ]),
       [[locations, locations]],
@@ -382,7 +384,7 @@ describe("tool.terminal", () => {
 })
 
 describe("tool.terminal permissions", () => {
-  ptyTest("own terminals ask nothing to resize or close; the user's and other sessions' ask under other:<id>", () =>
+  ptyTest("own terminals ask nothing to read or close; the user's and other sessions' ask under other:<id>", () =>
     project(({ pty }) =>
       Effect.gen(function* () {
         const tool = yield* init()
@@ -397,6 +399,8 @@ describe("tool.terminal permissions", () => {
         )
 
         const asked: Ask[] = []
+        yield* tool.execute({ action: "read", id: own.metadata.id }, context(asked))
+        yield* tool.execute({ action: "wait", id: own.metadata.id, quiet: 1 }, context(asked))
         const clamped = yield* tool.execute(
           { action: "resize", id: own.metadata.id, cols: 10, rows: 1000 },
           context(asked),
@@ -406,6 +410,8 @@ describe("tool.terminal permissions", () => {
         expect(half.output).toBe("resize needs both cols and rows.")
         expect(asked).toEqual([])
         for (const id of [user.id, other.id]) {
+          yield* tool.execute({ action: "read", id }, context(asked))
+          yield* tool.execute({ action: "wait", id, quiet: 1 }, context(asked))
           const resized = yield* tool.execute({ action: "resize", id, cols: 120, rows: 40 }, context(asked))
           expect(resized.output).toBe(`Resized ${id} to 120 columns and 40 rows.`)
           yield* tool.execute({ action: "type", id, text: "x" }, context(asked))
@@ -413,6 +419,8 @@ describe("tool.terminal permissions", () => {
         }
         expect(asked.map((ask) => [ask.permission, ask.patterns, ask.always])).toEqual(
           [user.id, other.id].flatMap((id) => [
+            ["terminal", [`other:${id}`], [`other:${id}`]],
+            ["terminal", [`other:${id}`], [`other:${id}`]],
             ["terminal", [`other:${id}`], [`other:${id}`]],
             ["terminal_input", [`other:${id}`], [`other:${id}`]],
             ["terminal", [`other:${id}`], [`other:${id}`]],
@@ -432,6 +440,80 @@ describe("tool.terminal permissions", () => {
     ),
   )
 
+  ptyTest("a refused read of the user's terminal shows none of its output", () =>
+    project(({ pty }) =>
+      Effect.gen(function* () {
+        const tool = yield* init()
+        const user = yield* pty.create(bun(`console.log("the-users-secret"); ${IDLE}`))
+        const asked: Ask[] = []
+        const reject = (ask: Ask) => ask.permission === "terminal"
+        for (const params of [
+          { action: "read" as const, id: user.id },
+          { action: "wait" as const, id: user.id, pattern: "the-users-secret" },
+        ]) {
+          const exit = yield* tool.execute(params, context(asked, { reject })).pipe(Effect.exit)
+          expect(failure(exit)).toContain("rejected terminal")
+        }
+        expect(asked).toEqual([
+          expect.objectContaining({
+            permission: "terminal",
+            metadata: { action: "read", id: user.id, title: user.title },
+          }),
+          expect.objectContaining({
+            permission: "terminal",
+            metadata: { action: "wait", id: user.id, title: user.title },
+          }),
+        ])
+      }),
+    ),
+  )
+
+  ptyTest(
+    "in a session a guest acted in, only the agent's own terminals are listed or used, and nothing is asked",
+    () =>
+      project(({ pty }) =>
+        Effect.gen(function* () {
+          const guests = yield* FreeModelGuests.Service
+          yield* guests.mark(SessionID.make("ses_guest"))
+          const tool = yield* init()
+          const user = yield* pty.create({ ...bun(`console.log("the-users-secret"); ${IDLE}`), title: "claude" })
+          const other = yield* pty.create(bun(IDLE), { kind: "agent", sessionID: "ses_other" })
+          const asked: Ask[] = []
+          const guested = () => context(asked, { sessionID: "ses_guest" })
+          const own = yield* tool.execute(
+            { action: "open", ...bun(IDLE), title: "mine" },
+            context([], { sessionID: "ses_guest" }),
+          )
+          const listed = (yield* tool.execute({ action: "list" }, guested())).output
+          expect(listed).toContain(`Terminal ${own.metadata.id} "mine"`)
+          expect(listed).not.toContain(user.id)
+          expect(listed).not.toContain("claude")
+          expect(listed).not.toContain(other.id)
+          for (const id of [user.id, other.id])
+            for (const params of [
+              { action: "read" as const, id },
+              { action: "wait" as const, id, pattern: "the-users-secret" },
+              { action: "type" as const, id, text: "hello", enter: true },
+              { action: "keys" as const, id, keys: ["ctrl-c" as const] },
+              { action: "resize" as const, id, cols: 100, rows: 30 },
+              { action: "reveal" as const, id },
+              { action: "close" as const, id },
+            ]) {
+              const result = yield* tool.execute(params, guested())
+              expect(result.output).toContain("an invited guest has acted in")
+              expect(result.output).not.toContain("the-users-secret")
+            }
+          expect(asked).toEqual([])
+          expect((yield* pty.list()).map((info) => info.id)).toEqual(expect.arrayContaining([user.id, other.id]))
+          // The agent's own terminals work as before there.
+          const read = yield* tool.execute({ action: "read", id: own.metadata.id }, guested())
+          expect(read.output).toContain("yours")
+          // The user's own sessions still list every terminal.
+          expect((yield* tool.execute({ action: "list" }, context())).output).toContain(user.id)
+        }),
+      ),
+  )
+
   ptyTest("a submitted line is asked as the shell command it is, before anything is written", () =>
     project(({ directory, worktree }) =>
       Effect.gen(function* () {
@@ -445,8 +527,11 @@ describe("tool.terminal permissions", () => {
           ["terminal_input", [`own:${id}`]],
           ["bash", ["echo hello"]],
         ])
+        // The ask carries what would be typed, so the prompt can show it.
+        expect(asked[0].metadata).toEqual({ id, title: opened.metadata.title, text: "echo hello\ncat .env /etc/hosts" })
         asked.length = 0
         yield* tool.execute({ action: "keys", id, keys: ["enter"] }, context(asked))
+        expect(asked[0].metadata).toEqual({ id, title: opened.metadata.title, keys: ["enter"] })
         expect(asked.map((ask) => [ask.permission, ask.patterns])).toEqual([
           ["terminal_input", [`own:${id}`]],
           ["external_directory", [path.join("/etc", "*")]],
@@ -464,6 +549,7 @@ describe("tool.terminal permissions", () => {
           .pipe(Effect.exit)
         expect(failure(cloud)).toContain("rejected vector_cloud_publish")
         expect(asked.map((ask) => ask.permission)).toEqual(["terminal_input", "bash", "vector_cloud_publish"])
+        expect(asked[0].metadata).toMatchObject({ text: "vercel --prod", enter: true })
         expect(asked[2].patterns).toEqual([`vercel/${path.basename(directory)}/production/shell deploy`])
         const read = yield* tool.execute({ action: "read", id, cursor: ready.metadata.cursor }, context())
         expect(bytes(read.output)).toEqual(

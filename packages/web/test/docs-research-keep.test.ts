@@ -13,3 +13,12 @@ test("the research docs say asking Vector to keep research asks you every time, 
   expect(release112Copy("1.99.112")).toMatchObject({ since: "From desktop 1.99.112:", shipped: true })
   expect(typeof release112.since).toBe("string")
 })
+
+test("the docs say every memory erase takes the research that goes with it", async () => {
+  const research = await Bun.file(page).text()
+  expect(research).not.toContain("does not remove research runs yet")
+  expect(research).toContain("<code>vector memory erase</code> removes this repository's runs too")
+  expect(research).toContain("<code>--everywhere</code> removes every\n            run, and <code>--personal</code> keeps them")
+  const brain = await Bun.file(path.join(import.meta.dir, "../src/pages/docs/brain.astro")).text()
+  expect(brain).toContain("session, and the Deep research runs it started.")
+})

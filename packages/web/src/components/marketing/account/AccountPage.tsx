@@ -11,7 +11,7 @@ import "./account.css"
 
 type AccountState = {
   user: { id: string; email: string; name?: string }
-  // Decided by api/account/status against the server's owner allowlist, so this page never carries anyone's address.
+  // Decided by api/account/status against the Design Lab's allowlist, so this page never carries anyone's address.
   // It only shows the Design tab; api/design-lab still decides who may open the lab.
   owner?: boolean
 }

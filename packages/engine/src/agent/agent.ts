@@ -242,9 +242,9 @@ const layer = Layer.effect(
           "*": "allow",
           doom_loop: "ask",
           unsandboxed_shell: "ask",
-          // Terminals the agent did not open (the user's, or another session's) ask before the agent types into,
-          // resizes or closes them. Reading any terminal asks nothing, and a submitted line also goes through the
-          // shell's own rules.
+          // Terminals the agent did not open (the user's, or another session's) ask before the agent reads, waits
+          // on, types into, resizes or closes them, and a submitted line also goes through the shell's own rules.
+          // Its own terminals ask nothing to read.
           terminal: { "*": "allow", "other:*": "ask" },
           terminal_input: { "*": "allow", "other:*": "ask" },
           browser_external: "ask",

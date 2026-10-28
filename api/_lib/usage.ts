@@ -267,14 +267,6 @@ export function requireUsageOwner(request: Pick<ApiRequest, "headers">, fetcher:
 }
 
 /**
- * Whether a signed-in account is on that same allowlist. It only tells the account page to show the owner's links,
- * so the site's code never has to carry anyone's address; each owner-only route still runs its own full check.
- */
-export function isUsageOwner(email: string) {
-  return usageOwners().includes(email.trim().toLowerCase())
-}
-
-/**
  * Lets counting finish after the response without delaying it. Vercel keeps a function running
  * only for work registered with its request context, which is the hook @vercel/functions'
  * waitUntil reads; this repository does not depend on that package. Elsewhere the work runs on.

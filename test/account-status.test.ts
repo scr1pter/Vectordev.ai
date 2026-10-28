@@ -54,8 +54,8 @@ function status(fetcher: typeof fetch, request: Partial<ApiRequest> = {}) {
 }
 
 describe("account status", () => {
-  test("answers whether the account is on the admin allowlist, as a boolean beside the user", async () => {
-    process.env.VECTOR_ADMIN_EMAILS = " Owner@Example.com , second@example.com"
+  test("answers whether the account is on the Design Lab allowlist, as a boolean beside the user", async () => {
+    process.env.VECTOR_DESIGN_LAB_EMAILS = " Owner@Example.com , second@example.com"
     expect(await status(supabase("OWNER@example.com"))).toEqual({
       status: 200,
       body: { user: { id: ID, email: "owner@example.com" }, owner: true },
@@ -67,12 +67,13 @@ describe("account status", () => {
     })
   })
 
-  test("uses the same allowlist as the usage dashboard, falling back to the Design Lab owners", async () => {
+  // The answer only shows the Design tab, so it follows the list /design opens the lab for, not the usage dashboard's.
+  test("follows the Design Lab owners whatever the admin allowlist says", async () => {
     process.env.VECTOR_DESIGN_LAB_EMAILS = "designer@example.com"
     expect(await status(supabase("designer@example.com"))).toMatchObject({ body: { owner: true } })
     process.env.VECTOR_ADMIN_EMAILS = "admin@example.com"
-    expect(await status(supabase("admin@example.com"))).toMatchObject({ body: { owner: true } })
-    expect(await status(supabase("designer@example.com"))).toMatchObject({ body: { owner: false } })
+    expect(await status(supabase("admin@example.com"))).toMatchObject({ body: { owner: false } })
+    expect(await status(supabase("designer@example.com"))).toMatchObject({ body: { owner: true } })
   })
 
   test("an ordinary account is not the owner when no allowlist is configured", async () => {
@@ -80,7 +81,7 @@ describe("account status", () => {
   })
 
   test("answers nothing about ownership without a valid session", async () => {
-    process.env.VECTOR_ADMIN_EMAILS = "owner@example.com"
+    process.env.VECTOR_DESIGN_LAB_EMAILS = "owner@example.com"
     const signedOut = await status(supabase("owner@example.com"), { headers: {} })
     expect(signedOut.status).toBe(401)
     expect(signedOut.body).not.toHaveProperty("owner")

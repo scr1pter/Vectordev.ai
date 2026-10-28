@@ -41,6 +41,7 @@
   },
   "devDependencies": {
     "@actions/artifact": "4.0.0",
+    "@happy-dom/global-registrator": "20.0.11",
     "@vectordevai/app": "workspace:*",
     "@vectordevai/core": "workspace:*",
     "@vectordevai/ui": "workspace:*",

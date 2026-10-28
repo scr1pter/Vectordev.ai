@@ -2998,7 +2998,7 @@ export class Memory extends HeyApiClient {
   /**
    * Erase what Vector learned in a session
    *
-   * Forget every entry Vector learned whose only evidence is this session, so it is not learned again, and the Deep research runs the session started. What you wrote and what other sessions also taught stay. The session keeps its messages until you delete them.
+   * Forget every entry Vector learned whose only evidence is this session, so it is not learned again. The Deep research runs the session started are forgotten too. What you wrote and what other sessions also taught stay. The session keeps its messages until you delete them.
    */
   public eraseSession<ThrowOnError extends boolean = false>(options: Options<MemoryEraseSessionData, ThrowOnError>) {
     return (options.client ?? this.client).delete<MemoryEraseSessionResponses, MemoryEraseSessionErrors, ThrowOnError>({

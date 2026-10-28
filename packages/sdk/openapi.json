@@ -8004,7 +8004,7 @@
             }
           }
         },
-        "description": "Forget every entry Vector learned whose only evidence is this session, so it is not learned again, and the Deep research runs the session started. What you wrote and what other sessions also taught stay. The session keeps its messages until you delete them.",
+        "description": "Forget every entry Vector learned whose only evidence is this session, so it is not learned again. The Deep research runs the session started are forgotten too. What you wrote and what other sessions also taught stay. The session keeps its messages until you delete them.",
         "summary": "Erase what Vector learned in a session",
         "x-codeSamples": [
           {
