@@ -150,8 +150,8 @@ export async function fetchOffers(request: Send): Promise<Offers | undefined> {
     ? Schema.decodeUnknownOption(Config)(await response.json().catch(() => undefined))
     : Option.none()
   if (Option.isNone(decoded)) return undefined
-  // Only these four fields, whatever else the configuration carries. A plan or top-up Vector knows takes its current
-  // name, so a site still answering an older name shows the same one as everything else.
+  // Only these four fields, whatever else the configuration carries. A plan Vector knows takes its current name, so a
+  // site still answering an older name shows the same one as everything else.
   const offer = (item: Offer) => ({
     id: item.id,
     name: CodiumPlan.name(item.id) ?? item.name,

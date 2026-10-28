@@ -588,7 +588,8 @@ test("the offers Vector shows carry names and prices only, and nothing is availa
     ],
   })
   const offers = await ModelPlanStatus.fetchOffers(answer(config(true)))
-  // A plan or top-up Vector knows shows its current name; one it does not know keeps the name the site gave it.
+  // A plan Vector knows shows its current name; anything else keeps the name the site gave it. Codium has no top-ups
+  // any more, so an old site's top-up is not renamed.
   expect(offers).toEqual({
     enabled: true,
     plans: [
@@ -596,7 +597,7 @@ test("the offers Vector shows carry names and prices only, and nothing is availa
       { id: "vector-50", name: "Pro", price: 50, available: true },
     ],
     topups: [
-      { id: "codium-topup-10", name: "$10 credit top-up", price: 10, available: true },
+      { id: "codium-topup-10", name: "Retired top-up 10", price: 10, available: true },
       { id: "vector-team", name: "Team", price: 30, available: true },
     ],
   })
