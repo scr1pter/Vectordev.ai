@@ -2733,6 +2733,11 @@ export type Provider = {
 
 export type ExperimentalCapabilities = {
   backgroundSubagents: boolean
+  computer?: {
+    available: boolean
+    protocol?: number
+    reason?: string
+  }
 }
 
 export type ToolListItem = {

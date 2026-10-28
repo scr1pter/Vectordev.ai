@@ -1,5 +1,6 @@
 import { Agent } from "@/agent/agent"
 import { BackgroundJob } from "@/background/job"
+import { ComputerAvailability } from "@/computer/availability"
 import { InstanceState } from "@/effect/instance-state"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { MCP } from "@/mcp"
@@ -48,6 +49,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     const sessions = yield* Session.Service
     const background = yield* BackgroundJob.Service
     const flags = yield* RuntimeFlags.Service
+    const computer = yield* ComputerAvailability.Service
     const tasks = yield* TaskManager.Service
     const desktop = yield* DesktopTasks.Service
     const prompts = yield* SessionPrompt.Service
@@ -154,7 +156,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     })
 
     const capabilities = Effect.fn("ExperimentalHttpApi.capabilities")(function* () {
-      return { backgroundSubagents: flags.backgroundSubagents }
+      return { backgroundSubagents: flags.backgroundSubagents, computer: yield* computer.capabilities() }
     })
 
     const tool = Effect.fn("ExperimentalHttpApi.tool")(function* (ctx: { query: typeof ToolListQuery.Type }) {

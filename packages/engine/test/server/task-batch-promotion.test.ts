@@ -6,6 +6,7 @@ import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
 import { BackgroundJob } from "@vectordevai/core/background-job"
 import { ProjectV2 } from "@vectordevai/core/project"
 import { Agent } from "@/agent/agent"
+import { ComputerAvailability } from "@/computer/availability"
 import { MCP } from "@/mcp"
 import { Project } from "@/project/project"
 import { ToolRegistry } from "@/tool/registry"
@@ -53,6 +54,7 @@ const it = testEffect(
         RuntimeFlags.layer({ backgroundSubagents: true }),
         // These unrelated experimental endpoints are never called by this test.
         Layer.mock(Agent.Service)({}),
+        Layer.mock(ComputerAvailability.Service)({}),
         Layer.mock(MCP.Service)({}),
         Layer.mock(Project.Service)({}),
         Layer.mock(ToolRegistry.Service)({}),

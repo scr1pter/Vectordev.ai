@@ -66,6 +66,8 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { BrowserTool } from "./browser"
+import { ComputerTool } from "./computer"
+import { ComputerAvailability } from "@/computer/availability"
 import { VectorCloudTool } from "./vector-cloud"
 import { ResearchStore } from "@vectordevai/core/research/store"
 import { ResearchRun } from "./research-run"
@@ -137,6 +139,7 @@ const layer = Layer.effect(
     const truncate = yield* Truncate.Service
     const flags = yield* RuntimeFlags.Service
     const fsutil = yield* FSUtil.Service
+    const computerAvailability = yield* ComputerAvailability.Service
 
     const invalid = yield* InvalidTool
     const escalate = yield* EscalateTool
@@ -158,6 +161,7 @@ const layer = Layer.effect(
     const skilltool = yield* SkillTool
     const memorytool = yield* MemoryTool
     const browsertool = yield* BrowserTool
+    const computertool = yield* ComputerTool
     const vectorcloudtool = yield* VectorCloudTool
     const researchplan = yield* ResearchPlanTool
     const researchsearch = yield* ResearchSearchTool
@@ -294,6 +298,7 @@ const layer = Layer.effect(
           lsp: Tool.init(lsptool),
           plan: Tool.init(plan),
           browser: Tool.init(browsertool),
+          computer: Tool.init(computertool),
           vectorcloud: Tool.init(vectorcloudtool),
           researchplan: Tool.init(researchplan),
           researchsearch: Tool.init(researchsearch),
@@ -327,6 +332,9 @@ const layer = Layer.effect(
             // Offered only to a sized request below Thorough; the session runtime removes it everywhere else.
             tool.escalate,
             ...(process.env.VECTOR_BROWSER_BRIDGE_URL && process.env.VECTOR_BROWSER_BRIDGE_TOKEN ? [tool.browser] : []),
+            ...(process.env.VECTOR_COMPUTER_BRIDGE_URL && process.env.VECTOR_COMPUTER_BRIDGE_TOKEN
+              ? [tool.computer]
+              : []),
             ...(process.env.VECTOR_CLOUD_BRIDGE_URL && process.env.VECTOR_CLOUD_BRIDGE_TOKEN ? [tool.vectorcloud] : []),
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
             ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
@@ -378,11 +386,19 @@ const layer = Layer.effect(
 
     const tools: Interface["tools"] = Effect.fn("ToolRegistry.tools")(function* (input) {
       const builtin = yield* InstanceState.get(state)
-      const researchSetting = (yield* config.get()).research?.tool
+      const settings = yield* config.get()
+      const researchSetting = settings.research?.tool
+      const computerUnavailable = yield* computerAvailability.unavailable()
+      const computerDenied = Permission.disabled([ComputerTool.id], input.agent.permission).has(ComputerTool.id)
       // A research agent is offered its own tools and nothing else, whatever a session's or the user's rules allow:
       // no edit, shell, plugin or custom tool reaches Deep research (RC1).
       const own = Agent.researchTools(input.agent.name)
       const filtered = (yield* all()).filter((tool) => {
+        if (
+          tool.id === ComputerTool.id &&
+          (computerUnavailable || computerDenied || settings.tools?.computer === false)
+        )
+          return false
         if (own && tool.id !== InvalidTool.id && !own.includes(tool.id)) return false
         // With Vector Local's Web access None, research is offered no tool that reaches the web (section 5.9).
         if (ResearchRun.withheld(tool.id)) return false
@@ -401,7 +417,10 @@ const layer = Layer.effect(
 
       return yield* Effect.forEach(
         filtered,
-        Effect.fnUntraced(function* (tool: Tool.Def) {
+        Effect.fnUntraced(function* (listed: Tool.Def) {
+          // A failed initial probe may recover after the capability cache expires. Refresh its decoder together
+          // with its advertised schema before offering it, so both use the currently supported action list.
+          const tool = listed.id === ComputerTool.id ? yield* Tool.init(computertool) : listed
           // Task's compatibility validator must distinguish untouched definitions
           // from in-place plugin edits without mutating the cached builtin schema.
           const initialSchema = tool === builtin.task ? structuredClone(tool.jsonSchema) : tool.jsonSchema
@@ -528,6 +547,7 @@ export const node = LayerNode.make({
   layer,
   deps: [
     Config.node,
+    ComputerAvailability.node,
     ConfigDependencies.node,
     Plugin.node,
     Question.node,

@@ -53,6 +53,13 @@ export const TaskWaitInput = Schema.Struct({
 
 const CapabilitiesResponse = Schema.Struct({
   backgroundSubagents: Schema.Boolean,
+  computer: Schema.optional(
+    Schema.Struct({
+      available: Schema.Boolean,
+      protocol: Schema.optional(NonNegativeInt),
+      reason: Schema.optional(Schema.String),
+    }),
+  ),
 }).annotate({ identifier: "ExperimentalCapabilities" })
 
 const ToolIDs = Schema.Array(Schema.String).annotate({ identifier: "ToolIDs" })

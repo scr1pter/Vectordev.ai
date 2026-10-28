@@ -31,6 +31,8 @@ import { Instruction } from "./instruction"
 import { Plugin } from "../plugin"
 import { MAX_STEPS_PROMPT } from "@vectordevai/core/session/runner/max-steps"
 import { ToolRegistry } from "@/tool/registry"
+import { ComputerAvailability } from "@/computer/availability"
+import { Computer } from "@vectordevai/schema/computer"
 import { assertExternalDirectoryEffect, readPatterns } from "@/tool/external-directory"
 import type { Tool } from "@/tool/tool"
 import { MCP } from "../mcp"
@@ -105,6 +107,7 @@ globalThis.AI_SDK_LOG_WARNINGS = false
 
 const decodeMessageInfo = Schema.decodeUnknownExit(SessionV1.Info)
 const decodeMessagePart = Schema.decodeUnknownExit(SessionV1.Part)
+const isComputerMention = Schema.is(Computer.MentionMarker)
 const MAX_MCP_RESOURCE_BLOB_BYTES = 10 * 1024 * 1024
 // Sessions whose instruction files are kept between requests; an evicted session reads its files again.
 const MAX_INSTRUCTION_SNAPSHOTS = 256
@@ -253,6 +256,7 @@ const layer = Layer.effect(
     const mcp = yield* MCP.Service
     const lsp = yield* LSP.Service
     const registry = yield* ToolRegistry.Service
+    const computer = yield* ComputerAvailability.Service
     const truncate = yield* Truncate.Service
     const image = yield* Image.Service
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -2518,6 +2522,13 @@ const layer = Layer.effect(
           } else delete tools.escalate
           // Memory is the main agent's: a subagent reports to it, and Vector's hidden helpers never learn.
           if (session.parentID || session.internal) delete tools.memory
+          const computerReason = ComputerAvailability.sessionReason({
+            parentID: session.parentID,
+            internal: session.internal,
+            guest,
+            freeModel: model.freeModel,
+          })
+          if (computerReason) delete tools.computer
 
           if (lastUser.format?.type === "json_schema") {
             tools["StructuredOutput"] = createStructuredOutputTool({
@@ -2614,6 +2625,15 @@ const layer = Layer.effect(
             ...(lastUser.executionMode === "fast" ? [FAST_EXECUTION_SYSTEM_PROMPT] : []),
           ]
           const format = lastUser.format ?? { type: "text" as const }
+          if (
+            !offered.includes("computer") &&
+            lastUserMsg?.parts.some(
+              (part) => part.type === "text" && isComputerMention(part.metadata?.[Computer.MENTION_KEY]),
+            )
+          ) {
+            const reason = computerReason ?? (yield* computer.unavailable()) ?? "disabled"
+            system.push(`Explain in one sentence: ${ComputerAvailability.message(reason)}`)
+          }
           if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
           const result = yield* handle.process({
             user: lastUser,
@@ -4156,6 +4176,7 @@ export const node = LayerNode.make({
     MCP.node,
     LSP.node,
     ToolRegistry.node,
+    ComputerAvailability.node,
     Truncate.node,
     Image.node,
     CrossSpawnSpawner.node,

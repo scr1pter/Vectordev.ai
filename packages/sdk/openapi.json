@@ -33880,6 +33880,23 @@
         "properties": {
           "backgroundSubagents": {
             "type": "boolean"
+          },
+          "computer": {
+            "type": "object",
+            "properties": {
+              "available": {
+                "type": "boolean"
+              },
+              "protocol": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": ["available"],
+            "additionalProperties": false
           }
         },
         "required": ["backgroundSubagents"],

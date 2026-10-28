@@ -12,6 +12,7 @@ import { BackgroundJob } from "@/background/job"
 import { TaskManager } from "@/task/manager"
 import { DesktopTasks } from "@/task/desktop"
 import { Command } from "@/command"
+import { ComputerAvailability } from "@/computer/availability"
 import { Config } from "@/config/config"
 import { Workspace } from "@/control-plane/workspace"
 import { Env } from "@/env"
@@ -283,6 +284,7 @@ const app = LayerNode.group([
   Command.node,
   Truncate.node,
   ToolRegistry.node,
+  ComputerAvailability.node,
   Format.node,
   Project.node,
   Vcs.node,
