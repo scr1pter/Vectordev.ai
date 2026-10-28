@@ -16,6 +16,7 @@ import { Permission } from "@/permission"
 import { Question } from "@/question"
 import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
 import type { TaskPromptOps } from "@/tool/task"
+import { TaskStructured } from "@/tool/task-structured"
 import { TaskMailbox } from "@vectordevai/core/task-mailbox"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
@@ -137,6 +138,8 @@ const SWEEPS = 4
 const STOP_REASON = "Stopped by the parent session; partial work was retained."
 const INTERRUPT_REASON = "Stopped with the main agent; partial work was kept."
 const OUTPUT_LIMIT = 4096
+// A structured answer as inspect shows it: pretty JSON cut to this many UTF-8 bytes.
+const STRUCTURED_LIMIT = 8 * 1024
 // The most messages inspect shows for a task, sent to it and reported up together.
 const MAX_MESSAGES = 50
 const FOREGROUND_REPORT = "Your parent is waiting on you; put this in your final report."
@@ -381,6 +384,15 @@ const layer = Layer.effect(
               }) as Task.Interrupted,
             }
           : {}),
+        ...(current.structured
+          ? {
+              result: SubagentLifecycle.defined({
+                format: "json",
+                valid: current.structured.valid,
+                attempts: current.structured.attempts,
+              }) as Task.Result,
+            }
+          : {}),
         ...inbox(current),
       }
     })
@@ -534,6 +546,17 @@ const layer = Layer.effect(
         .flatMap((part) => (part.type === "text" && !part.synthetic && !part.ignored ? [part.text] : []))
         .join("\n\n")
       const mail = yield* exchanged(session)
+      // A structured child's last answer, as text a client shows and never renders (5.E.2).
+      const record = SubagentLifecycle.read(session)
+      const answer = record?.structured ? TaskStructured.latest(messages) : undefined
+      const pretty = answer === undefined ? undefined : JSON.stringify(JSON.parse(answer), null, 2)
+      const cut =
+        pretty !== undefined && Buffer.byteLength(pretty, "utf8") > STRUCTURED_LIMIT
+          ? Buffer.from(pretty, "utf8")
+              .subarray(0, STRUCTURED_LIMIT)
+              .toString("utf8")
+              .replace(/\uFFFD$/, "")
+          : undefined
       return {
         task,
         steps,
@@ -541,6 +564,15 @@ const layer = Layer.effect(
         truncated:
           messages.length >= 8 || text.length > OUTPUT_LIMIT || parts.filter((part) => part.type === "tool").length > 8,
         ...(mail.length > 0 ? { messages: mail } : {}),
+        ...(pretty !== undefined
+          ? {
+              structured: {
+                json: cut ?? pretty,
+                valid: record?.structured?.valid === true,
+                truncated: cut !== undefined,
+              },
+            }
+          : {}),
       }
     })
 
@@ -633,6 +665,17 @@ const layer = Layer.effect(
                 "The task has finished; no message was sent and no new run was started. To continue it, call task with its task_id.",
             })
           const now = Date.now()
+          // A steered child keeps answering in the format it was asked for, so a structured one keeps StructuredOutput.
+          const last = (yield* sessions
+            .messages({ sessionID: session.id })
+            .pipe(Effect.catch(() => Effect.succeed([] as SessionV1.WithParts[])))).findLast(
+            (item) => item.info.role === "user" && item.info.format !== undefined,
+          )?.info
+          const asked = last?.role === "user" ? last.format : undefined
+          const kept =
+            record.structured && !record.fork && asked?.type !== "json_schema"
+              ? TaskStructured.format(record.structured.schema)
+              : asked
           const mailbox = record.mailbox ?? []
           const limited = TaskMailbox.admissionError({
             text,
@@ -670,15 +713,17 @@ const layer = Layer.effect(
               },
               record.attempt,
             )
+            const model = {
+              providerID: ProviderV2.ID.make(record.model.providerID),
+              modelID: ModelV2.ID.make(record.model.modelID),
+            }
             const result = yield* ops.prompt({
               sessionID: session.id,
               messageID: entry.id,
               agent: record.agent,
-              model: {
-                providerID: ProviderV2.ID.make(record.model.providerID),
-                modelID: ModelV2.ID.make(record.model.modelID),
-              },
+              model,
               variant: record.model.variant,
+              ...(kept ? { format: kept } : {}),
               parts: [
                 {
                   type: "text",
@@ -688,6 +733,22 @@ const layer = Layer.effect(
                 },
               ],
             })
+            // A structured child's answer to the message is checked like its first one (5.E.2).
+            if (value.structured)
+              return (yield* TaskStructured.settle({
+                sessions,
+                ops,
+                sessionID: session.id,
+                model,
+                ...(record.model.variant ? { variant: record.model.variant } : {}),
+                agent: record.agent,
+                schema: value.structured.schema,
+                mode: value.fork ? "text" : "tool",
+                ...(kept ? { format: kept } : {}),
+                since: entry.id,
+                result,
+                attempt: record.attempt,
+              })).json
             const failed = result.info.role === "assistant" ? SubagentLifecycle.failure(result.info.error) : undefined
             const output = result.parts
               .flatMap((part) => (part.type === "text" && !part.synthetic && !part.ignored ? [part.text] : []))
@@ -1217,6 +1278,14 @@ const layer = Layer.effect(
                     stop: undefined,
                     waiting: undefined,
                     reports: undefined,
+                    // The schema applies to this run too, which counts its own attempts (5.E.2).
+                    ...(record.structured && {
+                      structured: {
+                        schema: record.structured.schema,
+                        schemaHash: record.structured.schemaHash,
+                        attempts: 0,
+                      },
+                    }),
                   },
                   record.attempt,
                 )
@@ -1238,15 +1307,19 @@ const layer = Layer.effect(
                     queued = false
                     yield* SubagentLifecycle.update(sessions, id, { status: "running", slotReason: undefined }, attempt)
                   }
-                  return yield* ops.prompt({
+                  const since = MessageID.ascending()
+                  const model = {
+                    providerID: ProviderV2.ID.make(record.model.providerID),
+                    modelID: ModelV2.ID.make(record.model.modelID),
+                  }
+                  const structured = record.structured && !record.fork ? record.structured : undefined
+                  const result = yield* ops.prompt({
                     sessionID: id,
-                    messageID: MessageID.ascending(),
+                    messageID: since,
                     agent: record.agent,
-                    model: {
-                      providerID: ProviderV2.ID.make(record.model.providerID),
-                      modelID: ModelV2.ID.make(record.model.modelID),
-                    },
+                    model,
                     variant: record.model.variant,
+                    ...(structured ? { format: TaskStructured.format(structured.schema) } : {}),
                     parts: [
                       {
                         type: "text",
@@ -1256,6 +1329,20 @@ const layer = Layer.effect(
                       },
                     ],
                   })
+                  if (!record.structured) return result
+                  return (yield* TaskStructured.settle({
+                    sessions,
+                    ops,
+                    sessionID: id,
+                    model,
+                    ...(record.model.variant ? { variant: record.model.variant } : {}),
+                    agent: record.agent,
+                    schema: record.structured.schema,
+                    mode: structured ? "tool" : "text",
+                    since,
+                    result,
+                    attempt,
+                  })).json
                 })
                 const waiting = Effect.sync(() => {
                   queued = true
@@ -1294,7 +1381,9 @@ const layer = Layer.effect(
                   durable: { parentSessionID: root.id, sessionID: id, directory, attempt },
                   run: limits.run({ conversationID, childID: id, origin: "resume", waiting }, work).pipe(
                     Effect.onInterrupt(() => ops.cancel(id)),
-                    Effect.flatMap(SubagentLifecycle.settleRun),
+                    Effect.flatMap((ran) =>
+                      typeof ran === "string" ? Effect.succeed(ran) : SubagentLifecycle.settleRun(ran),
+                    ),
                     Effect.ensuring(limits.release(admission, id)),
                   ),
                 })

@@ -18,6 +18,7 @@ import type { SubagentUsage } from "@/agent/subagent-kind"
 import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
 import type { TaskPromptOps } from "@/tool/task"
 import { Truncate } from "@/tool/truncate"
+import { TaskStructured } from "@/tool/task-structured"
 import { Locale } from "@/util/locale"
 import { NoteWindow } from "./note-window"
 import { TaskLimits } from "./limits"
@@ -63,6 +64,8 @@ export type ResultInput = {
   agent: string
   variant?: string
   hold?: BrainSchema.Hold
+  /** The text is a checked JSON answer (output_schema): sent whole or as the file holding it, never cut. */
+  format?: "json"
 }
 
 export type WatchInput = {
@@ -152,6 +155,8 @@ export function render(input: {
   text: string
   /** How much of its delegated ceiling the request's subagents have spent, once they pass the warning level. */
   spend?: string
+  /** A checked JSON answer, shown in place of the text. */
+  json?: TaskStructured.Shown
 }) {
   const attributes = [
     `id="${input.taskID}"`,
@@ -173,9 +178,9 @@ export function render(input: {
       : []),
     ...(input.spend ? [input.spend] : []),
     ...(guidance ? [guidance] : []),
-    `<${tag}>`,
-    TaskSize.neutralizeTags(input.text),
-    `</${tag}>`,
+    ...(input.json
+      ? [TaskStructured.element(input.json)]
+      : [`<${tag}>`, TaskSize.neutralizeTags(input.text), `</${tag}>`]),
     "</task-notification>",
   ].join("\n")
 }
@@ -511,8 +516,14 @@ const layer = Layer.effect(
         if (SubagentLifecycle.read(yield* sessions.get(input.taskID))?.attempt !== input.attempt) return
         const parent = yield* unreverted(input.parentID, 1_000)
         // The note stays in the parent's history and is sent again on every later request, so it gets the cap a tool
-        // result gets, with the rest saved where the parent can read it.
-        const capped = yield* truncate.output(input.text, { maxBytes: 3072, maxLines: 60 })
+        // result gets, with the rest saved where the parent can read it. A JSON answer is never cut: it goes whole up to
+        // its own limit, or as the file that holds it (5.E.2).
+        const json = input.format === "json" ? yield* TaskStructured.shown(truncate, input.text) : undefined
+        const capped = json
+          ? "json" in json
+            ? { content: json.json, truncated: false as const }
+            : { content: TaskStructured.element(json), truncated: true as const, outputPath: json.ref }
+          : yield* truncate.output(input.text, { maxBytes: 3072, maxLines: 60 })
         yield* SubagentLifecycle.update(
           sessions,
           input.taskID,
@@ -531,6 +542,7 @@ const layer = Layer.effect(
           duration: input.duration,
           text: capped.content,
           spend: yield* spendLine(input.taskID),
+          ...(json ? { json } : {}),
         })
         yield* SubagentLifecycle.write(
           sessions,
@@ -560,7 +572,8 @@ const layer = Layer.effect(
     const settled = Effect.fnUntraced(function* (input: WatchInput, info: BackgroundJob.Info | undefined) {
       // A run Vector interrupted while going away is TaskRecovery's to settle and report (D.3).
       if (!info || info.status === "running" || info.status === "interrupted") return
-      if (SubagentLifecycle.read(yield* sessions.get(input.taskID))?.attempt !== input.attempt) return
+      const record = SubagentLifecycle.read(yield* sessions.get(input.taskID))
+      if (record?.attempt !== input.attempt) return
       const status = info.status
       const done = yield* SubagentLifecycle.locked(SubagentLifecycle.controlLock)(
         Effect.gen(function* () {
@@ -590,6 +603,9 @@ const layer = Layer.effect(
         hold: done.hold,
       }
       const ended = outcome.status === "completed" || outcome.status === "error" ? outcome.status : "cancelled"
+      // A checked answer is its last run's JSON alone, never numbered reports (5.E.2).
+      if (ended === "completed" && record?.structured)
+        return yield* result({ ...note, state: ended, text: info.output ?? "", format: "json" })
       yield* result({
         ...note,
         state: ended,

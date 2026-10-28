@@ -241,6 +241,43 @@ describe("task management", () => {
     expect(result.tasks[0].reason).toContain("Correction failed")
   }))
 
+  // 5.E.2: a steered child keeps the format it was asked for, and its answer is checked like its first.
+  it.instance("a message to a structured child keeps its format and answers with checked JSON", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const jobs = yield* BackgroundJob.Service
+    const statuses = yield* SessionStatus.Service
+    const root = yield* sessions.create()
+    const schema = { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] }
+    const task = yield* child(root.id, { structured: { schema, schemaHash: "hash", attempts: 1, valid: true } })
+    const format = new SessionV1.OutputFormatJsonSchema({ type: "json_schema", schema, retryCount: 2 })
+    yield* sessions.updateMessage({ id: MessageID.ascending(), role: "user", sessionID: task.id, agent: "general", model, time: { created: Date.now() }, format })
+    yield* sessions.updateMessage({ id: MessageID.ascending(), role: "user", sessionID: task.id, agent: "general", model, time: { created: Date.now() } })
+    const original = yield* Deferred.make<void>()
+    yield* jobs.start({ id: task.id, type: "task", run: Deferred.await(original).pipe(Effect.as('{"ok":false}')) })
+    yield* statuses.set(task.id, { type: "busy" })
+    const sent: SessionPrompt.PromptInput[] = []
+    yield* manager.message({ sessionID: root.id, taskID: task.id, text: "Check the error path too" }, { ...ops, prompt: (input) => Effect.gen(function* () {
+      sent.push(input)
+      const answer = reply(input)
+      const info = { ...answer.info, structured: { ok: true } } as SessionV1.Assistant
+      yield* sessions.updateMessage(info)
+      return { ...answer, info }
+    }) })
+    yield* Deferred.succeed(original, undefined)
+    const done = yield* jobs.wait({ id: task.id })
+    expect(sent[0]?.format).toMatchObject({ type: "json_schema", schema, retryCount: 2 })
+    expect(done.info?.output).toBe('{"ok":true}')
+    expect(SubagentLifecycle.read(yield* sessions.get(task.id))?.structured).toMatchObject({ schema, valid: true })
+    // The board and inspect say so: a JSON result, and the answer as pretty text.
+    expect((yield* manager.list({ sessionID: root.id })).tasks[0]?.result).toMatchObject({ format: "json", valid: true })
+    expect((yield* manager.inspect({ sessionID: root.id, taskID: task.id })).structured).toEqual({
+      json: '{\n  "ok": true\n}',
+      valid: true,
+      truncated: false,
+    })
+  }))
+
   it.instance("a sibling can send bounded untrusted data but cannot stop its peer", () => Effect.gen(function* () {
     const sessions = yield* Session.Service
     const manager = yield* TaskManager.Service

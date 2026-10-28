@@ -24,6 +24,7 @@ import { SubagentModel } from "../agent/subagent-model"
 import { SubagentLifecycle } from "./subagent-lifecycle"
 import { Truncate } from "./truncate"
 import { TaskReport } from "./task-report"
+import { TaskStructured } from "./task-structured"
 import type { SessionPrompt } from "../session/prompt"
 import { Config } from "@/config/config"
 import { Cause, Effect, Exit, Option, Schema, Scope, Semaphore } from "effect"
@@ -183,6 +184,9 @@ const BaseParameterFields = {
   effort: Schema.optional(Schema.Literals(["default", "low", "medium", "high"])).annotate({
     description: "Never above your own effort",
   }),
+  output_schema: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)).annotate({
+    description: "A JSON Schema the final answer must match; you receive checked JSON",
+  }),
 }
 
 const BaseParameters = Schema.Struct(BaseParameterFields)
@@ -199,15 +203,14 @@ const BatchBrief = Schema.Struct({
   background: Schema.optional(Schema.Never),
 })
 
-// Brief fields a later version adds (a fork of this conversation, checked JSON output, an isolated worktree). Not
-// advertised yet, and refused when sent: dropped silently, an isolation or fork request would start a child without it.
+// Brief fields a later version adds (a fork of this conversation, an isolated worktree). Not advertised yet, and
+// refused when sent: dropped silently, an isolation or fork request would start a child without it.
 const UNRELEASED = {
   fork: Schema.optional(Schema.Never),
-  output_schema: Schema.optional(Schema.Never),
   isolation: Schema.optional(Schema.Never),
 }
 // Brief fields a batch takes only inside each entry.
-const PER_BRIEF = ["model", "effort"] as const
+const PER_BRIEF = ["model", "effort", "output_schema"] as const
 
 export const BatchParameters = Schema.Struct({
   tasks: Schema.Array(BaseParameters).check(Schema.isMinLength(1), Schema.isMaxLength(8)).annotate({
@@ -249,6 +252,7 @@ export const InputParameters = Schema.Union([
     context_pack: Schema.optional(Schema.Never),
     model: Schema.optional(Schema.Never),
     effort: Schema.optional(Schema.Never),
+    output_schema: Schema.optional(Schema.Never),
     ...UNRELEASED,
   }),
 ])
@@ -299,6 +303,8 @@ type Report = {
   state: "running" | "completed" | "error" | "cancelled"
   summary?: string
   text: string
+  /** A checked JSON answer (output_schema), shown in place of the text. */
+  json?: TaskStructured.Shown
 }
 
 // A launch's result. A batch re-renders `report` once each entry's text is cut to its share of the output (5.C.5), and
@@ -312,9 +318,9 @@ function renderOutput(input: Report) {
   return [
     `<task id="${input.sessionID}" state="${input.state}">`,
     ...(input.summary ? [`<summary>${input.summary}</summary>`] : []),
-    `<${tag}>`,
-    TaskSize.neutralizeTags(input.text),
-    `</${tag}>`,
+    ...(input.json
+      ? [TaskStructured.element(input.json)]
+      : [`<${tag}>`, TaskSize.neutralizeTags(input.text), `</${tag}>`]),
     "</task>",
   ].join("\n")
 }
@@ -431,6 +437,12 @@ export const TaskTool = Tool.define(
         return yield* Effect.fail(
           new Error("context_pack exceeds 8192 UTF-8 bytes; send only established facts needed for this assignment."),
         )
+      // A schema Vector cannot check in full is refused before anything starts, rather than passed on unchecked (5.E.2).
+      const asked = params.output_schema === undefined ? undefined : TaskStructured.accept(params.output_schema)
+      if (asked && !asked.ok)
+        return yield* Effect.fail(
+          new Error(`Vector cannot check this output_schema: ${asked.reason} No child was started.`),
+        )
       if (params.background === true && !flags.backgroundSubagents) {
         return yield* Effect.fail(
           new Error(
@@ -466,7 +478,8 @@ export const TaskTool = Tool.define(
       // The description is the title on the subagent's card, the child session and the job.
       const title = subagentTitle(params.description, params.prompt)
       const dependencies = [...new Set(params.depends_on?.map((item) => item.trim()).filter(Boolean) ?? [])]
-      const durableDependencies = new Map<string, string>()
+      // A finished prerequisite's report, or its checked JSON when it had an output_schema.
+      const durableDependencies = new Map<string, { text: string; json?: boolean }>()
       const jobs = yield* background.list()
       if (batch?.multiple && session && jobs.some((job) => job.id === session.id && job.status === "running")) {
         return yield* Effect.fail(
@@ -497,6 +510,11 @@ export const TaskTool = Tool.define(
               ),
             )
           const recent = yield* sessions.messages({ sessionID: saved.value.id, limit: 8 })
+          const json = record.structured ? TaskStructured.latest(recent) : undefined
+          if (json !== undefined) {
+            durableDependencies.set(dependency, { text: json, json: true })
+            continue
+          }
           const report =
             record.resultSummary ??
             recent
@@ -504,7 +522,7 @@ export const TaskTool = Tool.define(
               ?.parts.flatMap((part) => (part.type === "text" && !part.synthetic && !part.ignored ? [part.text] : []))
               .join("\n\n") ??
             "Completed; inspect its saved session for details."
-          durableDependencies.set(dependency, report)
+          durableDependencies.set(dependency, { text: report })
           continue
         }
         if (job.type !== id || job.metadata?.parentSessionId !== ctx.sessionID) {
@@ -533,6 +551,11 @@ export const TaskTool = Tool.define(
           new Error(
             `Task ${params.task_id} ran the ${ran} agent, so it resumes only as ${ran}. Start a new task for ${subagentType}.`,
           ),
+        )
+      // The research run shapes its agents' reports (5.E.1 rule 2).
+      if (asked && researchAgents.has(subagentType))
+        return yield* Effect.fail(
+          new Error(`The ${subagentType} agent writes the report its research run asks for; leave output_schema out.`),
         )
 
       const instance = yield* InstanceState.context
@@ -640,6 +663,10 @@ export const TaskTool = Tool.define(
 
       const { root, depth } = yield* lineage(parent)
       const resumed = session && SubagentLifecycle.read(session)
+      // A brief's schema, else the one a resumed child was given: it applies to every later run (5.E.2).
+      const structured: TaskStructured.Accepted | undefined = asked?.ok
+        ? asked.value
+        : resumed?.structured && { schema: resumed.structured.schema, schemaHash: resumed.structured.schemaHash }
       if (resumed && !(yield* SubagentLifecycle.agentMayResume(sessions, root.id, resumed)))
         return yield* Effect.fail(new Error(SubagentLifecycle.HUMAN_FIRST))
       if (depth >= MAX_SUBAGENT_DEPTH) {
@@ -926,6 +953,8 @@ export const TaskTool = Tool.define(
           status: dependencies.length > 0 || slotted ? "queued" : "running",
           ...(slotted && dependencies.length === 0 ? { slotReason: SLOT_REASON } : {}),
           startedAt,
+          // Each run counts its own attempts and says whether its answer matched.
+          ...(structured ? { structured: { ...structured, attempts: 0 } } : {}),
           ...(delegation
             ? {
                 conversationID: delegation.conversationID,
@@ -1000,10 +1029,18 @@ export const TaskTool = Tool.define(
         const outcome: SubagentLifecycle.Outcome = { status: record.status }
         // Why the child waits for a slot; the part mirrors the record's slotReason as queuedReason (4.6).
         let queuedReason = record.slotReason
+        // The part mirrors the record's structured state as {valid, attempts} (4.6).
+        let structuredPart: { valid?: boolean; attempts: number } | undefined = structured && { attempts: 0 }
         // What the child took in, once it settles: a parent whose subagent read the web is held as web, not subagent
         // (RC8), so its memory writes wait for the user for the right reason.
         const held: { [SessionMemory.HOLD]?: BrainSchema.Hold } = {}
-        const partMetadata = () => ({ ...metadata, ...outcome, ...(queuedReason ? { queuedReason } : {}), ...held })
+        const partMetadata = () => ({
+          ...metadata,
+          ...outcome,
+          ...(queuedReason ? { queuedReason } : {}),
+          ...(structuredPart ? { structured: structuredPart } : {}),
+          ...held,
+        })
         // Once the call has returned (background launch or promotion), its tool
         // part is settled and later changes must patch the stored part.
         let detached = runInBackground
@@ -1070,14 +1107,22 @@ export const TaskTool = Tool.define(
         }, SubagentLifecycle.locked(claimLock))
 
         const runTask = Effect.fn("TaskTool.runTask")(function* () {
+          // A prerequisite's checked JSON goes whole or as the file holding it, never cut (5.E.2); its last run's only.
+          const handOff = (dependency: string, json: string) =>
+            TaskStructured.shown(truncate, json).pipe(
+              Effect.map((shown) =>
+                TaskMailbox.envelope(TaskStructured.element(shown), { sender: dependency, recipient: nextSession.id }),
+              ),
+            )
           // Observe every prerequisite together so a later failure or stop can settle this task immediately.
           const prerequisites = yield* Effect.forEach(
             dependencies,
             (dependency) =>
               Effect.gen(function* () {
                 const saved = durableDependencies.get(dependency)
+                if (saved?.json) return yield* handOff(dependency, saved.text)
                 if (saved !== undefined) {
-                  const report = yield* truncate.output(saved, { maxBytes: 2048, maxLines: 40 })
+                  const report = yield* truncate.output(saved.text, { maxBytes: 2048, maxLines: 40 })
                   return TaskMailbox.envelope(report.content, { sender: dependency, recipient: nextSession.id })
                 }
                 const waited = yield* background.wait({ id: dependency })
@@ -1091,6 +1136,12 @@ export const TaskTool = Tool.define(
                 // and start a parent turn after the user pressed Stop.
                 if (failed?.cancelled) return yield* Effect.interrupt
                 if (failed) return yield* Effect.fail(new Error(failed.message))
+                const childID = Schema.decodeUnknownOption(SessionID)(dependency)
+                const prior = Option.isSome(childID)
+                  ? yield* sessions.get(childID.value).pipe(Effect.option)
+                  : Option.none<Session.Info>()
+                if (Option.isSome(prior) && SubagentLifecycle.read(prior.value)?.structured)
+                  return yield* handOff(dependency, waited.info.output ?? "")
                 const report = yield* truncate.output(TaskNotify.reports(waited.info), { maxBytes: 2048, maxLines: 40 })
                 return TaskMailbox.envelope(report.content, { sender: dependency, recipient: nextSession.id })
               }),
@@ -1109,8 +1160,9 @@ export const TaskTool = Tool.define(
             )).filter(
               (part) => part.type !== "agent" && (subagentType !== ResearchRun.RESEARCHER || part.type !== "file"),
             )
-            return yield* ops.prompt({
-              messageID: MessageID.ascending(),
+            const since = MessageID.ascending()
+            const result = yield* ops.prompt({
+              messageID: since,
               sessionID: nextSession.id,
               model: {
                 modelID: model.modelID,
@@ -1118,8 +1170,39 @@ export const TaskTool = Tool.define(
               },
               variant: childVariant,
               agent: next.name,
+              ...(structured ? { format: TaskStructured.format(structured.schema) } : {}),
               parts,
             })
+            if (!structured) return result
+            // A run that ended without a value is asked again inside the slot it holds (5.E.2).
+            return yield* TaskStructured.settle({
+              sessions,
+              ops,
+              sessionID: nextSession.id,
+              model: { providerID: model.providerID, modelID: model.modelID },
+              ...(childVariant ? { variant: childVariant } : {}),
+              agent: next.name,
+              schema: structured.schema,
+              mode: "tool",
+              since,
+              result,
+              attempt: joinedAttempt ?? attempt,
+            }).pipe(
+              Effect.map((settled) => settled.json),
+              Effect.ensuring(
+                sessions.get(nextSession.id).pipe(
+                  Effect.map((current) => {
+                    const state = SubagentLifecycle.read(current)?.structured
+                    if (state)
+                      structuredPart = {
+                        attempts: state.attempts,
+                        ...(state.valid === undefined ? {} : { valid: state.valid }),
+                      }
+                  }),
+                  Effect.ignore,
+                ),
+              ),
+            )
           })
           // The slot is taken only once the prerequisites are met, so a child waiting on a dependency holds none (5.B.3).
           if (!delegation) return yield* work
@@ -1219,7 +1302,8 @@ export const TaskTool = Tool.define(
         const guardedRun = () =>
           runTask().pipe(
             Effect.onInterrupt(() => ops.cancel(nextSession.id)),
-            Effect.flatMap(SubagentLifecycle.settleRun),
+            // A checked answer is settled already; any other run ends as its last message says.
+            Effect.flatMap((ran) => (typeof ran === "string" ? Effect.succeed(ran) : SubagentLifecycle.settleRun(ran))),
             // A researcher hands back 1,500 characters at most, and the notes it saved in the run, whether it finished
             // or failed partway: a failed run's text reaches the lead too.
             Effect.flatMap((text) =>
@@ -1239,6 +1323,8 @@ export const TaskTool = Tool.define(
                 : Effect.fail(failed),
             ),
           )
+        // The attempt of the run this call joined, when it added a run to one already going.
+        let joinedAttempt: number | undefined
         // A message for a background task that is mid-run joins the child's running loop, as a prompt sent to a busy
         // session does, so the child reads it at its next step. One that is queued behind its dependencies, or between
         // runs, waits for the run before it: a message with its own dependencies is not delivered until they finish, and
@@ -1262,12 +1348,18 @@ export const TaskTool = Tool.define(
             const release = Effect.sync(() => dependencyClaims.delete(claim))
             if (dependencies.length > 0) dependencyClaims.add(claim)
             const assignment = SubagentLifecycle.read(yield* sessions.get(nextSession.id))
-            if (ownedPaths.length)
+            // The added run belongs to the run it joins, and a schema it brings applies from it on.
+            joinedAttempt = assignment?.attempt
+            const schema = asked?.ok && assignment?.structured?.schemaHash !== asked.value.schemaHash
+            if (ownedPaths.length || schema)
               yield* SubagentLifecycle.write(
                 sessions,
                 nextSession.id,
                 {
-                  ownedPaths: [...new Set([...(assignment?.ownedPaths ?? []), ...ownedPaths])],
+                  ...(ownedPaths.length
+                    ? { ownedPaths: [...new Set([...(assignment?.ownedPaths ?? []), ...ownedPaths])] }
+                    : {}),
+                  ...(schema && structured ? { structured: { ...structured, attempts: 0 } } : {}),
                 },
                 assignment?.attempt,
               )
@@ -1279,11 +1371,15 @@ export const TaskTool = Tool.define(
               })
               .pipe(Effect.onExit((exit) => (Exit.isSuccess(exit) && exit.value ? Effect.void : release)))
             if (!added) {
-              if (ownedPaths.length)
+              joinedAttempt = undefined
+              if (ownedPaths.length || schema)
                 yield* SubagentLifecycle.write(
                   sessions,
                   nextSession.id,
-                  { ownedPaths: assignment?.ownedPaths },
+                  {
+                    ...(ownedPaths.length ? { ownedPaths: assignment?.ownedPaths } : {}),
+                    ...(schema ? { structured: assignment?.structured } : {}),
+                  },
                   assignment?.attempt,
                 )
               return undefined
@@ -1509,11 +1605,14 @@ export const TaskTool = Tool.define(
                   : state === "error"
                     ? [outcome.error, result?.output].filter(Boolean).join("\n\n")
                     : (result?.output ?? "")
+              // A checked answer is its last run's JSON, whole or as the file holding it (5.E.2).
+              const json = structured && state === "completed" ? yield* TaskStructured.shown(truncate, text) : undefined
               return rendered(title, partMetadata(), {
                 sessionID: nextSession.id,
                 state,
                 ...(busy && admission ? { summary: busyNote(admission.active, admission.limits.running) } : {}),
                 text,
+                ...(json ? { json } : {}),
               })
             }),
           (_, exit) =>
@@ -1548,6 +1647,7 @@ export const TaskTool = Tool.define(
           task.success_criteria,
           task.model,
           task.effort,
+          task.output_schema,
         ]),
       )
       if (new Set(briefs).size !== briefs.length)
@@ -1681,8 +1781,14 @@ export const TaskTool = Tool.define(
               }
               const head = `<task_entry index="${index}" state="${items[index].status}">`
               return {
-                text: TaskSize.neutralizeTags(report.text),
-                render: (text: string) => `${head}\n${renderOutput({ ...report, text })}\n</task_entry>`,
+                text: report.json
+                  ? "json" in report.json
+                    ? report.json.json
+                    : TaskStructured.element(report.json)
+                  : TaskSize.neutralizeTags(report.text),
+                json: report.json,
+                render: (text: string, json = report.json) =>
+                  `${head}\n${renderOutput({ ...report, text, json })}\n</task_entry>`,
               }
             }
             const cancelled = Exit.hasInterrupts(exit)
@@ -1718,6 +1824,11 @@ export const TaskTool = Tool.define(
       const entries = yield* Effect.forEach(results, (result, index) => {
         const cut = cuts[index]
         if (!cut) return Effect.succeed({ output: result.render(result.text), truncated: false })
+        // A JSON answer is never cut: past its share it is named by the file that holds it.
+        if ("json" in result && result.json && "json" in result.json)
+          return truncate
+            .write(result.json.json)
+            .pipe(Effect.map((ref) => ({ output: result.render("", { ref }), truncated: true })))
         return truncate
           .output(result.text, cut)
           .pipe(Effect.map((kept) => ({ output: result.render(kept.content), truncated: kept.truncated })))

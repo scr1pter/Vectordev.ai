@@ -415,6 +415,10 @@ exports[`tool parameters JSON Schema (wire shape) task 1`] = `
             "description": ""provider/model", a model ID on your provider, or "small". Never pricier than yours unless the user allowed it",
             "type": "string",
           },
+          "output_schema": {
+            "description": "A JSON Schema the final answer must match; you receive checked JSON",
+            "type": "object",
+          },
           "owned_paths": {
             "description": "Repository-relative files or directory prefixes this subagent owns. Vector rejects overlapping ownership among active sibling subagents",
             "items": {
