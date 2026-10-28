@@ -24,13 +24,13 @@ checks. Push through the required pre-push typecheck; never bypass it.
 
 | Work | Branch | State / next gate |
 | --- | --- | --- |
-| Release 1.99.112 | `release-prep` | Version, unsigned allowlist and changelog prepared; test-only clock repair restores Linux coverage. Publication needs green integrated CI, exact catalog parity and protected release approval. See `release-199112.md`. |
+| Release 1.99.112 | `release-prep` | Version, unsigned allowlist and changelog prepared; test-only clock repair restores Linux coverage. Full candidate CI is green, including Linux/Windows tests, both browser suites and the 30-minute packet capture. Exact catalog parity and protected publication approval remain release-workflow gates. See `release-199112.md`. |
 | Service setup prompt | `vector-takeover` | Written in `codex-setup-prompt.md`. No external setup performed. |
-| Multi-agent parity | `self-evolving` | WP1–22 inherited; WP23 committed with 237 passing cases and engine typecheck. WP24 in progress in an isolated follow-up worktree; WP25–40 and phase/final review remain. |
-| Codium | `codium` | A00–08 inherited; A09 committed with 230 passing tests and API typecheck. Inherited CI fixes pass 47 tests. A10 in progress; A11–60 and Track B remain. Protected provider end-to-end setup needs the owner. |
+| Multi-agent parity | `self-evolving` | WP1–22 inherited; WP23 committed with 237 passing cases and engine typecheck. WP24 committed in the follow-up worktree with 231 passing cases and independent review closed. WP25 is in progress; phase/final review and later work packages remain. |
+| Codium | `codium` | A00–08 inherited; A09 committed with 230 passing tests and API typecheck. Inherited CI fixture fixes are committed and the complete Codium CI run `40779479590` passes, including browser specs and all eight typechecks. A10 in progress; A11–60 and Track B remain. Protected provider end-to-end setup needs the owner. |
 | VectorScope | `vectorscope` | Measurement-first build plan written in `docs/vector/build/vectorscope-plan.md`. Runtime implementation and paid eval have not started. |
 | Approved tokenomics/copy | `approved-fixes` | Standard task tracking and planned 550B+ Vector Velocity wording validated by 47 tests; evidence-gated audit recommendations recorded separately. |
-| Reviewed catalog restoration | `catalog-112` / catalog fork `codium-112` | Four prior reviewed model records restored through the fork; canonical mirror test re-enabled (26 tests pass). Coordinate the release pin and website mirror before landing. |
+| Reviewed catalog restoration | `catalog-112` / catalog fork `codium-112` | Four prior reviewed model records restored through the fork; canonical mirror test re-enabled (26 tests pass). The owner chose to keep the existing catalog for 1.99.112; restoration remains deferred on separate branches. |
 
 Newer Mac-only specs, deviations and the partial A09 patch were unavailable in
 this cloud workspace. Their absence is not evidence that no local work exists;
@@ -55,8 +55,10 @@ as part of Codium. Do not implement Vector Labs, team features or parked R2 work
 
 - Approve `production-release` in GitHub for the approved 1.99.112 run only;
   later releases and unlisted main merges need separate authorization.
-- Confirm/set the reviewed catalog fork revision with an appropriately scoped
-  account; this session's integration receives HTTP 403 listing Actions variables.
+- Keep the existing catalog for 1.99.112, as the owner directed. The restored
+  catalog is separate; landing it later requires coordinated fork and mirror pins.
+  This session receives HTTP 403 listing Actions variables; release validation
+  must continue to enforce catalog parity.
 - Codium's ordinary CI already ran, including its typecheck matrix; the handoff
   note about branch approval was stale. Its protected provider end-to-end lane
   still requires the owner's `codium-test` environment and test-only secrets.
