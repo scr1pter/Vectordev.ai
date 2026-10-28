@@ -1,4 +1,4 @@
-import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect"
+import { Cause, Clock, Context, Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect"
 import { makeGlobalNode } from "@vectordevai/core/effect/app-node"
 import { EventV2 } from "@vectordevai/core/event"
 import { serviceUse } from "@vectordevai/core/effect/service-use"
@@ -14,7 +14,7 @@ export type Input = {
   signal?: AbortSignal
 }
 
-/** One task generation. Only the callback holding this root's FIFO may change its live state. */
+/** One task generation. Action state belongs to the FIFO; the heartbeat also updates its control clock. */
 export type State = {
   lease?: number
   frames: Computer.Frame[]
@@ -26,6 +26,12 @@ export type State = {
   denyMentions: Map<string, MessageID>
   actions: number
   activeMs: number
+  activeSince?: number
+  waiting: number
+  desktopWaiting: boolean
+  desktopPhase?: Computer.ComputerPhase
+  nextActions?: number
+  nextActiveMs?: number
   screenshots: number
   failedMessageID?: MessageID
   lastScreenText?: string
@@ -40,6 +46,17 @@ export interface Interface {
   ) => Effect.Effect<A, E | ComputerTransport.ComputerError, R>
   /** Drop remembered coordinates immediately without creating a task or waiting behind its FIFO. */
   readonly invalidate: (rootSessionID: SessionID) => Effect.Effect<void>
+  /** Start once after acquire; the task owns this heartbeat across individual tool calls. */
+  readonly start: <R>(
+    state: State,
+    onState: (state: Computer.ComputerState) => Effect.Effect<void, never, R>,
+  ) => Effect.Effect<void, ComputerTransport.ComputerError, R>
+  readonly report: (
+    state: State,
+    desktop: Computer.ComputerState,
+  ) => Effect.Effect<void, ComputerTransport.ComputerError>
+  /** Safe within serialized: signal Stop now; the task watcher drains workers and releases the lease. */
+  readonly stop: (state: State) => Effect.Effect<void>
   /** Call outside serialized: it aborts and waits for the current callback to unwind. */
   readonly release: (rootSessionID: SessionID) => Effect.Effect<void>
 }
@@ -54,6 +71,9 @@ type Task = {
   signals: Set<AbortSignal>
   workers: Set<Fiber.Fiber<unknown, unknown>>
   abort: () => void
+  heartbeat?: Fiber.Fiber<void, never>
+  publish?: (state: Computer.ComputerState) => Effect.Effect<void>
+  publishedAt?: number
   closing?: Deferred.Deferred<void>
 }
 type Root = {
@@ -79,6 +99,48 @@ export function invalidate(state: State) {
   state.lastInspect = undefined
 }
 
+/** Settle the task clock before observing a threshold or changing a wait state. */
+export const elapsed = Effect.fn("ComputerSession.elapsed")(function* (state: State) {
+  const now = yield* Clock.currentTimeMillis
+  if (state.activeSince !== undefined) {
+    if (state.waiting === 0 && !state.desktopWaiting && !state.signal.aborted)
+      state.activeMs += Math.max(0, now - state.activeSince)
+    state.activeSince = now
+  }
+  return state.activeMs
+})
+
+/** Nested permission and question waits must not subtract the same time twice. */
+export function waiting<A, E, R>(state: State, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> {
+  return Effect.acquireUseRelease(
+    elapsed(state).pipe(
+      Effect.map(() => {
+        state.waiting++
+      }),
+    ),
+    () => effect,
+    (_, exit) =>
+      elapsed(state).pipe(
+        Effect.andThen(
+          Effect.sync(() => {
+            state.waiting--
+            // Answering our ask cannot clear a physical take-over or a handoff reported during it.
+            if (Exit.isSuccess(exit) && state.waiting === 0 && state.desktopPhase === "asking")
+              state.desktopWaiting = false
+          }),
+        ),
+      ),
+  )
+}
+
+/** A desktop-confirmed Resume begins a new active interval without charging the paused interval. */
+export const resume = Effect.fn("ComputerSession.resume")(function* (state: State) {
+  yield* elapsed(state)
+  if (state.signal.aborted) return
+  state.desktopWaiting = false
+  state.desktopPhase = "working"
+})
+
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -87,6 +149,7 @@ export const layer = Layer.effect(
     const scope = yield* Scope.Scope
     // The desktop lock belongs to a root conversation across directories, not to an InstanceState scope.
     const roots = new Map<SessionID, Root>()
+    const tasks = new WeakMap<State, Task>()
 
     const finish = Effect.fn("ComputerSession.finish")(function* (root: Root, task: Task) {
       if (task.closing) return yield* Deferred.await(task.closing)
@@ -98,6 +161,7 @@ export const layer = Layer.effect(
       for (const signal of task.signals) signal.removeEventListener("abort", task.abort)
       task.signals.clear()
       task.controller.abort()
+      if (task.heartbeat) yield* Fiber.interrupt(task.heartbeat)
       task.state.grants.clear()
       invalidate(task.state)
       yield* Fiber.interruptAll(task.workers)
@@ -124,6 +188,8 @@ export const layer = Layer.effect(
           invalidate(task.state)
           task.state.actions = 0
           task.state.activeMs = 0
+          task.state.activeSince = undefined
+          task.state.desktopWaiting = true
           task.state.screenshots = 0
           task.state.failedMessageID = undefined
         }),
@@ -150,6 +216,61 @@ export const layer = Layer.effect(
         if (task) invalidate(task.state)
       }),
     )
+
+    const stop = Effect.fn("ComputerSession.stop")((state: State) => Effect.sync(() => tasks.get(state)?.abort()))
+
+    const report = Effect.fn("ComputerSession.report")(function* (state: State, desktop: Computer.ComputerState) {
+      const task = tasks.get(state)
+      if (!task || state.signal.aborted) return yield* stopped()
+      if (desktop.lease !== state.lease || (desktop.holder && desktop.holder.sessionID !== task.input.rootSessionID)) {
+        task.abort()
+        return yield* stopped()
+      }
+      yield* elapsed(state)
+      if (state.signal.aborted) return yield* stopped()
+      state.desktopPhase = desktop.phase
+      state.desktopWaiting = ["asking", "handoff", "paused", "waiting"].includes(desktop.phase)
+      const now = yield* Clock.currentTimeMillis
+      if (state.signal.aborted) return yield* stopped()
+      if (task.publish && (task.publishedAt === undefined || now - task.publishedAt >= 1000)) {
+        task.publishedAt = now
+        yield* task.publish(desktop)
+      }
+      if (state.signal.aborted) return yield* stopped()
+      if (["off", "setup", "ready", "done", "stopped"].includes(desktop.phase)) {
+        task.abort()
+        return yield* stopped()
+      }
+    })
+
+    const start: Interface["start"] = Effect.fn("ComputerSession.start")(function* <R>(
+      state: State,
+      onState: (state: Computer.ComputerState) => Effect.Effect<void, never, R>,
+    ) {
+      const task = tasks.get(state)
+      if (!task || state.lease === undefined || state.signal.aborted) return yield* stopped()
+      if (task.heartbeat) return
+      const context = yield* Effect.context<R>()
+      task.publish = (desktop) => onState(desktop).pipe(Effect.provide(context))
+      state.activeSince = yield* Clock.currentTimeMillis
+      const lease = state.lease
+      const heartbeat = Effect.gen(function* () {
+        yield* Effect.sleep(Computer.LIMITS.heartbeatMs)
+        const reply = yield* transport.request(
+          { v: Computer.PROTOCOL, ...task.input, command: "heartbeat", lease },
+          { signal: state.signal },
+        )
+        yield* report(state, reply.state)
+      }).pipe(
+        Effect.forever,
+        Effect.catchCause(() => Effect.sync(task.abort)),
+      )
+      task.heartbeat = yield* heartbeat.pipe(Effect.forkIn(scope))
+      if (state.signal.aborted) {
+        yield* Fiber.interrupt(task.heartbeat)
+        return yield* stopped()
+      }
+    })
 
     const serialized: Interface["serialized"] = Effect.fn("ComputerSession.serialized")(function* <A, E, R>(
       input: Input,
@@ -188,10 +309,13 @@ export const layer = Layer.effect(
             denyMentions: root.denyMentions,
             actions: 0,
             activeMs: 0,
+            waiting: 0,
+            desktopWaiting: false,
             screenshots: 0,
             signal: controller.signal,
           },
         }
+        tasks.set(root.task.state, root.task)
       }
       const task = root.task
       // A turn may abort while the model is thinking between computer calls. Keep watching until task cleanup.
@@ -269,7 +393,7 @@ export const layer = Layer.effect(
         { discard: true },
       ),
     )
-    return Service.of({ serialized, invalidate: invalidateRoot, release })
+    return Service.of({ serialized, invalidate: invalidateRoot, start, report, stop, release })
   }),
 )
 

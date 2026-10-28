@@ -159,8 +159,9 @@ export function extract(text: string): Entity[] {
 }
 
 /** Once outside content has been observed, only addresses the user actually supplied can vouch for a destination. */
-export function unvouched(text: string, history: readonly SessionV1.WithParts[]) {
-  if (!SessionMemory.taint(history)) return []
+export function unvouched(text: string, history: readonly SessionV1.WithParts[], observed = false) {
+  // A batch can observe a live target before its tool result has entered persisted history.
+  if (!observed && !SessionMemory.taint(history)) return []
   const given = new Set(
     history
       .filter((message) => message.info.role === "user")

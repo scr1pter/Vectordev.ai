@@ -1017,9 +1017,13 @@ export const BridgeCommands = {
       lease: Lease,
       frame: optional(Id),
       steps: Schema.Array(Step).check(Schema.isLengthBetween(1, LIMITS.batchSteps)),
+      // Restricts targets to identities checked by the engine for this call; it never grants app access.
+      // D16 returns pending app for targets outside this list, including when it is absent or empty.
+      allowedApps: optional(Schema.Array(AppKey).check(Schema.isMaxLength(LIMITS.batchSteps))),
       approvals: optional(
+        // One live step can require both an app approval and a separate sensitive-action approval.
         Schema.Array(Schema.Struct({ index: NonNegativeInt, requestID: RequestID })).check(
-          Schema.isMaxLength(LIMITS.batchSteps),
+          Schema.isMaxLength(2 * LIMITS.batchSteps),
         ),
       ),
       settleMs: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 5000 })),
@@ -1031,7 +1035,8 @@ export const BridgeCommands = {
     response: Ok,
   },
   awaitControl: {
-    request: command("awaitControl", { lease: Lease, waitId: Id }),
+    // Pointer waits use their returned ID; a missing ID waits for this lease's paused control state.
+    request: command("awaitControl", { lease: Lease, waitId: optional(Id) }),
     response: Schema.Struct({ result: Schema.Literals(["resumed", "stopped", "declined", "pending"]) }),
   },
   heartbeat: { request: command("heartbeat", { lease: Lease }), response: Schema.Struct({ state: ComputerState }) },

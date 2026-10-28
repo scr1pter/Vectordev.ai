@@ -50,6 +50,7 @@ export interface Interface {
     sessionID: SessionID
     questions: ReadonlyArray<Info>
     tool?: Tool
+    metadata?: Request["metadata"]
   }) => Effect.Effect<ReadonlyArray<Answer>, RejectedError>
   readonly reply: (input: {
     requestID: QuestionID
@@ -88,6 +89,7 @@ const layer = Layer.effect(
       sessionID: SessionID
       questions: ReadonlyArray<Info>
       tool?: Tool
+      metadata?: Request["metadata"]
     }) {
       const pending = (yield* InstanceState.get(state)).pending
       const id = QuestionID.ascending()
@@ -99,6 +101,7 @@ const layer = Layer.effect(
         sessionID: input.sessionID,
         questions: input.questions,
         tool: input.tool,
+        ...(input.metadata ? { metadata: input.metadata } : {}),
       }
       pending.set(id, { info, deferred })
       yield* events.publish(Event.Asked, info)

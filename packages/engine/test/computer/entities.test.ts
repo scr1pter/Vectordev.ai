@@ -67,6 +67,16 @@ test("destination checks begin with outside content and persist after later loca
   expect(ComputerEntities.unvouched("outside@example.test", [observed("browser")])).toHaveLength(1)
 })
 
+test("a live observation checks new destinations before its tool result reaches history", () => {
+  expect(ComputerEntities.unvouched("outside@example.test", [user("Send the report")], true)).toEqual([
+    { kind: "email", value: "outside@example.test" },
+  ])
+  expect(ComputerEntities.unvouched("outside@example.test", [user("Use outside@example.test")], true)).toEqual([])
+  expect(
+    ComputerEntities.unvouched("outside@example.test", [user("outside@example.test", { synthetic: true })], true),
+  ).toHaveLength(1)
+})
+
 for (const [name, options] of [
   ["synthetic notes", { synthetic: true }],
   ["ignored text", { ignored: true }],

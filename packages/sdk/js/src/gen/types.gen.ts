@@ -91,6 +91,7 @@ export type Event =
   | EventQuestionAsked
   | EventQuestionReplied
   | EventQuestionRejected
+  | EventComputerState
   | EventSessionCompacted
   | EventResearchUpdated
   | EventLocalUpdated
@@ -1732,6 +1733,7 @@ export type GlobalEvent = {
            */
           questions: Array<QuestionInfo>
           tool?: QuestionTool
+          metadata?: ComputerHandoffQuestionMetadata | ComputerCheckInQuestionMetadata
         }
       }
     | {
@@ -1749,6 +1751,14 @@ export type GlobalEvent = {
         properties: {
           sessionID: string
           requestID: string
+        }
+      }
+    | {
+        id: string
+        type: "computer.state"
+        properties: {
+          sessionID: string
+          state: ComputerState2
         }
       }
     | {
@@ -4335,6 +4345,7 @@ export type QuestionRequest = {
    */
   questions: Array<QuestionInfo>
   tool?: QuestionTool
+  metadata?: ComputerHandoffQuestionMetadata | ComputerCheckInQuestionMetadata
 }
 
 export type QuestionNotFoundError = {
@@ -5291,6 +5302,24 @@ export type QuestionRejected2 = {
   }
 }
 
+export type ComputerState = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "computer.state"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    state: ComputerState2
+  }
+}
+
 export type V2Event =
   | ModelCatalogRefreshed
   | IntegrationUpdated
@@ -5378,6 +5407,7 @@ export type V2Event =
   | QuestionAsked
   | QuestionReplied2
   | QuestionRejected2
+  | ComputerState
   | SessionCompacted
   | ResearchUpdated
   | LocalUpdated
@@ -5873,6 +5903,110 @@ export type ProjectTime = {
   created: number
   updated: number
   initialized?: number
+}
+
+export type ComputerHandoffReason =
+  | "credential"
+  | "sign_in"
+  | "captcha"
+  | "payment_details"
+  | "admin_prompt"
+  | "security_prompt"
+  | "capture_confirm"
+  | "elevated"
+  | "site_permission"
+  | "download"
+  | "extension"
+  | "protocol_handler"
+  | "macros"
+  | "other"
+
+export type ComputerHandoffQuestionMetadata = {
+  computer: {
+    kind: "handoff"
+    app?: string
+    reason: ComputerHandoffReason
+  }
+}
+
+export type ComputerCheckInQuestionMetadata = {
+  computer: {
+    kind: "check_in"
+    actions: number
+    minutes: number
+  }
+}
+
+export type ComputerPhase =
+  | "off"
+  | "setup"
+  | "ready"
+  | "working"
+  | "asking"
+  | "handoff"
+  | "paused"
+  | "waiting"
+  | "done"
+  | "stopped"
+
+export type ComputerMode = "foreground" | "background"
+
+export type ComputerAppKey = string
+
+export type ComputerIcon = string
+
+export type ComputerPauseReason =
+  | "input"
+  | "button"
+  | "locked"
+  | "suspend"
+  | "away"
+  | "helper"
+  | "detection"
+  | "secure_input"
+  | "secure_desktop"
+  | "overlay"
+  | "pointer"
+
+export type ComputerAskKind = "app" | "sensitive" | "handoff" | "pointer" | "check_in"
+
+export type ComputerState2 = {
+  phase: ComputerPhase
+  backend: "local-macos" | "local-windows" | "remote"
+  mode: ComputerMode
+  holder?: {
+    sessionID: string
+    directory: string
+    title: string
+    startedAt: number
+    actions: number
+  }
+  apps: Array<{
+    key: ComputerAppKey
+    name: string
+    icon?: ComputerIcon
+  }>
+  step?: string
+  pause?: ComputerPauseReason
+  secureInputHolder?: string
+  ask?: {
+    requestID: string
+    directory: string
+    kind: ComputerAskKind
+    title: string
+    detail?: string
+    canAlways: boolean
+    icon?: ComputerIcon
+    shownAt: number
+  }
+  queue: Array<{
+    sessionID: string
+    title: string
+  }>
+  escStops: boolean
+  stopChord: string
+  lease: number
+  reduceMotion: boolean
 }
 
 export type EventServerInstanceDisposed = {
@@ -8939,6 +9073,7 @@ export type QuestionAsked = {
      */
     questions: Array<QuestionInfo>
     tool?: QuestionTool
+    metadata?: ComputerHandoffQuestionMetadata | ComputerCheckInQuestionMetadata
   }
 }
 
@@ -10148,6 +10283,7 @@ export type EventQuestionAsked = {
      */
     questions: Array<QuestionInfo>
     tool?: QuestionTool
+    metadata?: ComputerHandoffQuestionMetadata | ComputerCheckInQuestionMetadata
   }
 }
 
@@ -10167,6 +10303,15 @@ export type EventQuestionRejected = {
   properties: {
     sessionID: string
     requestID: string
+  }
+}
+
+export type EventComputerState = {
+  id: string
+  type: "computer.state"
+  properties: {
+    sessionID: string
+    state: ComputerState2
   }
 }
 

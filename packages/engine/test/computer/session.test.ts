@@ -11,6 +11,7 @@ import { MessageID, SessionID } from "@/session/schema"
 import { testEffect } from "../lib/effect"
 
 const it = testEffect(LayerNode.compile(EventV2.node))
+class PublishOrigin extends Context.Service<PublishOrigin, string>()("test/ComputerPublishOrigin") {}
 const input: ComputerSession.Input = {
   rootSessionID: SessionID.make("ses_computer_root"),
   sessionID: SessionID.make("ses_computer_root"),
@@ -26,19 +27,36 @@ const frame = (id: string): Computer.Frame => ({
   at: 1,
   hash: "0123456789abcdef",
 })
+const desktopState = (lease: number, phase: Computer.ComputerPhase = "working"): Computer.ComputerState => ({
+  phase,
+  backend: "local-macos",
+  mode: "foreground",
+  holder: { sessionID: input.rootSessionID, directory: input.directory, title: "Task", startedAt: 0, actions: 0 },
+  apps: [],
+  queue: [],
+  escStops: phase === "working",
+  stopChord: "Control+Option+Escape",
+  lease,
+  reduceMotion: false,
+})
 
 function fixture<A, E, R>(
   body: (service: ComputerSession.Interface, calls: Computer.BridgeRequest[]) => Effect.Effect<A, E, R>,
+  heartbeat?: (lease: number) => Effect.Effect<Computer.ComputerState, ComputerTransport.ComputerError>,
 ) {
   return Effect.scoped(
     Effect.gen(function* () {
       const calls: Computer.BridgeRequest[] = []
       const transport = ComputerTransport.Service.of({
         request: <Q extends Computer.BridgeRequest>(request: Q) =>
-          Effect.sync(() => {
+          Effect.gen(function* () {
+            calls.push(request)
+            if (request.command === "heartbeat") {
+              const state = heartbeat ? yield* heartbeat(request.lease) : desktopState(request.lease)
+              return { state } as ComputerTransport.Response<Q["command"]>
+            }
             if (request.command !== "cancel" && request.command !== "release")
               throw new Error("Unexpected session cleanup command")
-            calls.push(request)
             return { ok: true } as ComputerTransport.Response<Q["command"]>
           }),
       })
@@ -429,6 +447,253 @@ it.effect("frame invalidation clears screen observations without waiting for FIF
         }),
       )
       yield* sessions.release(input.rootSessionID)
+    }),
+  ),
+)
+
+it.effect("one task heartbeat survives individual calls and keeps its originating publish context", () =>
+  fixture((sessions, calls) =>
+    Effect.gen(function* () {
+      const published: { origin: string; phase: Computer.ComputerPhase }[] = []
+      const publish = (desktop: Computer.ComputerState) =>
+        Effect.gen(function* () {
+          published.push({ origin: yield* PublishOrigin, phase: desktop.phase })
+        })
+      const state = yield* sessions.serialized(input, (state) =>
+        Effect.gen(function* () {
+          state.lease = 41
+          yield* sessions.start(state, publish).pipe(Effect.provideService(PublishOrigin, "first workspace"))
+          return state
+        }),
+      )
+      yield* sessions.serialized(input, (state) =>
+        sessions.start(state, publish).pipe(Effect.provideService(PublishOrigin, "later caller")),
+      )
+      yield* TestClock.adjust(1999)
+      expect(calls).toHaveLength(0)
+      yield* TestClock.adjust(1)
+      expect(calls.map((call) => call.command)).toEqual(["heartbeat"])
+      yield* TestClock.adjust(2000)
+      expect(published).toEqual([
+        { origin: "first workspace", phase: "working" },
+        { origin: "first workspace", phase: "working" },
+      ])
+      expect(yield* ComputerSession.elapsed(state)).toBe(4000)
+      yield* sessions.release(input.rootSessionID)
+      yield* TestClock.adjust(4000)
+      expect(calls.map((call) => call.command)).toEqual(["heartbeat", "heartbeat", "cancel", "release"])
+    }),
+  ),
+)
+
+it.effect("act and heartbeat state reports share the one-second publication throttle", () =>
+  fixture((sessions) =>
+    Effect.gen(function* () {
+      const published: Computer.ComputerState[] = []
+      const state = yield* sessions.serialized(input, (state) =>
+        Effect.gen(function* () {
+          state.lease = 43
+          yield* sessions.start(state, (desktop) => Effect.sync(() => void published.push(desktop)))
+          return state
+        }),
+      )
+      yield* sessions.report(state, desktopState(43))
+      yield* sessions.report(state, desktopState(43, "asking"))
+      yield* TestClock.adjust(999)
+      yield* sessions.report(state, desktopState(43, "paused"))
+      expect(published.map((desktop) => desktop.phase)).toEqual(["working"])
+      yield* TestClock.adjust(1)
+      yield* sessions.report(state, desktopState(43, "paused"))
+      expect(published.map((desktop) => desktop.phase)).toEqual(["working", "paused"])
+      yield* TestClock.adjust(1000)
+      expect(published.map((desktop) => desktop.phase)).toEqual(["working", "paused", "working"])
+      yield* sessions.release(input.rootSessionID)
+    }),
+  ),
+)
+
+it.effect("active time includes thinking between calls and excludes nested waits and desktop pauses", () => {
+  const desktop = { phase: "working" as Computer.ComputerPhase }
+  return fixture(
+    (sessions) =>
+      Effect.gen(function* () {
+        const state = yield* sessions.serialized(input, (state) =>
+          Effect.gen(function* () {
+            state.lease = 45
+            yield* sessions.start(state, () => Effect.void)
+            return state
+          }),
+        )
+        yield* TestClock.adjust(1000)
+        expect(yield* ComputerSession.elapsed(state)).toBe(1000)
+        yield* ComputerSession.waiting(
+          state,
+          Effect.gen(function* () {
+            yield* TestClock.adjust(2000)
+            yield* ComputerSession.waiting(state, TestClock.adjust(3000))
+            yield* TestClock.adjust(1000)
+          }),
+        )
+        expect(yield* ComputerSession.elapsed(state)).toBe(1000)
+        yield* TestClock.adjust(1000)
+        expect(yield* ComputerSession.elapsed(state)).toBe(2000)
+        desktop.phase = "paused"
+        yield* sessions.report(state, desktopState(45, "paused"))
+        yield* TestClock.adjust(5000)
+        expect(yield* ComputerSession.elapsed(state)).toBe(2000)
+        desktop.phase = "working"
+        yield* ComputerSession.resume(state)
+        yield* TestClock.adjust(1000)
+        expect(yield* ComputerSession.elapsed(state)).toBe(3000)
+        yield* sessions.release(input.rootSessionID)
+      }),
+    (lease) => Effect.succeed(desktopState(lease, desktop.phase)),
+  )
+})
+
+it.effect("answering an ask cannot clear a take-over pause reported while it was waiting", () => {
+  const desktop = { phase: "working" as Computer.ComputerPhase }
+  return fixture(
+    (sessions) =>
+      Effect.gen(function* () {
+        const state = yield* sessions.serialized(input, (state) =>
+          Effect.gen(function* () {
+            state.lease = 47
+            yield* sessions.start(state, () => Effect.void)
+            return state
+          }),
+        )
+        yield* TestClock.adjust(500)
+        yield* ComputerSession.waiting(
+          state,
+          Effect.gen(function* () {
+            desktop.phase = "paused"
+            yield* sessions.report(state, desktopState(47, "paused"))
+            yield* TestClock.adjust(2500)
+          }),
+        )
+        expect(state.desktopWaiting).toBe(true)
+        yield* TestClock.adjust(3000)
+        expect(yield* ComputerSession.elapsed(state)).toBe(500)
+        desktop.phase = "working"
+        yield* ComputerSession.resume(state)
+        yield* TestClock.adjust(1000)
+        expect(yield* ComputerSession.elapsed(state)).toBe(1500)
+        yield* sessions.release(input.rootSessionID)
+      }),
+    (lease) => Effect.succeed(desktopState(lease, desktop.phase)),
+  )
+})
+
+it.effect("answering a pending desktop ask counts the resumed action time", () =>
+  fixture((sessions) =>
+    Effect.gen(function* () {
+      const state = yield* sessions.serialized(input, (state) =>
+        Effect.gen(function* () {
+          state.lease = 48
+          yield* sessions.start(state, () => Effect.void)
+          return state
+        }),
+      )
+      yield* TestClock.adjust(100)
+      yield* sessions.report(state, desktopState(48, "asking"))
+      yield* ComputerSession.waiting(state, TestClock.adjust(500))
+      expect(state.desktopWaiting).toBe(false)
+      yield* TestClock.adjust(400)
+      expect(yield* ComputerSession.elapsed(state)).toBe(500)
+      yield* sessions.release(input.rootSessionID)
+    }),
+  ),
+)
+
+it.effect("Stop from inside the FIFO aborts the task without waiting for its own worker", () =>
+  fixture((sessions, calls) =>
+    Effect.gen(function* () {
+      const result = yield* sessions
+        .serialized(input, (state) =>
+          Effect.gen(function* () {
+            state.lease = 49
+            yield* sessions.start(state, () => Effect.void)
+            yield* sessions.stop(state)
+            return "must not finish successfully"
+          }),
+        )
+        .pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      expect(calls.map((call) => call.command)).toEqual(["cancel", "release"])
+    }),
+  ),
+)
+
+it.effect("a heartbeat failure stops the task and releases its known lease", () =>
+  fixture(
+    (sessions, calls) =>
+      Effect.gen(function* () {
+        const state = yield* sessions.serialized(input, (state) =>
+          Effect.gen(function* () {
+            state.lease = 51
+            yield* sessions.start(state, () => Effect.void)
+            return state
+          }),
+        )
+        yield* TestClock.adjust(2000)
+        yield* sessions.release(input.rootSessionID)
+        expect(state.signal.aborted).toBe(true)
+        expect(state.lease).toBeUndefined()
+        expect(calls.map((call) => call.command)).toEqual(["heartbeat", "cancel", "release"])
+      }),
+    () => Effect.fail(new ComputerTransport.ComputerError({ code: "unavailable", message: "Disconnected" })),
+  ),
+)
+
+for (const mismatch of ["lease", "holder"] as const) {
+  it.effect(`a mismatched ${mismatch} state stops the task before it can be published`, () =>
+    fixture((sessions) =>
+      Effect.gen(function* () {
+        const published: Computer.ComputerState[] = []
+        const state = yield* sessions.serialized(input, (state) =>
+          Effect.gen(function* () {
+            state.lease = 53
+            yield* sessions.start(state, (desktop) => Effect.sync(() => void published.push(desktop)))
+            return state
+          }),
+        )
+        const desktop = desktopState(mismatch === "lease" ? 54 : 53)
+        const result = yield* sessions
+          .report(
+            state,
+            mismatch === "holder"
+              ? { ...desktop, holder: { ...desktop.holder!, sessionID: "ses_other_holder" } }
+              : desktop,
+          )
+          .pipe(Effect.result)
+        expect(Result.isFailure(result)).toBe(true)
+        expect(published).toHaveLength(0)
+        yield* sessions.release(input.rootSessionID)
+        expect(state.signal.aborted).toBe(true)
+      }),
+    ),
+  )
+}
+
+it.effect("late reports and Resume cannot publish or restart an aborted generation", () =>
+  fixture((sessions) =>
+    Effect.gen(function* () {
+      const published: Computer.ComputerState[] = []
+      const state = yield* sessions.serialized(input, (state) =>
+        Effect.gen(function* () {
+          state.lease = 55
+          yield* sessions.start(state, (desktop) => Effect.sync(() => void published.push(desktop)))
+          return state
+        }),
+      )
+      yield* sessions.release(input.rootSessionID)
+      const result = yield* sessions.report(state, desktopState(55)).pipe(Effect.result)
+      yield* ComputerSession.resume(state)
+      expect(Result.isFailure(result)).toBe(true)
+      expect(published).toHaveLength(0)
+      expect(state.desktopWaiting).toBe(true)
+      expect(state.activeSince).toBeUndefined()
     }),
   ),
 )

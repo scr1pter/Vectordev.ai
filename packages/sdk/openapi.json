@@ -25615,6 +25615,9 @@
             "$ref": "#/components/schemas/EventQuestionRejected"
           },
           {
+            "$ref": "#/components/schemas/EventComputerState"
+          },
+          {
             "$ref": "#/components/schemas/EventSessionCompacted"
           },
           {
@@ -30909,6 +30912,16 @@
                       },
                       "tool": {
                         "$ref": "#/components/schemas/QuestionTool"
+                      },
+                      "metadata": {
+                        "anyOf": [
+                          {
+                            "$ref": "#/components/schemas/ComputerHandoffQuestionMetadata"
+                          },
+                          {
+                            "$ref": "#/components/schemas/ComputerCheckInQuestionMetadata"
+                          }
+                        ]
                       }
                     },
                     "required": ["id", "sessionID", "questions"],
@@ -30978,6 +30991,35 @@
                       }
                     },
                     "required": ["sessionID", "requestID"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["id", "type", "properties"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["computer.state"]
+                  },
+                  "properties": {
+                    "type": "object",
+                    "properties": {
+                      "sessionID": {
+                        "type": "string",
+                        "pattern": "^ses"
+                      },
+                      "state": {
+                        "$ref": "#/components/schemas/ComputerState"
+                      }
+                    },
+                    "required": ["sessionID", "state"],
                     "additionalProperties": false
                   }
                 },
@@ -38740,6 +38782,16 @@
           },
           "tool": {
             "$ref": "#/components/schemas/QuestionTool"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ComputerHandoffQuestionMetadata"
+              },
+              {
+                "$ref": "#/components/schemas/ComputerCheckInQuestionMetadata"
+              }
+            ]
           }
         },
         "required": ["id", "sessionID", "questions"],
@@ -41731,6 +41783,57 @@
         "required": ["id", "type", "data"],
         "additionalProperties": false
       },
+      "computer.state": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["computer.state"]
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateID": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": ["aggregateID", "seq", "version"],
+            "additionalProperties": false
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRef"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "state": {
+                "$ref": "#/components/schemas/ComputerState"
+              }
+            },
+            "required": ["sessionID", "state"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "data"],
+        "additionalProperties": false
+      },
       "V2Event": {
         "anyOf": [
           {
@@ -41990,6 +42093,9 @@
           },
           {
             "$ref": "#/components/schemas/question.rejected"
+          },
+          {
+            "$ref": "#/components/schemas/computer.state"
           },
           {
             "$ref": "#/components/schemas/SessionCompacted"
@@ -43341,6 +43447,262 @@
           }
         },
         "required": ["created", "updated"],
+        "additionalProperties": false
+      },
+      "ComputerHandoffReason": {
+        "type": "string",
+        "enum": [
+          "credential",
+          "sign_in",
+          "captcha",
+          "payment_details",
+          "admin_prompt",
+          "security_prompt",
+          "capture_confirm",
+          "elevated",
+          "site_permission",
+          "download",
+          "extension",
+          "protocol_handler",
+          "macros",
+          "other"
+        ]
+      },
+      "ComputerHandoffQuestionMetadata": {
+        "type": "object",
+        "properties": {
+          "computer": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["handoff"]
+              },
+              "app": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "reason": {
+                "$ref": "#/components/schemas/ComputerHandoffReason"
+              }
+            },
+            "required": ["kind", "reason"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["computer"],
+        "additionalProperties": false
+      },
+      "ComputerCheckInQuestionMetadata": {
+        "type": "object",
+        "properties": {
+          "computer": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["check_in"]
+              },
+              "actions": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "minutes": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": ["kind", "actions", "minutes"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["computer"],
+        "additionalProperties": false
+      },
+      "ComputerPhase": {
+        "type": "string",
+        "enum": ["off", "setup", "ready", "working", "asking", "handoff", "paused", "waiting", "done", "stopped"]
+      },
+      "ComputerMode": {
+        "type": "string",
+        "enum": ["foreground", "background"]
+      },
+      "ComputerAppKey": {
+        "type": "string"
+      },
+      "ComputerIcon": {
+        "type": "string",
+        "pattern": "^data:image\\/png;base64,[A-Za-z0-9+/]*={0,2}$",
+        "maxLength": 10946
+      },
+      "ComputerPauseReason": {
+        "type": "string",
+        "enum": [
+          "input",
+          "button",
+          "locked",
+          "suspend",
+          "away",
+          "helper",
+          "detection",
+          "secure_input",
+          "secure_desktop",
+          "overlay",
+          "pointer"
+        ]
+      },
+      "ComputerAskKind": {
+        "type": "string",
+        "enum": ["app", "sensitive", "handoff", "pointer", "check_in"]
+      },
+      "ComputerState": {
+        "type": "object",
+        "properties": {
+          "phase": {
+            "$ref": "#/components/schemas/ComputerPhase"
+          },
+          "backend": {
+            "type": "string",
+            "enum": ["local-macos", "local-windows", "remote"]
+          },
+          "mode": {
+            "$ref": "#/components/schemas/ComputerMode"
+          },
+          "holder": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "directory": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "title": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "startedAt": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "actions": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": ["sessionID", "directory", "title", "startedAt", "actions"],
+            "additionalProperties": false
+          },
+          "apps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "$ref": "#/components/schemas/ComputerAppKey"
+                },
+                "name": {
+                  "type": "string",
+                  "maxLength": 256
+                },
+                "icon": {
+                  "$ref": "#/components/schemas/ComputerIcon"
+                }
+              },
+              "required": ["key", "name"],
+              "additionalProperties": false
+            }
+          },
+          "step": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "pause": {
+            "$ref": "#/components/schemas/ComputerPauseReason"
+          },
+          "secureInputHolder": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "ask": {
+            "type": "object",
+            "properties": {
+              "requestID": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "directory": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "kind": {
+                "$ref": "#/components/schemas/ComputerAskKind"
+              },
+              "title": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "detail": {
+                "type": "string",
+                "maxLength": 1000
+              },
+              "canAlways": {
+                "type": "boolean"
+              },
+              "icon": {
+                "$ref": "#/components/schemas/ComputerIcon"
+              },
+              "shownAt": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": ["requestID", "directory", "kind", "title", "canAlways", "shownAt"],
+            "additionalProperties": false
+          },
+          "queue": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sessionID": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "title": {
+                  "type": "string",
+                  "maxLength": 256
+                }
+              },
+              "required": ["sessionID", "title"],
+              "additionalProperties": false
+            }
+          },
+          "escStops": {
+            "type": "boolean"
+          },
+          "stopChord": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "lease": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reduceMotion": {
+            "type": "boolean"
+          }
+        },
+        "required": ["phase", "backend", "mode", "apps", "queue", "escStops", "stopChord", "lease", "reduceMotion"],
         "additionalProperties": false
       },
       "EventServerInstanceDisposed": {
@@ -52777,6 +53139,16 @@
               },
               "tool": {
                 "$ref": "#/components/schemas/QuestionTool"
+              },
+              "metadata": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ComputerHandoffQuestionMetadata"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ComputerCheckInQuestionMetadata"
+                  }
+                ]
               }
             },
             "required": ["id", "sessionID", "questions"],
@@ -56507,6 +56879,16 @@
               },
               "tool": {
                 "$ref": "#/components/schemas/QuestionTool"
+              },
+              "metadata": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ComputerHandoffQuestionMetadata"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ComputerCheckInQuestionMetadata"
+                  }
+                ]
               }
             },
             "required": ["id", "sessionID", "questions"],
@@ -56576,6 +56958,35 @@
               }
             },
             "required": ["sessionID", "requestID"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "properties"],
+        "additionalProperties": false
+      },
+      "EventComputerState": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["computer.state"]
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "state": {
+                "$ref": "#/components/schemas/ComputerState"
+              }
+            },
+            "required": ["sessionID", "state"],
             "additionalProperties": false
           }
         },
