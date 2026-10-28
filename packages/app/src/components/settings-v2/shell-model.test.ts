@@ -14,6 +14,18 @@ describe("Terminal shell options", () => {
     ])
   })
 
+  test("a server answer that is not a list leaves Auto and the saved shell, and never throws", () => {
+    // An older or mock server can answer the shell list with an object; Settings must still open (main CI, 27 Oct).
+    const odd = { shells: {} as unknown as readonly ShellOption[], current: "zsh", ...labels }
+    expect(() => shellSelectOptions(odd)).not.toThrow()
+    expect(shellSelectOptions(odd).map((option) => option.value)).toEqual(["", "zsh"])
+    const broken = [zsh, { name: "nu" } as unknown as ShellOption, null as unknown as ShellOption]
+    expect(shellSelectOptions({ shells: broken, current: "", ...labels }).map((option) => option.id)).toEqual([
+      "auto",
+      "/bin/zsh",
+    ])
+  })
+
   test("names each shell, keyed by its path", () => {
     expect(shellSelectOptions({ shells: [zsh, bash], current: "", ...labels }).slice(1)).toEqual([
       { id: "/bin/zsh", value: "zsh", label: "zsh" },

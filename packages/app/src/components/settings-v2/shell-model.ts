@@ -23,12 +23,17 @@ export function shellSelectOptions(input: {
   auto: string
   terminalOnly: string
 }): ShellSelectOption[] {
+  // A server that answers something other than a list (an older or a mock one) leaves just Auto and the saved shell,
+  // rather than taking Settings down with it.
+  const shells = Array.isArray(input.shells)
+    ? input.shells.filter((shell) => typeof shell?.path === "string" && typeof shell?.name === "string")
+    : []
   const nameCounts = new Map<string, number>()
-  for (const shell of input.shells) nameCounts.set(shell.name, (nameCounts.get(shell.name) ?? 0) + 1)
+  for (const shell of shells) nameCounts.set(shell.name, (nameCounts.get(shell.name) ?? 0) + 1)
 
   const options: ShellSelectOption[] = [
     { id: "auto", value: "", label: input.auto },
-    ...input.shells.map((shell) => {
+    ...shells.map((shell) => {
       const ambiguousName = (nameCounts.get(shell.name) ?? 0) > 1
       const text = ambiguousName ? shell.path : shell.name
       return {

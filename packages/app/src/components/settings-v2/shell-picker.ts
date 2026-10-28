@@ -19,7 +19,7 @@ export function useShellPicker() {
     () =>
       serverSdk()
         .client.pty.shells()
-        .then((res) => res.data ?? [])
+        .then((res) => (Array.isArray(res.data) ? res.data : []))
         .catch(() => [] as ShellOption[]),
     { initialValue: [] as ShellOption[] },
   )
