@@ -334,7 +334,6 @@ jobs:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright-browsers
       VECTOR_PERFORMANCE: "1"
       VECTOR_PERFORMANCE_RUN_ID: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-      VECTOR_PERFORMANCE_TRACE_DIR: ${{ runner.temp }}/vector-production-benchmark
     defaults:
       run:
         shell: bash
@@ -379,6 +378,8 @@ jobs:
 
       - name: Record production navigation metrics and raw traces
         working-directory: packages/app
+        env:
+          VECTOR_PERFORMANCE_TRACE_DIR: ${{ runner.temp }}/vector-production-benchmark
         run: |
           set -euo pipefail
           mkdir -p "$VECTOR_PERFORMANCE_TRACE_DIR"
