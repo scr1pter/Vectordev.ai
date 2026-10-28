@@ -1,5 +1,7 @@
 export { Agent } from "./agent"
 export { Command } from "./command"
+export { Computer } from "./computer"
+export { ComputerApps } from "./computer-apps"
 export { Connection } from "./connection"
 export { Credential } from "./credential"
 export { Event } from "./event"
