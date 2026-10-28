@@ -577,9 +577,11 @@ export function CodiumQuestions(props: { models: CodiumPricingView["models"] }) 
             ))}
           </ul>
           <p>
-            Codium requests, including the code and tool output a task sends, go through Vector to a provider serving
-            the model you picked. Vector routes them only to zero-data-retention endpoints that don't collect data for
-            training. Review the <a href="/legal/privacy#codium">privacy policy</a> before sending code.
+            Codium requests, including the code and tool output a task sends, go through Vector and OpenRouter to a
+            provider serving the model you picked. Vector routes them only to zero-data-retention endpoints that
+            OpenRouter lists as not storing or collecting request data. OpenRouter still screens requests for child
+            sexual abuse material and keeps request metadata, and some providers hold a short-lived prompt cache. Review
+            the <a href="/legal/privacy#codium">privacy policy</a> before sending code.
           </p>
         </React.Fragment>
       ),

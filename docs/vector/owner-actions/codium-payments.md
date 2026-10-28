@@ -93,6 +93,13 @@ Do all of this in **test mode** first, for the preview test run in [section 4](#
    - Example: at the busiest point customers hold $400 of credits and buy $60 of credits in 90 minutes. With L for the credits your largest purchase grants, set the threshold to at least ($400 + $60 + L) × 1.1 + $20, which is $526 + 1.1 × L.
 5. **Fee.** OpenRouter charges a fee on every credit purchase, auto top-ups included (5.5% by card when this was written). Set `CODIUM_OPENROUTER_FEE_PERCENT` to the fee its credits page shows, so the ledger's estimate stays right.
 6. **Resale terms.** OpenRouter's [terms, section 7](https://openrouter.ai/terms) restrict reselling API access. Confirm Codium is covered by suitable commercial terms before selling.
+7. **Privacy settings** (before the first sale, on this account only). The labels come from OpenRouter's documentation; match them to what the pages show.
+   - Settings → Observability: **Private Input & Output Logging — OFF.** If it is on, OpenRouter stores every Codium prompt and reply, and the privacy policy's zero-data-retention description stops being true.
+   - [Settings → Privacy](https://openrouter.ai/settings/privacy): **OpenRouter Use of Inputs/Outputs (the 1% discount) — OFF.**
+   - Same page: **paid models, allow providers that may train — OFF**, and **providers that may publish prompts — OFF.**
+   - Same page: **ZDR — ON for every model group** (Anthropic, OpenAI, Google, SpaceXAI and all other models). Codium already sends `zdr: true` on every request, so this is a second guard. Never turn this on for the free-models account (see [openrouter.md](openrouter.md), step 4).
+   - No BYOK provider keys, and no default or enforced plugins on this account.
+   - Once these are set, confirm it, so the privacy policy can say Vector keeps logging and input/output use off.
 
 ## 3. Vercel environment
 
