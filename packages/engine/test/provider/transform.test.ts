@@ -5194,3 +5194,89 @@ describe("ProviderTransform.schema - restated bounds", () => {
     expect(result.properties.tags.items.description).toBe("(maxLength: 8)")
   })
 })
+
+describe("ProviderTransform.message - boundary", () => {
+  const anthropic = {
+    providerID: "anthropic",
+    id: "claude-sonnet-4-5",
+    api: { id: "claude-sonnet-4-5", url: "https://api.anthropic.com", npm: "@ai-sdk/anthropic" },
+    capabilities: { input: { text: true, image: true, audio: false, video: false, pdf: true } },
+    options: {},
+    headers: {},
+  } as any
+  const marked = (message: any) => message.providerOptions?.anthropic?.cacheControl !== undefined
+  // A fork's request: two system blocks, the inherited history (its last message is index 4), then its own turn.
+  const request = () =>
+    [
+      { role: "system", content: "Stable block" },
+      { role: "system", content: "Session block" },
+      { role: "user", content: [{ type: "text", text: "Fix the build." }] },
+      {
+        role: "assistant",
+        content: [{ type: "tool-call", toolCallId: "call_1", toolName: "task", input: { fork: true } }],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call_1",
+            toolName: "task",
+            output: { type: "text", value: "Subagent started." },
+          },
+        ],
+      },
+      { role: "user", content: [{ type: "text", text: "<fork_assignment>Look at the tests.</fork_assignment>" }] },
+      { role: "assistant", content: [{ type: "text", text: "Reading them." }] },
+      { role: "user", content: [{ type: "text", text: "Continue." }] },
+    ] as ModelMessage[]
+
+  test("the non-final breakpoint goes on the last inherited message, four at most", () => {
+    const result = ProviderTransform.message(request(), anthropic, {}, true, 4) as any[]
+    expect(result.map(marked)).toEqual([true, true, false, false, true, false, false, true])
+  })
+
+  test("without a boundary the last two messages keep their breakpoints, as before", () => {
+    const result = ProviderTransform.message(request(), anthropic, {}) as any[]
+    expect(result.map(marked)).toEqual([true, true, false, false, false, false, true, true])
+  })
+
+  test("a boundary on the last message, a system message or past the end changes nothing it should not", () => {
+    expect((ProviderTransform.message(request(), anthropic, {}, true, 7) as any[]).map(marked)).toEqual([
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+    ])
+    for (const boundary of [0, 99])
+      expect((ProviderTransform.message(request(), anthropic, {}, true, boundary) as any[]).map(marked)).toEqual([
+        true,
+        true,
+        false,
+        false,
+        false,
+        false,
+        true,
+        true,
+      ])
+  })
+
+  test("the boundary follows its message when an empty message before it is dropped", () => {
+    const msgs = request()
+    msgs.splice(3, 0, { role: "assistant", content: "" })
+    const result = ProviderTransform.message(msgs, anthropic, {}, true, 5) as any[]
+    expect(result).toHaveLength(8)
+    expect(result.map(marked)).toEqual([true, true, false, false, true, false, false, true])
+    // The mark that carried it through is not left on the message.
+    expect(Object.getOwnPropertySymbols(result[4])).toEqual([])
+  })
+
+  test("no breakpoints without caching, boundary or not", () => {
+    const result = ProviderTransform.message(request(), anthropic, {}, false, 4) as any[]
+    expect(result.some(marked)).toBe(false)
+  })
+})

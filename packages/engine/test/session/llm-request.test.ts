@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { createOpenAI } from "@ai-sdk/openai"
-import { jsonSchema, streamText, tool } from "ai"
+import { jsonSchema, streamText, tool, type ModelMessage } from "ai"
+import { convertToLanguageModelPrompt, standardizePrompt } from "ai/internal"
 import { Effect } from "effect"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
@@ -296,5 +297,93 @@ describe("a learned default effort", () => {
       effort: "default",
     })
     expect(picked.params.options.thinking).toEqual({ type: "enabled", budgetTokens: 64_000 })
+  })
+})
+
+// A fork's first request of a run names its root's prompt cache key (5.E.3). Only that key changes: the headers still
+// carry the fork's own session IDs.
+describe("a fork's cache key", () => {
+  const openrouter = model("anthropic/claude-sonnet-4.5", "@openrouter/ai-sdk-provider", "openrouter")
+  const strip = (prepared: LLMRequestPrep.Prepared) => ({ ...prepared, tools: Object.keys(prepared.tools) })
+
+  test.each([
+    [gpt, "promptCacheKey"],
+    [openrouter, "prompt_cache_key"],
+  ] as const)("changes only %s's key", async (target, key) => {
+    const value = { ...input({ model: target, directory: "/work/child" }), parentSessionID: "ses_root" }
+    const own = await prepare(value)
+    const keyed = await prepare({ ...value, cacheKey: "ses_root" })
+    expect(own.params.options[key]).toBe(value.sessionID)
+    expect(keyed.params.options[key]).toBe("ses_root")
+    expect(strip(keyed)).toEqual(
+      strip({
+        ...own,
+        params: { ...own.params, options: { ...own.params.options, [key]: "ses_root" } },
+        messageTransformOptions: { ...own.messageTransformOptions, [key]: "ses_root" },
+      }),
+    )
+    const headers = new Headers(keyed.headers)
+    expect(headers.get("x-session-affinity")).toBe(value.sessionID)
+    expect(headers.get("x-session-id")).toBe(value.sessionID)
+    expect(headers.get("x-parent-session-id")).toBe("ses_root")
+  })
+
+  test("adds no key where the provider takes none", async () => {
+    const value = input({ model: claude, directory: "/work/child" })
+    const own = await prepare(value)
+    const keyed = await prepare({ ...value, cacheKey: "ses_root" })
+    expect(strip(keyed)).toEqual(strip(own))
+    expect(JSON.stringify(keyed.params.options)).not.toContain("ses_root")
+  })
+})
+
+// A fork's cache breakpoint is placed by the index of its last inherited message in the request's messages, which must
+// name the same message in the prompt the AI SDK builds from them.
+describe("LLMRequestPrep.promptIndex", () => {
+  const result = (id: string) => ({
+    role: "tool" as const,
+    content: [
+      { type: "tool-result" as const, toolCallId: id, toolName: "read", output: { type: "text" as const, value: id } },
+    ],
+  })
+  const call = (...ids: string[]) => ({
+    role: "assistant" as const,
+    content: ids.map((id) => ({ type: "tool-call" as const, toolCallId: id, toolName: "read", input: {} })),
+  })
+  const messages: ModelMessage[] = [
+    { role: "system", content: "Stable block" },
+    { role: "system", content: "Session block" },
+    { role: "user", content: "Look around." },
+    call("a", "b"),
+    result("a"),
+    result("b"),
+    { role: "user", content: "<fork_assignment>Fix it.</fork_assignment>" },
+    call("c"),
+    result("c"),
+  ]
+
+  test("names the same message in the prompt the AI SDK builds", async () => {
+    const prompt = await convertToLanguageModelPrompt({
+      prompt: await standardizePrompt({ messages }),
+      supportedUrls: {},
+      download: undefined,
+    })
+    expect(prompt).toHaveLength(8)
+    for (const [index, expected] of [
+      [2, "user"],
+      [3, "assistant"],
+      [4, "tool"],
+      [5, "tool"],
+      [6, "user"],
+      [8, "tool"],
+    ] as const) {
+      const at = LLMRequestPrep.promptIndex(messages, index)
+      expect(prompt[at]?.role).toBe(expected)
+    }
+    // Both tool messages land in one, after the system blocks and the two messages before them.
+    expect(LLMRequestPrep.promptIndex(messages, 4)).toBe(4)
+    expect(LLMRequestPrep.promptIndex(messages, 5)).toBe(4)
+    expect(LLMRequestPrep.promptIndex(messages, 6)).toBe(5)
+    expect(JSON.stringify(prompt[LLMRequestPrep.promptIndex(messages, 5)])).toContain('"toolCallId":"b"')
   })
 })

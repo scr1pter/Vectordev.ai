@@ -338,9 +338,12 @@ function normalizeMessages(
   return msgs
 }
 
-function applyCaching(msgs: ModelMessage[], model: Provider.Model): ModelMessage[] {
+// Breakpoints go on the first two system messages and the last two others. With a `boundary` (a fork's last inherited
+// message) the earlier of those two goes there instead, so the provider's look-back from it finds the parent's entry.
+function applyCaching(msgs: ModelMessage[], model: Provider.Model, boundary?: ModelMessage): ModelMessage[] {
   const system = msgs.filter((msg) => msg.role === "system").slice(0, 2)
-  const final = msgs.filter((msg) => msg.role !== "system").slice(-2)
+  const rest = msgs.filter((msg) => msg.role !== "system")
+  const final = boundary && boundary.role !== "system" ? unique([boundary, rest.at(-1)!]) : rest.slice(-2)
 
   const providerOptions = {
     anthropic: {
@@ -502,11 +505,33 @@ export function withoutThinking(options: Record<string, any>): Record<string, an
   return rest
 }
 
-export function message(msgs: ModelMessage[], model: Provider.Model, options: Record<string, unknown>, cache = true) {
+// Marks the boundary message through the transforms below, which may copy, drop or insert messages. Object spread
+// copies a symbol key, and request bodies never carry one.
+const BOUNDARY = Symbol("vector.cache-boundary")
+type Marked = ModelMessage & { [BOUNDARY]?: true }
+
+/** `boundary` is the index in `msgs` of a fork's last inherited message, which takes the non-final cache breakpoint. */
+export function message(
+  msgs: ModelMessage[],
+  model: Provider.Model,
+  options: Record<string, unknown>,
+  cache = true,
+  boundary?: number,
+) {
+  if (boundary !== undefined && msgs[boundary])
+    msgs = msgs.map((msg, index) => {
+      if (index !== boundary) return msg
+      const copy: Marked = { ...msg }
+      copy[BOUNDARY] = true
+      return copy
+    })
   msgs = unsupportedParts(msgs, model)
   msgs = normalizeMessages(msgs, model, options)
+  const marked =
+    boundary === undefined ? undefined : msgs.find((msg): msg is Marked => (msg as Marked)[BOUNDARY] === true)
+  if (marked) delete marked[BOUNDARY]
   if (cache && usesCacheBreakpoints(model)) {
-    msgs = applyCaching(msgs, model)
+    msgs = applyCaching(msgs, model, marked)
   }
 
   // Remap providerOptions keys from stored providerID to expected SDK key

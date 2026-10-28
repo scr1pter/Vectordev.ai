@@ -70,6 +70,11 @@ export type StreamInput = {
   // false for a request whose prefix is never sent again, such as a compaction summary: cache breakpoints would only
   // make the provider bill its whole input at the cache-write premium.
   cache?: boolean
+  // The prompt cache key to send instead of the session's (promptCacheKey, prompt_cache_key), such as a fork's root's
+  // on its first request. Affinity and session headers keep the session's own IDs.
+  cacheKey?: string
+  // The index in `messages` of a fork's last inherited message, which takes the non-final cache breakpoint.
+  boundary?: number
   // Called with the usage a provider reports as it starts a response, before the step finishes. A step that is
   // stopped or fails mid-stream reports nothing more, so this is what it was billed.
   started?: (usage: UsageInput) => void
@@ -457,6 +462,12 @@ const live: Layer.Layer<
                       input.model,
                       prepared.messageTransformOptions,
                       input.cache !== false,
+                      input.boundary === undefined
+                        ? undefined
+                        : LLMRequestPrep.promptIndex(
+                            prepared.messages,
+                            prepared.messages.length - input.messages.length + input.boundary,
+                          ),
                     )
                   }
                   return args.params

@@ -40,6 +40,8 @@ type PrepareInput = {
   readonly plugin: Plugin.Interface
   readonly flags: RuntimeFlags.Info
   readonly isWorkflow: boolean
+  // Sent as promptCacheKey or prompt_cache_key, where the options carry one, instead of the session ID.
+  readonly cacheKey?: string
 }
 
 export type Prepared = {
@@ -112,6 +114,9 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     mergeOptions(mergeOptions(mergeOptions(base, input.model.options), sized), input.agent.options),
     variant,
   )
+  // A fork's first request of a run names its root's key, so it is routed to the cache that holds the parent's prefix.
+  if (input.cacheKey)
+    for (const key of ["promptCacheKey", "prompt_cache_key"]) if (key in options) options[key] = input.cacheKey
   if (
     input.model.api.npm === "@ai-sdk/azure" &&
     (input.provider.options.useCompletionUrls || input.model.options.useCompletionUrls || options.useCompletionUrls)
@@ -240,6 +245,17 @@ export function resolveTools(input: Pick<PrepareInput, "tools" | "agent" | "perm
     Permission.merge(input.agent.permission, input.permission ?? []),
   )
   return Record.filter(input.tools, (_, k) => input.user.tools?.[k] !== false && !disabled.has(k))
+}
+
+/**
+ * Where the message at `index` of a request's messages lands in the prompt the AI SDK builds from them, which merges
+ * each run of tool messages into one.
+ */
+export function promptIndex(messages: readonly ModelMessage[], index: number): number {
+  let at = -1
+  for (let i = 0; i <= index && i < messages.length; i++)
+    if (messages[i]!.role !== "tool" || messages[i - 1]?.role !== "tool") at++
+  return at
 }
 
 export function hasToolCalls(messages: ModelMessage[]): boolean {

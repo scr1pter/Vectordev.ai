@@ -32,6 +32,7 @@ import { Database } from "@vectordevai/core/database/database"
 import { Usage, type LLMEvent } from "@vectordevai/llm"
 import { EffectBridge } from "@/effect/bridge"
 import { NativePatch } from "./llm/native-patch"
+import { SessionFork } from "./fork"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { NEXT_STEP_SLACK } from "@vectordevai/core/review/plan"
 import { providerCredentialAllowed, providerUsable } from "@vectordevai/core/provider-policy"
@@ -133,6 +134,7 @@ const layer = Layer.effect(
     const guard = yield* SpendGuard.Service
     const provider = yield* Provider.Service
     const slots = yield* ModelSlots.Service
+    const forks = yield* SessionFork.Service
     // The user message each root session last answered, so its first step for a new prompt drops waiting helpers.
     const prompts = new Map<SessionID, string>()
 
@@ -701,6 +703,8 @@ const layer = Layer.effect(
               }),
             )
             yield* Effect.forEach(Object.keys(ctx.reasoningMap), finishReasoning)
+            // A fork this step launched starts now that its reasoning metadata is final (5.E.3).
+            yield* forks.stepFinished(ctx.assistantMessage.id, value.reason)
             // The step is over once the provider's terminal event is recorded, so the loop moves on now. The closing
             // snapshot and the step's patch run in the session's snapshot queue, ahead of the next step's tools.
             const start = ctx.snapshot
@@ -901,9 +905,12 @@ const layer = Layer.effect(
         ctx.toolcalls = {}
         ctx.assistantMessage.time.completed = Date.now()
         yield* session.updateMessage(ctx.assistantMessage)
+        // A step that ended without its step-finish stops the forks it launched; after a step-finish this does nothing.
+        yield* forks.stepFinished(ctx.assistantMessage.id, "abort")
       })
 
       const halt = Effect.fn("SessionProcessor.halt")(function* (e: unknown) {
+        yield* forks.stepFinished(ctx.assistantMessage.id, aborted ? "abort" : "error")
         yield* Effect.logError("process", {
           "session.id": input.sessionID,
           messageID: input.assistantMessage.id,
@@ -1061,6 +1068,7 @@ const layer = Layer.effect(
             Effect.onInterrupt(() =>
               Effect.gen(function* () {
                 aborted = true
+                yield* forks.stepFinished(ctx.assistantMessage.id, "abort")
                 if (!ctx.assistantMessage.error) {
                   yield* halt(new DOMException("Aborted", "AbortError"))
                 }
@@ -1176,6 +1184,7 @@ export const node = LayerNode.make({
     SpendGuard.node,
     Provider.node,
     ModelSlots.node,
+    SessionFork.node,
   ],
 })
 
