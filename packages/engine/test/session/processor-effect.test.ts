@@ -108,9 +108,10 @@ function defer<T>() {
   return { promise, resolve }
 }
 
+// Returns as soon as the check passes; the deadline only bounds a failure, so it is generous for slow CI runners.
 const waitFor = <A>(check: Effect.Effect<A | undefined>, message: string) =>
   Effect.gen(function* () {
-    const stop = Date.now() + 500
+    const stop = Date.now() + 5000
     while (Date.now() < stop) {
       const value = yield* check
       if (value !== undefined) return value
