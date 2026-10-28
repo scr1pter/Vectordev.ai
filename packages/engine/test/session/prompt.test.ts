@@ -1314,16 +1314,19 @@ it.instance(
 )
 
 it.instance(
-  "loop tells the model to do the work itself and delegate only what is cheaper split up",
+  "loop tells the model when a child does it better, and to do small or coupled work itself",
   () =>
     Effect.gen(function* () {
       const body = yield* firstRequestBody({})
-      expect(body).toContain("Do the work yourself by default, multi-file changes included")
-      expect(body).toContain("Launch a general Subagent (omit subagent_type) only when that costs less")
-      expect(body).toContain("small fixes, single-file changes and lookups you do yourself")
+      // 5.A.3: delegation is the model's call, for independent substantial parts, broad searches and new work.
+      expect(body).toContain("Delegate when a child does it better than you would, not by default")
+      expect(body).toContain("Do it yourself when it is small, a single file or a known lookup")
+      expect(body).toContain("Put every independent brief you already know about in one task call, in the background")
+      expect(body).toContain("To correct a running child, use task_manage message")
       expect(body).toContain("Delegated batches run in the background by default")
-      expect(body).toContain("Use task_manage")
+      expect(body).toContain("Omit subagent_type for general")
       expect(body).toContain("never poll")
+      expect(body).not.toContain("Do the work yourself by default")
       expect(body).not.toContain("MUST launch general Subagents")
       expect(body).not.toContain("General Subagents are turned off")
       expect(body).not.toContain("You are a Subagent working on a brief")

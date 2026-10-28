@@ -467,6 +467,11 @@ export function usesCacheBreakpoints(model: Provider.Model) {
   )
 }
 
+/** Whether the provider caches the prompt prefix, so a smaller tool set on the next request would write it again. */
+export function caches(model: Provider.Model) {
+  return usesCacheBreakpoints(model) || (model.cost?.cache?.read ?? 0) > 0
+}
+
 export function message(msgs: ModelMessage[], model: Provider.Model, options: Record<string, unknown>, cache = true) {
   msgs = unsupportedParts(msgs, model)
   msgs = normalizeMessages(msgs, model, options)

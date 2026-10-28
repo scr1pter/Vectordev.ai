@@ -178,7 +178,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     })
 
     const capabilities = Effect.fn("ExperimentalHttpApi.capabilities")(function* () {
-      return { backgroundSubagents: flags.backgroundSubagents, subagentLimits: true }
+      return { backgroundSubagents: flags.backgroundSubagents, subagentLimits: true, workDelegation: true }
     })
 
     const tool = Effect.fn("ExperimentalHttpApi.tool")(function* (ctx: { query: typeof ToolListQuery.Type }) {

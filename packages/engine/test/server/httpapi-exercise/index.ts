@@ -1232,6 +1232,10 @@ const scenarios: Scenario[] = [
       typeof (body as { subagentLimits?: unknown }).subagentLimits === "boolean",
       "capabilities should report whether task lists carry subagent limits",
     )
+    check(
+      (body as { workDelegation?: unknown }).workDelegation === true,
+      "capabilities should report that Work requests are offered subagents",
+    )
   }),
   http.protected
     .post("/experimental/session/{sessionID}/background", "experimental.session.background")

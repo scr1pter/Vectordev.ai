@@ -329,7 +329,7 @@ export const RunCommand = effectCmd({
         type: "string",
         choices: ["auto", "chat", "light", "standard", "thorough"],
         describe:
-          "how much harness each prompt gets: auto (default) sizes it from what it says; only thorough offers subagents",
+          "how much harness each prompt gets: auto (default) sizes it from what it says; standard and thorough may hand work to subagents",
       })
       .option("judge", {
         type: "string",

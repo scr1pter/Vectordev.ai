@@ -2267,15 +2267,20 @@ const layer = Layer.effect(
         // Every step sizes the request again from the projected history, so a raise or a message that joined the run
         // applies from the next step. Subagents, Vector's hidden helpers and custom agents keep their own setup.
         const sizing = (yield* config.get()).sizing
-        const requests = sizable(session, lastUser)
-          ? SessionTaskSize.size({
-              messages: msgs,
-              caching: caches(model),
-              lifetime: ProviderTransform.cacheLifetime(model),
-              auto: sizing?.auto,
-              judge: sizing?.judge,
-            })
-          : []
+        const sizeAll = () =>
+          sizable(session, lastUser)
+            ? SessionTaskSize.size({
+                messages: msgs,
+                caching: ProviderTransform.caches(model),
+                lifetime: ProviderTransform.cacheLifetime(model),
+                auto: sizing?.auto,
+                judge: sizing?.judge,
+              })
+            : []
+        let requests = sizeAll()
+        // The subagents still working when a request opened are saved on its opening message at its first step off the
+        // quick lane, so every later step sends that message unchanged (5.A.2).
+        if (yield* snapshotFor(sessionID, requests.at(-1))) requests = sizeAll()
         const sized = requests.at(-1)
         for (const user of sized?.users ?? []) taught.set(user.info.id, { message: user, tier: sized!.tier })
 
@@ -2420,6 +2425,11 @@ const layer = Layer.effect(
           stepAgent.name === "quick"
             ? SessionTaskSize.closingText(msgs.filter((message) => message.info.id < opened)).slice(-PREVIOUS_REPLY)
             : ""
+        // The quick lane has no tools, so it is told which subagents are still working from live state (5.A.6).
+        const stillWorking =
+          stepAgent.name === "quick" && !session.parentID && !session.internal
+            ? TaskSize.running((yield* outstanding(sessionID, opened)).running, "quick")
+            : undefined
         // The owner's personal memory never goes to a session an invited guest has acted in, nor to a model that may
         // train on prompts.
         const guest = yield* guests.marked(sessionID)
@@ -2566,9 +2576,15 @@ const layer = Layer.effect(
             Effect.provideService(Config.Service, config),
           )
 
-          // A request is offered what its size needs. On a caching provider the size here is the session's highest
-          // while the cache is warm, so the task tool may stay defined on a Work request; it still runs only the
-          // subagents the user named, and escalate is how the agent asks for more.
+          // A request is offered what its size needs (5.A.1). On a caching provider the size here is the session's
+          // highest while the cache is warm, and "no subagents" withholds nothing, so a smaller or capped follow-up sends
+          // the same definitions; what it may not launch is refused when called instead.
+          const capped = build !== undefined && SessionTaskSize.capped(build.result)
+          const offer: TaskSize.Offer | undefined = build && {
+            capped: capped && !ProviderTransform.caches(model),
+            children: build.snapshot.length > 0,
+            notified: build.notified !== undefined,
+          }
           if (quick) {
             // The quick lane's one tool: escalate, which hands the message to the full agent. `invalid` only answers a
             // call to a tool that is not offered, and is never sent to the model.
@@ -2580,26 +2596,49 @@ const layer = Layer.effect(
             // sub-questions to researchers, up to its own cap of 2 (a Deep run's is 4); the research run counts them,
             // and the lead's permissions let it launch nothing else. The user's "no subagents" keeps the lead on its
             // own, and once Run Guard warns no new researcher starts.
-            const capped = SessionTaskSize.capped(build.result)
-            for (const id of withheldOnWork(build.offered, build.result.agents.length))
+            for (const id of TaskSize.withheld(build.offered, build.result.agents.length, offer))
               if (capped || id !== "task") delete tools[id]
             // A capped lead has no researcher to launch, so none to manage either (5.B.5).
             if (capped) for (const id of ["task", "task_manage"]) delete tools[id]
             if ((yield* guard.snapshot(sessionID))?.warned === true) delete tools.task
             delete tools.escalate
           } else if (build) {
-            for (const id of withheldOnWork(build.offered, build.result.agents.length)) delete tools[id]
+            for (const id of TaskSize.withheld(build.offered, build.result.agents.length, offer)) delete tools[id]
             // A thorough request has nothing to raise to, and the user kept a capped one at Work. On a caching provider
             // the tool keeps its place so a smaller follow-up sends the same definitions and reads the cached prefix;
             // it refuses to raise a capped request.
-            if ((build.tier === "thorough" || SessionTaskSize.capped(build.result)) && !caches(model))
-              delete tools.escalate
+            if ((build.tier === "thorough" || capped) && !ProviderTransform.caches(model)) delete tools.escalate
+            const why = capped ? CAPPED_REFUSAL : build.tier === "light" ? LIGHT_REFUSAL : undefined
             const delegate = tools.task?.execute
-            if (delegate && build.tier !== "thorough")
-              tools.task = { ...tools.task, execute: namedOnly(delegate, build.result.agents) }
+            if (why && delegate) {
+              // Light may continue a subagent whose report arrived in it, as the agent that subagent ran.
+              const resume =
+                !capped && build.notified !== undefined
+                  ? new Map(
+                      (yield* sessions.children(sessionID)).flatMap((child) => {
+                        const record = SubagentLifecycle.read(child)
+                        return record ? [[child.id as string, record.agent] as const] : []
+                      }),
+                    )
+                  : undefined
+              tools.task = { ...tools.task, execute: namedOnly(delegate, { named: build.result.agents, why, resume }) }
+            }
+            if (why && tools.workflow)
+              tools.workflow = {
+                ...tools.workflow,
+                execute: () => {
+                  throw new Error(why)
+                },
+              }
           } else delete tools.escalate
-          // Memory is the main agent's: a subagent reports to it, and Vector's hidden helpers never learn.
-          if (session.parentID || session.internal) delete tools.memory
+          // A workflow launches subagents, so it goes with the task tool.
+          if (!tools.task) delete tools.workflow
+          // Memory is the main agent's: a subagent reports to it, and Vector's hidden helpers never learn. A workflow is
+          // the main agent's too: its agents cannot launch subagents.
+          if (session.parentID || session.internal) {
+            delete tools.memory
+            delete tools.workflow
+          }
 
           if (lastUser.format?.type === "json_schema") {
             tools["StructuredOutput"] = createStructuredOutputTool({
@@ -2633,7 +2672,13 @@ const layer = Layer.effect(
                   subagents: {
                     ...delegation(
                       subagents,
-                      build && { offered: offered.includes("task"), named: build.result.agents, tier: build.tier },
+                      build && {
+                        offered: offered.includes("task"),
+                        manage: offered.includes("task_manage"),
+                        named: build.result.agents,
+                        tier: build.tier,
+                        capped,
+                      },
                     ),
                     teammates: offered.includes("send_teammate_message"),
                   },
@@ -2687,6 +2732,7 @@ const layer = Layer.effect(
                   ...(previousReply
                     ? [`Your previous reply in this conversation:\n<reply>\n${previousReply}\n</reply>`]
                     : []),
+                  ...(stillWorking ? [stillWorking] : []),
                 ]
               : []),
             ...env.session,
@@ -2709,7 +2755,9 @@ const layer = Layer.effect(
               : build
                 ? (tuned?.workflow?.effort ??
                   TaskSize.effort(ProviderTransform.usesCacheBreakpoints(model) ? build.offered : build.tier))
-                : undefined,
+                : session.parentID && !session.internal
+                  ? childEffort(session)
+                  : undefined,
             permission: session.permission,
             sessionID,
             parentSessionID: session.parentID,
@@ -3287,6 +3335,52 @@ const layer = Layer.effect(
       } satisfies SessionV1.TextPart)
       first.parts.push(part)
       return input.msgs
+    })
+
+    // This session's subagents launched before `before` (a request's opening message) that are still working, or that
+    // finished with a report not yet delivered. A record left running by an engine that is gone is not working
+    // (TaskManager.observe). `earlier` counts every child launched before, finished or not.
+    const outstanding = Effect.fn("SessionPrompt.outstanding")(function* (sessionID: SessionID, before: string) {
+      const children = (yield* sessions.children(sessionID)).flatMap((child) => {
+        const record = child.internal ? undefined : SubagentLifecycle.read(child)
+        return record && record.parentMessageID < before ? [{ child, record }] : []
+      })
+      const running = yield* Effect.forEach(children, ({ child, record }) =>
+        Effect.gen(function* () {
+          const item = { id: child.id, title: record.title }
+          if (record.status !== "running" && record.status !== "queued")
+            return record.notification && record.notification.messageID === undefined ? [item] : []
+          if (record.runtimeID === SubagentLifecycle.RUNTIME_ID) return [item]
+          const live = (yield* jobs.get(child.id)) !== undefined || (yield* status.get(child.id)).type !== "idle"
+          return live ? [item] : []
+        }),
+      )
+      return { earlier: children.length, running: running.flat() }
+    })
+
+    // Saves the snapshot part on the opening message of a request that is past the quick lane and has none, and reports
+    // whether it did. A session that launched nothing before the request records nothing: its snapshot stays empty.
+    const snapshotFor = Effect.fn("SessionPrompt.snapshotFor")(function* (
+      sessionID: SessionID,
+      request: SessionTaskSize.Request | undefined,
+    ) {
+      const opener = request?.carried ? undefined : request?.users[0]
+      if (!request || !opener || request.tier === "chat" || SessionTaskSize.snapshotOf(opener) !== undefined)
+        return false
+      const found = yield* outstanding(sessionID, opener.info.id)
+      if (found.earlier === 0) return false
+      const part = yield* sessions.updatePart({
+        id: PartID.ascending(),
+        messageID: opener.info.id,
+        sessionID,
+        type: "text",
+        ...SessionTaskSize.snapshotPart(found.running, Date.now()),
+        synthetic: true,
+        // Rendered beside the request's size note (sizeNotes), not on its own.
+        ignored: true,
+      } satisfies SessionV1.TextPart)
+      opener.parts.push(part)
+      return true
     })
 
     // A request message's recalled memory, saved on the message as a synthetic part (nothing when nothing is relevant).
@@ -3980,114 +4074,116 @@ function commandSize(args: string): TaskSize.Tier {
   return typed.source === "user" ? typed.tier : "standard"
 }
 
-// Whether the provider caches the prompt prefix, so a smaller tool set on the next request would write it again.
-function caches(model: Provider.Model) {
-  return ProviderTransform.usesCacheBreakpoints(model) || (model.cost?.cache?.read ?? 0) > 0
-}
-
-// Each sized request's guidance rides on its last user message, worked out from that request alone, so every earlier
-// message renders the same on every request and stays in the provider's cache. The judge policy older clients sent
-// with each prompt is dropped: Vector runs the judge itself, and the policy would have the model launch it too.
+// Each sized request's guidance rides on the user messages its notes name (SessionTaskSize.Request.notes): the opening
+// message, and a joined one only where the size, the "no subagents" cap or the judge changed. Each is worked out from
+// the messages up to its own, so every earlier message renders the same on every request and stays in the provider's
+// cache. The opening message also carries the subagents still working when the request opened. The judge policy older
+// clients sent with each prompt is dropped: Vector runs the judge itself, and the policy would have the model launch it
+// too.
 function sizeNotes(
   messages: SessionV1.WithParts[],
   requests: readonly SessionTaskSize.Request[],
-  // Each request's learned workflow default, by the user message its note rides on, so a request's note says the same
-  // on every step after it.
+  // Each request's learned workflow default, by the request's opening message, so a request's notes say the same on
+  // every step after it.
   workflows: ReadonlyMap<string, SessionWorkflow.Workflow> = new Map(),
 ) {
-  const notes = new Map(
-    requests.flatMap((request) => {
-      const user = noted(request)
-      if (!user || user.info.role !== "user" || !onBuild(user.info)) return []
-      const text = TaskSize.note(request.result.tier, {
-        escalate: !SessionTaskSize.capped(request.result),
-        judge: request.judge !== "off",
-        solo: workflows.get(user.info.id)?.split === "solo",
-      })
-      return text ? [[user.info.id, text] as const] : []
-    }),
-  )
+  const notes = new Map<string, string[]>()
+  for (const request of requests) {
+    const solo = workflows.get(openerOf(request))?.split === "solo"
+    for (const [index, entry] of request.notes.entries()) {
+      if (entry.user.info.role !== "user" || !onBuild(entry.user.info)) continue
+      const capped = SessionTaskSize.capped(entry.result)
+      const lines = [
+        index === 0 ? TaskSize.running(request.snapshot, "work") : undefined,
+        TaskSize.note(entry.result.tier, { escalate: !capped, judge: entry.judge !== "off", solo, capped }),
+      ].filter((line): line is string => line !== undefined)
+      if (lines.length > 0) notes.set(entry.user.info.id, [...(notes.get(entry.user.info.id) ?? []), ...lines])
+    }
+  }
   return messages.map((message) => {
     if (message.info.role !== "user") return message
-    const note = notes.get(message.info.id)
+    const added = notes.get(message.info.id) ?? []
     const parts = message.parts.filter(
       (part) => !(part.type === "text" && part.synthetic && part.text.startsWith(SessionTaskSize.LEGACY_JUDGE_POLICY)),
     )
-    if (!note && parts.length === message.parts.length) return message
+    if (added.length === 0 && parts.length === message.parts.length) return message
     return {
       ...message,
       parts: [
         ...parts,
-        ...(note
-          ? [
-              {
-                id: PartID.ascending(),
-                messageID: message.info.id,
-                sessionID: message.info.sessionID,
-                type: "text" as const,
-                text: note,
-                synthetic: true,
-              },
-            ]
-          : []),
+        ...added.map((text) => ({
+          id: PartID.ascending(),
+          messageID: message.info.id,
+          sessionID: message.info.sessionID,
+          type: "text" as const,
+          text,
+          synthetic: true,
+        })),
       ],
     }
   })
 }
 
-// The user message a request's size note rides on. A request whose opening message a compaction summarised carries its
-// note on the compaction marker.
-function noted(request: SessionTaskSize.Request) {
-  return request.users.at(-1) ?? request.messages.find((message) => message.info.role === "user")
+// The message that opened a request: the first user message, or the one a compaction recorded when its summary
+// replaced it.
+function openerOf(request: SessionTaskSize.Request) {
+  return request.carried?.opened ?? request.users[0]?.info.id ?? request.messages[0]!.info.id
 }
 
-// Each request's learned workflow default by the user message its note rides on: what its steps recorded, and for
-// the request being answered, what this step decided.
+// Each request's learned workflow default by its opening message: what its steps recorded, and for the request being
+// answered, what this step decided.
 function workflowNotes(requests: readonly SessionTaskSize.Request[], current: SessionWorkflow.Workflow | undefined) {
   return new Map(
     requests.flatMap((request, index) => {
-      const user = noted(request)
       const workflow = index === requests.length - 1 && current ? current : SessionWorkflow.recorded(request)
-      return user && workflow ? [[user.info.id, workflow] as const] : []
+      return workflow ? [[openerOf(request), workflow] as const] : []
     }),
   )
 }
 
-// Work requests keep the tools they had before the offer rules: below Thorough, no task or task_manage unless the
-// user named a subagent. Removed once delegation on Work is wired in with its policy and capability flag.
-function withheldOnWork(tier: TaskSize.Tier, agents: number) {
-  return new Set([
-    ...TaskSize.withheld(tier, agents),
-    ...(tier !== "thorough" && agents === 0 ? ["task", "task_manage"] : []),
-  ])
-}
+// Why a call the request may not make is refused (5.A.1), on a provider whose cache keeps the tool's definition.
+const LIGHT_REFUSAL =
+  "This is a Light request: it launches only subagents the user named. Do the work yourself, or continue a subagent whose report just arrived by passing its task_id."
+const CAPPED_REFUSAL =
+  "The user asked for no new subagents in this request. Do the work yourself; task_manage still checks, steers or stops the ones already running."
 
-// Below Thorough the task tool may stay in a cached request's definitions; only a subagent the user named runs.
-function namedOnly(execute: NonNullable<AITool["execute"]>, named: readonly string[]): NonNullable<AITool["execute"]> {
+// A call passes when every brief names a subagent the user named, or with `resume`, when every brief continues a child
+// by task_id as the agent it ran (subagent_type left out or the same). Anything else is refused with `why`.
+function namedOnly(
+  execute: NonNullable<AITool["execute"]>,
+  input: { named: readonly string[]; why: string; resume?: ReadonlyMap<string, string> },
+): NonNullable<AITool["execute"]> {
   return (args, options) => {
-    const input: Record<string, unknown> = isRecord(args) ? args : {}
-    const briefs: unknown[] = Array.isArray(input.tasks) ? input.tasks : [input]
-    const types = briefs.map((brief) =>
+    const call: Record<string, unknown> = isRecord(args) ? args : {}
+    const briefs: unknown[] = Array.isArray(call.tasks) ? call.tasks : [call]
+    const typeOf = (brief: unknown) =>
       isRecord(brief) && typeof brief.subagent_type === "string" && brief.subagent_type.trim()
         ? brief.subagent_type.trim()
-        : "general",
-    )
-    if (types.every((type) => named.includes(type))) return execute(args, options)
-    throw new Error(
-      "Subagents are not offered for this request. Do the work yourself; call escalate only for exceptionally hard work across the whole system or dozens of files.",
-    )
+        : undefined
+    if (briefs.every((brief) => input.named.includes(typeOf(brief) ?? "general"))) return execute(args, options)
+    const resume = input.resume
+    const continues = (brief: unknown) => {
+      if (!resume || !isRecord(brief) || typeof brief.task_id !== "string") return false
+      const type = typeOf(brief)
+      return type === undefined || type === resume.get(brief.task_id)
+    }
+    if (briefs.every(continues)) return execute(args, options)
+    throw new Error(input.why)
   }
 }
 
-// What the subagent policy describes for a sized request: nothing when the task tool is not offered, and only the
-// subagents the user named when they are all a smaller size allows.
+// What the subagent policy describes for a sized request: nothing when the task tool is not offered (only task_manage
+// when that is), and on a Light or capped request only the subagents the user named, when they named any.
 function delegation(
   availability: SystemPrompt.SubagentAvailability,
-  sized: { offered: boolean; named: readonly string[]; tier: TaskSize.Tier } | undefined,
+  sized:
+    | { offered: boolean; manage: boolean; named: readonly string[]; tier: TaskSize.Tier; capped: boolean }
+    | undefined,
 ): SystemPrompt.SubagentAvailability {
   if (!sized) return availability
-  if (!sized.offered) return { general: false, specialists: false }
-  if (sized.tier === "thorough" || sized.named.length === 0) return availability
+  if (!sized.offered)
+    return sized.manage ? { general: false, specialists: false, manage: true } : { general: false, specialists: false }
+  if ((sized.tier !== "light" && !sized.capped) || sized.named.length === 0) return availability
   const permitted = (availability.permitted ?? []).filter((name) => sized.named.includes(name))
   return {
     ...availability,
@@ -4095,6 +4191,12 @@ function delegation(
     specialists: permitted.length > 0,
     permitted,
   }
+}
+
+// A subagent's own effort, as its record holds it (5.A.7). The sized path carries "default" and "high".
+function childEffort(session: Session.Info): TaskSize.Effort | undefined {
+  const effort = SubagentLifecycle.read(session)?.effort
+  return effort === "default" || effort === "high" ? effort : undefined
 }
 
 function judgeBrief(work: NonNullable<ReturnType<typeof SessionTaskSize.judgeable>>) {
@@ -4227,7 +4329,7 @@ export const PromptInput = Schema.Struct({
   budget: Schema.optional(RunBudget.Info),
   size: Schema.optional(TaskSize.Choice).annotate({
     description:
-      "How much harness the request gets: auto (the default) lets Vector size it from what it says; chat is a direct reply with no tools; light, standard or thorough set it. Only thorough offers subagents.",
+      "How much harness the request gets: auto (the default) lets Vector size it from what it says; chat is a direct reply with no tools; light, standard or thorough set it. Standard and thorough may hand work to subagents; light and chat do not.",
   }),
   judge: Schema.optional(TaskSize.JudgeMode).annotate({
     description:

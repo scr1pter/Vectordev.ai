@@ -112,7 +112,7 @@ Options:
                      price                                                                  [number]
       --max-steps    stop this run after this many model steps                              [number]
       --size         how much harness each prompt gets: auto (default) sizes it from what it says;
-                     only thorough offers subagents
+                     standard and thorough may hand work to subagents
                                  [string] [choices: "auto", "chat", "light", "standard", "thorough"]
       --judge        run LLM-as-a-judge after large tasks that changed files (thorough) or after
                      every task that changed files (changes)
