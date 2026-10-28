@@ -1421,6 +1421,58 @@ async function convergeKey(
   }
 }
 
+/** What the daily sweep's key audit found (never an amount). */
+export type KeyAudit =
+  /** No key, or the account is being deleted. */
+  | { outcome: "none" }
+  /** The key is switched off, so its limit spends nothing; reconcile decides whether it should serve. */
+  | { outcome: "disabled" }
+  | { outcome: "ok" }
+  /**
+   * The key had drifted and was set back: its limit was above or below what the pool allows, or it had no limit at all;
+   * or it was switched on while the account's risk record holds it (`enabled`).
+   */
+  | { outcome: "repaired"; drift: "above" | "below" | "unset" | "enabled" }
+
+/**
+ * The daily sweep's audit of the account's current OpenRouter key (contract §5 WP A08), under the account's lease and
+ * without asking Stripe anything. A key's limit is expected to be either what Vector last set (`limitMicro`), or what
+ * its pool says now (credits + carry less every debit recorded, when a debit is still being applied). A limit that is
+ * neither, or missing, was changed outside Vector: it is set back to the pool's limit, as reconcile would (M1). A key
+ * switched on while a dispute, a fraud warning or a block holds the account is switched off at once (M5). Whether a
+ * key should serve at all is otherwise reconcile's question, so a switched-off key is left alone.
+ */
+export async function auditModelPlanKey(id: string, fetcher: typeof fetch = fetch): Promise<KeyAudit> {
+  return withCodiumLease(
+    id,
+    async (verify) => {
+      const account = await readModelPlanAccount(id, fetcher)
+      const key = account?.key
+      if (!account || !key || account.closing) return { outcome: "none" }
+      const data = (await openRouterManagement(`/${encodeURIComponent(key.hash)}`, undefined, fetcher)).data
+      if (!stripeRecord(data) || typeof data.disabled !== "boolean")
+        throw new ApiError(503, "MODEL_PLAN_KEY_INVALID", "Your model allowance could not be verified.")
+      if (data.disabled) return { outcome: "disabled" }
+      if (riskState(account)) {
+        await verify()
+        await openRouterManagement(`/${encodeURIComponent(key.hash)}`, { disabled: true }, fetcher, "PATCH")
+        return { outcome: "repaired", drift: "enabled" }
+      }
+      const pool = keyPool(key)
+      const debits = await readDebits(id, key.hash, fetcher)
+      const target = expectedLimitMicro(
+        pool,
+        debits.reduce((sum, debit) => sum + debit.micro, 0),
+      )
+      if (limitMatches(data.limit, pool.limitMicro) || limitMatches(data.limit, target)) return { outcome: "ok" }
+      await convergeKey(id, account, key, verify, fetcher)
+      const limit = typeof data.limit === "number" && Number.isFinite(data.limit) ? usdToMicro(data.limit) : undefined
+      return { outcome: "repaired", drift: limit === undefined ? "unset" : limit > target ? "above" : "below" }
+    },
+    fetcher,
+  )
+}
+
 // `available` is the pool's credits and carry less its applied debits and usage; the hold itself then takes the live
 // holds off as well (M3).
 function requireMonthlyCredits(availableMicro: number, requiredMicro: number) {

@@ -447,6 +447,18 @@
     {
       "path": "/api/model-plans/outbox",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/model-plans/replay",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/model-plans/sweep?scope=risk",
+      "schedule": "47 * * * *"
+    },
+    {
+      "path": "/api/model-plans/sweep",
+      "schedule": "23 4 * * *"
     }
   ]
 }

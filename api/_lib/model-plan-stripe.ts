@@ -140,6 +140,102 @@ export async function modelPlanStripe(
   return body
 }
 
+/** Stripe returns at most this many objects in one page of a list. */
+export const STRIPE_PAGE_SIZE = 100
+/** Stripe filters one events listing by at most this many types: why the webhook subscribes exactly 20 (§4.5). */
+export const STRIPE_EVENT_TYPES_MAX = 20
+
+function upstreamError() {
+  return new ApiError(502, "BILLING_UPSTREAM", "Billing could not complete this request. Please retry.")
+}
+
+/**
+ * A Stripe list read page by page through the mode guard, at the pinned API version: `query` names the filters, and
+ * each page continues `starting_after` the last object of the page before, so the order is Stripe's (newest first).
+ * Stops when Stripe has no more, or after `maxPages`; `complete` says which. A page Stripe answers without its list
+ * shape fails the whole read, so a caller never mistakes half a list for all of it.
+ */
+export async function listStripe(
+  path: string,
+  query: readonly (readonly [string, string])[],
+  options: { maxPages?: number; pageSize?: number } = {},
+  fetcher: typeof fetch = fetch,
+): Promise<{ data: Record<string, unknown>[]; complete: boolean }> {
+  const maxPages = Math.max(1, Math.floor(options.maxPages ?? 10))
+  const pageSize = Math.min(STRIPE_PAGE_SIZE, Math.max(1, Math.floor(options.pageSize ?? STRIPE_PAGE_SIZE)))
+  const data: Record<string, unknown>[] = []
+  let after: string | undefined
+  for (let page = 0; page < maxPages; page++) {
+    const params = new URLSearchParams([
+      ...query.map(([name, value]): [string, string] => [name, value]),
+      ["limit", String(pageSize)],
+      ...(after ? [["starting_after", after] as [string, string]] : []),
+    ])
+    const result = await modelPlanStripe(`${path}?${params}`, {}, fetcher)
+    if (!Array.isArray(result.data) || typeof result.has_more !== "boolean") throw upstreamError()
+    data.push(...result.data.filter(stripeRecord))
+    if (!result.has_more) return { data, complete: true }
+    const last: unknown = result.data.at(-1)
+    if (!stripeRecord(last) || typeof last.id !== "string" || !last.id) throw upstreamError()
+    after = last.id
+  }
+  return { data, complete: false }
+}
+
+/** A Stripe event as an events listing returns it, rendered at the API version it was created with. */
+export type StripeEvent = Record<string, unknown> & {
+  id: string
+  type: string
+  /** Seconds since the epoch. */
+  created: number
+  data: Record<string, unknown> & { object: Record<string, unknown> }
+}
+
+const EVENT_ID = /^evt_[\x21-\x7e]{1,200}$/
+
+/**
+ * The events of `types` (at most 20) created from `since` to `until` (seconds, both included), newest first, read in
+ * pages through `listStripe`. Events without an id, a type, a creation time or an object are left out: nothing could
+ * route them. `complete` is false when the window held more than `maxPages` pages, and then only the newest are here.
+ */
+export async function listStripeEvents(
+  options: { types: readonly string[]; since: number; until: number; maxPages?: number; pageSize?: number },
+  fetcher: typeof fetch = fetch,
+): Promise<{ events: StripeEvent[]; complete: boolean }> {
+  const { types, since, until } = options
+  if (
+    !types.length ||
+    types.length > STRIPE_EVENT_TYPES_MAX ||
+    !Number.isSafeInteger(since) ||
+    !Number.isSafeInteger(until) ||
+    since < 0 ||
+    since > until
+  )
+    throw new ApiError(500, "BILLING_EVENTS_INVALID", "Billing events could not be listed.")
+  const listed = await listStripe(
+    "events",
+    [
+      ...types.map((type): [string, string] => ["types[]", type]),
+      ["created[gte]", String(since)],
+      ["created[lte]", String(until)],
+    ],
+    { maxPages: options.maxPages, pageSize: options.pageSize },
+    fetcher,
+  )
+  const wanted = new Set(types)
+  const events = listed.data.filter(
+    (event): event is StripeEvent =>
+      typeof event.id === "string" &&
+      EVENT_ID.test(event.id) &&
+      typeof event.type === "string" &&
+      wanted.has(event.type) &&
+      Number.isSafeInteger(event.created) &&
+      stripeRecord(event.data) &&
+      stripeRecord(event.data.object),
+  )
+  return { events, complete: listed.complete }
+}
+
 export function verifyModelPlanWebhook(raw: Buffer, signature: string, now = Date.now()) {
   const secret = process.env.STRIPE_MODEL_PLAN_WEBHOOK_SECRET?.trim()
   if (!secret) throw new ApiError(503, "WEBHOOK_UNAVAILABLE", "Billing notifications are not configured.")

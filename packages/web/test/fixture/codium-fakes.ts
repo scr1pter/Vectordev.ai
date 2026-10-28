@@ -98,6 +98,8 @@ export class FakeStore {
     switch (name) {
       case "GET":
         return this.get(args[0]!) ?? null
+      case "MGET":
+        return args.map((key) => this.get(key) ?? null)
       case "SET": {
         const [key, value, ...options] = args
         if (options.includes("NX") && this.live(key!)) return null
@@ -147,11 +149,14 @@ export class FakeStore {
       }
       case "ZRANGEBYSCORE": {
         const limit = args.indexOf("LIMIT")
-        const found = this.between(this.zset(args[0]!), args[1]!, args[2]!).map(([member]) => member)
+        const found = this.between(this.zset(args[0]!), args[1]!, args[2]!)
         this.prune(args[0]!)
-        return limit >= 0
-          ? found.slice(Number(args[limit + 1]), Number(args[limit + 1]) + Number(args[limit + 2]))
-          : found
+        const page =
+          limit >= 0 ? found.slice(Number(args[limit + 1]), Number(args[limit + 1]) + Number(args[limit + 2])) : found
+        // WITHSCORES answers member, score, member, score…, scores as strings, as the REST API does.
+        return args.includes("WITHSCORES")
+          ? page.flatMap(([member, score]) => [member, String(score)])
+          : page.map(([member]) => member)
       }
       case "EVAL": {
         const [script, count, ...rest] = args
@@ -441,6 +446,9 @@ export type StripeObjects = {
   early_fraud_warnings?: Json[]
   checkout_sessions?: Json[]
   refunds?: Json[]
+  subscription_schedules?: Json[]
+  /** Events as `GET /v1/events` lists them, each rendered at its own `api_version`. */
+  events?: Json[]
 }
 
 const STRIPE_COLLECTIONS = [
@@ -453,6 +461,8 @@ const STRIPE_COLLECTIONS = [
   "early_fraud_warnings",
   "checkout_sessions",
   "refunds",
+  "subscription_schedules",
+  "events",
 ] as const
 
 /**
@@ -514,7 +524,24 @@ export class FakeStripe {
     const expand = call.query.getAll("expand[]")
     const ok = (body: unknown): Answer => ({ status: 200, body })
     const found = (value: Json | undefined) => (value ? ok(value) : stripeError(404, "No such object."))
-    const list = (data: Json[]) => ok({ object: "list", data, has_more: false, url: `/v1/${call.path}` })
+    // Lists honour `created[gte]`/`created[lte]`, and `limit` with `starting_after` when the request names a limit.
+    const list = (data: Json[]) => {
+      const gte = call.query.get("created[gte]")
+      const lte = call.query.get("created[lte]")
+      let items = data.filter(
+        (value) =>
+          (gte === null || Number(value.created) >= Number(gte)) &&
+          (lte === null || Number(value.created) <= Number(lte)),
+      )
+      const after = call.query.get("starting_after")
+      if (after) {
+        const at = items.findIndex((value) => value.id === after)
+        items = at >= 0 ? items.slice(at + 1) : []
+      }
+      const limit = call.query.get("limit")
+      const page = limit === null ? items : items.slice(0, Number(limit))
+      return ok({ object: "list", data: page, has_more: items.length > page.length, url: `/v1/${call.path}` })
+    }
     const [resource, id, action] = parts
     if (resource === "subscriptions" && call.method === "GET" && !id) {
       const customer = call.query.get("customer")
@@ -559,13 +586,30 @@ export class FakeStripe {
       return found(this.expandOrUndefined(this.objects.invoices.get(id), expand))
     if (resource === "invoices" && id && call.method === "POST") return this.invoiceAction(id, action, call)
     if (resource === "refunds" && id && call.method === "GET") return found(this.objects.refunds.get(id))
+    if (resource === "subscription_schedules" && id && call.method === "GET")
+      return found(this.objects.subscription_schedules.get(id))
+    if (resource === "events" && call.method === "GET" && !id) {
+      // Newest first, as Stripe lists them; `types[]` filters by type.
+      const types = call.query.getAll("types[]")
+      return list(
+        [...this.objects.events.values()]
+          .filter((value) => !types.length || types.includes(String(value.type)))
+          .sort(
+            (a, b) =>
+              Number(b.created) - Number(a.created) ||
+              (String(b.id) < String(a.id) ? -1 : String(b.id) > String(a.id) ? 1 : 0),
+          ),
+      )
+    }
     if (resource === "disputes" && call.method === "GET" && !id)
       return list(
-        [...this.objects.disputes.values()].filter(
-          (value) =>
-            (!call.query.get("charge") || value.charge === call.query.get("charge")) &&
-            (!call.query.get("payment_intent") || value.payment_intent === call.query.get("payment_intent")),
-        ),
+        [...this.objects.disputes.values()]
+          .filter(
+            (value) =>
+              (!call.query.get("charge") || value.charge === call.query.get("charge")) &&
+              (!call.query.get("payment_intent") || value.payment_intent === call.query.get("payment_intent")),
+          )
+          .map((value) => this.expand(value, expand, "data.")),
       )
     if (resource === "disputes" && id && call.method === "GET") return found(this.objects.disputes.get(id))
     if (resource === "radar" && id === "early_fraud_warnings" && call.method === "GET") {
