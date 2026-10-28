@@ -3,7 +3,6 @@ import { createHmac } from "node:crypto"
 import { paidModelPlan, protectModelPlanKey, revealModelPlanKey } from "../../../api/_lib/model-plan-account"
 import {
   modelPlans,
-  modelTopups,
   modelCreditMarkup,
   publicModelPlans,
   configuredPlanModels,
@@ -21,12 +20,7 @@ const names = [
   "MODEL_PLAN_KEY_ENCRYPTION_SECRET",
   "MODEL_CREDIT_MARKUP_PERCENT",
   "STRIPE_MODEL_PLAN_WEBHOOK_SECRET",
-  ...[10, 50, 100, 200].flatMap((price) => [
-    `MODEL_PLAN_${price}_CREDITS_USD`,
-    `STRIPE_MODEL_PLAN_${price}_PRICE_ID`,
-    `MODEL_TOPUP_${price}_CREDITS_USD`,
-    `STRIPE_MODEL_TOPUP_${price}_PRICE_ID`,
-  ]),
+  ...[10, 50, 100, 200].flatMap((price) => [`MODEL_PLAN_${price}_CREDITS_USD`, `STRIPE_MODEL_PLAN_${price}_PRICE_ID`]),
 ]
 const saved = new Map(names.map((name) => [name, process.env[name]]))
 afterEach(() =>
@@ -88,9 +82,9 @@ describe("subscription configuration", () => {
     })
     expect(modelPlans().map((plan) => plan.price)).toEqual([10, 50, 100, 200])
     expect(modelPlans().map((plan) => plan.credits)).toEqual([0, 0, 0, 0])
-    expect(modelTopups().map((pack) => pack.credits)).toEqual([0, 0, 0, 0])
     expect(publicModelPlans().plans.every((plan) => !plan.available)).toBe(true)
-    expect(publicModelPlans().topups.every((pack) => !pack.available)).toBe(true)
+    // Codium sells monthly plans only: the public configuration offers no top-ups.
+    expect(publicModelPlans()).not.toHaveProperty("topups")
     expect(publicModelPlans().product).toBe("Vector Codium")
     expect(publicModelPlans()).not.toHaveProperty("markupPercent")
     expect(publicModelPlans().models.map((model) => model.id)).toEqual([
@@ -106,7 +100,7 @@ describe("subscription configuration", () => {
   test("the public configuration carries no credit amounts, model prices or limits", () => {
     names.forEach((name) => delete process.env[name])
     const config = publicModelPlans()
-    for (const offer of [...config.plans, ...config.topups])
+    for (const offer of config.plans)
       expect(
         Object.keys(offer).every((key) => ["id", "name", "price", "available", "multiple", "tasks"].includes(key)),
       ).toBe(true)
@@ -129,9 +123,8 @@ describe("subscription configuration", () => {
     const original = publicModelPlans()
     process.env.MODEL_CREDIT_MARKUP_PERCENT = "100"
     process.env.MODEL_PLAN_10_CREDITS_USD = "0.5"
-    process.env.MODEL_TOPUP_100_CREDITS_USD = "70"
+    process.env.MODEL_PLAN_100_CREDITS_USD = "70"
     expect(publicModelPlans().plans.map((plan) => plan.tasks)).toEqual(original.plans.map((plan) => plan.tasks))
-    expect(publicModelPlans().topups.map((plan) => plan.tasks)).toEqual(original.topups.map((plan) => plan.tasks))
     expect(original.plans.map((plan) => plan.multiple)).toEqual([undefined, 5, 10, 20])
     expect(original.plans[0]!.tasks).toEqual([
       [50, 500],
@@ -154,11 +147,11 @@ describe("subscription configuration", () => {
     process.env.MODEL_CREDIT_MARKUP_PERCENT = "30"
     expect(modelCreditMarkup()).toBe(30)
     expect(modelPlans()[0].credits).toBe(7.69)
-    expect(modelTopups()[3].credits).toBe(153.84)
+    expect(modelPlans()[3].credits).toBe(153.84)
     process.env.MODEL_PLAN_10_CREDITS_USD = "7"
     expect(modelPlans()[0].credits).toBe(7)
     process.env.MODEL_CREDIT_MARKUP_PERCENT = "NaN"
-    expect(() => modelTopups()).toThrow()
+    expect(() => modelPlans()).toThrow()
   })
   test("invalid or unprofitable credit configurations fail closed", () => {
     process.env.MODEL_PLAN_10_CREDITS_USD = "11"
@@ -170,11 +163,9 @@ describe("subscription configuration", () => {
   })
   test("allowances require whole cents without rejecting valid floating-point representations", () => {
     process.env.MODEL_PLAN_10_CREDITS_USD = "7.125"
-    process.env.MODEL_TOPUP_10_CREDITS_USD = "7.125"
     expect(modelPlans()[0].credits).toBe(0)
-    expect(modelTopups()[0].credits).toBe(0)
-    process.env.MODEL_TOPUP_200_CREDITS_USD = "133.33"
-    expect(modelTopups()[3].credits).toBe(133.33)
+    process.env.MODEL_PLAN_200_CREDITS_USD = "133.33"
+    expect(modelPlans()[3].credits).toBe(133.33)
   })
   test("configured paid models require bounded positive pricing and valid context", () => {
     process.env.MODEL_PLAN_MODELS_JSON = JSON.stringify([model])

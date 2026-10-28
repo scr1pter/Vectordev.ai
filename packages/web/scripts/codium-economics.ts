@@ -1,4 +1,4 @@
-import { modelPlans, modelTopups } from "../../../api/_lib/model-plan-config"
+import { modelPlans } from "../../../api/_lib/model-plan-config"
 
 // Planning only. These fee assumptions never affect a customer's balance.
 const provider = Number(process.env.CODIUM_PROVIDER_FEE_PERCENT ?? 8) / 100
@@ -15,19 +15,16 @@ console.log(
   `Assumptions: provider ${provider * 100}%, payment ${payment * 100}% + $${fixed}, subscriptions ${recurring * 100}%.`,
 )
 console.table(
-  [
-    ...modelPlans().map((plan) => ({ ...plan, billing: "Monthly", recurring })),
-    ...modelTopups().map((plan) => ({ ...plan, billing: "Top-up", recurring: 0 })),
-  ].map((plan) => ({
-    billing: plan.billing,
+  modelPlans().map((plan) => ({
+    billing: "Monthly",
     price: plan.price,
     modelCredits: plan.credits,
     providerFee: (plan.credits * provider).toFixed(2),
-    paymentFees: (plan.price * (payment + plan.recurring) + fixed).toFixed(2),
+    paymentFees: (plan.price * (payment + recurring) + fixed).toFixed(2),
     beforeOtherExpenses: (
       plan.price -
       plan.credits * (1 + provider) -
-      plan.price * (payment + plan.recurring) -
+      plan.price * (payment + recurring) -
       fixed
     ).toFixed(2),
   })),

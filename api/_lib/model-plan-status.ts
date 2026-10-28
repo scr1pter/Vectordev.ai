@@ -1,12 +1,6 @@
 import { modelPlanStatus } from "./model-plan-account.js"
 import { requireBillingUser } from "./model-plan-billing.js"
-import {
-  configuredPlanModels,
-  modelPlanRequestCredits,
-  modelPlans,
-  modelPlansEnabled,
-  modelTopups,
-} from "./model-plan-config.js"
+import { configuredPlanModels, modelPlanRequestCredits, modelPlans, modelPlansEnabled } from "./model-plan-config.js"
 import { handleApiError, json, requireMethod, type ApiRequest, type ApiResponse } from "./http.js"
 
 export async function handleModelPlanStatus(request: ApiRequest, response: ApiResponse, fetcher: typeof fetch = fetch) {
@@ -33,25 +27,17 @@ export async function handleModelPlanStatus(request: ApiRequest, response: ApiRe
 }
 
 /**
- * The account's own Codium balances as every Vector screen shows them: the whole-percent share of this month's credits
- * left, the purchased credits' state, and whether the credits are running low or too low for any request. The gateway
- * accounts in provider-cost USD; an amount beside a purchase price would reveal what the purchase buys, so no amount,
- * and no fixed-amount threshold whose share would give one away, leaves the server.
+ * The account's own Codium balance as every Vector screen shows it: the whole-percent share of this month's credits
+ * left, and whether the credits are running low or too low for any request. The gateway accounts in provider-cost USD;
+ * an amount beside a plan's price would reveal what the plan buys, so no amount, and no fixed-amount threshold whose
+ * share would give one away, leaves the server.
  */
 export function modelPlanBalance(status: Awaited<ReturnType<typeof modelPlanStatus>>) {
-  const monthly = status.active ? status.remaining : 0
-  const remaining =
-    monthly === undefined || status.wallet.remaining === undefined ? undefined : monthly + status.wallet.remaining
+  const remaining = status.active ? status.remaining : 0
   // The gateway refuses a request unless the credits available cover the model's largest request, so below the
   // cheapest such amount in the catalog every request is refused.
   const requests = configuredPlanModels().map(modelPlanRequestCredits)
   const cheapest = requests.length ? Math.min(...requests) : 0
-  // Running low scales with what was bought: a tenth of this month's credits, or of the smallest top-up.
-  const smallest =
-    modelTopups()
-      .map((pack) => pack.credits)
-      .filter((credits) => credits > 0)
-      .sort((a, b) => a - b)[0] ?? 0
   const empty = remaining !== undefined && (remaining <= 0 || remaining < cheapest)
   return {
     active: status.active,
@@ -68,25 +54,13 @@ export function modelPlanBalance(status: Awaited<ReturnType<typeof modelPlanStat
           },
         }
       : {}),
-    purchased: {
-      bought: status.wallet.credits > 0,
-      ...(status.wallet.credits > 0 && status.wallet.remaining !== undefined
-        ? { state: purchasedState(status.wallet.remaining, cheapest, smallest) }
-        : {}),
-    },
+    // Codium sells monthly plans only (no top-ups). Decoders up to 1.99.112 require this field, so it is always sent,
+    // and always says nothing was bought (H7).
+    purchased: { bought: false as const },
     empty,
-    low: !empty && remaining !== undefined && remaining < Math.max(status.active ? status.credits : 0, smallest) / 10,
+    // Running low is a tenth of this month's credits.
+    low: !empty && remaining !== undefined && remaining < (status.active ? status.credits : 0) / 10,
   }
-}
-
-// Purchased credits pool every top-up ever bought, so they answer a state, not a share of that pool, which would read
-// "8% left" for a repeat buyer right after a fresh purchase. They are used up once they cannot cover the cheapest
-// model's largest request, and running low starts under a tenth of the smallest top-up, as the account's own flag
-// does, so the state reveals no allowance however much was bought.
-function purchasedState(remaining: number, cheapest: number, smallest: number) {
-  if (remaining <= 0 || remaining < cheapest) return "used" as const
-  if (remaining < smallest / 10) return "low" as const
-  return "available" as const
 }
 
 function share(left: number, total: number) {

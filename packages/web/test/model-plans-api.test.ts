@@ -18,7 +18,7 @@ import {
 import {
   handleModelPlanCheckout,
   handleModelPlanPortal,
-  handleModelTopupCheckout,
+  handleModelTopupRemoved,
 } from "../../../api/_lib/model-plan-billing"
 import { handleModelPlanChat } from "../../../api/_lib/model-plan-chat"
 import { handleModelPlanModels } from "../../../api/_lib/model-plan-models"
@@ -99,12 +99,7 @@ const environment = [
   "KV_REST_API_TOKEN",
   "UPSTASH_REDIS_REST_URL",
   "UPSTASH_REDIS_REST_TOKEN",
-  ...[10, 50, 100, 200].flatMap((price) => [
-    `MODEL_PLAN_${price}_CREDITS_USD`,
-    `STRIPE_MODEL_PLAN_${price}_PRICE_ID`,
-    `MODEL_TOPUP_${price}_CREDITS_USD`,
-    `STRIPE_MODEL_TOPUP_${price}_PRICE_ID`,
-  ]),
+  ...[10, 50, 100, 200].flatMap((price) => [`MODEL_PLAN_${price}_CREDITS_USD`, `STRIPE_MODEL_PLAN_${price}_PRICE_ID`]),
 ]
 const previousEnvironment = new Map(environment.map((key) => [key, process.env[key]]))
 
@@ -338,7 +333,7 @@ const server = createServer((request, response) => {
   if (request.url === "/api/model-plans/models") return void handleModelPlanModels(request, response, fetcher)
   if (request.url === "/api/model-plans/status") return void handleModelPlanStatus(request, response, fetcher)
   if (request.url === "/api/model-plans/checkout") return void handleModelPlanCheckout(request, response, fetcher)
-  if (request.url === "/api/model-plans/topup") return void handleModelTopupCheckout(request, response, fetcher)
+  if (request.url === "/api/model-plans/topup") return void handleModelTopupRemoved(request, response)
   if (request.url === "/api/model-plans/portal") return void handleModelPlanPortal(request, response, fetcher)
   void handleModelPlanChat(request, response, fetcher)
 })
@@ -614,18 +609,24 @@ describe("billing from the desktop app's Vector sign-in", () => {
     })
   })
 
-  test("top-ups take the same token", async () => {
-    for (const price of [10, 50, 100, 200]) {
-      process.env[`MODEL_TOPUP_${price}_CREDITS_USD`] = String(price / 2)
-      process.env[`STRIPE_MODEL_TOPUP_${price}_PRICE_ID`] = `price_topup${price}`
+  test("the old top-up route answers 410 to every token and sells nothing", async () => {
+    const removed = {
+      status: 410,
+      body: {
+        error: {
+          code: "MODEL_TOPUP_REMOVED",
+          message: "Vector Codium no longer sells top-ups. Choose or change a monthly plan instead.",
+        },
+      },
     }
-    // Past sign-in, the pack itself is checked.
-    expect(await billing("topup", { pack: "codium-topup-7" })).toMatchObject({
-      status: 400,
-      body: { error: { code: "MODEL_TOPUP_INVALID" } },
-    })
+    // What a desktop from before WP A04 sends, then a pasted token, a revoked one, and none at all.
+    expect(await billing("topup", { pack: "codium-topup-10" })).toEqual(removed)
+    expect(await billing("topup", { pack: "codium-topup-10" }, mintCliToken(user).token)).toEqual(removed)
     await redis(["SET", `vector:cli-revoked:${user.id}`, "1"])
-    expect((await billing("topup", { pack: "codium-topup-10" })).status).toBe(401)
+    expect(await billing("topup", { pack: "codium-topup-10" })).toEqual(removed)
+    expect(await billing("topup", {}, "")).toEqual(removed)
+    expect(sessions.size).toBe(0)
+    expect(calls.some((call) => call.path.startsWith("/v1/"))).toBe(false)
   })
 
   test("a revoked, expired or forged token is refused, and the website's browser session still works", async () => {
@@ -825,7 +826,6 @@ describe("model plan account deletion", () => {
       active: false,
       customer: true,
       access: false,
-      wallet: { credits: 0, used: 0, remaining: 0 },
     })
     await expect(modelPlanCheckout(user, "vector-50", fetcher)).rejects.toMatchObject({
       code: "MODEL_PLAN_ACCOUNT_CLOSING",
@@ -913,7 +913,6 @@ describe("model plan account deletion", () => {
       active: false,
       customer: true,
       access: false,
-      wallet: { credits: 0, used: 0, remaining: 0 },
     })
     state.failSubscriptionCancellation = false
     await cancelModelPlanAccount(user.id, fetcher)
@@ -1005,7 +1004,6 @@ describe("paid credential lifecycle", () => {
       active: false,
       customer: true,
       access: false,
-      wallet: { credits: 0, used: 0, remaining: 0 },
     })
     await expect(modelPlanCredential(user.id, fetcher)).rejects.toMatchObject({ code: "MODEL_PLAN_PAYMENT_REQUIRED" })
     expect(keys.size).toBe(0)
@@ -1153,7 +1151,7 @@ describe("model plan HTTP inference", () => {
       error: {
         code: "MODEL_PLAN_EXHAUSTED",
         message:
-          "Your monthly Codium credits cannot cover this model's largest request right now. Wait for running requests to finish, choose a model that uses fewer credits, or add a top-up. Monthly credits renew each billing period.",
+          "Your monthly Codium credits cannot cover this model's largest request right now. Wait for running requests to finish, or choose a model that uses fewer credits. Monthly credits renew each billing period.",
       },
     }
     // The fixture model's largest request, 8,192 context tokens at $1 and 2,048 output tokens at $2 per million,
@@ -1217,7 +1215,7 @@ describe("model plan HTTP inference", () => {
       error: {
         code: "MODEL_PLAN_EXHAUSTED",
         message:
-          "Your monthly Codium credits cannot cover this model's largest request right now. Wait for running requests to finish, choose a model that uses fewer credits, or add a top-up. Monthly credits renew each billing period.",
+          "Your monthly Codium credits cannot cover this model's largest request right now. Wait for running requests to finish, or choose a model that uses fewer credits. Monthly credits renew each billing period.",
       },
     })
     // Finished requests keep only what they were charged, for a moment, until the key's usage shows it.

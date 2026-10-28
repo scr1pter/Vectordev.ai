@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import { Option, Schema } from "effect"
 import { codiumKey, owedKeyName } from "./codium-keys.js"
 import { ApiError } from "./http.js"
-import { MODEL_PLAN_ROOT, modelPlans, modelTopups } from "./model-plan-config.js"
+import { MODEL_PLAN_ROOT, modelPlans } from "./model-plan-config.js"
 import { stripeRecord } from "./model-plan-stripe.js"
 import { persistentStore } from "./persistent-store.js"
 
@@ -36,7 +36,7 @@ const FUNDING_KEY = () => codiumKey("funding")
 const LOCK_KEY = () => codiumKey("funding", "lock")
 // One reservation per checkout, "<checkout's idempotency key>" -> "<lapses at>:<cents>". A buyer's new checkout gives
 // back their earlier checkout's reservation only when that one can no longer be paid (it closed it, or Stripe had), so
-// a buyer holds one unpaid open checkout of each kind while every purchase they paid for keeps counting.
+// a buyer holds one unpaid open checkout while every purchase they paid for keeps counting.
 const RESERVED_KEY = () => codiumKey("funding", "reserved")
 // Drops lapsed reservations and the one given back (ARGV[3]) and adds up the others, leaving out ARGV[2]'s own, which a
 // retry of the same checkout is reserving again.
@@ -133,11 +133,12 @@ async function measureFunding(fetcher: typeof fetch, now: number) {
 /**
  * Sales stay open only while the balance covers what customers hold, the credits in checkouts that may still be paid
  * for, and one more of the largest purchase, with the margin. The last term means that once reserveCodiumSale has had
- * to refuse a purchase, the next check pauses sales and tells the owner, unless the balance has grown since.
+ * to refuse a purchase, the next check pauses sales and tells the owner, unless the balance has grown since. Codium
+ * sells monthly plans only, so the largest purchase is the largest plan's credits.
  */
 async function fundingReading(fetcher: typeof fetch, now: number) {
   const margin = fundingMargin()
-  const largest = Math.max(0, ...[...modelPlans(), ...modelTopups()].map((value) => Math.round(value.credits * 100)))
+  const largest = Math.max(0, ...modelPlans().map((plan) => Math.round(plan.credits * 100)))
   const balance = await openRouterBalance(fetcher)
   const owed = await creditsOwed(fetcher, now)
   const reserved = Number(
@@ -154,7 +155,7 @@ async function fundingReading(fetcher: typeof fetch, now: number) {
 }
 
 /**
- * New subscriptions and top-ups need a check from the last CODIUM_FUNDING_MAX_AGE_MS that found the balance covering
+ * New subscriptions need a check from the last CODIUM_FUNDING_MAX_AGE_MS that found the balance covering
  * what is owed. A failed check is saved as a pause, and a sale that finds the reading stale runs a check first and
  * refuses unless it succeeds: selling credits Vector may not be able to pay for is the failure to avoid. Credits
  * already bought keep working either way. Returns the reading reserveCodiumSale measures the purchase against.
@@ -313,7 +314,7 @@ async function emailOwner(funding: CodiumFunding, failure: unknown, fetcher: typ
       ? {
           subject: "Vector Codium sales reopened",
           lines: [
-            "Vector Codium is selling subscriptions and top-ups again. Vector's OpenRouter balance covers the credits customers hold or are buying, room for the largest purchase, and the safety margin.",
+            "Vector Codium is selling subscriptions again. Vector's OpenRouter balance covers the credits customers hold or are buying, room for the largest purchase, and the safety margin.",
             "",
             ...amounts,
           ],
@@ -322,7 +323,7 @@ async function emailOwner(funding: CodiumFunding, failure: unknown, fetcher: typ
         ? {
             subject: "Vector Codium sales paused: the funding check could not finish",
             lines: [
-              `Vector Codium has paused new subscriptions and top-ups because the funding check could not finish: ${failure instanceof ApiError ? failure.message : "it failed unexpectedly."}`,
+              `Vector Codium has paused new subscriptions because the funding check could not finish: ${failure instanceof ApiError ? failure.message : "it failed unexpectedly."}`,
               "",
               reopen,
               "If this lasts, check OpenRouter's status, OPENROUTER_MANAGEMENT_KEY and the CODIUM_FUNDING_* settings.",
@@ -331,7 +332,7 @@ async function emailOwner(funding: CodiumFunding, failure: unknown, fetcher: typ
         : {
             subject: `Vector Codium sales paused: OpenRouter is short ${money((funding.required ?? 0) - (funding.balance ?? 0))}`,
             lines: [
-              "Vector Codium has paused new subscriptions and top-ups. Vector's OpenRouter balance cannot cover the credits customers hold or are buying, room for the largest purchase, and the safety margin.",
+              "Vector Codium has paused new subscriptions. Vector's OpenRouter balance cannot cover the credits customers hold or are buying, room for the largest purchase, and the safety margin.",
               "",
               ...amounts,
               `Short by: ${money((funding.required ?? 0) - (funding.balance ?? 0))}`,

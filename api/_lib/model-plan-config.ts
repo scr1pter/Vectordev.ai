@@ -82,19 +82,6 @@ export function subscriptionPlanCredits(
   return sold === undefined ? plan?.credits : Number(sold)
 }
 
-export function modelTopups() {
-  return CodiumPlan.TOPUPS.map((pack) => {
-    const priceID = process.env[`STRIPE_MODEL_TOPUP_${pack.price}_PRICE_ID`]?.trim()
-    return {
-      id: pack.id,
-      name: pack.name,
-      price: pack.price,
-      credits: creditAllowance(pack.price, process.env[`MODEL_TOPUP_${pack.price}_CREDITS_USD`]),
-      priceID: priceID && /^price_[a-zA-Z0-9]+$/.test(priceID) ? priceID : undefined,
-    }
-  })
-}
-
 export function modelCreditMarkup() {
   const configured = process.env.MODEL_CREDIT_MARKUP_PERCENT?.trim()
   if (!configured) return undefined
@@ -269,29 +256,14 @@ function modelPlanConfigurationReady() {
   return codiumBillingConfigProblems().length === 0
 }
 
-export function requireModelTopups() {
-  requireModelPlans()
-  const packs = modelTopups()
-  if (
-    packs.some((pack) => !pack.credits || !pack.priceID) ||
-    new Set(packs.map((pack) => pack.priceID)).size !== packs.length
-  )
-    throw configurationError()
-}
-
 /**
- * What anyone may read about Codium, for /codium and the account page: names, purchase prices, each purchase's credits
- * as a multiple of the smallest one, and usage as ranges of typical tasks per model. Credit amounts, model prices and
- * the task assumptions behind the ranges stay on the server, so no reader can work back to the dollars of model
- * credit in a purchase.
+ * What anyone may read about Codium, for /codium and the account page: names, monthly prices, each plan's credits as a
+ * multiple of Plus's, and usage as ranges of typical tasks per model. Credit amounts, model prices and the task
+ * assumptions behind the ranges stay on the server, so no reader can work back to the dollars of model credit in a
+ * plan. Codium sells monthly plans only: the answer has no `topups`, which every client decodes as optional.
  */
 export function publicModelPlans() {
   const enabled = modelPlansEnabled() && modelPlanConfigurationReady()
-  const topups = modelTopups()
-  const topupsEnabled =
-    enabled &&
-    topups.every((pack) => !!pack.credits && !!pack.priceID) &&
-    new Set(topups.map((pack) => pack.priceID)).size === topups.length
   const models = configuredPlanModels()
 
   const offers = (items: { id: string; name: string; price: number; credits: number }[], available: boolean) =>
@@ -329,7 +301,6 @@ export function publicModelPlans() {
       ...(model.description === undefined ? {} : { description: model.description }),
     })),
     plans: offers(modelPlans(), enabled),
-    topups: offers(topups, topupsEnabled),
   }
 }
 

@@ -1,5 +1,5 @@
 import { recordCodiumCharge } from "../_lib/codium-ledger.js"
-import { reconcileModelPlanAccount, reconcileModelTopup, readModelPlanAccount } from "../_lib/model-plan-account.js"
+import { reconcileModelPlanAccount, readModelPlanAccount } from "../_lib/model-plan-account.js"
 import { modelPlanStripe, stripeRecord, verifyModelPlanWebhook } from "../_lib/model-plan-stripe.js"
 import {
   ApiError,
@@ -33,13 +33,7 @@ export async function reconcileModelPlanEvent(event: Record<string, unknown>, fe
   const account = await readModelPlanAccount(id, fetcher)
   if (account?.customer !== object.customer)
     throw new ApiError(400, "BILLING_ACCOUNT_MISMATCH", "The billing account does not match.")
-  if (
-    String(event.type).startsWith("checkout.session.") &&
-    typeof data.id === "string" &&
-    data.mode === "payment" &&
-    data.status === "complete"
-  )
-    await reconcileModelTopup(id, data.id, fetcher)
+  // Codium sells monthly plans only, so a completed one-time payment checkout grants nothing of its own.
   // Read current Stripe state instead of applying webhook deltas: event retries
   // and out-of-order refund/dispute notifications cannot grant credits twice.
   await reconcileModelPlanAccount(id, fetcher)

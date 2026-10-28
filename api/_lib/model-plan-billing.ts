@@ -1,9 +1,9 @@
 import { requireAccountUser } from "./account.js"
 import { enforceRateLimit, requireTrustedJsonRequest } from "./abuse.js"
 import { verifyDesktopToken } from "./cli-token.js"
-import { modelPlanCheckout, modelPlanPortal, modelTopupCheckout } from "./model-plan-account.js"
+import { modelPlanCheckout, modelPlanPortal } from "./model-plan-account.js"
 import { requireModelPlanUser } from "./model-plan-chat.js"
-import { modelPlansEnabled, requireModelPlans, requireModelTopups } from "./model-plan-config.js"
+import { modelPlansEnabled, requireModelPlans } from "./model-plan-config.js"
 import { ApiError, handleApiError, json, readJson, requireMethod, type ApiRequest, type ApiResponse } from "./http.js"
 
 /**
@@ -51,30 +51,20 @@ export async function handleModelPlanCheckout(
   }
 }
 
-export async function handleModelTopupCheckout(
-  request: ApiRequest,
-  response: ApiResponse,
-  fetcher: typeof fetch = fetch,
-) {
-  try {
-    requireMethod(request, "POST")
-    requireTrustedJsonRequest(request, 4096)
-    requireModelTopups()
-    const account = await requireBillingUser(request, fetcher)
-    await enforceRateLimit(request, response, {
-      scope: "model-topup-checkout",
-      identifier: account.id,
-      limit: 10,
-      windowSeconds: 3600,
-      requirePersistent: true,
-    })
-    const body = await readJson<{ pack?: unknown }>(request, 4096)
-    if (typeof body.pack !== "string")
-      throw new ApiError(400, "MODEL_TOPUP_INVALID", "Choose an available Codium credit pack.")
-    json(response, 200, await modelTopupCheckout(account, body.pack, fetcher))
-  } catch (error) {
-    handleApiError(response, error)
-  }
+/**
+ * `/api/model-plans/topup`. Codium sells monthly plans only, so the route that sold top-ups answers every request, from
+ * any caller and with any method, with JSON 410 `MODEL_TOPUP_REMOVED`. It reads nothing, calls no service and sells
+ * nothing; an older Vector that still offers a top-up shows the message instead of a bare 404.
+ */
+export function handleModelTopupRemoved(_request: ApiRequest, response: ApiResponse) {
+  handleApiError(
+    response,
+    new ApiError(
+      410,
+      "MODEL_TOPUP_REMOVED",
+      "Vector Codium no longer sells top-ups. Choose or change a monthly plan instead.",
+    ),
+  )
 }
 
 export async function handleModelPlanPortal(request: ApiRequest, response: ApiResponse, fetcher: typeof fetch = fetch) {

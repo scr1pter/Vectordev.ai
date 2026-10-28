@@ -4,7 +4,7 @@ import {
   modelPlanStripe,
   stripeRecord,
 } from "../../../api/_lib/model-plan-stripe"
-import { MODEL_PLAN_PRICES, modelPlanOrigin, modelPlans, modelTopups } from "../../../api/_lib/model-plan-config"
+import { MODEL_PLAN_PRICES, modelPlanOrigin, modelPlans } from "../../../api/_lib/model-plan-config"
 import { modelPlanChangePortalConfiguration, modelPlanPortalConfiguration, modelPlanWebhook } from "./model-plan-setup"
 
 // A protected preview deployment lets Stripe's notifications through only with Vercel's automation bypass secret.
@@ -14,14 +14,13 @@ const webhook = `${modelPlanOrigin()}/api/model-plans/webhook${bypass ? `?${new 
 // Dry-run by default. Execute with --apply only in the intended Stripe account.
 if (!Bun.argv.includes("--apply")) {
   console.log(
-    `Vector Codium: monthly subscriptions and one-time top-ups at ${MODEL_PLAN_PRICES.map((price) => `$${price}`).join(", ")}.`,
+    `Vector Codium: monthly subscriptions at ${MODEL_PLAN_PRICES.map((price) => `$${price}`).join(", ")}. There are no top-ups.`,
   )
   console.table(
     modelPlans().map((plan) => ({
       plan: plan.name,
       price: plan.price,
       monthlyCredits: plan.credits,
-      topupCredits: modelTopups().find((pack) => pack.price === plan.price)?.credits,
     })),
   )
   console.log("Also creates a billing portal with payment-method updates, invoices and cancellation at period end.")
@@ -71,34 +70,6 @@ for (const plan of modelPlans()) {
     throw new Error(`Existing Stripe price ${lookup} has unexpected billing settings.`)
   monthly.push({ product: price.product, price: price.id })
   console.log(`STRIPE_MODEL_PLAN_${amount}_PRICE_ID=${price.id}`)
-}
-
-for (const pack of modelTopups()) {
-  const lookup = `vector-codium-topup-${pack.price}-v1`
-  const result = await modelPlanStripe(`prices?${new URLSearchParams({ "lookup_keys[]": lookup, limit: "2" })}`)
-  const existing = Array.isArray(result.data) ? result.data.filter(stripeRecord) : []
-  if (existing.length > 1) throw new Error(`More than one Stripe price matches ${lookup}.`)
-  const price =
-    existing[0] ??
-    (await modelPlanStripe("prices", {
-      method: "POST",
-      idempotency: lookup,
-      body: new URLSearchParams({
-        currency: "usd",
-        unit_amount: String(pack.price * 100),
-        "product_data[name]": `Vector Codium ${pack.name}`,
-        lookup_key: lookup,
-      }),
-    }))
-  if (
-    price.currency !== "usd" ||
-    price.unit_amount !== pack.price * 100 ||
-    price.active !== true ||
-    price.recurring ||
-    typeof price.id !== "string"
-  )
-    throw new Error(`Existing Stripe price ${lookup} has unexpected billing settings.`)
-  console.log(`STRIPE_MODEL_TOPUP_${pack.price}_PRICE_ID=${price.id}`)
 }
 
 const portal = await modelPlanPortalConfiguration()
