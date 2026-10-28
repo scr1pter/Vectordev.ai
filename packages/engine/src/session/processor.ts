@@ -99,6 +99,8 @@ interface ProcessorContext extends Input {
     output?: string
     error?: string
     providerExecuted: boolean
+    // A StructuredOutput call whose value was kept: the run's final answer.
+    final?: boolean
   }[]
   needsCompaction: boolean
   currentText: SessionV1.TextPart | undefined
@@ -316,7 +318,13 @@ const layer = Layer.effect(
         const digest = createHash("sha256")
           .update([output.output, ...(output.attachments ?? []).map((attachment) => attachment.url)].join("\n"))
           .digest("hex")
-        ctx.stepTools = ctx.stepTools.map((item) => (item.callID === toolCallID ? { ...item, output: digest } : item))
+        // StructuredOutput says whether it kept the value; an invalid call it answered with an error is not final.
+        const final = output.metadata.valid === true || output.metadata.captured === true
+        ctx.stepTools = ctx.stepTools.map((item) =>
+          item.callID === toolCallID
+            ? { ...item, output: digest, ...(item.tool === "StructuredOutput" && final ? { final } : {}) }
+            : item,
+        )
         yield* session.updatePart({
           ...match.part,
           state: {
@@ -721,10 +729,10 @@ const layer = Layer.effect(
                 unpriced: usage.unpriced,
                 tokens: usage.tokens,
                 // The loop's own rule: it goes on after "tool-calls", and after local tool calls under any finish
-                // reason. A StructuredOutput call is the final answer.
+                // reason. Only a StructuredOutput call whose value was kept is the final answer.
                 continues:
                   (value.reason === "tool-calls" || ctx.stepTools.some((item) => !item.providerExecuted)) &&
-                  !ctx.stepTools.some((item) => item.tool === "StructuredOutput"),
+                  !ctx.stepTools.some((item) => item.final),
                 // The step's patch is taken off the request path, so a successful edit tool stands in for it here.
                 patched: ctx.stepTools.some((item) => FILE_TOOLS.has(item.tool) && item.error === undefined),
               },

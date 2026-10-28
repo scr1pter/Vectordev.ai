@@ -5081,3 +5081,116 @@ describe("ProviderTransform.effortOptions", () => {
     expect(ProviderTransform.smallOptions(free("optional"))).toEqual({ reasoning: { effort: "none" } })
   })
 })
+
+describe("ProviderTransform.toolChoice", () => {
+  const model = (npm: string, apiID: string, providerID = "anthropic") => {
+    const value = {
+      id: `${providerID}/${apiID}`,
+      providerID,
+      api: { id: apiID, url: "https://api.test", npm },
+      capabilities: { reasoning: true },
+      limit: { context: 200_000, output: 64_000 },
+      release_date: "2026-01-01",
+    } as any
+    value.variants = ProviderTransform.variants(value)
+    return value
+  }
+  const opus = model("@ai-sdk/anthropic", "claude-opus-4-6")
+  const sonnet = model("@ai-sdk/anthropic", "claude-sonnet-4-5")
+  const vertex = model("@ai-sdk/google-vertex/anthropic", "claude-sonnet-4-5", "google-vertex-anthropic")
+  const bedrock = model("@ai-sdk/amazon-bedrock", "anthropic.claude-sonnet-4-5", "amazon-bedrock")
+  const gpt = model("@ai-sdk/openai", "gpt-5.2", "openai")
+  const gemini = model("@ai-sdk/google", "gemini-2.5-pro", "google")
+
+  test("Anthropic with thinking on gets auto instead of required", () => {
+    expect(ProviderTransform.toolChoice(opus, opus.variants.high, "required")).toBe("auto")
+    expect(ProviderTransform.toolChoice(sonnet, sonnet.variants.high, "required")).toBe("auto")
+    expect(ProviderTransform.toolChoice(vertex, vertex.variants.high, "required")).toBe("auto")
+    expect(ProviderTransform.toolChoice(bedrock, bedrock.variants.high, "required")).toBe("auto")
+  })
+
+  test("Anthropic without thinking, and other providers, keep required", () => {
+    expect(ProviderTransform.toolChoice(opus, {}, "required")).toBe("required")
+    expect(ProviderTransform.toolChoice(opus, { thinking: { type: "disabled" } }, "required")).toBe("required")
+    expect(ProviderTransform.toolChoice(opus, { effort: "high" }, "required")).toBe("required")
+    expect(ProviderTransform.toolChoice(gpt, gpt.variants.high, "required")).toBe("required")
+    expect(ProviderTransform.toolChoice(gemini, gemini.variants.high, "required")).toBe("required")
+    // A Bedrock model that is not Claude reasons through reasoningConfig too, and takes forced tool use.
+    const nova = model("@ai-sdk/amazon-bedrock", "amazon.nova-pro", "amazon-bedrock")
+    expect(ProviderTransform.toolChoice(nova, nova.variants.high, "required")).toBe("required")
+  })
+
+  test("only required changes", () => {
+    expect(ProviderTransform.toolChoice(opus, opus.variants.high, undefined)).toBeUndefined()
+    expect(ProviderTransform.toolChoice(opus, opus.variants.high, "auto")).toBe("auto")
+    expect(ProviderTransform.toolChoice(opus, opus.variants.high, "none")).toBe("none")
+  })
+
+  test("withoutThinking turns thinking off so the call can be required", () => {
+    const off = ProviderTransform.withoutThinking({ ...opus.variants.high, store: false })
+    expect(off).toEqual({ effort: "high", store: false })
+    expect(ProviderTransform.toolChoice(opus, off, "required")).toBe("required")
+    expect(
+      ProviderTransform.toolChoice(bedrock, ProviderTransform.withoutThinking(bedrock.variants.high), "required"),
+    ).toBe("required")
+  })
+})
+
+describe("ProviderTransform.caches", () => {
+  // The helper as it was in session/prompt.ts before it moved here.
+  const old = (model: any) => ProviderTransform.usesCacheBreakpoints(model) || (model.cost?.cache?.read ?? 0) > 0
+
+  test("equals the helper it replaced", () => {
+    const models = [
+      { providerID: "anthropic", id: "claude-sonnet-4-5", api: { id: "claude-sonnet-4-5", npm: "@ai-sdk/anthropic" } },
+      {
+        providerID: "openai",
+        id: "gpt-5.2",
+        api: { id: "gpt-5.2", npm: "@ai-sdk/openai" },
+        cost: { cache: { read: 0.1 } },
+      },
+      { providerID: "openai", id: "gpt-4", api: { id: "gpt-4", npm: "@ai-sdk/openai" }, cost: { input: 1, output: 2 } },
+      { providerID: "gateway", id: "anthropic/claude", api: { id: "anthropic/claude", npm: "@ai-sdk/gateway" } },
+      { providerID: "lmstudio", id: "local", api: { id: "local", npm: "@ai-sdk/openai-compatible" } },
+      { providerID: "alibaba", id: "qwen", api: { id: "qwen", npm: "@ai-sdk/alibaba" } },
+    ] as any[]
+    expect(models.map((model) => ProviderTransform.caches(model))).toEqual(models.map(old))
+    expect(models.map((model) => ProviderTransform.caches(model))).toEqual([true, true, false, false, false, true])
+  })
+})
+
+describe("ProviderTransform.schema - restated bounds", () => {
+  const model = (npm: string) => ({ providerID: "p", id: "m", api: { id: "m", npm } }) as any
+  const schema = {
+    type: "object",
+    properties: {
+      tags: { type: "array", items: { type: "string", maxLength: 8 }, minItems: 1, uniqueItems: true },
+      meta: { type: "object", properties: {}, additionalProperties: false },
+      name: { type: "string", minLength: 2 },
+    },
+  } as any
+
+  test("only when asked, and only for a provider that drops the bounds", () => {
+    expect(ProviderTransform.schema(model("@ai-sdk/anthropic"), schema, { restate: true })).toEqual(schema)
+    expect(ProviderTransform.schema(model("@ai-sdk/openai"), schema).properties!.tags).toEqual({
+      type: "array",
+      items: { type: "string" },
+    })
+  })
+
+  test("OpenAI's subset keeps additionalProperties and restates the rest", () => {
+    const result = ProviderTransform.schema(model("@ai-sdk/openai"), schema, { restate: true }) as any
+    expect(result.properties.tags.description).toBe("(minItems: 1, uniqueItems: true)")
+    expect(result.properties.tags.items.description).toBe("(maxLength: 8)")
+    expect(result.properties.name.description).toBe("(minLength: 2)")
+    expect(result.properties.meta.description).toBeUndefined()
+    expect(result.properties.meta.additionalProperties).toBe(false)
+  })
+
+  test("Google's conversion keeps minLength and restates additionalProperties", () => {
+    const result = ProviderTransform.schema(model("@ai-sdk/google"), schema, { restate: true }) as any
+    expect(result.properties.meta.description).toBe("(additionalProperties: false)")
+    expect(result.properties.name.description).toBeUndefined()
+    expect(result.properties.tags.items.description).toBe("(maxLength: 8)")
+  })
+})

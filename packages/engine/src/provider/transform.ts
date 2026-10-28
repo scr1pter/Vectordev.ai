@@ -472,6 +472,36 @@ export function caches(model: Provider.Model) {
   return usesCacheBreakpoints(model) || (model.cost?.cache?.read ?? 0) > 0
 }
 
+// Whether a request with these provider options runs an Anthropic model with thinking on, directly, on Vertex or on
+// Bedrock. Anthropic refuses forced tool use while extended thinking is on.
+function anthropicThinking(model: Provider.Model, options: Record<string, any>) {
+  const on = (setting: unknown) => isPlainObject(setting) && (setting.type === "enabled" || setting.type === "adaptive")
+  if (model.api.npm === "@ai-sdk/anthropic" || model.api.npm === "@ai-sdk/google-vertex/anthropic")
+    return on(options.thinking)
+  if (model.api.npm === "@ai-sdk/amazon-bedrock")
+    return (model.api.id.includes("anthropic") || model.api.id.includes("claude")) && on(options.reasoningConfig)
+  return false
+}
+
+/**
+ * The tool choice a request can send: "required" becomes "auto" for an Anthropic model with thinking on, which refuses
+ * forced tool use. The caller follows such a step with a closing one that turns thinking off (`withoutThinking`).
+ */
+export function toolChoice(
+  model: Provider.Model,
+  options: Record<string, any>,
+  requested?: "auto" | "required" | "none",
+): "auto" | "required" | "none" | undefined {
+  if (requested === "required" && anthropicThinking(model, options)) return "auto"
+  return requested
+}
+
+/** Provider options with Anthropic thinking turned off, for a step that must force a tool call. */
+export function withoutThinking(options: Record<string, any>): Record<string, any> {
+  const { thinking: _thinking, reasoningConfig: _reasoning, ...rest } = options
+  return rest
+}
+
 export function message(msgs: ModelMessage[], model: Provider.Model, options: Record<string, unknown>, cache = true) {
   msgs = unsupportedParts(msgs, model)
   msgs = normalizeMessages(msgs, model, options)
@@ -1524,7 +1554,60 @@ function sanitizeOpenAISchema(value: unknown): unknown {
   return result
 }
 
-export function schema(model: Provider.Model, schema: JSONSchema7): JSONSchema7 {
+// Bounds a provider's schema path drops: OpenAI's subset above, and the Google SDK's conversion. With `restate`, each is
+// restated in its node's description so the model still reads it; the engine checks it either way.
+const NUMBER_AND_COUNT_BOUNDS = [
+  "minimum",
+  "maximum",
+  "exclusiveMinimum",
+  "exclusiveMaximum",
+  "multipleOf",
+  "maxLength",
+  "minItems",
+  "maxItems",
+  "uniqueItems",
+  "minProperties",
+  "maxProperties",
+]
+const OPENAI_DROPS = [...NUMBER_AND_COUNT_BOUNDS, "minLength"]
+const GOOGLE_DROPS = [...NUMBER_AND_COUNT_BOUNDS, "additionalProperties"]
+
+function droppedBounds(model: Provider.Model): readonly string[] {
+  if (model.api.npm === "@ai-sdk/openai" || model.api.npm === "@ai-sdk/azure") return OPENAI_DROPS
+  if (model.api.npm === "@ai-sdk/google" || model.api.npm === "@ai-sdk/google-vertex") return GOOGLE_DROPS
+  return []
+}
+
+function restateBounds(node: unknown, keys: readonly string[]): unknown {
+  if (!isPlainObject(node)) return node
+  const result: JsonRecord = { ...node }
+  const said = keys.flatMap((key) => {
+    const value = node[key]
+    if (value === undefined || (key === "additionalProperties" && value !== false)) return []
+    if (key === "uniqueItems" && value !== true) return []
+    return [`${key}: ${JSON.stringify(value)}`]
+  })
+  if (said.length > 0)
+    result.description = `${typeof node.description === "string" && node.description ? `${node.description} ` : ""}(${said.join(", ")})`
+  const each = (value: unknown) =>
+    isPlainObject(value)
+      ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, restateBounds(item, keys)]))
+      : value
+  for (const key of ["properties", "$defs", "definitions"]) if (key in node) result[key] = each(node[key])
+  for (const key of ["items", "additionalProperties", "not"])
+    if (key in node) result[key] = restateBounds(node[key], keys)
+  for (const key of ["anyOf", "oneOf", "allOf"]) {
+    const list = node[key]
+    if (Array.isArray(list)) result[key] = list.map((item) => restateBounds(item, keys))
+  }
+  return result
+}
+
+export function schema(model: Provider.Model, schema: JSONSchema7, options: { restate?: boolean } = {}): JSONSchema7 {
+  if (options.restate) {
+    const dropped = droppedBounds(model)
+    if (dropped.length > 0) schema = restateBounds(schema, dropped) as JSONSchema7
+  }
   /*
   if (["openai", "azure"].includes(providerID)) {
     if (schema.type === "object" && schema.properties) {

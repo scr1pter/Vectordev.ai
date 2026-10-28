@@ -61,7 +61,12 @@ export type StreamInput = {
   effort?: TaskSize.Effort
   tools: Record<string, Tool>
   retries?: number
+  // "required" is sent as "auto" where the provider refuses forced tool use with thinking on
+  // (ProviderTransform.toolChoice); `chose` hears what was sent.
   toolChoice?: "auto" | "required" | "none"
+  chose?: (toolChoice: "auto" | "required" | "none" | undefined) => void
+  // false turns Anthropic thinking off, for a closing step that must force a tool call.
+  thinking?: false
   // false for a request whose prefix is never sent again, such as a compaction summary: cache breakpoints would only
   // make the provider bill its whole input at the cache-write premium.
   cache?: boolean
@@ -198,6 +203,10 @@ const live: Layer.Layer<
         typeof item.options.fetch === "function"
       )
         Object.assign(prepared.headers, { [REQUEST_ID_HEADER]: input.requestID })
+      const options =
+        input.thinking === false ? ProviderTransform.withoutThinking(prepared.params.options) : prepared.params.options
+      const toolChoice = ProviderTransform.toolChoice(input.model, options, input.toolChoice)
+      input.chose?.(toolChoice)
 
       // Wire up toolExecutor for DWS workflow models so that tool calls
       // from the workflow service are executed via vector's tool system
@@ -327,12 +336,12 @@ const live: Layer.Layer<
           llmClient,
           messages: prepared.messages,
           tools: prepared.tools,
-          toolChoice: input.toolChoice,
+          toolChoice,
           temperature: prepared.params.temperature,
           topP: prepared.params.topP,
           topK: prepared.params.topK,
           maxOutputTokens: prepared.params.maxOutputTokens,
-          providerOptions: prepared.params.options,
+          providerOptions: options,
           headers: prepared.headers,
           abort: input.abort,
         })
@@ -424,12 +433,12 @@ const live: Layer.Layer<
           temperature: prepared.params.temperature,
           topP: prepared.params.topP,
           topK: prepared.params.topK,
-          providerOptions: ProviderTransform.providerOptions(input.model, prepared.params.options),
+          providerOptions: ProviderTransform.providerOptions(input.model, options),
           activeTools: Object.keys(prepared.tools).filter((x) => x !== "invalid"),
           // A workflow model runs its tools inside its own stream, so holding a shell call back to the end would wait
           // on itself.
           tools: isWorkflow ? prepared.tools : ToolOrder.tools(prepared.tools, input.abort),
-          toolChoice: input.toolChoice,
+          toolChoice,
           maxOutputTokens: prepared.params.maxOutputTokens,
           abortSignal: input.abort,
           headers: prepared.headers,
@@ -455,7 +464,7 @@ const live: Layer.Layer<
               },
               NativePatch.middleware({
                 model: input.model,
-                options: prepared.params.options,
+                options,
                 tool: prepared.tools.apply_patch,
               }),
               ...(isWorkflow ? [] : [ToolOrder.middleware()]),

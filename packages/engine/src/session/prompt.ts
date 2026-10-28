@@ -91,6 +91,7 @@ import { LLMEvent } from "@vectordevai/llm"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { RunBudget } from "@vectordevai/schema/run-budget"
 import { TaskSize } from "@vectordevai/core/task-size"
+import { JsonSchemaCheck } from "@vectordevai/core/json-schema-check"
 import { SessionTaskSize } from "./task-size"
 import { SessionSkillLearn } from "./skill-learn"
 import { SessionWorkflow } from "./workflow"
@@ -188,6 +189,9 @@ IMPORTANT:
 - This tool provides your final answer - no further actions are taken after calling it`
 
 const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested structured output. You MUST use the StructuredOutput tool to provide your final response. Do NOT respond with plain text - you MUST call the StructuredOutput tool with your answer formatted according to the schema.`
+
+// The closing step's request ends with this, for a model that answered in text where thinking kept the call optional.
+const STRUCTURED_OUTPUT_CLOSING = "Call StructuredOutput now with your final answer."
 
 // The judge Vector runs after a finished run gets at most this many rounds per request: a FAIL sends its findings back
 // for repair and the judge looks again, and the third verdict stands.
@@ -2180,6 +2184,11 @@ const layer = Layer.effect(
       const ctx = yield* InstanceState.context
       const sessionID = session.id
       let structured: unknown
+      // Invalid StructuredOutput calls this run; the tool is built again for every step, so the count lives here.
+      const invalid = { count: 0 }
+      // A json_schema step that could not force the call ("auto" for thinking) and ended without a kept value gets one
+      // closing step with thinking off and the call required.
+      let closing: "due" | "done" | undefined
       let step = 0
       // Every message this run writes sorts after this ID, which is how the judge finds the requests the run answered.
       const since = MessageID.ascending()
@@ -2218,6 +2227,7 @@ const layer = Layer.effect(
           ) ?? false
 
         if (
+          closing !== "due" &&
           !(resumed && step === 0 && lastAssistant?.id === resumed.messageID) &&
           lastAssistant?.finish &&
           !["tool-calls"].includes(lastAssistant.finish) &&
@@ -2659,6 +2669,9 @@ const layer = Layer.effect(
               onSuccess(output) {
                 structured = output
               },
+              retryCount: lastUser.format.retryCount,
+              invalid,
+              model,
             })
           }
 
@@ -2756,6 +2769,10 @@ const layer = Layer.effect(
           ]
           const format = lastUser.format ?? { type: "text" as const }
           if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
+          const closingStep = closing === "due" && format.type === "json_schema"
+          if (closing === "due") closing = "done"
+          let chosen: LLM.StreamInput["toolChoice"]
+          const retried = invalid.count
           const result = yield* handle.process({
             user: lastUser,
             agent: stepAgent,
@@ -2780,11 +2797,16 @@ const layer = Layer.effect(
               ...(stepAgent.name === "autocomplete"
                 ? modelMsgs.filter((message) => message.role === "user").slice(-1)
                 : modelMsgs),
+              ...(closingStep ? [{ role: "user" as const, content: STRUCTURED_OUTPUT_CLOSING }] : []),
               ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS_PROMPT }] : []),
             ],
             tools,
             model,
             toolChoice: format.type === "json_schema" ? "required" : undefined,
+            chose: (choice) => {
+              chosen = choice
+            },
+            ...(closingStep ? { thinking: false as const } : {}),
             retries: lastUser.executionMode === "fast" ? 1 : undefined,
             answering: () => Deferred.doneUnsafe(answering, Effect.succeed(true)),
             // The digest in the system prompt carries the owner's rules, MEMORY.md and pinned entries too.
@@ -2813,9 +2835,15 @@ const layer = Layer.effect(
               return "break" as const
             }
             if (format.type === "json_schema") {
+              // An invalid call got its error back, and the model answers it next step whatever the finish said.
+              if (invalid.count > retried) return "continue" as const
+              if (chosen === "auto" && closing === undefined) {
+                closing = "due"
+                return "continue" as const
+              }
               handle.message.error = new SessionV1.StructuredOutputError({
                 message: "Model did not produce structured output",
-                retries: 0,
+                retries: invalid.count,
               }).toObject()
               yield* sessions.updateMessage(handle.message)
               return "break" as const
@@ -4494,20 +4522,44 @@ export function prepareCommandTemplate(templateCommand: string, inputArguments: 
 export function createStructuredOutputTool(input: {
   schema: Record<string, any>
   onSuccess: (output: unknown) => void
+  // Invalid calls answered with an error before a value is kept as it is (the format's retryCount).
+  retryCount?: number
+  // The run's count of invalid calls. The tool is built again for every step, so the run keeps the count.
+  invalid?: { count: number }
+  // The model the schema is rendered for: bounds its provider drops are restated in descriptions.
+  model?: Provider.Model
 }): AITool {
   // Remove $schema property if present (not needed for tool input)
   const { $schema: _, ...toolSchema } = input.schema
+  // The AI SDK does not check a JSON Schema tool's input, so Vector does, for every schema JsonSchemaCheck can enforce
+  // in full. Any other schema is passed on and its value kept unchecked.
+  const check = JsonSchemaCheck.accept(input.schema)
+  const invalid = input.invalid ?? { count: 0 }
+  const retryCount = input.retryCount ?? 2
 
   return tool({
     description: STRUCTURED_OUTPUT_DESCRIPTION,
-    inputSchema: jsonSchema(toolSchema as JSONSchema7),
+    inputSchema: jsonSchema(
+      check.ok && input.model
+        ? ProviderTransform.schema(input.model, toolSchema as JSONSchema7, { restate: true })
+        : (toolSchema as JSONSchema7),
+    ),
     async execute(args) {
-      // AI SDK validates args against inputSchema before calling execute()
+      const problems = check.ok ? JsonSchemaCheck.validate(check.schema, args) : []
+      if (problems.length > 0 && invalid.count < retryCount) {
+        invalid.count++
+        return {
+          output: `Invalid structured output: ${JsonSchemaCheck.describe(problems)} Call StructuredOutput again with JSON that matches the schema.`,
+          title: "Structured Output",
+          metadata: { valid: false },
+        }
+      }
       input.onSuccess(args)
       return {
         output: "Structured output captured successfully.",
         title: "Structured Output",
-        metadata: { valid: true },
+        // A value kept after the retries ran out is still the answer, marked invalid.
+        metadata: problems.length > 0 ? { valid: false, captured: true } : { valid: true },
       }
     },
     toModelOutput({ output }) {
