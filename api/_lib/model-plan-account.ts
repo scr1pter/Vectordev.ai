@@ -3,15 +3,18 @@ import { Option, Schema } from "effect"
 import type { AccountUser } from "./account.js"
 import { withBillingMutation } from "./billing-lock.js"
 import { requireCodiumSales, reserveCodiumSale } from "./codium-funding.js"
+import { codiumKey, openRouterKeyName } from "./codium-keys.js"
+import { codiumKeyLimitUsd } from "./codium-limits.js"
 import {
   modelPlanOrigin,
   modelPlans,
   modelPlansEnabled,
   modelTopups,
   MODEL_PLAN_ROOT,
+  requireCodiumCheckoutUser,
   subscriptionPlanCredits,
 } from "./model-plan-config.js"
-import { modelPlanStripe, stripeRecord } from "./model-plan-stripe.js"
+import { modelPlanStripe, stripeMode, stripeRecord } from "./model-plan-stripe.js"
 import { ApiError } from "./http.js"
 import { persistentStore } from "./persistent-store.js"
 
@@ -51,7 +54,15 @@ const Account = Schema.Struct({
   ),
 })
 type Account = typeof Account.Type
-const accountKey = (id: string) => `vector:model-plans:account:${id}`
+const accountKey = (id: string) => codiumKey("account", id)
+
+/**
+ * The account's billing lease. Checkout, deletion, the webhook and model requests all serialize on this one key, in the
+ * same mode namespace as the account it guards.
+ */
+function withAccountLease<T>(id: string, work: (verify: () => Promise<void>) => Promise<T>, fetcher: typeof fetch) {
+  return withBillingMutation(`model-plan:${id}`, work, fetcher, { key: codiumKey("lease", id) })
+}
 
 export async function readModelPlanAccount(id: string, fetcher: typeof fetch = fetch) {
   const saved = await persistentStore(["GET", accountKey(id)], fetcher)
@@ -66,17 +77,26 @@ async function saveAccount(id: string, value: Account, fetcher: typeof fetch) {
   await persistentStore(["SET", accountKey(id), JSON.stringify(value)], fetcher)
 }
 
+/**
+ * A call to OpenRouter's key management API. Creating a key (POST) names an idempotency key, so a create retried after a
+ * lost answer can be recognised instead of leaving a second funded key behind; the account lease is what serializes
+ * the creates themselves.
+ */
 export async function openRouterManagement(
   path: string,
   body?: Record<string, unknown>,
   fetcher: typeof fetch = fetch,
   method = "GET",
+  idempotency?: string,
 ) {
+  if (method === "POST" && !idempotency?.trim())
+    throw new ApiError(500, "MODEL_PLAN_IDEMPOTENCY_REQUIRED", "Your model allowance could not be created.")
   const response = await fetcher(`${MODEL_PLAN_ROOT}/keys${path}`, {
     method,
     headers: {
       authorization: `Bearer ${process.env.OPENROUTER_MANAGEMENT_KEY ?? ""}`,
       "content-type": "application/json",
+      ...(idempotency ? { "Idempotency-Key": idempotency } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
     redirect: "error",
@@ -102,7 +122,7 @@ export async function withCodiumLease<T>(
   fetcher: typeof fetch = fetch,
   deadline = Date.now() + LEASE_WAIT_MS,
 ): Promise<T> {
-  return withBillingMutation(`model-plan:${id}`, work, fetcher).catch(async (error: unknown) => {
+  return withAccountLease(id, work, fetcher).catch(async (error: unknown) => {
     if (!(error instanceof ApiError) || error.code !== "BILLING_MUTATION_BUSY" || Date.now() >= deadline) throw error
     await new Promise((resolve) => setTimeout(resolve, 100 + Math.random() * 150))
     return withCodiumLease(id, work, fetcher, deadline)
@@ -337,7 +357,7 @@ async function synchronizeWalletKey(id: string, account: Account, fetcher: typeo
     `/${encodeURIComponent(account.wallet.hash)}`,
     {
       disabled: account.closing === true || credits <= usage,
-      limit: credits,
+      limit: codiumKeyLimitUsd(credits),
       limit_reset: null,
       include_byok_in_limit: true,
       expires_at: null,
@@ -353,7 +373,7 @@ async function walletCredential(id: string, fetcher: typeof fetch, requiredCredi
   if (existing?.closing)
     throw new ApiError(409, "MODEL_PLAN_ACCOUNT_CLOSING", "This account is being deleted. Model access is closed.")
   if (existing?.wallet) {
-    const credits = await purchasedCredits(existing, id, fetcher)
+    const credits = codiumKeyLimitUsd(await purchasedCredits(existing, id, fetcher))
     const result = await openRouterManagement(`/${encodeURIComponent(existing.wallet.hash)}`, undefined, fetcher)
     const key = result.data
     const usage = verifiedUsage(key)
@@ -380,7 +400,7 @@ async function walletCredential(id: string, fetcher: typeof fetch, requiredCredi
       const account = await readModelPlanAccount(id, fetcher)
       if (!account || account.closing)
         throw new ApiError(402, "MODEL_PLAN_REQUIRED", "Choose a Codium subscription or add credits to use this model.")
-      const credits = await purchasedCredits(account, id, fetcher)
+      const credits = codiumKeyLimitUsd(await purchasedCredits(account, id, fetcher))
       if (account.wallet) {
         await synchronizeWalletKey(id, account, fetcher, verify)
         const result = await openRouterManagement(`/${encodeURIComponent(account.wallet.hash)}`, undefined, fetcher)
@@ -412,14 +432,15 @@ async function provisionWalletKey(
   const result = await openRouterManagement(
     "",
     {
-      name: `Codium ${id} purchased credits`,
-      limit: credits,
+      name: openRouterKeyName([id, "purchased credits"]),
+      limit: codiumKeyLimitUsd(credits),
       limit_reset: null,
       include_byok_in_limit: true,
       expires_at: null,
     },
     fetcher,
     "POST",
+    `vector-codium-wallet-${stripeMode()}-${digest(id)}`,
   )
   if (
     !stripeRecord(result.data) ||
@@ -667,7 +688,7 @@ async function holdCredits(
 ) {
   // Provisioning and checks without a request to pay for hold nothing.
   if (requiredCredits <= 0) return { key: funding.key, release: async (_charge?: number) => {} }
-  const pool = `vector:model-plans:held:${funding.pool}`
+  const pool = codiumKey("held", funding.pool)
   const ticket = randomUUID()
   const member = `${ticket}:${requiredCredits}`
   const held = await persistentStore(
@@ -708,12 +729,14 @@ async function monthlyStatus(id: string, fetcher: typeof fetch = fetch, now = Da
       : current
         ? undefined
         : 0
+  // In test mode the key holds less than the plan's credits; the share left is of what the key can spend.
+  const limit = codiumKeyLimitUsd(paid.plan.credits)
   return {
     active: true as const,
     plan: paid.plan.id,
-    credits: paid.plan.credits,
+    credits: limit,
     used: usage,
-    remaining: usage === undefined ? undefined : Math.max(0, paid.plan.credits - usage),
+    remaining: usage === undefined ? undefined : Math.max(0, limit - usage),
     periodStart: paid.start * 1000,
     periodEnd: paid.end * 1000,
     cancelAtPeriodEnd: paid.cancelAtPeriodEnd,
@@ -749,10 +772,11 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
     if (paid && existing.key?.subscription === paid.id && existing.key.start === paid.start) {
       const result = await openRouterManagement(`/${encodeURIComponent(existing.key.hash)}`, undefined, fetcher)
       const key = result.data
+      const limit = codiumKeyLimitUsd(paid.plan.credits)
       if (
         stripeRecord(key) &&
         key.disabled === false &&
-        key.limit === paid.plan.credits &&
+        key.limit === limit &&
         key.limit_reset === null &&
         key.include_byok_in_limit === true &&
         key.expires_at === new Date(paid.end * 1000).toISOString() &&
@@ -760,11 +784,11 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
         Number.isFinite(key.usage) &&
         key.usage >= 0
       ) {
-        requireMonthlyCredits(paid.plan.credits, key.usage, requiredCredits)
+        requireMonthlyCredits(limit, key.usage, requiredCredits)
         return {
           key: revealModelPlanKey(existing.key.encrypted, `${id}:${paid.id}:${paid.start}`),
           pool: existing.key.hash,
-          available: paid.plan.credits - key.usage,
+          available: limit - key.usage,
         }
       }
     }
@@ -790,10 +814,11 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
           "Your model subscription needs an active paid billing period.",
         )
       }
-      if (paid.plan.credits < requiredCredits) throw monthlyShortfall()
+      const limit = codiumKeyLimitUsd(paid.plan.credits)
+      if (limit < requiredCredits) throw monthlyShortfall()
       const funding = await provisionMonthlyKey(id, account, paid, fetcher, verify)
-      requireMonthlyCredits(paid.plan.credits, funding.usage, requiredCredits)
-      return { key: funding.key, pool: funding.pool, available: paid.plan.credits - funding.usage }
+      requireMonthlyCredits(limit, funding.usage, requiredCredits)
+      return { key: funding.key, pool: funding.pool, available: limit - funding.usage }
     },
     fetcher,
   )
@@ -809,6 +834,7 @@ async function provisionMonthlyKey(
 ) {
   const context = `${id}:${paid.id}:${paid.start}`
   const expires = new Date(paid.end * 1000).toISOString()
+  const limit = codiumKeyLimitUsd(paid.plan.credits)
   if (account.key?.subscription === paid.id && account.key.start === paid.start) {
     const result = await openRouterManagement(`/${encodeURIComponent(account.key.hash)}`, undefined, fetcher)
     const key = result.data
@@ -822,7 +848,7 @@ async function provisionMonthlyKey(
       throw new ApiError(503, "MODEL_PLAN_KEY_INVALID", "Your model allowance could not be verified.")
     if (
       key.disabled ||
-      key.limit !== paid.plan.credits ||
+      key.limit !== limit ||
       key.limit_reset !== null ||
       key.include_byok_in_limit !== true ||
       key.expires_at !== expires
@@ -832,7 +858,7 @@ async function provisionMonthlyKey(
         `/${encodeURIComponent(account.key.hash)}`,
         {
           disabled: false,
-          limit: paid.plan.credits,
+          limit,
           limit_reset: null,
           include_byok_in_limit: true,
           expires_at: expires,
@@ -854,14 +880,15 @@ async function provisionMonthlyKey(
   const result = await openRouterManagement(
     "",
     {
-      name: `Vector ${id} ${paid.id} ${paid.start}`,
-      limit: paid.plan.credits,
+      name: openRouterKeyName([id, paid.id, paid.start]),
+      limit,
       limit_reset: null,
       include_byok_in_limit: true,
       expires_at: expires,
     },
     fetcher,
     "POST",
+    `vector-codium-key-${stripeMode()}-${digest(context)}`,
   )
   if (
     !stripeRecord(result.data) ||
@@ -900,10 +927,11 @@ export async function modelPlanCheckout(
   if (!plan?.priceID || !plan.credits)
     throw new ApiError(400, "MODEL_PLAN_INVALID", "Choose an available Codium subscription.")
   const priceID = plan.priceID
+  requireCodiumCheckoutUser(user)
   // Sell only credits Vector's OpenRouter balance can pay for.
   const funding = await requireCodiumSales(fetcher, now)
-  return withBillingMutation(
-    `model-plan:${user.id}`,
+  return withAccountLease(
+    user.id,
     async (verify) => {
       const previous = await readModelPlanAccount(user.id, fetcher)
       if (previous?.closing)
@@ -955,7 +983,7 @@ export async function modelPlanCheckout(
         earlier && pending?.status === "open"
           ? await modelPlanStripe(
               `checkout/sessions/${encodeURIComponent(earlier.id)}/expire`,
-              { method: "POST" },
+              { method: "POST", idempotency: `vector-expire-${earlier.id}` },
               fetcher,
             )
           : pending
@@ -1097,24 +1125,28 @@ export async function modelPlanPortal(
       "Your plan already has a change waiting for its renewal date. You can change it again after that date.",
     )
   const flow = options.flow === "change" ? "subscription_update" : "subscription_cancel"
+  const body = new URLSearchParams({
+    customer: account.customer,
+    configuration,
+    return_url: `${modelPlanOrigin()}/account`,
+    // A finished change or cancellation returns to the account page, which Vector's billing window watches for.
+    ...(options.flow
+      ? {
+          "flow_data[type]": flow,
+          [`flow_data[${flow}][subscription]`]: subscription[0]!.id,
+          "flow_data[after_completion][type]": "redirect",
+          "flow_data[after_completion][redirect][return_url]": `${modelPlanOrigin()}/account?model_plan=${options.flow === "change" ? "updated" : "ending"}`,
+        }
+      : {}),
+  })
+  // A double click within the minute opens the same portal session; Stripe refuses a key reused with other values,
+  // so the key covers everything the request says.
   const result = await modelPlanStripe(
     "billing_portal/sessions",
     {
       method: "POST",
-      body: new URLSearchParams({
-        customer: account.customer,
-        configuration,
-        return_url: `${modelPlanOrigin()}/account`,
-        // A finished change or cancellation returns to the account page, which Vector's billing window watches for.
-        ...(options.flow
-          ? {
-              "flow_data[type]": flow,
-              [`flow_data[${flow}][subscription]`]: subscription[0]!.id,
-              "flow_data[after_completion][type]": "redirect",
-              "flow_data[after_completion][redirect][return_url]": `${modelPlanOrigin()}/account?model_plan=${options.flow === "change" ? "updated" : "ending"}`,
-            }
-          : {}),
-      }),
+      body,
+      idempotency: `vector-portal-${digest(body.toString())}-${Math.floor((options.now ?? Date.now()) / 60_000)}`,
     },
     fetcher,
   )
@@ -1133,10 +1165,11 @@ export async function modelTopupCheckout(
   if (!pack?.priceID || !pack.credits)
     throw new ApiError(400, "MODEL_TOPUP_INVALID", "Choose an available Codium credit pack.")
   const priceID = pack.priceID
+  requireCodiumCheckoutUser(user)
   const funding = await requireCodiumSales(fetcher, now)
   await settlePendingTopup(user.id, fetcher)
-  return withBillingMutation(
-    `model-plan:${user.id}`,
+  return withAccountLease(
+    user.id,
     async (verify) => {
       const previous = await readModelPlanAccount(user.id, fetcher)
       if (previous?.closing)
@@ -1186,7 +1219,7 @@ export async function modelTopupCheckout(
         earlier && pending?.status === "open"
           ? await modelPlanStripe(
               `checkout/sessions/${encodeURIComponent(earlier.id)}/expire`,
-              { method: "POST" },
+              { method: "POST", idempotency: `vector-expire-${earlier.id}` },
               fetcher,
             )
           : pending
@@ -1283,8 +1316,8 @@ export async function cancelModelPlanAccount(id: string, fetcher: typeof fetch =
       throw new ApiError(503, "BILLING_UNAVAILABLE", "Model billing must be available before deleting this account.")
     return
   }
-  await withBillingMutation(
-    `model-plan:${id}`,
+  await withAccountLease(
+    id,
     async (verify) => {
       const account = await readModelPlanAccount(id, fetcher)
       if (!account) return
@@ -1308,7 +1341,11 @@ export async function cancelModelPlanAccount(id: string, fetcher: typeof fetch =
             "Pending checkout sessions could not be closed. Retry deletion.",
           )
         await verify()
-        await modelPlanStripe(`checkout/sessions/${encodeURIComponent(session.id)}/expire`, { method: "POST" }, fetcher)
+        await modelPlanStripe(
+          `checkout/sessions/${encodeURIComponent(session.id)}/expire`,
+          { method: "POST", idempotency: `vector-expire-${session.id}` },
+          fetcher,
+        )
       }
       for (const subscription of await subscriptions(account.customer, fetcher)) {
         if (["canceled", "incomplete_expired"].includes(String(subscription.status))) continue
@@ -1322,4 +1359,9 @@ export async function cancelModelPlanAccount(id: string, fetcher: typeof fetch =
     },
     fetcher,
   )
+}
+
+/** A short, fixed-length digest for idempotency keys, so they stay well under Stripe's 255 characters. */
+function digest(value: string) {
+  return createHash("sha256").update(value).digest("hex").slice(0, 32)
 }

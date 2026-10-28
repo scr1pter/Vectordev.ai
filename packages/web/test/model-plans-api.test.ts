@@ -64,7 +64,9 @@ async function redis(command: readonly (string | number)[]): Promise<unknown> {
 }
 
 const user = { id: "11111111-1111-4111-8111-111111111111", email: "fixture@example.test" }
-const accountKey = `vector:model-plans:account:${user.id}`
+// Stripe test mode keeps every Codium key in the test namespace.
+const accountKey = `vector:codium:test:account:${user.id}`
+const heldKey = "vector:codium:test:held:hash_fixture1"
 const model = {
   id: "fixture/paid-model",
   name: "Fixture model",
@@ -76,6 +78,10 @@ const model = {
 const environment = [
   "NODE_ENV",
   "VERCEL_ENV",
+  "CODIUM_STRIPE_MODE",
+  "CODIUM_TEST_CREDIT_CAP_USD",
+  "VECTOR_ADMIN_EMAILS",
+  "MODEL_PLANS_MIN_CLIENT",
   "MODEL_PLANS_ENABLED",
   "MODEL_PLAN_MODELS_JSON",
   "MODEL_PLAN_KEY_ENCRYPTION_SECRET",
@@ -193,7 +199,7 @@ const upstream = Bun.serve({
       return Response.json({ ...user, email_confirmed_at: "2026-01-01T00:00:00Z" })
     }
     if (url.pathname.startsWith("/v1/")) {
-      expect(request.headers.get("authorization")).toBe("Bearer sk_fixture")
+      expect(request.headers.get("authorization")).toBe("Bearer sk_test_fixture")
       if (url.pathname === "/v1/customers") return Response.json({ id: "cus_fixture" })
       if (url.pathname === "/v1/subscriptions") return Response.json({ data: state.subscriptions, has_more: false })
       if (url.pathname.startsWith("/v1/subscriptions/") && request.method === "DELETE") {
@@ -351,7 +357,7 @@ beforeEach(async () => {
   // Vector's OpenRouter balance covers what is owed; codium-payments.test.ts exercises the funding check itself.
   await redis([
     "SET",
-    "vector:codium:funding",
+    "vector:codium:test:funding",
     JSON.stringify({
       status: "open",
       checkedAt: Date.now(),
@@ -367,7 +373,12 @@ beforeEach(async () => {
     MODEL_PLANS_ENABLED: "true",
     MODEL_PLAN_MODELS_JSON: JSON.stringify([model]),
     MODEL_PLAN_KEY_ENCRYPTION_SECRET: "ab".repeat(32),
-    STRIPE_SECRET_KEY: "sk_fixture",
+    STRIPE_SECRET_KEY: "sk_test_fixture",
+    CODIUM_STRIPE_MODE: "test",
+    // Test mode caps each key at CODIUM_TEST_CREDIT_CAP_USD; these tests use the fixture plans' full credits.
+    CODIUM_TEST_CREDIT_CAP_USD: "200",
+    // Test checkout is open only to admins.
+    VECTOR_ADMIN_EMAILS: user.email,
     STRIPE_MODEL_PLAN_WEBHOOK_SECRET: "whsec_fixture",
     STRIPE_MODEL_PLAN_PORTAL_CONFIG_ID: "bpc_fixture",
     OPENROUTER_MANAGEMENT_KEY: "fixture-management-key",
@@ -380,11 +391,18 @@ beforeEach(async () => {
     SUPABASE_PUBLISHABLE_KEY: "fixture-publishable",
   })
   delete process.env.VERCEL_ENV
+  delete process.env.MODEL_PLANS_MIN_CLIENT
   delete process.env.STRIPE_MODEL_PLAN_CHANGE_PORTAL_CONFIG_ID
   delete process.env.UPSTASH_REDIS_REST_URL
   delete process.env.UPSTASH_REDIS_REST_TOKEN
-  for (const price of [10, 50, 100, 200]) {
-    process.env[`MODEL_PLAN_${price}_CREDITS_USD`] = String(price / 2)
+  // Fixture allowances that keep the public usage multiples (5.5x, 12x and 25x Plus), as Codium's configuration requires.
+  for (const [price, credits] of [
+    [10, "5"],
+    [50, "27.5"],
+    [100, "60"],
+    [200, "125"],
+  ] as const) {
+    process.env[`MODEL_PLAN_${price}_CREDITS_USD`] = credits
     process.env[`STRIPE_MODEL_PLAN_${price}_PRICE_ID`] = `price_fixture${price}`
   }
   Object.assign(state, {
@@ -480,7 +498,7 @@ describe("subscription checkout with real billing leases", () => {
     expect(calls.filter((call) => call.path === "/v1/customers")).toHaveLength(1)
     expect(calls.find((call) => call.path === "/v1/checkout/sessions")?.body["payment_method_types[0]"]).toBe("card")
     expect(commands.some((command) => command[0] === "EVAL" && String(command[1]).includes("PTTL"))).toBe(true)
-    expect(await redis(["KEYS", "vector:billing-mutation:*"])).toEqual([])
+    expect(await redis(["KEYS", "vector:codium:test:lease:*"])).toEqual([])
   })
 
   test("retries an ambiguous checkout response under the same Stripe idempotency key", async () => {
@@ -662,7 +680,7 @@ describe("plan changes in Stripe's customer portal", () => {
     process.env.MODEL_PLANS_ENABLED = "true"
     await redis([
       "SET",
-      "vector:codium:funding",
+      "vector:codium:test:funding",
       JSON.stringify({
         status: "paused",
         reason: "short",
@@ -771,7 +789,7 @@ describe("plan changes in Stripe's customer portal", () => {
         lines: { data: [{ price: { id: "price_fixture100" }, period: { start, end }, proration: false }] },
       },
     }
-    expect(paidModelPlan(upgraded, user.id)?.plan).toMatchObject({ id: "vector-100", credits: 50 })
+    expect(paidModelPlan(upgraded, user.id)?.plan).toMatchObject({ id: "vector-100", credits: 60 })
     // A prorated charge pays for part of a month, which Codium never grants.
     const prorated = {
       ...upgraded,
@@ -850,7 +868,7 @@ describe("model plan account deletion", () => {
   test("missing billing credentials cannot silently complete cleanup for an existing or unverifiable account", async () => {
     delete process.env.STRIPE_SECRET_KEY
     expect(await cancelModelPlanAccount(user.id, fetcher)).toBeUndefined()
-    process.env.STRIPE_SECRET_KEY = "sk_fixture"
+    process.env.STRIPE_SECRET_KEY = "sk_test_fixture"
     await paid()
     await modelPlanCredential(user.id, fetcher)
     delete process.env.STRIPE_SECRET_KEY
@@ -1164,7 +1182,7 @@ describe("model plan HTTP inference", () => {
     expect(await (await chat()).json()).toEqual(answer)
     expect(chats()).toHaveLength(1)
     // The served request settles its hold just after its answer ends, so wait for that before the next test.
-    const pool = "vector:model-plans:held:hash_fixture1"
+    const pool = heldKey
     for (let tries = 0; tries < 100; tries++) {
       const [member] = (await redis(["ZRANGE", pool, 0, -1])) as string[]
       if (member && Number(await redis(["ZSCORE", pool, member])) < Date.now() + 60_000) break
@@ -1177,7 +1195,7 @@ describe("model plan HTTP inference", () => {
     await modelPlanCredential(user.id, fetcher)
     // Each hold is "<ticket>:<credits>". A request settles its hold just after its answer ends.
     const held = async (count: number, charge?: string) => {
-      const members = async () => (await redis(["ZRANGE", "vector:model-plans:held:hash_fixture1", 0, -1])) as string[]
+      const members = async () => (await redis(["ZRANGE", heldKey, 0, -1])) as string[]
       for (let tries = 0; tries < 100; tries++) {
         const current = await members()
         if (current.length === count && current.every((member) => !charge || member.endsWith(`:${charge}`)))
@@ -1218,7 +1236,7 @@ describe("model plan HTTP inference", () => {
 
   test("an answer that breaks off keeps its largest cost held, since the provider may still bill it", async () => {
     await paid()
-    const pool = "vector:model-plans:held:hash_fixture1"
+    const pool = heldKey
     const members = async () => (await redis(["ZRANGE", pool, 0, -1])) as string[]
     state.charge = 0.001
     state.streamMode = "truncated"

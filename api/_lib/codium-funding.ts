@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { Option, Schema } from "effect"
+import { codiumKey, owedKeyName } from "./codium-keys.js"
 import { ApiError } from "./http.js"
 import { MODEL_PLAN_ROOT, modelPlans, modelTopups } from "./model-plan-config.js"
 import { stripeRecord } from "./model-plan-stripe.js"
@@ -30,12 +31,13 @@ const Funding = Schema.Struct({
 })
 export type CodiumFunding = typeof Funding.Type
 
-const FUNDING_KEY = "vector:codium:funding"
-const LOCK_KEY = "vector:codium:funding:lock"
+// Read at each call: the mode namespace comes from the environment.
+const FUNDING_KEY = () => codiumKey("funding")
+const LOCK_KEY = () => codiumKey("funding", "lock")
 // One reservation per checkout, "<checkout's idempotency key>" -> "<lapses at>:<cents>". A buyer's new checkout gives
 // back their earlier checkout's reservation only when that one can no longer be paid (it closed it, or Stripe had), so
 // a buyer holds one unpaid open checkout of each kind while every purchase they paid for keeps counting.
-const RESERVED_KEY = "vector:codium:funding:reserved"
+const RESERVED_KEY = () => codiumKey("funding", "reserved")
 // Drops lapsed reservations and the one given back (ARGV[3]) and adds up the others, leaving out ARGV[2]'s own, which a
 // retry of the same checkout is reserving again.
 const RESERVATIONS =
@@ -48,13 +50,11 @@ const RESERVE = `${RESERVATIONS}if tonumber(ARGV[6]) < math.ceil((tonumber(ARGV[
 // sale runs a check of its own first.
 export const CODIUM_FUNDING_MAX_AGE_MS = 15 * 60_000
 const REMINDER_MS = 24 * 60 * 60_000
-// Every key Codium creates is named after the Vector account it pays for; other keys on the account are not owed.
-const CODIUM_KEY_NAME = /^(?:Vector|Codium) [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12} /i
 // Bounds the key listing; an account this large needs a different store of what is owed.
 const MAX_KEYS = 50_000
 
 export async function readCodiumFunding(fetcher: typeof fetch = fetch) {
-  const saved = await persistentStore(["GET", FUNDING_KEY], fetcher)
+  const saved = await persistentStore(["GET", FUNDING_KEY()], fetcher)
   if (saved === null) return undefined
   return Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(Funding))(saved))
 }
@@ -63,7 +63,8 @@ export async function readCodiumFunding(fetcher: typeof fetch = fetch) {
 export async function checkCodiumFunding(fetcher: typeof fetch = fetch, now = Date.now()) {
   const lease = randomUUID()
   // One check at a time, so a change of state sends one email.
-  if ((await persistentStore(["SET", LOCK_KEY, lease, "NX", "PX", 60_000], fetcher)) !== "OK")
+  const lock = LOCK_KEY()
+  if ((await persistentStore(["SET", lock, lease, "NX", "PX", 60_000], fetcher)) !== "OK")
     return { ...(await readCodiumFunding(fetcher)), notified: false, ran: false }
   return measureFunding(fetcher, now).finally(() =>
     persistentStore(
@@ -71,7 +72,7 @@ export async function checkCodiumFunding(fetcher: typeof fetch = fetch, now = Da
         "EVAL",
         "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0",
         1,
-        LOCK_KEY,
+        lock,
         lease,
       ],
       fetcher,
@@ -116,14 +117,14 @@ async function measureFunding(fetcher: typeof fetch, now: number) {
     keys: reading.keys,
     notifiedAt: changed ? undefined : previous?.notifiedAt,
   }
-  await persistentStore(["SET", FUNDING_KEY, JSON.stringify(funding)], fetcher)
+  await persistentStore(["SET", FUNDING_KEY(), JSON.stringify(funding)], fetcher)
   // Tell the owner when sales pause or the reason changes, each day they stay paused, and when they reopen.
   const notify =
     funding.status === "paused"
       ? funding.notifiedAt === undefined || now - funding.notifiedAt >= REMINDER_MS
       : changed && previous !== undefined
   const notified = notify && (await emailOwner(funding, reading.failure, fetcher))
-  if (notified) await persistentStore(["SET", FUNDING_KEY, JSON.stringify({ ...funding, notifiedAt: now })], fetcher)
+  if (notified) await persistentStore(["SET", FUNDING_KEY(), JSON.stringify({ ...funding, notifiedAt: now })], fetcher)
   // The scheduled job still reports the failure, so its log shows the check did not run.
   if (funding.reason === "unavailable") throw reading.failure
   return { ...funding, notifiedAt: notified ? now : funding.notifiedAt, notified, ran: true }
@@ -140,7 +141,7 @@ async function fundingReading(fetcher: typeof fetch, now: number) {
   const balance = await openRouterBalance(fetcher)
   const owed = await creditsOwed(fetcher, now)
   const reserved = Number(
-    await persistentStore(["EVAL", `${RESERVATIONS}return reserved`, 1, RESERVED_KEY, now, "", ""], fetcher),
+    await persistentStore(["EVAL", `${RESERVATIONS}return reserved`, 1, RESERVED_KEY(), now, "", ""], fetcher),
   )
   if (!Number.isSafeInteger(reserved)) throw unavailable()
   return {
@@ -195,7 +196,7 @@ export async function reserveCodiumSale(
       "EVAL",
       RESERVE,
       1,
-      RESERVED_KEY,
+      RESERVED_KEY(),
       now,
       sale.id,
       sale.released ?? "",
@@ -238,7 +239,7 @@ async function creditsOwed(fetcher: typeof fetch, now: number) {
     (key) =>
       key.disabled !== true &&
       typeof key.name === "string" &&
-      CODIUM_KEY_NAME.test(key.name) &&
+      owedKeyName(key.name) &&
       typeof key.limit === "number" &&
       Number.isFinite(key.limit) &&
       (key.expires_at === null ||

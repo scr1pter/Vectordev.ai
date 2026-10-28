@@ -1,6 +1,6 @@
 import { RedisClient } from "bun"
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test"
-import { createHash, createHmac } from "node:crypto"
+import { createHmac } from "node:crypto"
 import { mkdtemp, rm } from "node:fs/promises"
 import { createServer } from "node:http"
 import { tmpdir } from "node:os"
@@ -52,7 +52,8 @@ const redis = (command: readonly (string | number)[]) =>
   database.send(String(command[0]), command.slice(1).map(String)) as Promise<unknown>
 
 const user = { id: "44444444-4444-4444-8444-444444444444", email: "buyer@example.test" }
-const accountKey = `vector:model-plans:account:${user.id}`
+// Stripe test mode keeps every Codium key in the test namespace.
+const accountKey = `vector:codium:test:account:${user.id}`
 const DAY = 86_400
 
 type Charge = {
@@ -99,6 +100,9 @@ const resend = { failing: false }
 const environment = [
   "NODE_ENV",
   "VERCEL_ENV",
+  "CODIUM_STRIPE_MODE",
+  "CODIUM_TEST_CREDIT_CAP_USD",
+  "VECTOR_ADMIN_EMAILS",
   "MODEL_PLANS_ENABLED",
   "MODEL_CREDIT_MARKUP_PERCENT",
   "STRIPE_SECRET_KEY",
@@ -323,6 +327,11 @@ beforeEach(async () => {
     NODE_ENV: "development",
     MODEL_PLANS_ENABLED: "true",
     STRIPE_SECRET_KEY: "sk_test_fixture",
+    CODIUM_STRIPE_MODE: "test",
+    // Test mode caps each key at CODIUM_TEST_CREDIT_CAP_USD; these tests follow the fixture plans' full credits.
+    CODIUM_TEST_CREDIT_CAP_USD: "200",
+    // Test checkout is open only to admins: the buyer and the parallel buyers below.
+    VECTOR_ADMIN_EMAILS: [user.email, "1@example.test", "2@example.test", "3@example.test", "4@example.test"].join(","),
     STRIPE_MODEL_PLAN_WEBHOOK_SECRET: "whsec_fixture",
     STRIPE_MODEL_PLAN_PORTAL_CONFIG_ID: "bpc_fixture",
     MODEL_PLAN_KEY_ENCRYPTION_SECRET: "cd".repeat(32),
@@ -610,7 +619,7 @@ describe("payment notifications grant and remove credits without anyone acting",
     await redis(["SET", accountKey, JSON.stringify({ customer: "cus_buyer" })])
     subscribe(10)
     // A notification holds the account's lease for a moment, as it does while it creates the month's key.
-    const lease = `vector:billing-mutation:${createHash("sha256").update(`model-plan:${user.id}`).digest("hex")}`
+    const lease = `vector:codium:test:lease:${user.id}`
     await redis(["SET", lease, "webhook", "PX", "600"])
     expect((await modelPlanCredential(user.id, fetcher)).key).toBe("codium-secret-1")
   })

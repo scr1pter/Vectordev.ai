@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto"
 import { Option, Schema } from "effect"
 import { readCodiumFunding } from "./codium-funding.js"
+import { codiumKey } from "./codium-keys.js"
 import { ApiError, handleApiError, json, queryValue, requireMethod, type ApiRequest, type ApiResponse } from "./http.js"
 import { openRouterManagement, readModelPlanAccount, withCodiumLease } from "./model-plan-account.js"
 import { modelPlans, modelTopups, subscriptionPlanCredits } from "./model-plan-config.js"
@@ -35,7 +36,8 @@ const Entry = Schema.Struct({
 })
 type Entry = typeof Entry.Type
 
-const LEDGER_KEY = "vector:codium:ledger"
+// Read at each call: the mode namespace comes from the environment.
+const LEDGER_KEY = () => codiumKey("ledger")
 
 /**
  * Writes the ledger entry for one charge from Stripe's current state, so every notification about it (paid, fee
@@ -126,7 +128,7 @@ export async function recordCodiumCharge(id: string, chargeID: string, fetcher: 
         // Written under the lease, so the latest entry holds the latest usage.
         updatedAt: Date.now(),
       }
-      await persistentStore(["HSET", LEDGER_KEY, chargeID, JSON.stringify(entry)], fetcher)
+      await persistentStore(["HSET", LEDGER_KEY(), chargeID, JSON.stringify(entry)], fetcher)
       return entry
     },
     fetcher,
@@ -292,7 +294,7 @@ function openRouterFeePercent() {
 }
 
 async function ledgerPage(fetcher: typeof fetch, cursor = "0"): Promise<Entry[]> {
-  const result = await persistentStore(["HSCAN", LEDGER_KEY, cursor, "COUNT", 500], fetcher)
+  const result = await persistentStore(["HSCAN", LEDGER_KEY(), cursor, "COUNT", 500], fetcher)
   if (!Array.isArray(result) || !Array.isArray(result[1]))
     throw new ApiError(503, "CODIUM_LEDGER_UNAVAILABLE", "The Codium ledger could not be read.")
   const entries = result[1]

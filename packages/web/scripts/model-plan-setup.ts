@@ -88,7 +88,7 @@ export async function modelPlanChangePortalConfiguration(
   if (existing) {
     await modelPlanStripe(
       `billing_portal/configurations/${encodeURIComponent(String(existing.id))}`,
-      { method: "POST", body },
+      { method: "POST", idempotency: `vector-codium-change-portal-update-${randomUUID()}`, body },
       fetcher,
     )
     return { id: String(existing.id), created: false }
@@ -119,7 +119,11 @@ export async function modelPlanWebhook(url: string, fetcher: typeof fetch = fetc
     if (registered.url !== url)
       await modelPlanStripe(
         `webhook_endpoints/${encodeURIComponent(String(registered.id))}`,
-        { method: "POST", body: new URLSearchParams({ url }) },
+        {
+          method: "POST",
+          idempotency: `vector-codium-webhook-update-${randomUUID()}`,
+          body: new URLSearchParams({ url }),
+        },
         fetcher,
       )
     const events = Array.isArray(registered.enabled_events) ? registered.enabled_events : []

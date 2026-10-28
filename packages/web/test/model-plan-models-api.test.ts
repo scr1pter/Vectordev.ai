@@ -13,7 +13,6 @@ const environment: Record<string, string> = {
   KV_REST_API_URL: "https://kv.fixture.invalid",
   KV_REST_API_TOKEN: "fixture-kv-token",
   MODEL_PLANS_ENABLED: "true",
-  MODEL_CREDIT_MARKUP_PERCENT: "100",
   STRIPE_SECRET_KEY: "sk_test_fixture_placeholder",
   STRIPE_MODEL_PLAN_WEBHOOK_SECRET: "whsec_fixture_placeholder",
   STRIPE_MODEL_PLAN_PORTAL_CONFIG_ID: "bpc_fixture_placeholder",
@@ -21,6 +20,16 @@ const environment: Record<string, string> = {
   MODEL_PLAN_KEY_ENCRYPTION_SECRET: "cd".repeat(32),
   ...Object.fromEntries(
     [10, 50, 100, 200].map((price) => [`STRIPE_MODEL_PLAN_${price}_PRICE_ID`, `price_fixture${price}`]),
+  ),
+  // Fixture allowances that keep the public usage multiples (5.5x, 12x and 25x Plus), which Codium's configuration
+  // requires; a markup alone scales by price and cannot.
+  ...Object.fromEntries(
+    [
+      [10, "6"],
+      [50, "33"],
+      [100, "72"],
+      [200, "150"],
+    ].map(([price, credits]) => [`MODEL_PLAN_${price}_CREDITS_USD`, credits]),
   ),
 }
 const previous = new Map(Object.keys(environment).map((key) => [key, process.env[key]]))

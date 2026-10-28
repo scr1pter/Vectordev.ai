@@ -1,7 +1,10 @@
 import { Option, Schema } from "effect"
+import { ENTITLEMENTS } from "../../packages/schema/src/codium-entitlements.js"
 import { CodiumPlan } from "../../packages/schema/src/codium-plan.js"
 import { ApiError } from "./http.js"
 import { CODIUM_CATALOG_UPDATED, CODIUM_MODELS } from "./codium-catalog.js"
+import { codiumLimitProblems, testCreditCapUsd } from "./codium-limits.js"
+import { stripeMode, stripeModeProblems, requireStripeMode, type StripeMode } from "./model-plan-stripe.js"
 
 export const MODEL_PLAN_PRICES = CodiumPlan.PLANS.map((plan) => plan.price)
 export const MODEL_PLAN_ROOT = "https://openrouter.ai/api/v1"
@@ -149,20 +152,121 @@ export function configuredPlanModels() {
 
 export function requireModelPlans() {
   if (!modelPlansEnabled()) throw new ApiError(503, "MODEL_PLANS_DISABLED", "Vector Codium is not available yet.")
-  if (!modelPlanConfigurationReady()) throw configurationError()
+  return codiumBillingConfig()
+}
+
+/**
+ * The oldest desktop or CLI Codium serves when `MODEL_PLANS_MIN_CLIENT` is unset. Older clients show Codium tokens and
+ * do not send the headers the gateway needs, so they get `enabled:false` and 426 (WP A16). The release that carries the
+ * client work (WPs A19–A26) raises this at go-live; until then it fails closed for every client released so far.
+ */
+export const MODEL_PLANS_MIN_CLIENT_DEFAULT = "1.99.113"
+const CLIENT_VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,6}$/
+
+/** The configured minimum client, or the compiled default. An unreadable value turns Codium off (see the problems). */
+export function modelPlansMinClient() {
+  const configured = process.env.MODEL_PLANS_MIN_CLIENT?.trim()
+  if (!configured) return MODEL_PLANS_MIN_CLIENT_DEFAULT
+  if (!CLIENT_VERSION.test(configured)) throw configurationError()
+  return configured
+}
+
+/** Only tokens marked for Codium (desktop, `cli` from the code exchange, run tokens) spend it, unless set to "false". */
+export function modelPlanRequireMarkedTokens() {
+  return process.env.MODEL_PLAN_REQUIRE_MARKED_TOKENS?.trim().toLowerCase() !== "false"
+}
+
+/** The owner's admin allowlist. Stripe test checkout is open to these addresses only; empty means nobody. */
+export function codiumAdminEmails() {
+  return (process.env.VECTOR_ADMIN_EMAILS ?? "")
+    .split(",")
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean)
+}
+
+/**
+ * Every checkout, upgrade included, asks this first. In test mode only an admin may open one: a test checkout takes no
+ * real money but its key spends Vector's real OpenRouter balance (up to the test cap), so a preview that leaks must not
+ * become a free model gateway. Live checkout is open to every signed-in account.
+ */
+export function requireCodiumCheckoutUser(user: { email: string }) {
+  if (requireStripeMode() === "live") return
+  if (!codiumAdminEmails().includes(user.email.trim().toLowerCase()))
+    throw new ApiError(403, "CODIUM_TEST_CHECKOUT", "Test checkout is open only to Vector admins.")
+}
+
+/** The checked billing configuration Codium runs with. */
+export type CodiumBillingConfig = {
+  readonly mode: StripeMode
+  readonly plans: readonly {
+    readonly id: CodiumPlan.PlanId
+    readonly name: string
+    readonly price: number
+    readonly credits: number
+    readonly priceID: string
+  }[]
+  readonly minClient: string
+  readonly requireMarkedTokens: boolean
+  /** The key limit in test mode; null in live mode. */
+  readonly testCreditCapUsd: number | null
+}
+
+/**
+ * The billing configuration, checked as a whole before Codium serves or sells anything: the Stripe mode guard, every
+ * secret and price, the private credits and their ratios, the minimum client and the server-only limits. Any problem
+ * turns Codium off with one public answer (`MODEL_PLANS_CONFIGURATION`); `codiumBillingConfigProblems()` names them.
+ */
+export function codiumBillingConfig(): CodiumBillingConfig {
+  if (codiumBillingConfigProblems().length) throw configurationError()
+  const mode = stripeMode()
+  return {
+    mode,
+    plans: modelPlans().map((plan) => ({ ...plan, priceID: plan.priceID! })),
+    minClient: modelPlansMinClient(),
+    requireMarkedTokens: modelPlanRequireMarkedTokens(),
+    testCreditCapUsd: mode === "test" ? testCreditCapUsd() : null,
+  }
+}
+
+/**
+ * What stops Codium from running, by env name only, never a value, for the owner page and logs. Each plan's private
+ * credits must keep the public usage multiple (`ENTITLEMENTS[plan].usageMultiple`, 5.5× Plus on Pro and so on) to
+ * within 0.05: the pricing page promises those multiples, so credits that drift from them would sell less than it says.
+ */
+export function codiumBillingConfigProblems(): string[] {
+  const problems = [...stripeModeProblems()]
+  const required = [
+    "STRIPE_SECRET_KEY",
+    "STRIPE_MODEL_PLAN_WEBHOOK_SECRET",
+    "STRIPE_MODEL_PLAN_PORTAL_CONFIG_ID",
+    "OPENROUTER_MANAGEMENT_KEY",
+  ] as const
+  for (const name of required) if (!process.env[name]?.trim()) problems.push(`${name} is not set`)
+  if (!/^[a-fA-F0-9]{64}$/.test(process.env.MODEL_PLAN_KEY_ENCRYPTION_SECRET ?? ""))
+    problems.push("MODEL_PLAN_KEY_ENCRYPTION_SECRET is not 64 hex characters")
+  if (!configuredPlanModels().length) problems.push("MODEL_PLAN_MODELS_JSON lists no models")
+  const plans = modelPlans()
+  for (const plan of plans) {
+    if (!plan.credits) problems.push(`MODEL_PLAN_${plan.price}_CREDITS_USD is not set or out of range`)
+    if (!plan.priceID) problems.push(`STRIPE_MODEL_PLAN_${plan.price}_PRICE_ID is not set`)
+  }
+  if (new Set(plans.map((plan) => plan.priceID)).size !== MODEL_PLAN_PRICES.length)
+    problems.push("STRIPE_MODEL_PLAN_*_PRICE_ID values are not distinct")
+  const base = plans.find((plan) => ENTITLEMENTS[plan.id].rank === 1)?.credits ?? 0
+  if (base > 0 && plans.every((plan) => plan.credits > 0))
+    for (const plan of plans) {
+      const multiple = ENTITLEMENTS[plan.id].usageMultiple
+      if (Math.abs(plan.credits / base - multiple) > 0.05)
+        problems.push(`MODEL_PLAN_${plan.price}_CREDITS_USD is not ${multiple}x the Plus credits`)
+    }
+  if (process.env.MODEL_PLANS_MIN_CLIENT?.trim() && !CLIENT_VERSION.test(process.env.MODEL_PLANS_MIN_CLIENT.trim()))
+    problems.push("MODEL_PLANS_MIN_CLIENT is not a version like 1.99.113")
+  problems.push(...codiumLimitProblems())
+  return problems
 }
 
 function modelPlanConfigurationReady() {
-  return !(
-    !process.env.STRIPE_SECRET_KEY?.trim() ||
-    !process.env.STRIPE_MODEL_PLAN_WEBHOOK_SECRET?.trim() ||
-    !process.env.STRIPE_MODEL_PLAN_PORTAL_CONFIG_ID?.trim() ||
-    !process.env.OPENROUTER_MANAGEMENT_KEY?.trim() ||
-    !/^[a-fA-F0-9]{64}$/.test(process.env.MODEL_PLAN_KEY_ENCRYPTION_SECRET ?? "") ||
-    !configuredPlanModels().length ||
-    modelPlans().some((plan) => !plan.credits || !plan.priceID) ||
-    new Set(modelPlans().map((plan) => plan.priceID)).size !== MODEL_PLAN_PRICES.length
-  )
+  return codiumBillingConfigProblems().length === 0
 }
 
 export function requireModelTopups() {
