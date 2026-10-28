@@ -2146,6 +2146,41 @@ export type RunBudget = {
   unpricedSteps?: number
 }
 
+export type ComputerConfig = {
+  enabled?: boolean
+  default_app_access?: "ask" | "deny"
+  allow_always?: boolean
+  background?: boolean
+  keep_awake?: boolean
+  away_minutes?: number
+  screenshot_retention_days?: number
+  max_actions?: number
+  max_minutes?: number
+  native_tools?: "auto" | "off"
+  screenshots?: {
+    keep?: number
+    max_width?: number
+    max_height?: number
+  }
+  apps?: {
+    macos?: {
+      [key: string]: "allow" | "deny"
+    }
+    windows?: Array<
+      | {
+          aumid: string
+          access: "allow" | "deny"
+        }
+      | {
+          publisher: string
+          product: string
+          binary?: string
+          access: "allow" | "deny"
+        }
+    >
+  }
+}
+
 export type LocalAllowed = {
   source: string
   hosts?: Array<string>
@@ -2381,6 +2416,7 @@ export type ConfigWithLocks = {
     auto?: boolean
     judge?: TaskJudgeMode
   }
+  computer?: ComputerConfig
   local?: LocalConfig
   research?: ResearchConfig
   experimental?: {
@@ -2547,6 +2583,7 @@ export type Config = {
     auto?: boolean
     judge?: TaskJudgeMode
   }
+  computer?: ComputerConfig
   local?: LocalConfig
   research?: ResearchConfig
   experimental?: {

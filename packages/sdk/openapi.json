@@ -32059,6 +32059,126 @@
         },
         "additionalProperties": false
       },
+      "ComputerConfig": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "default_app_access": {
+            "type": "string",
+            "enum": ["ask", "deny"]
+          },
+          "allow_always": {
+            "type": "boolean"
+          },
+          "background": {
+            "type": "boolean"
+          },
+          "keep_awake": {
+            "type": "boolean"
+          },
+          "away_minutes": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "minimum": 5,
+            "maximum": 240
+          },
+          "screenshot_retention_days": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 365
+          },
+          "max_actions": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 5000
+          },
+          "max_minutes": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 600
+          },
+          "native_tools": {
+            "type": "string",
+            "enum": ["auto", "off"]
+          },
+          "screenshots": {
+            "type": "object",
+            "properties": {
+              "keep": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 10
+              },
+              "max_width": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "max_height": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
+          "apps": {
+            "type": "object",
+            "properties": {
+              "macos": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string",
+                  "enum": ["allow", "deny"]
+                }
+              },
+              "windows": {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "aumid": {
+                          "type": "string"
+                        },
+                        "access": {
+                          "type": "string",
+                          "enum": ["allow", "deny"]
+                        }
+                      },
+                      "required": ["aumid", "access"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "publisher": {
+                          "type": "string"
+                        },
+                        "product": {
+                          "type": "string"
+                        },
+                        "binary": {
+                          "type": "string"
+                        },
+                        "access": {
+                          "type": "string",
+                          "enum": ["allow", "deny"]
+                        }
+                      },
+                      "required": ["publisher", "product", "access"],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
       "LocalAllowed": {
         "type": "object",
         "properties": {
@@ -32785,6 +32905,9 @@
             },
             "additionalProperties": false
           },
+          "computer": {
+            "$ref": "#/components/schemas/ComputerConfig"
+          },
           "local": {
             "$ref": "#/components/schemas/LocalConfig"
           },
@@ -33290,6 +33413,9 @@
               }
             },
             "additionalProperties": false
+          },
+          "computer": {
+            "$ref": "#/components/schemas/ComputerConfig"
           },
           "local": {
             "$ref": "#/components/schemas/LocalConfig"
