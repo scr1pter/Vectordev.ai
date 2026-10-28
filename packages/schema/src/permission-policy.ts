@@ -50,11 +50,36 @@ export const AFTER_WEB_REASON =
   "This conversation read the web, and this address is new: neither you nor an earlier result gave it. A page can steer the agent into putting your data in an address."
 
 /**
- * Whether a request asks the user every time: account mutations, changes to memory's own files, keeping research, and the asks Vector
- * Local adds for the agent's network commands and its new addresses after the web.
+ * Computer permissions (Vector Hands; internal ids stay `computer_*`). Whenever one is raised, a person answers it:
+ * no configuration allow, `"*": "allow"` default, auto-accept or company allow does, and a `deny` still wins.
+ * `computer_app` is the per-app ask, the only one that may be saved as Always allow, and only for `app:` keys; the
+ * desktop, never the engine, keeps that saved list. `computer_sensitive` asks before each risky step and never
+ * offers Always. `computer_observe` and `computer_interact` are copy keys only and are never raised.
+ */
+export const COMPUTER_APP = "computer_app"
+export const COMPUTER_OBSERVE = "computer_observe"
+export const COMPUTER_INTERACT = "computer_interact"
+export const COMPUTER_SENSITIVE = "computer_sensitive"
+/** The prefix of an app key (`app:macos:<bundleId>`, `app:windows:…`), the only pattern a computer Always may save. */
+export const COMPUTER_APP_PREFIX = "app:"
+/** Why typing an address, recipient or number the user never gave asks once the screen has been read. */
+export const AFTER_SCREEN_REASON =
+  "Text on your screen can steer the agent, and this address or recipient is new: you did not give it."
+/** Why a step asks when text on screen reads as instructions to an AI. */
+export const FLAGGED_SCREEN_REASON =
+  "Text on screen looks like instructions to an AI. Check that this step is what you asked for."
+
+// A saved computer approval names one concrete app: a wildcard such as `app:*` or `app:macos:*` is never one.
+const concreteAppKey = (pattern: string) =>
+  pattern.length > COMPUTER_APP_PREFIX.length && pattern.startsWith(COMPUTER_APP_PREFIX) && !/[*?]/.test(pattern)
+
+/**
+ * Whether a request asks the user every time: account mutations, changes to memory's own files, keeping research, the asks Vector
+ * Local adds for the agent's network commands and its new addresses after the web, and every computer permission.
  */
 export function requiresApproval(permission?: string, always?: readonly string[], patterns?: readonly string[]) {
   return (
+    Boolean(permission?.startsWith("computer_")) ||
     permission === MEMORY_SOURCE ||
     permission === RESEARCH_KEEP ||
     permission === NETWORK_COMMAND ||
@@ -72,6 +97,11 @@ export function canAutoApprove(permission?: string, always?: readonly string[], 
   )
 }
 
+/**
+ * Whether a reply may be "always". `computer_app` qualifies only when every saved pattern is a concrete `app:` key, even
+ * though it never auto-approves; every other computer permission never qualifies.
+ */
 export function canAlwaysApprove(permission?: string, always?: readonly string[], patterns?: readonly string[]) {
+  if (permission === COMPUTER_APP) return Boolean(always?.length) && always!.every(concreteAppKey)
   return canAutoApprove(permission, always, patterns) && Boolean(always?.length)
 }

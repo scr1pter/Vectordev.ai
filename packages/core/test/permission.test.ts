@@ -9,6 +9,7 @@ import { Location } from "@vectordevai/core/location"
 import { PermissionV2 } from "@vectordevai/core/permission"
 import { PermissionTable } from "@vectordevai/core/permission/sql"
 import { PermissionSaved } from "@vectordevai/core/permission/saved"
+import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 import { Project } from "@vectordevai/core/project"
 import { ProjectTable } from "@vectordevai/core/project/sql"
 import { AbsolutePath } from "@vectordevai/core/schema"
@@ -445,4 +446,162 @@ describe("PermissionV2", () => {
       expect(yield* saved.list()).toEqual([])
     }),
   )
+})
+
+// Vector Hands (build contract E1, INV-C5 and INV-S6): every computer permission asks, and only the per-app ask can be
+// saved as Always allow, for concrete app keys only.
+describe("PermissionPolicy computer permissions", () => {
+  const COMPUTER = [
+    PermissionPolicy.COMPUTER_APP,
+    PermissionPolicy.COMPUTER_OBSERVE,
+    PermissionPolicy.COMPUTER_INTERACT,
+    PermissionPolicy.COMPUTER_SENSITIVE,
+  ]
+  const calculator = "app:macos:com.apple.calculator"
+
+  test("the computer ids keep their internal names", () => {
+    expect(COMPUTER).toEqual(["computer_app", "computer_observe", "computer_interact", "computer_sensitive"])
+    expect(PermissionPolicy.COMPUTER_APP_PREFIX).toBe("app:")
+    expect(PermissionPolicy.FLAGGED_SCREEN_REASON).toBe(
+      "Text on screen looks like instructions to an AI. Check that this step is what you asked for.",
+    )
+    expect(PermissionPolicy.AFTER_SCREEN_REASON.length).toBeGreaterThan(0)
+  })
+
+  test("computer_* require approval and never auto-approve", () => {
+    for (const permission of [...COMPUTER, "computer_future_action"]) {
+      for (const always of [undefined, [], ["*"], [calculator]]) {
+        for (const patterns of [undefined, ["*"], [calculator], [`${calculator}:send`]]) {
+          expect(PermissionPolicy.requiresApproval(permission, always, patterns), permission).toBe(true)
+          expect(PermissionPolicy.canAutoApprove(permission, always, patterns), permission).toBe(false)
+        }
+      }
+    }
+  })
+
+  test("computer_sensitive requires approval under '*': allow and under a config allow (pure policy)", () => {
+    const sensitive = PermissionPolicy.COMPUTER_SENSITIVE
+    expect(PermissionPolicy.requiresApproval(sensitive, ["*"], ["*"])).toBe(true)
+    expect(PermissionPolicy.requiresApproval(sensitive, [], [`${calculator}:send`])).toBe(true)
+    expect(PermissionPolicy.canAutoApprove(sensitive, ["*"], ["*"])).toBe(false)
+  })
+
+  it.effect("computer_sensitive requires approval under '*': allow and under a config allow", () =>
+    Effect.gen(function* () {
+      const mail = "app:macos:com.apple.mail"
+      const sensitive = (id: string) =>
+        assertion({
+          id: PermissionV2.ID.create(id),
+          action: PermissionPolicy.COMPUTER_SENSITIVE,
+          resources: [`${mail}:send`],
+          save: [],
+        })
+      const app = (id: string) =>
+        assertion({
+          id: PermissionV2.ID.create(id),
+          action: PermissionPolicy.COMPUTER_APP,
+          resources: [mail],
+          save: [mail],
+        })
+
+      // A "*": "allow" default answers ordinary tools but not a computer ask.
+      yield* setup([{ action: "*", resource: "*", effect: "allow" }])
+      const service = yield* PermissionV2.Service
+      expect(yield* service.ask(assertion({ id: PermissionV2.ID.create("per_read") }))).toMatchObject({
+        effect: "allow",
+      })
+      expect(yield* service.ask(sensitive("per_star_sensitive"))).toMatchObject({ effect: "ask" })
+      expect(yield* service.ask(app("per_star_app"))).toMatchObject({ effect: "ask" })
+
+      // A config allow written for the computer ids, even in a trusted repository, still asks.
+      yield* setRules([
+        { action: "computer_sensitive", resource: "*", effect: "allow" },
+        { action: "computer_app", resource: "*", effect: "allow" },
+        { action: "computer_*", resource: "*", effect: "allow" },
+      ])
+      expect(yield* service.ask(sensitive("per_config_sensitive"))).toMatchObject({ effect: "ask" })
+      expect(yield* service.ask(app("per_config_app"))).toMatchObject({ effect: "ask" })
+
+      // An "always" reply to a sensitive ask is answered as "once", and the next one asks again.
+      const events = yield* EventV2.Service
+      const replies: unknown[] = []
+      const unsubscribe = yield* events.listen((event) =>
+        Effect.sync(() => {
+          if (event.type === PermissionV2.Event.Replied.type) replies.push(event.data)
+        }),
+      )
+      yield* Effect.addFinalizer(() => unsubscribe)
+      yield* service.reply({ requestID: PermissionV2.ID.create("per_config_sensitive"), reply: "always" })
+      expect(replies).toContainEqual(
+        expect.objectContaining({ requestID: PermissionV2.ID.create("per_config_sensitive"), reply: "once" }),
+      )
+      expect(yield* service.ask(sensitive("per_config_sensitive_again"))).toMatchObject({ effect: "ask" })
+
+      // A deny still wins over everything.
+      yield* setRules([
+        { action: "*", resource: "*", effect: "allow" },
+        { action: "computer_sensitive", resource: "*", effect: "deny" },
+        { action: "computer_app", resource: mail, effect: "deny" },
+      ])
+      expect(yield* service.ask(sensitive("per_deny_sensitive"))).toMatchObject({ effect: "deny" })
+      expect(yield* service.ask(app("per_deny_app"))).toMatchObject({ effect: "deny" })
+      expect(yield* service.assert(sensitive("per_assert_deny")).pipe(Effect.flip)).toBeInstanceOf(
+        PermissionV2.DeniedError,
+      )
+    }),
+  )
+
+  test("only computer_app with concrete app: keys can be always-approved", () => {
+    const app = PermissionPolicy.COMPUTER_APP
+    expect(PermissionPolicy.canAlwaysApprove(app, [calculator])).toBe(true)
+    expect(PermissionPolicy.canAlwaysApprove(app, [calculator], [calculator])).toBe(true)
+    expect(
+      PermissionPolicy.canAlwaysApprove(app, ["app:windows:aumid:microsoft.windowscalculator_8wekyb3d8bbwe!app"]),
+    ).toBe(true)
+    expect(PermissionPolicy.canAlwaysApprove(app, ["app:windows:exe:microsoft corporation|notepad|notepad.exe"])).toBe(
+      true,
+    )
+    expect(PermissionPolicy.canAlwaysApprove(app, ["*"])).toBe(false)
+    expect(PermissionPolicy.canAlwaysApprove(app, [calculator, "*"])).toBe(false)
+    expect(PermissionPolicy.canAlwaysApprove(app, ["window:42:0"])).toBe(false)
+    expect(PermissionPolicy.canAlwaysApprove(app, [])).toBe(false)
+    expect(PermissionPolicy.canAlwaysApprove(app)).toBe(false)
+    // A wildcard or bare prefix names no single app.
+    for (const pattern of ["app:", "app:*", "app:macos:*", "app:macos:com.apple.?alculator"])
+      expect(PermissionPolicy.canAlwaysApprove(app, [pattern]), pattern).toBe(false)
+
+    // Every other computer permission never offers Always, whatever it carries.
+    for (const permission of [
+      PermissionPolicy.COMPUTER_SENSITIVE,
+      PermissionPolicy.COMPUTER_OBSERVE,
+      PermissionPolicy.COMPUTER_INTERACT,
+      "computer_future_action",
+    ]) {
+      for (const always of [["*"], [calculator], [`${calculator}:send`], ["window:42:0"]])
+        expect(PermissionPolicy.canAlwaysApprove(permission, always, always), permission).toBe(false)
+    }
+
+    // The core wrapper the V2 reply path uses agrees.
+    expect(PermissionV2.canAlwaysApprove(app, [calculator])).toBe(true)
+    expect(PermissionV2.canAlwaysApprove(app, ["*"])).toBe(false)
+    expect(PermissionV2.canAlwaysApprove(PermissionPolicy.COMPUTER_SENSITIVE, [calculator])).toBe(false)
+  })
+
+  test("browser_sensitive, doom_loop and ordinary permissions are unchanged", () => {
+    for (const permission of ["browser_sensitive", "doom_loop"]) {
+      expect(PermissionPolicy.requiresApproval(permission)).toBe(false)
+      expect(PermissionPolicy.requiresApproval(permission, ["*"], ["*"])).toBe(false)
+      expect(PermissionPolicy.canAutoApprove(permission)).toBe(false)
+      expect(PermissionPolicy.canAutoApprove(permission, ["*"], ["*"])).toBe(false)
+      expect(PermissionPolicy.canAlwaysApprove(permission, ["*"])).toBe(false)
+      expect(PermissionPolicy.canAlwaysApprove(permission, [calculator])).toBe(false)
+    }
+    // A permission merely named like an app key is not a computer permission.
+    expect(PermissionPolicy.requiresApproval("webfetch", [calculator], [calculator])).toBe(false)
+    expect(PermissionPolicy.canAutoApprove("edit")).toBe(true)
+    expect(PermissionPolicy.canAlwaysApprove("webfetch", ["https://example.com/*"])).toBe(true)
+    expect(PermissionPolicy.canAlwaysApprove("webfetch", [])).toBe(false)
+    expect(PermissionPolicy.requiresApproval("webfetch", [], ["after-web https://example.com/"])).toBe(true)
+    expect(PermissionPolicy.requiresApproval(PermissionPolicy.NETWORK_COMMAND)).toBe(true)
+  })
 })
