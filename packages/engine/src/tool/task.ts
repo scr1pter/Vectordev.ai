@@ -51,6 +51,7 @@ import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { isRecord } from "@/util/record"
 import { SessionFork } from "@/session/fork"
 import { usable } from "@/session/overflow"
+import { Token } from "@vectordevai/core/util/token"
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): Effect.Effect<void>
@@ -219,6 +220,8 @@ const UNRELEASED = {
 }
 // Brief fields a batch takes only inside each entry.
 const PER_BRIEF = ["model", "effort", "output_schema", "fork"] as const
+// The quick lane's agents, whose steps send only their own request's messages (prompt.ts `quick`).
+const QUICK_LANE = new Set(["quick", "autocomplete", "distill"])
 
 export const BatchParameters = Schema.Struct({
   tasks: Schema.Array(BaseParameters).check(Schema.isMinLength(1), Schema.isMaxLength(8)).annotate({
@@ -444,8 +447,7 @@ export const TaskTool = Tool.define(
     }) {
       const { params, ctx, parent, launching, cfg } = input
       const refuse = (message: string) => ({ refused: message }) as const
-      if (cfg.sizing?.subagents?.fork === false)
-        return refuse("Forks are turned off (sizing.subagents.fork); write a brief instead.")
+      if (cfg.sizing?.subagents?.fork === false) return refuse(SessionFork.TURNED_OFF)
       if (parent.parentID || parent.internal)
         return refuse("Only the main agent of a conversation can fork; write a brief instead.")
       const named = params.subagent_type?.trim()
@@ -468,16 +470,33 @@ export const TaskTool = Tool.define(
           "Your provider does not cache prompts, so a fork would pay for your whole conversation again; write a brief instead.",
         )
       if (model.limit.context === 0) return refuse("Your model lists no context window; write a brief instead.")
-      // What the conversation weighed at its last finished step; the launching step itself is still running.
-      const recent = yield* sessions.messages({ sessionID: parent.id, limit: 8 })
-      const last = recent.findLast(
-        (message) => message.info.role === "assistant" && message.info.finish && message.info.id !== launching.id,
-      )?.info
-      const tokens =
-        last?.role === "assistant"
-          ? last.tokens.total ||
-            last.tokens.input + last.tokens.output + last.tokens.cache.read + last.tokens.cache.write
-          : 0
+      // What the fork inherits: the history before the launching step, its request message included, estimated as
+      // compaction does (media as a placeholder line), and at least what the newest full step since the last summary
+      // counted, which also holds the system prompt and tools. A quick-lane step sends only its request's messages and a
+      // summary counts the history it replaced, so neither stands for the conversation.
+      const history = yield* MessageV2.filterCompactedBeforeEffect(parent.id, launching.id).pipe(
+        Effect.provideService(Database.Service, database),
+      )
+      const estimated = Token.estimate(
+        JSON.stringify(yield* MessageV2.toModelMessagesEffect(history, model, { stripMedia: true })),
+      )
+      // filterCompacted puts a summary ahead of the tail it kept, so the newest message is found by ID.
+      const newest = (items: SessionV1.Assistant[]) =>
+        items.reduce<SessionV1.Assistant | undefined>((top, item) => (!top || item.id > top.id ? item : top), undefined)
+      const assistants = history.flatMap((message) => (message.info.role === "assistant" ? [message.info] : []))
+      const summary = newest(assistants.filter((info) => info.summary))?.id
+      const counted = newest(
+        assistants.filter(
+          (info) => info.finish && !info.summary && !QUICK_LANE.has(info.agent) && (!summary || info.id > summary),
+        ),
+      )
+      const tokens = Math.max(
+        estimated,
+        counted
+          ? counted.tokens.total ||
+              counted.tokens.input + counted.tokens.output + counted.tokens.cache.read + counted.tokens.cache.write
+          : 0,
+      )
       if (tokens > usable({ cfg, model }) / 2)
         return refuse(
           `Your conversation (${tokens} tokens) is over half of what your model can take, too long to fork; write a brief instead.`,
@@ -556,6 +575,9 @@ export const TaskTool = Tool.define(
         )
       if (forking && params.background === false)
         return yield* Effect.fail(new Error("A fork runs only in the background; leave background out."))
+      // A fork resumed after the owner turned forks off would send its whole inherited window again.
+      if (resumedFork && cfg.sizing?.subagents?.fork === false)
+        return yield* Effect.fail(new Error(SessionFork.TURNED_OFF))
       // The description is the title on the subagent's card, the child session and the job.
       const title = subagentTitle(params.description, params.prompt)
       const dependencies = [...new Set(params.depends_on?.map((item) => item.trim()).filter(Boolean) ?? [])]
@@ -782,9 +804,7 @@ export const TaskTool = Tool.define(
         forking &&
         Permission.evaluate(id, "fork", caller?.permission ?? [], parent.permission ?? []).action === "deny"
       )
-        return yield* Effect.fail(
-          new Error(`The task permission denies forks to the ${ctx.agent} agent; write a brief instead.`),
-        )
+        return yield* Effect.fail(new Error(SessionFork.denied(ctx.agent)))
       if (!forking && (generalOff || missing || (!requested && !invoked))) {
         // An omitted type means the general Subagent only where the caller may launch it.
         const denied = (name: string) =>
@@ -886,6 +906,7 @@ export const TaskTool = Tool.define(
               .pipe(Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)))
           : undefined
       const sized = ctx.extra?.effort
+      const passed = ctx.extra?.passdown
       // A resumed fork runs as its first own message asked, whatever this step runs on (5.E.3).
       const shape = resumed?.fork && Option.isSome(forks) ? yield* forks.value.userFields(resumed) : undefined
       const keptEffort = resumed?.effort === "default" || resumed?.effort === "high" ? resumed.effort : undefined
@@ -894,6 +915,7 @@ export const TaskTool = Tool.define(
           model: shape?.model ?? { providerID: msg.info.providerID, modelID: msg.info.modelID },
           variant: shape ? shape.variant : variant,
           sized: shape ? keptEffort : sized === "off" || sized === "default" || sized === "high" ? sized : undefined,
+          ...(!shape && (passed === "off" || passed === "default" || passed === "high") ? { passdown: passed } : {}),
           free: freeRoute,
           learnedSmall: msg.info.workflow?.subagentModel === "small",
           guest: yield* guests.marked(root.id),

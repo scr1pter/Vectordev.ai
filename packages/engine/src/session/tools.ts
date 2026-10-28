@@ -69,8 +69,10 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   outward?: boolean
   // The request a root session's subagent launches count against (multi-agent contract 5.B.2).
   delegation?: TaskLimits.Context
-  // This step's sized effort, which the task tool passes down under Thorough (5.E.1).
+  // This step's sized effort: a fork's effort and a brief's ceiling (5.E.1).
   effort?: TaskSize.Effort
+  // The effort this request's own size gives, which the task tool passes down under Thorough (5.E.1).
+  passdown?: TaskSize.Effort
 }) {
   const tools: Record<string, AITool> = {}
   const run = yield* EffectBridge.make()
@@ -121,6 +123,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
       ...(input.taskSize ? { taskSize: input.taskSize } : {}),
       ...(input.delegation ? { delegation: input.delegation } : {}),
       ...(input.effort ? { effort: input.effort } : {}),
+      ...(input.passdown ? { passdown: input.passdown } : {}),
     },
     ownedPaths: SubagentLifecycle.read(input.session)?.ownedPaths,
     getOwnedPaths: () =>

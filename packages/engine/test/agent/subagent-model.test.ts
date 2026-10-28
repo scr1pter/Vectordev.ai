@@ -374,6 +374,11 @@ describe("SubagentModel effort", () => {
     expect((await choose(input({ parent: thorough, ask: { model: "small" } }))).effort).toBeUndefined()
     // A model the brief names takes it like any other.
     expect((await choose(input({ parent: thorough, ask: { model: "acme/mid" } }))).effort).toBe("high")
+    // A Work request that still runs at high while a Thorough request's cache is warm passes nothing down; its own
+    // high effort is still the ceiling for a brief's.
+    const sticky = { sized: "high" as const, passdown: "default" as const }
+    expect((await choose(input({ parent: sticky }))).effort).toBeUndefined()
+    expect((await choose(input({ parent: sticky, ask: { effort: "high" } }))).effort).toBe("high")
   })
 
   test("a warm resume keeps the effort its child ran at; a cold one works it out again", async () => {

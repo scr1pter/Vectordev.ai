@@ -193,6 +193,9 @@ const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested struc
 
 // The closing step's request ends with this, for a model that answered in text where thinking kept the call optional.
 const STRUCTURED_OUTPUT_CLOSING = "Call StructuredOutput now with your final answer."
+// The most invalid StructuredOutput calls one run answers with an error, whatever retryCount a caller sends: each one
+// costs another full-context step.
+const STRUCTURED_OUTPUT_MAX_RETRIES = 5
 
 // The judge Vector runs after a finished run gets at most this many rounds per request: a FAIL sends its findings back
 // for repair and the judge looks again, and the third verdict stands.
@@ -2550,13 +2553,17 @@ const layer = Layer.effect(
         // A fork is told and offered what its parent was: it is rendered as the root, under the root's rules.
         const rules = fork ? (forkParent?.permission ?? []) : session.permission
         const nested = session.parentID !== undefined && !fork
-        const subagents = SystemPrompt.subagentAvailability({
-          agents: yield* agents.list(),
-          permission: agent.permission,
-          session: rules,
-          agent: agent.name,
-          nested,
-        })
+        const subagents = {
+          ...SystemPrompt.subagentAvailability({
+            agents: yield* agents.list(),
+            permission: agent.permission,
+            session: rules,
+            agent: agent.name,
+            nested,
+          }),
+          // The task tool refuses every fork from a subagent's own session or the research lead (5.E.3).
+          ...(nested || agent.name === ResearchRun.LEAD ? { fork: false } : {}),
+        }
         const explore = subagents.permitted?.includes("explore")
         // A learned workflow default (section 6.3), for the build agent's own requests only.
         const tuned =
@@ -2630,7 +2637,7 @@ const layer = Layer.effect(
           // A greeting never reasons; otherwise the size sets effort where the user left it on its default, or a
           // learned default drops Thorough's high effort to the model's own. Changing thinking settings rewrites
           // Anthropic's cached messages, so there effort follows the size the tools do. A subagent runs at the effort
-          // its record holds (5.A.7). The task tool reads the same value to pass Thorough's effort down (5.E.1).
+          // its record holds (5.A.7).
           const sizedEffort: TaskSize.Effort | undefined = quick
             ? "off"
             : build
@@ -2639,6 +2646,9 @@ const layer = Layer.effect(
               : session.parentID && !session.internal
                 ? childEffort(session)
                 : undefined
+          // What the task tool passes down follows this request's own size (5.E.1): a child shares none of the
+          // parent's cache, so the high effort a warm cache keeps after a Thorough request stays with the parent.
+          const passdown = build && !quick ? (tuned?.workflow?.effort ?? TaskSize.effort(build.tier)) : sizedEffort
 
           const tools = yield* SessionTools.resolve({
             agent: stepAgent,
@@ -2654,6 +2664,7 @@ const layer = Layer.effect(
             outward: audience === "outward",
             ...(delegationContext ? { delegation: delegationContext } : {}),
             ...(sizedEffort ? { effort: sizedEffort } : {}),
+            ...(passdown ? { passdown } : {}),
             ...(build
               ? {
                   taskSize: {
@@ -4654,7 +4665,7 @@ export function prepareCommandTemplate(templateCommand: string, inputArguments: 
 export function createStructuredOutputTool(input: {
   schema: Record<string, any>
   onSuccess: (output: unknown) => void
-  // Invalid calls answered with an error before a value is kept as it is (the format's retryCount).
+  // Invalid calls answered with an error before a value is kept as it is (the format's retryCount, at most 5).
   retryCount?: number
   // The run's count of invalid calls. The tool is built again for every step, so the run keeps the count.
   invalid?: { count: number }
@@ -4667,7 +4678,7 @@ export function createStructuredOutputTool(input: {
   // in full. Any other schema is passed on and its value kept unchecked.
   const check = JsonSchemaCheck.accept(input.schema)
   const invalid = input.invalid ?? { count: 0 }
-  const retryCount = input.retryCount ?? 2
+  const retryCount = Math.min(input.retryCount ?? 2, STRUCTURED_OUTPUT_MAX_RETRIES)
 
   return tool({
     description: STRUCTURED_OUTPUT_DESCRIPTION,

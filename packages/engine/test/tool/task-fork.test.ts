@@ -43,6 +43,9 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
 import { SubagentModel } from "@/agent/subagent-model"
 import { isRecord } from "@/util/record"
+import { Brain } from "@vectordevai/core/brain/brain"
+import { Instruction } from "../../src/session/instruction"
+import { SessionMemory } from "../../src/session/memory"
 import { disposeAllInstances, TestInstance } from "../fixture/fixture"
 import { pollWithTimeout, testEffect } from "../lib/effect"
 import { reply, TestLLMServer } from "../lib/llm-server"
@@ -136,6 +139,10 @@ const seed = Effect.fn("TaskForkTest.seed")(function* (
     permission?: SessionV1.User["tools"] extends unknown ? Session.Info["permission"] : never
     parentID?: SessionID
     before?: Partial<SessionV1.Assistant>
+    /** The request's text. */
+    text?: string
+    /** A compaction before the request, whose summary counted this many input tokens. */
+    summary?: number
   } = {},
 ) {
   const sessions = yield* Session.Service
@@ -171,6 +178,39 @@ const seed = Effect.fn("TaskForkTest.seed")(function* (
     })
     yield* sessions.updateMessage(assistantOf(earlier.id, input.before))
   }
+  if (input.summary !== undefined) {
+    const compaction = yield* sessions.updateMessage({
+      id: MessageID.ascending(),
+      role: "user",
+      sessionID: chat.id,
+      agent: "build",
+      model: modelRef,
+      time: { created: Date.now() },
+    })
+    yield* sessions.updatePart({
+      id: PartID.ascending(),
+      messageID: compaction.id,
+      sessionID: chat.id,
+      type: "compaction",
+      auto: true,
+    })
+    const summary = yield* sessions.updateMessage(
+      assistantOf(compaction.id, {
+        mode: "compaction",
+        agent: "compaction",
+        summary: true,
+        finish: "stop",
+        tokens: { input: input.summary, output: 500, reasoning: 0, cache: { read: 0, write: 0 } },
+      }),
+    )
+    yield* sessions.updatePart({
+      id: PartID.ascending(),
+      messageID: summary.id,
+      sessionID: chat.id,
+      type: "text",
+      text: "The parser and printer were discussed at length.",
+    })
+  }
   const user = yield* sessions.updateMessage({
     id: MessageID.ascending(),
     role: "user",
@@ -185,7 +225,7 @@ const seed = Effect.fn("TaskForkTest.seed")(function* (
     messageID: user.id,
     sessionID: chat.id,
     type: "text",
-    text: "Fix the parser and the printer.",
+    text: input.text ?? "Fix the parser and the printer.",
   })
   // Finished unless a test says otherwise, so the fork does not wait for it.
   const launching = yield* sessions.updateMessage(assistantOf(user.id, { finish: "tool-calls", ...input.launching }))
@@ -406,9 +446,74 @@ describe("fork refusals", () => {
           ),
         )
         expect(failure(exit)).toContain("Forks are turned off (sizing.subagents.fork); write a brief instead.")
+        // A fork launched before forks were turned off does not resume either: it would send its whole window again.
+        const fork = yield* sessions.create({
+          parentID: chat.id,
+          metadata: {
+            subagent: {
+              kind: "subagent",
+              custom: false,
+              agent: "build",
+              title: "Fix the parser",
+              parentSessionID: chat.id,
+              parentMessageID: launching.id,
+              model: ref("free"),
+              status: "completed",
+              startedAt: Date.now(),
+              completedAt: Date.now(),
+              attempt: 1,
+              fork: { point: launching.id },
+            },
+          },
+        })
+        const resumed = yield* Effect.exit(
+          def.execute(
+            { description: "Fix the parser", prompt: "Carry on.", task_id: fork.id },
+            context({ sessionID: chat.id, messageID: launching.id, ops: forkOps(chat.id, [], sessions), asks }),
+          ),
+        )
+        expect(failure(resumed)).toContain(SessionFork.TURNED_OFF)
         expect(asks).toHaveLength(0)
       }),
     { trusted: true, config: config({ sizing: { subagents: { fork: false } } }) },
+  )
+
+  tools.instance(
+    "the size check measures what a fork inherits: a large first message counts, a summary's count does not",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const def = yield* (yield* TaskTool).init()
+        const prompts: SessionPrompt.PromptInput[] = []
+        const asks: unknown[] = []
+        const launch = (seeded: { chat: Session.Info; launching: SessionV1.Assistant }) =>
+          def.execute(
+            brief,
+            context({
+              sessionID: seeded.chat.id,
+              messageID: seeded.launching.id,
+              ops: forkOps(seeded.chat.id, prompts, sessions),
+              asks,
+            }),
+          )
+        // The conversation's first response forks after a message that alone fills more than half the window: no
+        // step has finished yet, so only the message itself shows its size.
+        const big = yield* seed({ text: "parser ".repeat(40_000) })
+        const refused = yield* Effect.exit(launch(big))
+        expect(failure(refused)).toMatch(
+          /Your conversation \((\d+) tokens\) is over half of what your model can take, too long to fork/,
+        )
+        expect(Number(/\((\d+) tokens\)/.exec(failure(refused))?.[1])).toBeGreaterThan(65_000)
+        expect(yield* sessions.children(big.chat.id)).toHaveLength(0)
+        // A summary counted the history it replaced, so a short conversation after a compaction still forks.
+        const compacted = yield* seed({ summary: 90_000 })
+        const result = yield* launch(compacted)
+        expect(result.output).toContain("Background task started")
+        expect((result.metadata as { inheritedTokens: number }).inheritedTokens).toBeLessThan(1_000)
+        const [child] = yield* sessions.children(compacted.chat.id)
+        yield* settled(child!.id, "completed")
+      }),
+    { trusted: true, config: config() },
   )
 
   alone.instance(
@@ -517,7 +622,11 @@ describe("fork launch", () => {
           brief,
           context({ sessionID: chat.id, messageID: launching.id, ops: forkOps(chat.id, prompts, sessions), asks: [] }),
         )
-        expect(result.metadata).toMatchObject({ fork: true, inheritedTokens: 0, modelSource: "fork" })
+        // What it inherits is the parent's history before the launching step: here one short request (5.E.3).
+        expect(result.metadata).toMatchObject({ fork: true, modelSource: "fork" })
+        const inherited = (result.metadata as { inheritedTokens: number }).inheritedTokens
+        expect(inherited).toBeGreaterThan(0)
+        expect(inherited).toBeLessThan(200)
         const [child] = yield* sessions.children(chat.id)
         expect(yield* recordOf(child!.id)).toMatchObject({
           status: "queued",
@@ -864,6 +973,8 @@ const loop = testEffect(
       FSUtil.node,
       Database.node,
       TaskLimits.node,
+      Brain.node,
+      Instruction.node,
       LayerNode.make({ service: TestLLMServer, layer: TestLLMServer.layer, deps: [] }),
     ]),
     [
@@ -972,6 +1083,88 @@ describe("a fork in the run loop", () => {
         const opening = (hit: { body: Record<string, unknown> }) =>
           JSON.stringify((hit.body.messages as { role: string }[]).find((message) => message.role === "user"))
         expect(opening(noted)).toBe(opening((yield* parentHits)[0]!))
+      }),
+    { git: true },
+    90_000,
+  )
+
+  // What a subagent's first step writes, how the owner works, goes on its first user message. A fork's first user
+  // message is its parent's opener, which nothing has recalled for when the conversation opened with a chat reply.
+  loop.instance(
+    "briefFor never writes how the owner works into the parent's opening message",
+    () =>
+      Effect.gen(function* () {
+        const { directory } = yield* TestInstance
+        const llm = yield* TestLLMServer
+        const fs = yield* FSUtil.Service
+        const file = path.join(directory, "vector.json")
+        yield* fs.writeWithDirs(
+          file,
+          JSON.stringify({
+            formatter: false,
+            lsp: false,
+            provider: {
+              lmstudio: {
+                name: "Test",
+                id: "lmstudio",
+                env: [],
+                npm: "@ai-sdk/openai-compatible",
+                models: { coder: model("coder", { reasoning: false, variants: undefined }) },
+                options: { apiKey: "test-key", baseURL: llm.url, concurrency: 64 },
+              },
+            },
+          }),
+        )
+        const snapshot = yield* Effect.promise(() => WorkspaceTrust.snapshot(directory, [file]))
+        yield* Effect.promise(() => WorkspaceTrust.approve(Global.Path.state, snapshot))
+        const brain = yield* Brain.Service
+        const place = yield* (yield* Instruction.Service).place()
+        yield* brain.propose(place, {
+          kind: "preference",
+          text: "Run the parser tests with bun test before every commit",
+          scope: "personal",
+          origin: "user",
+          evidence: { type: "user" },
+        })
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({
+          title: "Forks",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        yield* llm.pushMatch(
+          (hit) => !isFork(hit) && !isTitle(hit.body),
+          reply().text("They run with bun test.").stop(),
+          reply().tool("task", { description: "Fix the parser", prompt: ASSIGNMENT, fork: true }),
+          reply().text("Launched a fork.").stop(),
+        )
+        yield* llm.pushMatch(isFork, reply().text("Fixed the parser.").stop())
+        // A chat reply opens the conversation, so no recall ran on its message.
+        yield* prompt.prompt({
+          sessionID: chat.id,
+          agent: "build",
+          model: ref("coder"),
+          size: "chat",
+          parts: [{ type: "text", text: "How do the parser tests run?" }],
+        })
+        yield* prompt.prompt({
+          sessionID: chat.id,
+          agent: "build",
+          model: ref("coder"),
+          size: "standard",
+          parts: [{ type: "text", text: "Fix the parser and the printer." }],
+        })
+        const [child] = yield* sessions.children(chat.id)
+        expect(SubagentLifecycle.read(child!)?.fork?.point).toBeDefined()
+        yield* pollWithTimeout(
+          recordOf(child!.id).pipe(Effect.map((record) => (record?.status === "completed" ? record : undefined))),
+          "the fork must finish",
+          "20 seconds",
+        )
+        const opener = (yield* sessions.messages({ sessionID: chat.id })).find((item) => item.info.role === "user")!
+        expect(opener.parts.map((part) => part.type === "text" && part.text)).toContain("How do the parser tests run?")
+        expect(opener.parts.every((part) => part.sessionID === chat.id)).toBe(true)
+        expect(opener.parts.some((part) => part.type === "text" && part.metadata?.[SessionMemory.RECALL])).toBe(false)
       }),
     { git: true },
     90_000,

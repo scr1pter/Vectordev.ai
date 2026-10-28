@@ -25,6 +25,7 @@ import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { TaskMailbox } from "@vectordevai/core/task-mailbox"
 import { BrainSchema } from "@vectordevai/core/brain/schema"
 import { SessionMemory } from "@/session/memory"
+import { SessionFork } from "@/session/fork"
 import { InstanceState } from "@/effect/instance-state"
 import type { Task } from "@vectordevai/schema/task"
 import { disposeAllInstances } from "../fixture/fixture"
@@ -783,6 +784,70 @@ describe("task management", () => {
     expect(brief).toContain("Also cover the error path")
     expect(brief).not.toContain("[vector:resume]")
     expect(SubagentLifecycle.read(yield* sessions.get(task.id))?.attempt).toBe(2)
+  }))
+
+  // E.1 and I25: a resume keeps the recorded effort while the child's cache is warm, and works it out again after that.
+  it.instance("a resume keeps the recorded effort only while the child's cache is warm", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const jobs = yield* BackgroundJob.Service
+    const { root, launch } = yield* launched()
+    const prompts: SessionPrompt.PromptInput[] = []
+    const resumeOps: TaskPromptOps = { ...ops, prompt: (input) => Effect.sync(() => void prompts.push(input)).pipe(Effect.as(reply(input))) }
+    // The fixture model's provider sets no cache breakpoints, so its cache lasts an hour.
+    const warm = 60_000
+    const cold = 2 * 60 * 60_000
+    const cases = [
+      // Thorough's high, passed down through the sized path with no variant.
+      { patch: { effort: "high" }, ago: warm, effort: "high", variant: undefined },
+      { patch: { effort: "high" }, ago: cold, effort: undefined, variant: undefined },
+      // A brief's own low, sent as the variant: after the cache lifetime neither stays.
+      { patch: { effort: "low", model: { ...model, variant: "low" } }, ago: warm, effort: "low", variant: "low" },
+      { patch: { effort: "low", model: { ...model, variant: "low" } }, ago: cold, effort: undefined, variant: undefined },
+      // The user's own variant is not an effort a brief set, so it stays.
+      { patch: { model: { ...model, variant: "medium" } }, ago: cold, effort: undefined, variant: "medium" },
+    ] as const
+    for (const item of cases) {
+      const task = yield* helper(root.id, launch, { status: "completed", completedAt: Date.now() - item.ago, ...item.patch })
+      yield* manager.resume({ sessionID: root.id, taskIDs: [task.id], text: "Carry on", origin: "user", guest: false }, resumeOps)
+      yield* jobs.wait({ id: task.id })
+      const record = SubagentLifecycle.read(yield* sessions.get(task.id))!
+      expect(record.effort, JSON.stringify(item)).toBe(item.effort)
+      expect(record.model.variant, JSON.stringify(item)).toBe(item.variant)
+      expect(prompts.findLast((input) => input.sessionID === task.id)?.variant, JSON.stringify(item)).toBe(item.variant)
+    }
+  }), { trusted: true, config: { provider: { "local-test": {
+    name: "Test", id: "local-test", env: [], npm: "@ai-sdk/openai-compatible",
+    options: { apiKey: "test-key", baseURL: "http://localhost:1/v1" },
+    models: { fixture: {
+      id: "fixture", name: "Fixture", attachment: false, reasoning: true, temperature: false, tool_call: true,
+      release_date: "2025-01-01", limit: { context: 100_000, output: 10_000 }, cost: { input: 0, output: 0 },
+    } },
+  } } } })
+
+  // 5.E.3: a fork resumes only while a fork could start, since it sends its whole inherited window again.
+  it.instance("a fork does not resume once forks are turned off", () => Effect.gen(function* () {
+    const manager = yield* TaskManager.Service
+    const { root, launch } = yield* launched()
+    const fork = yield* helper(root.id, launch, { agent: "build", fork: { point: launch } })
+    expect(yield* manager.resume({ sessionID: root.id, taskIDs: [fork.id], origin: "user", guest: false }, ops).pipe(Effect.flip))
+      .toMatchObject({ code: "invalid", message: SessionFork.TURNED_OFF })
+  }), { trusted: true, config: { sizing: { subagents: { fork: false } } } })
+
+  it.instance("a fork does not resume where the task permission denies forks", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const jobs = yield* BackgroundJob.Service
+    const root = yield* sessions.create({ permission: [{ permission: "task", pattern: "fork", action: "deny" }] })
+    const launch = reply({ sessionID: root.id, parts: [] })
+    yield* sessions.updateMessage(launch.info)
+    const fork = yield* helper(root.id, launch.info.id, { agent: "build", fork: { point: launch.info.id } })
+    expect(yield* manager.resume({ sessionID: root.id, taskIDs: [fork.id], origin: "user", guest: false }, ops).pipe(Effect.flip))
+      .toMatchObject({ code: "forbidden", message: SessionFork.denied("build") })
+    // Another child of the same root still resumes.
+    const plain = yield* helper(root.id, launch.info.id)
+    yield* manager.resume({ sessionID: root.id, taskIDs: [plain.id], origin: "user", guest: false }, ops)
+    expect((yield* jobs.wait({ id: plain.id })).info?.status).toBe("completed")
   }))
 
   it.instance("a resume the request's spend ceiling refuses fails with code limit", () => Effect.gen(function* () {

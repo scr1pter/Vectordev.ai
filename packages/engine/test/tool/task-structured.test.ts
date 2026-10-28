@@ -505,6 +505,72 @@ describe("task output_schema", () => {
   )
 
   tools.instance(
+    "a message that joins a busy structured child settles once: one follow-up, attempts counted once",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const status = yield* SessionStatus.Service
+        const { chat, assistant } = yield* seed()
+        const def = yield* (yield* TaskTool).init()
+        const prompts: SessionPrompt.PromptInput[] = []
+        const gate = yield* Deferred.make<void>()
+        const ended = yield* Deferred.make<SessionV1.WithParts>()
+        let runs = 0
+        const ops: TaskPromptOps = {
+          cancel: () => Effect.void,
+          resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+          prompt: (input) =>
+            Effect.gen(function* () {
+              prompts.push(input)
+              if (input.sessionID === chat.id) return { info: assistantOf(input), parts: [] }
+              runs += 1
+              if (runs === 1) {
+                // The child's loop stays busy until the gate opens, then ends in text with no StructuredOutput call.
+                yield* status.set(input.sessionID, { type: "busy" })
+                yield* Deferred.await(gate)
+                const result = yield* write(input, { text: "The routes are /health and /admin.", missed: true })
+                yield* status.set(input.sessionID, { type: "idle" })
+                yield* Deferred.succeed(ended, result)
+                return result
+              }
+              // The message joined the running loop, so its prompt returns that loop's last answer.
+              if (runs === 2) return yield* Deferred.await(ended)
+              return yield* write(input, { calls: 1, value: { routes: ["/health", "/admin"] } })
+            }).pipe(Effect.provideService(Session.Service, sessions)),
+        }
+        const ctx = context({ sessionID: chat.id, messageID: assistant.id, ops, asks: [] })
+        yield* def.execute({ ...brief, output_schema: SCHEMA }, ctx)
+        const [child] = yield* sessions.children(chat.id)
+        yield* pollWithTimeout(
+          Effect.sync(() => (childPrompts(prompts, child!.id).length === 1 ? true : undefined)),
+          "the first run must start",
+        )
+        const added = yield* def.execute(
+          { description: "List routes", prompt: "Include the admin routes.", task_id: child!.id },
+          ctx,
+        )
+        expect(added.output).toContain("added to the running background task's conversation")
+        yield* pollWithTimeout(
+          Effect.sync(() => (childPrompts(prompts, child!.id).length === 2 ? true : undefined)),
+          "the message must join the running loop",
+        )
+        yield* Deferred.succeed(gate, undefined)
+        const note = yield* noteFor(prompts, chat.id)
+        const followUps = childPrompts(prompts, child!.id).filter((input) =>
+          text(input).includes("Your final answer did not match the required JSON Schema"),
+        )
+        expect(followUps).toHaveLength(1)
+        expect(note).toContain('<task_result format="json">\n{"routes":["/health","/admin"]}\n</task_result>')
+        // The follow-up and its one call.
+        expect(SubagentLifecycle.read(yield* sessions.get(child!.id))?.structured).toMatchObject({
+          attempts: 2,
+          valid: true,
+        })
+      }),
+    { trusted: true, config },
+  )
+
+  tools.instance(
     "a 9 KiB value returns a ref with no partial JSON",
     () =>
       Effect.gen(function* () {

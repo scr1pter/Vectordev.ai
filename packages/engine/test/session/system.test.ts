@@ -224,6 +224,34 @@ describe("session.system", () => {
     }),
   )
 
+  // 5.E.3: a subagent's own session and the research lead can never fork, so their policy does not mention forks. A
+  // root agent with general turned off still forks.
+  it.effect("forks go unmentioned where every fork is refused", () =>
+    Effect.sync(() => {
+      for (const availability of [
+        { general: false, specialists: true, reason: "nested", fork: false },
+        {
+          general: false,
+          specialists: true,
+          reason: "denied",
+          agent: "research",
+          permitted: ["researcher"],
+          fork: false,
+        },
+      ] as const) {
+        const policy = subagentPolicy(availability)
+        expect(policy).not.toContain("fork")
+        expect(policy).not.toContain("Fork")
+        expect(policy).toContain("Each child starts with an empty context, works on its own and reports only to you")
+        expect(policy).toContain("and what its final report must contain.\n")
+      }
+      expect(subagentPolicy({ general: false, specialists: true, reason: "disabled" })).toContain(
+        "Fork instead when the work needs this conversation and your provider caches prompts.",
+      )
+      expect(subagentPolicy({ ...ALL_SUBAGENTS, fork: true })).toBe(SUBAGENT_POLICY)
+    }),
+  )
+
   it.effect("names only the specialists the agent may launch", () =>
     Effect.sync(() => {
       const plan = subagentPolicy({

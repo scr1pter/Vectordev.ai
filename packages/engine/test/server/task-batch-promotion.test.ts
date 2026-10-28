@@ -30,6 +30,8 @@ import { TaskLimits } from "@/task/limits"
 import { TaskNotify } from "@/task/notify"
 import { TaskSignals } from "@/task/signals"
 import { DesktopTasks } from "@/task/desktop"
+import { SessionFork } from "@/session/fork"
+import { Provider } from "@/provider/provider"
 import { MessageID, type SessionID } from "@/session/schema"
 import { ExperimentalApi } from "@/server/routes/instance/httpapi/groups/experimental"
 import { experimentalHandlers } from "@/server/routes/instance/httpapi/handlers/experimental"
@@ -71,9 +73,15 @@ const manager = (
     | TaskNotify.Service
     | TaskSignals.Service
     | RuntimeFlags.Service
+    | SessionFork.Service
+    | Provider.Service
+    | Agent.Service
   >
 ).pipe(
   Layer.provide([
+    Layer.mock(SessionFork.Service)({}),
+    Layer.mock(Provider.Service)({}),
+    Layer.mock(Agent.Service)({}),
     jobs,
     flags,
     stored,

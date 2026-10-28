@@ -1,7 +1,7 @@
 export * as TaskStructured from "./task-structured"
 
 import { createHash } from "node:crypto"
-import { Effect } from "effect"
+import { Deferred, Effect } from "effect"
 import { JsonSchemaCheck } from "@vectordevai/core/json-schema-check"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import type { ModelV2 } from "@vectordevai/core/model"
@@ -99,12 +99,50 @@ export type SettleInput = {
   attempt?: number
 }
 
+export type Settled = { json: string; attempts: number }
+
+// The settle each child last ran: the attempt it belongs to, every answer it read, and its outcome. A run that joined a
+// busy child's loop (a steer) returns that loop's answer, which the settle already running is checking, so it takes that
+// settle's outcome instead of following the same answer up again.
+type Settling = {
+  attempt?: number
+  seen: Set<string>
+  done: Deferred.Deferred<Settled, BackgroundJob.RunFailed>
+  finished: boolean
+}
+const settling = new Map<string, Settling>()
+const KEPT = 256
+
 /**
  * The run's checked value as compact JSON, after at most one follow-up for a tool-mode child (two for a text-mode one)
  * when it ended without a value. Attempts are every StructuredOutput call plus every follow-up; a text-mode child's
- * answers count as its calls. A stopped child stops here too, and a run that failed otherwise fails as it did.
+ * answers count as its calls. A stopped child stops here too, and a run that failed otherwise fails as it did. One settle
+ * runs per child at a time: a run of the same attempt that ends on an answer it is checking, or while it runs, gets its
+ * outcome.
  */
 export const settle = Effect.fn("TaskStructured.settle")(function* (i: SettleInput) {
+  const done = yield* Deferred.make<Settled, BackgroundJob.RunFailed>()
+  // Nothing yields from here until the entry is in the map, so two runs ending together cannot both take it.
+  const running = settling.get(i.sessionID)
+  if (running && running.attempt === i.attempt && (!running.finished || running.seen.has(i.result.info.id)))
+    return yield* Deferred.await(running.done)
+  const entry: Settling = { attempt: i.attempt, seen: new Set([i.result.info.id]), done, finished: false }
+  settling.delete(i.sessionID)
+  settling.set(i.sessionID, entry)
+  for (const [id, item] of settling) {
+    if (settling.size <= KEPT) break
+    if (item.finished) settling.delete(id)
+  }
+  return yield* check(i, entry).pipe(
+    Effect.onExit((exit) =>
+      Effect.sync(() => {
+        entry.finished = true
+      }).pipe(Effect.andThen(Deferred.done(entry.done, exit))),
+    ),
+  )
+})
+
+const check = Effect.fnUntraced(function* (i: SettleInput, entry: Settling) {
   let result = i.result
   let followUps = 0
   const calls = Effect.gen(function* () {
@@ -151,7 +189,7 @@ export const settle = Effect.fn("TaskStructured.settle")(function* (i: SettleInp
     if (found.ok && problems.length === 0) {
       const count = yield* attempts
       yield* record(count, true)
-      return { json: JsonSchemaCheck.encode(found.value), attempts: count }
+      return { json: JsonSchemaCheck.encode(found.value), attempts: count } satisfies Settled
     }
     // A tool-mode value was kept invalid only after the run's own retries ran out, so it is not asked for again.
     const again = (i.mode === "text" || !found.ok) && followUps < FOLLOW_UPS[i.mode]
@@ -191,5 +229,6 @@ export const settle = Effect.fn("TaskStructured.settle")(function* (i: SettleInp
         },
       ],
     })
+    entry.seen.add(result.info.id)
   }
 })

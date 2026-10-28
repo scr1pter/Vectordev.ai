@@ -428,6 +428,17 @@ describe("structured-output.validation", () => {
     expect((await step({ invalid, kept }).execute!({}, options)).metadata).toEqual({ valid: false, captured: true })
   })
 
+  test("a large retryCount stops at 5 invalid calls, so a caller cannot run up unbounded steps", async () => {
+    const invalid = { count: 0 }
+    const kept: unknown[] = []
+    for (const _ of [1, 2, 3, 4, 5])
+      expect((await step({ invalid, retryCount: 1000, kept }).execute!({}, options)).metadata).toEqual({ valid: false })
+    expect(invalid.count).toBe(5)
+    const last = await step({ invalid, retryCount: 1000, kept }).execute!({}, options)
+    expect(last.metadata).toEqual({ valid: false, captured: true })
+    expect(kept).toEqual([{}])
+  })
+
   test("retryCount 0 keeps an invalid value at once", async () => {
     const invalid = { count: 0 }
     const kept: unknown[] = []

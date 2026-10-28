@@ -472,4 +472,71 @@ describe("Thorough passes effort down", () => {
     { git: true },
     90_000,
   )
+
+  // On a provider with cache breakpoints the parent keeps Thorough's high effort while that cache is warm, so a Work
+  // follow-up still runs at high itself. Its children start caches of their own and get nothing passed down.
+  loop.instance(
+    "a Work follow-up within a Thorough request's cache lifetime passes no high effort down",
+    () =>
+      Effect.gen(function* () {
+        const { directory } = yield* TestInstance
+        const llm = yield* TestLLMServer
+        const fs = yield* FSUtil.Service
+        const file = path.join(directory, "vector.json")
+        const config = loopConfig(llm.url)
+        const lmstudio = config.provider!.lmstudio!
+        lmstudio.models = {
+          "claude-coder": { ...lmstudio.models!["north-mini-code"]!, id: "claude-coder", name: "Claude Coder" },
+        }
+        yield* fs.writeWithDirs(file, JSON.stringify(config))
+        const snapshot = yield* Effect.promise(() => WorkspaceTrust.snapshot(directory, [file]))
+        yield* Effect.promise(() => WorkspaceTrust.approve(Global.Path.state, snapshot))
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({ title: "Sticky" })
+
+        const run = Effect.fn("test.run")(function* (text: string) {
+          yield* llm.pushMatch(
+            (hit) => !isChild(hit) && !isTitle(hit.body),
+            reply().tool("task", {
+              description: "Map the parser",
+              prompt: BRIEF,
+              subagent_type: "general",
+              background: false,
+            }),
+            reply().text("Mapped the parser.").stop(),
+          )
+          yield* llm.pushMatch(isChild, reply().text("Entry points: parse() and tokenize().").stop())
+          const before = (yield* llm.hits).length
+          const result = yield* prompt.prompt({
+            sessionID: chat.id,
+            agent: "build",
+            model: ref("claude-coder"),
+            parts: [{ type: "text", text }],
+          })
+          const hits = (yield* llm.hits).slice(before).filter((hit) => !isTitle(hit.body))
+          const child = (yield* sessions.children(chat.id)).at(-1)
+          return {
+            size: result.info.role === "assistant" ? result.info.size : undefined,
+            root: hits.filter((hit) => !isChild(hit)).map((hit) => hit.body.reasoning_effort),
+            child: hits.filter(isChild).map((hit) => hit.body.reasoning_effort),
+            record: SubagentLifecycle.read(child!),
+          }
+        })
+
+        const thorough = yield* run("be thorough: map the parser's entry points across the codebase")
+        expect(thorough.size).toBe("thorough")
+        expect(thorough.root[0]).toBe("high")
+        expect(thorough.record).toMatchObject({ effort: "high" })
+
+        const work = yield* run("now map the printer's entry points")
+        expect(work.size).toBe("standard")
+        // The parent itself stays at high, so its cached messages hold.
+        expect(work.root[0]).toBe("high")
+        expect(work.child).toEqual([undefined])
+        expect(work.record?.effort).toBeUndefined()
+      }),
+    { git: true },
+    90_000,
+  )
 })

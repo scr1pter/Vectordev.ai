@@ -32,6 +32,9 @@ import { TaskLimits } from "./limits"
 import { TaskNotify } from "./notify"
 import { TaskSignals } from "./signals"
 import { SessionFork } from "@/session/fork"
+import { Provider } from "@/provider/provider"
+import { Agent } from "@/agent/agent"
+import { SubagentModel } from "@/agent/subagent-model"
 
 export class Error extends Schema.TaggedErrorClass<Error>()("TaskManager.Error", {
   code: Schema.Literals([
@@ -185,6 +188,8 @@ const layer = Layer.effect(
     const flags = yield* RuntimeFlags.Service
     const signals = yield* TaskSignals.Service
     const forks = yield* SessionFork.Service
+    const provider = yield* Provider.Service
+    const agents = yield* Agent.Service
     const bridge = <A>(effect: Effect.Effect<A, DesktopTasks.Error>) =>
       effect.pipe(Effect.mapError((error) => new Error({ code: error.code, message: error.message })))
     const lock = SubagentLifecycle.controlLock
@@ -1164,6 +1169,15 @@ const layer = Layer.effect(
       if (SubagentLifecycle.open(record)) return yield* running
       if (RESEARCH_AGENTS.has(record.agent))
         return yield* new Error({ code: "invalid", message: "A research agent cannot be resumed; start a new one." })
+      // A fork resumes only while forks may start: it sends its whole inherited window again (5.E.3).
+      if (record.fork && (yield* config.get()).sizing?.subagents?.fork === false)
+        return yield* new Error({ code: "invalid", message: SessionFork.TURNED_OFF })
+      if (
+        record.fork &&
+        Permission.evaluate("task", "fork", (yield* agents.get(record.agent))?.permission ?? [], root.permission ?? [])
+          .action === "deny"
+      )
+        return yield* new Error({ code: "forbidden", message: SessionFork.denied(record.agent) })
       if (Option.isNone(yield* sessions.findMessage(session.id, SessionTaskSize.real).pipe(Effect.orDie)))
         return yield* new Error({ code: "invalid", message: "This task never started; relaunch it with task." })
       if (record.interruption?.dismissedAt !== undefined)
@@ -1272,10 +1286,32 @@ const layer = Layer.effect(
               budget: resolved.budget,
               seed: yield* limits.seed(conversationID, requestID),
             }
-            return yield* Effect.forEach(admitted, ({ session, record, admission }) =>
+            return yield* Effect.forEach(admitted, ({ session, record: ran, admission }) =>
               Effect.gen(function* () {
                 const id = session.id
-                const attempt = (record.attempt ?? 1) + 1
+                const attempt = (ran.attempt ?? 1) + 1
+                // A resume keeps the effort the child ran at while its cache is warm; after that the child runs at its
+                // model's own effort, without a variant that only its brief's effort set (5.E.1). A fork keeps its
+                // parent's request, as the task tool resumes it.
+                const cold =
+                  !ran.fork &&
+                  ran.effort !== undefined &&
+                  !SubagentModel.warm(
+                    ran,
+                    yield* provider
+                      .getModel(ProviderV2.ID.make(ran.model.providerID), ModelV2.ID.make(ran.model.modelID))
+                      .pipe(Effect.catch(() => Effect.succeed(undefined))),
+                  )
+                const record: SubagentRecord = cold
+                  ? {
+                      ...ran,
+                      effort: undefined,
+                      model:
+                        ran.effort !== "default" && ran.model.variant === ran.effort
+                          ? { providerID: ran.model.providerID, modelID: ran.model.modelID }
+                          : ran.model,
+                    }
+                  : ran
                 const now = Date.now()
                 const lease = yield* jobs.lease()
                 let queued = admission.waits
@@ -1283,6 +1319,7 @@ const layer = Layer.effect(
                 yield* persist(
                   id,
                   {
+                    ...(cold ? { effort: undefined, model: record.model } : {}),
                     attempt,
                     status: queued ? "queued" : "running",
                     slotReason: queued ? TaskLimits.SLOT_REASON : undefined,
@@ -1510,6 +1547,8 @@ export const node = LayerNode.make({
     RuntimeFlags.node,
     TaskSignals.node,
     SessionFork.node,
+    Provider.node,
+    Agent.node,
   ],
 })
 export * as TaskManager from "./manager"

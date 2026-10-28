@@ -22,8 +22,14 @@ export type Parent = {
   model: Ref
   /** The user's variant on the parent's step. */
   variant?: string
-  /** The parent's own sized effort (ctx.extra.effort). */
+  /** The parent's own sized effort (ctx.extra.effort): a fork's effort and a brief's ceiling. */
   sized?: TaskSize.Effort
+  /**
+   * The effort the parent's request size gives (ctx.extra.passdown), which only Thorough makes high; defaults to `sized`.
+   * On a caching provider `sized` stays high while the cache of an earlier Thorough request is warm, which a child,
+   * starting a cache of its own, has no reason to share.
+   */
+  passdown?: TaskSize.Effort
   /** The parent runs on a free model, whose route its children keep. */
   free: boolean
   /** The request's learned default moves general subagents to the small model. */
@@ -303,7 +309,7 @@ export const choose = Effect.fn("SubagentModel.choose")(function* (i: {
     return chosen(kept, kept === "default" ? undefined : ask.resume?.record.model.variant === kept ? kept : base)
   // Thorough's high effort, through the sized path, for a child nothing else sets an effort for.
   const passdown =
-    parent.sized === "high" &&
+    (parent.passdown ?? parent.sized) === "high" &&
     !research &&
     !onSmall &&
     next.name !== "explore" &&

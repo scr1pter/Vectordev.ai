@@ -341,6 +341,12 @@ export const node = LayerNode.make({ service: Service, layer, deps: [Database.no
 
 // Pure rules -----------------------------------------------------------------------------------------------------------
 
+/** Why no fork starts or resumes while the owner has turned forks off. */
+export const TURNED_OFF = "Forks are turned off (sizing.subagents.fork); write a brief instead."
+/** Why no fork starts or resumes for an agent the task permission's "fork" pattern denies. */
+export const denied = (agent: string) =>
+  `The task permission denies forks to the ${agent} agent; write a brief instead.`
+
 /** Whether a model can carry forks: free and local ($0) models always, a paid one only where its provider caches. */
 export function qualifies(model: Provider.Model) {
   const free = !model.cost.unpriced && model.cost.input === 0 && model.cost.output === 0

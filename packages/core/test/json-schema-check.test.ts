@@ -261,6 +261,31 @@ describe("JsonSchemaCheck.validate", () => {
     ])
   })
 
+  test("a schema that fans out over one large string or array reads it once, so the check stays fast", () => {
+    // Each level tries 8 references to the next and no leaf matches: about 33,000 visits of the same value.
+    const fanOut = (leaf: Record<string, unknown>) => {
+      const $defs: Record<string, unknown> = { l5: leaf }
+      for (let level = 4; level >= 0; level--)
+        $defs[`l${level}`] = { anyOf: Array.from({ length: 8 }, () => ({ $ref: `#/$defs/l${level + 1}` })) }
+      return { $defs, $ref: "#/$defs/l0" }
+    }
+    const missed = [{ path: "", message: "must match at least one of the 8 anyOf schemas." }]
+    const text = `${"x".repeat(500_000)}😀`
+    const items = Array.from({ length: 1000 }, (_, index) => `${index}`.padStart(500, "0"))
+    const started = performance.now()
+    expect(problems(fanOut({ enum: ["y"] }), text)).toEqual(missed)
+    expect(problems(fanOut({ type: "string", maxLength: 10 }), text)).toEqual(missed)
+    expect(problems(fanOut({ type: "array", minItems: 2000, uniqueItems: true }), items)).toEqual(missed)
+    expect(performance.now() - started).toBeLessThan(5000)
+    // Read once, the length and the repeat are still checked.
+    expect(problems({ type: "string", maxLength: 500_000 }, text)).toEqual([
+      { path: "", message: "must be at most 500000 characters." },
+    ])
+    expect(problems({ type: "array", uniqueItems: true }, [...items.slice(0, 999), items[3]])).toEqual([
+      { path: "/999", message: "repeats item 3; items must differ." },
+    ])
+  })
+
   test("returns at most 20 problems", () => {
     const found = problems(
       { type: "array", items: { type: "string" } },

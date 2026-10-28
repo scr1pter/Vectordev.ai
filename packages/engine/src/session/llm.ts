@@ -349,6 +349,11 @@ const live: Layer.Layer<
           providerOptions: options,
           headers: prepared.headers,
           abort: input.abort,
+          ...(input.cache === false ? { cache: false } : {}),
+          // Native messages are not merged as the AI SDK's prompt is, so the boundary needs no promptIndex.
+          ...(input.boundary === undefined
+            ? {}
+            : { boundary: prepared.messages.length - input.messages.length + input.boundary }),
         })
         if (native.type === "supported") {
           yield* Effect.logInfo("llm runtime selected", {

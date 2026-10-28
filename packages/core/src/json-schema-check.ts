@@ -29,8 +29,10 @@ export const LIMIT = {
   problems: 20,
 } as const
 
-// Schema nodes one check may visit before it gives up: anyOf and oneOf try every branch on a value.
+// Schema nodes one check may visit before it gives up: anyOf and oneOf try every branch on a value. Reading a string's
+// length or an array's items for uniqueItems costs one more unit per this many characters.
 const WORK = 1_000_000
+const CHARS_PER_WORK = 1024
 
 const SUPPORTED = new Set([
   "type",
@@ -149,6 +151,21 @@ function target(root: Record<string, unknown>, ref: string): Schema | undefined 
     return typeof found === "boolean" || record(found) ? found : undefined
   }
   return undefined
+}
+
+/** A string's length in code points, as `[...text].length` counts it, without building the array. */
+function codePoints(text: string) {
+  let length = text.length
+  for (let index = 0; index < text.length - 1; index++) {
+    const code = text.charCodeAt(index)
+    if (code < 0xd800 || code > 0xdbff) continue
+    const next = text.charCodeAt(index + 1)
+    if (next >= 0xdc00 && next <= 0xdfff) {
+      length--
+      index++
+    }
+  }
+  return length
 }
 
 /** JSON with every object's keys sorted, so equal values give equal text. */
@@ -368,6 +385,36 @@ export function validate(schema: Record<string, unknown>, value: unknown): Probl
   if (big) return [big]
   const root = schema
   let work = WORK
+  // A string's length and an array's repeated item are read once per check, however many schema nodes visit them, and
+  // charged by size, so a schema that fans out over one large value stays within WORK.
+  const lengths = new Map<string, number>()
+  const repeats = new WeakMap<unknown[], { first: number; index: number } | null>()
+  const length = (text: string) => {
+    const known = lengths.get(text)
+    if (known !== undefined) return known
+    work -= Math.ceil(text.length / CHARS_PER_WORK)
+    const counted = codePoints(text)
+    lengths.set(text, counted)
+    return counted
+  }
+  const repeated = (items: unknown[]) => {
+    const known = repeats.get(items)
+    if (known !== undefined) return known
+    const seen = new Map<string, number>()
+    let found: { first: number; index: number } | null = null
+    for (const [index, entry] of items.entries()) {
+      const key = canonical(entry)
+      work -= Math.ceil(key.length / CHARS_PER_WORK)
+      const first = seen.get(key)
+      if (first !== undefined) {
+        found = { first, index }
+        break
+      }
+      seen.set(key, index)
+    }
+    repeats.set(items, found)
+    return found
+  }
 
   // Records problems into `out`, or, with no `out`, stops at the first one: anyOf, oneOf and not only ask whether a
   // branch matches.
@@ -407,10 +454,10 @@ export function validate(schema: Record<string, unknown>, value: unknown): Probl
     }
     if (!ok && !out) return false
 
-    if (typeof item === "string") {
-      const length = [...item].length
-      if (count(node.minLength) && length < node.minLength) ok = fail(`must be at least ${node.minLength} characters.`)
-      if (count(node.maxLength) && length > node.maxLength) ok = fail(`must be at most ${node.maxLength} characters.`)
+    if (typeof item === "string" && (count(node.minLength) || count(node.maxLength))) {
+      const size = length(item)
+      if (count(node.minLength) && size < node.minLength) ok = fail(`must be at least ${node.minLength} characters.`)
+      if (count(node.maxLength) && size > node.maxLength) ok = fail(`must be at most ${node.maxLength} characters.`)
     }
     if (typeof item === "number") {
       if (finite(node.minimum) && item < node.minimum) ok = fail(`must be ${node.minimum} or more.`)
@@ -452,16 +499,8 @@ export function validate(schema: Record<string, unknown>, value: unknown): Probl
         if (item.length > LIMIT.unique)
           ok = fail(`has more than ${LIMIT.unique} items, too many to check that they differ.`)
         else {
-          const seen = new Map<string, number>()
-          for (const [index, entry] of item.entries()) {
-            const key = canonical(entry)
-            const first = seen.get(key)
-            if (first !== undefined) {
-              ok = fail(`repeats item ${first}; items must differ.`, child(path, index))
-              break
-            }
-            seen.set(key, index)
-          }
+          const repeat = repeated(item)
+          if (repeat) ok = fail(`repeats item ${repeat.first}; items must differ.`, child(path, repeat.index))
         }
       }
       if (node.items !== undefined)
