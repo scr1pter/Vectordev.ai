@@ -673,10 +673,10 @@ function EraseCard(props: {
     scope === "research"
       ? "all research in this repository: every run's pages, notes and reports"
       : scope === "all"
-        ? "everything Vector learned, in every repository and about you"
+        ? "everything Vector learned, in every repository and about you, and every Deep research run"
         : scope === "personal"
           ? "everything Vector learned about you"
-          : "everything Vector learned in this repository, its failure memory included"
+          : "everything Vector learned in this repository, its failure memory and Deep research runs included"
   return (
     <div class="settings-v2-card settings-v2-card--wide">
       <div class="settings-v2-card-head">

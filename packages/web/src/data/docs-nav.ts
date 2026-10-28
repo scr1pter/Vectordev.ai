@@ -10,6 +10,12 @@ export const docsNav: DocGroup[] = [
     label: "Get started",
     links: [
       {
+        id: "first-launch",
+        title: "First launch, step by step",
+        blurb:
+          "For anyone new to Vector: download it, get past the first-launch warnings, sign in, pick a model and run a first task.",
+      },
+      {
         id: "install",
         title: "Install Vector",
         blurb: "Create a free account, download the installer for your computer and run it.",

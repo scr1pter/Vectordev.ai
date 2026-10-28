@@ -4,6 +4,7 @@ import { HttpServerRequest, HttpServerResponse, type Multipart } from "effect/un
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainEmbed } from "@vectordevai/core/brain/embed"
+import { BrainErase } from "@vectordevai/core/brain/erase"
 import { BrainExport } from "@vectordevai/core/brain/export"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import type { BrainSchema } from "@vectordevai/core/brain/schema"
@@ -118,18 +119,18 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
       return true
     })
 
-    // Research runs are the repository's, like its documents: erasing the repository or everything forgets them first.
+    // Research goes with the memory erased (BrainErase): a repository's runs, every run, or the runs a session started.
+    // The answer stays the count of entries.
     const erase = Effect.fn("MemoryHttpApi.erase")(function* (ctx: {
       payload: { scope: "repository" | "personal" | "all" }
     }) {
       const place = yield* instruction.place()
-      if (ctx.payload.scope !== "personal")
-        yield* research.forgetAll(place, ctx.payload.scope === "all" ? { everywhere: true } : {})
-      return yield* brain.erase(place, ctx.payload.scope)
+      return (yield* BrainErase.erase({ brain, research, place, scope: ctx.payload.scope })).entries
     })
 
     const eraseSession = Effect.fn("MemoryHttpApi.eraseSession")(function* (ctx: { params: { sessionID: string } }) {
-      return yield* brain.eraseSession(yield* instruction.place(), ctx.params.sessionID)
+      const place = yield* instruction.place()
+      return (yield* BrainErase.session({ brain, research, place, sessionID: ctx.params.sessionID })).entries
     })
 
     // An attachment, never something a browser renders.

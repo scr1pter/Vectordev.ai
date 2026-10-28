@@ -298,6 +298,12 @@ const modelRequests = (llm: TestLLMServer["Service"]) =>
 // Exercise the processor's real partial-usage persistence. This boundary fixture reports a numeric started total,
 // then fails or interrupts before completion; HTTP fixtures above cover the regular full-stream path.
 for (const reason of ["error", "abort", "reduced"] as const) {
+  // Review and security run in parallel, and nothing else orders security's first admission against review's step.
+  // Once review's step settles it holds its finalize reservation until its report is decoded, and a security
+  // admission that lands in that window is refused for budget: its started, unfinished attempt never runs, adds no
+  // uncertain exposure, and verify then fits. Review's first reply waits here until security's stream is pulled,
+  // which the processor does only after admitting it, so the attempt this test is about always runs.
+  const securityAdmitted = Promise.withResolvers<void>()
   const partial = testEffect(
     LayerNode.compile(root, [
       ...replacements,
@@ -310,6 +316,7 @@ for (const reason of ["error", "abort", "reduced"] as const) {
               Stream.suspend(() => {
                 const text = JSON.stringify(input.messages.at(-1) ?? {})
                 if (input.agent.name === "security" && !text.includes("Stop investigating")) {
+                  securityAdmitted.resolve()
                   input.started?.(
                     reason === "reduced"
                       ? { inputTokens: 40_000, outputTokens: 100, totalTokens: 40_100 }
@@ -337,26 +344,34 @@ for (const reason of ["error", "abort", "reduced"] as const) {
                   )
                 }
                 const verify = text.includes("You are checking candidate findings")
-                return Stream.make(
-                  LLMEvent.stepStart({ index: 0 }),
-                  LLMEvent.textStart({ id: "answer" }),
-                  LLMEvent.textDelta({
-                    id: "answer",
-                    text: JSON.stringify(
-                      verify ? { results: [] } : report(input.agent.name === "review" ? [finding()] : []),
+                const gate =
+                  input.agent.name === "review" && !verify && !text.includes("Stop investigating")
+                    ? Stream.fromEffect(Effect.promise(() => securityAdmitted.promise)).pipe(Stream.drain)
+                    : Stream.empty
+                return gate.pipe(
+                  Stream.concat(
+                    Stream.make(
+                      LLMEvent.stepStart({ index: 0 }),
+                      LLMEvent.textStart({ id: "answer" }),
+                      LLMEvent.textDelta({
+                        id: "answer",
+                        text: JSON.stringify(
+                          verify ? { results: [] } : report(input.agent.name === "review" ? [finding()] : []),
+                        ),
+                      }),
+                      LLMEvent.textEnd({ id: "answer" }),
+                      LLMEvent.stepFinish({
+                        index: 0,
+                        reason: "stop",
+                        usage: new Usage(
+                          input.agent.name === "review"
+                            ? { inputTokens: 30_000, outputTokens: 100, totalTokens: 30_100 }
+                            : { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+                        ),
+                      }),
+                      LLMEvent.finish({ reason: "stop" }),
                     ),
-                  }),
-                  LLMEvent.textEnd({ id: "answer" }),
-                  LLMEvent.stepFinish({
-                    index: 0,
-                    reason: "stop",
-                    usage: new Usage(
-                      input.agent.name === "review"
-                        ? { inputTokens: 30_000, outputTokens: 100, totalTokens: 30_100 }
-                        : { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-                    ),
-                  }),
-                  LLMEvent.finish({ reason: "stop" }),
+                  ),
                 )
               }),
           }),

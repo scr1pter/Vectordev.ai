@@ -55,8 +55,9 @@ import { ResearchReport } from "./report"
 //   documents, which these are.
 // - A run nobody kept is deleted after 30 days. Research in a repository is capped at 1 GB; past it, the oldest runs
 //   nobody kept go first, and the add says so. A run keeps at most 80 sources and 40 MB of their text.
-// - Forget (a source, a run, all of a repository's research) deletes the text and leaves tombstones, so a later run
-//   does not keep a forgotten page again on its own.
+// - Forget (a source, a run, the runs of a session, all of a repository's research) deletes the text and leaves
+//   tombstones, so a later run does not keep a forgotten page again on its own. Erasing memory forgets research too
+//   (BrainErase): a session's runs with what Vector learned in it, a repository's with its memory, every run with all.
 // - A run a guest acted in keeps nothing in the brain: it lives in a brain in this process's memory, which is gone
 //   when the process ends. Its report stays in the session's transcript.
 
@@ -206,6 +207,8 @@ export type Detail = {
 
 export type Exported = { readonly name: string; readonly type: string; readonly body: string }
 
+export type ForgetAllOptions = { readonly everywhere?: boolean; readonly session?: string }
+
 export interface Interface {
   readonly start: (place: Brain.Place, input: StartInput) => Effect.Effect<Research.Run>
   /** The newest run of a root session that is still planned or running. */
@@ -276,8 +279,11 @@ export interface Interface {
   >
   readonly forget: (place: Brain.Place, runID: string) => Effect.Effect<boolean>
   readonly forgetSource: (place: Brain.Place, runID: string, ref: string) => Effect.Effect<boolean>
-  /** Every run of the repository, or with `everywhere` of every repository (Erase all); how many there were. */
-  readonly forgetAll: (place: Brain.Place, options?: { readonly everywhere?: boolean }) => Effect.Effect<number>
+  /**
+   * Every run of the repository, or with `everywhere` of every repository (Erase all), or with `session` only the runs
+   * that root session started (Erase what Vector learned in a session); how many there were.
+   */
+  readonly forgetAll: (place: Brain.Place, options?: ForgetAllOptions) => Effect.Effect<number>
   readonly export: (
     place: Brain.Place,
     runID: string,
@@ -1394,7 +1400,7 @@ function make(input: {
 
   const forgetAll = Effect.fn("ResearchStore.forgetAll")(function* (
     place: Brain.Place,
-    options: { readonly everywhere?: boolean } = {},
+    options: ForgetAllOptions = {},
   ) {
     return yield* lock.withPermit(
       Effect.gen(function* () {
@@ -1402,7 +1408,12 @@ function make(input: {
           store
             .select({ id: ResearchRunTable.id, repository: ResearchRunTable.repository_id })
             .from(ResearchRunTable)
-            .where(options.everywhere ? undefined : eq(ResearchRunTable.repository_id, place.repository))
+            .where(
+              and(
+                options.everywhere ? undefined : eq(ResearchRunTable.repository_id, place.repository),
+                options.session === undefined ? undefined : eq(ResearchRunTable.session_id, options.session),
+              ),
+            )
             .all()
             .pipe(Effect.orDie)
         // Runs a guest acted in go too: their pages are in this process's memory, not the brain, but they are research.

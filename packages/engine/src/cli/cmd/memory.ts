@@ -3,9 +3,11 @@ import { EOL } from "os"
 import path from "path"
 import { Effect } from "effect"
 import { Brain } from "@vectordevai/core/brain/brain"
+import { BrainErase } from "@vectordevai/core/brain/erase"
 import { BrainExport } from "@vectordevai/core/brain/export"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import type { BrainSchema } from "@vectordevai/core/brain/schema"
+import { ResearchStore } from "@vectordevai/core/research/store"
 import { Instruction } from "@/session/instruction"
 import { cmd } from "./cmd"
 import {
@@ -229,25 +231,42 @@ export const MemoryTidyCommand = effectCmd({
   }),
 })
 
+/** What `vector memory erase` takes, as it asks before erasing. Deep research goes with a repository's memory. */
+export function eraseWarning(scope: BrainErase.Scope) {
+  const what =
+    scope === "all"
+      ? "everything Vector learned, in every repository and about you, and every Deep research run"
+      : scope === "personal"
+        ? "what Vector learned about you"
+        : "what Vector learned in this repository, its failure memory and Deep research runs included"
+  return `This erases ${what}. Run it again with --yes to confirm.`
+}
+
+/** What `vector memory erase` says it took. */
+export function erasedMessage(erased: BrainErase.Erased) {
+  const entries = `Erased ${erased.entries} entr${erased.entries === 1 ? "y" : "ies"}`
+  return erased.runs === 0 ? entries : `${entries} and ${erased.runs} research run${erased.runs === 1 ? "" : "s"}`
+}
+
+// The same erase as Settings > Memory's, through BrainErase, so research does not outlive the memory it belongs to.
 export const MemoryEraseCommand = effectCmd({
   command: "erase",
-  describe: "erase what Vector learned (files you wrote are left alone)",
+  describe: "erase what Vector learned, and a repository's Deep research (files you wrote are left alone)",
   builder: (yargs) =>
     scopeOption(yargs)
       .option("everywhere", { describe: "every repository and your own", type: "boolean", default: false })
       .option("yes", { describe: "confirm", type: "boolean", default: false }),
   handler: Effect.fn("Cli.memory.erase")(function* (args) {
     const scope = args.everywhere ? "all" : args.personal ? "personal" : "repository"
-    const what =
-      scope === "all"
-        ? "everything Vector learned, in every repository and about you"
-        : scope === "personal"
-          ? "what Vector learned about you"
-          : "what Vector learned in this repository, its failure memory included"
-    if (!args.yes) return yield* fail(`This erases ${what}. Run it again with --yes to confirm.`)
+    if (!args.yes) return yield* fail(eraseWarning(scope))
     const memory = yield* where
-    const count = yield* memory.brain.erase(memory.place, scope)
-    UI.println(UI.Style.TEXT_SUCCESS_BOLD + `Erased ${count} entr${count === 1 ? "y" : "ies"}` + UI.Style.TEXT_NORMAL)
+    const erased = yield* BrainErase.erase({
+      brain: memory.brain,
+      research: yield* ResearchStore.Service,
+      place: memory.place,
+      scope,
+    })
+    UI.println(UI.Style.TEXT_SUCCESS_BOLD + erasedMessage(erased) + UI.Style.TEXT_NORMAL)
   }),
 })
 
