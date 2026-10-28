@@ -64,6 +64,7 @@ benchmark.describe("performance: first navigation paint", () => {
     const result = await measureFirstNavigation(page, {
       href,
       trigger: "click",
+      clickSelector: 'button[aria-label^="Inspect child navigation"]',
       destinationPath: href,
       sourceSelector: messageSelector(fixture.expected.sourceMessageIDs.at(-1)!),
       destinationSelector: messageSelector(fixture.expected.childMessageIDs.at(-1)!),
