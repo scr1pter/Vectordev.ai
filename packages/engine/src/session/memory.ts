@@ -377,6 +377,17 @@ const WEB_AGENTS = new Set(["research", "researcher"])
 export const HOLD = "hold"
 
 /**
+ * Metadata for a note or message part from another agent that carries what that agent took in (D.6): web or MCP
+ * content marks the part as outside content, keeping which, so the recipient is held for the same reason.
+ */
+export function carried(hold: BrainSchema.Hold | undefined): Record<string, string> {
+  return hold === "web" || hold === "mcp" ? { [BrainSchema.OUTSIDE]: "subagent", [HOLD]: hold } : {}
+}
+
+// Note parts Vector writes about the work a subagent did: its report, its note up, its waiting, its interruption.
+const SUBAGENT_NOTES = ["taskNotification", "taskMessage", "taskAttention", "taskInterrupted"]
+
+/**
  * What the user typed in a message, without Vector's synthetic notes or attached file contents. A slash command's text
  * is someone else's words (a template, an MCP server's prompt, a skill, a snippet's output), so of it only the
  * arguments the user typed count, and text from outside (an imported transcript, an issue) or that the user pasted (an
@@ -900,7 +911,8 @@ export function touched(messages: readonly SessionV1.WithParts[], file: string, 
  * text from outside (an imported transcript, an issue or pull request), used the browser or Vector Cloud, ran an MCP
  * tool or an MCP server's prompt, or took a subagent's report. Memory poisoning works by planting text the agent later
  * saves as its own, so once outside content is in the history, every write is held for review. A research session is
- * held as web throughout, and a subagent that read the web passes that up: its parent is held as web, not subagent.
+ * held as web throughout, and a subagent that read the web or ran an MCP tool passes that up: its parent is held as web
+ * or mcp, not subagent.
  */
 export function taint(messages: readonly SessionV1.WithParts[]): BrainSchema.Hold | undefined {
   const calls = messages.flatMap((message) => message.parts.flatMap((part) => (part.type === "tool" ? [part] : [])))
@@ -910,7 +922,7 @@ export function taint(messages: readonly SessionV1.WithParts[]): BrainSchema.Hol
   if (messages.some((message) => WEB_AGENTS.has(message.info.agent))) return "web"
   if (calls.some((part) => part.state.status !== "pending" && part.state.metadata?.[HOLD] === "web")) return "web"
   // A local file an editor embedded is this computer's, like what the read tool returns, and what the user pasted they
-  // chose to send; other outside text is not.
+  // chose to send; other outside text is not. A note from an agent that only ran an MCP tool is held as MCP (below).
   if (
     messages.some((message) =>
       message.parts.some(
@@ -918,7 +930,8 @@ export function taint(messages: readonly SessionV1.WithParts[]): BrainSchema.Hol
           part.type === "text" &&
           outside(part) &&
           part.metadata?.[BrainSchema.OUTSIDE] !== "file" &&
-          part.metadata?.[BrainSchema.OUTSIDE] !== BrainSchema.PASTE,
+          part.metadata?.[BrainSchema.OUTSIDE] !== BrainSchema.PASTE &&
+          !(part.metadata?.[BrainSchema.OUTSIDE] === "subagent" && part.metadata?.[HOLD] === "mcp"),
       ),
     )
   )
@@ -937,11 +950,25 @@ export function taint(messages: readonly SessionV1.WithParts[]): BrainSchema.Hol
     )
   )
     return "web"
-  // A background subagent's report arrives as a synthetic note in a user message, after its task call.
+  // A subagent that ran an MCP tool passes that up, on its task call or on a note about it, and is not held as less.
+  if (
+    messages.some((message) =>
+      message.parts.some((part) =>
+        part.type === "tool"
+          ? part.state.status !== "pending" && part.state.metadata?.[HOLD] === "mcp"
+          : part.type === "text" && part.metadata?.[HOLD] === "mcp",
+      ),
+    )
+  )
+    return "mcp"
+  // A background subagent's report, note up, waiting or interruption arrives as a synthetic note in a user message. A
+  // background command's exit note adds nothing, like a foreground command's result.
   if (
     tools.some((tool) => tool === "task" || tool === "task_manage" || tool === "send_teammate_message") ||
     messages.some((message) =>
-      message.parts.some((part) => part.type === "text" && part.metadata?.["taskNotification"] !== undefined),
+      message.parts.some(
+        (part) => part.type === "text" && SUBAGENT_NOTES.some((key) => part.metadata?.[key] !== undefined),
+      ),
     )
   )
     return "subagent"

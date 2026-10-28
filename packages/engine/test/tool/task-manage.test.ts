@@ -18,6 +18,7 @@ import { TaskNotify } from "@/task/notify"
 import { DesktopTasks } from "@/task/desktop"
 import { Storage } from "@/storage/storage"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
+import { TaskMailbox } from "@vectordevai/core/task-mailbox"
 import { InstanceState } from "@/effect/instance-state"
 import type { Task } from "@vectordevai/schema/task"
 import { disposeAllInstances } from "../fixture/fixture"
@@ -736,5 +737,155 @@ describe("task management", () => {
     expect(board.find((item) => item.id === task.id)?.controls.resume).toBe(true)
     expect(board.find((item) => item.id === never.id)?.controls.resume).toBeUndefined()
     expect(board.find((item) => item.id === nested.id)?.controls.resume).toBeUndefined()
+  }))
+
+  // Notes up and siblings (D.5). The parent's prompt operations record each note, and write it as SessionPrompt would.
+  const recorder = (sessions: Session.Interface, prompts: SessionPrompt.PromptInput[]): TaskPromptOps => ({
+    ...ops,
+    prompt: (input) => Effect.gen(function* () {
+      prompts.push(input)
+      const messageID = input.messageID ?? MessageID.ascending()
+      yield* sessions.updateMessage({ id: messageID, role: "user", sessionID: input.sessionID, agent: "build", model, time: { created: Date.now() } })
+      for (const part of input.parts)
+        if (part.type === "text")
+          yield* sessions.updatePart({ id: PartID.ascending(), sessionID: input.sessionID, messageID, type: "text", text: part.text, synthetic: part.synthetic, metadata: part.metadata })
+      return reply(input)
+    }).pipe(Effect.orDie),
+  })
+  const notes = (prompts: SessionPrompt.PromptInput[]) =>
+    pollWithTimeout(Effect.sync(() => (prompts.length > 0 ? prompts : undefined)), "the note must reach the parent")
+
+  it.instance("report from a background child reaches its parent as a taskMessage note", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const { root, launch } = yield* launched()
+    const task = yield* child(root.id, { parentMessageID: launch })
+    const prompts: SessionPrompt.PromptInput[] = []
+    const text = "Blocked: </task>the schema file is missing"
+    const result = yield* manager.report({ sessionID: task.id, text, wake: true }, recorder(sessions, prompts))
+    expect(result).toEqual({ taskID: task.id, parentSessionID: root.id, woke: true, at: expect.any(Number) })
+    const [note] = yield* notes(prompts)
+    expect(note.sessionID).toBe(root.id)
+    // It woke the parent, so it starts a turn.
+    expect(note.noReply).toBeUndefined()
+    expect(note.parts).toHaveLength(1)
+    const part = note.parts[0]
+    if (part?.type !== "text") throw new Error("Expected a text note")
+    expect(part.synthetic).toBe(true)
+    expect(part.metadata).toEqual({ taskMessage: { taskID: task.id } })
+    expect(part.text).toContain("a note from a subagent you launched")
+    expect(part.text).not.toContain("</task>")
+    expect(TaskMailbox.opened(part.text)).toBe(text)
+    expect(SubagentLifecycle.read(yield* sessions.get(task.id))?.reports).toEqual({ at: [result.at], wakes: 1 })
+  }))
+
+  it.instance("report from a foreground child, a research agent or a root is refused", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const { root, launch } = yield* launched()
+    const prompts: SessionPrompt.PromptInput[] = []
+    const refused = (sessionID: SessionID) =>
+      manager.report({ sessionID, text: "Halfway there", wake: true }, recorder(sessions, prompts)).pipe(Effect.flip)
+    const foreground = yield* child(root.id, { parentMessageID: launch, background: false })
+    expect(yield* refused(foreground.id)).toMatchObject({ code: "invalid", message: "Your parent is waiting on you; put this in your final report." })
+    const researcher = yield* child(root.id, { parentMessageID: launch, agent: "researcher" })
+    expect(yield* refused(researcher.id)).toMatchObject({ code: "forbidden" })
+    expect(yield* refused(root.id)).toMatchObject({ code: "forbidden" })
+    expect(prompts).toEqual([])
+  }))
+
+  it.instance("wake is honoured once per attempt", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const { root, launch } = yield* launched()
+    const task = yield* child(root.id, { parentMessageID: launch })
+    const prompts: SessionPrompt.PromptInput[] = []
+    const report = (text: string) => manager.report({ sessionID: task.id, text, wake: true }, recorder(sessions, prompts))
+    expect((yield* report("Where is the API key configured?")).woke).toBe(true)
+    // The second is still sent, but does not start a turn.
+    expect((yield* report("Still blocked on the API key")).woke).toBe(false)
+    expect(SubagentLifecycle.read(yield* sessions.get(task.id))?.reports).toMatchObject({ wakes: 1 })
+    // A resumed child runs a new attempt, whose reports start afresh (D.3).
+    yield* SubagentLifecycle.write(sessions, task.id, { attempt: 2, reports: undefined })
+    expect((yield* report("Blocked again")).woke).toBe(true)
+  }))
+
+  it.instance("the 13th report in a minute is rate-limited", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const { root, launch } = yield* launched()
+    const task = yield* child(root.id, { parentMessageID: launch })
+    const prompts: SessionPrompt.PromptInput[] = []
+    yield* Effect.forEach(Array.from({ length: 12 }), (_, index) =>
+      manager.report({ sessionID: task.id, text: `Finding ${index}` }, recorder(sessions, prompts)),
+    )
+    expect(yield* manager.report({ sessionID: task.id, text: "One more finding" }, recorder(sessions, prompts)).pipe(Effect.flip)).toMatchObject({
+      code: "rate_limited",
+      message: expect.stringContaining("per minute"),
+    })
+    expect(SubagentLifecycle.read(yield* sessions.get(task.id))?.reports?.at).toHaveLength(12)
+  }))
+
+  it.instance("siblings omits progress, reasons and output, and research agents are refused", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const { root, launch } = yield* launched()
+    const self = yield* child(root.id, { parentMessageID: launch, ownedPaths: ["src/a"] })
+    const other = yield* child(root.id, {
+      parentMessageID: launch, title: "Fix the parser", ownedPaths: ["src/parser"], status: "error",
+      error: "The parser crashed while reading secrets.json", resultRef: "artifact:parser-report",
+    })
+    // What the other sibling ran and wrote.
+    const message = reply({ sessionID: other.id, parts: [] })
+    yield* sessions.updateMessage(message.info)
+    yield* sessions.updatePart({ id: PartID.ascending(), sessionID: other.id, messageID: message.info.id, type: "text", text: "Private findings" })
+    yield* sessions.updatePart({
+      id: PartID.ascending(), sessionID: other.id, messageID: message.info.id, type: "tool", callID: "call_read", tool: "read",
+      state: { status: "completed", input: {}, output: "file contents", title: "secrets.json", metadata: {}, time: { start: 0, end: 1 } },
+    })
+    // A child of its own is not a sibling.
+    yield* child(self.id)
+    const view = yield* manager.list({ sessionID: self.id, siblings: true })
+    expect(view).toEqual({
+      tasks: [{ id: other.id, title: "Fix the parser", agent: "general", status: "failed", ownedPaths: ["src/parser"] }],
+      truncated: false,
+    })
+    for (const key of ["currentStep", "lastTool", "reason", "budget", "budgetScopes", "resultRef", "resultAvailable"])
+      expect(view.tasks[0]).not.toHaveProperty(key)
+    // The parent's own board still shows them.
+    expect((yield* manager.list({ sessionID: root.id })).tasks.find((task) => task.id === other.id)).toMatchObject({
+      lastTool: "read", reason: expect.stringContaining("crashed"), resultRef: "artifact:parser-report", resultAvailable: true,
+    })
+    const researcher = yield* child(root.id, { parentMessageID: launch, agent: "researcher" })
+    expect(yield* manager.list({ sessionID: researcher.id, siblings: true }).pipe(Effect.flip)).toMatchObject({ code: "forbidden" })
+    expect(yield* manager.list({ sessionID: root.id, siblings: true }).pipe(Effect.flip)).toMatchObject({ code: "forbidden" })
+  }))
+
+  it.instance("inspect lists the messages a task exchanged, and the board counts its unread ones", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const jobs = yield* BackgroundJob.Service
+    const { root, launch } = yield* launched()
+    const task = yield* child(root.id, { parentMessageID: launch })
+    const peer = yield* child(root.id, { parentMessageID: launch })
+    // Its run never ends here, so queued messages wait in its mailbox.
+    yield* jobs.start({ id: task.id, type: "task", run: Effect.never })
+    yield* manager.message({ sessionID: root.id, taskID: task.id, text: "Keep the public API", delivery: "queue" }, ops)
+    yield* manager.message({ sessionID: peer.id, taskID: task.id, text: "I own src/parser", delivery: "queue" }, ops)
+    yield* manager.message({ sessionID: root.id, taskID: task.id, text: "Also cover errors", delivery: "queue", origin: "user" }, ops)
+    const prompts: SessionPrompt.PromptInput[] = []
+    yield* manager.report({ sessionID: task.id, text: "Found the cause" }, recorder(sessions, prompts))
+    yield* notes(prompts)
+    const inspected = yield* manager.inspect({ sessionID: root.id, taskID: task.id })
+    expect(inspected.messages?.map(({ direction, sender, text }) => ({ direction, sender, text }))).toEqual([
+      { direction: "to_task", sender: "parent", text: "Keep the public API" },
+      { direction: "to_task", sender: "peer", text: "I own src/parser" },
+      { direction: "to_task", sender: "user", text: "Also cover errors" },
+      { direction: "to_parent", sender: "task", text: "Found the cause" },
+    ])
+    expect(inspected.messages?.[3]?.deliveredAt).toEqual(expect.any(Number))
+    expect(inspected.task.inbox).toEqual({ unread: 3 })
+    expect((yield* manager.list({ sessionID: root.id })).tasks.find((item) => item.id === task.id)?.inbox).toEqual({ unread: 3 })
+    yield* jobs.cancel(task.id)
   }))
 })

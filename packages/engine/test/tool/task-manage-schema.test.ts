@@ -54,7 +54,7 @@ describe("task_manage provider schema", () => {
         expect(parameters).toMatchObject({
           type: "object",
           properties: {
-            action: { enum: ["list", "inspect", "message", "stop", "wait", "resume"] },
+            action: { enum: ["list", "inspect", "message", "stop", "wait", "resume", "report"] },
             task_id: { type: "string" },
             task_ids: { type: "array", minItems: 1, maxItems: 200 },
             text: { type: "string" },
@@ -62,6 +62,8 @@ describe("task_manage provider schema", () => {
             all: { type: "boolean" },
             mode: { enum: ["any", "all"] },
             timeout: { type: "number", minimum: 0, maximum: 60000 },
+            siblings: { type: "boolean" },
+            wake: { type: "boolean" },
           },
           required: ["action"],
         })
@@ -97,6 +99,8 @@ describe("task_manage provider schema", () => {
         { action: "resume" },
         { action: "resume", task_ids: [] },
         { action: "resume", task_ids: Array.from({ length: 9 }, (_, index) => `ses_child_${index}`) },
+        { action: "report" },
+        { action: "report", text: "Blocked on the schema", wake: "yes" },
       ]) {
         const exit = yield* tool.execute(input, context).pipe(Effect.exit)
         expect(Exit.isFailure(exit)).toBe(true)
@@ -112,6 +116,8 @@ describe("task_manage provider schema", () => {
         { action: "wait", task_ids: ["ses_child"], mode: "all", timeout: 60000 },
         { action: "resume", task_ids: ["ses_child"] },
         { action: "resume", task_ids: ["ses_child"], text: "Also check the parser" },
+        { action: "list", siblings: true },
+        { action: "report", text: "Blocked on the schema", wake: true },
       ]) {
         expect(Schema.decodeUnknownSync(tool.parameters)(input)).toEqual(input)
       }

@@ -1,5 +1,5 @@
 import { Context, Effect, Layer, Option, Schema } from "effect"
-import { eq, sql } from "drizzle-orm"
+import { and, desc, eq, sql } from "drizzle-orm"
 import { Task } from "@vectordevai/schema/task"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Database } from "@vectordevai/core/database/database"
@@ -9,7 +9,9 @@ import { Session } from "@/session/session"
 import { SessionStatus } from "@/session/status"
 import { SessionID, MessageID } from "@/session/schema"
 import { SessionTaskSize } from "@/session/task-size"
+import { SessionMemory } from "@/session/memory"
 import type { SubagentRecord } from "@/agent/subagent-kind"
+import type { SessionV1 } from "@vectordevai/core/v1/session"
 import { Permission } from "@/permission"
 import { Question } from "@/question"
 import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
@@ -43,19 +45,42 @@ export class Error extends Schema.TaggedErrorClass<Error>()("TaskManager.Error",
   message: Schema.String,
 }) {}
 
+export type ListInput = {
+  sessionID: SessionID
+  descendants?: boolean
+  limit?: number
+  /** Only work in flight: finished children are walked through but never listed (5.D.1). */
+  active?: boolean
+  /** A subagent's view of its parent's other children (D.5). */
+  siblings?: boolean
+}
+
+/** A sibling as another subagent sees it: nothing that would carry the sibling's progress or output (D.5). */
+export type Sibling = Pick<Task.Info, "id" | "title" | "agent" | "status" | "ownedPaths">
+export type SiblingList = { tasks: Sibling[]; truncated: boolean }
+
 export interface Interface {
-  readonly list: (input: {
-    sessionID: SessionID
-    descendants?: boolean
-    limit?: number
-    /** Only work in flight: finished children are walked through but never listed (5.D.1). */
-    active?: boolean
-  }) => Effect.Effect<Task.ListResult, Error>
+  readonly list: {
+    (input: ListInput & { siblings: true }): Effect.Effect<SiblingList, Error>
+    (input: ListInput): Effect.Effect<Task.ListResult, Error>
+  }
   readonly inspect: (input: { sessionID: SessionID; taskID: string }) => Effect.Effect<Task.InspectResult, Error>
   readonly message: (
-    input: { sessionID: SessionID; taskID: string; text: string; delivery?: "steer" | "queue" },
+    input: {
+      sessionID: SessionID
+      taskID: string
+      text: string
+      delivery?: "steer" | "queue"
+      /** The user wrote it, through the session's page (default "agent"). */
+      origin?: "agent" | "user"
+    },
     ops: TaskPromptOps,
   ) => Effect.Effect<Task.MessageResult, Error>
+  /** A background subagent's note to its parent while it works (D.5). */
+  readonly report: (
+    input: { sessionID: SessionID; text: string; wake?: boolean },
+    ops: TaskPromptOps,
+  ) => Effect.Effect<Task.ReportResult, Error>
   readonly stop: (
     input: {
       sessionID: SessionID
@@ -112,6 +137,10 @@ const SWEEPS = 4
 const STOP_REASON = "Stopped by the parent session; partial work was retained."
 const INTERRUPT_REASON = "Stopped with the main agent; partial work was kept."
 const OUTPUT_LIMIT = 4096
+// The most messages inspect shows for a task, sent to it and reported up together.
+const MAX_MESSAGES = 50
+const FOREGROUND_REPORT = "Your parent is waiting on you; put this in your final report."
+const ENDED_REPORT = "This run has ended; no report was sent."
 // The most children one resume call continues.
 const MAX_RESUME = 32
 // Research agents (Agent.RESEARCH, RESEARCHER and RESEARCH_JUDGE) start from a checked brief, which a resume would skip.
@@ -125,6 +154,11 @@ const abandon = (at: number) => ({
   reason: "Engine restarted; partial work was retained. Resume explicitly to continue.",
   interruption: { at, cause: "unknown" as const },
 })
+// How many messages sent to a task have not reached it yet; nothing when none wait.
+const inbox = (record: SubagentRecord) => {
+  const unread = (record.mailbox ?? []).filter((item) => item.deliveredAt === undefined).length
+  return unread > 0 ? { inbox: { unread } } : {}
+}
 const recentActiveFirst = (left: { status: string; startedAt: number }, right: { status: string; startedAt: number }) =>
   Number(ACTIVE.has(right.status)) - Number(ACTIVE.has(left.status)) || right.startedAt - left.startedAt
 
@@ -347,6 +381,7 @@ const layer = Layer.effect(
               }) as Task.Interrupted,
             }
           : {}),
+        ...inbox(current),
       }
     })
 
@@ -381,7 +416,32 @@ const layer = Layer.effect(
       } satisfies Task.Limits
     })
 
-    const list: Interface["list"] = Effect.fn("TaskManager.list")(function* (input) {
+    // A subagent's view of its parent's other children (D.5): who they are and what they own, never their progress,
+    // reasons or output, so one sibling's tool output never reaches another.
+    const siblings = Effect.fn("TaskManager.siblings")(function* (input: ListInput) {
+      const session = yield* get(input.sessionID)
+      const record = SubagentLifecycle.read(session)
+      if (!session.parentID || session.internal || !record)
+        return yield* new Error({ code: "forbidden", message: "Only a subagent has siblings to list." })
+      if (RESEARCH_AGENTS.has(record.agent))
+        return yield* new Error({ code: "forbidden", message: "Research agents cannot list their siblings." })
+      const limit = Math.min(MAX_TASKS, Math.max(1, Math.floor(input.limit ?? 100)))
+      const others = (yield* sessions.children(session.parentID))
+        .filter((item) => item.id !== session.id && !item.internal && SubagentLifecycle.read(item))
+        .sort((left, right) => recentActiveFirst(SubagentLifecycle.read(left)!, SubagentLifecycle.read(right)!))
+      const tasks = yield* Effect.forEach(others.slice(0, limit), observe, { concurrency: 4 })
+      return {
+        tasks: tasks.map(
+          ({ id, title, agent, status, ownedPaths }): Sibling => ({ id, title, agent, status, ownedPaths }),
+        ),
+        truncated: others.length > limit,
+      }
+    })
+
+    const list = Effect.fn("TaskManager.list")(function* (
+      input: ListInput,
+    ): Effect.fn.Return<Task.ListResult | SiblingList, Error> {
+      if (input.siblings) return yield* siblings(input)
       const session = yield* get(input.sessionID)
       const result = yield* collect(input)
       // The board never fails for want of its limits line.
@@ -395,7 +455,7 @@ const layer = Layer.effect(
       return counted ? { ...result, limits: counted } : result
     })
 
-    const collect = Effect.fn("TaskManager.collect")(function* (input: Parameters<Interface["list"]>[0]) {
+    const collect = Effect.fn("TaskManager.collect")(function* (input: ListInput) {
       yield* get(input.sessionID)
       const limit = Math.min(MAX_TASKS, Math.max(1, Math.floor(input.limit ?? 100)))
       const queue = [input.sessionID]
@@ -472,13 +532,73 @@ const layer = Layer.effect(
         .flatMap((message) => message.parts)
         .flatMap((part) => (part.type === "text" && !part.synthetic && !part.ignored ? [part.text] : []))
         .join("\n\n")
+      const mail = yield* exchanged(session)
       return {
         task,
         steps,
         output: text.slice(-OUTPUT_LIMIT),
         truncated:
           messages.length >= 8 || text.length > OUTPUT_LIMIT || parts.filter((part) => part.type === "tool").length > 8,
+        ...(mail.length > 0 ? { messages: mail } : {}),
       }
+    })
+
+    // What a task exchanged with the agents above it (D.5): the messages sent to it, from its mailbox, and the notes it
+    // reported up, as its parent received them. The latest MAX_MESSAGES, oldest first.
+    const exchanged = Effect.fn("TaskManager.exchanged")(function* (session: Session.Info) {
+      const mailbox = SubagentLifecycle.read(session)?.mailbox ?? []
+      // A message from an ancestor came down the task's own line, and any other sender is a sibling. The line above the
+      // parent is walked only when some sender is neither the parent nor the user.
+      const walk = mailbox.some((item) => item.from !== "user" && item.sender !== session.parentID)
+      const ancestors = new Set<string>()
+      let next = session.parentID
+      while (next && !ancestors.has(next) && ancestors.size <= MAX_TASKS) {
+        ancestors.add(next)
+        if (!walk) break
+        next = Option.getOrUndefined(Option.map(yield* sessions.get(next).pipe(Effect.option), (item) => item.parentID))
+      }
+      const sent = mailbox.map(
+        (item): Task.Message => ({
+          id: item.id,
+          direction: "to_task",
+          sender: item.from === "user" ? "user" : ancestors.has(item.sender) ? "parent" : "peer",
+          text: item.text,
+          createdAt: item.createdAt,
+          ...(item.deliveredAt === undefined ? {} : { deliveredAt: item.deliveredAt }),
+        }),
+      )
+      const rows = session.parentID
+        ? yield* database.db
+            .select({ id: PartTable.id, created: PartTable.time_created, data: PartTable.data })
+            .from(PartTable)
+            .where(
+              and(
+                eq(PartTable.session_id, session.parentID),
+                sql`json_extract(${PartTable.data}, '$.metadata.taskMessage.taskID') = ${session.id}`,
+              ),
+            )
+            .orderBy(desc(PartTable.id))
+            .limit(MAX_MESSAGES)
+            .all()
+            .pipe(Effect.orDie)
+        : []
+      const reported = rows.flatMap((row): Task.Message[] => {
+        const text =
+          "text" in row.data && typeof row.data.text === "string" ? TaskMailbox.opened(row.data.text) : undefined
+        return text === undefined
+          ? []
+          : [
+              {
+                id: row.id,
+                direction: "to_parent",
+                sender: "task",
+                text,
+                createdAt: row.created,
+                deliveredAt: row.created,
+              },
+            ]
+      })
+      return [...sent, ...reported].sort((left, right) => left.createdAt - right.createdAt).slice(-MAX_MESSAGES)
     })
 
     const message: Interface["message"] = Effect.fn("TaskManager.message")(function* (input, ops) {
@@ -486,6 +606,17 @@ const layer = Layer.effect(
       const invalid = TaskMailbox.bodyError(text)
       if (invalid) return yield* new Error({ code: "invalid", message: invalid })
       if (DesktopTasks.owns(input.taskID)) return yield* bridge(desktop.message({ ...input, text }))
+      // What the sending agent took in travels with its message (D.6); the user's own words carry nothing.
+      const carried =
+        input.origin === "user"
+          ? {}
+          : SessionMemory.carried(
+              SessionMemory.taint(
+                yield* sessions
+                  .messages({ sessionID: input.sessionID })
+                  .pipe(Effect.catch(() => Effect.succeed([] as SessionV1.WithParts[]))),
+              ),
+            )
       return yield* SubagentLifecycle.locked(lock)(
         Effect.gen(function* () {
           const session = yield* requireTask(input.sessionID, input.taskID, true)
@@ -515,6 +646,7 @@ const layer = Layer.effect(
             text,
             delivery: input.delivery ?? ("steer" as const),
             createdAt: now,
+            ...(input.origin === "user" ? { from: "user" as const } : {}),
           }
           yield* persist(
             session.id,
@@ -551,6 +683,7 @@ const layer = Layer.effect(
                   type: "text",
                   synthetic: true,
                   text: TaskMailbox.envelope(text, { sender: input.sessionID, recipient: session.id, relation }),
+                  ...(Object.keys(carried).length > 0 ? { metadata: carried } : {}),
                 },
               ],
             })
@@ -603,6 +736,61 @@ const layer = Layer.effect(
           return { taskID: session.id, messageID: entry.id, delivery: entry.delivery, accepted: true as const }
         }),
       )
+    })
+
+    // A background subagent's note up (D.5): framed as data from the child, carrying what the child took in (D.6), and
+    // starting its parent's turn only when it asks to and has not already this attempt.
+    const report: Interface["report"] = Effect.fn("TaskManager.report")(function* (input, ops) {
+      const text = input.text.trim()
+      const invalid = TaskMailbox.bodyError(text)
+      if (invalid) return yield* new Error({ code: "invalid", message: invalid })
+      const session = yield* get(input.sessionID)
+      const record = SubagentLifecycle.read(session)
+      const parentID = session.parentID
+      if (!parentID || session.internal || !record)
+        return yield* new Error({ code: "forbidden", message: "Only a subagent reports to a parent; you have none." })
+      if (RESEARCH_AGENTS.has(record.agent))
+        return yield* new Error({ code: "forbidden", message: "Research agents report only in their final report." })
+      if (record.background !== true) return yield* new Error({ code: "invalid", message: FOREGROUND_REPORT })
+      const at = Date.now()
+      const admitted = yield* SubagentLifecycle.modify<
+        { woke: boolean } | { code: "finished" | "rate_limited"; refused: string }
+      >(sessions, session.id, (current) => {
+        if (current.attempt !== record.attempt) return { value: { code: "finished", refused: ENDED_REPORT } }
+        const sent = current.reports?.at ?? []
+        const refused = TaskMailbox.admissionError({ text, sentAt: sent, pending: 0, now: at })
+        if (refused) return { value: { code: "rate_limited", refused } }
+        const wakes = current.reports?.wakes ?? 0
+        const woke = input.wake === true && wakes < TaskMailbox.REPORT_WAKES_PER_ATTEMPT
+        return {
+          patch: { reports: { at: [...sent, at].slice(-TaskMailbox.MAX_PER_MINUTE), wakes: wakes + (woke ? 1 : 0) } },
+          value: { woke },
+        }
+      }).pipe(Effect.mapError(() => new Error({ code: "not_found", message: "Task session was not found." })))
+      if (!admitted) return yield* new Error({ code: "finished", message: ENDED_REPORT })
+      if ("refused" in admitted) return yield* new Error({ code: admitted.code, message: admitted.refused })
+      const hold = SessionMemory.taint(
+        yield* sessions
+          .messages({ sessionID: session.id })
+          .pipe(Effect.catch(() => Effect.succeed([] as SessionV1.WithParts[]))),
+      )
+      const parent = yield* get(parentID)
+      yield* notify.enqueue({
+        parentID,
+        note: {
+          kind: "message",
+          taskID: session.id,
+          launchID: MessageID.make(record.parentMessageID),
+          attempt: record.attempt,
+          state: "reported",
+          text: TaskMailbox.envelope(text, { sender: session.id, recipient: parentID, relation: "child" }),
+          wake: admitted.woke,
+          ...(hold ? { hold } : {}),
+        },
+        ops,
+        agent: parent.agent ?? "build",
+      })
+      return { taskID: session.id, parentSessionID: parentID, woke: admitted.woke, at }
     })
 
     const select = Effect.fn("TaskManager.select")(function* (sessionID: SessionID, ids: readonly string[]) {
@@ -1128,7 +1316,17 @@ const layer = Layer.effect(
       }
     })
 
-    return Service.of({ list, inspect, message, stop, interrupt, promote, resume, wait })
+    return Service.of({
+      list: list as Interface["list"],
+      inspect,
+      message,
+      report,
+      stop,
+      interrupt,
+      promote,
+      resume,
+      wait,
+    })
   }),
 )
 

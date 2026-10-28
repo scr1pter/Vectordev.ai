@@ -122,7 +122,16 @@ export type SubagentRecord = {
   }
   budgetScopes?: readonly import("@vectordevai/schema/task").Task.BudgetScope[]
   budget?: import("@vectordevai/schema/run-budget").RunBudget.Info
-  mailbox?: Array<{ id: string; sender: string; text: string; delivery: "steer" | "queue"; createdAt: number; deliveredAt?: number }>
+  /** Messages sent to this child; `from: "user"` when the user wrote one through the session's page. */
+  mailbox?: Array<{
+    id: string
+    sender: string
+    text: string
+    delivery: "steer" | "queue"
+    createdAt: number
+    deliveredAt?: number
+    from?: "user"
+  }>
   model: { providerID: string; modelID: string; variant?: string }
   background: boolean
   status: SubagentStatus

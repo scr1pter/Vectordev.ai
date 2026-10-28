@@ -11,6 +11,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Session } from "@/session/session"
 import { SessionStatus } from "@/session/status"
 import { MessageV2 } from "@/session/message-v2"
+import { SessionMemory } from "@/session/memory"
 import { SessionTaskSize } from "@/session/task-size"
 import { MessageID, SessionID } from "@/session/schema"
 import type { SubagentUsage } from "@/agent/subagent-kind"
@@ -40,6 +41,8 @@ export type Note = {
   wake: boolean
   /** What an attention note's child waits for. */
   attention?: "permission" | "question"
+  /** What the child took in: web or MCP content marks the note as outside content (D.6). */
+  hold?: BrainSchema.Hold
   recovered?: boolean
   quiet?: boolean
   /** A stale claim on a result note (its engine stopped before writing the message), which this delivery takes over. */
@@ -59,6 +62,7 @@ export type ResultInput = {
   ops: TaskPromptOps
   agent: string
   variant?: string
+  hold?: BrainSchema.Hold
 }
 
 export type WatchInput = {
@@ -191,7 +195,8 @@ function metadata(note: Note, quiet: boolean): Record<string, unknown> {
           : note.kind === "interrupted"
             ? { taskInterrupted: { taskIDs: note.taskIDs ?? [] } }
             : { shellNotification: { shellID: note.shellID, state: note.state } }
-  return quiet ? { ...own, [SessionTaskSize.QUIET]: true } : own
+  const held = { ...own, ...SessionMemory.carried(note.hold) }
+  return quiet ? { ...held, [SessionTaskSize.QUIET]: true } : held
 }
 
 type Pending = { note: Note; ops: TaskPromptOps; agent: string; variant?: string }
@@ -516,6 +521,7 @@ const layer = Layer.effect(
             state: input.state,
             text,
             wake: input.state !== "cancelled",
+            ...(input.hold ? { hold: input.hold } : {}),
           },
           ops: input.ops,
           agent: parent.agent ?? input.agent,
@@ -554,6 +560,7 @@ const layer = Layer.effect(
         ops: input.ops,
         agent: input.agent,
         variant: input.variant,
+        hold: done.hold,
       }
       const ended = outcome.status === "completed" || outcome.status === "error" ? outcome.status : "cancelled"
       yield* result({

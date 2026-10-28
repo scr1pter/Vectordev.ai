@@ -9,13 +9,19 @@ const ids = Schema.Array(Schema.String).check(Schema.isMinLength(1), Schema.isMa
 // Provider adapters flatten root unions and can lose their action discriminators.
 // Advertise one object, but validate each action against Parameters before execution.
 export const PublicParameters = Schema.Struct({
-  action: Schema.Literals(["list", "inspect", "message", "stop", "wait", "resume"]),
+  action: Schema.Literals(["list", "inspect", "message", "stop", "wait", "resume", "report"]),
   task_id: Schema.optional(Schema.String).annotate({ description: "Required for inspect and message" }),
   task_ids: Schema.optional(ids).annotate({ description: "Required for wait and resume; selects tasks for stop" }),
   text: Schema.optional(Schema.String).annotate({
-    description: "Required for message, optional for resume: instructions or a correction",
+    description: "Required for message and report; optional for resume",
   }),
   descendants: Schema.optional(Schema.Boolean).annotate({ description: "Include descendants in list" }),
+  siblings: Schema.optional(Schema.Boolean).annotate({
+    description: "list: your parent's other children (subagents only)",
+  }),
+  wake: Schema.optional(Schema.Boolean).annotate({
+    description: "report: start your parent's turn for a blocker (once per run)",
+  }),
   delivery: Schema.optional(Schema.Literals(["steer", "queue"])),
   all: Schema.optional(Schema.Boolean).annotate({ description: "Stop all tasks instead of selecting task_ids" }),
   reason: Schema.optional(Schema.String),
@@ -24,7 +30,11 @@ export const PublicParameters = Schema.Struct({
 })
 
 export const Parameters = Schema.Union([
-  Schema.Struct({ action: Schema.Literal("list"), descendants: Schema.optional(Schema.Boolean) }),
+  Schema.Struct({
+    action: Schema.Literal("list"),
+    descendants: Schema.optional(Schema.Boolean),
+    siblings: Schema.optional(Schema.Boolean),
+  }),
   Schema.Struct({ action: Schema.Literal("inspect"), task_id: Schema.String }),
   Schema.Struct({
     action: Schema.Literal("message"),
@@ -49,7 +59,10 @@ export const Parameters = Schema.Union([
     task_ids: Schema.Array(Schema.String).check(Schema.isMinLength(1), Schema.isMaxLength(8)),
     text: Schema.optional(Schema.String),
   }),
+  Schema.Struct({ action: Schema.Literal("report"), text: Schema.String, wake: Schema.optional(Schema.Boolean) }),
 ])
+
+const PROMPTED = new Set(["message", "stop", "resume", "report"])
 
 export const TaskManageTool = Tool.define(
   "task_manage",
@@ -60,49 +73,45 @@ export const TaskManageTool = Tool.define(
     const research = yield* Effect.serviceOption(ResearchRun.Service)
     return {
       description:
-        "Manage delegated tasks without starting a model. list gives compact status, spend and dependencies; inspect gives bounded recent progress and partial output; message sends your instructions or the user’s correction to a running child at the next safe provider-turn boundary or queues until current work ends; stop settles selected tasks (or all) and retains partial work; resume continues stopped, failed or interrupted children in the background; wait is event-driven for any/all task IDs with a 0–60000 ms timeout. Parent instructions stay within the existing assignment and cannot widen a child's permissions.",
+        "Manage subagents without starting a model. list: status, spend and dependencies. inspect: recent progress, output and messages. message: instructions or the user's correction for a running child, at its next step (steer) or after its current work (queue). stop: end tasks, keeping partial work. resume: continue stopped, failed or interrupted children in the background. wait: until any or all task_ids end, or timeout ms. report: as a background subagent, send your parent a short note while you work. A message cannot widen a child's task or permissions.",
       parameters: Parameters,
       jsonSchema: ToolJsonSchema.fromSchema(PublicParameters),
       execute: (input: typeof Parameters.Type, context: Tool.Context) =>
         Effect.gen(function* () {
           const ops = context.extra?.promptOps as TaskPromptOps | undefined
-          if ((input.action === "message" || input.action === "stop" || input.action === "resume") && !ops)
+          if (PROMPTED.has(input.action) && !ops)
             return yield* Effect.die(new Error("Task management requires prompt operations"))
           if (input.action === "message" && Option.isSome(research)) {
             const screened = yield* research.value.message({ ctx: context, taskID: input.task_id, text: input.text })
             if (screened.type === "refused") return yield* Effect.fail(new Error(screened.message))
           }
-          const result = yield* input.action === "list"
-            ? tasks.list({ sessionID: context.sessionID, descendants: input.descendants })
-            : input.action === "inspect"
-              ? tasks.inspect({ sessionID: context.sessionID, taskID: input.task_id })
-              : input.action === "message"
-                ? tasks.message(
-                    { sessionID: context.sessionID, taskID: input.task_id, text: input.text, delivery: input.delivery },
-                    ops!,
-                  )
-                : input.action === "stop"
-                  ? tasks.stop(
-                      { sessionID: context.sessionID, taskIDs: input.task_ids, all: input.all, reason: input.reason },
-                      ops!,
-                    )
-                  : input.action === "resume"
-                    ? tasks.resume(
-                        {
-                          sessionID: context.sessionID,
-                          taskIDs: input.task_ids,
-                          text: input.text,
-                          origin: "agent",
-                          guest: false,
-                        },
-                        ops!,
-                      )
-                    : tasks.wait({
-                        sessionID: context.sessionID,
-                        taskIDs: input.task_ids,
-                        mode: input.mode,
-                        timeout: input.timeout,
-                      })
+          const sessionID = context.sessionID
+          const result = yield* ((): Effect.Effect<unknown, TaskManager.Error> => {
+            switch (input.action) {
+              case "list":
+                return input.siblings
+                  ? tasks.list({ sessionID, siblings: true })
+                  : tasks.list({ sessionID, descendants: input.descendants })
+              case "inspect":
+                return tasks.inspect({ sessionID, taskID: input.task_id })
+              case "message":
+                return tasks.message(
+                  { sessionID, taskID: input.task_id, text: input.text, delivery: input.delivery },
+                  ops!,
+                )
+              case "stop":
+                return tasks.stop({ sessionID, taskIDs: input.task_ids, all: input.all, reason: input.reason }, ops!)
+              case "resume":
+                return tasks.resume(
+                  { sessionID, taskIDs: input.task_ids, text: input.text, origin: "agent", guest: false },
+                  ops!,
+                )
+              case "report":
+                return tasks.report({ sessionID, text: input.text, wake: input.wake }, ops!)
+              case "wait":
+                return tasks.wait({ sessionID, taskIDs: input.task_ids, mode: input.mode, timeout: input.timeout })
+            }
+          })()
           return { title: `Task ${input.action}`, metadata: { action: input.action }, output: JSON.stringify(result) }
         }).pipe(Effect.orDie),
     }

@@ -130,7 +130,9 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     }) {
       yield* access(ctx.params.sessionID, true)
       const guest = (yield* RequestPrincipal).kind !== "owner"
-      return yield* taskError(tasks.message({ ...ctx.params, ...ctx.payload }, guest ? guestPrompts : taskPrompts))
+      return yield* taskError(
+        tasks.message({ ...ctx.params, ...ctx.payload, origin: "user" }, guest ? guestPrompts : taskPrompts),
+      )
     })
 
     // Resume (D.3): the user continues stopped, failed or interrupted helpers. A guest's resume runs under the guest
