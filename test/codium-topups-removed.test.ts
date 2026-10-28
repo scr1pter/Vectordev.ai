@@ -5,6 +5,7 @@ import { mintCliToken } from "../api/_lib/cli-token"
 import { checkCodiumFunding } from "../api/_lib/codium-funding"
 import { codiumLedger, codiumLedgerSummary, recordCodiumCharge } from "../api/_lib/codium-ledger"
 import { POOL_SCRIPTS } from "../api/_lib/codium-pool"
+import { RAMP_SCRIPTS } from "../api/_lib/codium-ramp"
 import { SNAPSHOT_SCRIPTS } from "../api/_lib/codium-snapshot"
 import {
   cancelModelPlanAccount,
@@ -157,6 +158,15 @@ function store(input: unknown[]) {
     if (script === POOL_SCRIPTS.READ) return [0, 0, 0]
     if (script === POOL_SCRIPTS.DEBITS) return [...hash(key)].flat()
     if (script === POOL_SCRIPTS.APPLY) return 0
+    if (script === RAMP_SCRIPTS.WRITE) {
+      const previous = Number(hash(key).get(args[4]!) ?? 0)
+      const value = args[6] === "raise" ? Math.max(previous, Number(args[5])) : Number(args[5])
+      if (value === 0) hash(key).delete(args[4]!)
+      if (value !== 0) hash(key).set(args[4]!, String(value))
+      if (value !== previous) world.store.set(args[3]!, String(Number(world.store.get(args[3]!) ?? 0) + 1))
+      return value
+    }
+    if (script === RAMP_SCRIPTS.READ) return [world.store.get(args[3]!) ?? "0", [...hash(key)].flat()]
     // Reconcile's snapshot write (WP A05; test/codium-billing.test.ts covers it): the snapshot is all these tests see.
     if (script === SNAPSHOT_SCRIPTS.WRITE) {
       world.store.set(key, args[2 + Number(args[1])]!)
@@ -450,9 +460,11 @@ describe("an account record written while top-ups were sold", () => {
       name: `Vector test ${user.id} sub_topups ${subscription.items.data[0]!.current_period_start}`,
       limit: 4,
     })
-    // The next save of the record leaves the old fields out.
+    // The next save leaves the old fields out and retains the paid month's trust history.
     const saved = JSON.parse(world.store.get(ACCOUNT)!) as Record<string, unknown>
-    expect(Object.keys(saved).sort()).toEqual(["customer", "key"])
+    expect(Object.keys(saved).sort()).toEqual(["customer", "firstPaidAt", "key", "paidThrough"])
+    expect(saved.firstPaidAt).toBe(subscription.items.data[0]!.current_period_start * 1000)
+    expect(saved.paidThrough).toBe(subscription.items.data[0]!.current_period_end * 1000)
     // The old key is never read, raised, revealed or switched off, and no new purchased-credit key appears.
     expect(world.keys.get(WALLET)).toMatchObject({ limit: 5, usage: 1, disabled: false })
     expect(touchedTopups()).toEqual([])
