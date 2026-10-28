@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { browserCommand, owningDirectory, selectBrowserSpecs, selectUnitTests, unitCommand } from "./codium-ci-tests"
@@ -262,13 +264,21 @@ describe("Codium CI lane", () => {
   const exists = (relative: string) => existsSync(path.join(checkoutRoot, relative))
   // Runs a workflow step's own shell; only the inputs and GitHub's output file are substituted.
   const shell = async (script: string, env: Record<string, string>) => {
-    const child = Bun.spawn(["bash", "-c", script], {
-      env: { PATH: process.env.PATH ?? "", GITHUB_OUTPUT: "/dev/stdout", ...env },
-      stdout: "pipe",
-      stderr: "ignore",
-    })
-    const [status, output] = await Promise.all([child.exited, new Response(child.stdout).text()])
-    return { status, output }
+    const directory = await mkdtemp(path.join(tmpdir(), "vector-workflow-"))
+    const file = path.join(directory, "output")
+    // Actions supplies a regular file. Linux cannot reopen Bun's socket-backed stdout via /dev/stdout.
+    await writeFile(file, "")
+    try {
+      const child = Bun.spawn(["bash", "-c", script], {
+        env: { PATH: process.env.PATH ?? "", GITHUB_OUTPUT: file, ...env },
+        stdout: "pipe",
+        stderr: "ignore",
+      })
+      const [status, output] = await Promise.all([child.exited, new Response(child.stdout).text()])
+      return { status, output: output + (await readFile(file, "utf8")) }
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
   }
 
   test("the lane runs on the Codium branches with read-only access and no secrets", async () => {
