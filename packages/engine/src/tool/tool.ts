@@ -6,6 +6,7 @@ import type { MessageV2 } from "../session/message-v2"
 import type { Permission } from "../permission"
 import type { SessionID, MessageID } from "../session/schema"
 import * as Truncate from "./truncate"
+import type { GitMutation } from "./shell/git-mutation"
 import { Agent } from "@/agent/agent"
 
 interface Metadata {
@@ -33,6 +34,12 @@ export class InvalidArgumentsError extends Schema.TaggedErrorClass<InvalidArgume
   }
 }
 
+export type WritableInput = {
+  files: readonly string[]
+  git?: readonly GitMutation.Result[]
+  via?: "shell" | "file"
+}
+
 export type Context<M extends Metadata = Metadata> = {
   sessionID: SessionID
   /** The session that launched this one, when it is a subagent: its user messages are a brief another agent wrote. */
@@ -46,7 +53,7 @@ export type Context<M extends Metadata = Metadata> = {
   ownedPaths?: readonly string[]
   getOwnedPaths?: () => Effect.Effect<readonly string[] | undefined>
   /** Runtime ownership check, repeated inside file locks. */
-  assertWritable?(input: { files: readonly string[]; via?: "shell" | "file" }): Effect.Effect<void>
+  assertWritable?(input: WritableInput): Effect.Effect<void>
   messages: SessionV1.WithParts[]
   /**
    * The whole conversation, with what a compaction folded away: the messages the session stored, then this step's.

@@ -179,10 +179,47 @@ export function conflicts(input: { tree: string; sessionID: string; file: string
       return inside(boundary, file) || inside(file, boundary)
     })
     if (owned !== undefined) return [{ entry, owned }]
-    return [...entry.files].some((changed) => inside(file, changed) || changed === file)
+    return [...entry.files].some((changed) => inside(file, changed) || inside(changed, file))
       ? [{ entry, owned: undefined }]
       : []
   })
+}
+
+/** Active shared-tree writers outside this writer's ancestors, counted once across extensions. */
+export function writers(tree: string, sessionID?: string) {
+  const root = FileLock.key(tree)
+  const ancestors = sessionID ? lineage(sessionID) : new Set<string>()
+  const unique = new Map<string | Claim, Claim>()
+  for (const entry of claims) {
+    const tree = entry.tree === path.parse(entry.tree).root ? entry.directory : entry.tree
+    if (
+      !entry.active ||
+      !entry.writes ||
+      entry.isolated ||
+      tree !== root ||
+      (entry.taskID && ancestors.has(entry.taskID))
+    )
+      continue
+    unique.set(entry.taskID ?? entry, entry)
+  }
+  return [...unique.values()]
+}
+
+/** Working trees known to this process; registry folders themselves are not git trees. */
+export function trees() {
+  return [
+    ...new Set([
+      ...[...claims].map((entry) => (entry.tree === path.parse(entry.tree).root ? entry.directory : entry.tree)),
+      ...protectedTrees().flatMap((entry) =>
+        [entry.workDirectory, entry.parentDirectory].filter((value): value is string => value !== undefined),
+      ),
+    ]),
+  ]
+}
+
+/** Directly isolated helpers may mutate their own branch; shared descendants retain shared-helper git rules. */
+export function isolatedTree(sessionID: string) {
+  return forTask(sessionID).find((entry) => entry.held && entry.isolated)?.tree
 }
 
 /** Called after each explicit-file write, while the file lock is still held. */
@@ -208,13 +245,21 @@ export type Protection = {
   directories: readonly string[]
   parentDirectory?: string
   workDirectory?: string
+  branch?: string
+  gitDirectory?: string
 }
 const protections = new Map<string, Protection>()
 
 export function protect(input: Protection) {
   protections.set(input.taskID, {
     ...input,
-    directories: input.directories.map((directory) => FileLock.key(directory)),
+    directories: [
+      ...new Set(
+        [...input.directories, ...(input.gitDirectory ? [input.gitDirectory] : [])].map((directory) =>
+          FileLock.key(directory),
+        ),
+      ),
+    ],
   })
 }
 
@@ -224,6 +269,17 @@ export function unprotect(taskID: string) {
 
 export function protectedTrees() {
   return [...protections.values()]
+}
+
+/** Linked-worktree git directories are supplied only by validated isolation registration (WP27). */
+export function gitDirectories() {
+  return Object.fromEntries(
+    protectedTrees().flatMap((entry): [string, string][] =>
+      entry.gitDirectory && entry.workDirectory
+        ? [[FileLock.key(entry.gitDirectory), FileLock.key(entry.workDirectory)]]
+        : [],
+    ),
+  )
 }
 
 export function protectedConflict(sessionID: string, file: string) {

@@ -17,6 +17,9 @@ import { AGENT_MARKER, untrustedChildEnvironment } from "@vectordevai/core/child
 import { ShellID } from "./shell/id"
 import { Sandbox } from "./shell/sandbox"
 import { CloudCli } from "./shell/cloud-cli"
+import { GitMutation } from "./shell/git-mutation"
+import { TaskClaims } from "@/task/claims"
+import { FileLock } from "./file-lock"
 import { UNREAD } from "./shell/unread"
 
 import * as Truncate from "./truncate"
@@ -73,6 +76,7 @@ const PS_ALIASES = new Map([
   ["rd", "remove-item"],
   ["ren", "rename-item"],
   ["ri", "remove-item"],
+  ["rm", "remove-item"],
   ["rmdir", "remove-item"],
   ["rni", "rename-item"],
   ["sc", "set-content"],
@@ -112,6 +116,10 @@ type Scan = {
   patterns: Set<string>
   always: Set<string>
   writes: Set<string>
+  /** Resolved ownership targets; permission patterns above retain their existing spelling. */
+  written: Set<string>
+  mutates: Set<string>
+  git: GitMutation.Result[]
   /** Files a command reads that the read tool's rules apply to, relative to the worktree. */
   reads: Set<string>
   /** Vercel and Supabase CLI calls that act on a cloud account, by permission pattern. */
@@ -826,6 +834,101 @@ function cmdWrites(cmd: string, words: readonly string[]): Write[] {
   return [{ target: operands[operands.length - 1], sources: operands.slice(0, -1), folder: false }]
 }
 
+/** Removal and metadata writes detected beside permission scanning; unresolved words stay out of ownership checks. */
+function mutationTargets(cmd: string, words: readonly string[]) {
+  if (cmd === "mv") return writes(cmd, words).flatMap((write) => write.sources)
+  if (!["rm", "rmdir", "unlink", "touch", "truncate"].includes(cmd)) return []
+  const valued =
+    cmd === "touch"
+      ? new Set(["-d", "--date", "-t", "-r", "--reference"])
+      : cmd === "truncate"
+        ? new Set(["-s", "--size", "-r", "--reference"])
+        : new Set<string>()
+  const paths: string[] = []
+  let after = false
+  let skip = false
+  for (const word of words) {
+    if (skip) {
+      skip = false
+      continue
+    }
+    if (!after && word === "--") {
+      after = true
+      continue
+    }
+    if (!after && word.startsWith("-")) {
+      skip = valued.has(word)
+      continue
+    }
+    paths.push(word)
+  }
+  return paths
+}
+
+function psMutationTargets(cmd: string, args: readonly PsArgument[]) {
+  if (["mv", "move-item"].includes(cmd)) return psWrites(cmd, args).flatMap((write) => write.sources)
+  if (cmd !== "remove-item")
+    return mutationTargets(
+      cmd,
+      args.map((arg) => arg.text),
+    )
+  const names = [
+    "-path",
+    "-literalpath",
+    "-filter",
+    "-include",
+    "-exclude",
+    "-recurse",
+    "-force",
+    "-credential",
+    "-stream",
+    "-whatif",
+    "-confirm",
+    ...PS_COMMON,
+  ]
+  const paths: string[] = []
+  let want: string | undefined
+  let array = false
+  for (const arg of args) {
+    if (want !== undefined) {
+      array = want === "-path" || want === "-literalpath"
+      if (array) paths.push(arg.text)
+      want = undefined
+      continue
+    }
+    if (arg.type === "command_parameter") {
+      array = false
+      const name = psParameter(arg.text, names)
+      if (!name) continue
+      const inline = arg.text.includes(":") ? arg.text.slice(arg.text.indexOf(":") + 1) : ""
+      if (PS_SWITCHES.has(name)) {
+        if (arg.colon && !inline) want = ""
+        continue
+      }
+      if (inline) {
+        if (name === "-path" || name === "-literalpath") {
+          paths.push(inline)
+          array = true
+        }
+      } else want = name
+      continue
+    }
+    if (arg.text.startsWith(",")) {
+      if (array) paths.push(arg.text.slice(1))
+      continue
+    }
+    paths.push(arg.text)
+    array = true
+  }
+  return paths
+}
+
+function cmdMutationTargets(cmd: string, words: readonly string[]) {
+  if (cmd === "move") return cmdWrites(cmd, words).flatMap((write) => write.sources)
+  if (!["del", "erase", "rd", "rmdir"].includes(cmd)) return []
+  return words.filter((word) => !cmdWord(unquote(word)).startsWith("/"))
+}
+
 function preview(text: string) {
   if (text.length <= MAX_METADATA_LENGTH) return text
   return "...\n\n" + text.slice(-MAX_METADATA_LENGTH)
@@ -932,7 +1035,11 @@ const cloudRequests = Effect.fn("ShellTool.cloudRequests")(function* (
   return nested.flat()
 })
 
+const assertOwnership = (ctx: Tool.Context, scan: Scan) =>
+  ctx.assertWritable?.({ files: [...scan.written, ...scan.mutates], git: scan.git, via: "shell" }) ?? Effect.void
+
 const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan, input: { command: string }) {
+  yield* assertOwnership(ctx, scan)
   if (scan.dirs.size > 0) {
     const directories = Array.from(scan.dirs)
     const globs = directories.map((dir) => {
@@ -1251,6 +1358,9 @@ export const ShellTool = Tool.define(
         patterns: new Set<string>(),
         always: new Set<string>(),
         writes: new Set<string>(),
+        written: new Set<string>(),
+        mutates: new Set<string>(),
+        git: [],
         reads: new Set<string>(),
         cloud: new Map(),
       }
@@ -1417,10 +1527,69 @@ export const ShellTool = Tool.define(
             const files =
               resolved && into ? write.sources.map((source) => path.join(resolved, name(source))) : [resolved]
             for (const file of files) {
+              if (file) scan.written.add(file)
               scan.writes.add(file ? path.relative(instance.worktree, file) : write.target)
               if (file && !containsPath(file, instance)) scan.dirs.add(path.dirname(file))
             }
           }
+        }
+
+        if (cmd) {
+          const mutationCommand = win ? path.win32.basename(cmd).toLowerCase() : path.basename(cmd)
+          const mutates = ps
+            ? psMutationTargets(mutationCommand, psArguments(item.node))
+            : shellKind === "cmd"
+              ? cmdMutationTargets(mutationCommand, tokens.slice(1))
+              : mutationTargets(mutationCommand, tokens.slice(1))
+          for (const target of mutates) {
+            const resolved = yield* targetPath(target, cwd, ps, shell)
+            if (resolved) scan.mutates.add(resolved)
+          }
+        }
+        const leading = item.node.children
+          .filter((node): node is Node => node?.type === "variable_assignment")
+          .map((node) => shellWord(node.text, cwd, ps, shell))
+        const words = [...leading, ...tokens.map((word) => shellWord(word, cwd, ps, shell))]
+        const variables = {
+          GIT_DIR: process.env.GIT_DIR,
+          GIT_WORK_TREE: process.env.GIT_WORK_TREE,
+          GIT_INDEX_FILE: process.env.GIT_INDEX_FILE,
+        }
+        const trees = [
+          ...new Set([instance.project.vcs === "git" ? instance.worktree : instance.directory, ...TaskClaims.trees()]),
+        ]
+        const options: GitMutation.Options = {
+          cwd,
+          env: variables,
+          trees,
+          canonicalize: FileLock.key,
+          gitDirectories: TaskClaims.gitDirectories(),
+        }
+        const classified = GitMutation.classify(words, options)
+        if (classified) {
+          let mutation = classified
+          if (classified.alias) {
+            const env = Object.fromEntries(
+              leading.flatMap((word) => {
+                const match = /^(GIT_DIR|GIT_WORK_TREE|GIT_INDEX_FILE)=(.*)$/s.exec(word)
+                return match ? [[match[1], match[2]]] : []
+              }),
+            )
+            const alias = yield* spawner
+              .string(
+                ChildProcess.make(
+                  "git",
+                  [...classified.gitArgs, "-c", "core.fsmonitor=false", "config", "--get", `alias.${classified.alias}`],
+                  { cwd, env, extendEnv: true, stdin: "ignore", stderr: "ignore" },
+                ),
+              )
+              .pipe(Effect.catch(() => Effect.succeed("")))
+            mutation =
+              GitMutation.classify(words, { ...options, aliases: { [classified.alias]: alias.trim() || undefined } }) ??
+              classified
+          }
+          scan.git.push(mutation)
+          mutation.paths.forEach((file) => scan.mutates.add(file))
         }
 
         for (const cloud of yield* cloudRequests(tokens, 0)) {
@@ -1492,7 +1661,10 @@ export const ShellTool = Tool.define(
           // The provider globs the path and reads a stream by its file's name, so `${C:\proj\.en?}` and
           // `${C:\proj\.env::$DATA}` read `.env` the way `Get-Content .en?` does.
           if (use.read && item.file) yield* envRead(item.file)
-          if (use.write) scan.writes.add(target)
+          if (use.write) {
+            scan.writes.add(target)
+            if (resolved) scan.written.add(resolved)
+          }
           if (resolved && !containsPath(resolved, instance)) scan.dirs.add(path.dirname(resolved))
           // A drive the scan cannot place (`${Temp:\x}`) is outside the project as far as it knows.
           if (item.folder) scan.dirs.add(path.win32.dirname(item.name))
@@ -1510,6 +1682,7 @@ export const ShellTool = Tool.define(
       // A target that cannot be resolved (`> "$OUT"`) is asked for as written, so a rule that denies edits denies it.
       for (const target of redirects(root, ps)) {
         const resolved = yield* targetPath(target, cwd, ps, shell)
+        if (resolved) scan.written.add(resolved)
         scan.writes.add(resolved ? path.relative(instance.worktree, resolved) : target)
         if (!resolved || containsPath(resolved, instance)) continue
         scan.dirs.add(path.dirname(resolved))
@@ -1809,6 +1982,15 @@ export const ShellTool = Tool.define(
                   const scan = yield* collect(tree.rootNode, cwd, ps, shell, instanceCtx)
                   if (!containsPath(cwd, instanceCtx)) scan.dirs.add(cwd)
                   yield* ask(ctx, scan, params)
+                  // Admission is brief and takes the same file locks as edit/write/patch. Reserve resolved shell
+                  // targets before spawning: another unscoped writer must not pass while this command is running.
+                  yield* FileLock.withFiles([...scan.written, ...scan.mutates])(
+                    Effect.gen(function* () {
+                      yield* assertOwnership(ctx, scan)
+                      for (const file of new Set([...scan.written, ...scan.mutates]))
+                        TaskClaims.touch(ctx.sessionID, file)
+                    }),
+                  )
                 }),
               )
 
