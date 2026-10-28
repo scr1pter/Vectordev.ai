@@ -522,7 +522,8 @@ const layer = Layer.effect(
     const settled = Effect.fnUntraced(function* (input: WatchInput, info: BackgroundJob.Info | undefined) {
       if (!info || info.status === "running") return
       if (SubagentLifecycle.read(yield* sessions.get(input.taskID))?.attempt !== input.attempt) return
-      const status = info.status
+      // Interrupted while its instance went away: settled as stopped, as before restart recovery existed.
+      const status = info.status === "interrupted" ? "cancelled" : info.status
       const done = yield* SubagentLifecycle.locked(SubagentLifecycle.controlLock)(
         Effect.gen(function* () {
           const finished = yield* SubagentLifecycle.finish(sessions, guard, input.taskID, input.attempt, {

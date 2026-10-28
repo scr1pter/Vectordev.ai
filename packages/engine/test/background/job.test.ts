@@ -1,10 +1,31 @@
 import { describe, expect } from "bun:test"
+import { sql } from "drizzle-orm"
+import { BackgroundJobStore } from "@vectordevai/core/background-job-store"
+import { Database } from "@vectordevai/core/database/database"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
-import { Deferred, Effect, Fiber } from "effect"
+import { Context, Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect"
 import { BackgroundJob } from "@/background/job"
+import { disposing } from "@/effect/instance-registry"
+import { InstanceStore } from "@/project/instance-store"
+import { requireInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
 const it = testEffect(LayerNode.compile(BackgroundJob.node))
+const durable = testEffect(
+  LayerNode.compile(LayerNode.group([BackgroundJob.node, BackgroundJobStore.node, Database.node])),
+)
+
+// The session a durable job's row belongs to.
+const parent = (directory: string) =>
+  Effect.gen(function* () {
+    const { db } = yield* Database.Service
+    yield* db.run(
+      sql`INSERT INTO project (id, worktree, time_created, time_updated, sandboxes) VALUES ('prj', ${directory}, 1, 1, '[]')`,
+    )
+    yield* db.run(
+      sql`INSERT INTO session (id, project_id, slug, directory, title, version, time_created, time_updated) VALUES ('ses_parent', 'prj', 'parent', ${directory}, 'Parent', 'test', 1, 1)`,
+    )
+  })
 
 describe("background.job", () => {
   it.instance("tracks started jobs through completion", () =>
@@ -238,6 +259,74 @@ describe("background.job", () => {
       if (job.metadata) job.metadata.value = "changed"
 
       expect((yield* jobs.get(job.id))?.metadata?.value).toBe("initial")
+    }),
+  )
+})
+
+describe("background.job durable rows", () => {
+  durable.instance("disposing an instance with a running durable job leaves the row interrupted", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const store = yield* BackgroundJobStore.Service
+      const ctx = yield* requireInstance
+      yield* parent(ctx.directory)
+      const job = yield* jobs.start({
+        id: "ses_child",
+        type: "task",
+        title: "Survey",
+        run: Effect.never,
+        durable: { parentSessionID: "ses_parent", sessionID: "ses_child", directory: ctx.directory, attempt: 1 },
+      })
+      const lease = yield* jobs.lease()
+      expect(lease).toBeDefined()
+      expect(job).toMatchObject({ durable: true, owner: lease!.runtime })
+      expect(yield* store.forParent("ses_parent")).toEqual([
+        expect.objectContaining({ id: "ses_child", status: "running", owner: lease, attempt: 1 }),
+      ])
+      expect(BackgroundJobStore.alive(lease!)).toBe("alive")
+      const waiter = yield* jobs.wait({ id: job.id }).pipe(Effect.forkChild({ startImmediately: true }))
+
+      yield* InstanceStore.Service.use((instances) => instances.dispose(ctx))
+
+      expect((yield* Fiber.join(waiter)).info?.status).toBe("interrupted")
+      const [row] = yield* store.forParent("ses_parent")
+      expect(row).toMatchObject({ id: "ses_child", status: "interrupted", owner: lease })
+      expect(row.completedAt).toBeNumber()
+      // The instance's lease closed after its jobs settled, and the directory is no longer disposing.
+      expect(BackgroundJobStore.alive(lease!)).toBe("dead")
+      expect(disposing(ctx.directory)).toBe(false)
+    }),
+  )
+
+  durable.instance("a running durable job's row is interrupted when the service itself shuts down", () =>
+    Effect.gen(function* () {
+      const database = yield* Database.Service
+      const store = yield* BackgroundJobStore.Service
+      const ctx = yield* requireInstance
+      yield* parent(ctx.directory)
+      // A second service over the same database, built apart as a server listener builds its own.
+      const scope = yield* Scope.make()
+      const jobs = Context.get(
+        yield* Layer.buildWithMemoMap(
+          LayerNode.compile(BackgroundJob.node, [[Database.node, Layer.succeed(Database.Service, database)]]),
+          Layer.makeMemoMapUnsafe(),
+          scope,
+        ),
+        BackgroundJob.Service,
+      )
+      yield* jobs.start({
+        id: "ses_child",
+        type: "task",
+        run: Effect.never,
+        durable: { parentSessionID: "ses_parent", directory: ctx.directory },
+      })
+
+      yield* Scope.close(scope, Exit.void)
+
+      expect(yield* store.forParent("ses_parent")).toEqual([
+        expect.objectContaining({ id: "ses_child", status: "interrupted" }),
+      ])
+      expect(disposing(ctx.directory)).toBe(false)
     }),
   )
 })

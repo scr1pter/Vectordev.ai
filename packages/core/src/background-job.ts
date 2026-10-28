@@ -3,8 +3,10 @@ export * as BackgroundJob from "./background-job"
 import { Cause, Clock, Context, Deferred, Effect, Exit, Layer, Schema, Scope, SynchronizedRef } from "effect"
 import { Identifier } from "./id/id"
 import { makeGlobalNode } from "./effect/app-node"
+import type { BackgroundJobStore } from "./background-job-store"
 
-export type Status = "running" | "completed" | "error" | "cancelled"
+/** `interrupted`: stopped because its instance or Vector itself was going away, not because anyone asked. */
+export type Status = "running" | "completed" | "error" | "cancelled" | "interrupted"
 
 /**
  * A run that failed but still produced output worth keeping, such as a subagent whose provider failed partway through
@@ -28,7 +30,47 @@ export type Info = {
   outputs?: string[]
   error?: string
   metadata?: Record<string, unknown>
+  /** The instance lease running a durable job (`BackgroundJobStore.Owner.runtime`). */
+  owner?: string
+  /** Whether the job keeps a row in vector.db, so a restart can tell its parent it was interrupted. */
+  durable?: boolean
 }
+
+/** What a durable job's row holds beside the job itself. Metadata stays under 4 KiB and is never a brief or output. */
+export type Durable = {
+  parentSessionID: string
+  sessionID?: string
+  directory: string
+  attempt?: number
+  metadata?: Record<string, unknown>
+}
+
+/** The lease and attempt a row write is for: a write naming another lease or attempt changes nothing. */
+export type Holder = { owner: string; attempt?: number }
+
+export type Started = Durable & {
+  id: string
+  type: string
+  title?: string
+  background: boolean
+  startedAt: number
+  owner: BackgroundJobStore.Owner
+}
+
+export type Settled = Holder & { status: Exclude<Status, "running">; completedAt: number; error?: string }
+
+/** Where durable jobs keep their rows (BackgroundJobStore). */
+export interface Store {
+  readonly started: (row: Started) => Effect.Effect<void, unknown>
+  readonly settled: (id: string, p: Settled) => Effect.Effect<void, unknown>
+  readonly promoted: (id: string, p: Holder) => Effect.Effect<void, unknown>
+}
+
+// A durable job's row writes, in order: each waits for the one before it, so a settlement never lands before the row.
+type Writes = { holder: Holder; tail?: Deferred.Deferred<void> }
+
+// How long one row write, with its wait for the write before it, may take before it is given up and logged.
+const STORE_TIMEOUT = "2 seconds"
 
 type Active = {
   info: Info
@@ -44,6 +86,7 @@ type Active = {
   promoted: Deferred.Deferred<Info>
   onPromote?: Effect.Effect<void>
   promotable: boolean
+  durable?: Writes
 }
 
 type State = {
@@ -55,15 +98,17 @@ type FinishResult = {
   info?: Info
   done?: Deferred.Deferred<Info>
   scope?: Scope.Closeable
+  durable?: Writes
 }
 
 type PromoteResult = {
   info?: Info
   promoted?: Deferred.Deferred<Info>
   onPromote?: Effect.Effect<void>
+  durable?: Writes
 }
 
-type StartResult = { info: Info } | { info: Info; scope: Scope.Closeable; token: object }
+type StartResult = { info: Info } | { info: Info; scope: Scope.Closeable; token: object; durable?: Writes }
 
 type ExtendResult =
   | { extended: false }
@@ -83,6 +128,8 @@ export type StartInput = {
   metadata?: Record<string, unknown>
   onPromote?: Effect.Effect<void>
   promotable?: boolean
+  /** Keep a row for the job, when the registry has a store and a lease. */
+  durable?: Durable
   run: Effect.Effect<string, unknown>
 }
 
@@ -115,6 +162,8 @@ export interface Interface {
   readonly waitForPromotion: (id: string) => Effect.Effect<Info>
   readonly promote: (id: string) => Effect.Effect<Info | undefined>
   readonly cancel: (id: string) => Effect.Effect<Info | undefined>
+  /** The instance lease this registry's durable jobs run under, if it has one. */
+  readonly lease: () => Effect.Effect<BackgroundJobStore.Owner | undefined>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@vector/BackgroundJob") {}
@@ -133,17 +182,44 @@ function errorText(error: unknown) {
 }
 
 /**
- * Makes one scoped, process-local registry. Entries are intentionally not
- * durable: process restart or owner-scope closure loses status and interrupts
- * live work. Persisted observation, restart recovery, and remote workers need a
- * separate durable ownership slice rather than pretending this registry has
- * those semantics.
+ * Makes one scoped, process-local registry. Closing its scope interrupts live work, and the registry itself forgets
+ * it. A job started with `durable` also keeps a row through `store`, under the registry's `owner` lease, so a later
+ * process can tell what a restart interrupted. While `disposing()` holds, work that stops is `interrupted`, not
+ * `cancelled`. Row writes run outside the registry's lock, within STORE_TIMEOUT; a failure is logged, never the job's.
  */
-export const make = Effect.gen(function* () {
+export const makeWith = Effect.fnUntraced(function* (o: {
+  store?: Store
+  owner?: BackgroundJobStore.Owner
+  disposing?: () => boolean
+}) {
   const state: State = {
     jobs: yield* SynchronizedRef.make(new Map()),
     scope: yield* Scope.Scope,
   }
+  const stopped = (): "cancelled" | "interrupted" => (o.disposing?.() ? "interrupted" : "cancelled")
+
+  // Queues a row write behind the job's earlier ones; the caller runs it, or forks it so nothing waits on the store.
+  const write = (writes: Writes, id: string, call: (store: Store) => Effect.Effect<void, unknown>) => {
+    const previous = writes.tail
+    const done = Deferred.makeUnsafe<void>()
+    writes.tail = done
+    return (previous ? Deferred.await(previous) : Effect.void).pipe(
+      Effect.andThen(Effect.suspend(() => (o.store ? call(o.store) : Effect.void))),
+      Effect.timeout(STORE_TIMEOUT),
+      Effect.catchCause((cause) => Effect.logWarning("background job row was not written", { id, cause })),
+      Effect.ensuring(Deferred.succeed(done, undefined)),
+    )
+  }
+  const settled = (writes: Writes, info: Info) =>
+    write(writes, info.id, (store) =>
+      store.settled(info.id, {
+        ...writes.holder,
+        status: info.status === "running" ? "cancelled" : info.status,
+        completedAt: info.completed_at ?? info.started_at,
+        ...(info.error ? { error: info.error } : {}),
+      }),
+    )
+  const detach = <A, E>(effect: Effect.Effect<A, E>) => effect.pipe(Effect.forkDetach({ startImmediately: true }))
 
   const settle = Effect.fn("BackgroundJob.settle")(function* (
     id: string,
@@ -173,7 +249,7 @@ export const make = Effect.gen(function* () {
       const status: Exclude<Status, "running"> = Exit.isSuccess(final)
         ? "completed"
         : Cause.hasInterruptsOnly(final.cause)
-          ? "cancelled"
+          ? stopped()
           : "error"
       const output = outputs.at(-1)
       const next = {
@@ -190,12 +266,18 @@ export const make = Effect.gen(function* () {
           ...(status === "error" && Exit.isFailure(final) ? { error: errorText(Cause.squash(final.cause)) } : {}),
         },
       }
-      return [{ info: snapshot(next), done: job.done, scope: job.scope }, new Map(jobs).set(id, next)]
+      return [
+        { info: snapshot(next), done: job.done, scope: job.scope, durable: job.durable },
+        new Map(jobs).set(id, next),
+      ]
     })
     if (result.info && result.done) yield* Deferred.succeed(result.done, result.info).pipe(Effect.ignore)
     if (result.scope) {
       yield* Scope.close(result.scope, Exit.void).pipe(Effect.forkIn(state.scope, { startImmediately: true }))
     }
+    // Awaited in the run's exit, after its waiters were told: closing the registry, as disposing an instance does,
+    // ends only once the job's row says how it stopped.
+    if (result.info && result.durable) yield* settled(result.durable, result.info)
     return result.info
   })
 
@@ -207,7 +289,7 @@ export const make = Effect.gen(function* () {
     run: Effect.Effect<string, unknown>,
   ) {
     // onExit, not a match on the result: closing the job's scope from outside, as disposing the instance does,
-    // interrupts this fiber, and only a finalizer still settles the job, completes its waiters and records it cancelled.
+    // interrupts this fiber, and only a finalizer still settles the job, completes its waiters and records how it ended.
     return yield* run.pipe(
       Effect.onExit((exit) => settle(id, token, sequence, exit)),
       Effect.ignore,
@@ -235,6 +317,18 @@ export const make = Effect.gen(function* () {
         const done = yield* Deferred.make<Info>()
         const promoted = yield* Deferred.make<Info>()
         const tail = yield* Deferred.make<void>()
+        const row: Started | undefined =
+          input.durable && o.store && o.owner
+            ? {
+                ...input.durable,
+                id,
+                type: input.type,
+                ...(input.title === undefined ? {} : { title: input.title }),
+                background: input.metadata?.background === true,
+                startedAt: started_at,
+                owner: o.owner,
+              }
+            : undefined
         const result = yield* SynchronizedRef.modifyEffect(
           state.jobs,
           Effect.fnUntraced(function* (jobs) {
@@ -252,6 +346,7 @@ export const make = Effect.gen(function* () {
                 status: "running" as const,
                 started_at,
                 metadata: input.metadata,
+                ...(row ? { owner: row.owner.runtime, durable: true } : {}),
               },
               done,
               scope,
@@ -263,13 +358,20 @@ export const make = Effect.gen(function* () {
               promoted,
               onPromote: input.onPromote,
               promotable: input.promotable !== false,
+              // A job started again under its id writes after the writes its previous run left queued.
+              durable: row
+                ? { holder: { owner: row.owner.runtime, attempt: row.attempt }, tail: existing?.durable?.tail }
+                : undefined,
             }
-            return [{ info: snapshot(job), scope, token }, new Map(jobs).set(id, job)] as readonly [
-              StartResult,
-              Map<string, Active>,
-            ]
+            return [
+              { info: snapshot(job), scope, token, durable: job.durable },
+              new Map(jobs).set(id, job),
+            ] as readonly [StartResult, Map<string, Active>]
           }),
         )
+        // Queued before the run starts, so the row exists before any settlement of it is written.
+        if ("scope" in result && row && result.durable)
+          yield* detach(write(result.durable, id, (store) => store.started(row)))
         if ("scope" in result)
           yield* fork(
             result.scope,
@@ -358,12 +460,14 @@ export const make = Effect.gen(function* () {
           },
         }
         return [
-          { info: snapshot(next), onPromote: job.onPromote, promoted: job.promoted },
+          { info: snapshot(next), onPromote: job.onPromote, promoted: job.promoted, durable: job.durable },
           new Map(jobs).set(id, next),
         ] as readonly [PromoteResult, Map<string, Active>]
       }),
     )
     if (result.info && result.promoted) yield* Deferred.succeed(result.promoted, result.info).pipe(Effect.ignore)
+    const durable = result.promoted && result.durable
+    if (durable) yield* detach(write(durable, id, (store) => store.promoted(id, durable.holder)))
     if (result.onPromote) yield* result.onPromote.pipe(Effect.ignore)
     return result.info
   })
@@ -380,19 +484,28 @@ export const make = Effect.gen(function* () {
         pending: 0,
         info: {
           ...job.info,
-          status: "cancelled" as const,
+          status: stopped(),
           completed_at,
         },
       }
-      return [{ info: snapshot(next), done: job.done, scope: job.scope }, new Map(jobs).set(id, next)]
+      return [
+        { info: snapshot(next), done: job.done, scope: job.scope, durable: job.durable },
+        new Map(jobs).set(id, next),
+      ]
     })
     if (result.info && result.done) yield* Deferred.succeed(result.done, result.info).pipe(Effect.ignore)
+    if (result.info && result.durable) yield* detach(settled(result.durable, result.info))
     if (result.scope) yield* Scope.close(result.scope, Exit.void)
     return result.info
   })
 
-  return Service.of({ list, get, start, extend, wait, waitForPromotion, promote, cancel })
+  const lease: Interface["lease"] = () => Effect.succeed(o.owner)
+
+  return Service.of({ list, get, start, extend, wait, waitForPromotion, promote, cancel, lease })
 })
+
+/** A registry that keeps no rows. */
+export const make = makeWith({})
 
 const layer = Layer.effect(Service, make)
 

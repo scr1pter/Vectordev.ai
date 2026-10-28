@@ -26,6 +26,7 @@ import { SessionTable } from "@vectordevai/core/session/sql"
 import sessionMetadataMigration from "@vectordevai/core/database/migration/20260511173437_session-metadata"
 import sessionInternalHelpersMigration from "@vectordevai/core/database/migration/20261011044552_session_internal_helpers"
 import classifyEarlyReviewHelpersMigration from "@vectordevai/core/database/migration/20261015171500_classify_early_review_helpers"
+import backgroundJobMigration from "@vectordevai/core/database/migration/20261028021005_background_job"
 import type { SqlClient as SqlClientService } from "effect/unstable/sql/SqlClient"
 import { Database } from "@vectordevai/core/database/database"
 import { SessionProjector } from "@vectordevai/core/session/projector"
@@ -97,6 +98,46 @@ describe("DatabaseMigration", () => {
           { name: "session_message_session_time_created_id_idx" },
           { name: "session_message_session_type_seq_idx" },
         ])
+      }),
+    )
+  })
+
+  test("creates the background job table and its indexes, and a deleted session takes its rows along", async () => {
+    await run(
+      Effect.gen(function* () {
+        const db = yield* makeDb
+        yield* db.run(sql`PRAGMA foreign_keys = ON`)
+        yield* DatabaseMigration.apply(db)
+        // The migration itself, as an existing database runs it.
+        yield* db.run(sql`DROP TABLE background_job`)
+        yield* db.run(sql`DELETE FROM migration WHERE id = ${backgroundJobMigration.id}`)
+        yield* DatabaseMigration.applyOnly(db, [backgroundJobMigration])
+
+        expect(
+          yield* db.all(
+            sql`SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'background_job' AND name NOT LIKE 'sqlite_%' ORDER BY name`,
+          ),
+        ).toEqual([{ name: "background_job_parent_idx" }, { name: "background_job_status_directory_idx" }])
+        expect(
+          yield* db.all(sql`SELECT name FROM pragma_index_info('background_job_status_directory_idx') ORDER BY seqno`),
+        ).toEqual([{ name: "status" }, { name: "directory" }])
+
+        yield* db.run(
+          sql`INSERT INTO project (id, worktree, time_created, time_updated, sandboxes) VALUES ('global', '/project', 1, 1, '[]')`,
+        )
+        yield* db.run(
+          sql`INSERT INTO session (id, project_id, slug, directory, title, version, time_created, time_updated) VALUES ('session', 'global', 'session', '/project', 'Parent', 'test', 1, 1)`,
+        )
+        yield* db.run(
+          sql`INSERT INTO background_job (id, type, parent_session_id, directory, status, owner_runtime, owner_pid, owner_boot, owner_machine, started_at, time_created, time_updated) VALUES ('job', 'task', 'session', '/project', 'running', 'process:instance', 1, 1, 'machine', 1, 1, 1)`,
+        )
+        expect(yield* db.get(sql`SELECT background, reported_at FROM background_job WHERE id = 'job'`)).toEqual({
+          background: 0,
+          reported_at: null,
+        })
+
+        yield* db.run(sql`DELETE FROM session WHERE id = 'session'`)
+        expect(yield* db.get(sql`SELECT count(*) AS count FROM background_job`)).toEqual({ count: 0 })
       }),
     )
   })

@@ -390,7 +390,7 @@ export const TaskTool = Tool.define(
       const cancelled = { cancelled: true, message: `Dependency ${job.id} was cancelled.` }
       if (job.status === "error")
         return { cancelled: false, message: `Dependency ${job.id} failed${job.error ? `: ${job.error}` : "."}` }
-      if (job.status === "cancelled") return cancelled
+      if (job.status === "cancelled" || job.status === "interrupted") return cancelled
       if (job.status !== "completed") return undefined
       // A job that returned normally can still have failed or been stopped inside its child.
       const child = job.metadata?.sessionId
@@ -1173,7 +1173,7 @@ export const TaskTool = Tool.define(
             Effect.flatMap((waited) =>
               waited.info && waited.info.status !== "running"
                 ? SubagentLifecycle.outcome(sessions, nextSession.id, {
-                    status: waited.info.status,
+                    status: waited.info.status === "interrupted" ? "cancelled" : waited.info.status,
                     error: waited.info.error,
                   }).pipe(
                     Effect.flatMap((value) => {
@@ -1460,7 +1460,7 @@ export const TaskTool = Tool.define(
               // The returned metadata carries the outcome, so the part needs no later
               // patch. A stopped subagent returns the cancelled note instead of failing.
               const settled =
-                result?.status === "cancelled" || ctx.abort.aborted
+                result?.status === "cancelled" || result?.status === "interrupted" || ctx.abort.aborted
                   ? "cancelled"
                   : result?.status === "error"
                     ? "error"

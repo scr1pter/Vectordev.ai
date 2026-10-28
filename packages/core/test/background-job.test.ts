@@ -278,3 +278,175 @@ describe("BackgroundJob", () => {
     }),
   )
 })
+
+describe("BackgroundJob durable rows", () => {
+  const owner = { runtime: "process:instance", pid: 4242, boot: 1_700_000_000_000, machine: "machine" }
+  const durable = { parentSessionID: "ses_parent", sessionID: "ses_child", directory: "/repo", attempt: 2 }
+
+  type Call =
+    | { kind: "started"; row: BackgroundJob.Started }
+    | { kind: "settled"; id: string; p: BackgroundJob.Settled }
+    | { kind: "promoted"; id: string; p: BackgroundJob.Holder }
+
+  // A store that records each call, then behaves as `act` says: write, fail, die or never answer.
+  const recorder = (act: (call: Call) => Effect.Effect<void, unknown> = () => Effect.void) => {
+    const calls: Call[] = []
+    const record = (call: Call) => Effect.suspend(() => (calls.push(call), act(call)))
+    const store: BackgroundJob.Store = {
+      started: (row) => record({ kind: "started", row }),
+      settled: (id, p) => record({ kind: "settled", id, p }),
+      promoted: (id, p) => record({ kind: "promoted", id, p }),
+    }
+    return { calls, store }
+  }
+
+  const registry = (store: BackgroundJob.Store, disposing: () => boolean = () => false) =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make()
+      const jobs = yield* BackgroundJob.makeWith({ store, owner, disposing }).pipe(Scope.provide(scope))
+      return { scope, jobs }
+    })
+
+  const until = (check: () => boolean) =>
+    Effect.gen(function* () {
+      while (!check()) yield* Effect.sleep("5 millis")
+    }).pipe(Effect.timeout("2 seconds"))
+
+  it.live("cancel() while not disposing records cancelled", () =>
+    Effect.gen(function* () {
+      const { calls, store } = recorder()
+      const { scope, jobs } = yield* registry(store)
+      const job = yield* jobs.start({ type: "task", durable, run: Effect.never })
+
+      expect((yield* jobs.cancel(job.id))?.status).toBe("cancelled")
+      yield* until(() => calls.some((call) => call.kind === "settled"))
+      expect(calls.find((call) => call.kind === "settled")).toMatchObject({
+        id: job.id,
+        p: { owner: owner.runtime, attempt: 2, status: "cancelled" },
+      })
+      yield* Scope.close(scope, Exit.void)
+    }),
+  )
+
+  it.live("while disposing, cancel() and closing the registry record interrupted", () =>
+    Effect.gen(function* () {
+      const { calls, store } = recorder()
+      let disposing = false
+      const { scope, jobs } = yield* registry(store, () => disposing)
+      const cancelled = yield* jobs.start({ type: "task", durable, run: Effect.never })
+      const closed = yield* jobs.start({ type: "task", durable, run: Effect.never })
+      const waiter = yield* jobs.wait({ id: closed.id }).pipe(Effect.forkChild({ startImmediately: true }))
+
+      disposing = true
+      expect((yield* jobs.cancel(cancelled.id))?.status).toBe("interrupted")
+      // Closing waits for the row: the instance is gone only once its jobs' rows say they were interrupted.
+      yield* Scope.close(scope, Exit.void)
+      expect((yield* Fiber.join(waiter)).info?.status).toBe("interrupted")
+      expect(calls.filter((call) => call.kind === "settled" && call.id === closed.id)).toEqual([
+        {
+          kind: "settled",
+          id: closed.id,
+          p: expect.objectContaining({ owner: owner.runtime, attempt: 2, status: "interrupted" }),
+        },
+      ])
+      yield* until(() => calls.some((call) => call.kind === "settled" && call.id === cancelled.id))
+      expect(calls.find((call) => call.kind === "settled" && call.id === cancelled.id)).toMatchObject({
+        p: { status: "interrupted" },
+      })
+    }),
+  )
+
+  it.live("durable jobs call the store: started, promoted, then settled, in that order", () =>
+    Effect.gen(function* () {
+      const { calls, store } = recorder()
+      const { scope, jobs } = yield* registry(store)
+      const latch = yield* Deferred.make<void>()
+      const job = yield* jobs.start({
+        id: "ses_child",
+        type: "task",
+        title: "Survey",
+        metadata: { parentSessionId: "ses_parent" },
+        durable: { ...durable, metadata: { agent: "explore" } },
+        run: Deferred.await(latch).pipe(Effect.as("report")),
+      })
+      expect(job).toMatchObject({ owner: owner.runtime, durable: true })
+      expect(yield* jobs.lease()).toEqual(owner)
+
+      yield* jobs.promote(job.id)
+      yield* Deferred.succeed(latch, undefined)
+      expect((yield* jobs.wait({ id: job.id })).info?.status).toBe("completed")
+      yield* until(() => calls.length === 3)
+      expect(calls).toEqual([
+        {
+          kind: "started",
+          row: {
+            ...durable,
+            metadata: { agent: "explore" },
+            id: "ses_child",
+            type: "task",
+            title: "Survey",
+            background: false,
+            startedAt: job.started_at,
+            owner,
+          },
+        },
+        { kind: "promoted", id: "ses_child", p: { owner: owner.runtime, attempt: 2 } },
+        {
+          kind: "settled",
+          id: "ses_child",
+          p: { owner: owner.runtime, attempt: 2, status: "completed", completedAt: expect.any(Number) },
+        },
+      ])
+      yield* Scope.close(scope, Exit.void)
+    }),
+  )
+
+  it.live(
+    "a failing or slow store never fails or blocks a job",
+    () =>
+      Effect.gen(function* () {
+        for (const act of [
+          () => Effect.fail(new Error("disk full")),
+          () => Effect.die(new Error("database closed")),
+          () => Effect.never,
+        ]) {
+          const { calls, store } = recorder(act)
+          const { scope, jobs } = yield* registry(store)
+          const begin = Date.now()
+          const done = yield* jobs.start({ type: "task", durable, run: Effect.succeed("report") })
+          const failed = yield* jobs.start({ type: "task", durable, run: Effect.fail(new Error("boom")) })
+          const stopped = yield* jobs.start({
+            type: "task",
+            durable,
+            metadata: { background: false },
+            run: Effect.never,
+          })
+          yield* jobs.promote(stopped.id)
+          expect((yield* jobs.cancel(stopped.id))?.status).toBe("cancelled")
+          expect((yield* jobs.wait({ id: done.id })).info).toMatchObject({ status: "completed", output: "report" })
+          expect((yield* jobs.wait({ id: failed.id })).info).toMatchObject({ status: "error", error: "boom" })
+          // Well inside the store's 2 s allowance: nothing waited on it.
+          expect(Date.now() - begin).toBeLessThan(1_000)
+          expect(calls.length).toBeGreaterThan(0)
+          yield* Scope.close(scope, Exit.void)
+        }
+      }),
+    20_000,
+  )
+
+  it.live("non-durable jobs never touch the store", () =>
+    Effect.gen(function* () {
+      const { calls, store } = recorder()
+      const { scope, jobs } = yield* registry(store)
+      const done = yield* jobs.start({ type: "task", run: Effect.succeed("report") })
+      const stopped = yield* jobs.start({ type: "task", run: Effect.never })
+      yield* jobs.promote(stopped.id)
+      yield* jobs.cancel(stopped.id)
+      expect((yield* jobs.wait({ id: done.id })).info?.status).toBe("completed")
+      expect(done.durable).toBeUndefined()
+      expect(done.owner).toBeUndefined()
+      yield* Scope.close(scope, Exit.void)
+      expect(calls).toEqual([])
+    }),
+  )
+})

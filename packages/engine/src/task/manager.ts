@@ -138,7 +138,7 @@ const layer = Layer.effect(
         (item) => item.sessionID === session.id,
       )
       const status: Task.Status =
-        abandoned || current.status === "cancelled" || job?.status === "cancelled"
+        abandoned || current.status === "cancelled" || job?.status === "cancelled" || job?.status === "interrupted"
           ? "stopped"
           : current.status === "error" || job?.status === "error"
             ? "failed"
