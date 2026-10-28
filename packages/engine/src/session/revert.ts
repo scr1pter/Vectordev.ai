@@ -15,6 +15,7 @@ import { BrainSkill } from "@vectordevai/core/brain/skill"
 import { BrainWorkflow } from "@vectordevai/core/brain/workflow"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { Instruction } from "./instruction"
+import { FileState } from "@/tool/file-state"
 
 export const RevertInput = Schema.Struct({
   sessionID: SessionID,
@@ -103,6 +104,8 @@ const layer = Layer.effect(
           files: diffs.length,
         },
       })
+      // Files went back, so what the session read or wrote is seeded again from the messages that remain.
+      FileState.forget(input.sessionID)
       return yield* sessions.get(input.sessionID).pipe(Effect.orDie)
     })
 
@@ -113,6 +116,7 @@ const layer = Layer.effect(
       if (!session.revert) return session
       if (session.revert.snapshot) yield* snap.restore(session.revert.snapshot)
       yield* sessions.clearRevert(input.sessionID)
+      FileState.forget(input.sessionID)
       return yield* sessions.get(input.sessionID).pipe(Effect.orDie)
     })
 

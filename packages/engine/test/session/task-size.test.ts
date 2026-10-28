@@ -1,3 +1,4 @@
+import { readdirSync } from "node:fs"
 import { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
@@ -28,6 +29,7 @@ import { SubagentLifecycle } from "../../src/tool/subagent-lifecycle"
 import { isRecord } from "@/util/record"
 import { TestInstance } from "../fixture/fixture"
 import { pollWithTimeout, testEffect } from "../lib/effect"
+import { seen } from "../lib/file-state"
 import { reply, TestLLMServer } from "../lib/llm-server"
 
 // What a request costs by its size, measured against a fake model server: how many requests it makes, which tools it
@@ -214,8 +216,15 @@ function systemText(body: Record<string, unknown> | undefined) {
     .join("\n")
 }
 
+// These tests are about sizing, not file safety: the session has read every file at the folder's top, so the fake
+// model's write over a file an earlier conversation made goes through (read before write, multi-agent contract 5.F.1).
 const send = (prompt: SessionPrompt.Interface, sessionID: SessionID, text: string, extra = {}) =>
-  prompt.prompt({ sessionID, agent: "build", model: ref, parts: [{ type: "text", text }], ...extra })
+  Effect.gen(function* () {
+    const { directory } = yield* TestInstance
+    const files = readdirSync(directory, { withFileTypes: true }).filter((entry) => entry.isFile())
+    yield* seen(sessionID, ...files.map((entry) => path.join(directory, entry.name)))
+    return yield* prompt.prompt({ sessionID, agent: "build", model: ref, parts: [{ type: "text", text }], ...extra })
+  })
 
 const conversation = (body: Record<string, unknown> | undefined) =>
   ((body?.messages ?? []) as { role: string }[]).filter((message) => message.role !== "system")

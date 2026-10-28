@@ -1738,11 +1738,17 @@ const layer = Layer.effect(
                     type: "text",
                     synthetic: true,
                     text: result.output,
-                    // Lets a later Read of the same unchanged lines point back here instead of sending the file again.
-                    ...(typeof result.metadata.fingerprint === "string"
+                    // Lets a later Read of the same unchanged lines point back here instead of sending the file again,
+                    // and counts as a read for edit, write and apply_patch, after a restart too.
+                    ...(typeof result.metadata.fingerprint === "string" || result.metadata.fileState
                       ? {
                           metadata: {
-                            read: { fingerprint: result.metadata.fingerprint, display: result.metadata.display },
+                            read: {
+                              ...(typeof result.metadata.fingerprint === "string"
+                                ? { fingerprint: result.metadata.fingerprint, display: result.metadata.display }
+                                : {}),
+                              ...(result.metadata.fileState ? { fileState: result.metadata.fileState } : {}),
+                            },
                           },
                         }
                       : {}),

@@ -106,6 +106,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     })
   })
 
+  const subagentTitle = SubagentLifecycle.read(input.session)?.title
   const context = (args: Record<string, unknown>, options: ToolExecutionOptions): Tool.Context => ({
     sessionID: input.session.id,
     parentID: input.session.parentID,
@@ -124,6 +125,8 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
       ...(input.delegation ? { delegation: input.delegation } : {}),
       ...(input.effort ? { effort: input.effort } : {}),
       ...(input.passdown ? { passdown: input.passdown } : {}),
+      // Names this subagent to a session whose edit its write makes stale (FileState.verify).
+      ...(subagentTitle ? { subagentTitle } : {}),
     },
     ownedPaths: SubagentLifecycle.read(input.session)?.ownedPaths,
     getOwnedPaths: () =>

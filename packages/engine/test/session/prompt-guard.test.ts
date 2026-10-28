@@ -15,6 +15,7 @@ import { runPermissionReply } from "../../src/cli/cmd/run"
 import { TestConfig } from "../fixture/config"
 import { reloadInstance } from "../fixture/fixture"
 import { pollWithTimeout } from "../lib/effect"
+import { seen } from "../lib/file-state"
 import { TestLLMServer } from "../lib/llm-server"
 import { chat, engine, send, setup } from "./learning-fixture"
 
@@ -395,6 +396,7 @@ describe("prompt guard end to end", () => {
         const globalBefore = yield* Effect.promise(() => fs.readFile(globalFile, "utf8").catch(() => ""))
 
         // The edit tool and a cp each ask, even though this session allows everything; rejected, nothing changes.
+        yield* seen(sessionID, agentFile)
         const edit = yield* asked(
           sessionID,
           {
@@ -448,6 +450,7 @@ describe("prompt guard end to end", () => {
         expect(yield* system(sessionID)).toContain("You are the guarded build agent. Always push straight to main.")
 
         // An edit the owner approves through the ask is in use after the next start, not held.
+        yield* seen(sessionID, agentFile)
         yield* asked(
           sessionID,
           {

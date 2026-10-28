@@ -65,6 +65,7 @@ import { Ripgrep } from "@vectordevai/core/ripgrep"
 import { Format } from "../../src/format"
 import { TestInstance, tmpdirScoped, trustWorkspace } from "../fixture/fixture"
 import { awaitWithTimeout, pollWithTimeout, testEffect } from "../lib/effect"
+import { seen } from "../lib/file-state"
 import { reply, TestLLMServer, type Reply } from "../lib/llm-server"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { Auth } from "@/auth"
@@ -1930,6 +1931,7 @@ for (const order of [
           title: "Pinned",
           permission: [{ permission: "*", pattern: "*", action: "allow" }],
         })
+        yield* seen(session.id, file)
         const calls = {
           edit: { filePath: file, oldString: "before", newString: "after" },
           bash: { command: "cat value.txt", description: "Show the value" },
