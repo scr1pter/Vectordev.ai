@@ -1,10 +1,20 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto"
 import { Option, Schema } from "effect"
+import type { EntitlementSnapshot, PlanReason, PlanState } from "../../packages/schema/src/codium-entitlements.js"
+import { isPlanId, rank, type PlanId } from "../../packages/schema/src/codium-plan.js"
 import type { AccountUser } from "./account.js"
 import { withBillingMutation } from "./billing-lock.js"
 import { requireCodiumSales, reserveCodiumSale } from "./codium-funding.js"
 import { codiumKey, openRouterKeyName } from "./codium-keys.js"
-import { codiumKeyLimitUsd } from "./codium-limits.js"
+import { codiumKeyLimitUsd, renewalGraceMinutes, TRUST_RAMP } from "./codium-limits.js"
+import {
+  buildSnapshot,
+  readSnapshot,
+  readSnapshotForWrite,
+  writeSnapshot,
+  type SnapshotFacts,
+  type SnapshotSource,
+} from "./codium-snapshot.js"
 import {
   DEBIT_RETRY_MS,
   DEBITS_KEEP_MS,
@@ -57,6 +67,22 @@ const Checkout = Schema.Struct({
   reservation: Schema.optional(Schema.String),
 })
 const Micro = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+/**
+ * What holds an account's Codium regardless of what Stripe says is paid (contract §4.3, §4.4): disputes still open on
+ * any of its charges, by charge, with Stripe's status and when Vector first saw it; charges with an early-fraud
+ * warning; and a block, from a lost dispute, a refunded fraud warning (WP A10) or the owner. Reconcile keeps this from
+ * Stripe's current state; only the owner clears a block or a warning.
+ */
+const Risk = Schema.Struct({
+  blocked: Schema.Boolean,
+  // "disputed", "early_fraud_warning" or "owner"; anything else reads as the owner's block.
+  reason: Schema.optional(Schema.String),
+  at: Schema.optional(Schema.Number),
+  openDisputes: Schema.Record(Schema.String, Schema.Struct({ status: Schema.String, at: Schema.Number })),
+  efw: Schema.Array(Schema.String),
+})
+type Risk = typeof Risk.Type
+const NO_RISK: Risk = { blocked: false, openDisputes: {}, efw: [] }
 // Codium sells monthly plans only (WP A04). A record written while top-ups existed may still carry `topupCheckout`,
 // `purchases` and `wallet`, in any shape: decoding ignores keys the struct does not name, so such a record still
 // decodes, nothing reads those fields, and the next save leaves them out. Sales never opened, so no one holds
@@ -64,6 +90,16 @@ const Micro = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 const Account = Schema.Struct({
   customer: Schema.String,
   closing: Schema.optional(Schema.Boolean),
+  risk: Schema.optional(Risk),
+  // Set by WP A10 once a rank 3 or higher payment passed 3-D Secure.
+  highValueVerified: Schema.optional(Schema.Boolean),
+  // Milliseconds. The first paid invoice; the first paid invoice of a rank 3 or higher price (restarted after a gap of
+  // more than 14 days without a paid period: the trust ramp); the start of an unbroken Max or Ultra run (private); and
+  // the end of the last paid period, which measures that gap.
+  firstPaidAt: Schema.optional(Schema.Number),
+  firstHighPaidAt: Schema.optional(Schema.Number),
+  memberSince: Schema.optional(Schema.Number),
+  paidThrough: Schema.optional(Schema.Number),
   checkout: Schema.optional(Checkout),
   key: Schema.optional(
     Schema.Struct({
@@ -217,41 +253,540 @@ async function chargeAvailable(charge: Record<string, unknown>, chargeID: string
   )
 }
 
+/** A notification's object that reconcile must re-read itself, because no subscription points at it. */
+export type ReconcileHint =
+  /** A dispute on one of the customer's charges, current month or not. */
+  | { kind: "dispute"; charge: string }
+  /** An early-fraud warning, by id, on one of the customer's charges. */
+  | { kind: "efw"; id: string; charge?: string }
+
+const DAY_MS = 86_400_000
+
 /**
- * Bring the account's OpenRouter key in line with what Stripe says is paid, as soon as a billing notification
- * arrives, so a buyer's credits are ready before their first request: the paid period's key gets the plan's credits
- * (each period gets a new key, so monthly credits reset rather than roll over), and a key nothing pays for any more
- * is switched off. It reads Stripe's current state rather than applying the notification, so a replayed or
- * out-of-order notification changes nothing.
+ * Brings the account in line with Stripe's current state (contract §4.3, §4.4) and writes its entitlement snapshot,
+ * which every service reads instead of calling Stripe. It reads the account's subscriptions and the disputes and
+ * fraud warnings that hold it, picks the governing subscription, maps it to a state, records the payment history, and
+ * converges the OpenRouter key: the paid period's key gets the pool's limit (each period gets a new key, so monthly
+ * credits reset rather than roll over), a renewing account keeps its previous key, and every other state switches
+ * the key off. It reads Stripe rather than applying the notification, so a replayed or out-of-order notification
+ * changes nothing; the snapshot's version moves only when something changed. Only this function, and account deletion,
+ * write a snapshot.
  */
-export async function reconcileModelPlanAccount(id: string, fetcher: typeof fetch = fetch, now = Date.now()) {
-  await withCodiumLease(
+export async function reconcileModelPlanAccount(
+  id: string,
+  fetcher: typeof fetch = fetch,
+  now = Date.now(),
+  options: { source?: SnapshotSource; hint?: ReconcileHint } = {},
+): Promise<EntitlementSnapshot> {
+  const source = options.source ?? "webhook"
+  return withCodiumLease(
     id,
     async (verify) => {
+      const stored = await readSnapshotForWrite(id, fetcher)
       const account = await readModelPlanAccount(id, fetcher)
-      if (!account) return
-      const paid = account.closing
-        ? []
-        : (await subscriptions(account.customer, fetcher))
-            .map((subscription) => paidModelPlan(subscription, id, now))
-            .filter((value) => value !== undefined)
-      if (account.key && paid.length !== 1) {
-        await verify()
-        await openRouterManagement(`/${encodeURIComponent(account.key.hash)}`, { disabled: true }, fetcher, "PATCH")
+      if (!account)
+        return commitSnapshot(
+          { account: id, state: "none", plan: null, periodStart: 0, periodEnd: 0, cancelAtPeriodEnd: false, source },
+          stored,
+          fetcher,
+          now,
+          verify,
+        )
+      if (account.closing) {
+        if (account.key) {
+          await verify()
+          await openRouterManagement(`/${encodeURIComponent(account.key.hash)}`, { disabled: true }, fetcher, "PATCH")
+        }
+        return commitSnapshot(closingFacts(id, account, stored.previous, source), stored, fetcher, now, verify)
       }
-      if (paid.length === 1) await provisionMonthlyKey(id, account, paid[0]!, fetcher, verify)
+      const listed = await listSubscriptions(account.customer, fetcher)
+      const review = await reviewRisk(account, listed, options.hint, fetcher, now)
+      const current = listed.map((subscription) => clearWonDispute(subscription, review.cleared))
+      const reviewed = { ...account, risk: review.risk }
+      const standing = planStanding(id, reviewed, current, now, {
+        known: knownPeriods(account, stored.previous),
+      })
+      const updated = recordPaidHistory(reviewed, standing)
+      if (accountChanged(account, updated)) {
+        await verify()
+        await saveAccount(id, updated, fetcher)
+      }
+      if (standing.state === "active" && standing.governing?.paid)
+        await provisionMonthlyKey(id, updated, standing.governing.paid, fetcher, verify)
+      else if (standing.state !== "renewing" && updated.key) {
+        // Past due, unpaid, ended, refunded, disputed, warned or blocked: the key stops at once (M5). Renewing keeps
+        // the previous period's key serving until the renewal is paid or its grace runs out.
+        await verify()
+        await openRouterManagement(`/${encodeURIComponent(updated.key.hash)}`, { disabled: true }, fetcher, "PATCH")
+      }
+      if (standing.duplicates.length)
+        // Owner alerts arrive with WP A11; until then the log names the subscriptions, never the person.
+        console.warn("Vector Codium: an account has more than one live subscription", {
+          account: id,
+          governing: standing.governing?.id,
+          duplicates: standing.duplicates,
+        })
+      const governing = standing.governing
+      const planned = standing.state !== "none"
+      return commitSnapshot(
+        {
+          account: id,
+          state: standing.state,
+          ...(standing.reason ? { reason: standing.reason } : {}),
+          plan: planned ? (governing?.plan ?? stored.previous?.plan ?? null) : null,
+          ...(planned && (governing?.id ?? stored.previous?.subscription)
+            ? { subscription: governing?.id ?? stored.previous?.subscription }
+            : {}),
+          // Without a plan there is no period: an incomplete checkout's dates mean nothing yet.
+          periodStart: !planned ? 0 : governing ? governing.start * 1000 : (stored.previous?.periodStart ?? 0),
+          periodEnd: !planned ? 0 : governing ? governing.end * 1000 : (stored.previous?.periodEnd ?? 0),
+          cancelAtPeriodEnd: governing?.cancelAtPeriodEnd ?? false,
+          ...history(updated),
+          source,
+        },
+        stored,
+        fetcher,
+        now,
+        verify,
+      )
     },
     fetcher,
   )
 }
 
-export function paidModelPlan(subscription: unknown, accountID: string, now = Date.now()) {
-  if (
-    !stripeRecord(subscription) ||
-    typeof subscription.id !== "string" ||
-    subscription.status !== "active" ||
-    subscription.pause_collection
+/**
+ * Writes the snapshot for `facts` over what was stored, still holding the lease, so a reconcile that ran out of time
+ * cannot overwrite a newer one written meanwhile; when a newer one is already there, answers that instead.
+ */
+async function commitSnapshot(
+  facts: SnapshotFacts,
+  stored: { previous?: EntitlementSnapshot; version: number },
+  fetcher: typeof fetch,
+  now: number,
+  verify: () => Promise<void>,
+) {
+  const snapshot = buildSnapshot(facts, stored.previous, now, stored.version)
+  await verify()
+  const { written } = await writeSnapshot(snapshot, stored.previous, fetcher, now)
+  if (!written) return (await readSnapshot(facts.account, fetcher)) ?? snapshot
+  return snapshot
+}
+
+function history(account: Account) {
+  return {
+    ...(account.firstPaidAt === undefined ? {} : { firstPaidAt: account.firstPaidAt }),
+    ...(account.firstHighPaidAt === undefined ? {} : { firstHighPaidAt: account.firstHighPaidAt }),
+    ...(account.memberSince === undefined ? {} : { memberSince: account.memberSince }),
+  }
+}
+
+/** A deleted account's snapshot: ended for good, keeping the plan and period it last had for the owner's records. */
+function closingFacts(
+  id: string,
+  account: Account,
+  previous: EntitlementSnapshot | undefined,
+  source: SnapshotSource,
+): SnapshotFacts {
+  return {
+    account: id,
+    state: "ended",
+    reason: "closing",
+    plan: previous?.plan ?? null,
+    ...(previous?.subscription ? { subscription: previous.subscription } : {}),
+    periodStart: previous?.periodStart ?? 0,
+    periodEnd: previous?.periodEnd ?? 0,
+    cancelAtPeriodEnd: false,
+    ...history(account),
+    source,
+  }
+}
+
+/** Periods this account is known to have had, in seconds: the current key's and the last snapshot's. */
+function knownPeriods(account: Account, previous: EntitlementSnapshot | undefined) {
+  return [
+    ...(account.key ? [{ subscription: account.key.subscription, start: account.key.start, end: account.key.end }] : []),
+    ...(previous?.subscription
+      ? [
+          {
+            subscription: previous.subscription,
+            start: Math.floor(previous.periodStart / 1000),
+            end: Math.floor(previous.periodEnd / 1000),
+          },
+        ]
+      : []),
+  ]
+}
+
+/** Whether reconcile changed the record, whatever order its fields are in. */
+function accountChanged(before: Account, after: Account) {
+  const stable = (value: unknown): unknown =>
+    Array.isArray(value)
+      ? value.map(stable)
+      : value && typeof value === "object"
+        ? Object.fromEntries(
+            Object.entries(value)
+              .filter(([, field]) => field !== undefined)
+              .sort(([a], [b]) => (a < b ? -1 : 1))
+              .map(([name, field]) => [name, stable(field)]),
+          )
+        : value
+  return JSON.stringify(stable(before)) !== JSON.stringify(stable(after))
+}
+
+// ── Risk: disputes and early-fraud warnings ──────────────────────────────────────────────────────────────────────
+
+// Stripe's dispute statuses at the pinned API version. Any status not listed here counts as open: it fails closed.
+const WON_DISPUTE = new Set(["won", "warning_closed"])
+const LOST_DISPUTE = new Set(["lost"])
+
+/**
+ * Where the disputes on one charge stand: lost if any was lost, open if any is still open (or cannot be read), won
+ * once every one of them was won or closed as an inquiry. A charge Stripe marks disputed with no dispute listed, or
+ * with more than one page of them, counts as open.
+ */
+async function disputeOutcome(charge: string, fetcher: typeof fetch) {
+  const query = new URLSearchParams({ charge, limit: "100" })
+  const result = await modelPlanStripe(`disputes?${query}`, {}, fetcher)
+  const disputes = Array.isArray(result.data) ? result.data.filter(stripeRecord) : []
+  if (result.has_more !== false || !disputes.length || disputes.some((value) => value.charge !== charge))
+    return { kind: "open" as const, status: "unknown" }
+  const lost = disputes.find((value) => LOST_DISPUTE.has(String(value.status)))
+  if (lost) return { kind: "lost" as const, status: String(lost.status) }
+  const open = disputes.find((value) => !WON_DISPUTE.has(String(value.status)))
+  if (open) return { kind: "open" as const, status: typeof open.status === "string" ? open.status : "unknown" }
+  return { kind: "won" as const, status: "won" }
+}
+
+/**
+ * Brings `risk` in line with Stripe: every charge with a dispute this account has seen (the notified one, any latest
+ * charge Stripe marks disputed, and every dispute still open in the record) is read again. A dispute on any Codium
+ * charge holds the account, not only one on the latest (M5). A lost dispute blocks it. An early-fraud warning named by
+ * a notification is read again and recorded against its charge. Returns the charges whose disputes were all won, which
+ * may pay for their month again.
+ */
+async function reviewRisk(
+  account: Account,
+  subscriptions: readonly Record<string, unknown>[],
+  hint: ReconcileHint | undefined,
+  fetcher: typeof fetch,
+  now: number,
+) {
+  const before = account.risk ?? NO_RISK
+  const risk = {
+    ...before,
+    openDisputes: { ...before.openDisputes },
+    efw: [...before.efw],
+  }
+  const charges = new Set<string>(Object.keys(risk.openDisputes))
+  if (hint?.kind === "dispute" && validChargeId(hint.charge)) charges.add(hint.charge)
+  for (const subscription of subscriptions) {
+    const charge = latestCharge(subscription)
+    if (charge?.disputed === true && typeof charge.id === "string") charges.add(charge.id)
+  }
+  const cleared = new Set<string>()
+  for (const charge of charges) {
+    const outcome = await disputeOutcome(charge, fetcher)
+    if (outcome.kind === "open") {
+      risk.openDisputes[charge] = { status: outcome.status, at: before.openDisputes[charge]?.at ?? now }
+      continue
+    }
+    delete risk.openDisputes[charge]
+    if (outcome.kind === "won") cleared.add(charge)
+    else if (!risk.blocked) Object.assign(risk, { blocked: true, reason: "disputed", at: now })
+  }
+  if (hint?.kind === "efw") {
+    const warning = await modelPlanStripe(`radar/early_fraud_warnings/${encodeURIComponent(hint.id)}`, {}, fetcher)
+    const charge =
+      typeof warning.charge === "string"
+        ? warning.charge
+        : stripeRecord(warning.charge) && typeof warning.charge.id === "string"
+          ? warning.charge.id
+          : undefined
+    if (charge && validChargeId(charge) && (!hint.charge || hint.charge === charge) && !risk.efw.includes(charge))
+      risk.efw.push(charge)
+  }
+  const unchanged = JSON.stringify(risk) === JSON.stringify(before)
+  return { risk: unchanged && !account.risk ? undefined : risk, cleared }
+}
+
+const validChargeId = (value: unknown): value is string => typeof value === "string" && /^(ch|py)_[a-zA-Z0-9]+$/.test(value)
+
+function latestCharge(subscription: Record<string, unknown>) {
+  const invoice = stripeRecord(subscription.latest_invoice) ? subscription.latest_invoice : undefined
+  return invoice && stripeRecord(invoice.charge) ? invoice.charge : undefined
+}
+
+/** The same subscription with its latest charge's `disputed` lifted, when every dispute on that charge was won. */
+function clearWonDispute(subscription: Record<string, unknown>, cleared: ReadonlySet<string>) {
+  const invoice = stripeRecord(subscription.latest_invoice) ? subscription.latest_invoice : undefined
+  const charge = latestCharge(subscription)
+  if (!invoice || !charge || typeof charge.id !== "string" || !cleared.has(charge.id)) return subscription
+  return { ...subscription, latest_invoice: { ...invoice, charge: { ...charge, disputed: false } } }
+}
+
+/**
+ * The state the account's risk record forces, whatever Stripe says is paid, in this order: deletion; a block from a
+ * lost dispute or a refunded fraud warning (ended); an open dispute (frozen); an early-fraud warning (frozen); any
+ * other block, the owner's (frozen).
+ */
+export function riskState(account: {
+  closing?: boolean
+  risk?: Risk
+}): { state: PlanState; reason: PlanReason } | undefined {
+  if (account.closing) return { state: "ended", reason: "closing" }
+  const risk = account.risk
+  if (!risk) return undefined
+  if (risk.blocked && (risk.reason === "disputed" || risk.reason === "early_fraud_warning"))
+    return { state: "ended", reason: risk.reason }
+  if (Object.keys(risk.openDisputes).length) return { state: "frozen", reason: "disputed" }
+  if (risk.efw.length) return { state: "frozen", reason: "early_fraud_warning" }
+  if (risk.blocked) return { state: "frozen", reason: "owner" }
+  return undefined
+}
+
+/** The refusal for an account its risk record holds: a block or freeze is not something a new card fixes. */
+function riskRefusal(held: { state: PlanState; reason: PlanReason }) {
+  return new ApiError(
+    403,
+    "MODEL_PLAN_BLOCKED",
+    held.reason === "disputed"
+      ? "Vector Codium is on hold for this account while a payment dispute is open."
+      : "Vector Codium is on hold for this account. Contact Vector support.",
+    { detail: { reason: held.reason } },
   )
+}
+
+// ── The governing subscription and its state ───────────────────────────────────────────────────────────────────
+
+/** One subscription of the account, mapped to a state. Periods are in seconds. */
+export type Standing = {
+  id: string
+  plan: PlanId
+  state: PlanState
+  reason?: PlanReason
+  /** The period the state is about: the paid one, or, while a renewal is due or failing, the one that just ended. */
+  start: number
+  end: number
+  cancelAtPeriodEnd: boolean
+  supersedes?: string
+  created: number
+  paid?: NonNullable<ReturnType<typeof paidModelPlan>>
+}
+
+type StandingContext = {
+  graceMs?: number
+  /** Periods the account is known to have had, to find the start of the one a renewal follows. */
+  known?: readonly { subscription: string; start: number; end: number }[]
+}
+
+/** The Codium plan a subscription is for: its price as configured, or the plan checkout recorded in its metadata. */
+function subscriptionPlanId(price: Record<string, unknown> | undefined, metadata: Record<string, unknown> | undefined) {
+  const configured = modelPlans().find((plan) => plan.priceID && plan.priceID === price?.id)
+  if (configured && isPlanId(configured.id)) return configured.id
+  return isPlanId(metadata?.vector_plan) ? metadata.vector_plan : undefined
+}
+
+function invoiceCovers(invoice: Record<string, unknown>, priceID: unknown, start: number, end: number) {
+  const lines = stripeRecord(invoice.lines) && Array.isArray(invoice.lines.data) ? invoice.lines.data : []
+  return lines.some(
+    (line) =>
+      stripeRecord(line) &&
+      stripeRecord(line.period) &&
+      line.period.start === start &&
+      line.period.end === end &&
+      (!stripeRecord(line.price) || line.price.id === priceID),
+  )
+}
+
+function fullyRefunded(charge: Record<string, unknown> | undefined) {
+  return (
+    !!charge &&
+    (charge.refunded === true ||
+      (typeof charge.amount === "number" &&
+        charge.amount > 0 &&
+        typeof charge.amount_refunded === "number" &&
+        charge.amount_refunded >= charge.amount))
+  )
+}
+
+function needsAction(invoice: Record<string, unknown> | undefined) {
+  const intent = invoice && stripeRecord(invoice.payment_intent) ? invoice.payment_intent : undefined
+  return intent?.status === "requires_action"
+}
+
+/**
+ * The period a renewal follows, in seconds: a renewal invoice's own `period_start`/`period_end` name it, then a period
+ * the account is known to have had, and failing both the same length again before the current period.
+ */
+function previousPeriod(
+  subscription: string,
+  start: number,
+  end: number,
+  invoice: Record<string, unknown> | undefined,
+  known: StandingContext["known"],
+) {
+  const invoiceStart = Number(invoice?.period_start)
+  if (Number.isSafeInteger(invoiceStart) && invoice?.period_end === start && invoiceStart < start)
+    return { start: invoiceStart, end: start }
+  const period = known?.find((value) => value.subscription === subscription && value.end === start)
+  if (period && period.start < start) return { start: period.start, end: start }
+  return { start: start - (end - start), end: start }
+}
+
+/**
+ * One subscription's state (contract §4.4 "Stripe → state"), before the account's risk record is applied:
+ * - none: `incomplete`, `incomplete_expired`, and anything Codium does not sell (trials, mismatched prices);
+ * - active: the current period's invoice is paid and unreversed (a partial refund is goodwill and changes nothing);
+ * - renewing: the period ended and its renewal invoice is a draft, or open without an attempt, until `periodEnd` +
+ *   grace, after which it is paused / payment_pending;
+ * - paused: `past_due` (payment_failed, or action_required when the bank asks the customer to confirm), Stripe's own
+ *   `paused`, and a renewal invoice that was voided;
+ * - ended: `unpaid` (payment_failed), `canceled`, and a full refund of the current period's charge (refunded).
+ * Undefined for a subscription that is not this account's Codium plan.
+ */
+export function subscriptionStanding(
+  subscription: unknown,
+  accountID: string,
+  now = Date.now(),
+  context: StandingContext = {},
+): Standing | undefined {
+  if (!stripeRecord(subscription) || typeof subscription.id !== "string") return undefined
+  const metadata = stripeRecord(subscription.metadata) ? subscription.metadata : undefined
+  if (metadata?.vector_account_id !== accountID) return undefined
+  const items = stripeRecord(subscription.items) && Array.isArray(subscription.items.data) ? subscription.items.data : []
+  const item = items.length === 1 && stripeRecord(items[0]) ? items[0] : undefined
+  const price = item && stripeRecord(item.price) ? item.price : undefined
+  const plan = subscriptionPlanId(price, metadata)
+  const start = Number(item?.current_period_start ?? subscription.current_period_start)
+  const end = Number(item?.current_period_end ?? subscription.current_period_end)
+  if (!plan || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || end <= start) return undefined
+  const base = {
+    id: subscription.id,
+    plan,
+    start,
+    end,
+    cancelAtPeriodEnd: subscription.cancel_at_period_end === true,
+    ...(typeof metadata?.vector_supersedes === "string" && metadata.vector_supersedes
+      ? { supersedes: metadata.vector_supersedes }
+      : {}),
+    created: Number.isSafeInteger(subscription.created) ? Number(subscription.created) : 0,
+  }
+  const status = String(subscription.status)
+  if (status === "canceled") return { ...base, state: "ended", reason: "canceled" }
+  if (status === "unpaid") return { ...base, state: "ended", reason: "payment_failed" }
+  if (status !== "active" && status !== "past_due" && status !== "paused") return { ...base, state: "none" }
+  const invoice = stripeRecord(subscription.latest_invoice) ? subscription.latest_invoice : undefined
+  const before = previousPeriod(subscription.id, start, end, invoice, context.known)
+  const failed = (): Standing => ({
+    ...base,
+    ...before,
+    state: "paused",
+    reason: needsAction(invoice) ? "action_required" : "payment_failed",
+  })
+  if (status === "past_due") return failed()
+  if (status === "paused") return { ...base, ...before, state: "paused", reason: "payment_pending" }
+  const paid = paidModelPlan(subscription, accountID, now)
+  if (paid) return { ...base, start: paid.start, end: paid.end, state: "active", paid }
+  const grace = context.graceMs ?? renewalGraceMinutes() * 60_000
+  const renewal = (period: { start: number; end: number }): Standing =>
+    now > period.end * 1000 + grace
+      ? { ...base, ...period, state: "paused", reason: "payment_pending" }
+      : { ...base, ...period, state: "renewing" }
+  const covers = invoice !== undefined && invoiceCovers(invoice, price?.id, start, end)
+  if (!covers) return { ...base, state: "none" }
+  const charge = stripeRecord(invoice.charge) ? invoice.charge : undefined
+  if (invoice.status === "paid" && fullyRefunded(charge)) return { ...base, state: "ended", reason: "refunded" }
+  // Stripe has not moved the subscription on to its next period yet: the paid period is over and its renewal is due.
+  if (invoice.status === "paid" && now >= end * 1000) return renewal({ start, end })
+  if ((invoice.status === "draft" || invoice.status === "open") && now >= start * 1000)
+    return Number(invoice.attempt_count ?? 0) > 0 ? failed() : renewal(before)
+  if (invoice.status === "void") return { ...base, ...before, state: "paused", reason: "payment_pending" }
+  return { ...base, state: "none" }
+}
+
+const STATE_ORDER: Record<PlanState, number> = { active: 5, renewing: 4, paused: 3, frozen: 3, ended: 2, none: 1 }
+const LIVE_STATES: ReadonlySet<PlanState> = new Set(["active", "renewing", "paused"])
+
+/**
+ * The subscription that governs the account: the best-standing one (paid first), the highest rank among those, then
+ * the most recent. A subscription another one names in `vector_supersedes` stops counting once that one has been paid
+ * (an upgrade, WP A09). Any other subscription still live is a duplicate, for the owner.
+ */
+export function governingStanding(standings: readonly Standing[]) {
+  const superseded = new Set(
+    standings.flatMap((value) => (value.supersedes && value.state !== "none" ? [value.supersedes] : [])),
+  )
+  const candidates = standings
+    .filter((value) => !superseded.has(value.id))
+    .sort(
+      (a, b) =>
+        STATE_ORDER[b.state] - STATE_ORDER[a.state] ||
+        rank(b.plan) - rank(a.plan) ||
+        b.start - a.start ||
+        b.created - a.created,
+    )
+  const governing = candidates[0]
+  return {
+    governing,
+    duplicates: candidates.slice(1).flatMap((value) => (LIVE_STATES.has(value.state) ? [value.id] : [])),
+  }
+}
+
+/** The account's state: its risk record first, then its governing subscription's. */
+export function planStanding(
+  accountID: string,
+  account: { closing?: boolean; risk?: Risk },
+  subscriptions: readonly unknown[],
+  now = Date.now(),
+  context: StandingContext = {},
+) {
+  const standings = subscriptions
+    .map((subscription) => subscriptionStanding(subscription, accountID, now, context))
+    .filter((value) => value !== undefined)
+  const { governing, duplicates } = governingStanding(standings)
+  const held = riskState(account)
+  const state = held ?? (governing ? { state: governing.state, reason: governing.reason } : { state: "none" as const })
+  return { state: state.state, reason: state.reason, governing, duplicates }
+}
+
+/**
+ * The account's payment history after this reconcile, from the governing subscription's paid period: the first paid
+ * invoice, the first paid invoice of a rank 3 or higher price (a Plus→Ultra upgrade starts it, Max→Ultra does not),
+ * the start of an unbroken Max or Ultra run, and the end of the last paid period. A gap of more than 14 days without a
+ * paid period restarts the high-value history. A Plus or Pro period, or an ending, breaks the run.
+ */
+function recordPaidHistory(account: Account, standing: ReturnType<typeof planStanding>): Account {
+  const paid = standing.state === "active" ? standing.governing?.paid : undefined
+  if (!paid) {
+    if (standing.state !== "ended" && standing.state !== "none") return account
+    const { memberSince: _ended, ...rest } = account
+    return rest
+  }
+  const paidAt = paid.paidAt ?? paid.start * 1000
+  const startedAt = paid.start * 1000
+  const gap =
+    account.paidThrough !== undefined && startedAt - account.paidThrough > TRUST_RAMP.restartGapDays * DAY_MS
+  const high = rank(paid.plan.id) >= 3
+  const { firstHighPaidAt: _high, memberSince: _since, ...rest } = account
+  const firstHighPaidAt = high ? (gap ? paidAt : (account.firstHighPaidAt ?? paidAt)) : gap ? undefined : account.firstHighPaidAt
+  const memberSince = high ? (gap ? startedAt : (account.memberSince ?? startedAt)) : undefined
+  return {
+    ...rest,
+    firstPaidAt: account.firstPaidAt ?? paidAt,
+    ...(firstHighPaidAt === undefined ? {} : { firstHighPaidAt }),
+    ...(memberSince === undefined ? {} : { memberSince }),
+    paidThrough: Math.max(account.paidThrough ?? 0, paid.end * 1000),
+  }
+}
+
+/**
+ * The paid month a subscription grants now, or undefined: an active subscription of this account on one configured
+ * plan at its exact monthly price, whose latest invoice is paid in full for the current period by a charge that is
+ * paid, not fully refunded and not disputed (a won dispute is lifted before this is asked). A partial refund leaves the
+ * month paid. Collection paused on the subscription does not change a month already paid.
+ */
+export function paidModelPlan(subscription: unknown, accountID: string, now = Date.now()) {
+  if (!stripeRecord(subscription) || typeof subscription.id !== "string" || subscription.status !== "active")
     return undefined
   const metadata = stripeRecord(subscription.metadata) ? subscription.metadata : undefined
   const items = stripeRecord(subscription.items) ? subscription.items.data : undefined
@@ -301,7 +836,13 @@ export function paidModelPlan(subscription: unknown, accountID: string, now = Da
     charge.paid !== true ||
     charge.refunded !== false ||
     charge.disputed !== false ||
-    charge.amount_refunded !== 0
+    !(
+      charge.amount_refunded === 0 ||
+      (typeof charge.amount_refunded === "number" &&
+        typeof charge.amount === "number" &&
+        charge.amount_refunded > 0 &&
+        charge.amount_refunded < charge.amount)
+    )
   )
     return undefined
   // An old paid invoice must not grant a newly changed billing period or an unpaid upgrade.
@@ -320,16 +861,55 @@ export function paidModelPlan(subscription: unknown, accountID: string, now = Da
     )
   )
     return undefined
-  return { id: subscription.id, plan, start, end, cancelAtPeriodEnd: subscription.cancel_at_period_end === true }
+  const transitions = stripeRecord(invoice.status_transitions) ? invoice.status_transitions : undefined
+  const paidAt = Number(transitions?.paid_at)
+  return {
+    id: subscription.id,
+    plan,
+    start,
+    end,
+    cancelAtPeriodEnd: subscription.cancel_at_period_end === true,
+    ...(Number.isSafeInteger(paidAt) && paidAt > 0 ? { paidAt: paidAt * 1000 } : {}),
+    ...(typeof metadata.vector_supersedes === "string" && metadata.vector_supersedes
+      ? { supersedes: metadata.vector_supersedes }
+      : {}),
+  }
 }
 
-async function subscriptions(customer: string, fetcher: typeof fetch) {
-  const query = new URLSearchParams({ customer, status: "all", limit: "100", "expand[]": "data.latest_invoice.charge" })
+/**
+ * The paid month that pays for the account's requests: of the subscriptions paid now, the one with the highest rank
+ * (the latest on a tie), leaving out any an upgrade supersedes. The same choice reconcile makes, so the key it
+ * provisions is the key requests use.
+ */
+function governingPaid(subscriptions: readonly unknown[], accountID: string, now: number) {
+  const paid = subscriptions
+    .map((subscription) => paidModelPlan(subscription, accountID, now))
+    .filter((value) => value !== undefined)
+  const superseded = new Set(paid.flatMap((value) => (value.supersedes ? [value.supersedes] : [])))
+  return paid
+    .filter((value) => !superseded.has(value.id))
+    .sort((a, b) => rank(b.plan.id) - rank(a.plan.id) || b.start - a.start)[0]
+}
+
+/** The customer's subscriptions as Stripe has them, latest invoice, charge and payment intent expanded. */
+async function listSubscriptions(customer: string, fetcher: typeof fetch) {
+  const query = new URLSearchParams([
+    ["customer", customer],
+    ["status", "all"],
+    ["limit", "100"],
+    ["expand[]", "data.latest_invoice.charge"],
+    ["expand[]", "data.latest_invoice.payment_intent"],
+  ])
   const result = await modelPlanStripe(`subscriptions?${query}`, {}, fetcher)
   if (!Array.isArray(result.data) || result.has_more === true)
     throw new ApiError(503, "MODEL_PLAN_SUBSCRIPTIONS", "Your subscription could not be verified.")
+  return result.data.filter(stripeRecord)
+}
+
+/** The customer's subscriptions, each latest charge whose disputes were all won lifted so it can pay for its month. */
+async function subscriptions(customer: string, fetcher: typeof fetch) {
   return Promise.all(
-    result.data.filter(stripeRecord).map(async (subscription) => {
+    (await listSubscriptions(customer, fetcher)).map(async (subscription) => {
       const invoice = stripeRecord(subscription.latest_invoice) ? subscription.latest_invoice : undefined
       const charge = invoice && stripeRecord(invoice.charge) ? invoice.charge : undefined
       if (
@@ -352,7 +932,8 @@ export async function modelPlanStatus(id: string, fetcher: typeof fetch = fetch,
   const account = await readModelPlanAccount(id, fetcher)
   const monthly = await monthlyStatus(id, fetcher, now)
   if (!account || account.closing) return { ...monthly, access: false }
-  return { ...monthly, customer: true, access: monthly.active }
+  // An open dispute, a fraud warning or a block holds the account whatever Stripe says is paid.
+  return { ...monthly, customer: true, access: monthly.active && !riskState(account) }
 }
 
 /**
@@ -447,11 +1028,7 @@ async function monthlyStatus(id: string, fetcher: typeof fetch = fetch, now = Da
   const account = await readModelPlanAccount(id, fetcher)
   if (!account) return { active: false as const }
   if (account.closing) return { active: false as const, customer: true }
-  const all = await subscriptions(account.customer, fetcher)
-  const eligible = all
-    .map((subscription) => paidModelPlan(subscription, id, now))
-    .filter((value) => value !== undefined)
-  const paid = eligible.length === 1 ? eligible[0] : undefined
+  const paid = governingPaid(await subscriptions(account.customer, fetcher), id, now)
   if (!paid) return { active: false as const, customer: true }
   const current = account.key?.subscription === paid.id && account.key.start === paid.start ? account.key : undefined
   const data = current
@@ -495,11 +1072,12 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
   const existing = await readModelPlanAccount(id, fetcher)
   if (existing?.closing)
     throw new ApiError(409, "MODEL_PLAN_ACCOUNT_CLOSING", "This account is being deleted. Model access is closed.")
+  // A dispute on any charge, a fraud warning or a block holds the account before Stripe is asked anything, and
+  // provisioning below never switches its key back on (M5).
+  const held = existing && riskState(existing)
+  if (held) throw riskRefusal(held)
   if (existing) {
-    const eligible = (await subscriptions(existing.customer, fetcher))
-      .map((subscription) => paidModelPlan(subscription, id, now))
-      .filter((value) => value !== undefined)
-    const paid = eligible.length === 1 ? eligible[0] : undefined
+    const paid = governingPaid(await subscriptions(existing.customer, fetcher), id, now)
     if (!paid && !existing.key)
       throw new ApiError(
         402,
@@ -550,10 +1128,9 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
       if (!account) throw new ApiError(402, "MODEL_PLAN_REQUIRED", "Choose a Codium plan to use this model.")
       if (account.closing)
         throw new ApiError(409, "MODEL_PLAN_ACCOUNT_CLOSING", "This account is being deleted. Model access is closed.")
-      const eligible = (await subscriptions(account.customer, fetcher))
-        .map((subscription) => paidModelPlan(subscription, id, now))
-        .filter((value) => value !== undefined)
-      const paid = eligible.length === 1 ? eligible[0] : undefined
+      const held = riskState(account)
+      if (held) throw riskRefusal(held)
+      const paid = governingPaid(await subscriptions(account.customer, fetcher), id, now)
       if (!paid) {
         if (account.key)
           await openRouterManagement(`/${encodeURIComponent(account.key.hash)}`, { disabled: true }, fetcher, "PATCH")
@@ -1140,7 +1717,11 @@ export async function cancelModelPlanAccount(id: string, fetcher: typeof fetch =
       // Persist closure before external cleanup so retries cannot open new
       // checkout sessions or re-enable a key while identity deletion proceeds.
       await verify()
-      await saveAccount(id, { ...account, closing: true }, fetcher)
+      const closing = { ...account, closing: true }
+      await saveAccount(id, closing, fetcher)
+      // Every service reads the snapshot, so the account is ended/closing everywhere from here (contract §4.4).
+      const stored = await readSnapshotForWrite(id, fetcher)
+      await commitSnapshot(closingFacts(id, closing, stored.previous, "request"), stored, fetcher, Date.now(), verify)
       if (account.key)
         await openRouterManagement(`/${encodeURIComponent(account.key.hash)}`, { disabled: true }, fetcher, "PATCH")
       const query = new URLSearchParams({ customer: account.customer, status: "open", limit: "100" })

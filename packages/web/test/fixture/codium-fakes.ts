@@ -1,0 +1,769 @@
+import { readdirSync, readFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
+import { POOL_SCRIPTS } from "../../../../api/_lib/codium-pool"
+import { SNAPSHOT_SCRIPTS } from "../../../../api/_lib/codium-snapshot"
+
+/*
+ * In-memory fakes for Codium's billing tests: Stripe (at the pinned API version), OpenRouter's key management API and
+ * the Valkey store, behind one injected `fetch`. Each records every call it receives, with its idempotency key, and
+ * OpenRouter's keys keep their limits, so a test can say exactly what was asked of each service. Nothing here reaches
+ * a real service: the fetcher throws on any other origin. Fixtures of Stripe objects live in `../fixtures/stripe/`.
+ */
+
+export const STRIPE_API_VERSION = "2025-02-24.acacia"
+export const FAKE_KV_URL = "https://kv.codium-fakes.invalid"
+export const FIXTURE_PRICES = [10, 50, 100, 200] as const
+/** The private pools the fixtures assume, in dollars: the contract's 6/33/72/150, which keep the public multiples. */
+export const FIXTURE_CREDITS = { 10: "6", 50: "33", 100: "72", 200: "150" } as const
+
+type Json = Record<string, unknown>
+
+export type RecordedCall = {
+  service: "stripe" | "openrouter"
+  method: string
+  /** Stripe: the path after `/v1/`. OpenRouter: the path after `/api/v1/`. */
+  path: string
+  query: URLSearchParams
+  /** Stripe's form body, parsed. */
+  form?: URLSearchParams
+  /** OpenRouter's JSON body, parsed. */
+  json?: Json
+  idempotencyKey?: string
+  stripeVersion?: string
+}
+
+/** A clock the store's expiries follow; tests move it instead of waiting. */
+export class FakeClock {
+  constructor(public now = Date.now()) {}
+  advance(ms: number) {
+    this.now += ms
+    return this.now
+  }
+}
+
+// ── The store ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+type Value =
+  | { kind: "string"; value: string }
+  | { kind: "hash"; value: Map<string, string> }
+  | { kind: "zset"; value: Map<string, number> }
+type Script = (keys: string[], argv: string[]) => unknown
+
+const LEASE_CHECK = "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return -1 end; return redis.call('PTTL', KEYS[1])"
+const LEASE_RELEASE = "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end; return 0"
+
+/**
+ * Enough of Valkey for Codium: strings with NX/PX, hashes, sorted sets, expiry on the fake clock, and the scripts
+ * Codium sends, each recognised by its exact text and run as TypeScript (the account lease, the pool's and the
+ * snapshot's). A script it does not know throws, so a new one cannot slip through untested. `commands` records every
+ * command in order.
+ */
+export class FakeStore {
+  readonly data = new Map<string, Value>()
+  readonly expires = new Map<string, number>()
+  readonly commands: string[][] = []
+  readonly scripts = new Map<string, Script>()
+  /** Set to make every command fail, as an unreachable store does. */
+  down = false
+
+  constructor(private readonly clock: FakeClock) {
+    this.registerBuiltInScripts()
+  }
+
+  /** The value of a string key, or undefined. */
+  get(key: string) {
+    const value = this.live(key)
+    return value?.kind === "string" ? value.value : undefined
+  }
+
+  set(key: string, value: string) {
+    this.data.set(key, { kind: "string", value })
+    this.expires.delete(key)
+  }
+
+  /** Every live key, for assertions. */
+  keys() {
+    return [...this.data.keys()].filter((key) => this.live(key))
+  }
+
+  command(input: readonly unknown[]): unknown {
+    const command = input.map(String)
+    this.commands.push(command)
+    if (this.down) throw new Error("store down")
+    const [name, ...args] = command
+    switch (name) {
+      case "GET":
+        return this.get(args[0]!) ?? null
+      case "SET": {
+        const [key, value, ...options] = args
+        if (options.includes("NX") && this.live(key!)) return null
+        this.set(key!, value!)
+        const px = options.indexOf("PX")
+        if (px >= 0) this.expires.set(key!, this.clock.now + Number(options[px + 1]))
+        return "OK"
+      }
+      case "DEL":
+        return args.reduce((count, key) => count + (this.remove(key) ? 1 : 0), 0)
+      case "PTTL":
+        return this.pttl(args[0]!)
+      case "HSET":
+        this.hash(args[0]!).set(args[1]!, args[2]!)
+        return 1
+      case "HGET":
+        return this.hash(args[0]!).get(args[1]!) ?? null
+      case "HSCAN":
+        return ["0", [...this.hash(args[0]!)].flat()]
+      case "ZADD": {
+        const set = this.zset(args[0]!)
+        set.set(args[2]!, Number(args[1]))
+        return 1
+      }
+      case "ZREM": {
+        const removed = this.zset(args[0]!).delete(args[1]!) ? 1 : 0
+        this.prune(args[0]!)
+        return removed
+      }
+      case "ZSCORE": {
+        const score = this.zset(args[0]!).get(args[1]!)
+        this.prune(args[0]!)
+        return score === undefined ? null : String(score)
+      }
+      case "ZRANGE": {
+        const members = this.ordered(this.zset(args[0]!)).map(([member]) => member)
+        this.prune(args[0]!)
+        return members
+      }
+      case "ZRANGEBYSCORE": {
+        const limit = args.indexOf("LIMIT")
+        const found = this.between(this.zset(args[0]!), args[1]!, args[2]!).map(([member]) => member)
+        this.prune(args[0]!)
+        return limit >= 0
+          ? found.slice(Number(args[limit + 1]), Number(args[limit + 1]) + Number(args[limit + 2]))
+          : found
+      }
+      case "EVAL": {
+        const [script, count, ...rest] = args
+        const run = this.scripts.get(script!)
+        if (!run) throw new Error(`Unexpected store script ${script!.slice(0, 80)}`)
+        return run(rest.slice(0, Number(count)), rest.slice(Number(count)))
+      }
+    }
+    throw new Error(`Unexpected store command ${name}`)
+  }
+
+  // Internals, shared with the scripts.
+
+  live(key: string) {
+    const at = this.expires.get(key)
+    if (at !== undefined && at <= this.clock.now) this.remove(key)
+    return this.data.get(key)
+  }
+  remove(key: string) {
+    const existed = this.data.delete(key)
+    this.expires.delete(key)
+    return existed
+  }
+  hash(key: string) {
+    const value = this.live(key)
+    if (value?.kind === "hash") return value.value
+    const created = new Map<string, string>()
+    this.data.set(key, { kind: "hash", value: created })
+    return created
+  }
+  zset(key: string) {
+    const value = this.live(key)
+    if (value?.kind === "zset") return value.value
+    const created = new Map<string, number>()
+    this.data.set(key, { kind: "zset", value: created })
+    return created
+  }
+  /** Valkey deletes a set or hash, and its lifetime, when its last member goes. */
+  prune(key: string) {
+    const value = this.data.get(key)
+    if (value && value.kind !== "string" && value.value.size === 0) this.remove(key)
+  }
+  pttl(key: string) {
+    if (!this.live(key)) return -2
+    const at = this.expires.get(key)
+    return at === undefined ? -1 : at - this.clock.now
+  }
+  private growTtl(key: string, ms: string) {
+    if (this.pttl(key) < Number(ms)) this.expires.set(key, this.clock.now + Number(ms))
+  }
+  private ordered(set: Map<string, number>) {
+    return [...set].sort((a, b) => a[1] - b[1] || (a[0] < b[0] ? -1 : 1))
+  }
+  private between(set: Map<string, number>, min: string, max: string) {
+    const bound = (value: string) =>
+      value === "-inf"
+        ? { at: -Infinity, open: false }
+        : value === "+inf"
+          ? { at: Infinity, open: false }
+          : value.startsWith("(")
+            ? { at: Number(value.slice(1)), open: true }
+            : { at: Number(value), open: false }
+    const low = bound(min)
+    const high = bound(max)
+    return this.ordered(set).filter(
+      ([, score]) => (low.open ? score > low.at : score >= low.at) && (high.open ? score < high.at : score <= high.at),
+    )
+  }
+
+  private registerBuiltInScripts() {
+    const last = (member: string) => Number(/:(\d+)$/.exec(member)?.[1] ?? 0)
+    const microOf = (debit: string) => Number(/"micro":(\d+)/.exec(debit)?.[1] ?? 0)
+    const scripts: [string, Script][] = [
+      [
+        LEASE_CHECK,
+        ([key], [token]) => (this.get(key!) === token ? this.pttl(key!) : -1),
+      ],
+      [
+        LEASE_RELEASE,
+        ([key], [token]) => {
+          if (this.get(key!) !== token) return 0
+          this.remove(key!)
+          return 1
+        },
+      ],
+      [
+        POOL_SCRIPTS.HOLD,
+        ([held, debits], [now, base, required, score, member, ttl]) => {
+          const set = this.zset(held!)
+          for (const [value, at] of set) if (at <= Number(now)) set.delete(value)
+          const holding = [...set.keys()].reduce((sum, value) => sum + last(value), 0)
+          const applied = [...this.hash(debits!).values()]
+            .filter((value) => value.includes('"applied":true'))
+            .reduce((sum, value) => sum + microOf(value), 0)
+          this.prune(debits!)
+          if (Number(base) - applied - holding < Number(required)) {
+            this.prune(held!)
+            return 0
+          }
+          set.set(member!, Number(score))
+          this.growTtl(held!, ttl!)
+          return 1
+        },
+      ],
+      [
+        POOL_SCRIPTS.SETTLE,
+        ([held], [old, score, member, ttl]) => {
+          const set = this.zset(held!)
+          set.delete(old!)
+          set.set(member!, Number(score))
+          this.growTtl(held!, ttl!)
+          return 1
+        },
+      ],
+      [
+        POOL_SCRIPTS.DEBIT,
+        ([held, debits, due], [old, ref, record, score, member, ttl, expireAt, dueMember, dueAt]) => {
+          this.zset(held!).delete(old!)
+          this.prune(held!)
+          const entries = this.hash(debits!)
+          if (entries.has(ref!)) return 0
+          entries.set(ref!, record!)
+          this.expires.set(debits!, Number(expireAt))
+          this.zset(held!).set(member!, Number(score))
+          this.growTtl(held!, ttl!)
+          const queue = this.zset(due!)
+          const current = queue.get(dueMember!)
+          if (current === undefined || current > Number(dueAt)) queue.set(dueMember!, Number(dueAt))
+          return 1
+        },
+      ],
+      [
+        POOL_SCRIPTS.APPLY,
+        ([debits, held, account, due], [record, dueMember, ...pairs]) => {
+          const entries = this.hash(debits!)
+          for (let index = 0; index < pairs.length; index += 2) {
+            const debit = entries.get(pairs[index]!)
+            if (debit) entries.set(pairs[index]!, debit.replace('"applied":false', '"applied":true'))
+            this.zset(held!).delete(pairs[index + 1]!)
+            this.prune(held!)
+          }
+          if (record !== "") this.set(account!, record!)
+          const pending = [...entries.values()].filter((value) => value.includes('"applied":false')).length
+          this.prune(debits!)
+          if (pending === 0) {
+            this.zset(due!).delete(dueMember!)
+            this.prune(due!)
+          }
+          return pending
+        },
+      ],
+      [
+        POOL_SCRIPTS.READ,
+        ([held, debits], [now]) => {
+          const holding = this.between(this.zset(held!), `(${now}`, "+inf").reduce(
+            (sum, [value]) => sum + last(value),
+            0,
+          )
+          const values = [...this.hash(debits!).values()]
+          const applied = values.filter((value) => value.includes('"applied":true'))
+          const pending = values.filter((value) => !value.includes('"applied":true'))
+          this.prune(held!)
+          this.prune(debits!)
+          return [
+            holding,
+            applied.reduce((sum, value) => sum + microOf(value), 0),
+            pending.reduce((sum, value) => sum + microOf(value), 0),
+          ]
+        },
+      ],
+      [
+        POOL_SCRIPTS.DEBITS,
+        ([debits]) => {
+          const flat = [...this.hash(debits!)].flat()
+          this.prune(debits!)
+          return flat
+        },
+      ],
+      [
+        SNAPSHOT_SCRIPTS.WRITE,
+        ([snapshot, status, index, opened, outbox, ...items], argv) => {
+          const current = this.get(snapshot!)
+          if (current !== undefined) {
+            try {
+              const old = JSON.parse(current) as { version?: unknown }
+              if (typeof old.version === "number" && old.version > Number(argv[1])) return 0
+            } catch {
+              // An unreadable snapshot is overwritten, as the script's pcall does.
+            }
+          }
+          this.set(snapshot!, argv[0]!)
+          if (argv[6] !== "") this.expires.set(snapshot!, this.clock.now + Number(argv[6]))
+          this.remove(status!)
+          if (argv[2] === "1") this.zset(index!).set(argv[4]!, Number(argv[3]))
+          else {
+            this.zset(index!).delete(argv[4]!)
+            this.prune(index!)
+          }
+          if (argv[5] !== "" && this.get(opened!) === undefined) this.set(opened!, argv[5]!)
+          items.forEach((key, position) => {
+            const at = 7 + position * 3
+            this.set(key, argv[at + 2]!)
+            this.zset(outbox!).set(argv[at]!, Number(argv[at + 1]))
+          })
+          return 1
+        },
+      ],
+      [
+        SNAPSHOT_SCRIPTS.METER_ADD,
+        ([meter], [amount, cap, expireAt]) => {
+          const used = Number(this.get(meter!) ?? 0)
+          if (used + Number(amount) > Number(cap)) return [0, used]
+          this.set(meter!, String(used + Number(amount)))
+          this.expires.set(meter!, Number(expireAt))
+          return [1, used + Number(amount)]
+        },
+      ],
+    ]
+    for (const [text, run] of scripts) this.scripts.set(text, run)
+  }
+}
+
+// ── Stripe ─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+export type StripeObjects = {
+  customers?: Json[]
+  subscriptions?: Json[]
+  invoices?: Json[]
+  charges?: Json[]
+  payment_intents?: Json[]
+  disputes?: Json[]
+  early_fraud_warnings?: Json[]
+  checkout_sessions?: Json[]
+}
+
+const STRIPE_COLLECTIONS = [
+  "customers",
+  "subscriptions",
+  "invoices",
+  "charges",
+  "payment_intents",
+  "disputes",
+  "early_fraud_warnings",
+  "checkout_sessions",
+] as const
+
+/**
+ * Stripe's API for the objects Codium reads and writes, at {@link STRIPE_API_VERSION}: objects are stored as Stripe
+ * returns them unexpanded (ids in place of related objects) and expanded only where a request asks with `expand[]`, so
+ * a missing expansion shows up as a missing object, as it would against Stripe. A POST replayed with the same
+ * idempotency key answers what the first one did, and one reused with a different body is refused, as Stripe does.
+ */
+export class FakeStripe {
+  readonly objects: Record<(typeof STRIPE_COLLECTIONS)[number], Map<string, Json>> = Object.fromEntries(
+    STRIPE_COLLECTIONS.map((name) => [name, new Map<string, Json>()]),
+  ) as never
+  readonly calls: RecordedCall[] = []
+  private readonly idempotency = new Map<string, { request: string; body: unknown }>()
+  /** Answers a call with a failure of the test's choosing, before the fake looks at it. */
+  fail?: (call: RecordedCall) => Response | undefined
+
+  /** Adds objects as Stripe stores them (deep copies, so a fixture is never changed). */
+  load(objects: StripeObjects) {
+    for (const name of STRIPE_COLLECTIONS)
+      for (const value of objects[name] ?? []) this.objects[name].set(String(value.id), structuredClone(value))
+  }
+
+  subscription(id: string) {
+    return this.objects.subscriptions.get(id)
+  }
+  charge(id: string) {
+    return this.objects.charges.get(id)
+  }
+
+  handle(call: RecordedCall): Response {
+    this.calls.push(call)
+    const failure = this.fail?.(call)
+    if (failure) return failure
+    const answer = this.answer(call)
+    return Response.json(answer.body, { status: answer.status })
+  }
+
+  private answer(call: RecordedCall): Answer {
+    if (call.stripeVersion !== STRIPE_API_VERSION)
+      return stripeError(400, `Requests must pin Stripe-Version ${STRIPE_API_VERSION}.`)
+    if (call.method !== "POST") return this.route(call)
+    if (!call.idempotencyKey) return stripeError(400, "The fake requires an idempotency key on every POST.")
+    const request = `${call.path}?${call.form?.toString() ?? ""}`
+    const earlier = this.idempotency.get(call.idempotencyKey)
+    if (earlier && earlier.request !== request)
+      return stripeError(400, "Keys for idempotent requests can only be used with the same parameters.")
+    if (earlier) return { status: 200, body: earlier.body }
+    const answer = this.route(call)
+    if (answer.status === 200) this.idempotency.set(call.idempotencyKey, { request, body: answer.body })
+    return answer
+  }
+
+  private route(call: RecordedCall): Answer {
+    const parts = call.path.split("/")
+    const expand = call.query.getAll("expand[]")
+    const ok = (body: unknown): Answer => ({ status: 200, body })
+    const found = (value: Json | undefined) => (value ? ok(value) : stripeError(404, "No such object."))
+    const list = (data: Json[]) => ok({ object: "list", data, has_more: false, url: `/v1/${call.path}` })
+    const [resource, id, action] = parts
+    if (resource === "subscriptions" && call.method === "GET" && !id) {
+      const customer = call.query.get("customer")
+      const status = call.query.get("status")
+      const subscriptions = [...this.objects.subscriptions.values()].filter(
+        (value) =>
+          (!customer || value.customer === customer) &&
+          (status === "all" ? true : status ? value.status === status : value.status !== "canceled"),
+      )
+      return list(subscriptions.map((value) => this.expand(value, expand, "data.")))
+    }
+    if (resource === "subscriptions" && id && call.method === "GET")
+      return found(this.expandOrUndefined(this.objects.subscriptions.get(id), expand))
+    if (resource === "subscriptions" && id && call.method === "POST") {
+      const subscription = this.objects.subscriptions.get(id)
+      if (!subscription) return stripeError(404, "No such subscription.")
+      const form = call.form ?? new URLSearchParams()
+      if (form.has("pause_collection"))
+        subscription.pause_collection = null
+      if (form.has("pause_collection[behavior]"))
+        subscription.pause_collection = { behavior: form.get("pause_collection[behavior]"), resumes_at: null }
+      if (form.has("cancel_at_period_end")) subscription.cancel_at_period_end = form.get("cancel_at_period_end") === "true"
+      return ok(subscription)
+    }
+    if (resource === "subscriptions" && id && call.method === "DELETE") {
+      const subscription = this.objects.subscriptions.get(id)
+      if (!subscription) return stripeError(404, "No such subscription.")
+      Object.assign(subscription, { status: "canceled", canceled_at: 0, ended_at: 0 })
+      return ok(subscription)
+    }
+    if (resource === "customers" && id && call.method === "GET") return found(this.objects.customers.get(id))
+    if (resource === "charges" && call.method === "GET" && !id)
+      return list(
+        [...this.objects.charges.values()].filter(
+          (value) => !call.query.get("customer") || value.customer === call.query.get("customer"),
+        ),
+      )
+    if (resource === "charges" && id && call.method === "GET")
+      return found(this.expandOrUndefined(this.objects.charges.get(id), expand))
+    if (resource === "invoices" && id && call.method === "GET")
+      return found(this.expandOrUndefined(this.objects.invoices.get(id), expand))
+    if (resource === "disputes" && call.method === "GET" && !id)
+      return list(
+        [...this.objects.disputes.values()].filter(
+          (value) =>
+            (!call.query.get("charge") || value.charge === call.query.get("charge")) &&
+            (!call.query.get("payment_intent") || value.payment_intent === call.query.get("payment_intent")),
+        ),
+      )
+    if (resource === "disputes" && id && call.method === "GET") return found(this.objects.disputes.get(id))
+    if (resource === "radar" && id === "early_fraud_warnings" && call.method === "GET") {
+      const warning = parts[2]
+      if (warning) return found(this.objects.early_fraud_warnings.get(warning))
+      return list(
+        [...this.objects.early_fraud_warnings.values()].filter(
+          (value) => !call.query.get("charge") || value.charge === call.query.get("charge"),
+        ),
+      )
+    }
+    if (resource === "checkout" && id === "sessions" && call.method === "GET" && !action)
+      return list(
+        [...this.objects.checkout_sessions.values()].filter(
+          (value) =>
+            (!call.query.get("customer") || value.customer === call.query.get("customer")) &&
+            (!call.query.get("status") || value.status === call.query.get("status")),
+        ),
+      )
+    if (resource === "checkout" && id === "sessions" && action && call.method === "GET")
+      return found(this.objects.checkout_sessions.get(action))
+    if (resource === "checkout" && id === "sessions" && action && parts[3] === "expire" && call.method === "POST") {
+      const session = this.objects.checkout_sessions.get(action)
+      if (!session) return stripeError(404, "No such checkout session.")
+      session.status = "expired"
+      return ok(session)
+    }
+    throw new Error(`Unexpected Stripe request ${call.method} /v1/${call.path}${call.query.size ? `?${call.query}` : ""}`)
+  }
+
+  private expandOrUndefined(value: Json | undefined, expand: string[]) {
+    return value && this.expand(value, expand, "")
+  }
+
+  /** A deep copy of `value` with every path in `expand` (after `prefix`) replaced by its object. */
+  private expand(value: Json, expand: string[], prefix: string): Json {
+    const copy = structuredClone(value)
+    const paths = expand.filter((path) => path.startsWith(prefix)).map((path) => path.slice(prefix.length).split("."))
+    for (const path of paths) this.expandPath(copy, path)
+    return copy
+  }
+
+  private expandPath(target: Json, path: string[]) {
+    const [field, ...rest] = path
+    if (!field) return
+    const current = target[field]
+    if (typeof current === "string") {
+      const collection = RELATED[field]
+      const related = collection && this.objects[collection].get(current)
+      if (!related) return
+      target[field] = structuredClone(related)
+    }
+    const next = target[field]
+    if (next && typeof next === "object" && !Array.isArray(next)) this.expandPath(next as Json, rest)
+  }
+}
+
+// Which collection an expandable field names.
+const RELATED: Record<string, (typeof STRIPE_COLLECTIONS)[number] | undefined> = {
+  latest_invoice: "invoices",
+  invoice: "invoices",
+  charge: "charges",
+  latest_charge: "charges",
+  payment_intent: "payment_intents",
+  subscription: "subscriptions",
+  customer: "customers",
+}
+
+type Answer = { status: number; body: unknown }
+
+function stripeError(status: number, message: string): Answer {
+  return { status, body: { error: { type: "invalid_request_error", message } } }
+}
+
+// ── OpenRouter ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * OpenRouter's key management API: keys keep their name, limit, usage, expiry and whether they are disabled. A create
+ * replayed with the same idempotency key answers the key the first one made.
+ */
+export class FakeOpenRouter {
+  readonly keys = new Map<string, Json>()
+  readonly calls: RecordedCall[] = []
+  credits = { total_credits: 1000, total_usage: 0 }
+  private readonly created = new Map<string, unknown>()
+  fail?: (call: RecordedCall) => Response | undefined
+
+  /** Adds a key as if Codium had made it earlier. */
+  seed(hash: string, data: Json) {
+    this.keys.set(hash, {
+      hash,
+      usage: 0,
+      disabled: false,
+      limit_reset: null,
+      include_byok_in_limit: true,
+      ...data,
+    })
+  }
+
+  /** Each key's limit, by hash. */
+  limits() {
+    return Object.fromEntries([...this.keys].map(([hash, data]) => [hash, data.limit]))
+  }
+
+  handle(call: RecordedCall): Response {
+    this.calls.push(call)
+    const failure = this.fail?.(call)
+    if (failure) return failure
+    if (call.path === "credits") return Response.json({ data: this.credits })
+    if (call.path === "keys" && call.method === "GET")
+      return Response.json({ data: call.query.get("offset") === "0" ? [...this.keys.values()] : [] })
+    if (call.path === "keys" && call.method === "POST") {
+      const replay = call.idempotencyKey && this.created.get(call.idempotencyKey)
+      if (replay) return Response.json(replay)
+      const hash = `fake_key_${this.keys.size + 1}`
+      const data = { ...call.json, hash, usage: 0, disabled: false }
+      this.keys.set(hash, data)
+      const body = { key: `fake-openrouter-secret-${this.keys.size}`, data }
+      if (call.idempotencyKey) this.created.set(call.idempotencyKey, body)
+      return Response.json(body)
+    }
+    const key = this.keys.get(call.path.split("/").at(-1) ?? "")
+    if (!call.path.startsWith("keys/") || !key) return Response.json({ error: "Unknown key" }, { status: 404 })
+    if (call.method === "PATCH") Object.assign(key, call.json)
+    else if (call.method !== "GET") throw new Error(`Unexpected OpenRouter request ${call.method} ${call.path}`)
+    return Response.json({ data: key })
+  }
+}
+
+// ── Together ───────────────────────────────────────────────────────────────────────────────────────────────────
+
+export type CodiumFakes = ReturnType<typeof codiumFakes>
+
+/** A store, Stripe and OpenRouter on one clock, and the `fetch` that reaches them and nothing else. */
+export function codiumFakes(options: { now?: number } = {}) {
+  const clock = new FakeClock(options.now)
+  const store = new FakeStore(clock)
+  const stripe = new FakeStripe()
+  const openRouter = new FakeOpenRouter()
+  const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : String(input))
+    const headers = new Headers(init?.headers)
+    const body = init?.body === undefined || init.body === null ? "" : String(init.body)
+    if (url.origin === FAKE_KV_URL) {
+      try {
+        return Response.json({ result: store.command(JSON.parse(body) as unknown[]) })
+      } catch (error) {
+        if (store.down) return new Response("unavailable", { status: 503 })
+        throw error
+      }
+    }
+    const call = {
+      method: init?.method ?? "GET",
+      query: url.searchParams,
+      ...(headers.get("idempotency-key") ? { idempotencyKey: headers.get("idempotency-key")! } : {}),
+    }
+    if (url.origin === "https://api.stripe.com" && url.pathname.startsWith("/v1/"))
+      return stripe.handle({
+        ...call,
+        service: "stripe",
+        path: url.pathname.slice("/v1/".length),
+        ...(body ? { form: new URLSearchParams(body) } : {}),
+        ...(headers.get("stripe-version") ? { stripeVersion: headers.get("stripe-version")! } : {}),
+      })
+    if (url.origin === "https://openrouter.ai" && url.pathname.startsWith("/api/v1/"))
+      return openRouter.handle({
+        ...call,
+        service: "openrouter",
+        path: url.pathname.slice("/api/v1/".length),
+        ...(body ? { json: JSON.parse(body) as Json } : {}),
+      })
+    throw new Error(`Unexpected request to ${url.origin}`)
+  }) as typeof fetch
+  return { clock, store, stripe, openRouter, fetcher }
+}
+
+const ENVIRONMENT = [
+  "MODEL_PLANS_ENABLED",
+  "KV_REST_API_URL",
+  "KV_REST_API_TOKEN",
+  "UPSTASH_REDIS_REST_URL",
+  "UPSTASH_REDIS_REST_TOKEN",
+  "STRIPE_SECRET_KEY",
+  "CODIUM_STRIPE_MODE",
+  "VERCEL_ENV",
+  "OPENROUTER_MANAGEMENT_KEY",
+  "MODEL_PLAN_KEY_ENCRYPTION_SECRET",
+  "MODEL_PLAN_MODELS_JSON",
+  "MODEL_CREDIT_MARKUP_PERCENT",
+  "CODIUM_TEST_CREDIT_CAP_USD",
+  "CODIUM_RENEWAL_GRACE_MINUTES",
+  "CODIUM_TRUST_RAMP_DAYS",
+  ...FIXTURE_PRICES.flatMap((price) => [`MODEL_PLAN_${price}_CREDITS_USD`, `STRIPE_MODEL_PLAN_${price}_PRICE_ID`]),
+]
+
+/**
+ * Sets the environment the fixtures assume (Stripe test mode, the fake store, the fixtures' price ids and the
+ * contract's pools, test keys not capped) and returns a function that puts the previous environment back.
+ */
+export function codiumTestEnvironment(overrides: Record<string, string | undefined> = {}) {
+  const original = new Map(ENVIRONMENT.concat(Object.keys(overrides)).map((name) => [name, process.env[name]]))
+  for (const name of original.keys()) delete process.env[name]
+  Object.assign(process.env, {
+    MODEL_PLANS_ENABLED: "true",
+    KV_REST_API_URL: FAKE_KV_URL,
+    KV_REST_API_TOKEN: "fixture-kv-token",
+    STRIPE_SECRET_KEY: "sk_test_codium_fixture",
+    CODIUM_STRIPE_MODE: "test",
+    VERCEL_ENV: "preview",
+    OPENROUTER_MANAGEMENT_KEY: "fixture-management-key",
+    MODEL_PLAN_KEY_ENCRYPTION_SECRET: "cd".repeat(32),
+    // The fixtures follow the plans' full pools; test mode would otherwise cap every key at the test cap.
+    CODIUM_TEST_CREDIT_CAP_USD: "200",
+  })
+  for (const price of FIXTURE_PRICES) {
+    process.env[`MODEL_PLAN_${price}_CREDITS_USD`] = FIXTURE_CREDITS[price]
+    process.env[`STRIPE_MODEL_PLAN_${price}_PRICE_ID`] = `price_codium${price}`
+  }
+  for (const [name, value] of Object.entries(overrides)) {
+    if (value === undefined) delete process.env[name]
+    else process.env[name] = value
+  }
+  return () =>
+    original.forEach((value, name) => {
+      delete process.env[name]
+      if (value !== undefined) process.env[name] = value
+    })
+}
+
+// ── Fixtures ───────────────────────────────────────────────────────────────────────────────────────────────────
+
+const FIXTURES = fileURLToPath(new URL("../fixtures/stripe/", import.meta.url))
+
+/** One scenario: Stripe objects at a moment, the account record around them, and what reconcile should make of it. */
+export type StripeFixture = {
+  /** The row of the contract's §4.4 "Stripe → state" table this fixture covers, or "governing". */
+  row: string
+  description: string
+  apiVersion: string
+  accountId: string
+  /** Seconds since the epoch. */
+  now: number
+  /** The account record's fields before reconcile (customer, risk, closing). */
+  account: Json
+  /** A key Codium made earlier for this period (seconds), when the scenario has one. */
+  key?: { subscription: string; start: number; end: number }
+  hint?: { kind: "dispute"; charge: string } | { kind: "efw"; id: string; charge?: string }
+  objects: StripeObjects
+  expect: {
+    state: string
+    reason?: string
+    plan: string | null
+    subscription?: string
+    periodStart: number
+    periodEnd: number
+    cancelAtPeriodEnd?: boolean
+    /** What happens to the account's OpenRouter key: made now, kept on, switched off, or there is none. */
+    key: "created" | "enabled" | "disabled" | "none"
+    risk?: { blocked?: boolean; reason?: string; openDisputes?: string[]; efw?: string[] }
+    duplicates?: string[]
+    stripeCalls?: number
+  }
+}
+
+export function stripeFixtureNames() {
+  return readdirSync(FIXTURES)
+    .filter((file) => file.endsWith(".json"))
+    .map((file) => file.slice(0, -".json".length))
+    .sort()
+}
+
+export function loadStripeFixture(name: string): StripeFixture {
+  const fixture = JSON.parse(readFileSync(`${FIXTURES}${name}.json`, "utf8")) as StripeFixture
+  if (fixture.apiVersion !== STRIPE_API_VERSION) throw new Error(`${name} is not at ${STRIPE_API_VERSION}`)
+  return fixture
+}

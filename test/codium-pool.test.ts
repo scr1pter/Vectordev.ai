@@ -25,6 +25,7 @@ import {
   readModelPlanAccount,
   reconcileModelPlanAccount,
 } from "../api/_lib/model-plan-account"
+import { SNAPSHOT_SCRIPTS } from "../api/_lib/codium-snapshot"
 import { modelPlanBalance } from "../api/_lib/model-plan-status"
 
 // Invariants M1–M3 (WP A03): the OpenRouter key is the hard cap, spend is held before it starts, and what is available
@@ -230,6 +231,25 @@ const scripts = new Map<string, (keys: string[], argv: string[]) => unknown>([
       const value = live(key!)
       if (value?.kind !== "string" || value.value !== token) return 0
       remove(key!)
+      return 1
+    },
+  ],
+  [
+    // Reconcile's snapshot write (WP A05; test/codium-billing.test.ts covers it): only what these tests can see.
+    SNAPSHOT_SCRIPTS.WRITE,
+    ([snapshot, status, index, opened, outbox, ...items], argv) => {
+      memory.data.set(snapshot!, { kind: "string", value: argv[0]! })
+      memory.expires.delete(snapshot!)
+      if (argv[6] !== "") memory.expires.set(snapshot!, Date.now() + Number(argv[6]))
+      remove(status!)
+      if (argv[2] === "1") zset(index!).set(argv[4]!, Number(argv[3]))
+      else zset(index!).delete(argv[4]!)
+      prune(index!)
+      if (argv[5] !== "" && !live(opened!)) memory.data.set(opened!, { kind: "string", value: argv[5]! })
+      items.forEach((key, position) => {
+        memory.data.set(key, { kind: "string", value: argv[9 + position * 3]! })
+        zset(outbox!).set(argv[7 + position * 3]!, Number(argv[8 + position * 3]))
+      })
       return 1
     },
   ],

@@ -6,6 +6,7 @@ import { codiumKey, codiumKeyIn, codiumKeyMode, openRouterKeyName, owedKeyName }
 import { recordCodiumCharge } from "../api/_lib/codium-ledger"
 import { codiumKeyLimitUsd, codiumLimitProblems, renewalGraceMinutes, trustRampDays } from "../api/_lib/codium-limits"
 import { POOL_SCRIPTS } from "../api/_lib/codium-pool"
+import { SNAPSHOT_SCRIPTS } from "../api/_lib/codium-snapshot"
 import {
   cancelModelPlanAccount,
   modelPlanCheckout,
@@ -173,6 +174,11 @@ function store(input: unknown[]) {
     if (script === POOL_SCRIPTS.READ) return [0, 0, 0]
     if (script === POOL_SCRIPTS.DEBITS) return [...hash(key)].flat()
     if (script === POOL_SCRIPTS.APPLY) return 0
+    // Reconcile's snapshot write (WP A05; test/codium-billing.test.ts covers it): the snapshot is all these tests see.
+    if (script === SNAPSHOT_SCRIPTS.WRITE) {
+      world.store.set(key, args[2 + Number(args[1])]!)
+      return 1
+    }
     if (script.includes("PTTL")) return world.store.get(key) === token ? 60_000 : -1
     if (script.includes("redis.call('DEL'")) {
       if (world.store.get(key) === token) world.store.delete(key)

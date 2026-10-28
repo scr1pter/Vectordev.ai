@@ -1,5 +1,5 @@
 import { recordCodiumCharge } from "../_lib/codium-ledger.js"
-import { reconcileModelPlanAccount, readModelPlanAccount } from "../_lib/model-plan-account.js"
+import { reconcileModelPlanAccount, readModelPlanAccount, type ReconcileHint } from "../_lib/model-plan-account.js"
 import { modelPlanStripe, stripeRecord, verifyModelPlanWebhook } from "../_lib/model-plan-stripe.js"
 import {
   ApiError,
@@ -13,11 +13,23 @@ import {
 
 export const config = { api: { bodyParser: false } }
 
+/** What a dispute or early-fraud-warning notification is about, for reconcile to read again. */
+function reconcileHint(event: Record<string, unknown>, data: Record<string, unknown>): ReconcileHint | undefined {
+  const type = String(event.type)
+  if (type.startsWith("charge.dispute.") && typeof data.charge === "string")
+    return { kind: "dispute", charge: data.charge }
+  if (type.startsWith("radar.early_fraud_warning.") && typeof data.id === "string")
+    return { kind: "efw", id: data.id, ...(typeof data.charge === "string" ? { charge: data.charge } : {}) }
+  return undefined
+}
+
 export async function reconcileModelPlanEvent(event: Record<string, unknown>, fetcher: typeof fetch = fetch) {
   const data = stripeRecord(event.data) && stripeRecord(event.data.object) ? event.data.object : undefined
   if (
     !data ||
-    !/^(checkout\.session\.|customer\.subscription\.|invoice\.|charge\.|payment_intent\.)/.test(String(event.type))
+    !/^(checkout\.session\.|customer\.subscription\.|invoice\.|charge\.|payment_intent\.|radar\.early_fraud_warning\.)/.test(
+      String(event.type),
+    )
   )
     return
   const object =
@@ -35,8 +47,9 @@ export async function reconcileModelPlanEvent(event: Record<string, unknown>, fe
     throw new ApiError(400, "BILLING_ACCOUNT_MISMATCH", "The billing account does not match.")
   // Codium sells monthly plans only, so a completed one-time payment checkout grants nothing of its own.
   // Read current Stripe state instead of applying webhook deltas: event retries
-  // and out-of-order refund/dispute notifications cannot grant credits twice.
-  await reconcileModelPlanAccount(id, fetcher)
+  // and out-of-order refund/dispute notifications cannot grant credits twice. A dispute or fraud warning on a charge
+  // no subscription points at any more (last month's) is named to reconcile, which reads it again from Stripe.
+  await reconcileModelPlanAccount(id, fetcher, Date.now(), { source: "webhook", hint: reconcileHint(event, data) })
   const charge = /^charge\.(dispute|refund)\./.test(String(event.type))
     ? data.charge
     : String(event.type).startsWith("charge.")
