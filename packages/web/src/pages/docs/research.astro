@@ -1,7 +1,7 @@
 ---
 import DocsPage from "../../layouts/DocsPage.astro"
 import { researchCapRows } from "../../data/docs-content"
-import { release111 } from "../../data/vector-releases"
+import { release111, release112 } from "../../data/vector-releases"
 
 export const prerender = true
 ---
@@ -145,6 +145,11 @@ export const prerender = true
             <strong>Export JSON</strong>, <strong>Save to repository</strong>, which writes
             <code>.vector/research/&lt;date&gt;-&lt;question&gt;.md</code>, <strong>Keep this format</strong> and
             <strong>Forget this research</strong>.
+          </p>
+          <p>
+            {release112.since} asking Vector to save or keep the research does what <strong>Keep in brain</strong> does,
+            after you say yes. Its report was written from web pages, so Vector asks every time, whatever your permission
+            settings or auto-accept allow.
           </p>
 
           <h2 id="sources">The Sources tab</h2>

@@ -3,7 +3,7 @@ import { filterSettingsGroups, isSettingsTab, settingsGroups, settingsItemCount 
 
 describe("settings registry", () => {
   test("keeps every settings page reachable", () => {
-    expect(settingsItemCount(settingsGroups)).toBe(14)
+    expect(settingsItemCount(settingsGroups)).toBe(15)
     expect(settingsGroups.flatMap((group) => group.items.map((item) => item.value))).toEqual([
       "account",
       "general",
@@ -16,10 +16,26 @@ describe("settings registry", () => {
       "models",
       "servers",
       "trust",
+      "shortcuts",
       "notifications",
       "accessibility",
       "about",
     ])
+  })
+
+  test("puts Keyboard shortcuts in the Workspace group, found by what people call them", () => {
+    const workspace = settingsGroups.find((group) => group.title === "Workspace")
+    expect(workspace?.items.find((item) => item.value === "shortcuts")?.label).toBe("Keyboard shortcuts")
+    for (const query of ["shortcuts", "keyboard", "keybindings", "keybinds", "hotkeys", "command palette"])
+      expect(filterSettingsGroups(query).flatMap((group) => group.items.map((item) => item.value))).toEqual([
+        "shortcuts",
+      ])
+    expect(isSettingsTab("shortcuts")).toBe(true)
+  })
+
+  test("finds the Terminal shell picker under General", () => {
+    for (const query of ["shell", "terminal", "bash", "zsh", "PowerShell"])
+      expect(filterSettingsGroups(query).flatMap((group) => group.items.map((item) => item.value))).toEqual(["general"])
   })
 
   test("has no Project rules, Appearance, Editor, Chat, Voice or Personalization page", () => {

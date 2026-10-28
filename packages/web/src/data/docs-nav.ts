@@ -117,7 +117,8 @@ export const docsNav: DocGroup[] = [
       {
         id: "models",
         title: "Models, free models and your own keys",
-        blurb: "Sign in to Vector for free models, or connect a provider account or API key.",
+        blurb:
+          "Sign in to Vector for free models, connect a provider account or API key, or add an OpenAI-compatible server of your own.",
       },
       {
         id: "local",
@@ -159,6 +160,12 @@ export const docsNav: DocGroup[] = [
   {
     label: "Reference",
     links: [
+      {
+        id: "configuration",
+        title: "Configuration files",
+        blurb:
+          "Where vector.json lives for the desktop app, the terminal and a repository, how it takes values from the environment, and where each key is described.",
+      },
       {
         id: "permissions",
         title: "Permissions",
