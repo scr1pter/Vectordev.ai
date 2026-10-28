@@ -443,6 +443,10 @@
     {
       "path": "/api/model-plans/funding",
       "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/model-plans/outbox",
+      "schedule": "* * * * *"
     }
   ]
 }

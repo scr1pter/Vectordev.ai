@@ -1,11 +1,12 @@
 import { readdirSync, readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { POOL_SCRIPTS } from "../../../../api/_lib/codium-pool"
+import { OUTBOX_SCRIPTS } from "../../../../api/_lib/codium-provision"
 import { SNAPSHOT_SCRIPTS } from "../../../../api/_lib/codium-snapshot"
 
 /*
- * In-memory fakes for Codium's billing tests: Stripe (at the pinned API version), OpenRouter's key management API and
- * the Valkey store, behind one injected `fetch`. Each records every call it receives, with its idempotency key, and
+ * In-memory fakes for Codium's billing tests: Stripe (at the pinned API version), OpenRouter's key management API, the
+ * Valkey store and the owner's email service, behind one injected `fetch`. Each records every call it receives, with its idempotency key, and
  * OpenRouter's keys keep their limits, so a test can say exactly what was asked of each service. Nothing here reaches
  * a real service: the fetcher throws on any other origin. Fixtures of Stripe objects live in `../fixtures/stripe/`.
  */
@@ -49,14 +50,17 @@ type Value =
   | { kind: "zset"; value: Map<string, number> }
 type Script = (keys: string[], argv: string[]) => unknown
 
+// The billing lease's scripts (billing-lock.ts); the outbox's drain lock sends the same two, word for word.
 const LEASE_CHECK = "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return -1 end; return redis.call('PTTL', KEYS[1])"
 const LEASE_RELEASE = "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end; return 0"
+if (OUTBOX_SCRIPTS.LOCK_CHECK !== LEASE_CHECK || OUTBOX_SCRIPTS.LOCK_RELEASE !== LEASE_RELEASE)
+  throw new Error("The outbox lock's scripts no longer match the billing lease's.")
 
 /**
  * Enough of Valkey for Codium: strings with NX/PX, hashes, sorted sets, expiry on the fake clock, and the scripts
- * Codium sends, each recognised by its exact text and run as TypeScript (the account lease, the pool's and the
- * snapshot's). A script it does not know throws, so a new one cannot slip through untested. `commands` records every
- * command in order.
+ * Codium sends, each recognised by its exact text and run as TypeScript (the account lease, the pool's, the
+ * snapshot's and the outbox's). A script it does not know throws, so a new one cannot slip through untested.
+ * `commands` records every command in order.
  */
 export class FakeStore {
   readonly data = new Map<string, Value>()
@@ -114,9 +118,17 @@ export class FakeStore {
       case "HSCAN":
         return ["0", [...this.hash(args[0]!)].flat()]
       case "ZADD": {
-        const set = this.zset(args[0]!)
-        set.set(args[2]!, Number(args[1]))
-        return 1
+        const [key, ...rest] = args
+        const flags = new Set<string>()
+        while (rest.length && ["NX", "XX"].includes(rest[0]!)) flags.add(rest.shift()!)
+        const set = this.zset(key!)
+        const exists = set.has(rest[1]!)
+        if ((flags.has("NX") && exists) || (flags.has("XX") && !exists)) {
+          this.prune(key!)
+          return 0
+        }
+        set.set(rest[1]!, Number(rest[0]))
+        return exists ? 0 : 1
       }
       case "ZREM": {
         const removed = this.zset(args[0]!).delete(args[1]!) ? 1 : 0
@@ -355,6 +367,64 @@ export class FakeStore {
           this.set(meter!, String(used + Number(amount)))
           this.expires.set(meter!, Number(expireAt))
           return [1, used + Number(amount)]
+        },
+      ],
+      [
+        OUTBOX_SCRIPTS.ENQUEUE,
+        ([outbox, item, dead], [id, raw, score, mode]) => {
+          const set = this.zset(outbox!)
+          const pending = set.get(id!)
+          if (pending !== undefined && mode === "keep") return 0
+          this.set(item!, raw!)
+          if (pending === undefined || Number(score) < pending) set.set(id!, Number(score))
+          this.zset(dead!).delete(id!)
+          this.prune(dead!)
+          return 1
+        },
+      ],
+      [
+        OUTBOX_SCRIPTS.FINISH,
+        ([outbox, item, prov], [id, raw, version]) => {
+          if (this.get(item!) === raw) {
+            this.remove(item!)
+            this.zset(outbox!).delete(id!)
+            this.prune(outbox!)
+          }
+          if (prov !== undefined && Number(version) > (Number(this.get(prov) ?? 0) || 0)) this.set(prov, version!)
+          return 1
+        },
+      ],
+      [
+        OUTBOX_SCRIPTS.RETRY,
+        ([outbox, item, dead, alert], [id, raw, next, score, isDead, keep, before, alertId, alertRaw, alertScore]) => {
+          if (this.get(item!) !== raw) return 0
+          const queue = this.zset(outbox!)
+          if (isDead !== "1") {
+            this.set(item!, next!)
+            queue.set(id!, Number(score))
+            return 1
+          }
+          queue.delete(id!)
+          this.set(item!, next!)
+          this.expires.set(item!, this.clock.now + Number(keep))
+          const letters = this.zset(dead!)
+          for (const [member, at] of letters) if (at <= Number(before)) letters.delete(member)
+          letters.set(id!, Number(score))
+          if (alert !== undefined && !queue.has(alertId!)) {
+            this.set(alert, alertRaw!)
+            queue.set(alertId!, Number(alertScore))
+          }
+          this.prune(outbox!)
+          return 2
+        },
+      ],
+      [
+        OUTBOX_SCRIPTS.RAISE,
+        ([key], [value, keep]) => {
+          if (Number(value) <= (Number(this.get(key!) ?? 0) || 0)) return 0
+          this.set(key!, value!)
+          this.expires.set(key!, this.clock.now + Number(keep))
+          return 1
         },
       ],
     ]
@@ -624,16 +694,31 @@ export class FakeOpenRouter {
 
 export type CodiumFakes = ReturnType<typeof codiumFakes>
 
-/** A store, Stripe and OpenRouter on one clock, and the `fetch` that reaches them and nothing else. */
+/**
+ * The owner's email service (Resend): records each email it is asked to send. Set `fail` to make sends fail, as an
+ * outage or a rejected key does.
+ */
+export class FakeMail {
+  readonly sent: { from: string; to: string; subject: string; text: string }[] = []
+  fail = false
+}
+
+/** A store, Stripe, OpenRouter and the owner's email on one clock, and the `fetch` that reaches them and nothing else. */
 export function codiumFakes(options: { now?: number } = {}) {
   const clock = new FakeClock(options.now)
   const store = new FakeStore(clock)
   const stripe = new FakeStripe()
   const openRouter = new FakeOpenRouter()
+  const mail = new FakeMail()
   const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : String(input))
     const headers = new Headers(init?.headers)
     const body = init?.body === undefined || init.body === null ? "" : String(init.body)
+    if (url.href === "https://api.resend.com/emails" && init?.method === "POST") {
+      if (mail.fail) return new Response("unavailable", { status: 503 })
+      mail.sent.push(JSON.parse(body) as FakeMail["sent"][number])
+      return Response.json({ id: `email_${mail.sent.length}` })
+    }
     if (url.origin === FAKE_KV_URL) {
       try {
         return Response.json({ result: store.command(JSON.parse(body) as unknown[]) })
@@ -664,7 +749,7 @@ export function codiumFakes(options: { now?: number } = {}) {
       })
     throw new Error(`Unexpected request to ${url.origin}`)
   }) as typeof fetch
-  return { clock, store, stripe, openRouter, fetcher }
+  return { clock, store, stripe, openRouter, mail, fetcher }
 }
 
 const ENVIRONMENT = [
@@ -683,6 +768,11 @@ const ENVIRONMENT = [
   "CODIUM_TEST_CREDIT_CAP_USD",
   "CODIUM_RENEWAL_GRACE_MINUTES",
   "CODIUM_TRUST_RAMP_DAYS",
+  // Owner alerts stay off unless a test turns them on, so no test depends on the shell it runs in.
+  "RESEND_API_KEY",
+  "VECTOR_PURCHASE_EMAIL_FROM",
+  "CODIUM_OWNER_EMAIL",
+  "VECTOR_BUG_REPORT_TO",
   ...FIXTURE_PRICES.flatMap((price) => [`MODEL_PLAN_${price}_CREDITS_USD`, `STRIPE_MODEL_PLAN_${price}_PRICE_ID`]),
 ]
 

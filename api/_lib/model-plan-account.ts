@@ -7,6 +7,10 @@ import { withBillingMutation } from "./billing-lock.js"
 import { requireCodiumSales, reserveCodiumSale } from "./codium-funding.js"
 import { codiumKey, openRouterKeyName } from "./codium-keys.js"
 import { codiumKeyLimitUsd, renewalGraceMinutes, TRUST_RAMP } from "./codium-limits.js"
+import { registerAction } from "./codium-provision.js"
+// Every snapshot this module writes queues one outbox item per configured provisioner (contract §4.8), so the
+// provisioners are registered wherever reconcile can run.
+import "./codium-provisioners.js"
 import {
   buildSnapshot,
   readSnapshot,
@@ -1433,8 +1437,9 @@ export async function applyPoolDebits(account: string, keyHash?: string, fetcher
 }
 
 /**
- * Retries every key whose `debit-apply` is due, one at a time within `budgetMs`, until the outbox (WP A06) takes this
- * action over. A key that still fails is tried again after DEBIT_RETRY_MS; its debits stay held meanwhile.
+ * Retries every key whose `debit-apply` is due, one at a time within `budgetMs`. The DEBIT script queues a key here in
+ * the same step as its debit, so the minute outbox cron (api/model-plans/outbox.ts) runs this after the outbox itself.
+ * A key that still fails is tried again after DEBIT_RETRY_MS; its debits stay held meanwhile.
  */
 export async function drainDebitApplies(
   options: { fetcher?: typeof fetch; now?: number; budgetMs?: number; limit?: number } = {},
@@ -1458,6 +1463,37 @@ export async function drainDebitApplies(
   }
   return outcome
 }
+
+// ── Outbox actions (contract §4.8) ─────────────────────────────────────────────────────────────────────────────────
+
+/** The hint a queued reconcile carries, when it is one reconcile can use. */
+function queuedHint(payload: unknown): ReconcileHint | undefined {
+  if (!stripeRecord(payload) || !stripeRecord(payload.hint)) return undefined
+  const hint = payload.hint
+  if (hint.kind === "dispute" && typeof hint.charge === "string") return { kind: "dispute", charge: hint.charge }
+  if (hint.kind === "efw" && typeof hint.id === "string")
+    return { kind: "efw", id: hint.id, ...(typeof hint.charge === "string" ? { charge: hint.charge } : {}) }
+  return undefined
+}
+
+// `reconcile` (key: the account; payload `{hint?}`): a reconcile that could not finish where it started, such as a
+// webhook's, run again from Stripe's current state.
+registerAction("reconcile", async (action, fetcher) => {
+  const hint = queuedHint(action.payload)
+  await reconcileModelPlanAccount(action.key, fetcher, action.now, { source: "outbox", ...(hint ? { hint } : {}) })
+})
+
+// `debit-apply` (key: `<account>:<keyHash>`, or the account alone for its current key): the pool debits a key still
+// has to carry. It fails, and is tried again, while any stay pending.
+registerAction("debit-apply", async (action, fetcher) => {
+  const split = action.key.indexOf(":")
+  const account = split < 0 ? action.key : action.key.slice(0, split)
+  const keyHash = split < 0 ? undefined : action.key.slice(split + 1) || undefined
+  const result = await applyPoolDebits(account, keyHash, fetcher)
+  if (result.pending > 0)
+    throw new ApiError(503, "MODEL_PLAN_DEBIT_PENDING", "Some Codium charges are still being applied.")
+  if (keyHash) await finishDebitApply(account, keyHash, fetcher)
+})
 
 export async function modelPlanCheckout(
   user: AccountUser,

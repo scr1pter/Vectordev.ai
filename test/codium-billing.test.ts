@@ -526,12 +526,14 @@ describe("the snapshot write", () => {
       (command) => command[0] === "EVAL" && command[1] === SNAPSHOT_SCRIPTS.WRITE,
     )
     expect(writes).toHaveLength(2)
+    // From WP A06 on, every configured provisioner (here only github-runs) has its own item in the same EVAL.
     expect(writes[0]!.slice(3, 3 + Number(writes[0]![2]))).toEqual([
       codiumKey("ent", id),
       codiumKey("status", id),
       codiumKey("idx", "period-end"),
       codiumKey("sales-opened-at"),
       codiumKey("outbox"),
+      codiumKey("outbox", "item", `github-runs:${id}:1`),
       codiumKey("outbox", "item", `test-provisioner:${id}:1`),
     ])
     expect(JSON.parse(fakes.store.get(codiumKey("outbox", "item", `test-provisioner:${id}:1`))!)).toEqual({
@@ -924,7 +926,8 @@ describe.skipIf(!valkeyURL)("the snapshot's Lua on Valkey", () => {
       expect(await client!.send("EXISTS", [codiumKey("status", facts.account)])).toBe(0)
       expect(Number(await client!.send("ZSCORE", [codiumKey("idx", "period-end"), facts.account]))).toBe(facts.periodEnd)
       expect(await client!.send("GET", [codiumKey("sales-opened-at")])).toBe(String(now))
-      expect(await client!.send("ZRANGE", [codiumKey("outbox"), "0", "-1"])).toEqual(["p:1"])
+      // The configured provisioners' items (WP A06: github-runs) are written with the listener's, at the same score.
+      expect(await client!.send("ZRANGE", [codiumKey("outbox"), "0", "-1"])).toEqual(["github-runs:valkey-account:1", "p:1"])
       expect(await client!.send("GET", [codiumKey("outbox", "item", "p:1")])).toBe('{"v":1}')
 
       const ended = buildSnapshot({ ...facts, state: "ended", reason: "canceled" }, first, now + 1000)

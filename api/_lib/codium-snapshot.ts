@@ -283,9 +283,19 @@ export type EntitlementChange = {
 export type OutboxItem = { id: string; at?: number; priority?: boolean; payload: unknown }
 
 /**
+ * The outbox is one sorted set scored by when an item is due (ms). The priority lane (freezes and revocations, WP A06)
+ * sits this far below it, at negative scores, so it always sorts first and keeps its own due times for retries.
+ */
+export const PRIORITY_LEAD_MS = 10_000_000_000_000
+/** An outbox item's score: due at `at`, in the priority lane or not (the drain lives in codium-provision.ts). */
+export function outboxScore(at: number, priority = false) {
+  return priority ? at - PRIORITY_LEAD_MS : at
+}
+
+/**
  * Told of every change before it is written, a listener answers the outbox items that change needs; they are written in
- * the same script as the snapshot, so a crash can never leave a new snapshot without its work queued. The outbox and
- * its provisioners (WP A06) register here; until then nothing does, and a change writes the snapshot alone.
+ * the same script as the snapshot, so a crash can never leave a new snapshot without its work queued. The outbox
+ * (codium-provision.ts) registers here and answers one item per configured provisioner.
  */
 export type EntitlementListener = (change: EntitlementChange) => readonly OutboxItem[] | void
 
@@ -398,7 +408,11 @@ export async function writeSnapshot(
       snapshot.account,
       snapshot.state === "active" ? now : "",
       snapshot.state === "none" ? NONE_SNAPSHOT_KEEP_MS : "",
-      ...items.flatMap((item) => [item.id, item.priority ? 0 : (item.at ?? now), JSON.stringify(item.payload ?? null)]),
+      ...items.flatMap((item) => [
+        item.id,
+        outboxScore(item.at ?? now, item.priority === true),
+        JSON.stringify(item.payload ?? null),
+      ]),
     ],
     fetcher,
   )
