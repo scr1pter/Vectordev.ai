@@ -17,7 +17,12 @@ import {
   handleCodiumLedger,
   recordCodiumCharge,
 } from "../../../api/_lib/codium-ledger"
-import { modelPlanCheckout, modelPlanCredential, reconcileModelPlanAccount } from "../../../api/_lib/model-plan-account"
+import {
+  keyExpiresAt,
+  modelPlanCheckout,
+  modelPlanCredential,
+  reconcileModelPlanAccount,
+} from "../../../api/_lib/model-plan-account"
 import { verifyModelPlanWebhook } from "../../../api/_lib/model-plan-stripe"
 import { reconcileModelPlanEvent } from "../../../api/model-plans/webhook"
 
@@ -456,7 +461,7 @@ describe("payment notifications grant and remove credits without anyone acting",
       limit: 25,
       disabled: false,
       limit_reset: null,
-      expires_at: new Date(paid.end * 1000).toISOString(),
+      expires_at: keyExpiresAt(paid.end),
     })
     // Stripe retries and the dashboard's resend deliver the same notification again; nothing changes.
     await reconcileModelPlanEvent(completed, fetcher)
@@ -478,7 +483,7 @@ describe("payment notifications grant and remove credits without anyone acting",
       limit: 5,
       usage: 0,
       disabled: false,
-      expires_at: new Date(renewal.end * 1000).toISOString(),
+      expires_at: keyExpiresAt(renewal.end),
     })
   })
 
@@ -498,7 +503,7 @@ describe("payment notifications grant and remove credits without anyone acting",
     expect(openRouter.keys.get("codium_key_2")?.data).toMatchObject({
       limit: 25,
       disabled: false,
-      expires_at: new Date(upgrade.end * 1000).toISOString(),
+      expires_at: keyExpiresAt(upgrade.end),
     })
     await reconcileModelPlanEvent(event("invoice.paid", upgrade.invoice), fetcher)
     expect((await codiumLedger(fetcher)).find((value) => value.charge === upgrade.charge.id)).toMatchObject({

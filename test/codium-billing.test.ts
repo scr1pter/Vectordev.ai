@@ -28,6 +28,7 @@ import { ApiError, handleApiError, type ApiResponse } from "../api/_lib/http"
 import {
   cancelModelPlanAccount,
   governingStanding,
+  keyExpiresAt,
   modelPlanCredential,
   protectModelPlanKey,
   readModelPlanAccount,
@@ -92,11 +93,12 @@ function seed(fixture: StripeFixture) {
     const { subscription, start, end } = fixture.key
     const owner = fixture.objects.subscriptions?.find((value) => value.id === subscription)
     const credits = Number((owner?.metadata as Record<string, string>).vector_model_credits_usd)
+    // As provisioning makes it since WP A07: expiring at the period's end plus the renewal grace (M11).
     fakes.openRouter.seed(SEEDED, {
       name: `Vector test ${fixture.accountId} ${subscription} ${start}`,
       limit: credits,
       usage: 0.25,
-      expires_at: new Date(end * 1000).toISOString(),
+      expires_at: keyExpiresAt(end),
     })
     record.key = {
       hash: SEEDED,

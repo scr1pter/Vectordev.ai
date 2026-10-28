@@ -19,6 +19,7 @@ import {
   applyPoolDebits,
   drainDebitApplies,
   holdPool,
+  keyExpiresAt,
   modelPlanCredential,
   modelPlanStatus,
   protectModelPlanKey,
@@ -471,7 +472,8 @@ async function seed(options: {
     disabled: false,
     limit_reset: null,
     include_byok_in_limit: true,
-    expires_at: new Date(end * 1000).toISOString(),
+    // As provisioning makes it since WP A07: the period's end plus the renewal grace (M11).
+    expires_at: keyExpiresAt(end),
   })
 }
 

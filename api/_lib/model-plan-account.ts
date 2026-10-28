@@ -141,6 +141,15 @@ function keyPool(key: AccountKey): PoolBase & { limitMicro: number } {
 }
 
 /**
+ * When a period's key stops working on its own: the period's end plus the renewal grace (contract §4.4, M11), so a
+ * renewal that is still being collected never locks out someone who pays. Reconcile switches the key off sooner when
+ * the renewal fails, the plan ends or the account is held, and a paid renewal replaces it with the next period's key.
+ */
+export function keyExpiresAt(periodEnd: number) {
+  return new Date(periodEnd * 1000 + renewalGraceMinutes() * 60_000).toISOString()
+}
+
+/**
  * The account's billing lease. Checkout, deletion, the webhook and model requests all serialize on this one key, in the
  * same mode namespace as the account it guards.
  */
@@ -155,6 +164,23 @@ export async function readModelPlanAccount(id: string, fetcher: typeof fetch = f
   if (Option.isNone(decoded))
     throw new ApiError(503, "MODEL_PLAN_ACCOUNT_INVALID", "Model access could not be verified.")
   return decoded.value
+}
+
+/**
+ * The Vector account a Stripe customer pays for: the customer's `vector_account_id`, read again from Stripe, when that
+ * account's record names this customer. Undefined for a customer that is not a Codium account's (another product's, or
+ * one whose record has moved on), which billing notifications then leave alone.
+ */
+export async function accountForCustomer(customer: string, fetcher: typeof fetch = fetch) {
+  const record = await modelPlanStripe(`customers/${encodeURIComponent(customer)}`, {}, fetcher)
+  const id = stripeRecord(record.metadata) ? record.metadata.vector_account_id : undefined
+  if (typeof id !== "string" || !id) return undefined
+  const account = await readModelPlanAccount(id, fetcher)
+  if (account?.customer === customer) return id
+  // Ids only: never the person.
+  if (account)
+    console.warn("Vector Codium: a billing notification names a customer the account no longer uses", { account: id })
+  return undefined
 }
 
 async function saveAccount(id: string, value: Account, fetcher: typeof fetch) {
@@ -317,9 +343,21 @@ export async function reconcileModelPlanAccount(
       }
       if (standing.state === "active" && standing.governing?.paid)
         await provisionMonthlyKey(id, updated, standing.governing.paid, fetcher, verify)
-      else if (standing.state !== "renewing" && updated.key) {
-        // Past due, unpaid, ended, refunded, disputed, warned or blocked: the key stops at once (M5). Renewing keeps
-        // the previous period's key serving until the renewal is paid or its grace runs out.
+      else if (standing.state === "renewing") {
+        // M11: the previous period's key keeps serving, at its pool's limit, until the renewal is paid or its grace
+        // runs out (the key's own expiry is the period's end plus the grace).
+        const previous = renewingKey(updated, standing.governing)
+        if (previous)
+          await convergeKey(id, updated, previous, verify, fetcher, {
+            expiresAt: keyExpiresAt(standing.governing!.end),
+          })
+        else if (updated.key) {
+          // A key from any other period (an older month, or a subscription that no longer governs) never serves.
+          await verify()
+          await openRouterManagement(`/${encodeURIComponent(updated.key.hash)}`, { disabled: true }, fetcher, "PATCH")
+        }
+      } else if (updated.key) {
+        // Past due, unpaid, ended, refunded, disputed, warned or blocked: the key stops at once (M5).
         await verify()
         await openRouterManagement(`/${encodeURIComponent(updated.key.hash)}`, { disabled: true }, fetcher, "PATCH")
       }
@@ -895,8 +933,26 @@ function governingPaid(subscriptions: readonly unknown[], accountID: string, now
     .sort((a, b) => rank(b.plan.id) - rank(a.plan.id) || b.start - a.start)[0]
 }
 
+/** The account's key when it is the one for the period a renewal follows: the governing subscription's last paid one. */
+function renewingKey(account: Account, governing: Standing | undefined) {
+  const key = account.key
+  return key && governing && key.subscription === governing.id && key.start === governing.start ? key : undefined
+}
+
+/**
+ * While the account is renewing (contract §4.4: the governing subscription's period ended and its renewal is not paid
+ * yet, within the grace), the previous period's key and that period. Undefined in any other state, or when the account's
+ * key is for another period. Requests and the account's screens keep using that key until the renewal is paid (M11).
+ */
+function renewingPeriod(id: string, account: Account, listed: readonly unknown[], now: number) {
+  const standing = planStanding(id, account, listed, now, { known: knownPeriods(account, undefined) })
+  if (standing.state !== "renewing" || !standing.governing) return undefined
+  const key = renewingKey(account, standing.governing)
+  return key ? { key, governing: standing.governing } : undefined
+}
+
 /** The customer's subscriptions as Stripe has them, latest invoice, charge and payment intent expanded. */
-async function listSubscriptions(customer: string, fetcher: typeof fetch) {
+export async function listSubscriptions(customer: string, fetcher: typeof fetch) {
   const query = new URLSearchParams([
     ["customer", customer],
     ["status", "all"],
@@ -1032,7 +1088,21 @@ async function monthlyStatus(id: string, fetcher: typeof fetch = fetch, now = Da
   const account = await readModelPlanAccount(id, fetcher)
   if (!account) return { active: false as const }
   if (account.closing) return { active: false as const, customer: true }
-  const paid = governingPaid(await subscriptions(account.customer, fetcher), id, now)
+  const listed = await subscriptions(account.customer, fetcher)
+  const governing = governingPaid(listed, id, now)
+  // While a renewal is being collected, the month just ended and its key are still the account's (M11).
+  const renewing = governing ? undefined : renewingPeriod(id, account, listed, now)
+  const paid = governing
+    ? { ...governing, plan: { id: governing.plan.id, credits: governing.plan.credits } }
+    : renewing
+      ? {
+          id: renewing.governing.id,
+          plan: { id: renewing.governing.plan, credits: renewing.key.credits },
+          start: renewing.governing.start,
+          end: renewing.governing.end,
+          cancelAtPeriodEnd: renewing.governing.cancelAtPeriodEnd,
+        }
+      : undefined
   if (!paid) return { active: false as const, customer: true }
   const current = account.key?.subscription === paid.id && account.key.start === paid.start ? account.key : undefined
   const data = current
@@ -1081,47 +1151,32 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
   const held = existing && riskState(existing)
   if (held) throw riskRefusal(held)
   if (existing) {
-    const paid = governingPaid(await subscriptions(existing.customer, fetcher), id, now)
-    if (!paid && !existing.key)
-      throw new ApiError(
-        402,
-        "MODEL_PLAN_PAYMENT_REQUIRED",
-        "Your model subscription needs an active paid billing period.",
-      )
-    if (!paid && existing.key) {
-      const result = await openRouterManagement(`/${encodeURIComponent(existing.key.hash)}`, undefined, fetcher)
-      if (stripeRecord(result.data) && result.data.disabled === true)
+    const listed = await subscriptions(existing.customer, fetcher)
+    const paid = governingPaid(listed, id, now)
+    // A renewal still being collected keeps the month that just ended, and its key, serving (M11).
+    const renewing = paid ? undefined : renewingPeriod(id, existing, listed, now)
+    if (renewing) {
+      const ready = await readyKey(id, renewing.key, renewing.governing.end, requiredMicro, fetcher)
+      if (ready) return ready
+    } else {
+      if (!paid && !existing.key)
         throw new ApiError(
           402,
           "MODEL_PLAN_PAYMENT_REQUIRED",
           "Your model subscription needs an active paid billing period.",
         )
-    }
-    if (paid && existing.key?.subscription === paid.id && existing.key.start === paid.start) {
-      const result = await openRouterManagement(`/${encodeURIComponent(existing.key.hash)}`, undefined, fetcher)
-      const key = result.data
-      const pool = keyPool(existing.key)
-      // The key's limit must be the one the pool last set (M1), within half a cent; anything else is repaired under the
-      // lease below, where the debits are read.
-      if (
-        stripeRecord(key) &&
-        key.disabled === false &&
-        limitMatches(key.limit, pool.limitMicro) &&
-        key.limit_reset === null &&
-        key.include_byok_in_limit === true &&
-        key.expires_at === new Date(paid.end * 1000).toISOString() &&
-        typeof key.usage === "number" &&
-        Number.isFinite(key.usage) &&
-        key.usage >= 0
-      ) {
-        const usage = usdToMicro(key.usage)
-        requireMonthlyCredits(pool.limitMicro - usage, requiredMicro)
-        return {
-          key: revealModelPlanKey(existing.key.encrypted, `${id}:${paid.id}:${paid.start}`),
-          pool: existing.key.hash,
-          baseMicro: pool.creditsMicro + pool.carryMicro - usage,
-          end: paid.end,
-        }
+      if (!paid && existing.key) {
+        const result = await openRouterManagement(`/${encodeURIComponent(existing.key.hash)}`, undefined, fetcher)
+        if (stripeRecord(result.data) && result.data.disabled === true)
+          throw new ApiError(
+            402,
+            "MODEL_PLAN_PAYMENT_REQUIRED",
+            "Your model subscription needs an active paid billing period.",
+          )
+      }
+      if (paid && existing.key?.subscription === paid.id && existing.key.start === paid.start) {
+        const ready = await readyKey(id, existing.key, paid.end, requiredMicro, fetcher)
+        if (ready) return ready
       }
     }
   }
@@ -1134,7 +1189,23 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
         throw new ApiError(409, "MODEL_PLAN_ACCOUNT_CLOSING", "This account is being deleted. Model access is closed.")
       const held = riskState(account)
       if (held) throw riskRefusal(held)
-      const paid = governingPaid(await subscriptions(account.customer, fetcher), id, now)
+      const listed = await subscriptions(account.customer, fetcher)
+      const paid = governingPaid(listed, id, now)
+      const renewing = paid ? undefined : renewingPeriod(id, account, listed, now)
+      if (renewing) {
+        // The previous period's key, brought back to what its pool says and to its grace-extended expiry.
+        const end = renewing.governing.end
+        const converged = await convergeKey(id, account, renewing.key, verify, fetcher, {
+          expiresAt: keyExpiresAt(end),
+        })
+        requireMonthlyCredits(converged.limitMicro - converged.usageMicro, requiredMicro)
+        return {
+          key: revealModelPlanKey(renewing.key.encrypted, `${id}:${renewing.key.subscription}:${renewing.key.start}`),
+          pool: renewing.key.hash,
+          baseMicro: converged.creditsMicro + converged.carryMicro - converged.usageMicro,
+          end,
+        }
+      }
       if (!paid) {
         if (account.key)
           await openRouterManagement(`/${encodeURIComponent(account.key.hash)}`, { disabled: true }, fetcher, "PATCH")
@@ -1165,10 +1236,40 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
 }
 
 /**
+ * A period's key as it is, when it needs no repair: switched on, at the limit the pool last set (M1, within half a
+ * cent), never resetting, counting the buyer's own keys, and expiring at the period's end plus the grace. Undefined when
+ * anything there differs, which the lease's path repairs. Throws the shortfall when the pool cannot pay for the request.
+ */
+async function readyKey(id: string, key: AccountKey, end: number, requiredMicro: number, fetcher: typeof fetch) {
+  const data = (await openRouterManagement(`/${encodeURIComponent(key.hash)}`, undefined, fetcher)).data
+  const pool = keyPool(key)
+  if (
+    !stripeRecord(data) ||
+    data.disabled !== false ||
+    !limitMatches(data.limit, pool.limitMicro) ||
+    data.limit_reset !== null ||
+    data.include_byok_in_limit !== true ||
+    data.expires_at !== keyExpiresAt(end) ||
+    typeof data.usage !== "number" ||
+    !Number.isFinite(data.usage) ||
+    data.usage < 0
+  )
+    return undefined
+  const usage = usdToMicro(data.usage)
+  requireMonthlyCredits(pool.limitMicro - usage, requiredMicro)
+  return {
+    key: revealModelPlanKey(key.encrypted, `${id}:${key.subscription}:${key.start}`),
+    pool: key.hash,
+    baseMicro: pool.creditsMicro + pool.carryMicro - usage,
+    end,
+  }
+}
+
+/**
  * The paid period's key, or a new one when the period changed. Callers hold the lease. An existing key is brought to
- * what the pool says (M1): enabled, expiring at the period's end, and limited to credits + carry less every debit
- * recorded against it, never back to the plan's credits. Its limit is PATCHed only when it is more than half a cent
- * off, and any debit not yet applied is applied in the same pass.
+ * what the pool says (M1): enabled, expiring at the period's end plus the renewal grace, and limited to credits + carry
+ * less every debit recorded against it, never back to the plan's credits. Its limit is PATCHed only when it is more
+ * than half a cent off, and any debit not yet applied is applied in the same pass.
  */
 async function provisionMonthlyKey(
   id: string,
@@ -1178,7 +1279,8 @@ async function provisionMonthlyKey(
   verify: () => Promise<void>,
 ) {
   const context = `${id}:${paid.id}:${paid.start}`
-  const expires = new Date(paid.end * 1000).toISOString()
+  // M11: the key outlives its period by the renewal grace; a paid renewal replaces it, anything else switches it off.
+  const expires = keyExpiresAt(paid.end)
   if (account.key?.subscription === paid.id && account.key.start === paid.start) {
     const converged = await convergeKey(id, account, account.key, verify, fetcher, { expiresAt: expires })
     return {
@@ -1244,8 +1346,8 @@ async function provisionMonthlyKey(
 /**
  * Sets the account's current key to its pool's limit, credits + carry less every debit recorded against it, and marks
  * the debits that limit includes applied, saving the limit in the account record in the same step. Callers hold the
- * lease. `repair` also re-enables the key and resets its other settings; only provisioning for a paid period passes it,
- * so applying a debit never turns a key back on.
+ * lease. `repair` also re-enables the key and resets its other settings; only provisioning for a paid period and the
+ * renewing period's key (M11, never while the account is held) pass it, so applying a debit never turns a key back on.
  */
 async function convergeKey(
   id: string,

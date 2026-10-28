@@ -8,6 +8,7 @@ import { join } from "node:path"
 import { mintCliToken } from "../../../api/_lib/cli-token"
 import {
   cancelModelPlanAccount,
+  keyExpiresAt,
   modelPlanCheckout,
   modelPlanCredential,
   modelPlanPortal,
@@ -948,7 +949,7 @@ describe("paid credential lifecycle", () => {
       limit: 5,
       limit_reset: null,
       include_byok_in_limit: true,
-      expires_at: new Date(subscription.items.data[0]!.current_period_end * 1000).toISOString(),
+      expires_at: keyExpiresAt(subscription.items.data[0]!.current_period_end),
     })
     expect((await modelPlanCredential(user.id, fetcher)).key).toBe(credential)
     expect(keys.size).toBe(1)

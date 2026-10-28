@@ -225,10 +225,7 @@ export class FakeStore {
     const last = (member: string) => Number(/:(\d+)$/.exec(member)?.[1] ?? 0)
     const microOf = (debit: string) => Number(/"micro":(\d+)/.exec(debit)?.[1] ?? 0)
     const scripts: [string, Script][] = [
-      [
-        LEASE_CHECK,
-        ([key], [token]) => (this.get(key!) === token ? this.pttl(key!) : -1),
-      ],
+      [LEASE_CHECK, ([key], [token]) => (this.get(key!) === token ? this.pttl(key!) : -1)],
       [
         LEASE_RELEASE,
         ([key], [token]) => {
@@ -443,6 +440,7 @@ export type StripeObjects = {
   disputes?: Json[]
   early_fraud_warnings?: Json[]
   checkout_sessions?: Json[]
+  refunds?: Json[]
 }
 
 const STRIPE_COLLECTIONS = [
@@ -454,6 +452,7 @@ const STRIPE_COLLECTIONS = [
   "disputes",
   "early_fraud_warnings",
   "checkout_sessions",
+  "refunds",
 ] as const
 
 /**
@@ -463,6 +462,7 @@ const STRIPE_COLLECTIONS = [
  * idempotency key answers what the first one did, and one reused with a different body is refused, as Stripe does.
  */
 export class FakeStripe {
+  constructor(private readonly clock: FakeClock = new FakeClock()) {}
   readonly objects: Record<(typeof STRIPE_COLLECTIONS)[number], Map<string, Json>> = Object.fromEntries(
     STRIPE_COLLECTIONS.map((name) => [name, new Map<string, Json>()]),
   ) as never
@@ -470,6 +470,8 @@ export class FakeStripe {
   private readonly idempotency = new Map<string, { request: string; body: unknown }>()
   /** Answers a call with a failure of the test's choosing, before the fake looks at it. */
   fail?: (call: RecordedCall) => Response | undefined
+  /** Invoices whose payment the card declines: `pay` counts the attempt and answers 402, as Stripe does. */
+  readonly declines = new Set<string>()
 
   /** Adds objects as Stripe stores them (deep copies, so a fixture is never changed). */
   load(objects: StripeObjects) {
@@ -530,11 +532,12 @@ export class FakeStripe {
       const subscription = this.objects.subscriptions.get(id)
       if (!subscription) return stripeError(404, "No such subscription.")
       const form = call.form ?? new URLSearchParams()
-      if (form.has("pause_collection"))
-        subscription.pause_collection = null
+      if (form.has("pause_collection")) subscription.pause_collection = null
       if (form.has("pause_collection[behavior]"))
         subscription.pause_collection = { behavior: form.get("pause_collection[behavior]"), resumes_at: null }
-      if (form.has("cancel_at_period_end")) subscription.cancel_at_period_end = form.get("cancel_at_period_end") === "true"
+      if (form.has("cancel_at_period_end"))
+        subscription.cancel_at_period_end = form.get("cancel_at_period_end") === "true"
+      setMetadata(subscription, form)
       return ok(subscription)
     }
     if (resource === "subscriptions" && id && call.method === "DELETE") {
@@ -554,6 +557,8 @@ export class FakeStripe {
       return found(this.expandOrUndefined(this.objects.charges.get(id), expand))
     if (resource === "invoices" && id && call.method === "GET")
       return found(this.expandOrUndefined(this.objects.invoices.get(id), expand))
+    if (resource === "invoices" && id && call.method === "POST") return this.invoiceAction(id, action, call)
+    if (resource === "refunds" && id && call.method === "GET") return found(this.objects.refunds.get(id))
     if (resource === "disputes" && call.method === "GET" && !id)
       return list(
         [...this.objects.disputes.values()].filter(
@@ -588,7 +593,68 @@ export class FakeStripe {
       session.status = "expired"
       return ok(session)
     }
-    throw new Error(`Unexpected Stripe request ${call.method} /v1/${call.path}${call.query.size ? `?${call.query}` : ""}`)
+    throw new Error(
+      `Unexpected Stripe request ${call.method} /v1/${call.path}${call.query.size ? `?${call.query}` : ""}`,
+    )
+  }
+
+  /**
+   * `POST /v1/invoices/<id>` (update: `auto_advance`, metadata), `/finalize` (a draft becomes open) and `/pay` (an open
+   * invoice is paid by a new charge, or, for an invoice in `declines`, the attempt is counted and answered 402).
+   */
+  private invoiceAction(id: string, action: string | undefined, call: RecordedCall): Answer {
+    const invoice = this.objects.invoices.get(id)
+    if (!invoice) return stripeError(404, "No such invoice.")
+    const form = call.form ?? new URLSearchParams()
+    const at = Math.floor(this.clock.now / 1000)
+    const transitions = () => (invoice.status_transitions ??= {}) as Json
+    if (!action) {
+      if (form.has("auto_advance")) invoice.auto_advance = form.get("auto_advance") === "true"
+      setMetadata(invoice, form)
+      return { status: 200, body: invoice }
+    }
+    if (action === "finalize") {
+      if (invoice.status !== "draft") return stripeError(400, "This invoice is already finalized.")
+      Object.assign(invoice, { status: "open", auto_advance: form.get("auto_advance") !== "false" })
+      transitions().finalized_at = at
+      return { status: 200, body: invoice }
+    }
+    if (action === "pay") {
+      if (invoice.status === "paid") return stripeError(400, "Invoice is already paid.")
+      if (invoice.status !== "open") return stripeError(400, "You can only pay an open invoice.")
+      invoice.attempt_count = Number(invoice.attempt_count ?? 0) + 1
+      invoice.attempted = true
+      if (this.declines.has(id))
+        return { status: 402, body: { error: { type: "card_error", code: "card_declined", message: "Declined." } } }
+      const charge: Json = {
+        id: `ch_${id.slice("in_".length)}`,
+        object: "charge",
+        amount: invoice.amount_due,
+        amount_captured: invoice.amount_due,
+        amount_refunded: 0,
+        captured: true,
+        created: at,
+        currency: invoice.currency ?? "usd",
+        customer: invoice.customer,
+        disputed: false,
+        invoice: id,
+        livemode: false,
+        paid: true,
+        refunded: false,
+        status: "succeeded",
+      }
+      this.objects.charges.set(String(charge.id), charge)
+      Object.assign(invoice, {
+        status: "paid",
+        paid: true,
+        amount_paid: invoice.amount_due,
+        amount_remaining: 0,
+        charge: charge.id,
+      })
+      transitions().paid_at = at
+      return { status: 200, body: invoice }
+    }
+    throw new Error(`Unexpected Stripe request POST /v1/invoices/${id}/${action}`)
   }
 
   private expandOrUndefined(value: Json | undefined, expand: string[]) {
@@ -630,6 +696,17 @@ const RELATED: Record<string, (typeof STRIPE_COLLECTIONS)[number] | undefined> =
 }
 
 type Answer = { status: number; body: unknown }
+
+/** Applies `metadata[<name>]` fields of a form to an object's metadata; an empty value removes the name, as Stripe does. */
+function setMetadata(target: Json, form: URLSearchParams) {
+  for (const [name, value] of form) {
+    const field = /^metadata\[(.+)\]$/.exec(name)?.[1]
+    if (!field) continue
+    const metadata = (target.metadata ??= {}) as Record<string, string>
+    if (value === "") delete metadata[field]
+    else metadata[field] = value
+  }
+}
 
 function stripeError(status: number, message: string): Answer {
   return { status, body: { error: { type: "invalid_request_error", message } } }
@@ -707,7 +784,7 @@ export class FakeMail {
 export function codiumFakes(options: { now?: number } = {}) {
   const clock = new FakeClock(options.now)
   const store = new FakeStore(clock)
-  const stripe = new FakeStripe()
+  const stripe = new FakeStripe(clock)
   const openRouter = new FakeOpenRouter()
   const mail = new FakeMail()
   const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {

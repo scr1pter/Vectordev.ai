@@ -5,26 +5,46 @@ import { ApiError } from "./http.js"
 export const stripeRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === "object" && !Array.isArray(value)
 
-/** The Stripe events the Codium webhook acts on; `scripts/setup-model-plans.ts --apply` subscribes exactly these. */
+/**
+ * The Stripe events the Codium webhook acts on (contract §4.5): exactly 20, so one replay call can list them all.
+ * `scripts/setup-model-plans.ts --apply` subscribes exactly these.
+ */
 export const MODEL_PLAN_WEBHOOK_EVENTS = [
   "checkout.session.completed",
+  "checkout.session.expired",
   "customer.subscription.created",
   "customer.subscription.updated",
   "customer.subscription.deleted",
-  "customer.subscription.paused",
-  "customer.subscription.resumed",
+  "invoice.created",
   "invoice.paid",
   "invoice.payment_failed",
-  "payment_intent.succeeded",
-  "charge.succeeded",
-  "charge.updated",
+  "invoice.payment_action_required",
+  "invoice.finalization_failed",
   "charge.refunded",
   "charge.refund.updated",
   "charge.dispute.created",
   "charge.dispute.updated",
   "charge.dispute.closed",
-  "charge.dispute.funds_withdrawn",
   "charge.dispute.funds_reinstated",
+  "radar.early_fraud_warning.created",
+  "radar.early_fraud_warning.updated",
+  "subscription_schedule.released",
+  "subscription_schedule.canceled",
+] as const
+export type ModelPlanWebhookEvent = (typeof MODEL_PLAN_WEBHOOK_EVENTS)[number]
+
+/**
+ * The families of event types the webhook routes (§4.5): the prefixes of the 20 events above. A type outside them is
+ * acknowledged and ignored. Within a family the webhook does the same thing for every type (reconcile from Stripe's
+ * current state), so a type Stripe adds to a family later is handled too.
+ */
+export const MODEL_PLAN_WEBHOOK_PREFIXES = [
+  "checkout.session.",
+  "customer.subscription.",
+  "invoice.",
+  "charge.",
+  "radar.early_fraud_warning.",
+  "subscription_schedule.",
 ] as const
 export const MODEL_PLAN_STRIPE_VERSION = "2025-02-24.acacia"
 
