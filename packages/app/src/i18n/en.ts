@@ -1103,6 +1103,8 @@ export const dict = {
   "settings.permissions.tool.external_directory.description": "Access files outside the repository",
   "settings.permissions.tool.doom_loop.title": "Doom Loop",
   "settings.permissions.tool.doom_loop.description": "Detect repeated tool calls with identical input",
+  "settings.permissions.tool.research_keep.description":
+    "Keep this research in the repository's brain, so later requests can recall its report. It was written from web pages, so keep only research you trust",
   "settings.permissions.tool.memory_source.description":
     "Change RULES.md, BRAIN.md or MEMORY.md after this session read outside content. A line there guides every later request, so check it is one you want",
   "settings.permissions.tool.vector_cloud_publish.title": "Publish",

@@ -63,6 +63,18 @@ export function release111Copy(published: string) {
 
 export const release111 = release111Copy(publishedDesktopVersion)
 
+// What desktop 1.99.112 changes in the docs, said as coming until the download page offers it.
+export const release112Version = "1.99.112"
+
+export function release112Copy(published: string) {
+  const [major = 0, minor = 0, patch = 0] = published.split(".").map(Number)
+  if (major > 1 || (major === 1 && (minor > 99 || (minor === 99 && patch >= 112))))
+    return { since: "From desktop 1.99.112:", stage: "Desktop 1.99.112", shipped: true }
+  return { since: "Coming in desktop 1.99.112:", stage: "Coming in 1.99.112", shipped: false }
+}
+
+export const release112 = release112Copy(publishedDesktopVersion)
+
 export const releaseSeries: VectorRelease[] = [
   {
     version: "1.0",

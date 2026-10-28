@@ -22,6 +22,13 @@ export function requiresCloudApproval(permission?: string, always?: readonly str
 export const MEMORY_SOURCE = "memory_source"
 
 /**
+ * Keeping a research run makes its report, written from web pages, recallable by every later request. A page can carry
+ * planted instructions, so the agent keeps research only after the user says yes: it asks every time, whatever
+ * configuration allows or a client auto-accepts.
+ */
+export const RESEARCH_KEEP = "research_keep"
+
+/**
  * A shell command that may reach the network while Vector Local is on. Vector cannot see where such a command
  * connects, so it asks every time, whatever configuration allows or a client auto-accepts.
  */
@@ -43,12 +50,13 @@ export const AFTER_WEB_REASON =
   "This conversation read the web, and this address is new: neither you nor an earlier result gave it. A page can steer the agent into putting your data in an address."
 
 /**
- * Whether a request asks the user every time: account mutations, changes to memory's own files, and the asks Vector
+ * Whether a request asks the user every time: account mutations, changes to memory's own files, keeping research, and the asks Vector
  * Local adds for the agent's network commands and its new addresses after the web.
  */
 export function requiresApproval(permission?: string, always?: readonly string[], patterns?: readonly string[]) {
   return (
     permission === MEMORY_SOURCE ||
+    permission === RESEARCH_KEEP ||
     permission === NETWORK_COMMAND ||
     Boolean(patterns?.some((pattern) => pattern.startsWith(AFTER_WEB))) ||
     requiresCloudApproval(permission, always)
