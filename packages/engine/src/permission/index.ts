@@ -9,6 +9,7 @@ import { PermissionV2 } from "@vectordevai/core/permission"
 import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { UNREAD } from "@/tool/shell/unread"
+import { TaskPlace } from "@/task/place"
 
 export const Event = PermissionV1.Event
 
@@ -79,60 +80,63 @@ const layer = Layer.effect(
       }),
     )
 
-    const ask = Effect.fn("Permission.ask")(function* (input: PermissionV1.AskInput) {
-      const { approved, pending } = yield* InstanceState.get(state)
-      const { ruleset, ...request } = input
-      let needsAsk = PermissionPolicy.requiresApproval(request.permission, request.always, request.patterns)
+    const ask = Effect.fn("Permission.ask")(
+      function* (input: PermissionV1.AskInput) {
+        const { approved, pending } = yield* InstanceState.get(state)
+        const { ruleset, ...request } = input
+        let needsAsk = PermissionPolicy.requiresApproval(request.permission, request.always, request.patterns)
 
-      for (const pattern of request.patterns) {
-        // Approvals are shared by every session in the instance and come last, so on their own they would override a
-        // session's deny (plan mode, a review session). They may only turn an ask into an allow.
-        const own = evaluate(request.permission, pattern, ruleset)
-        const rule = own.action === "deny" ? own : evaluate(request.permission, pattern, ruleset, approved)
-        yield* Effect.logInfo("evaluated", { permission: request.permission, pattern, action: rule })
-        if (rule.action === "deny") {
-          return yield* new PermissionV1.DeniedError({
-            ruleset: ruleset.filter((rule) => Wildcard.match(request.permission, rule.permission)),
-            permission: request.permission,
-            pattern,
-          })
+        for (const pattern of request.patterns) {
+          // Approvals are shared by every session in the instance and come last, so on their own they would override a
+          // session's deny (plan mode, a review session). They may only turn an ask into an allow.
+          const own = evaluate(request.permission, pattern, ruleset)
+          const rule = own.action === "deny" ? own : evaluate(request.permission, pattern, ruleset, approved)
+          yield* Effect.logInfo("evaluated", { permission: request.permission, pattern, action: rule })
+          if (rule.action === "deny") {
+            return yield* new PermissionV1.DeniedError({
+              ruleset: ruleset.filter((rule) => Wildcard.match(request.permission, rule.permission)),
+              permission: request.permission,
+              pattern,
+            })
+          }
+          if (rule.action === "allow") continue
+          needsAsk = true
         }
-        if (rule.action === "allow") continue
-        needsAsk = true
-      }
 
-      if (!needsAsk) return
+        if (!needsAsk) return
 
-      const id = request.id ?? PermissionV1.ID.ascending()
-      const info: PermissionV1.Request = {
-        id,
-        sessionID: request.sessionID,
-        permission: request.permission,
-        patterns: request.patterns,
-        metadata: request.metadata,
-        always: request.always,
-        tool: request.tool,
-      }
-      yield* Effect.logInfo("asking", { id, permission: info.permission, patterns: info.patterns })
+        const id = request.id ?? PermissionV1.ID.ascending()
+        const info: PermissionV1.Request = {
+          id,
+          sessionID: request.sessionID,
+          permission: request.permission,
+          patterns: request.patterns,
+          metadata: request.metadata,
+          always: request.always,
+          tool: request.tool,
+        }
+        yield* Effect.logInfo("asking", { id, permission: info.permission, patterns: info.patterns })
 
-      const deferred = yield* Deferred.make<void, PermissionV1.RejectedError | PermissionV1.CorrectedError>()
-      pending.set(id, { info, deferred })
-      yield* events.publish(Event.Asked, info)
-      return yield* Deferred.await(deferred).pipe(
-        // A request whose asker stopped waiting, such as a stopped subagent, is withdrawn the way a rejection is
-        // announced, so clients stop showing a prompt that can no longer be answered.
-        Effect.onInterrupt(() =>
-          pending.has(id)
-            ? events.publish(Event.Replied, { sessionID: info.sessionID, requestID: id, reply: "reject" })
-            : Effect.void,
-        ),
-        Effect.ensuring(
-          Effect.sync(() => {
-            pending.delete(id)
-          }),
-        ),
-      )
-    })
+        const deferred = yield* Deferred.make<void, PermissionV1.RejectedError | PermissionV1.CorrectedError>()
+        pending.set(id, { info, deferred })
+        yield* events.publish(Event.Asked, info)
+        return yield* Deferred.await(deferred).pipe(
+          // A request whose asker stopped waiting, such as a stopped subagent, is withdrawn the way a rejection is
+          // announced, so clients stop showing a prompt that can no longer be answered.
+          Effect.onInterrupt(() =>
+            pending.has(id)
+              ? events.publish(Event.Replied, { sessionID: info.sessionID, requestID: id, reply: "reject" })
+              : Effect.void,
+          ),
+          Effect.ensuring(
+            Effect.sync(() => {
+              pending.delete(id)
+            }),
+          ),
+        )
+      },
+      (effect, input) => TaskPlace.atHome(input.sessionID)(effect),
+    )
 
     const reply = Effect.fn("Permission.reply")(function* (input: PermissionV1.ReplyInput) {
       const { approved, pending } = yield* InstanceState.get(state)

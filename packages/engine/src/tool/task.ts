@@ -4,6 +4,7 @@ import { ToolJsonSchema } from "./json-schema"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import type { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import { BackgroundJob } from "@/background/job"
+import { TaskPlace } from "@/task/place"
 import { Session } from "@/session/session"
 import { SessionStatus } from "@/session/status"
 import { SessionID, MessageID } from "../session/schema"
@@ -2048,6 +2049,11 @@ export const TaskTool = Tool.define(
         }).pipe(
           Effect.map((result) => ({ title: result.title, metadata: result.metadata, output: result.output })),
           Effect.scoped,
+          (effect) =>
+            sessions.get(ctx.sessionID).pipe(
+              Effect.orDie,
+              Effect.andThen(() => TaskPlace.within(ctx.sessionID)(effect)),
+            ),
           Effect.orDie,
         ),
     }

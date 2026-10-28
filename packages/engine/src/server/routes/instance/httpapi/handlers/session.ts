@@ -17,6 +17,7 @@ import { SessionPrompt } from "@/session/prompt"
 import { SessionRevert } from "@/session/revert"
 import { SessionRunState } from "@/session/run-state"
 import { SessionStatus } from "@/session/status"
+import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
 import { SessionSummary } from "@/session/summary"
 import { Todo } from "@/session/todo"
 import { ModelV2 } from "@vectordevai/core/model"
@@ -268,7 +269,9 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
         yield* session.setTitle({ sessionID: ctx.params.sessionID, title: ctx.payload.title })
       }
       if (ctx.payload.metadata !== undefined) {
-        yield* session.setMetadata({ sessionID: ctx.params.sessionID, metadata: ctx.payload.metadata })
+        yield* SubagentLifecycle.setPublicMetadata(session, ctx.params.sessionID, ctx.payload.metadata).pipe(
+          Effect.catchTag("NotFoundError", (error) => Effect.fail(notFound(error.message))),
+        )
       }
       if (ctx.payload.permission !== undefined) {
         yield* session.setPermission({

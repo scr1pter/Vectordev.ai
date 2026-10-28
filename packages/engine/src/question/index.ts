@@ -5,6 +5,7 @@ import { SessionID } from "@/session/schema"
 import { QuestionID } from "./schema"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { QuestionV1 } from "@vectordevai/schema/question-v1"
+import { TaskPlace } from "@/task/place"
 
 export const Option = QuestionV1.Option
 export type Option = typeof Option.Type
@@ -96,37 +97,38 @@ const layer = Layer.effect(
       }),
     )
 
-    const ask = Effect.fn("Question.ask")(function* (input: {
-      sessionID: SessionID
-      questions: ReadonlyArray<Info>
-      tool?: Tool
-    }) {
-      const pending = (yield* InstanceState.get(state)).pending
-      const id = QuestionID.ascending()
-      yield* Effect.logInfo("asking", { id, questions: input.questions.length })
+    const ask = Effect.fn("Question.ask")(
+      function* (input: { sessionID: SessionID; questions: ReadonlyArray<Info>; tool?: Tool }) {
+        const pending = (yield* InstanceState.get(state)).pending
+        const id = QuestionID.ascending()
+        yield* Effect.logInfo("asking", { id, questions: input.questions.length })
 
-      const deferred = yield* Deferred.make<ReadonlyArray<Answer>, RejectedError>()
-      const info: Request = {
-        id,
-        sessionID: input.sessionID,
-        questions: input.questions,
-        tool: input.tool,
-      }
-      pending.set(id, { info, deferred })
-      yield* events.publish(Event.Asked, info)
+        const deferred = yield* Deferred.make<ReadonlyArray<Answer>, RejectedError>()
+        const info: Request = {
+          id,
+          sessionID: input.sessionID,
+          questions: input.questions,
+          tool: input.tool,
+        }
+        pending.set(id, { info, deferred })
+        yield* events.publish(Event.Asked, info)
 
-      return yield* Deferred.await(deferred).pipe(
-        // A question whose asker stopped waiting is withdrawn, so clients stop showing it.
-        Effect.onInterrupt(() =>
-          pending.has(id) ? events.publish(Event.Rejected, { sessionID: info.sessionID, requestID: id }) : Effect.void,
-        ),
-        Effect.ensuring(
-          Effect.sync(() => {
-            pending.delete(id)
-          }),
-        ),
-      )
-    })
+        return yield* Deferred.await(deferred).pipe(
+          // A question whose asker stopped waiting is withdrawn, so clients stop showing it.
+          Effect.onInterrupt(() =>
+            pending.has(id)
+              ? events.publish(Event.Rejected, { sessionID: info.sessionID, requestID: id })
+              : Effect.void,
+          ),
+          Effect.ensuring(
+            Effect.sync(() => {
+              pending.delete(id)
+            }),
+          ),
+        )
+      },
+      (effect, input) => TaskPlace.atHome(input.sessionID)(effect),
+    )
 
     const reply = Effect.fn("Question.reply")(function* (input: {
       requestID: QuestionID

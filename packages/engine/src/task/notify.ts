@@ -5,6 +5,7 @@ import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { TaskSize } from "@vectordevai/core/task-size"
 import type { BrainSchema } from "@vectordevai/core/brain/schema"
 import { BackgroundJob } from "@/background/job"
+import { TaskPlace } from "./place"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -305,7 +306,7 @@ const layer = Layer.effect(
     // its whole hold for that job's note too.
     const siblings = Effect.fnUntraced(function* (parentID: SessionID, window: Window) {
       const held = new Set(window.pending.flatMap(({ note }) => [note.taskID, note.shellID].filter(Boolean)))
-      return (yield* background.list()).filter(
+      return (yield* background.list().pipe(TaskPlace.within(parentID))).filter(
         (job) =>
           job.status === "running" &&
           job.metadata?.parentSessionId === parentID &&
@@ -406,7 +407,8 @@ const layer = Layer.effect(
       const claimed: SessionID[] = []
       const sent = (yield* Effect.forEach(kept, (item) => {
         const { note } = item
-        if (note.kind !== "result" || !note.taskID || !note.launchID || !final(note.state)) return Effect.succeed([item])
+        if (note.kind !== "result" || !note.taskID || !note.launchID || !final(note.state))
+          return Effect.succeed([item])
         const taskID = note.taskID
         return SubagentLifecycle.claimNotification(sessions, database, taskID, note.attempt, messageID, {
           stale: note.stale,
@@ -447,7 +449,9 @@ const layer = Layer.effect(
           })),
         })
         .pipe(
-          Effect.onError(() => SubagentLifecycle.releaseNotifications(sessions, database, parentID, messageID, claimed)),
+          Effect.onError(() =>
+            SubagentLifecycle.releaseNotifications(sessions, database, parentID, messageID, claimed),
+          ),
           Effect.catchCause((cause) =>
             Cause.hasInterrupts(cause)
               ? Effect.void
@@ -475,7 +479,14 @@ const layer = Layer.effect(
       }),
     )
 
-    const enqueue = Effect.fn("TaskNotify.enqueue")(function* (input: {
+    const within = <A, E, R>(parentID: SessionID, effect: Effect.Effect<A, E, R>) =>
+      sessions.get(parentID).pipe(
+        Effect.option,
+        Effect.andThen(() => TaskPlace.within(parentID)(effect)),
+      )
+
+    const enqueue: Interface["enqueue"] = (input) => within(input.parentID, enqueueHere(input))
+    const enqueueHere = Effect.fn("TaskNotify.enqueue")(function* (input: {
       parentID: SessionID
       note: Note
       ops: TaskPromptOps
@@ -496,7 +507,8 @@ const layer = Layer.effect(
       )
     })
 
-    const post: Interface["post"] = Effect.fn("TaskNotify.post")(function* (input) {
+    const post: Interface["post"] = (input) => within(input.parentID, postHere(input))
+    const postHere: Interface["post"] = Effect.fn("TaskNotify.post")(function* (input) {
       if (input.notes.length === 0) return
       const parent = yield* sessions.get(input.parentID).pipe(Effect.option)
       const pending = input.notes.map((note) => ({ note, ops: input.ops, agent: input.agent, variant: input.variant }))
@@ -511,7 +523,8 @@ const layer = Layer.effect(
       )
     })
 
-    const result = Effect.fn("TaskNotify.result")(function* (input: ResultInput) {
+    const result: Interface["result"] = (input) => within(input.parentID, resultHere(input))
+    const resultHere = Effect.fn("TaskNotify.result")(function* (input: ResultInput) {
       yield* Effect.gen(function* () {
         if (SubagentLifecycle.read(yield* sessions.get(input.taskID))?.attempt !== input.attempt) return
         const parent = yield* unreverted(input.parentID, 1_000)
@@ -619,7 +632,8 @@ const layer = Layer.effect(
       })
     })
 
-    const watch = Effect.fn("TaskNotify.watch")(function* (input: WatchInput) {
+    const watch: Interface["watch"] = (input) => within(input.parentID, watchHere(input))
+    const watchHere = Effect.fn("TaskNotify.watch")(function* (input: WatchInput) {
       yield* background.wait({ id: input.jobID }).pipe(
         Effect.flatMap((waited) => settled(input, waited.info)),
         Effect.catchCause((cause) =>

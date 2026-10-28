@@ -98,6 +98,8 @@ import { SessionSkillLearn } from "./skill-learn"
 import { SessionWorkflow } from "./workflow"
 import { LearnedSkill } from "@/skill/learned"
 import { BackgroundJob } from "@/background/job"
+import { TaskPlace } from "@/task/place"
+import { TaskJobs } from "@/task/jobs"
 import { parseJudgeVerdict } from "./judge-verdict"
 import { isRecord } from "@/util/record"
 import { ResearchRun } from "@/tool/research-run"
@@ -379,16 +381,32 @@ const layer = Layer.effect(
       } satisfies TaskPromptOps
     })
 
-    const cancel = Effect.fn("SessionPrompt.cancel")(function* (sessionID: SessionID) {
+    const within = <A, E, R>(sessionID: SessionID, effect: Effect.Effect<A, E, R>) =>
+      sessions.get(sessionID).pipe(
+        Effect.orDie,
+        Effect.andThen(() => TaskPlace.within(sessionID)(effect)),
+      )
+
+    const cancel: Interface["cancel"] = (sessionID) =>
+      sessions.get(sessionID).pipe(
+        Effect.option,
+        Effect.andThen(() => TaskPlace.within(sessionID)(cancelHere(sessionID))),
+      )
+    const cancelHere = Effect.fn("SessionPrompt.cancel")(function* (sessionID: SessionID) {
       yield* Effect.logInfo("cancel", { "session.id": sessionID })
       yield* state.cancel(sessionID)
       // A tool waiting on the user runs outside the stopped loop, so its request is answered here: rejecting it ends
       // the wait, stops the tool from running if approved later, and tells every client to drop the prompt.
-      const asked = (yield* permission.list()).find((request) => request.sessionID === sessionID)
-      if (asked) yield* permission.reply({ requestID: asked.id, reply: "reject" }).pipe(Effect.ignore)
+      const asked = (yield* permission.list().pipe(TaskPlace.atHome(sessionID))).find(
+        (request) => request.sessionID === sessionID,
+      )
+      if (asked)
+        yield* permission
+          .reply({ requestID: asked.id, reply: "reject" })
+          .pipe(TaskPlace.atHome(sessionID), Effect.ignore)
       yield* Effect.forEach(
-        (yield* question.list()).filter((request) => request.sessionID === sessionID),
-        (request) => question.reject(request.id).pipe(Effect.ignore),
+        (yield* question.list().pipe(TaskPlace.atHome(sessionID))).filter((request) => request.sessionID === sessionID),
+        (request) => question.reject(request.id).pipe(TaskPlace.atHome(sessionID), Effect.ignore),
         { discard: true },
       )
     })
@@ -1981,7 +1999,8 @@ const layer = Layer.effect(
       return { info, parts }
     }, Effect.scoped)
 
-    const prompt = Effect.fn("SessionPrompt.prompt")(function* (input: PromptInput, options?: PromptOptions) {
+    const prompt: Interface["prompt"] = (input, options) => within(input.sessionID, promptHere(input, options))
+    const promptHere = Effect.fn("SessionPrompt.prompt")(function* (input: PromptInput, options?: PromptOptions) {
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       // Read before the message exists: a prompt sent while a run is going joins that run.
       const joined = (yield* status.get(input.sessionID)).type !== "idle"
@@ -3540,7 +3559,9 @@ const layer = Layer.effect(
           if (record.status !== "running" && record.status !== "queued")
             return record.notification && record.notification.messageID === undefined ? [item] : []
           if (SubagentLifecycle.localLiveness(record) === "alive") return [item]
-          const live = (yield* jobs.get(child.id)) !== undefined || (yield* status.get(child.id)).type !== "idle"
+          const live =
+            (yield* jobs.get(child.id).pipe(TaskJobs.atLauncher(child))) !== undefined ||
+            (yield* status.get(child.id)).type !== "idle"
           return live ? [item] : []
         }),
       )
@@ -3891,13 +3912,14 @@ const layer = Layer.effect(
       return input.msgs
     })
 
-    const loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts> = Effect.fn("SessionPrompt.loop")(function* (
-      input: LoopInput,
-    ) {
+    const loop: Interface["loop"] = (input) => within(input.sessionID, loopHere(input))
+    const loopHere = Effect.fn("SessionPrompt.loop")(function* (input: LoopInput) {
       return yield* state.ensureRunning(input.sessionID, lastAssistant(input.sessionID), runLoop(input.sessionID))
     })
 
-    const resumeFreeModels = Effect.fn("SessionPrompt.resumeFreeModels")(function* (
+    const resumeFreeModels: Interface["resumeFreeModels"] = (input, options) =>
+      within(input.sessionID, resumeFreeModelsHere(input, options))
+    const resumeFreeModelsHere = Effect.fn("SessionPrompt.resumeFreeModels")(function* (
       input: ResumeFreeModelsInput,
       options?: Pick<PromptOptions, "refuseTrainingFreeModels">,
     ) {
@@ -3978,14 +4000,14 @@ const layer = Layer.effect(
       )
     })
 
-    const shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError> = Effect.fn(
-      "SessionPrompt.shell",
-    )(function* (input: ShellInput) {
+    const shell: Interface["shell"] = (input) => within(input.sessionID, shellHere(input))
+    const shellHere = Effect.fn("SessionPrompt.shell")(function* (input: ShellInput) {
       const ready = yield* Latch.make()
       return yield* state.startShell(input.sessionID, lastAssistant(input.sessionID), shellImpl(input, ready), ready)
     })
 
-    const command = Effect.fn("SessionPrompt.command")(function* (input: CommandInput) {
+    const command: Interface["command"] = (input) => within(input.sessionID, commandHere(input))
+    const commandHere = Effect.fn("SessionPrompt.command")(function* (input: CommandInput) {
       yield* Effect.logInfo("command", {
         "session.id": input.sessionID,
         command: input.command,

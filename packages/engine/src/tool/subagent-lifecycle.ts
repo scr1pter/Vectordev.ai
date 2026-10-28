@@ -337,6 +337,22 @@ export function write(sessions: Session.Interface, sessionID: SessionID, patch: 
   }).pipe(locked(metadataLock))
 }
 
+/** Public metadata replacement cannot forge, remove or race lifecycle-owned subagent fields. */
+export function setPublicMetadata(
+  sessions: Session.Interface,
+  sessionID: SessionID,
+  metadata: Record<string, unknown>,
+) {
+  return Effect.gen(function* () {
+    const current = yield* sessions.get(sessionID)
+    const next = { ...metadata }
+    delete next[METADATA_KEY]
+    if (current.metadata && Object.hasOwn(current.metadata, METADATA_KEY))
+      next[METADATA_KEY] = current.metadata[METADATA_KEY]
+    yield* sessions.setMetadata({ sessionID, metadata: next })
+  }).pipe(locked(metadataLock))
+}
+
 export function update(sessions: Session.Interface, sessionID: SessionID, patch: Partial<SubagentRecord>, attempt?: number) {
   return write(sessions, sessionID, patch, attempt).pipe(
     Effect.catchCause((cause) => Effect.logWarning("subagent lifecycle update failed", { sessionID, cause })),

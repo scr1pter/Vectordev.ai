@@ -1539,12 +1539,20 @@ describe("tool.task", () => {
         pollWithTimeout(
           record(sessionID).pipe(
             Effect.map((value) =>
-              value && typeof value === "object" && "status" in value && value.status === "completed" && "notification" in value
+              value &&
+              typeof value === "object" &&
+              "status" in value &&
+              value.status === "completed" &&
+              "notification" in value &&
+              value.notification &&
+              typeof value.notification === "object" &&
+              "messageID" in value.notification &&
+              typeof value.notification.messageID === "string"
                 ? value
                 : undefined,
             ),
           ),
-          "the first run never settled",
+          "the first run and its independent notification claim never settled",
         )
       const auth = (yield* def.execute(
         { description: "Inspect auth", prompt: "Inspect auth", background: true },

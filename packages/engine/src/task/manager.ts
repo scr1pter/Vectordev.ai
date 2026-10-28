@@ -6,6 +6,8 @@ import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Database } from "@vectordevai/core/database/database"
 import { PartTable } from "@vectordevai/core/session/sql"
 import { BackgroundJob } from "@/background/job"
+import { TaskJobs } from "./jobs"
+import { TaskPlace } from "./place"
 import { Session } from "@/session/session"
 import { SessionStatus } from "@/session/status"
 import { SessionID, MessageID } from "@/session/schema"
@@ -174,7 +176,8 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const scope = yield* Scope.Scope
     const sessions = yield* Session.Service
-    const jobs = yield* BackgroundJob.Service
+    const background = yield* BackgroundJob.Service
+    const jobs = TaskJobs.routed(background, sessions)
     const statuses = yield* SessionStatus.Service
     const permissions = yield* Permission.Service
     const questions = yield* Question.Service
@@ -291,7 +294,10 @@ const layer = Layer.effect(
       const current = SubagentLifecycle.read(session)!
       // A request pending here, or one a record says its child waits on in an engine that still runs it (D.4).
       const pending =
-        [...(yield* permissions.list()), ...(yield* questions.list())].some((item) => item.sessionID === session.id) ||
+        [
+          ...(yield* permissions.list().pipe(TaskPlace.atHome(session.id))),
+          ...(yield* questions.list().pipe(TaskPlace.atHome(session.id))),
+        ].some((item) => item.sessionID === session.id) ||
         (!job && !abandoned && current.waiting !== undefined && SubagentLifecycle.open(current))
       const status: Task.Status =
         abandoned || current.status === "cancelled" || job?.status === "cancelled" || job?.status === "interrupted"
@@ -1307,7 +1313,7 @@ const layer = Layer.effect(
                     }
                   : ran
                 const now = Date.now()
-                const lease = yield* jobs.lease()
+                const lease = yield* TaskJobs.atLauncher(session)(jobs.lease())
                 let queued = admission.waits
                 yield* guard.link(id, root.id, { budget: record.budget, renew: true, delegated })
                 yield* persist(

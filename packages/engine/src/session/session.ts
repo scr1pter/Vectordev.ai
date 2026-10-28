@@ -52,6 +52,10 @@ import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { SessionMessage } from "@vectordevai/schema/session-message"
 import { SessionEvent } from "@vectordevai/schema/session-event"
+import { TaskPlace } from "@/task/place"
+import { TaskJobs } from "@/task/jobs"
+import { InstanceRef } from "@/effect/instance-ref"
+import { SessionCleanup } from "./cleanup"
 
 const parentTitlePrefix = "New session - "
 const childTitlePrefix = "Child session - "
@@ -644,14 +648,17 @@ const layer: Layer.Layer<
       metadata?: typeof Metadata.Type
       permission?: PermissionV1.Ruleset
     }) {
-      const ctx = yield* InstanceState.context
+      const current = yield* InstanceState.context
+      const id = SessionID.descending(input.id)
+      const inherited = input.parentID ? TaskPlace.inherit(id, input.parentID) : undefined
+      const ctx = inherited?.home ?? current
       const result: Info = {
-        id: SessionID.descending(input.id),
+        id,
         slug: Slug.create(),
         version: InstallationVersion,
         projectID: ctx.project.id,
-        directory: input.directory,
-        path: input.path,
+        directory: inherited?.home.directory ?? input.directory,
+        path: inherited ? sessionPath(ctx.worktree, ctx.directory) : input.path,
         workspaceID: input.workspaceID,
         parentID: input.parentID,
         internal: input.internal,
@@ -669,7 +676,9 @@ const layer: Layer.Layer<
       }
       yield* Effect.logInfo("created", result)
 
-      yield* events.publish(SessionV1.Event.Created, { sessionID: result.id, info: result })
+      yield* events
+        .publish(SessionV1.Event.Created, { sessionID: result.id, info: result })
+        .pipe(Effect.onError(() => Effect.sync(() => TaskPlace.drop(result.id))))
 
       return result
     })
@@ -677,7 +686,31 @@ const layer: Layer.Layer<
     const get = Effect.fn("Session.get")(function* (id: SessionID) {
       const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, id)).get().pipe(Effect.orDie)
       if (!row) return yield* Effect.fail(new NotFoundError({ message: `Session not found: ${id}` }))
-      return fromRow(row)
+      const info = fromRow(row)
+      // Reused sessions may predate the runtime map. Recover trusted lineage from rows, never display metadata.
+      if (info.parentID && !TaskPlace.get(info.id)) {
+        const family = [info]
+        const seen = new Set<string>([info.id])
+        for (
+          let parentID: SessionID | undefined = info.parentID;
+          parentID && !seen.has(parentID) && !TaskPlace.get(parentID);
+
+        ) {
+          seen.add(parentID)
+          const parent: SessionRow | undefined = yield* db
+            .select()
+            .from(SessionTable)
+            .where(eq(SessionTable.id, parentID))
+            .get()
+            .pipe(Effect.orDie)
+          if (!parent) break
+          family.push(fromRow(parent))
+          parentID = parent.parent_id ? SessionID.make(parent.parent_id) : undefined
+        }
+        for (const child of family.reverse())
+          if (child.parentID && !TaskPlace.get(child.id)) TaskPlace.inherit(child.id, child.parentID)
+      }
+      return info
     })
 
     const list = Effect.fn("Session.list")(function* (input?: ListInput) {
@@ -833,8 +866,10 @@ const layer: Layer.Layer<
           yield* remove(child.id, options)
         }
 
+        yield* SessionCleanup.run(session)
         yield* events.publish(SessionV1.Event.Deleted, { sessionID, info: session })
         yield* events.remove(sessionID)
+        TaskPlace.drop(sessionID)
       } catch (error) {
         yield* Effect.logError("failed to remove session", { sessionID, error })
       }
@@ -1171,15 +1206,17 @@ const cancelBackgroundJobs = Effect.fn("Session.cancelBackgroundJobs")(function*
   background: BackgroundJob.Interface,
   sessionID: SessionID,
 ) {
-  const jobs = yield* background.list()
+  const jobs = yield* TaskJobs.all(background)
   yield* Effect.forEach(
-    jobs.filter((job) => {
+    jobs.filter(({ info: job }) => {
       if (job.status !== "running") return false
       if (job.id === sessionID) return true
       if (job.metadata?.sessionId === sessionID) return true
       return job.metadata?.parentSessionId === sessionID
     }),
-    (job) => background.cancel(job.id),
+    ({ info, place }) => place
+      ? background.cancel(info.id).pipe(Effect.provideService(InstanceRef, place))
+      : background.cancel(info.id),
     { concurrency: "unbounded", discard: true },
   )
 })

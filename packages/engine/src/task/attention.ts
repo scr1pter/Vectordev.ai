@@ -4,6 +4,7 @@ import type { EventV2 } from "@vectordevai/core/event"
 import { TaskSize } from "@vectordevai/core/task-size"
 import type { SubagentRecord } from "@/agent/subagent-kind"
 import { BackgroundJob } from "@/background/job"
+import { TaskPlace } from "./place"
 import { Config } from "@/config/config"
 import { InstanceState } from "@/effect/instance-state"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -201,7 +202,11 @@ const layer = Layer.effect(
         // Only a running subagent's own asks: never the root's, and never an internal session's.
         if (!child || child.internal || !child.parentID) return
         const record = SubagentLifecycle.read(child)
-        if (record?.status !== "running" || (yield* jobs.get(child.id))?.status !== "running") return
+        if (
+          record?.status !== "running" ||
+          (yield* jobs.get(child.id).pipe(TaskPlace.within(child.parentID)))?.status !== "running"
+        )
+          return
         // Its answer may already have arrived on the other stream.
         if (!(yield* pending(input.kind, input.requestID))) return
         const now = yield* Clock.currentTimeMillis
