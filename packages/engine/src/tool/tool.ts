@@ -45,6 +45,8 @@ export type Context<M extends Metadata = Metadata> = {
   /** Assignment scope supplied by the session runtime, never by model arguments. */
   ownedPaths?: readonly string[]
   getOwnedPaths?: () => Effect.Effect<readonly string[] | undefined>
+  /** Runtime ownership check, repeated inside file locks. */
+  assertWritable?(input: { files: readonly string[]; via?: "shell" | "file" }): Effect.Effect<void>
   messages: SessionV1.WithParts[]
   /**
    * The whole conversation, with what a compaction folded away: the messages the session stored, then this step's.

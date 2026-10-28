@@ -140,6 +140,7 @@ export const EditTool = Tool.define(
                 yield* check(current)
                 change = derive(current)
               }
+              if (ctx.assertWritable) yield* ctx.assertWritable({ files: [filePath] })
               yield* FileLock.write(afs, filePath, Bom.join(change.contentNew, change.bom))
               let written = change.contentNew
               if (yield* format.file(filePath)) {
@@ -710,7 +711,9 @@ export function replace(content: string, oldString: string, newString: string, r
     const matches = [...spans].map((span) => ({ span, count: content.split(span).length - 1 }))
     const total = matches.reduce((sum, match) => sum + match.count, 0)
     if (total > 1 && !replaceAll) {
-      throw new Error("Found multiple matches for oldString. Provide more surrounding context to make the match unique.")
+      throw new Error(
+        "Found multiple matches for oldString. Provide more surrounding context to make the match unique.",
+      )
     }
 
     // A fuzzy replacer hands back a span taken from the file, which can cover

@@ -14,6 +14,7 @@ import { Truncate } from "@/tool/truncate"
 import { TestInstance } from "../fixture/fixture"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { pollWithTimeout, testEffect } from "../lib/effect"
+import { TaskClaims } from "@/task/claims"
 import { FileState } from "../../src/tool/file-state"
 import { Permission } from "../../src/permission"
 import { Session } from "@/session/session"
@@ -665,6 +666,12 @@ describe("tool.apply_patch in a session", () => {
           title: "Tidy notes",
           permission: [{ permission: "*", pattern: "*", action: "allow" }],
         })
+        const claim = yield* TaskClaims.provisional({
+          tree: dir, directory: dir, parentSessionID: child.parentID!, taskID: child.id,
+          title: "Tidy notes", paths: [],
+        })
+        TaskClaims.bind(claim, child.id)
+        yield* Effect.addFinalizer(() => Effect.sync(() => TaskClaims.release(claim)))
         yield* llm.tool("read", { filePath: notes })
         yield* llm.tool("apply_patch", {
           patchText:

@@ -49,18 +49,7 @@ const metadataLock = Semaphore.makeUnsafe(1)
 // Read-modify-write of a stored, settled tool part (patchPart, patchEntry, settleOrphanPart).
 const partLock = Semaphore.makeUnsafe(1)
 
-/** Owned paths a task call holds before its job lists them, or that a follow-up hands a task already running. */
-export type Claim = {
-  parentSessionID: SessionID
-  taskID?: string
-  title: string
-  paths: string[]
-  /** Held for a running task until it settles, rather than for the length of one call. */
-  held?: boolean
-}
-// Checked and added under controlLock. Sibling calls in one message run concurrently, so the job list alone cannot see
-// each other's paths. Session IDs are unique, so one set serves every instance.
-export const claims = new Set<Claim>()
+export { claims, type Claim } from "@/task/claims"
 
 /** The reason an interrupted helper's record carries. */
 export const INTERRUPTED_REASON = "Interrupted when Vector stopped (an update, restart or crash); partial work was kept."

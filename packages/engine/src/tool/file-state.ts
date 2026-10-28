@@ -5,6 +5,7 @@ import { open } from "node:fs/promises"
 import { Effect, Schema } from "effect"
 import { TaskSize } from "@vectordevai/core/task-size"
 import type { SessionV1 } from "@vectordevai/core/v1/session"
+import { TaskClaims } from "@/task/claims"
 import { FileLock } from "./file-lock"
 
 /**
@@ -126,6 +127,7 @@ export function record(sessionID: string, file: string, stamp: Stamp | undefined
 export function wrote(sessionID: string, file: string, stamp: Stamp | undefined, title?: string): Entry {
   const entry: Entry = { file: FileLock.key(file), at: tick(), ...(stamp ? { stamp } : {}) }
   put(sessionID, entry)
+  TaskClaims.touch(sessionID, file)
   bump(writers, entry.file, { sessionID, ...(title ? { title } : {}), at: entry.at, deleted: !stamp }, limits.writers)
   return entry
 }

@@ -22,6 +22,8 @@ import { SessionStatus } from "@/session/status"
 
 import { TaskTool, type BatchMetadata, type TaskPromptOps } from "../../src/tool/task"
 import { TaskNotify } from "@/task/notify"
+import { TaskClaims } from "@/task/claims"
+import { InstanceState } from "@/effect/instance-state"
 import { TaskLimits } from "@/task/limits"
 import { TaskManager } from "@/task/manager"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
@@ -5563,3 +5565,34 @@ describe("task resume gate", () => {
     }),
   )
 })
+
+
+background.instance("a refused late extension starts a fresh job with fresh ownership claims", () => Effect.gen(function* () {
+  const jobs = yield* BackgroundJob.Service
+  const instance = yield* InstanceState.context
+  const seeded = yield* seed()
+  const wrapped = BackgroundJob.Service.of({
+    ...jobs,
+    extend: (input) => jobs.cancel(input.id).pipe(Effect.as(false)),
+  })
+  const definition = yield* singleTaskDefinition(yield* TaskTool.pipe(Effect.provideService(BackgroundJob.Service, wrapped)))
+  const started = yield* definition.execute({
+    description: "Initial owner", prompt: "Own src", owned_paths: ["src"], background: true,
+  }, taskContext({ sessionID: seeded.chat.id, messageID: seeded.assistant.id,
+    promptOps: { ...stubOps(), prompt: () => Effect.never } }))
+  const gate = yield* Deferred.make<void>()
+  const resumed = yield* definition.execute({
+    description: "Resume owner", prompt: "Continue src", task_id: started.metadata.sessionId,
+    owned_paths: ["src"], background: true,
+  }, taskContext({ sessionID: seeded.chat.id, messageID: seeded.assistant.id,
+    promptOps: { ...stubOps(), prompt: (input) => Deferred.await(gate).pipe(Effect.as(reply(input, "done"))) } }))
+  const id = resumed.metadata.sessionId
+  expect((yield* jobs.get(id))?.status).toBe("running")
+  expect(TaskClaims.forTask(id)).toHaveLength(1)
+  expect(TaskClaims.conflicts({ tree: instance.worktree, sessionID: seeded.chat.id,
+    file: path.join(instance.directory, "src/file.ts") })[0]?.entry.taskID).toBe(id)
+  yield* Deferred.succeed(gate, undefined)
+  yield* jobs.wait({ id })
+  yield* pollWithTimeout(Effect.sync(() => TaskClaims.forTask(id).length === 0 ? true : undefined),
+    "ownership is released after the new job settles")
+}))

@@ -1,3 +1,5 @@
+import { TaskClaims } from "@/task/claims"
+import { assertWritable } from "@/tool/owned-path"
 import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
 import { Agent } from "@/agent/agent"
 import { SessionV1 } from "@vectordevai/core/v1/session"
@@ -128,13 +130,18 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
       // Names this subagent to a session whose edit its write makes stale (FileState.verify).
       ...(subagentTitle ? { subagentTitle } : {}),
     },
-    ownedPaths: SubagentLifecycle.read(input.session)?.ownedPaths,
+    ownedPaths: TaskClaims.pathsFor(input.session.id),
     getOwnedPaths: () =>
-      sessions.get(input.session.id).pipe(
-        Effect.map(
-          (session) => SubagentLifecycle.read(session)?.ownedPaths ?? SubagentLifecycle.read(input.session)?.ownedPaths,
-        ),
-        Effect.orDie,
+      Effect.sync(() => TaskClaims.trustedPaths(input.session.id, input.session.parentID !== undefined)),
+    assertWritable: (request) =>
+      assertWritable(
+        {
+          sessionID: input.session.id,
+          parentID: input.session.parentID,
+          getOwnedPaths: () =>
+            Effect.sync(() => TaskClaims.trustedPaths(input.session.id, input.session.parentID !== undefined)),
+        },
+        request,
       ),
     agent: input.agent.name,
     messages: input.messages,
@@ -170,6 +177,18 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
           sessionID: input.session.id,
           tool: { messageID: input.processor.message.id, callID: options.toolCallId },
           ruleset: Permission.merge(input.agent.permission, input.session.permission ?? []),
+        }
+        if (req.permission === "edit" && !req.metadata?.command) {
+          const instance = yield* InstanceState.context
+          yield* assertWritable(
+            {
+              sessionID: input.session.id,
+              parentID: input.session.parentID,
+              getOwnedPaths: () =>
+                Effect.sync(() => TaskClaims.trustedPaths(input.session.id, input.session.parentID !== undefined)),
+            },
+            { files: req.patterns.map((pattern) => path.resolve(instance.worktree, pattern)) },
+          )
         }
         yield* permission.ask({ ...req, ...request })
         if (req.permission !== "edit") return

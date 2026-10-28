@@ -277,6 +277,11 @@ export const ApplyPatchTool = Tool.define(
             }
           }
 
+          if (ctx.assertWritable)
+            yield* ctx.assertWritable({
+              files: fileChanges.flatMap((change) => [change.filePath, ...(change.movePath ? [change.movePath] : [])]),
+            })
+
           for (const change of fileChanges) {
             const edited = change.type === "delete" ? undefined : (change.movePath ?? change.filePath)
             switch (change.type) {

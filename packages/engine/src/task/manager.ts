@@ -1,4 +1,5 @@
-import { Context, Effect, Layer, Option, Schema } from "effect"
+import path from "node:path"
+import { Context, Effect, Layer, Option, Schema, Scope } from "effect"
 import { and, desc, eq, sql } from "drizzle-orm"
 import { Task } from "@vectordevai/schema/task"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
@@ -28,6 +29,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { disposing } from "@/effect/instance-registry"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { DesktopTasks } from "./desktop"
+import { TaskClaims } from "./claims"
 import { TaskLimits } from "./limits"
 import { TaskNotify } from "./notify"
 import { TaskSignals } from "./signals"
@@ -152,8 +154,6 @@ const ENDED_REPORT = "This run has ended; no report was sent."
 const MAX_RESUME = 32
 // Research agents (Agent.RESEARCH, RESEARCHER and RESEARCH_JUDGE) start from a checked brief, which a resume would skip.
 const RESEARCH_AGENTS = new Set(["research", "researcher", "research-judge"])
-const overlaps = (a: string, b: string) =>
-  a === "." || b === "." || a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`)
 // A record whose engine is gone, found before TaskRecovery reported it: why it stopped is unknown (D.3).
 const abandon = (at: number) => ({
   status: "cancelled" as const,
@@ -172,6 +172,7 @@ const recentActiveFirst = (left: { status: string; startedAt: number }, right: {
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
+    const scope = yield* Scope.Scope
     const sessions = yield* Session.Service
     const jobs = yield* BackgroundJob.Service
     const statuses = yield* SessionStatus.Service
@@ -1235,37 +1236,30 @@ const layer = Layer.effect(
           Effect.gen(function* () {
             const checked = yield* Effect.forEach(ids, (id) => resumable(root, id, input.origin, text))
             const resuming = new Set<string>(checked.map((item) => item.session.id))
-            // Owned paths stay exclusive among the conversation's active children (check 11).
-            const running = (yield* jobs.list()).filter((job) => job.type === "task" && job.status === "running")
-            const active = [
-              ...running
-                .filter((job) => job.metadata?.parentSessionId === root.id && !resuming.has(job.id))
-                .map((job) => ({
-                  label: job.title ?? job.id,
-                  paths: Array.isArray(job.metadata?.ownedPaths)
-                    ? job.metadata.ownedPaths.filter((item): item is string => typeof item === "string")
-                    : [],
-                })),
-              ...[...SubagentLifecycle.claims]
-                .filter(
-                  (claim) =>
-                    claim.parentSessionID === root.id &&
-                    !(claim.taskID && resuming.has(claim.taskID)) &&
-                    (!claim.held || running.some((job) => job.id === claim.taskID)),
-                )
-                .map((claim) => ({ label: claim.title, paths: claim.paths })),
-            ]
+            const instance = yield* InstanceState.context
             const conflicts = new Set(
-              checked.flatMap(({ record }) =>
-                (record.ownedPaths ?? []).flatMap((owned) =>
-                  active.flatMap((item) =>
-                    item.paths
-                      .filter((path) => overlaps(owned, path))
-                      .map((path) => `${item.label}: ${owned} overlaps ${path}`),
-                  ),
-                ),
+              checked.flatMap(({ record, session }) =>
+                TaskClaims.overlaps({
+                  tree: instance.worktree,
+                  directory,
+                  parentSessionID: root.id,
+                  taskID: session.id,
+                  paths: record.ownedPaths ?? [],
+                  except: resuming,
+                }),
               ),
             )
+            // Resuming siblings must not acquire overlapping assignments in the same batch either.
+            for (const [index, item] of checked.entries()) {
+              for (const other of checked.slice(0, index)) {
+                for (const owned of item.record.ownedPaths ?? []) {
+                  for (const existing of other.record.ownedPaths ?? []) {
+                    if (TaskClaims.pathsOverlap(path.resolve(directory, owned), path.resolve(directory, existing)))
+                      conflicts.add(`${other.record.title}: ${owned} overlaps ${existing}`)
+                  }
+                }
+              }
+            }
             if (conflicts.size > 0)
               return yield* new Error({
                 code: "conflict",
@@ -1419,40 +1413,67 @@ const layer = Layer.effect(
                     ),
                   ),
                 )
+                const ownership = yield* TaskClaims.scoped({
+                  tree: instance.worktree,
+                  directory,
+                  parentSessionID: root.id,
+                  taskID: id,
+                  title: record.title,
+                  paths: record.ownedPaths ?? [],
+                  writes: !["explore", "review", "judge", "security"].includes(record.agent),
+                })
+                const claim = ownership.claim
+                TaskClaims.bind(claim, id)
                 yield* limits.bind(admission, id)
                 // A fork's prefix stays while it runs (5.E.3).
                 if (record.fork) yield* forks.hold(MessageID.make(record.fork.point), id)
-                yield* jobs.start({
-                  id,
-                  type: "task",
-                  title: record.title,
-                  metadata: {
-                    parentSessionId: root.id,
-                    sessionId: id,
-                    projectId: root.projectID,
-                    directory: root.directory,
-                    model: record.model,
-                    kind: record.kind,
-                    agent: record.agent,
-                    custom: record.custom,
+                yield* jobs
+                  .start({
+                    id,
+                    type: "task",
                     title: record.title,
-                    parentMessageId: record.parentMessageID,
-                    startedAt: now,
-                    attempt,
-                    ...(record.ownedPaths?.length ? { ownedPaths: record.ownedPaths } : {}),
-                    background: true,
-                  },
-                  // A row in vector.db, so a restart can tell the parent this child was interrupted again.
-                  durable: { parentSessionID: root.id, sessionID: id, directory, attempt },
-                  run: limits.run({ conversationID, childID: id, origin: "resume", waiting }, work).pipe(
-                    Effect.onInterrupt(() => ops.cancel(id)),
-                    Effect.flatMap((ran) =>
-                      typeof ran === "string" ? Effect.succeed(ran) : SubagentLifecycle.settleRun(ran),
+                    metadata: {
+                      parentSessionId: root.id,
+                      sessionId: id,
+                      projectId: root.projectID,
+                      directory: root.directory,
+                      model: record.model,
+                      kind: record.kind,
+                      agent: record.agent,
+                      custom: record.custom,
+                      title: record.title,
+                      parentMessageId: record.parentMessageID,
+                      startedAt: now,
+                      attempt,
+                      ...(record.ownedPaths?.length ? { ownedPaths: record.ownedPaths } : {}),
+                      background: true,
+                    },
+                    // A row in vector.db, so a restart can tell the parent this child was interrupted again.
+                    durable: { parentSessionID: root.id, sessionID: id, directory, attempt },
+                    run: limits.run({ conversationID, childID: id, origin: "resume", waiting }, work).pipe(
+                      Effect.onInterrupt(() => ops.cancel(id)),
+                      Effect.flatMap((ran) =>
+                        typeof ran === "string" ? Effect.succeed(ran) : SubagentLifecycle.settleRun(ran),
+                      ),
+                      Effect.ensuring(limits.release(admission, id)),
+                      Effect.ensuring(record.fork ? forks.release(id) : Effect.void),
                     ),
-                    Effect.ensuring(limits.release(admission, id)),
-                    Effect.ensuring(record.fork ? forks.release(id) : Effect.void),
-                  ),
-                })
+                  })
+                  .pipe(
+                    Effect.tap(() =>
+                      Effect.gen(function* () {
+                        yield* jobs
+                          .wait({ id })
+                          .pipe(
+                            Effect.ensuring(Effect.sync(() => TaskClaims.release(claim))),
+                            Effect.ignore,
+                            Effect.forkIn(scope, { startImmediately: true }),
+                          )
+                        ownership.started = true
+                      }),
+                    ),
+                    Effect.uninterruptible,
+                  )
                 yield* notify.watch({
                   jobID: id,
                   parentID: root.id,

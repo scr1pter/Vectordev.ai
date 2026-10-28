@@ -83,6 +83,7 @@ export const WriteTool = Tool.define(
               const current = yield* FileState.observe(filepath)
               if (!FileState.same(current?.stamp, before?.stamp)) yield* check(current)
               const bom = (current ? Bom.decode(current.bytes).bom : false) || next.bom
+              if (ctx.assertWritable) yield* ctx.assertWritable({ files: [filepath] })
               yield* FileLock.write(fs, filepath, Bom.join(contentNew, bom))
               if (yield* format.file(filepath)) {
                 yield* Bom.syncFile(fs, filepath, bom)

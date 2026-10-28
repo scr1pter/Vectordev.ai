@@ -45,6 +45,7 @@ import { isFreeModelRef } from "@vectordevai/schema/free-model"
 import { SessionMemory } from "../session/memory"
 import { ResearchRun } from "./research-run"
 import { TaskNotify } from "@/task/notify"
+import { TaskClaims } from "@/task/claims"
 import { TaskLimits } from "@/task/limits"
 import { TaskSize } from "@vectordevai/core/task-size"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
@@ -114,12 +115,6 @@ function normalizedPath(value: string) {
     throw new Error(`Subagent owned path cannot leave the repository: ${value}`)
   }
   return normalized.replace(/\/$/, "")
-}
-
-function pathsOverlap(a: string, b: string) {
-  if (a === "." || b === ".") return true
-  if (a === b) return true
-  return a.startsWith(`${b}/`) || b.startsWith(`${a}/`)
 }
 
 function dependencyIDs(job: BackgroundJob.Info) {
@@ -406,7 +401,6 @@ export const TaskTool = Tool.define(
       }
     })
     // Ownership claimed by task calls that have not registered their job yet.
-    const claims = SubagentLifecycle.claims
     const claimLock = SubagentLifecycle.controlLock
     // A follow-up can add prerequisites without replacing the job's original metadata. Keep those edges visible
     // until its run settles, so another follow-up cannot close a cycle through an otherwise invisible edge.
@@ -690,7 +684,7 @@ export const TaskTool = Tool.define(
                 FSUtil.realpath(path.resolve(instance.directory, owned)),
               ) || ".",
             )
-          const inherited = (SubagentLifecycle.read(parent)?.ownedPaths ?? []).map(canonical)
+          const inherited = (TaskClaims.trustedPaths(parent.id, parent.parentID !== undefined) ?? []).map(canonical)
           const requested = [...new Set(params.owned_paths?.map(normalizedPath).filter(Boolean).map(canonical) ?? [])]
           if (
             inherited.length &&
@@ -706,73 +700,61 @@ export const TaskTool = Tool.define(
         },
         catch: (error) => (error instanceof Error ? error : new Error(String(error))),
       })
-      const reserved: SubagentLifecycle.Claim[] = []
-      const release = () => Effect.sync(() => reserved.forEach((claim) => claims.delete(claim)))
-      if (ownedPaths.length > 0) {
-        const conflicts = yield* SubagentLifecycle.locked(claimLock)(
-          Effect.gen(function* () {
-            const running = (yield* background.list()).filter((job) => job.status === "running")
-            const active = [
-              ...running
-                .filter(
-                  (job) =>
-                    job.type === id &&
-                    job.status === "running" &&
-                    job.id !== params.task_id &&
-                    !dependencies.includes(job.id) &&
-                    job.metadata?.parentSessionId === ctx.sessionID,
-                )
-                .map((job) => ({
-                  label: job.title ?? job.id,
-                  paths: Array.isArray(job.metadata?.ownedPaths)
-                    ? job.metadata.ownedPaths.filter((item): item is string => typeof item === "string")
-                    : [],
-                })),
-              ...[...claims]
-                .filter(
-                  (claim) =>
-                    claim.parentSessionID === ctx.sessionID &&
-                    (!claim.taskID || (claim.taskID !== params.task_id && !dependencies.includes(claim.taskID))) &&
-                    // A claim held for a running task lapses with that task, even if its release never ran (an
-                    // instance disposed mid-task closes its jobs without settling them).
-                    (!claim.held || running.some((job) => job.id === claim.taskID)),
-                )
-                .map((claim) => ({ label: claim.title, paths: claim.paths })),
-            ]
-            const found = [
-              ...new Set(
-                active.flatMap((item) =>
-                  ownedPaths.flatMap((owned) =>
-                    item.paths
-                      .map(normalizedPath)
-                      .filter((existing) => existing && pathsOverlap(owned, existing))
-                      .map((existing) => `${item.label}: ${owned} overlaps ${existing}`),
-                  ),
-                ),
-              ),
-            ]
-            // Held until this call returns; by then its job, if it started, carries the paths itself.
-            if (found.length === 0) {
-              const claim = { parentSessionID: ctx.sessionID, taskID: params.task_id, title, paths: ownedPaths }
-              claims.add(claim)
-              reserved.push(claim)
-              yield* Effect.addFinalizer(() => Effect.sync(() => claims.delete(claim)))
-            }
-            return found
+      const reserved: TaskClaims.Claim[] = []
+      const reserveOwnership = () =>
+        TaskClaims.provisional({
+          tree: instance.worktree,
+          directory: instance.directory,
+          parentSessionID: ctx.sessionID,
+          taskID: params.task_id,
+          title,
+          paths: ownedPaths,
+          writes:
+            !researchAgents.has(subagentType) && !["explore", "review", "judge", "security"].includes(subagentType),
+        })
+      const watchOwnership = (jobID: string) => {
+        const held = [...reserved]
+        return background
+          .wait({ id: jobID })
+          .pipe(
+            Effect.ensuring(Effect.sync(() => held.forEach(TaskClaims.release))),
+            Effect.ignore,
+            Effect.forkIn(scope, { startImmediately: true }),
+          )
+      }
+      // Unbound reservations belong to this call; bound claims belong to the job, which releases them on settle.
+      const release = () =>
+        Effect.sync(() =>
+          reserved.forEach((claim) => {
+            if (!claim.held) TaskClaims.release(claim)
           }),
         )
-        if (conflicts.length > 0) {
-          return yield* Effect.fail(
-            new Error(
-              [
-                "Subagent ownership overlaps active sibling work.",
-                ...conflicts.map((item) => `- ${item}`),
-                "Wait for that task, add it to depends_on, or assign non-overlapping paths.",
-              ].join("\n"),
-            ),
-          )
-        }
-      }
+      const conflicts = yield* SubagentLifecycle.locked(claimLock)(
+        Effect.gen(function* () {
+          const found = TaskClaims.overlaps({
+            tree: instance.worktree,
+            directory: instance.directory,
+            parentSessionID: ctx.sessionID,
+            taskID: params.task_id,
+            paths: ownedPaths,
+            except: new Set(dependencies),
+          })
+          if (found.length) return found
+          const claim = yield* reserveOwnership()
+          reserved.push(claim)
+          return found
+        }),
+      )
+      if (conflicts.length > 0)
+        return yield* Effect.fail(
+          new Error(
+            [
+              "Subagent ownership overlaps active sibling work.",
+              ...conflicts.map((item) => `- ${item}`),
+              "Wait for that task, add it to depends_on, or assign non-overlapping paths.",
+            ].join("\n"),
+          ),
+        )
 
       const { root, depth } = yield* lineage(parent)
       const resumed = session && SubagentLifecycle.read(session)
@@ -1423,25 +1405,6 @@ export const TaskTool = Tool.define(
 
         // This call adds to a run that is still working; its card settles when that run does.
         const joined = Effect.fn("TaskTool.joined")(function* (added: "delivered" | "queued") {
-          // The job still lists only the paths it started with, so paths this update hands the running task stay
-          // reserved against sibling launches until that run settles.
-          if (ownedPaths.length > 0) {
-            const claim = {
-              parentSessionID: ctx.sessionID,
-              taskID: nextSession.id,
-              title,
-              paths: ownedPaths,
-              held: true,
-            }
-            claims.add(claim)
-            yield* background
-              .wait({ id: nextSession.id })
-              .pipe(
-                Effect.ensuring(Effect.sync(() => claims.delete(claim))),
-                Effect.ignore,
-                Effect.forkIn(scope, { startImmediately: true }),
-              )
-          }
           yield* background.wait({ id: nextSession.id }).pipe(
             Effect.flatMap((waited) =>
               // An interrupted run (Vector going away) is TaskRecovery's to settle (D.3).
@@ -1473,7 +1436,7 @@ export const TaskTool = Tool.define(
               text: added === "delivered" ? BACKGROUND_DELIVERED : BACKGROUND_QUEUED,
             },
           )
-        })
+        }, Effect.uninterruptible)
         // The child's loop runs in its own scope, so interrupting the job's fiber alone would leave it calling the
         // provider after a stop; every run, first or added, stops the child when interrupted. The loop returns normally
         // when the child was stopped or failed, so the job settles from the child's last message, not as completed.
@@ -1541,14 +1504,26 @@ export const TaskTool = Tool.define(
                 },
                 assignment?.attempt,
               )
+            reserved.forEach((entry) => TaskClaims.bind(entry, nextSession.id))
             const added = yield* background
               .extend({
                 id: nextSession.id,
                 run: guardedRun().pipe(Effect.interruptible, Effect.ensuring(release)),
                 concurrent: busy,
               })
-              .pipe(Effect.onExit((exit) => (Exit.isSuccess(exit) && exit.value ? Effect.void : release)))
+              .pipe(
+                Effect.onExit((exit) =>
+                  Exit.isFailure(exit)
+                    ? Effect.all([release, Effect.sync(() => reserved.forEach(TaskClaims.release))], { discard: true })
+                    : Effect.void,
+                ),
+              )
             if (!added) {
+              yield* release
+              // The old job ended while this call prepared its extension. Its reservation cannot be reused for
+              // the new job: a release belongs to one job lifetime, so fallthrough gets a fresh scoped claim.
+              reserved.forEach(TaskClaims.release)
+              reserved.splice(0, reserved.length, yield* reserveOwnership())
               joinedAttempt = undefined
               if (ownedPaths.length || schema)
                 yield* SubagentLifecycle.write(
@@ -1562,6 +1537,7 @@ export const TaskTool = Tool.define(
                 )
               return undefined
             }
+            yield* watchOwnership(nextSession.id)
             // A queued extension may be cancelled before its run is entered, so its run finalizer cannot release it.
             if (dependencies.length > 0)
               yield* background
@@ -1647,36 +1623,45 @@ export const TaskTool = Tool.define(
             // A fork's prefix stays while its job runs, before it waits on anything (5.E.3).
             if (record.fork && Option.isSome(forks))
               yield* forks.value.hold(MessageID.make(record.fork.point), nextSession.id)
-            return yield* background.start({
-              id: nextSession.id,
-              type: id,
-              title,
-              metadata,
-              // A row in vector.db, so a restart can tell the parent this child was interrupted (D.3).
-              durable: {
-                parentSessionID: ctx.sessionID,
-                sessionID: nextSession.id,
-                directory: instance.directory,
-                attempt,
-              },
-              // Move to background frees the call from a single child or from each entry of a batch; a promoted entry
-              // reports on its own (5.D.2). Whole even if the caller that promoted it goes away, so it is always watched.
-              onPromote: Effect.all([
-                Effect.sync(() => {
-                  detached = true
-                }),
-                ctx.metadata({
-                  title,
-                  metadata: { ...partMetadata(), background: true, jobId: nextSession.id },
-                }),
-                SubagentLifecycle.update(sessions, nextSession.id, { background: true }),
-                notify(nextSession.id),
-              ]).pipe(Effect.uninterruptible),
-              // A run that never took its slot, stopped first or failed on a prerequisite, gives back what was bound.
-              run: guardedRun().pipe(
-                Effect.ensuring(admission ? limits.release(admission, nextSession.id) : Effect.void),
-              ),
-            })
+            reserved.forEach((claim) => TaskClaims.bind(claim, nextSession.id))
+            return yield* background
+              .start({
+                id: nextSession.id,
+                type: id,
+                title,
+                metadata,
+                // A row in vector.db, so a restart can tell the parent this child was interrupted (D.3).
+                durable: {
+                  parentSessionID: ctx.sessionID,
+                  sessionID: nextSession.id,
+                  directory: instance.directory,
+                  attempt,
+                },
+                // Move to background frees the call from a single child or from each entry of a batch; a promoted entry
+                // reports on its own (5.D.2). Whole even if the caller that promoted it goes away, so it is always watched.
+                onPromote: Effect.all([
+                  Effect.sync(() => {
+                    detached = true
+                  }),
+                  ctx.metadata({
+                    title,
+                    metadata: { ...partMetadata(), background: true, jobId: nextSession.id },
+                  }),
+                  SubagentLifecycle.update(sessions, nextSession.id, { background: true }),
+                  notify(nextSession.id),
+                ]).pipe(Effect.uninterruptible),
+                // A run that never took its slot, stopped first or failed on a prerequisite, gives back what was bound.
+                run: guardedRun().pipe(
+                  Effect.ensuring(admission ? limits.release(admission, nextSession.id) : Effect.void),
+                ),
+              })
+              .pipe(
+                Effect.tap((started) => watchOwnership(started.id)),
+                Effect.onExit((exit) =>
+                  Exit.isFailure(exit) ? Effect.sync(() => reserved.forEach(TaskClaims.release)) : Effect.void,
+                ),
+                Effect.uninterruptible,
+              )
           }),
         )
         // start hands back the running job when a concurrent call resuming the same task_id got there first. Join that
@@ -1915,46 +1900,48 @@ export const TaskTool = Tool.define(
           })
           .pipe(Effect.mapError((refused) => new Error(refused.message)))
       })
-      const launches = yield* capacity.pipe(
-        Effect.andThen(
-          Effect.forEach(params.tasks, (task, index) =>
-            prepare(
-              { ...task, background: params.background },
-              {
-                ...ctx,
-                metadata: (value) => publish(index, value.metadata ?? {}),
-              },
-              {
-                index,
-                multiple: items.length > 1,
-                budget: params.budget,
-                own: (sessionID) => {
-                  owned.set(index, sessionID)
+      const launches = yield* capacity
+        .pipe(
+          Effect.andThen(
+            Effect.forEach(params.tasks, (task, index) =>
+              prepare(
+                { ...task, background: params.background },
+                {
+                  ...ctx,
+                  metadata: (value) => publish(index, value.metadata ?? {}),
                 },
-                persist: (patch) => deferred(index, patch),
-                admitted: (admission) => {
-                  if (admission.active <= busiest.active) return
-                  busiest.active = admission.active
-                  busiest.limit = admission.limits.running
+                {
+                  index,
+                  multiple: items.length > 1,
+                  budget: params.budget,
+                  own: (sessionID) => {
+                    owned.set(index, sessionID)
+                  },
+                  persist: (patch) => deferred(index, patch),
+                  admitted: (admission) => {
+                    if (admission.active <= busiest.active) return
+                    busiest.active = admission.active
+                    busiest.limit = admission.limits.running
+                  },
                 },
-              },
+              ),
             ),
           ),
-        ),
-      ).pipe(
-        Effect.catchCause((cause) =>
-          Effect.gen(function* () {
-            const error = `Task batch preflight refused; no child work started. ${Cause.pretty(cause)}`
-            yield* Effect.forEach(items, (item) =>
-              publish(item.index, {
-                status: Cause.hasInterrupts(cause) ? "cancelled" : "error",
-                error,
-              }),
-            )
-            return yield* Effect.failCause(cause)
-          }),
-        ),
-      )
+        )
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.gen(function* () {
+              const error = `Task batch preflight refused; no child work started. ${Cause.pretty(cause)}`
+              yield* Effect.forEach(items, (item) =>
+                publish(item.index, {
+                  status: Cause.hasInterrupts(cause) ? "cancelled" : "error",
+                  error,
+                }),
+              )
+              return yield* Effect.failCause(cause)
+            }),
+          ),
+        )
       // Each entry's text, neutralized as it is shown and as it is saved when cut (I13), and how it renders once cut to
       // its share.
       const results = yield* Effect.forEach(
