@@ -464,11 +464,11 @@ const chats = () => calls.filter((call) => call.path === "/api/v1/chat/completio
 describe("subscription checkout with real billing leases", () => {
   test("replaces a pending subscription checkout when its allowance or Stripe price changes", async () => {
     const first = await modelPlanCheckout(user, "vector-10", fetcher)
-    process.env.MODEL_PLAN_10_CREDITS_USD = "6"
+    process.env.MODEL_PLAN_10_CREDITS_USD = "7"
     const second = await modelPlanCheckout(user, "vector-10", fetcher)
     expect(second.url).not.toBe(first.url)
     expect(sessions.get("cs_fixture1")?.status).toBe("expired")
-    expect(sessions.get("cs_fixture2")?.metadata.vector_model_credits_usd).toBe("6")
+    expect(sessions.get("cs_fixture2")?.metadata.vector_model_credits_usd).toBe("7")
     process.env.STRIPE_MODEL_PLAN_10_PRICE_ID = "price_repriced10"
     const third = await modelPlanCheckout(user, "vector-10", fetcher)
     expect(third.url).not.toBe(second.url)
@@ -1152,7 +1152,7 @@ describe("model plan HTTP inference", () => {
       error: {
         code: "MODEL_PLAN_EXHAUSTED",
         message:
-          "Your monthly Codium credits cannot cover this model's largest request right now. Wait for running requests to finish, or choose a model that uses fewer credits. Monthly credits renew each billing period.",
+          "This month's Vector Codium usage cannot cover this model's largest request right now. Wait for running requests to finish, or choose a lighter model. Your Codium usage renews each billing period.",
       },
     }
     // The fixture model's largest request, 8,192 context tokens at $1 and 2,048 output tokens at $2 per million,
@@ -1216,7 +1216,7 @@ describe("model plan HTTP inference", () => {
       error: {
         code: "MODEL_PLAN_EXHAUSTED",
         message:
-          "Your monthly Codium credits cannot cover this model's largest request right now. Wait for running requests to finish, or choose a model that uses fewer credits. Monthly credits renew each billing period.",
+          "This month's Vector Codium usage cannot cover this model's largest request right now. Wait for running requests to finish, or choose a lighter model. Your Codium usage renews each billing period.",
       },
     })
     // Finished requests keep only what they were charged, for a moment, until the key's usage shows it.

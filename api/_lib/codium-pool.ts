@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { Option, Schema } from "effect"
 import { codiumKey } from "./codium-keys.js"
 import { ApiError } from "./http.js"
@@ -218,9 +218,11 @@ const SETTLE = `redis.call('ZREM', KEYS[1], ARGV[1]) redis.call('ZADD', KEYS[1],
 /**
  * DEBIT. A pool charge's hold (ARGV[1]) becomes an unapplied debit (ref ARGV[2], record ARGV[3]) held by a member of
  * its own amount (ARGV[5], lapsing at ARGV[4]) until it is applied, and the key is queued for `debit-apply` (member
- * ARGV[8] at ARGV[9], or earlier if it already is). A ref already recorded is not recorded again: 0.
+ * ARGV[8] at ARGV[9], or earlier if it already is). A ref already recorded is not recorded again (0): the held set is
+ * looked at only to give back the hold this settle came with, and never the member that keeps the recorded debit
+ * counted, so a settle retried while its debit is still pending cannot drop that debit's hold.
  */
-const DEBIT = `redis.call('ZREM', KEYS[1], ARGV[1]) if redis.call('HSETNX', KEYS[2], ARGV[2], ARGV[3]) == 0 then return 0 end redis.call('PEXPIREAT', KEYS[2], ARGV[7]) redis.call('ZADD', KEYS[1], ARGV[4], ARGV[5]) ${growTtl("KEYS[1]", "ARGV[6]")}local due = redis.call('ZSCORE', KEYS[3], ARGV[8]) if not due or tonumber(due) > tonumber(ARGV[9]) then redis.call('ZADD', KEYS[3], ARGV[9], ARGV[8]) end return 1`
+const DEBIT = `local recorded = redis.call('HGET', KEYS[2], ARGV[2]) if recorded then if not string.find(recorded, '"hold":"' .. ARGV[1] .. '"', 1, true) then redis.call('ZREM', KEYS[1], ARGV[1]) end return 0 end redis.call('HSET', KEYS[2], ARGV[2], ARGV[3]) redis.call('ZREM', KEYS[1], ARGV[1]) redis.call('PEXPIREAT', KEYS[2], ARGV[7]) redis.call('ZADD', KEYS[1], ARGV[4], ARGV[5]) ${growTtl("KEYS[1]", "ARGV[6]")}local due = redis.call('ZSCORE', KEYS[3], ARGV[8]) if not due or tonumber(due) > tonumber(ARGV[9]) then redis.call('ZADD', KEYS[3], ARGV[9], ARGV[8]) end return 1`
 
 /**
  * APPLY. Marks the named debits (ARGV[3], ARGV[5], …) applied and drops their holds (ARGV[4], ARGV[6], …), saves the
@@ -322,8 +324,19 @@ export async function settleHold(hold: PoolTicket, chargedMicro: number, now: nu
 }
 
 /**
+ * The ticket of the held member that keeps one debit counted until it is applied: derived from the debit's ref, so it
+ * is the same on every retry of that settle, differs for every other debit (two settles of one hold included), and can
+ * never equal a hold's own ticket (a random UUID).
+ */
+export function debitHoldTicket(ref: string) {
+  if (!validDebitRef(ref)) throw invalidCharge()
+  return `debit-${createHash("sha256").update(ref).digest("hex").slice(0, 40)}`
+}
+
+/**
  * Records what a pool charge cost as an unapplied debit on its key, keeps it held until it is applied, and queues the
- * key for `debit-apply`. False when `ref` was already recorded, which makes a retried settle harmless.
+ * key for `debit-apply`. False when `ref` was already recorded, which makes a retried settle harmless: the debit keeps
+ * its own held member, and only the hold the retry came with is given back.
  */
 export async function recordDebit(
   hold: PoolTicket,
@@ -331,7 +344,7 @@ export async function recordDebit(
   fetcher: typeof fetch = fetch,
 ) {
   if (!validDebitRef(charge.ref) || !Number.isSafeInteger(charge.micro) || charge.micro < 0) throw invalidCharge()
-  const member = holdMember(hold.ticket, hold.purpose, hold.run, charge.micro)
+  const member = holdMember(debitHoldTicket(charge.ref), hold.purpose, hold.run, charge.micro)
   const debit: typeof Debit.Type = {
     micro: charge.micro,
     applied: false,

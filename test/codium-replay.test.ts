@@ -187,7 +187,7 @@ describe("replay (contract §4.5, WP A08)", () => {
     })
     const snapshot = await readSnapshot(id, fakes.fetcher)
     expect(snapshot).toMatchObject({ state: "active", plan: "vector-10", source: "replay" })
-    expect([...fakes.openRouter.keys.values()]).toEqual([expect.objectContaining({ disabled: false, limit: 6 })])
+    expect([...fakes.openRouter.keys.values()]).toEqual([expect.objectContaining({ disabled: false, limit: 4 })])
     expect(fakes.store.get(eventDoneKey("evt_missed"))).toBeDefined()
     expect(cursorOf(fakes)).toBe(Math.floor(run / 1000))
     // The object was read again at the pinned version before routing.
@@ -534,10 +534,10 @@ describe("the daily sweep (WP A08)", () => {
     const now = fixture.now * 1000
     await reconcileModelPlanAccount(id, fakes.fetcher, now, { source: "webhook" })
     const hash = [...fakes.openRouter.keys.keys()][0]!
-    // 0.50 of hosted debits already applied: the key's limit is 6 − 0.5 = 5.5, as convergeKey last set it.
+    // 0.50 of hosted debits already applied: the key's limit is 4 − 0.5 = 3.5, as convergeKey last set it.
     debit(fakes, id, hash, "block-1", 500_000, true)
     await setRecord(fakes, id, (record) => {
-      ;(record.key as Record<string, unknown>).limitMicro = 5_500_000
+      ;(record.key as Record<string, unknown>).limitMicro = 3_500_000
     })
     fakes.openRouter.keys.get(hash)!.limit = 9.99
     fakes.mail.sent.length = 0
@@ -549,23 +549,23 @@ describe("the daily sweep (WP A08)", () => {
     } finally {
       warn.mockRestore()
     }
-    expect(fakes.openRouter.keys.get(hash)).toMatchObject({ limit: 5.5, disabled: false })
+    expect(fakes.openRouter.keys.get(hash)).toMatchObject({ limit: 3.5, disabled: false })
     expect(fakes.mail.sent.map((mail) => mail.subject)).toEqual([
       "Vector Codium: an OpenRouter key was changed outside Vector",
     ])
     expect(fakes.mail.sent[0]!.text).toContain(id)
     expect(fakes.mail.sent[0]!.text).toContain("above")
-    expect(fakes.mail.sent[0]!.text).not.toMatch(/\$|9\.99|5\.5/)
+    expect(fakes.mail.sent[0]!.text).not.toMatch(/\$|9\.99|3\.5/)
 
-    // Nothing drifted: no PATCH and no email. Within half a cent is not drift (5.504 for 5.5).
+    // Nothing drifted: no PATCH and no email. Within half a cent is not drift (3.504 for 3.5).
     const patches = () => fakes.openRouter.calls.filter((call) => call.method === "PATCH").length
     const before = patches()
     expect(await sweep()).toMatchObject({ repaired: 0 })
-    fakes.openRouter.keys.get(hash)!.limit = 5.504
+    fakes.openRouter.keys.get(hash)!.limit = 3.504
     expect(await sweep()).toMatchObject({ repaired: 0 })
     // A debit still being applied: the key at what Vector last set is not drift either.
     debit(fakes, id, hash, "block-2", 250_000, false)
-    fakes.openRouter.keys.get(hash)!.limit = 5.5
+    fakes.openRouter.keys.get(hash)!.limit = 3.5
     expect(await sweep()).toMatchObject({ repaired: 0 })
     expect(patches()).toBe(before)
     expect(fakes.mail.sent).toHaveLength(1)
@@ -578,8 +578,8 @@ describe("the daily sweep (WP A08)", () => {
     } finally {
       quietAgain.mockRestore()
     }
-    expect(fakes.openRouter.keys.get(hash)!.limit).toBe(5.25)
-    expect((await readModelPlanAccount(id, fakes.fetcher))!.key!.limitMicro).toBe(5_250_000)
+    expect(fakes.openRouter.keys.get(hash)!.limit).toBe(3.25)
+    expect((await readModelPlanAccount(id, fakes.fetcher))!.key!.limitMicro).toBe(3_250_000)
     // The same account's alert is sent once a day at most.
     expect(fakes.mail.sent).toHaveLength(1)
   })
@@ -734,6 +734,39 @@ describe("the daily sweep (WP A08)", () => {
     expect(reads.length).toBe(20)
     expect(new Set(reads).size).toBe(10)
     expect(fakes.store.get(dailySweepKey())).toBeUndefined()
+  })
+
+  test("the walk is saved after every batch, so a run killed in the middle of one loses that batch only", async () => {
+    const fakes = codiumFakes()
+    const now = 1_800_000_000_000
+    Array.from({ length: 10 }, (_, n) => `acct-${n}`).forEach((account, n) => {
+      fakes.store.command(["ZADD", sweepIndexKey(), now + 86_400_000 + n, account])
+      fakes.store.set(codiumKey("account", account), "not json")
+    })
+    // The sixth account's record never answers, so the run hangs in its batch until the platform would kill it.
+    let stuck = false
+    const hanging = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const command = typeof init?.body === "string" ? (JSON.parse(init.body) as unknown[]) : []
+      if (command[0] === "GET" && command[1] === codiumKey("account", "acct-5")) {
+        stuck = true
+        return new Promise<Response>(() => {})
+      }
+      return fakes.fetcher(input, init)
+    }) as typeof fetch
+    const warn = quiet()
+    try {
+      void runDailySweep({ fetcher: hanging, now })
+      for (let tries = 0; tries < 500 && !stuck; tries++) await new Promise((resolve) => setTimeout(resolve, 1))
+      expect(stuck).toBe(true)
+      // The other visits of the hanging batch finish meanwhile; none of them moves the saved position.
+      for (let tries = 0; tries < 20; tries++) await new Promise((resolve) => setTimeout(resolve, 1))
+      expect(JSON.parse(fakes.store.get(dailySweepKey())!)).toEqual({
+        startedAt: now,
+        position: { member: "acct-3", score: now + 86_400_000 + 3 },
+      })
+    } finally {
+      warn.mockRestore()
+    }
   })
 })
 

@@ -46,14 +46,21 @@ export const maxDuration = 60
  * Daily (04:23 UTC, no scope): every indexed account's OpenRouter key limit is audited and set back when it drifted,
  * with an owner alert (M1); stale snapshots and accounts past their period's end plus the renewal grace are reconciled;
  * and every provisioner behind the account's snapshot is queued again, as is every account a provisioner's dead letter
- * names. A walk the time budget cut short is saved (`sweep:daily`) and continued by the hourly sweep, so every account
- * is visited within the day at any size.
+ * names. Where the walk got to is saved (`sweep:daily`) after every batch of accounts, and a walk the time budget cut
+ * short (or the platform killed) is continued by the hourly sweep, so every account is visited within the day at any
+ * size.
  */
 
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
 const DAY = 24 * HOUR
 export const SWEEP_BUDGET_MS = 50_000
+/**
+ * Walks start no new batch of accounts after this much of a run: one visit can wait 5 s for the account's lease and
+ * then make several Stripe and OpenRouter calls of up to 10 s each, and a batch that is still running when the function
+ * reaches `maxDuration` (60 s) is killed. Each finished batch is saved as it ends, so a kill loses one batch at most.
+ */
+export const SWEEP_WALK_BUDGET_MS = 35_000
 /** An account reconciled this recently is left alone by the hourly sweep. */
 export const SWEEP_FRESH_MS = 15 * MINUTE
 /** Disputes are decided within about 75 days; this reaches every one still open. */
@@ -117,6 +124,8 @@ async function walkIndex(input: {
   deadline: number
   fetcher: typeof fetch
   visit: (account: string) => Promise<void>
+  /** Called after each batch with the last account it visited, so a walk the platform kills keeps its progress. */
+  visited?: (position: Position) => Promise<void>
 }): Promise<{ finished: boolean; position?: Position }> {
   let position = input.from
   let min = position ? String(position.score) : "-inf"
@@ -135,6 +144,7 @@ async function walkIndex(input: {
       const chunk = fresh.slice(start, start + CONCURRENCY)
       await Promise.all(chunk.map((entry) => input.visit(entry.member)))
       position = chunk.at(-1)!
+      await input.visited?.(position)
     }
     if (page.length < INDEX_PAGE) return { finished: true, position }
     min = String(position!.score)
@@ -182,7 +192,9 @@ export async function runRiskSweep(
 ): Promise<RiskSweepResult> {
   const fetcher = options.fetcher ?? fetch
   const now = options.now ?? Date.now()
-  const deadline = Date.now() + (options.budgetMs ?? SWEEP_BUDGET_MS)
+  const started = Date.now()
+  const deadline = started + (options.budgetMs ?? SWEEP_BUDGET_MS)
+  const walkDeadline = Math.min(deadline, started + SWEEP_WALK_BUDGET_MS)
   const disputes = await checkDisputes(fetcher, now, deadline)
   const duplicates = await checkDuplicates(fetcher, now, deadline)
   const counts = { reconciled: 0, skipped: 0, failed: 0 }
@@ -190,13 +202,13 @@ export async function runRiskSweep(
   // whose period has ended.
   await walkIndex({
     max: String(now),
-    deadline,
+    deadline: walkDeadline,
     fetcher,
     visit: async (account) => {
       counts[await reconcileIfDue(account, fetcher, now, (snapshot) => now - snapshot.checkedAt >= SWEEP_FRESH_MS)]++
     },
   })
-  const daily = Date.now() < deadline ? await continueDailySweep(fetcher, now, deadline) : undefined
+  const daily = Date.now() < walkDeadline ? await continueDailySweep(fetcher, now, walkDeadline) : undefined
   return { ...counts, disputes, duplicates, ...(daily ? { daily } : {}) }
 }
 
@@ -398,7 +410,8 @@ export async function runDailySweep(
 ): Promise<DailySweepResult> {
   const fetcher = options.fetcher ?? fetch
   const now = options.now ?? Date.now()
-  const deadline = Date.now() + (options.budgetMs ?? SWEEP_BUDGET_MS)
+  const started = Date.now()
+  const deadline = Math.min(started + (options.budgetMs ?? SWEEP_BUDGET_MS), started + SWEEP_WALK_BUDGET_MS)
   const counts = emptyDaily()
   let state = await readDailyState(fetcher)
   if (!state) {
@@ -429,11 +442,26 @@ async function dailyWalk(
   const grace = renewalGraceMinutes() * MINUTE
   const due = (snapshot: EntitlementSnapshot) =>
     isStale(snapshot, now) || (snapshot.periodEnd > 0 && now > snapshot.periodEnd + grace)
+  const save = (position?: Position) =>
+    persistentStore(
+      [
+        "SET",
+        dailySweepKey(),
+        JSON.stringify({ startedAt: state.startedAt, ...(position ? { position } : {}) }),
+        "PX",
+        DAILY_STATE_KEEP_MS,
+      ],
+      fetcher,
+    )
   const walk = await walkIndex({
     ...(state.position ? { from: state.position } : {}),
     max: "+inf",
     deadline,
     fetcher,
+    // Where the walk got to, after every batch: a run the platform kills at its time limit loses one batch at most.
+    visited: async (position) => {
+      await save(position)
+    },
     visit: async (account) => {
       // The audit first: a reconcile would set a drifted limit back without saying so.
       try {
@@ -456,17 +484,7 @@ async function dailyWalk(
     },
   })
   if (walk.finished) await persistentStore(["DEL", dailySweepKey()], fetcher)
-  else
-    await persistentStore(
-      [
-        "SET",
-        dailySweepKey(),
-        JSON.stringify({ startedAt: state.startedAt, ...(walk.position ? { position: walk.position } : {}) }),
-        "PX",
-        DAILY_STATE_KEEP_MS,
-      ],
-      fetcher,
-    )
+  else await save(walk.position)
   return { ...counts, finished: walk.finished }
 }
 

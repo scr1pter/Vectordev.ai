@@ -21,14 +21,14 @@ const environment: Record<string, string> = {
   ...Object.fromEntries(
     [10, 50, 100, 200].map((price) => [`STRIPE_MODEL_PLAN_${price}_PRICE_ID`, `price_fixture${price}`]),
   ),
-  // Fixture allowances that keep the public usage multiples (5.5x, 12x and 25x Plus), which Codium's configuration
-  // requires; a markup alone scales by price and cannot.
+  // Made-up fixture allowances that keep the public usage multiples (5.5x, 12x and 25x Plus), which Codium's
+  // configuration requires; a markup alone scales by price and cannot.
   ...Object.fromEntries(
     [
-      [10, "6"],
-      [50, "33"],
-      [100, "72"],
-      [200, "150"],
+      [10, "4"],
+      [50, "22"],
+      [100, "48"],
+      [200, "100"],
     ].map(([price, credits]) => [`MODEL_PLAN_${price}_CREDITS_USD`, credits]),
   ),
 }

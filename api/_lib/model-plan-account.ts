@@ -1,6 +1,11 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto"
 import { Option, Schema } from "effect"
-import type { EntitlementSnapshot, PlanReason, PlanState } from "../../packages/schema/src/codium-entitlements.js"
+import {
+  PLAN_REASONS,
+  type EntitlementSnapshot,
+  type PlanReason,
+  type PlanState,
+} from "../../packages/schema/src/codium-entitlements.js"
 import { isPlanId, rank, type PlanId } from "../../packages/schema/src/codium-plan.js"
 import type { AccountUser } from "./account.js"
 import { withBillingMutation } from "./billing-lock.js"
@@ -126,6 +131,10 @@ const Account = Schema.Struct({
         }),
       ),
       limitMicro: Schema.optional(Micro),
+      // Why reconcile switched this key off for good: the account ended while it was the current key (its charge
+      // refunded, a lost dispute, a refunded fraud warning, the plan cancelled or unpaid). That period was not kept,
+      // so a renewal of it never turns this key back on (M11 keeps only a paid period's key serving).
+      revoked: Schema.optional(Schema.Literals(PLAN_REASONS)),
     }),
   ),
 })
@@ -323,44 +332,40 @@ export async function reconcileModelPlanAccount(
           verify,
         )
       if (account.closing) {
-        if (account.key) {
-          await verify()
-          await openRouterManagement(`/${encodeURIComponent(account.key.hash)}`, { disabled: true }, fetcher, "PATCH")
-        }
-        return commitSnapshot(closingFacts(id, account, stored.previous, source), stored, fetcher, now, verify)
+        // The snapshot that ends access goes first, as for every state that stops the key (see below).
+        const closed = await commitSnapshot(
+          closingFacts(id, account, stored.previous, source),
+          stored,
+          fetcher,
+          now,
+          verify,
+        )
+        if (account.key) await disableKey(account.key, verify, fetcher)
+        return closed
       }
       const listed = await listSubscriptions(account.customer, fetcher)
       const review = await reviewRisk(account, listed, options.hint, fetcher, now)
       const current = listed.map((subscription) => clearWonDispute(subscription, review.cleared))
       const reviewed = { ...account, risk: review.risk }
-      const standing = planStanding(id, reviewed, current, now, {
-        known: knownPeriods(account, stored.previous),
-      })
-      const updated = recordPaidHistory(reviewed, standing)
+      const standing = revokedRenewal(
+        reviewed,
+        planStanding(id, reviewed, current, now, { known: knownPeriods(account, stored.previous) }),
+      )
+      const updated = revokeEndedKey(recordPaidHistory(reviewed, standing), standing)
       if (accountChanged(account, updated)) {
         await verify()
         await saveAccount(id, updated, fetcher)
       }
+      // M11: while renewing, the previous period's key keeps serving, at its pool's limit, until the renewal is paid or
+      // its grace runs out (the key's own expiry is the period's end plus the grace).
+      const previous = standing.state === "renewing" ? renewingKey(updated, standing.governing) : undefined
+      const serving = (standing.state === "active" && !!standing.governing?.paid) || !!previous
       if (standing.state === "active" && standing.governing?.paid)
         await provisionMonthlyKey(id, updated, standing.governing.paid, fetcher, verify)
-      else if (standing.state === "renewing") {
-        // M11: the previous period's key keeps serving, at its pool's limit, until the renewal is paid or its grace
-        // runs out (the key's own expiry is the period's end plus the grace).
-        const previous = renewingKey(updated, standing.governing)
-        if (previous)
-          await convergeKey(id, updated, previous, verify, fetcher, {
-            expiresAt: keyExpiresAt(standing.governing!.end),
-          })
-        else if (updated.key) {
-          // A key from any other period (an older month, or a subscription that no longer governs) never serves.
-          await verify()
-          await openRouterManagement(`/${encodeURIComponent(updated.key.hash)}`, { disabled: true }, fetcher, "PATCH")
-        }
-      } else if (updated.key) {
-        // Past due, unpaid, ended, refunded, disputed, warned or blocked: the key stops at once (M5).
-        await verify()
-        await openRouterManagement(`/${encodeURIComponent(updated.key.hash)}`, { disabled: true }, fetcher, "PATCH")
-      }
+      else if (previous)
+        await convergeKey(id, updated, previous, verify, fetcher, {
+          expiresAt: keyExpiresAt(standing.governing!.end),
+        })
       if (standing.duplicates.length)
         // Owner alerts arrive with WP A11; until then the log names the subscriptions, never the person.
         console.warn("Vector Codium: an account has more than one live subscription", {
@@ -370,7 +375,7 @@ export async function reconcileModelPlanAccount(
         })
       const governing = standing.governing
       const planned = standing.state !== "none"
-      return commitSnapshot(
+      const snapshot = await commitSnapshot(
         {
           account: id,
           state: standing.state,
@@ -391,9 +396,41 @@ export async function reconcileModelPlanAccount(
         now,
         verify,
       )
+      // Past due, unpaid, ended, refunded, disputed, warned or blocked, and a renewing account's key from any other
+      // period: the key stops at once (M5). The snapshot that ends access, and the outbox items it queues, are written
+      // first, so every service that reads it stops even while OpenRouter cannot be reached; a PATCH that fails throws,
+      // and the queued reconcile switches the key off when it runs again.
+      if (!serving && updated.key) await disableKey(updated.key, verify, fetcher)
+      return snapshot
     },
     fetcher,
   )
+}
+
+/** Switches a key off. Callers hold the lease. */
+async function disableKey(key: AccountKey, verify: () => Promise<void>, fetcher: typeof fetch) {
+  await verify()
+  await openRouterManagement(`/${encodeURIComponent(key.hash)}`, { disabled: true }, fetcher, "PATCH")
+}
+
+/**
+ * The account's state when it is renewing a period whose key reconcile switched off for good (the subscription went on
+ * billing after the month was refunded, for example from Stripe's dashboard): that period was not kept, so its renewal
+ * keeps nothing on until it is paid, and the account stays ended for the reason its key was switched off. Any other
+ * standing is returned as it is.
+ */
+function revokedRenewal(account: Account, standing: ReturnType<typeof planStanding>): ReturnType<typeof planStanding> {
+  const key = account.key
+  const governing = standing.governing
+  if (standing.state !== "renewing" || !key?.revoked || !governing) return standing
+  if (key.subscription !== governing.id || key.start !== governing.start) return standing
+  return { ...standing, state: "ended", reason: key.revoked }
+}
+
+/** The record with its current key marked revoked once the account ended, so no renewal of its period revives it. */
+function revokeEndedKey(account: Account, standing: ReturnType<typeof planStanding>): Account {
+  if (standing.state !== "ended" || !account.key || account.key.revoked) return account
+  return { ...account, key: { ...account.key, revoked: standing.reason ?? "canceled" } }
 }
 
 /**
@@ -586,8 +623,24 @@ export function riskState(account: {
   return undefined
 }
 
-/** The refusal for an account its risk record holds: a block or freeze is not something a new card fixes. */
+/**
+ * The refusal for a model request from an account its risk record holds, the same answer `requireEntitlement` gives
+ * for that state (contract §4.4, §4.10): an account that ended (a lost dispute, a refunded fraud warning) is 402
+ * `MODEL_PLAN_REQUIRED {reason}`; a freeze (an open dispute, a fraud warning, the owner's block) is 403
+ * `MODEL_PLAN_BLOCKED {reason}`, which a new card does not fix.
+ */
 function riskRefusal(held: { state: PlanState; reason: PlanReason }) {
+  if (held.state === "ended" && held.reason === "closing")
+    return new ApiError(409, "MODEL_PLAN_ACCOUNT_CLOSING", "This account is being deleted. Model access is closed.")
+  if (held.state === "ended")
+    return new ApiError(402, "MODEL_PLAN_REQUIRED", "Your Vector Codium plan has ended. Choose a plan to use this.", {
+      detail: { reason: held.reason },
+    })
+  return blockedRefusal(held)
+}
+
+/** 403 `MODEL_PLAN_BLOCKED {reason}`: the account is held, and buying or using Codium waits for Vector support. */
+function blockedRefusal(held: { reason: PlanReason }) {
   return new ApiError(
     403,
     "MODEL_PLAN_BLOCKED",
@@ -933,10 +986,15 @@ function governingPaid(subscriptions: readonly unknown[], accountID: string, now
     .sort((a, b) => rank(b.plan.id) - rank(a.plan.id) || b.start - a.start)[0]
 }
 
-/** The account's key when it is the one for the period a renewal follows: the governing subscription's last paid one. */
+/**
+ * The account's key when it is the one for the period a renewal follows: the governing subscription's last paid one,
+ * unless reconcile switched it off for good when the account ended (`revoked`).
+ */
 function renewingKey(account: Account, governing: Standing | undefined) {
   const key = account.key
-  return key && governing && key.subscription === governing.id && key.start === governing.start ? key : undefined
+  return key && !key.revoked && governing && key.subscription === governing.id && key.start === governing.start
+    ? key
+    : undefined
 }
 
 /**
@@ -1021,15 +1079,15 @@ export async function modelPlanCredential(
   )
 }
 
-// Credits that are used up, too few for the model's largest request, or held by requests still running get one
-// answer per pool. A different answer for each would tell a client which side of a threshold its balance is on, and
-// with the share of a plan it has used, the allowance and so the markup. Codium sells monthly plans only, so the
-// answer offers nothing to buy.
+// A pool that is used up, too small for the model's largest request, or held by requests still running gets one
+// answer. A different answer for each would tell a client which side of a threshold its balance is on, and with the
+// share of a plan it has used, the allowance and so the markup. Codium sells monthly plans only, so the answer offers
+// nothing to buy, and like every answer it names no amount and no credits (P1).
 function monthlyShortfall() {
   return new ApiError(
     402,
     "MODEL_PLAN_EXHAUSTED",
-    "Your monthly Codium credits cannot cover this model's largest request right now. Wait for running requests to finish, or choose a model that uses fewer credits. Monthly credits renew each billing period.",
+    "This month's Vector Codium usage cannot cover this model's largest request right now. Wait for running requests to finish, or choose a lighter model. Your Codium usage renews each billing period.",
   )
 }
 
@@ -1668,6 +1726,10 @@ export async function modelPlanCheckout(
       const previous = await readModelPlanAccount(user.id, fetcher)
       if (previous?.closing)
         throw new ApiError(409, "MODEL_PLAN_ACCOUNT_CLOSING", "This account is being deleted. Checkout is closed.")
+      // An account a lost dispute, a fraud warning or the owner holds buys nothing: reconcile would never grant what it
+      // paid for. Refused before any customer, reservation or session is made.
+      const held = previous && riskState(previous)
+      if (held) throw blockedRefusal(held)
       const customer =
         previous?.customer ??
         (

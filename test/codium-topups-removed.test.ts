@@ -25,8 +25,8 @@ import { reconcileModelPlanEvent } from "../api/model-plans/webhook"
 const user = { id: "77777777-7777-4777-8777-777777777777", email: "buyer@example.test" }
 const KV = "https://kv.topups-fixture.invalid"
 const PRICES = [10, 50, 100, 200] as const
-// The contract's private pools keep the public multiples: 33/6 = 5.5, 72/6 = 12, 150/6 = 25.
-const CREDITS = { 10: "6", 50: "33", 100: "72", 200: "150" } as const
+// Made-up credits that keep the public multiples: 22/4 = 5.5, 48/4 = 12, 100/4 = 25.
+const CREDITS = { 10: "4", 50: "22", 100: "48", 200: "100" } as const
 const ACCOUNT = `vector:codium:test:account:${user.id}`
 const WALLET = "hash_wallet_legacy"
 
@@ -421,11 +421,11 @@ describe("an account record written while top-ups were sold", () => {
     // A month's key next to the old fields decodes with it.
     const { start, end } = period()
     seedLegacyAccount({
-      key: { hash: "hash_month", encrypted: "x", subscription: "sub_topups", start, end, credits: 6 },
+      key: { hash: "hash_month", encrypted: "x", subscription: "sub_topups", start, end, credits: 4 },
     })
     expect(await readModelPlanAccount(user.id, fetcher)).toMatchObject({
       customer: "cus_legacy",
-      key: { hash: "hash_month", subscription: "sub_topups", credits: 6 },
+      key: { hash: "hash_month", subscription: "sub_topups", credits: 4 },
     })
     // A record that is not an account at all still fails closed.
     world.store.set(ACCOUNT, JSON.stringify({ wallet: { hash: WALLET } }))
@@ -448,7 +448,7 @@ describe("an account record written while top-ups were sold", () => {
     await credential.release(0.001)
     expect(world.keys.get("hash_topups2")).toMatchObject({
       name: `Vector test ${user.id} sub_topups ${subscription.items.data[0]!.current_period_start}`,
-      limit: 6,
+      limit: 4,
     })
     // The next save of the record leaves the old fields out.
     const saved = JSON.parse(world.store.get(ACCOUNT)!) as Record<string, unknown>
@@ -492,15 +492,17 @@ describe("refusals offer nothing to buy", () => {
     world.store.set(ACCOUNT, JSON.stringify({ customer: "cus_legacy" }))
     world.subscriptions = [paidSubscription()]
     await modelPlanCredential(user.id, fetcher)
-    world.keys.get("hash_topups1")!.usage = 6
+    world.keys.get("hash_topups1")!.usage = 4
     const used = await modelPlanCredential(user.id, fetcher, Date.now(), 0.01).catch((error: unknown) => error)
     expect(used).toMatchObject({
       statusCode: 402,
       code: "MODEL_PLAN_EXHAUSTED",
       message:
-        "Your monthly Codium credits cannot cover this model's largest request right now. Wait for running requests to finish, or choose a model that uses fewer credits. Monthly credits renew each billing period.",
+        "This month's Vector Codium usage cannot cover this model's largest request right now. Wait for running requests to finish, or choose a lighter model. Your Codium usage renews each billing period.",
     })
     for (const error of [none, used]) expect(String((error as Error).message)).not.toMatch(/top-up|add credits|buy/i)
+    // P1: no answer names credits or an amount.
+    for (const error of [none, used]) expect(String((error as Error).message)).not.toMatch(/credit|\$|usd|cents/i)
   })
 
   test("a won dispute brings the same month's key back with its usage kept", async () => {
@@ -518,7 +520,7 @@ describe("refusals offer nothing to buy", () => {
     await expect(modelPlanCredential(user.id, fetcher)).rejects.toMatchObject({ code: "MODEL_PLAN_PAYMENT_REQUIRED" })
     world.disputes = [{ charge: "ch_month", status: "won" }]
     expect((await modelPlanCredential(user.id, fetcher)).key).toBe(first.key)
-    expect(world.keys.get("hash_topups1")).toMatchObject({ limit: 6, usage: 2, disabled: false })
+    expect(world.keys.get("hash_topups1")).toMatchObject({ limit: 4, usage: 2, disabled: false })
     expect(world.keys.size).toBe(1)
   })
 })
@@ -531,8 +533,9 @@ describe("configuration, funding and the books know plans only", () => {
   })
 
   test("funding leaves room for the largest plan, not a pack", async () => {
-    // Nothing is owed: required = the largest plan's credits ($150) × 1.1 + $20. A $199 pack would have needed $238.90.
-    expect(await checkCodiumFunding(fetcher)).toMatchObject({ status: "open", owed: 0, reserved: 0, required: 18500 })
+    // Nothing is owed: required = the largest plan's credits (the fixtures' $100) × 1.1 + $20. A $199 pack would have
+    // needed $238.90.
+    expect(await checkCodiumFunding(fetcher)).toMatchObject({ status: "open", owed: 0, reserved: 0, required: 13000 })
   })
 
   test("the ledger records plan payments only, and a line from before still counts as it was recorded", async () => {
@@ -574,7 +577,7 @@ describe("configuration, funding and the books know plans only", () => {
     expect(await recordCodiumCharge(user.id, "ch_month", fetcher)).toMatchObject({
       kind: "subscription",
       product: "vector-10",
-      credits: 600,
+      credits: 400,
     })
     // A top-up line written before WP A04, with the field only top-ups had.
     world.hashes.get("vector:codium:test:ledger")!.set(
@@ -605,7 +608,7 @@ describe("configuration, funding and the books know plans only", () => {
     ])
     expect(entries[1]).not.toHaveProperty("walletUsage")
     const summary = await codiumLedgerSummary(fetcher)
-    expect(summary.totals).toMatchObject({ payments: 2, price: 2000, credits: 1100 })
+    expect(summary.totals).toMatchObject({ payments: 2, price: 2000, credits: 900 })
     expect(summary.totals).not.toHaveProperty("reversedSpend")
     expect(world.stripe.some((call) => call.path.includes("payment_intents"))).toBe(false)
   })

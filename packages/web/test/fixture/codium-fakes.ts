@@ -14,8 +14,11 @@ import { SNAPSHOT_SCRIPTS } from "../../../../api/_lib/codium-snapshot"
 export const STRIPE_API_VERSION = "2025-02-24.acacia"
 export const FAKE_KV_URL = "https://kv.codium-fakes.invalid"
 export const FIXTURE_PRICES = [10, 50, 100, 200] as const
-/** The private pools the fixtures assume, in dollars: the contract's 6/33/72/150, which keep the public multiples. */
-export const FIXTURE_CREDITS = { 10: "6", 50: "33", 100: "72", 200: "150" } as const
+/**
+ * The credits the fixtures assume, in dollars. They are made up for the tests and only keep the public usage multiples
+ * (5.5x, 12x and 25x Plus) that Codium's configuration requires; the real pools stay private and never appear here.
+ */
+export const FIXTURE_CREDITS = { 10: "4", 50: "22", 100: "48", 200: "100" } as const
 
 type Json = Record<string, unknown>
 
@@ -271,11 +274,15 @@ export class FakeStore {
       [
         POOL_SCRIPTS.DEBIT,
         ([held, debits, due], [old, ref, record, score, member, ttl, expireAt, dueMember, dueAt]) => {
-          this.zset(held!).delete(old!)
-          this.prune(held!)
           const entries = this.hash(debits!)
-          if (entries.has(ref!)) return 0
+          const recorded = entries.get(ref!)
+          if (recorded !== undefined) {
+            if (!recorded.includes(`"hold":"${old!}"`)) this.zset(held!).delete(old!)
+            this.prune(held!)
+            return 0
+          }
           entries.set(ref!, record!)
+          this.zset(held!).delete(old!)
           this.expires.set(debits!, Number(expireAt))
           this.zset(held!).set(member!, Number(score))
           this.growTtl(held!, ttl!)
@@ -898,8 +905,8 @@ const ENVIRONMENT = [
 ]
 
 /**
- * Sets the environment the fixtures assume (Stripe test mode, the fake store, the fixtures' price ids and the
- * contract's pools, test keys not capped) and returns a function that puts the previous environment back.
+ * Sets the environment the fixtures assume (Stripe test mode, the fake store, the fixtures' price ids and credits, test
+ * keys not capped) and returns a function that puts the previous environment back.
  */
 export function codiumTestEnvironment(overrides: Record<string, string | undefined> = {}) {
   const original = new Map(ENVIRONMENT.concat(Object.keys(overrides)).map((name) => [name, process.env[name]]))
@@ -913,7 +920,7 @@ export function codiumTestEnvironment(overrides: Record<string, string | undefin
     VERCEL_ENV: "preview",
     OPENROUTER_MANAGEMENT_KEY: "fixture-management-key",
     MODEL_PLAN_KEY_ENCRYPTION_SECRET: "cd".repeat(32),
-    // The fixtures follow the plans' full pools; test mode would otherwise cap every key at the test cap.
+    // The fixtures follow the plans' full credits; test mode would otherwise cap every key at the test cap.
     CODIUM_TEST_CREDIT_CAP_USD: "200",
   })
   for (const price of FIXTURE_PRICES) {

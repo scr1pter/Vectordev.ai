@@ -3,6 +3,7 @@ import { RedisClient } from "bun"
 import {
   DEBIT_HOLD_MS,
   DEBIT_RETRY_MS,
+  debitHoldTicket,
   holdMember,
   limitMatches,
   limitUsd,
@@ -37,7 +38,8 @@ import { modelPlanBalance } from "../api/_lib/model-plan-status"
 const user = { id: "77777777-7777-4777-8777-777777777777" }
 const KV = "https://kv.pool-fixture.invalid"
 const PRICES = [10, 50, 100, 200] as const
-const CREDITS = { 10: "6", 50: "33", 100: "72", 200: "150" } as const
+// Made-up credits that keep the public multiples (5.5x, 12x and 25x Plus); the real pools stay private.
+const CREDITS = { 10: "4", 50: "22", 100: "48", 200: "100" } as const
 const HASH = "hash_pool1"
 const HOUR = 3_600_000
 
@@ -162,11 +164,15 @@ const scripts = new Map<string, (keys: string[], argv: string[]) => unknown>([
   [
     POOL_SCRIPTS.DEBIT,
     ([held, debits, due], [old, ref, record, score, member, ttl, expireAt, dueMember, dueAt]) => {
-      zset(held!).delete(old!)
-      prune(held!)
       const entries = hash(debits!)
-      if (entries.has(ref!)) return 0
+      const recorded = entries.get(ref!)
+      if (recorded !== undefined) {
+        if (!recorded.includes(`"hold":"${old!}"`)) zset(held!).delete(old!)
+        prune(held!)
+        return 0
+      }
       entries.set(ref!, record!)
+      zset(held!).delete(old!)
       memory.expires.set(debits!, Number(expireAt))
       zset(held!).set(member!, Number(score))
       growTtl(held!, ttl!)
@@ -525,46 +531,46 @@ describe("pool arithmetic", () => {
     expect(usdToMicroCeil(0.012288)).toBe(12_288)
     expect(usdToMicroCeil(0.0000001)).toBe(1)
     expect(usdToMicroCeil(0.001)).toBe(1_000)
-    expect(limitUsd(73_936_000)).toBe(73.94)
-    expect(limitUsd(73_935_000)).toBe(73.94)
+    expect(limitUsd(49_936_000)).toBe(49.94)
+    expect(limitUsd(49_935_000)).toBe(49.94)
     expect(limitUsd(-5)).toBe(0)
     expect(() => usdToMicro(Number.NaN)).toThrow()
   })
 
   test("a limit within half a cent matches, so a key set in cents is never PATCHed again", () => {
-    expect(limitMatches(73.94, 73_936_000)).toBe(true)
-    expect(limitMatches(73.93, 73_936_000)).toBe(false)
-    expect(limitMatches(73.95, 73_936_000)).toBe(false)
+    expect(limitMatches(49.94, 49_936_000)).toBe(true)
+    expect(limitMatches(49.93, 49_936_000)).toBe(false)
+    expect(limitMatches(49.95, 49_936_000)).toBe(false)
     // The value a half-cent target is PATCHed to matches it.
-    expect(limitMatches(limitUsd(73_935_000), 73_935_000)).toBe(true)
-    expect(limitMatches("73.94", 73_936_000)).toBe(false)
+    expect(limitMatches(limitUsd(49_935_000), 49_935_000)).toBe(true)
+    expect(limitMatches("49.94", 49_936_000)).toBe(false)
     expect(limitMatches(undefined, 0)).toBe(false)
   })
 
   test("every figure comes from credits, carry, usage, debits and holds", () => {
-    const figures = poolFigures({ creditsMicro: 72_000_000, carryMicro: 2_500_000 }, 10_000_000, {
+    const figures = poolFigures({ creditsMicro: 48_000_000, carryMicro: 2_500_000 }, 10_000_000, {
       heldMicro: 1_500_000,
       appliedMicro: 564_000,
       pendingMicro: 1_000_000,
     })
     expect(figures).toEqual({
-      totalMicro: 74_500_000,
+      totalMicro: 50_500_000,
       spentMicro: 11_564_000,
-      limitMicro: 73_936_000,
-      remainingMicro: 62_936_000,
+      limitMicro: 49_936_000,
+      remainingMicro: 38_936_000,
       // The pending debit is among the holds, so it is counted once.
-      availableMicro: 74_500_000 - 564_000 - 10_000_000 - 1_500_000,
+      availableMicro: 50_500_000 - 564_000 - 10_000_000 - 1_500_000,
     })
-    expect(poolShareUsed(figures)).toBe(0.16)
+    expect(poolShareUsed(figures)).toBe(0.23)
   })
 
   test("the share used is a whole percent, and used + left is exactly 100", () => {
-    for (let spent = 0; spent <= 6_000_000; spent += 37_501) {
-      const used = poolShareUsed({ totalMicro: 6_000_000, spentMicro: spent })
+    for (let spent = 0; spent <= 4_000_000; spent += 25_001) {
+      const used = poolShareUsed({ totalMicro: 4_000_000, spentMicro: spent })
       expect(Math.round(used * 100) / 100).toBe(used)
       expect(Math.round(used * 100) + Math.round((1 - used) * 100)).toBe(100)
     }
-    expect(poolShareUsed({ totalMicro: 6_000_000, spentMicro: 9_000_000 })).toBe(1)
+    expect(poolShareUsed({ totalMicro: 4_000_000, spentMicro: 6_000_000 })).toBe(1)
     expect(poolShareUsed({ totalMicro: 0, spentMicro: 0 })).toBe(1)
   })
 
@@ -587,35 +593,35 @@ describe("pool arithmetic", () => {
 // ── M1 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 describe("M1: the provider key is the hard cap", () => {
-  test("a key keeps its carry and debits, is never repaired to the plan's credits, and 73.936 vs 73.94 is no PATCH", async () => {
-    // Max: 72 of credits, 2.50 carried from an upgrade, 0.564 of hosted debits applied: 73.936, set as 73.94.
-    await seed({ price: 100, limit: 73.94, usage: 10, carryMicro: 2_500_000, applied: [564_000] })
+  test("a key keeps its carry and debits, is never repaired to the plan's credits, and 49.936 vs 49.94 is no PATCH", async () => {
+    // Max: 48 of credits, 2.50 carried from an upgrade, 0.564 of hosted debits applied: 49.936, set as 49.94.
+    await seed({ price: 100, limit: 49.94, usage: 10, carryMicro: 2_500_000, applied: [564_000] })
     await reconcileModelPlanAccount(user.id, fetcher)
     await (await modelPlanCredential(user.id, fetcher, Date.now(), 0.01)).release()
     expect(patches()).toEqual([])
-    expect(world.keys.get(HASH)?.limit).toBe(73.94)
+    expect(world.keys.get(HASH)?.limit).toBe(49.94)
 
     // A key whose limit drifted, here back to the plan's credits, is set to the pool's limit, not to the credits.
-    world.keys.get(HASH)!.limit = 72
+    world.keys.get(HASH)!.limit = 48
     await (await modelPlanCredential(user.id, fetcher, Date.now(), 0.01)).release()
     expect(patches()).toHaveLength(1)
-    expect(patches()[0]!.body).toMatchObject({ limit: 73.94, disabled: false })
-    expect(world.keys.get(HASH)?.limit).toBe(73.94)
+    expect(patches()[0]!.body).toMatchObject({ limit: 49.94, disabled: false })
+    expect(world.keys.get(HASH)?.limit).toBe(49.94)
     await reconcileModelPlanAccount(user.id, fetcher)
     expect(patches()).toHaveLength(1)
     expect((await readModelPlanAccount(user.id, fetcher))?.key).toMatchObject({
-      creditsMicro: 72_000_000,
+      creditsMicro: 48_000_000,
       carry: { micro: 2_500_000 },
-      limitMicro: 73_936_000,
+      limitMicro: 49_936_000,
     })
   })
 
   test("a switched-off key is switched back on at the pool's limit, its usage kept", async () => {
-    await seed({ price: 10, limit: 5.5, usage: 2, applied: [500_000] })
+    await seed({ price: 10, limit: 3.5, usage: 2, applied: [500_000] })
     world.keys.get(HASH)!.disabled = true
     await (await modelPlanCredential(user.id, fetcher, Date.now(), 0.01)).release()
-    expect(world.keys.get(HASH)).toMatchObject({ disabled: false, limit: 5.5, usage: 2 })
-    expect(patches().map((call) => call.body.limit)).toEqual([5.5])
+    expect(world.keys.get(HASH)).toMatchObject({ disabled: false, limit: 3.5, usage: 2 })
+    expect(patches().map((call) => call.body.limit)).toEqual([3.5])
   })
 
   test("a new month's key starts at its credits in whole micro-dollars, and a record from before them is filled in", async () => {
@@ -623,21 +629,21 @@ describe("M1: the provider key is the hard cap", () => {
     await redis(["SET", `vector:codium:test:account:${user.id}`, JSON.stringify({ customer: "cus_pool" })])
     await modelPlanCredential(user.id, fetcher)
     const created = world.openRouter.filter((call) => call.method === "POST")
-    expect(created.map((call) => call.body.limit)).toEqual([33])
+    expect(created.map((call) => call.body.limit)).toEqual([22])
     expect((await readModelPlanAccount(user.id, fetcher))?.key).toMatchObject({
-      credits: 33,
-      creditsMicro: 33_000_000,
-      limitMicro: 33_000_000,
+      credits: 22,
+      creditsMicro: 22_000_000,
+      limitMicro: 22_000_000,
     })
 
     // A record written before the pool counted in micro-dollars has no debits: its limit is its credits.
     world.openRouter.length = 0
-    await seed({ price: 100, limit: 72, legacy: true })
+    await seed({ price: 100, limit: 48, legacy: true })
     await reconcileModelPlanAccount(user.id, fetcher)
     expect(patches()).toEqual([])
     expect((await readModelPlanAccount(user.id, fetcher))?.key).toMatchObject({
-      creditsMicro: 72_000_000,
-      limitMicro: 72_000_000,
+      creditsMicro: 48_000_000,
+      limitMicro: 48_000_000,
     })
   })
 })
@@ -646,7 +652,7 @@ describe("M1: the provider key is the hard cap", () => {
 
 describe("M2: spend is held before it starts", () => {
   test("model requests and pool charges hold in one set, and a 12 h hold survives a later 660 s one", async () => {
-    await seed({ price: 100, limit: 72 })
+    await seed({ price: 100, limit: 48 })
     const block = await holdPool(user.id, 1, 12 * HOUR, "hosted", { fetcher, runId: "job_1" })
     const request = await modelPlanCredential(user.id, fetcher, Date.now(), 0.5)
     const members = (await heldMembers()).map((member) => parseHoldMember(member))
@@ -667,22 +673,22 @@ describe("M2: spend is held before it starts", () => {
   })
 
   test("a pool charge cannot spend what a model request holds, nor the other way round", async () => {
-    await seed({ price: 10, limit: 6, usage: 1 })
-    const block = await holdPool(user.id, 4.9, HOUR, "hosted", { fetcher })
+    await seed({ price: 10, limit: 4, usage: 1 })
+    const block = await holdPool(user.id, 2.9, HOUR, "hosted", { fetcher })
     await expect(modelPlanCredential(user.id, fetcher, Date.now(), 0.2)).rejects.toMatchObject({
       statusCode: 402,
       code: "MODEL_PLAN_EXHAUSTED",
     })
     await block.release()
     const request = await modelPlanCredential(user.id, fetcher, Date.now(), 0.2)
-    await expect(holdPool(user.id, 4.9, HOUR, "hosted", { fetcher })).rejects.toMatchObject({
+    await expect(holdPool(user.id, 2.9, HOUR, "hosted", { fetcher })).rejects.toMatchObject({
       code: "MODEL_PLAN_EXHAUSTED",
     })
     await request.release()
   })
 
   test("two settles racing lose no debit, and a replayed settle records nothing new", async () => {
-    await seed({ price: 100, limit: 72 })
+    await seed({ price: 100, limit: 48 })
     const first = await holdPool(user.id, 1, HOUR, "hosted", { fetcher })
     const second = await holdPool(user.id, 2, HOUR, "hosted", { fetcher })
     const settled = await Promise.all([first.settle(0.75, "block-a"), second.settle(1.25, "block-b")])
@@ -690,7 +696,7 @@ describe("M2: spend is held before it starts", () => {
       { recorded: true, applied: true },
       { recorded: true, applied: true },
     ])
-    expect(world.keys.get(HASH)?.limit).toBe(70)
+    expect(world.keys.get(HASH)?.limit).toBe(46)
     expect(
       (await readDebits(user.id, HASH, fetcher)).map((debit) => [debit.ref, debit.micro, debit.applied]).sort(),
     ).toEqual([
@@ -698,32 +704,32 @@ describe("M2: spend is held before it starts", () => {
       ["block-b", 1_250_000, true],
     ])
     expect(await heldMembers()).toEqual([])
-    expect((await readModelPlanAccount(user.id, fetcher))?.key?.limitMicro).toBe(70_000_000)
+    expect((await readModelPlanAccount(user.id, fetcher))?.key?.limitMicro).toBe(46_000_000)
 
     const again = await holdPool(user.id, 1, HOUR, "hosted", { fetcher })
     expect(await again.settle(0.75, "block-a")).toEqual({ recorded: false, applied: true })
-    expect(world.keys.get(HASH)?.limit).toBe(70)
+    expect(world.keys.get(HASH)?.limit).toBe(46)
     expect(await heldMembers()).toEqual([])
     expect(await ledger()).toEqual({ heldMicro: 0, appliedMicro: 2_000_000, pendingMicro: 0 })
   })
 
   test("a failed PATCH is retried, and the charge stays held, counted once, until it is applied", async () => {
-    await seed({ price: 10, limit: 6, usage: 0.5 })
-    const block = await holdPool(user.id, 4, HOUR, "hosted", { fetcher })
+    await seed({ price: 10, limit: 4, usage: 0.5 })
+    const block = await holdPool(user.id, 3, HOUR, "hosted", { fetcher })
     world.failPatches = 1
-    expect(await block.settle(3.5, "block-1")).toEqual({ recorded: true, applied: false })
-    // The key still says 6, but the charge is held, and every figure counts it exactly once.
-    expect(world.keys.get(HASH)?.limit).toBe(6)
+    expect(await block.settle(2.5, "block-1")).toEqual({ recorded: true, applied: false })
+    // The key still says 4, but the charge is held, and every figure counts it exactly once.
+    expect(world.keys.get(HASH)?.limit).toBe(4)
     const held = await heldMembers()
     expect(held.map((member) => parseHoldMember(member))).toEqual([
-      { ticket: block.ticket, purpose: "hosted", run: undefined, micro: 3_500_000 },
+      { ticket: debitHoldTicket("block-1"), purpose: "hosted", run: undefined, micro: 2_500_000 },
     ])
     expect(Number(await redis(["ZSCORE", `vector:codium:test:held:${HASH}`, held[0]!]))).toBeGreaterThan(
       Date.now() + DEBIT_HOLD_MS - 60_000,
     )
-    expect(await ledger()).toEqual({ heldMicro: 3_500_000, appliedMicro: 0, pendingMicro: 3_500_000 })
-    expect((await status()).monthly).toMatchObject({ credits: 6, used: 4, remaining: 2, available: 2 })
-    await expect(modelPlanCredential(user.id, fetcher, Date.now(), 2.1)).rejects.toMatchObject({
+    expect(await ledger()).toEqual({ heldMicro: 2_500_000, appliedMicro: 0, pendingMicro: 2_500_000 })
+    expect((await status()).monthly).toMatchObject({ credits: 4, used: 3, remaining: 1, available: 1 })
+    await expect(modelPlanCredential(user.id, fetcher, Date.now(), 1.1)).rejects.toMatchObject({
       code: "MODEL_PLAN_EXHAUSTED",
     })
 
@@ -733,11 +739,11 @@ describe("M2: spend is held before it starts", () => {
       applied: 1,
       retried: 0,
     })
-    expect(world.keys.get(HASH)?.limit).toBe(2.5)
+    expect(world.keys.get(HASH)?.limit).toBe(1.5)
     expect(await heldMembers()).toEqual([])
-    expect(await ledger()).toEqual({ heldMicro: 0, appliedMicro: 3_500_000, pendingMicro: 0 })
-    expect((await status()).monthly).toMatchObject({ credits: 6, used: 4, remaining: 2, available: 2 })
-    await expect(modelPlanCredential(user.id, fetcher, Date.now(), 2.1)).rejects.toMatchObject({
+    expect(await ledger()).toEqual({ heldMicro: 0, appliedMicro: 2_500_000, pendingMicro: 0 })
+    expect((await status()).monthly).toMatchObject({ credits: 4, used: 3, remaining: 1, available: 1 })
+    await expect(modelPlanCredential(user.id, fetcher, Date.now(), 1.1)).rejects.toMatchObject({
       code: "MODEL_PLAN_EXHAUSTED",
     })
     expect(await drainDebitApplies({ fetcher, now: Date.now() + DEBIT_RETRY_MS + 1_000 })).toEqual({
@@ -747,7 +753,7 @@ describe("M2: spend is held before it starts", () => {
   })
 
   test("a retry that fails again waits for the next one, and the debit stays held", async () => {
-    await seed({ price: 10, limit: 6 })
+    await seed({ price: 10, limit: 4 })
     const block = await holdPool(user.id, 1, HOUR, "hosted", { fetcher })
     world.failPatches = 2
     expect(await block.settle(1, "block-1")).toEqual({ recorded: true, applied: false })
@@ -758,7 +764,7 @@ describe("M2: spend is held before it starts", () => {
     expect(await ledger()).toEqual({ heldMicro: 1_000_000, appliedMicro: 0, pendingMicro: 1_000_000 })
     // Any pass under the lease applies it too: here the account's next provisioning.
     await reconcileModelPlanAccount(user.id, fetcher)
-    expect(world.keys.get(HASH)?.limit).toBe(5)
+    expect(world.keys.get(HASH)?.limit).toBe(3)
     expect(await ledger()).toEqual({ heldMicro: 0, appliedMicro: 1_000_000, pendingMicro: 0 })
     // ...which also took the key off the retry queue.
     expect(await drainDebitApplies({ fetcher, now: Date.now() + 10 * DEBIT_RETRY_MS })).toEqual({
@@ -767,8 +773,34 @@ describe("M2: spend is held before it starts", () => {
     })
   })
 
+  test("a settle retried while its debit is pending keeps that debit held, and two settles of one hold count twice", async () => {
+    await seed({ price: 10, limit: 4 })
+    const block = await holdPool(user.id, 1, HOUR, "hosted", { fetcher })
+    world.failPatches = 2
+    expect(await block.settle(1, "block-1")).toEqual({ recorded: true, applied: false })
+    // The caller retries the same settle while the key still cannot be updated: nothing new is recorded, and the
+    // pending debit is still counted, once, as held.
+    expect(await block.settle(1, "block-1")).toEqual({ recorded: false, applied: false })
+    expect(await ledger()).toEqual({ heldMicro: 1_000_000, appliedMicro: 0, pendingMicro: 1_000_000 })
+    expect((await heldMembers()).map((member) => parseHoldMember(member)?.ticket)).toEqual([debitHoldTicket("block-1")])
+    expect(await applyPoolDebits(user.id, HASH, fetcher)).toEqual({ applied: 1, pending: 0 })
+    expect(world.keys.get(HASH)?.limit).toBe(3)
+    expect(await ledger()).toEqual({ heldMicro: 0, appliedMicro: 1_000_000, pendingMicro: 0 })
+
+    // Two charges settled on one hold, with the same amount and different refs, are two debits, each held.
+    const twice = await holdPool(user.id, 1, HOUR, "hosted", { fetcher })
+    world.failPatches = 2
+    expect(await twice.settle(0.5, "block-2")).toEqual({ recorded: true, applied: false })
+    expect(await twice.settle(0.5, "block-3")).toEqual({ recorded: true, applied: false })
+    expect(await ledger()).toEqual({ heldMicro: 1_000_000, appliedMicro: 1_000_000, pendingMicro: 1_000_000 })
+    expect(await applyPoolDebits(user.id, HASH, fetcher)).toEqual({ applied: 2, pending: 0 })
+    expect(world.keys.get(HASH)?.limit).toBe(2)
+    expect(await ledger()).toEqual({ heldMicro: 0, appliedMicro: 2_000_000, pendingMicro: 0 })
+    expect(debitHoldTicket("block-2")).not.toBe(debitHoldTicket("block-3"))
+  })
+
   test("a debit on a key the account replaced is applied without touching that key", async () => {
-    await seed({ price: 10, limit: 6 })
+    await seed({ price: 10, limit: 4 })
     const old = "hash_replaced"
     await redis([
       "HSET",
@@ -790,7 +822,7 @@ describe("M2: spend is held before it starts", () => {
   })
 
   test("a pool hold names a known purpose, a valid run and a bounded lifetime", async () => {
-    await seed({ price: 100, limit: 72 })
+    await seed({ price: 100, limit: 48 })
     const refused = [
       holdPool(user.id, 1, 3 * 86_400_000, "hosted", { fetcher }),
       holdPool(user.id, 1, HOUR, "mining" as never, { fetcher }),
@@ -810,48 +842,48 @@ describe("M2: spend is held before it starts", () => {
 
 describe("M3: available is the same figure everywhere", () => {
   test("hosted spend lowers status left and refuses a model hold, on the fast path and under the lease alike", async () => {
-    await seed({ price: 10, limit: 6, usage: 1 })
-    expect((await status()).balance.plan).toMatchObject({ left: 0.83 })
-    expect((await status()).monthly).toMatchObject({ shareUsed: 0.17, available: 5 })
+    await seed({ price: 10, limit: 4, usage: 1 })
+    expect((await status()).balance.plan).toMatchObject({ left: 0.75 })
+    expect((await status()).monthly).toMatchObject({ shareUsed: 0.25, available: 3 })
 
     // A running block holds, which does not move the share, but a model request cannot spend it.
-    const block = await holdPool(user.id, 3.5, HOUR, "hosted", { fetcher })
-    expect((await status()).balance.plan).toMatchObject({ left: 0.83 })
-    expect((await status()).monthly).toMatchObject({ available: 1.5 })
-    await expect(modelPlanCredential(user.id, fetcher, Date.now(), 2)).rejects.toMatchObject({
+    const block = await holdPool(user.id, 2.5, HOUR, "hosted", { fetcher })
+    expect((await status()).balance.plan).toMatchObject({ left: 0.75 })
+    expect((await status()).monthly).toMatchObject({ available: 0.5 })
+    await expect(modelPlanCredential(user.id, fetcher, Date.now(), 1)).rejects.toMatchObject({
       code: "MODEL_PLAN_EXHAUSTED",
     })
 
     // Its charge is spend: the share left drops, and so does what a request may hold.
-    expect(await block.settle(3, "block-1")).toEqual({ recorded: true, applied: true })
-    expect(world.keys.get(HASH)?.limit).toBe(3)
+    expect(await block.settle(2, "block-1")).toEqual({ recorded: true, applied: true })
+    expect(world.keys.get(HASH)?.limit).toBe(2)
     const after = await status()
-    expect(after.balance.plan).toMatchObject({ left: 0.33 })
-    expect(after.monthly).toMatchObject({ credits: 6, used: 4, remaining: 2, available: 2, shareUsed: 0.67 })
-    await expect(modelPlanCredential(user.id, fetcher, Date.now(), 2.5)).rejects.toMatchObject({
+    expect(after.balance.plan).toMatchObject({ left: 0.25 })
+    expect(after.monthly).toMatchObject({ credits: 4, used: 3, remaining: 1, available: 1, shareUsed: 0.75 })
+    await expect(modelPlanCredential(user.id, fetcher, Date.now(), 1.5)).rejects.toMatchObject({
       code: "MODEL_PLAN_EXHAUSTED",
     })
-    await (await modelPlanCredential(user.id, fetcher, Date.now(), 1.9)).release()
+    await (await modelPlanCredential(user.id, fetcher, Date.now(), 0.9)).release()
 
     // Under the lease (the key's limit had drifted back up), the answer is the same and the key is set right again.
-    world.keys.get(HASH)!.limit = 6
-    await expect(modelPlanCredential(user.id, fetcher, Date.now(), 2.5)).rejects.toMatchObject({
+    world.keys.get(HASH)!.limit = 4
+    await expect(modelPlanCredential(user.id, fetcher, Date.now(), 1.5)).rejects.toMatchObject({
       code: "MODEL_PLAN_EXHAUSTED",
     })
-    expect(world.keys.get(HASH)?.limit).toBe(3)
-    world.keys.get(HASH)!.limit = 6
-    await (await modelPlanCredential(user.id, fetcher, Date.now(), 1.9)).release()
-    expect(world.keys.get(HASH)?.limit).toBe(3)
+    expect(world.keys.get(HASH)?.limit).toBe(2)
+    world.keys.get(HASH)!.limit = 4
+    await (await modelPlanCredential(user.id, fetcher, Date.now(), 0.9)).release()
+    expect(world.keys.get(HASH)?.limit).toBe(2)
     expect(await heldMembers()).toEqual([])
   })
 
   test("a finished request keeps its charge held briefly, and status counts spend, not running requests", async () => {
-    await seed({ price: 10, limit: 6, usage: 1 })
+    await seed({ price: 10, limit: 4, usage: 1 })
     const request = await modelPlanCredential(user.id, fetcher, Date.now(), 0.5)
-    expect((await status()).monthly).toMatchObject({ remaining: 5, available: 4.5 })
+    expect((await status()).monthly).toMatchObject({ remaining: 3, available: 2.5 })
     // The provider charged 0.2; until the key's usage shows it, it stays held.
     await request.release(0.2)
     expect((await heldMembers()).map((member) => parseHoldMember(member)?.micro)).toEqual([200_000])
-    expect((await status()).monthly).toMatchObject({ remaining: 5, available: 4.8 })
+    expect((await status()).monthly).toMatchObject({ remaining: 3, available: 2.8 })
   })
 })

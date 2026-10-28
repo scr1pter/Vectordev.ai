@@ -271,7 +271,7 @@ describe("the webhook (contract §4.5)", () => {
     expect(await drainOutbox({ fetcher: fakes.fetcher, now })).toMatchObject({ retried: 0, dead: 0 })
     expect(outboxIds(fakes)).toEqual([])
     expect(await readSnapshot(id, fakes.fetcher)).toMatchObject({ state: "active", source: "outbox" })
-    expect([...fakes.openRouter.keys.values()]).toEqual([expect.objectContaining({ disabled: false, limit: 6 })])
+    expect([...fakes.openRouter.keys.values()]).toEqual([expect.objectContaining({ disabled: false, limit: 4 })])
 
     // The replayed event changes nothing more, and is marked done this time.
     expect(
@@ -524,11 +524,11 @@ describe("M11: a renewal never locks out someone who pays", () => {
     expect(account?.key).toMatchObject({
       subscription: "sub_renewing",
       start: nextStart / 1000,
-      limitMicro: 72_000_000,
+      limitMicro: 48_000_000,
     })
     expect(account?.key?.carry).toBeUndefined()
     const fresh = fakes.openRouter.keys.get(account!.key!.hash)!
-    expect(fresh).toMatchObject({ disabled: false, limit: 72, usage: 0 })
+    expect(fresh).toMatchObject({ disabled: false, limit: 48, usage: 0 })
     const credential = await modelPlanCredential(id, fakes.fetcher, paidAt + MINUTE, 0.01)
     expect(credential.key).not.toBe("seeded-secret")
     await credential.release()
@@ -551,12 +551,12 @@ describe("M11: a renewal never locks out someone who pays", () => {
     // Carry from an upgrade earlier in the month ends at the renewal.
     const record = JSON.parse(fakes.store.get(codiumKey("account", id))!)
     record.key.carry = { micro: 5_000_000, fromSubscription: "sub_old", fromStart: 1, fromCharge: "ch_old" }
-    record.key.limitMicro = 77_000_000
+    record.key.limitMicro = 53_000_000
     fakes.store.set(codiumKey("account", id), JSON.stringify(record))
-    fakes.openRouter.keys.get(SEEDED)!.limit = 77
+    fakes.openRouter.keys.get(SEEDED)!.limit = 53
     const renewing = await reconcileModelPlanAccount(id, fakes.fetcher, end + MINUTE)
     expect(renewing).toMatchObject({ state: "renewing", meterEpoch: `sub_renewing:${fixture.expect.periodStart * 1000}` })
-    expect(fakes.openRouter.keys.get(SEEDED)).toMatchObject({ disabled: false, limit: 77 })
+    expect(fakes.openRouter.keys.get(SEEDED)).toMatchObject({ disabled: false, limit: 53 })
 
     // An hour later Stripe finalizes the draft and the card pays it, with no help from Vector.
     const paidAt = end + 61 * MINUTE
@@ -582,11 +582,11 @@ describe("M11: a renewal never locks out someone who pays", () => {
     expect(snapshot!.meterEpoch).not.toBe(renewing.meterEpoch)
     expect(fakes.openRouter.keys.get(SEEDED)?.disabled).toBe(true)
     const account = await readModelPlanAccount(id, fakes.fetcher)
-    expect(account?.key).toMatchObject({ subscription: "sub_renewing", start: nextStart / 1000, limitMicro: 72_000_000 })
+    expect(account?.key).toMatchObject({ subscription: "sub_renewing", start: nextStart / 1000, limitMicro: 48_000_000 })
     expect(account?.key?.carry).toBeUndefined()
     expect(fakes.openRouter.keys.get(account!.key!.hash)).toMatchObject({
       disabled: false,
-      limit: 72,
+      limit: 48,
       usage: 0,
       expires_at: keyExpiresAt(Number(fixture.objects.subscriptions![0]!.current_period_end)),
     })
@@ -619,6 +619,80 @@ describe("M11: a renewal never locks out someone who pays", () => {
       statusCode: 402,
       code: "MODEL_PLAN_PAYMENT_REQUIRED",
     })
+  })
+
+  test("a month refunded without cancelling stays ended when it renews: its key stays off until a renewal is paid", async () => {
+    const fixture = loadStripeFixture("renewing-draft-invoice")
+    const id = fixture.accountId
+    const start = fixture.expect.periodStart
+    const end = fixture.expect.periodEnd
+    const fakes = seed(fixture, { now: (start + 86_400) * 1000 })
+    // A day into the month the subscription is still on it, paid, when its charge is refunded in full from Stripe's
+    // dashboard. The subscription is not cancelled, so Stripe goes on to bill the next month.
+    const subscription = fakes.stripe.subscription("sub_renewing")!
+    const next = {
+      current_period_start: subscription.current_period_start,
+      current_period_end: subscription.current_period_end,
+      latest_invoice: subscription.latest_invoice,
+    }
+    Object.assign(subscription, {
+      current_period_start: start,
+      current_period_end: end,
+      latest_invoice: "in_renewingP1",
+    })
+    expect(await reconcileModelPlanAccount(id, fakes.fetcher, (start + 86_400) * 1000)).toMatchObject({
+      state: "active",
+    })
+    expect(fakes.openRouter.keys.get(SEEDED)?.disabled).toBe(false)
+    Object.assign(fakes.stripe.charge("ch_renewingP1")!, { refunded: true, amount_refunded: 10_000 })
+    expect(await reconcileModelPlanAccount(id, fakes.fetcher, (start + 2 * 86_400) * 1000)).toMatchObject({
+      state: "ended",
+      reason: "refunded",
+    })
+    expect(fakes.openRouter.keys.get(SEEDED)?.disabled).toBe(true)
+    expect((await readModelPlanAccount(id, fakes.fetcher))?.key).toMatchObject({ hash: SEEDED, revoked: "refunded" })
+
+    // The period ends and Stripe moves the subscription on, with the renewal still a draft: a renewal of a paid month
+    // would keep that month's key serving (M11), but this month was refunded, so nothing comes back on.
+    Object.assign(subscription, next)
+    for (const at of [end * 1000 + MINUTE, end * 1000 + 30 * MINUTE]) {
+      fakes.clock.now = at
+      expect(await reconcileModelPlanAccount(id, fakes.fetcher, at)).toMatchObject({
+        state: "ended",
+        reason: "refunded",
+        periodEnd: end * 1000,
+      })
+      await expect(modelPlanCredential(id, fakes.fetcher, at, 0.01)).rejects.toMatchObject({ statusCode: 402 })
+      await expect(requireEntitlement(id, "codium", fakes.fetcher, at)).rejects.toMatchObject({
+        statusCode: 402,
+        code: "MODEL_PLAN_REQUIRED",
+        detail: { reason: "refunded" },
+      })
+      expect(await modelPlanStatus(id, fakes.fetcher, at)).toMatchObject({ active: false })
+    }
+    expect(fakes.openRouter.keys.get(SEEDED)?.disabled).toBe(true)
+    expect(fakes.openRouter.calls.filter((call) => call.method === "PATCH" && call.json?.disabled === false)).toEqual(
+      [],
+    )
+
+    // The renewal is paid: the new month starts on a new key, and the refunded month's key stays off.
+    const paidAt = end * 1000 + 61 * MINUTE
+    fakes.clock.now = paidAt
+    for (const action of ["finalize", "pay"])
+      await modelPlanStripe(
+        `invoices/in_renewal/${action}`,
+        { method: "POST", idempotency: `stripe-own-${action}` },
+        fakes.fetcher,
+      )
+    expect(await reconcileModelPlanAccount(id, fakes.fetcher, paidAt)).toMatchObject({
+      state: "active",
+      periodStart: Number(next.current_period_start) * 1000,
+    })
+    const account = await readModelPlanAccount(id, fakes.fetcher)
+    expect(account?.key?.hash).not.toBe(SEEDED)
+    expect(account?.key?.revoked).toBeUndefined()
+    expect(fakes.openRouter.keys.get(account!.key!.hash)).toMatchObject({ disabled: false, limit: 48 })
+    expect(fakes.openRouter.keys.get(SEEDED)?.disabled).toBe(true)
   })
 })
 
@@ -771,7 +845,7 @@ describe("M7: no renewal charge Vector should not take", () => {
           metadata: {
             vector_account_id: id,
             vector_plan: `vector-${price}`,
-            vector_model_credits_usd: price === 200 ? "150" : "72",
+            vector_model_credits_usd: price === 200 ? "100" : "48",
             ...metadata,
           },
           items: {
@@ -841,14 +915,14 @@ describe("M7: no renewal charge Vector should not take", () => {
   })
 
   test("refused, without a pause, while the balance does not cover what is owed plus the renewal (M12)", async () => {
-    // Owed $9,950 and a $72 renewal against a $10,000 balance.
+    // Owed $9,970 and a $48 renewal against a $10,000 balance.
     const short = renewal()
-    funding(short.fakes, short.at, 1_000_000, 995_000)
+    funding(short.fakes, short.at, 1_000_000, 997_000)
     await refused(short.fakes, short.at, "unfunded", false)
 
     // Exactly enough is enough.
     const exact = renewal()
-    funding(exact.fakes, exact.at, 1_000_000, 1_000_000 - 7_200)
+    funding(exact.fakes, exact.at, 1_000_000, 1_000_000 - 4_800)
     expect(await finalizeRenewal("in_renewal", exact.fakes.fetcher, exact.at)).toMatchObject({ outcome: "paid" })
 
     // No reading from the last 15 minutes, and none can be taken: short, so the early charge is skipped. (The failed

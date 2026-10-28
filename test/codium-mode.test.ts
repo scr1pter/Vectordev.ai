@@ -38,8 +38,8 @@ const admin = { id: "55555555-5555-4555-8555-555555555555", email: "admin@exampl
 const buyer = { id: "66666666-6666-4666-8666-666666666666", email: "buyer@example.test" }
 const KV = "https://kv.mode-fixture.invalid"
 const PRICES = [10, 50, 100, 200] as const
-// The contract's private pools keep the public multiples exactly: 33/6 = 5.5, 72/6 = 12, 150/6 = 25.
-const CREDITS = { 10: "6", 50: "33", 100: "72", 200: "150" } as const
+// Made-up credits that keep the public multiples exactly: 22/4 = 5.5, 48/4 = 12, 100/4 = 25.
+const CREDITS = { 10: "4", 50: "22", 100: "48", 200: "100" } as const
 
 const environment = [
   "MODEL_PLANS_ENABLED",
@@ -334,7 +334,7 @@ async function lifecycle(user: { id: string; email: string }) {
   await credential.release(0.001)
   const status = await modelPlanStatus(user.id, fetcher)
   charge(user)
-  expect(await recordCodiumCharge(user.id, "ch_mode", fetcher)).toMatchObject({ charge: "ch_mode", credits: 600 })
+  expect(await recordCodiumCharge(user.id, "ch_mode", fetcher)).toMatchObject({ charge: "ch_mode", credits: 400 })
   await cancelModelPlanAccount(user.id, fetcher)
   return status
 }
@@ -489,18 +489,18 @@ describe("test mode", () => {
   })
 
   test("the cap is CODIUM_TEST_CREDIT_CAP_USD, never above the plan's credits, and checked", () => {
-    expect(codiumKeyLimitUsd(6)).toBe(0.5)
+    expect(codiumKeyLimitUsd(4)).toBe(0.5)
     process.env.CODIUM_TEST_CREDIT_CAP_USD = "2.25"
-    expect(codiumKeyLimitUsd(6)).toBe(2.25)
+    expect(codiumKeyLimitUsd(4)).toBe(2.25)
     process.env.CODIUM_TEST_CREDIT_CAP_USD = "200"
-    expect(codiumKeyLimitUsd(6)).toBe(6)
-    expect(codiumKeyLimitUsd(6, "live")).toBe(6)
+    expect(codiumKeyLimitUsd(4)).toBe(4)
+    expect(codiumKeyLimitUsd(4, "live")).toBe(4)
     for (const value of ["0", "-1", "abc", "250", "0.125"]) {
       process.env.CODIUM_TEST_CREDIT_CAP_USD = value
-      expect(() => codiumKeyLimitUsd(6)).toThrow()
+      expect(() => codiumKeyLimitUsd(4)).toThrow()
       expect(codiumBillingConfigProblems()).toContain("CODIUM_TEST_CREDIT_CAP_USD is out of range")
       // Live mode never reads it.
-      expect(codiumKeyLimitUsd(6, "live")).toBe(6)
+      expect(codiumKeyLimitUsd(4, "live")).toBe(4)
       expect(codiumLimitProblems("live")).toEqual([])
     }
   })
@@ -528,7 +528,7 @@ describe("test mode", () => {
     world.keys.set("live1", {
       hash: "live1",
       name: `Vector ${buyer.id} sub_live ${start}`,
-      limit: 6,
+      limit: 4,
       usage: 1,
       disabled: false,
       expires_at: null,
@@ -542,9 +542,9 @@ describe("test mode", () => {
       expires_at: null,
     })
     configure("live")
-    expect(await checkCodiumFunding(fetcher)).toMatchObject({ status: "open", owed: 500, keys: 1 })
+    expect(await checkCodiumFunding(fetcher)).toMatchObject({ status: "open", owed: 300, keys: 1 })
     configure("test")
-    expect(await checkCodiumFunding(fetcher)).toMatchObject({ status: "open", owed: 550, keys: 2 })
+    expect(await checkCodiumFunding(fetcher)).toMatchObject({ status: "open", owed: 350, keys: 2 })
     // Each mode keeps its own reading.
     expect(world.store.has("vector:codium:live:funding")).toBe(true)
     expect(world.store.has("vector:codium:test:funding")).toBe(true)
@@ -561,7 +561,7 @@ describe("live mode", () => {
     const created = world.openRouter.filter((call) => call.method === "POST")
     expect(JSON.parse(created[0]!.body)).toMatchObject({
       name: `Vector ${buyer.id} sub_mode ${period().start}`,
-      limit: 6,
+      limit: 4,
     })
     expect(created[0]!.headers.get("idempotency-key")).toStartWith("vector-codium-key-live-")
   })
@@ -619,7 +619,7 @@ describe("codiumKey", () => {
 })
 
 describe("codiumBillingConfig", () => {
-  test("passes the contract's pools and reports the mode, the minimum client and the token rule", () => {
+  test("passes credits at the public multiples and reports the mode, the minimum client and the token rule", () => {
     expect(codiumBillingConfigProblems()).toEqual([])
     expect(codiumBillingConfig()).toMatchObject({
       mode: "test",
@@ -627,7 +627,7 @@ describe("codiumBillingConfig", () => {
       requireMarkedTokens: true,
       testCreditCapUsd: 0.5,
     })
-    expect(codiumBillingConfig().plans.map((plan) => plan.credits)).toEqual([6, 33, 72, 150])
+    expect(codiumBillingConfig().plans.map((plan) => plan.credits)).toEqual([4, 22, 48, 100])
     expect(requireModelPlans()).toMatchObject({ mode: "test" })
     configure("live")
     expect(codiumBillingConfig()).toMatchObject({ mode: "live", testCreditCapUsd: null })
@@ -643,9 +643,9 @@ describe("codiumBillingConfig", () => {
     ])
     expect(() => requireModelPlans()).toThrow("temporarily unavailable")
     configure("test")
-    process.env.MODEL_PLAN_50_CREDITS_USD = "33.2"
+    process.env.MODEL_PLAN_50_CREDITS_USD = "22.1"
     expect(codiumBillingConfigProblems()).toEqual([])
-    process.env.MODEL_PLAN_50_CREDITS_USD = "33.4"
+    process.env.MODEL_PLAN_50_CREDITS_USD = "22.3"
     expect(codiumBillingConfigProblems()).toEqual(["MODEL_PLAN_50_CREDITS_USD is not 5.5x the Plus credits"])
     // A markup alone scales every plan by its price, so it can never meet the multiples.
     configure("test")

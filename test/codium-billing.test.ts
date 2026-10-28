@@ -29,6 +29,7 @@ import {
   cancelModelPlanAccount,
   governingStanding,
   keyExpiresAt,
+  modelPlanCheckout,
   modelPlanCredential,
   protectModelPlanKey,
   readModelPlanAccount,
@@ -353,6 +354,42 @@ describe("a dispute on any Codium charge freezes the account (M5)", () => {
       reason: "disputed",
     })
     expect(created(fakes)).toEqual([])
+    // A model request gets the answer every service gives an ended plan (contract §4.4, §4.10): 402 REQUIRED with the
+    // reason, not the 403 of a freeze.
+    const ended = { statusCode: 402, code: "MODEL_PLAN_REQUIRED", detail: { reason: "disputed" } }
+    await expect(modelPlanCredential(id, fakes.fetcher, Date.now(), 0.01)).rejects.toMatchObject(ended)
+    await expect(requireEntitlement(id, "codium", fakes.fetcher, fixture.now * 1000 + HOUR)).rejects.toMatchObject(
+      ended,
+    )
+  })
+
+  test("a dispute while OpenRouter is down still writes the frozen snapshot, and the retry switches the key off", async () => {
+    const fixture = loadStripeFixture("frozen-dispute-open")
+    const fakes = seed(fixture)
+    const id = fixture.accountId
+    const now = fixture.now * 1000
+    fakes.openRouter.fail = (call) =>
+      call.method === "PATCH" ? Response.json({ error: "fixture outage" }, { status: 503 }) : undefined
+    await expect(reconcileModelPlanAccount(id, fakes.fetcher, now, { hint: fixture.hint! })).rejects.toMatchObject({
+      code: "MODEL_PLAN_UPSTREAM",
+    })
+    // The snapshot that stops every service, and the outbox items that revoke what was issued, went first.
+    const frozen = await readSnapshot(id, fakes.fetcher)
+    expect(frozen).toMatchObject({ state: "frozen", reason: "disputed", version: 1 })
+    expect(frozen?.revokedBefore).toBe(now)
+    expect(fakes.store.command(["ZRANGE", codiumKey("outbox"), 0, -1])).toContain(`github-runs:${id}:1`)
+    await expect(requireEntitlement(id, "codium", fakes.fetcher, now)).rejects.toMatchObject({
+      statusCode: 403,
+      code: "MODEL_PLAN_BLOCKED",
+    })
+    expect(fakes.openRouter.keys.get(SEEDED)?.disabled).toBe(false)
+
+    // OpenRouter is back: the reconcile the webhook queued switches the key off and leaves the snapshot as it was.
+    fakes.openRouter.fail = undefined
+    expect(
+      await reconcileModelPlanAccount(id, fakes.fetcher, now + 60_000, { source: "outbox", hint: fixture.hint! }),
+    ).toMatchObject({ state: "frozen", version: 1, revokedBefore: now })
+    expect(fakes.openRouter.keys.get(SEEDED)?.disabled).toBe(true)
   })
 
   test("the risk record's order: deletion, a lost dispute, an open dispute, a warning, any other block", () => {
@@ -378,6 +415,48 @@ describe("a dispute on any Codium charge freezes the account (M5)", () => {
       reason: "early_fraud_warning",
     })
     expect(riskState(risk({ blocked: true, reason: "something new" }))).toEqual({ state: "frozen", reason: "owner" })
+  })
+})
+
+// ── Checkout for a held account ────────────────────────────────────────────────────────────────────────────────
+
+describe("an account its risk record holds cannot buy Codium again", () => {
+  test("checkout refuses a blocked, disputed or warned account before any customer, reservation or session", async () => {
+    const buyer = "buyer@example.test"
+    for (const risk of [
+      { blocked: true, reason: "disputed", at: 1, openDisputes: {}, efw: [] },
+      { blocked: true, reason: "early_fraud_warning", at: 1, openDisputes: {}, efw: [] },
+      { blocked: true, reason: "owner", at: 1, openDisputes: {}, efw: [] },
+      { blocked: false, openDisputes: { ch_open: { status: "needs_response", at: 1 } }, efw: [] },
+      { blocked: false, openDisputes: {}, efw: ["ch_warned"] },
+    ]) {
+      restore()
+      restore = codiumTestEnvironment({ VECTOR_ADMIN_EMAILS: buyer })
+      // Its old subscription was cancelled, so nothing else would stop a new one.
+      const fixture = loadStripeFixture("ended-canceled")
+      const fakes = seed(fixture)
+      const at = fixture.now * 1000
+      fakes.store.set(
+        codiumKey("funding"),
+        JSON.stringify({
+          status: "open",
+          checkedAt: at,
+          since: at,
+          balance: 1_000_000,
+          owed: 0,
+          reserved: 0,
+          required: 0,
+          keys: 0,
+        }),
+      )
+      fakes.store.set(accountKey(fixture.accountId), JSON.stringify({ ...fixture.account, risk }))
+      await expect(
+        modelPlanCheckout({ id: fixture.accountId, email: buyer }, "vector-10", fakes.fetcher, at),
+      ).rejects.toMatchObject({ statusCode: 403, code: "MODEL_PLAN_BLOCKED" })
+      expect(fakes.stripe.calls).toEqual([])
+      expect(fakes.store.get(codiumKey("funding", "reserved"))).toBeUndefined()
+      expect(JSON.parse(fakes.store.get(accountKey(fixture.accountId))!)).not.toHaveProperty("checkout")
+    }
   })
 })
 
