@@ -13,6 +13,8 @@ import { TaskManager } from "@/task/manager"
 import { TaskNotify } from "@/task/notify"
 import { TaskLimits } from "@/task/limits"
 import { TaskRecovery } from "@/task/recovery"
+import { TaskAttention } from "@/task/attention"
+import { TaskSignals } from "@/task/signals"
 import { DesktopTasks } from "@/task/desktop"
 import { Command } from "@/command"
 import { Config } from "@/config/config"
@@ -277,6 +279,8 @@ const app = LayerNode.group([
   TaskNotify.node,
   TaskLimits.node,
   TaskRecovery.node,
+  TaskAttention.node,
+  TaskSignals.node,
   DesktopTasks.node,
   RuntimeFlags.node,
   EventV2Bridge.node,

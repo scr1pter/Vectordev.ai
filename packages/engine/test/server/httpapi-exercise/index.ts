@@ -1248,6 +1248,10 @@ const scenarios: Scenario[] = [
       (body as { taskResume?: unknown }).taskResume === true,
       "capabilities should report the route that resumes a session's stopped or interrupted tasks",
     )
+    check(
+      (body as { taskAttention?: unknown }).taskAttention === true,
+      "capabilities should report that tasks say when they wait on the user",
+    )
   }),
   http.protected
     .post("/experimental/session/{sessionID}/background", "experimental.session.background")

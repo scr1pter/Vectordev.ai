@@ -38,6 +38,8 @@ export type Note = {
   text: string
   /** Whether the note may start a parent turn. */
   wake: boolean
+  /** What an attention note's child waits for. */
+  attention?: "permission" | "question"
   recovered?: boolean
   quiet?: boolean
   /** A stale claim on a result note (its engine stopped before writing the message), which this delivery takes over. */
@@ -185,7 +187,7 @@ function metadata(note: Note, quiet: boolean): Record<string, unknown> {
       : note.kind === "message"
         ? { taskMessage: { taskID: note.taskID } }
         : note.kind === "attention"
-          ? { taskAttention: { taskID: note.taskID, state: note.state } }
+          ? { taskAttention: { taskID: note.taskID, kind: note.attention, state: note.state } }
           : note.kind === "interrupted"
             ? { taskInterrupted: { taskIDs: note.taskIDs ?? [] } }
             : { shellNotification: { shellID: note.shellID, state: note.state } }

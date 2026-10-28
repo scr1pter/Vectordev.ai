@@ -343,6 +343,26 @@ export function update(sessions: Session.Interface, sessionID: SessionID, patch:
   )
 }
 
+/**
+ * Reads the child's record and writes the patch `change` returns, under the lock `write` takes, so a check and the
+ * write it decides are one step. Returns `change`'s value, or undefined when there is no record.
+ */
+export function modify<A>(
+  sessions: Session.Interface,
+  sessionID: SessionID,
+  change: (record: SubagentRecord) => { patch?: Partial<SubagentRecord>; value: A },
+) {
+  return Effect.gen(function* () {
+    const info = yield* sessions.get(sessionID)
+    const record = read(info)
+    if (!record) return undefined
+    const { patch, value } = change(record)
+    if (patch)
+      yield* sessions.setMetadata({ sessionID, metadata: { ...info.metadata, [METADATA_KEY]: merge(record, patch) } })
+    return value
+  }).pipe(locked(metadataLock))
+}
+
 type Notification = NonNullable<SubagentRecord["notification"]>
 
 /** How long a claim stays its claimer's to write its message before recovery may take it over. */

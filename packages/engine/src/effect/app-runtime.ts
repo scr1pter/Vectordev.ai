@@ -66,6 +66,8 @@ import { LearnedSkill } from "@/skill/learned"
 import { TaskNotify } from "@/task/notify"
 import { TaskLimits } from "@/task/limits"
 import { TaskRecovery } from "@/task/recovery"
+import { TaskAttention } from "@/task/attention"
+import { TaskSignals } from "@/task/signals"
 
 export const AppLayer = AppNodeBuilderV1.build(
   LayerNode.group([
@@ -94,6 +96,8 @@ export const AppLayer = AppNodeBuilderV1.build(
     TaskNotify.node,
     TaskLimits.node,
     TaskRecovery.node,
+    TaskAttention.node,
+    TaskSignals.node,
     RuntimeFlags.node,
     EventV2Bridge.node,
     SessionRunState.node,

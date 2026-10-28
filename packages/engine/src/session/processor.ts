@@ -344,7 +344,11 @@ const layer = Layer.effect(
             time: { start: match.part.state.time.start, end: Date.now() },
           },
         })
-        if (error instanceof PermissionV1.RejectedError || error instanceof Question.RejectedError) {
+        // A question no one answered in time (ask_timeout) lets the agent carry on with its own judgement.
+        if (
+          error instanceof PermissionV1.RejectedError ||
+          (error instanceof Question.RejectedError && !error.timedOut)
+        ) {
           ctx.blocked = ctx.shouldBreak
         }
         ctx.stepTools = ctx.stepTools.map((item) =>

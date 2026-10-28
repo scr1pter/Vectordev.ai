@@ -27,6 +27,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { DesktopTasks } from "./desktop"
 import { TaskLimits } from "./limits"
 import { TaskNotify } from "./notify"
+import { TaskSignals } from "./signals"
 
 export class Error extends Schema.TaggedErrorClass<Error>()("TaskManager.Error", {
   code: Schema.Literals([
@@ -144,6 +145,7 @@ const layer = Layer.effect(
     const store = yield* BackgroundJobStore.Service
     const notify = yield* TaskNotify.Service
     const flags = yield* RuntimeFlags.Service
+    const signals = yield* TaskSignals.Service
     const bridge = <A>(effect: Effect.Effect<A, DesktopTasks.Error>) =>
       effect.pipe(Effect.mapError((error) => new Error({ code: error.code, message: error.message })))
     const lock = SubagentLifecycle.controlLock
@@ -242,9 +244,10 @@ const layer = Layer.effect(
       }
       const session = abandoned ? yield* get(initial.id) : initial
       const current = SubagentLifecycle.read(session)!
-      const pending = [...(yield* permissions.list()), ...(yield* questions.list())].some(
-        (item) => item.sessionID === session.id,
-      )
+      // A request pending here, or one a record says its child waits on in an engine that still runs it (D.4).
+      const pending =
+        [...(yield* permissions.list()), ...(yield* questions.list())].some((item) => item.sessionID === session.id) ||
+        (!job && !abandoned && current.waiting !== undefined && SubagentLifecycle.open(current))
       const status: Task.Status =
         abandoned || current.status === "cancelled" || job?.status === "cancelled" || job?.status === "interrupted"
           ? "stopped"
@@ -322,6 +325,17 @@ const layer = Layer.effect(
           stop: ACTIVE.has(status) && !SubagentLifecycle.stopping.has(session.id),
           ...(yield* offers(session, current, job, status, recent.length > 0)),
         },
+        ...(status === "waiting_on_user" && current.waiting
+          ? {
+              waiting: SubagentLifecycle.defined({
+                kind: current.waiting.kind,
+                since: current.waiting.since,
+                requestID: current.waiting.requestID,
+                expiresAt: current.waiting.expiresAt,
+                summary: current.waiting.summary,
+              }) as Task.Waiting,
+            }
+          : {}),
         ...(current.interruption
           ? {
               interrupted: SubagentLifecycle.defined({
@@ -1096,11 +1110,22 @@ const layer = Layer.effect(
             ? bridge(desktop.wait({ sessionID: input.sessionID, taskID: task.id, timeout: input.timeout ?? 30_000 }))
             : jobs.wait({ id: task.id }).pipe(Effect.asVoid),
         )
-      const done = yield* (
+      const finished = (
         input.mode === "all" ? Effect.all(waits, { concurrency: "unbounded", discard: true }) : Effect.raceAll(waits)
-      ).pipe(Effect.timeoutOption(input.timeout ?? 30_000))
+      ).pipe(Effect.as<string[]>([]))
+      // A selected task that starts waiting on the user ends the wait early, so the agent can tell the user (D.4). One
+      // already waiting does not, or every wait on it would return at once.
+      const asking = signals.next(
+        before.filter((task) => ACTIVE.has(task.status) && !DesktopTasks.owns(task.id)).map((task) => task.id),
+      )
+      const done = yield* Effect.raceFirst(finished, asking).pipe(Effect.timeoutOption(input.timeout ?? 30_000))
       const tasks = yield* select(input.sessionID, input.taskIDs)
-      return { tasks, timedOut: done._tag === "None" || !settled(tasks) }
+      const attention = Option.getOrElse(done, () => [])
+      return {
+        tasks,
+        timedOut: Option.isNone(done) || (attention.length === 0 && !settled(tasks)),
+        ...(attention.length > 0 ? { attention } : {}),
+      }
     })
 
     return Service.of({ list, inspect, message, stop, interrupt, promote, resume, wait })
@@ -1125,6 +1150,7 @@ export const node = LayerNode.make({
     BackgroundJobStore.node,
     TaskNotify.node,
     RuntimeFlags.node,
+    TaskSignals.node,
   ],
 })
 export * as TaskManager from "./manager"

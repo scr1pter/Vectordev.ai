@@ -254,6 +254,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
         sessionStop: true,
         taskPromote: true,
         taskResume: true,
+        taskAttention: true,
       }
     })
 

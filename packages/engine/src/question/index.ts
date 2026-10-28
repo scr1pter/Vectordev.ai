@@ -24,9 +24,16 @@ export const Replied = QuestionV1.Replied
 export const Rejected = QuestionV1.Rejected
 export const Event = QuestionV1.Event
 
-export class RejectedError extends Schema.TaggedErrorClass<RejectedError>()("QuestionRejectedError", {}) {
+/** What a caller tells its model when no one answered a question in time (`sizing.subagents.ask_timeout`). */
+export const TIMED_OUT =
+  "No one answered within the time limit. Continue with your best judgement and state your assumption in your report."
+
+export class RejectedError extends Schema.TaggedErrorClass<RejectedError>()("QuestionRejectedError", {
+  /** No one answered in time: the caller carries on with its own judgement rather than stopping its turn. */
+  timedOut: Schema.optional(Schema.Boolean),
+}) {
   override get message() {
-    return "The user dismissed this question"
+    return this.timedOut ? TIMED_OUT : "The user dismissed this question"
   }
 }
 
@@ -56,6 +63,11 @@ export interface Interface {
     answers: ReadonlyArray<Answer>
   }) => Effect.Effect<void, NotFoundError>
   readonly reject: (requestID: QuestionID) => Effect.Effect<void, NotFoundError>
+  /**
+   * Withdraws an unanswered question as timed out, failing only its asker with `RejectedError({ timedOut: true })`.
+   * Returns whether it was still pending.
+   */
+  readonly expire: (requestID: string) => Effect.Effect<boolean>
   readonly list: () => Effect.Effect<ReadonlyArray<Request>>
 }
 
@@ -152,12 +164,23 @@ const layer = Layer.effect(
       yield* Deferred.fail(existing.deferred, new RejectedError())
     })
 
+    const expire = Effect.fn("Question.expire")(function* (requestID: string) {
+      const pending = (yield* InstanceState.get(state)).pending
+      const existing = pending.get(requestID as QuestionID)
+      if (!existing) return false
+      pending.delete(existing.info.id)
+      yield* Effect.logInfo("expired", { requestID })
+      yield* events.publish(Event.Rejected, { sessionID: existing.info.sessionID, requestID: existing.info.id })
+      yield* Deferred.fail(existing.deferred, new RejectedError({ timedOut: true }))
+      return true
+    })
+
     const list = Effect.fn("Question.list")(function* () {
       const pending = (yield* InstanceState.get(state)).pending
       return Array.from(pending.values(), (x) => x.info)
     })
 
-    return Service.of({ ask, reply, reject, list })
+    return Service.of({ ask, reply, reject, expire, list })
   }),
 )
 

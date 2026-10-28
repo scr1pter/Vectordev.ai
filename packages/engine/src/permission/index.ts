@@ -15,6 +15,11 @@ export const Event = PermissionV1.Event
 export interface Interface {
   readonly ask: (input: PermissionV1.AskInput) => Effect.Effect<void, PermissionV1.Error>
   readonly reply: (input: PermissionV1.ReplyInput) => Effect.Effect<void, PermissionV1.NotFoundError>
+  /**
+   * Declines one unanswered request that timed out with `CorrectedError({ feedback: message })`. Unlike a rejection it
+   * leaves the session's other requests pending. Returns whether it was still pending.
+   */
+  readonly expire: (requestID: string, message: string) => Effect.Effect<boolean>
   readonly list: () => Effect.Effect<ReadonlyArray<PermissionV1.Request>>
 }
 
@@ -191,12 +196,27 @@ const layer = Layer.effect(
       }
     })
 
+    const expire = Effect.fn("Permission.expire")(function* (requestID: string, message: string) {
+      const { pending } = yield* InstanceState.get(state)
+      const existing = pending.get(requestID as PermissionV1.ID)
+      if (!existing) return false
+      pending.delete(existing.info.id)
+      yield* Effect.logInfo("expired", { requestID })
+      yield* events.publish(Event.Replied, {
+        sessionID: existing.info.sessionID,
+        requestID: existing.info.id,
+        reply: "reject",
+      })
+      yield* Deferred.fail(existing.deferred, new PermissionV1.CorrectedError({ feedback: message }))
+      return true
+    })
+
     const list = Effect.fn("Permission.list")(function* () {
       const pending = (yield* InstanceState.get(state)).pending
       return Array.from(pending.values(), (item) => item.info)
     })
 
-    return Service.of({ ask, reply, list })
+    return Service.of({ ask, reply, expire, list })
   }),
 )
 
