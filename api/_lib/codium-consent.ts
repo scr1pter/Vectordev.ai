@@ -12,7 +12,7 @@ export function checkoutConsentFields(plan: { price: number; id: string }) {
     "custom_text[terms_of_service_acceptance][message]": `${CODIUM_CHECKOUT_CONSENT} Renews monthly at $${plan.price} until I cancel in my account.${plan.id === "vector-100" || plan.id === "vector-200" ? " Vector Velocity is coming and is not part of this purchase." : ""}`,
     "metadata[vector_terms_date]": CODIUM_TERMS_DATE,
     "subscription_data[metadata][vector_terms_date]": CODIUM_TERMS_DATE,
-    ...(process.env.CODIUM_AUTOMATIC_TAX === "true" ? { "automatic_tax[enabled]": "true" } : {}),
+    ...(process.env.CODIUM_STRIPE_AUTOMATIC_TAX === "true" ? { "automatic_tax[enabled]": "true" } : {}),
   }
 }
 

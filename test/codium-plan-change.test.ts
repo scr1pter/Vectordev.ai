@@ -569,8 +569,8 @@ describe("Codium plan change", () => {
       checkoutConsentFields({ id: "vector-100", price: 100 })["custom_text[terms_of_service_acceptance][message]"],
     ).toContain("not part of this purchase")
     expect(checkoutConsentFields({ id: "vector-10", price: 10 })).not.toHaveProperty("automatic_tax[enabled]")
-    process.env.CODIUM_AUTOMATIC_TAX = "true"
+    process.env.CODIUM_STRIPE_AUTOMATIC_TAX = "true"
     expect(checkoutConsentFields({ id: "vector-10", price: 10 })["automatic_tax[enabled]"]).toBe("true")
-    delete process.env.CODIUM_AUTOMATIC_TAX
+    delete process.env.CODIUM_STRIPE_AUTOMATIC_TAX
   })
 })
