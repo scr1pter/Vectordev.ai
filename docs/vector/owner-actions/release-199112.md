@@ -75,3 +75,33 @@ re-enable the skipped canonical catalog assertion once the committed mirror
 contains them. Keep Deep research labelled Preview until its behavior/fit gates
 pass. macOS/Windows installation and owner acceptance still require the relevant
 machines; this cloud workspace is not evidence of those checks.
+
+## General-CI timer fixture repair
+
+Both general runs above failed in Windows engine shard 3 at the local-provider
+stall test in `packages/engine/test/provider/local-fit.test.ts`. The failure waited
+for the first streamed text chunk until the outer test timeout; a later coroutine
+then tried to advance fake timers after cleanup had restored real timers. Related
+following-test hangs are contamination evidence, not evidence that production
+provider deadlines need to change.
+
+That fixture combined large process-wide fake-clock jumps with real TCP traffic
+and a child-process readiness watchdog. The test already skipped Linux because
+those OS completion events could stop arriving after a clock jump. The repair
+uses controlled in-memory fetch responses through the actual provider and SDK,
+with bounded microtask readiness and explicit request cleanup before restoring
+real timers. It removes the platform skip while retaining the exact 600,000 ms
+header and 120,000 ms chunk boundaries, typed timeout errors, and the cloud path's
+lack of those local defaults. Production provider code and deadlines are unchanged.
+
+Local validation: engine `bun typecheck` passes. The full local-fit file reports
+16 passed and 1 failed; the restored Linux stall case passes in approximately
+490 ms. The remaining managed-private-server case fails the same way when run
+alone on the unchanged `self-evolving` control tree, with the stall case filtered
+out. Redirecting the temporary directory did not resolve that existing local
+fixture failure. It is recorded separately rather than weakened or attributed to
+the timer repair. Local socket tests require this workspace's network permission.
+
+Require fresh full Linux/Windows CI on the integrated candidate, including the
+managed-policy case. These local results do not establish Windows CI or desktop
+publication.
