@@ -53,7 +53,11 @@ export type Context<M extends Metadata = Metadata> = {
   history?: () => Effect.Effect<SessionV1.WithParts[]>
   metadata(input: { title?: string; metadata?: M }): Effect.Effect<void>
   deniedResources?(input: Pick<PermissionV1.Request, "permission" | "patterns">): Effect.Effect<ReadonlyArray<string>>
-  ask(input: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">): Effect.Effect<void>
+  /**
+   * Resolves with the person's answer, "once" or "always", so a tool can tell them apart; nothing when a rule allowed
+   * the request without a prompt. A context that only checks rules may still return `Effect.void`.
+   */
+  ask(input: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">): Effect.Effect<void | "once" | "always">
 }
 
 export interface ExecuteResult<M extends Metadata = Metadata> {

@@ -19,6 +19,8 @@ const missingAgentPermissions: Permission.Ruleset = [{ action: "*", resource: "*
 export const ID = Permission.ID
 export type ID = typeof ID.Type
 
+// An action whose approval must never be saved: true for every `computer_*` id (canAutoApprove is false for all of
+// them), the Cloud writes, memory and research asks, and the other sensitive actions.
 function isSensitiveAction(action: string) {
   return !PermissionPolicy.canAutoApprove(action, ["*"])
 }
@@ -288,16 +290,20 @@ const layer = Layer.effect(
             return
           }
 
-          if (reply === "always" && existing.request.save?.length) {
+          // A computer_app "always" is published for the desktop, which keeps the grant in its own sealed store; it
+          // is never saved here, so a revoke in Settings takes effect at once, and it answers only this ask.
+          const save =
+            reply === "always" && Boolean(existing.request.save?.length) && !isSensitiveAction(existing.request.action)
+          if (save) {
             yield* saved.add({
               projectID: location.project.id,
               action: existing.request.action,
-              resources: existing.request.save,
+              resources: existing.request.save ?? [],
             })
           }
           yield* Deferred.succeed(existing.deferred, undefined)
           pending.delete(input.requestID)
-          if (reply !== "always" || !existing.request.save?.length) return
+          if (!save) return
 
           const rememberedRules = yield* savedRules()
           for (const [id, item] of pending) {

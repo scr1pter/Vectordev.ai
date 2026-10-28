@@ -197,7 +197,8 @@ const layer = Layer.effect(
                 const bridge = yield* EffectBridge.make()
                 const pluginCtx: PluginToolContext = {
                   ...toolCtx,
-                  ask: (req) => bridge.promise(toolCtx.ask(req)),
+                  // A plugin's ask resolves with nothing: its API does not report how the person answered.
+                  ask: (req) => bridge.promise(toolCtx.ask(req).pipe(Effect.asVoid)),
                   directory: ctx.directory,
                   worktree: ctx.worktree,
                 }

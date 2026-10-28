@@ -138,19 +138,21 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
           tool: { messageID: input.processor.message.id, callID: options.toolCallId },
           ruleset: Permission.merge(input.agent.permission, input.session.permission ?? []),
         }
-        yield* permission.ask({ ...req, ...request })
+        // The tool learns the person's answer to its own request ("once" or "always"); the follow-up below never
+        // changes it.
+        const answer = yield* permission.ask({ ...req, ...request })
         // A line in a file memory is read from binds every later request, so planted text must not land in one unseen:
         // a session that took in outside content asks every time before it changes one, whichever tool writes it (an
         // edit, a patch or a shell redirect) and whatever the edit rules allow. A subagent always asks: it works from a
         // brief another agent wrote, which carries whatever that agent took in.
-        if (req.permission !== "edit") return
+        if (req.permission !== "edit") return answer
         const instance = yield* InstanceState.context
         const files = req.patterns.filter((pattern) =>
           SessionMemory.source(path.resolve(instance.worktree, pattern), brain.files()),
         )
-        if (files.length === 0) return
+        if (files.length === 0) return answer
         const hold = input.session.parentID ? "subagent" : SessionMemory.taint(yield* history())
-        if (!hold) return
+        if (!hold) return answer
         yield* permission.ask({
           permission: PermissionPolicy.MEMORY_SOURCE,
           patterns: files,
@@ -158,6 +160,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
           metadata: { ...req.metadata, hold },
           ...request,
         })
+        return answer
       }).pipe(Effect.orDie),
   })
 

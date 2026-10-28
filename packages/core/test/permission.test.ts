@@ -605,3 +605,131 @@ describe("PermissionPolicy computer permissions", () => {
     expect(PermissionPolicy.requiresApproval(PermissionPolicy.NETWORK_COMMAND)).toBe(true)
   })
 })
+
+// Vector Hands (build contract E2, INV-C5): the V2 saved list never keeps a computer_* reply. The desktop keeps
+// Always-allowed apps in its own sealed store, so a revoke in Settings takes effect at once. The saved list is watched
+// here so a save that a later read would purge still shows.
+const saves: PermissionSaved.AddInput[] = []
+const rows: PermissionSaved.Info[] = []
+const watchedSaved = Layer.succeed(
+  PermissionSaved.Service,
+  PermissionSaved.Service.of({
+    list: (input) => Effect.sync(() => rows.filter((row) => !input?.projectID || row.projectID === input.projectID)),
+    add: (input) =>
+      Effect.sync(() => {
+        saves.push(input)
+        for (const resource of input.resources)
+          rows.push({ id: PermissionSaved.ID.create(), projectID: input.projectID, action: input.action, resource })
+      }),
+    remove: (id) =>
+      Effect.sync(() => {
+        const index = rows.findIndex((row) => row.id === id)
+        if (index >= 0) rows.splice(index, 1)
+      }),
+  }),
+)
+const watched = testEffect(
+  AppNodeBuilder.build(
+    LayerNode.group([
+      Database.node,
+      EventV2.node,
+      SessionStore.node,
+      PermissionSaved.node,
+      AgentV2.node,
+      PermissionV2.node,
+    ]),
+    [
+      [Location.node, current],
+      [PermissionSaved.node, watchedSaved],
+    ],
+  ),
+)
+
+describe("PermissionV2 computer replies", () => {
+  watched.effect("V2 never saves computer_*", () =>
+    Effect.gen(function* () {
+      saves.length = 0
+      rows.length = 0
+      yield* setup([{ action: "*", resource: "*", effect: "allow" }])
+      const service = yield* PermissionV2.Service
+      const events = yield* EventV2.Service
+      const replies: unknown[] = []
+      const unsubscribe = yield* events.listen((event) =>
+        Effect.sync(() => {
+          if (event.type === PermissionV2.Event.Replied.type) replies.push(event.data)
+        }),
+      )
+      yield* Effect.addFinalizer(() => unsubscribe)
+
+      const mail = "app:macos:com.apple.mail"
+      const cases = [
+        // computer_app's "always" is published as "always" so the desktop can save the app in its own store (INV-S3).
+        { action: PermissionPolicy.COMPUTER_APP, resources: [mail], published: "always" },
+        { action: PermissionPolicy.COMPUTER_SENSITIVE, resources: [`${mail}:send`], published: "once" },
+        { action: PermissionPolicy.COMPUTER_OBSERVE, resources: [mail], published: "once" },
+        { action: PermissionPolicy.COMPUTER_INTERACT, resources: [mail], published: "once" },
+        { action: "computer_future_action", resources: [mail], published: "once" },
+      ]
+      for (const [index, item] of cases.entries()) {
+        const input = assertion({
+          id: PermissionV2.ID.create(`per_hands_${index}`),
+          action: item.action,
+          resources: item.resources,
+          save: item.resources,
+        })
+        expect(yield* service.ask(input)).toMatchObject({ effect: "ask" })
+        yield* service.reply({ requestID: input.id, reply: "always" })
+        expect(replies, item.action).toContainEqual(
+          expect.objectContaining({ requestID: input.id, reply: item.published }),
+        )
+        expect(saves, item.action).toEqual([])
+
+        // The next ask for the same app or step asks again.
+        const again = { ...input, id: PermissionV2.ID.create(`per_hands_${index}_again`) }
+        expect(yield* service.ask(again)).toMatchObject({ effect: "ask" })
+        yield* service.reply({ requestID: again.id, reply: "once" })
+      }
+      expect(saves).toEqual([])
+      expect(rows).toEqual([])
+
+      // A computer approval an older build saved is purged on the next read and answers nothing.
+      for (const action of cases.map((item) => item.action))
+        rows.push({ id: PermissionSaved.ID.create(), projectID: Project.ID.global, action, resource: mail })
+      expect(
+        yield* service.ask(
+          assertion({
+            id: PermissionV2.ID.create("per_hands_old"),
+            action: PermissionPolicy.COMPUTER_APP,
+            resources: [mail],
+            save: [mail],
+          }),
+        ),
+      ).toMatchObject({ effect: "ask" })
+      expect(rows).toEqual([])
+
+      // A computer_app "always" answers only that ask: a waiting request that an approval saved meanwhile would allow
+      // is still the person's to answer.
+      yield* setRules([])
+      const waiting = assertion({ id: PermissionV2.ID.create("per_hands_waiting") })
+      expect(yield* service.ask(waiting)).toMatchObject({ effect: "ask" })
+      rows.push({ id: PermissionSaved.ID.create(), projectID: Project.ID.global, action: "read", resource: "src/*" })
+      const app = assertion({
+        id: PermissionV2.ID.create("per_hands_app"),
+        action: PermissionPolicy.COMPUTER_APP,
+        resources: [mail],
+        save: [mail],
+      })
+      expect(yield* service.ask(app)).toMatchObject({ effect: "ask" })
+      yield* service.reply({ requestID: app.id, reply: "always" })
+      expect(yield* service.get(waiting.id)).toMatchObject({ id: waiting.id })
+      yield* service.reply({ requestID: waiting.id, reply: "once" })
+      rows.length = 0
+
+      // The watch does see an ordinary save.
+      const read = assertion({ id: PermissionV2.ID.create("per_hands_read"), save: ["src/*"] })
+      expect(yield* service.ask(read)).toMatchObject({ effect: "ask" })
+      yield* service.reply({ requestID: read.id, reply: "always" })
+      expect(saves).toEqual([{ projectID: Project.ID.global, action: "read", resources: ["src/*"] }])
+    }),
+  )
+})
