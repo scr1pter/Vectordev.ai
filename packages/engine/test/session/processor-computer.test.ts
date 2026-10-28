@@ -11,6 +11,7 @@ import { LLMEvent, Usage } from "@vectordevai/llm"
 import { Agent } from "@/agent/agent"
 import { Auth } from "@/auth"
 import { Config } from "@/config/config"
+import { ComputerSession } from "@/computer/session"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Image } from "@/image/image"
 import { Permission } from "@/permission"
@@ -32,6 +33,7 @@ class Fixture extends Context.Service<
     events: LLMEvent[]
     asks: string[]
     images: SessionV1.FilePart[]
+    invalidated: string[]
     image: "same" | "resize" | "unavailable"
     reject: boolean
   }
@@ -64,12 +66,32 @@ const model: Provider.Model = {
   headers: {},
   release_date: "2026-01-01",
 }
-const fixture = Layer.sync(Fixture, () => ({ events: [], asks: [], images: [], image: "same" as const, reject: false }))
+const fixture = Layer.sync(Fixture, () => ({
+  events: [],
+  asks: [],
+  images: [],
+  invalidated: [],
+  image: "same" as const,
+  reject: false,
+}))
 
 const it = testEffect(
   LayerNode.compile(LayerNode.group([SessionProcessor.node, Session.node, SessionProjector.node, SpendGuard.node]), [
     [Config.node, TestConfig.layer()],
     [RuntimeFlags.node, RuntimeFlags.layer({ experimentalEventSystem: true })],
+    [
+      ComputerSession.node,
+      Layer.unwrap(
+        Effect.map(Fixture, (state) =>
+          Layer.mock(ComputerSession.Service)({
+            invalidate: (sessionID) =>
+              Effect.sync(() => {
+                state.invalidated.push(sessionID)
+              }),
+          }),
+        ),
+      ).pipe(Layer.provide(fixture)),
+    ],
     [Provider.node, Layer.mock(Provider.Service)({ line: () => Effect.succeed(undefined) })],
     [Auth.node, Layer.mock(Auth.Service)({ get: () => Effect.succeed(undefined) })],
     [Agent.node, Layer.mock(Agent.Service)({ get: () => Effect.succeed(agent), helper: () => Effect.succeed(agent) })],
@@ -416,6 +438,7 @@ for (const image of ["same", "resize", "unavailable"] as const) {
         expect(result.tools).toHaveLength(1)
         const part = result.tools[0]
         if (image === "same") {
+          expect(state.invalidated).toEqual([])
           expect(part.state.status).toBe("completed")
           if (part.state.status !== "completed") throw new Error("Missing computer result")
           expect(part.state.attachments).toEqual(state.images)
@@ -423,6 +446,7 @@ for (const image of ["same", "resize", "unavailable"] as const) {
           return
         }
         expect(part.state.status).toBe("error")
+        expect(state.invalidated).toEqual([part.sessionID])
         if (part.state.status !== "error") throw new Error("Unsafe screenshot was accepted")
         expect(part.state.error).toContain("Capture a fresh screenshot")
         expect(part.state).not.toHaveProperty("attachments")

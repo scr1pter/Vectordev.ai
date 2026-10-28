@@ -1,4 +1,5 @@
 import path from "node:path"
+import { createHash } from "node:crypto"
 import { Computer } from "@vectordevai/schema/computer"
 import { ComputerApps } from "@vectordevai/schema/computer-apps"
 import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
@@ -8,6 +9,25 @@ import { ComputerKeys } from "./keys"
 
 /** App launches use the same classifier even though they are separate bridge commands, not input steps. */
 export type Step = Computer.Step | { readonly kind: "open"; readonly path: string }
+
+/** Binds a once-only ask to the exact proposed input, independently of object-property insertion order. */
+export function digest(step: Step) {
+  return createHash("sha256")
+    .update(JSON.stringify(canonical(step)))
+    .digest("hex")
+}
+
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical)
+  if (value === null || typeof value !== "object") return value
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, item]) => item !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([key, item]) => [key, canonical(item)]),
+  )
+}
+
 export type Result =
   | { readonly kind: "refuse"; readonly code: Computer.ComputerErrorCode; readonly description: string }
   | { readonly kind: "ask"; readonly why: Computer.SensitiveWhy; readonly description: string }

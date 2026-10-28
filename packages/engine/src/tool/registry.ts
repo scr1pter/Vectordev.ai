@@ -67,6 +67,9 @@ import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { BrowserTool } from "./browser"
 import { ComputerTool } from "./computer"
+import { ComputerSession } from "@/computer/session"
+import { ComputerTransport } from "@/computer/transport"
+import { Image } from "@/image/image"
 import { ComputerAvailability } from "@/computer/availability"
 import { VectorCloudTool } from "./vector-cloud"
 import { ResearchStore } from "@vectordevai/core/research/store"
@@ -548,6 +551,9 @@ export const node = LayerNode.make({
   deps: [
     Config.node,
     ComputerAvailability.node,
+    ComputerSession.node,
+    ComputerTransport.node,
+    Image.node,
     ConfigDependencies.node,
     Plugin.node,
     Question.node,

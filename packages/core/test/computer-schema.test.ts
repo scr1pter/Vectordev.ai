@@ -372,6 +372,43 @@ describe("computer bridge protocol", () => {
     rejects(Computer.BridgeCommands.cancel.request, { ...queued, lease: 0 })
   })
 
+  test("a program path is resolved through access before an approved launch", () => {
+    const app = { path: "/Applications/Numbers.app" }
+    accepts(Computer.BridgeRequest, { ...envelope, command: "access", lease, app })
+    accepts(Computer.BridgeRequest, { ...envelope, command: "openApp", lease, app, requestID: "per_launch" })
+    rejects(Computer.BridgeRequest, { ...envelope, command: "openApp", lease, app, requestID: "" })
+    rejects(Computer.BridgeRequest, { ...envelope, command: "access", lease, app: { ...app, approved: true } })
+    const request = { ...envelope, v: 1 as const, command: "openApp" as const, lease, app }
+    expect(Schema.encodeSync(Computer.BridgeCommands.openApp.request)({ ...request, requestID: undefined })).toEqual(
+      request,
+    )
+  })
+
+  test("inspect carries bounded desktop observations for key and program checks", () => {
+    accepts(Computer.InspectResult, inspect)
+    const observed = {
+      ...inspect,
+      clipboard: { agentOwned: false, text: "October receipts" },
+      layout: { platform: "macos", keys: { KeyQ: { key: "a", shift: "A" }, KeyS: "s" } },
+      focusedMenuShortcuts: [{ combo: ["cmd", "s"], label: "Save" }],
+      programPath: "/Applications/Numbers.app",
+    }
+    accepts(Computer.InspectResult, observed)
+    rejects(Computer.InspectResult, { ...observed, layout: { ...observed.layout, platform: "linux" } })
+    rejects(Computer.InspectResult, { ...observed, clipboard: { agentOwned: false, text: "x".repeat(4001) } })
+    rejects(Computer.InspectResult, {
+      ...observed,
+      focusedMenuShortcuts: Array(129).fill(observed.focusedMenuShortcuts[0]),
+    })
+    rejects(Computer.InspectResult, {
+      ...observed,
+      layout: {
+        platform: "macos",
+        keys: Object.fromEntries(Array.from({ length: 257 }, (_, index) => [`Key${index}`, "a"])),
+      },
+    })
+  })
+
   test("nested unknown fields are rejected too", () => {
     const grant = { ...envelope, command: "grant", lease, level: "interact", requestID: "per_1" }
     rejects(Computer.BridgeRequest, { ...grant, identity: { ...mac, granted: true } })
@@ -617,6 +654,9 @@ describe("asks, markers and tool input", () => {
       stepIndex: 1,
     }
     accepts(Computer.SensitiveAskMetadata, sensitive)
+    accepts(Computer.SensitiveAskMetadata, { ...sensitive, stepDigest: "a".repeat(64) })
+    rejects(Computer.SensitiveAskMetadata, { ...sensitive, stepDigest: "a".repeat(63) })
+    rejects(Computer.SensitiveAskMetadata, { ...sensitive, stepDigest: "z".repeat(64) })
     rejects(Computer.SensitiveAskMetadata, { ...sensitive, targetName: "x".repeat(41) })
     rejects(Computer.SensitiveAskMetadata, { ...sensitive, always: ["app:macos:com.apple.mail"] })
 

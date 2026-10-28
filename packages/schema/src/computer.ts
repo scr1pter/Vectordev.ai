@@ -433,6 +433,8 @@ export const SensitiveAskMetadata = Schema.Struct({
   ),
   frame: optional(Id),
   stepIndex: optional(NonNegativeInt),
+  /** SHA-256 of the canonical proposed step. Desktop matches it before consuming the once-only approval. */
+  stepDigest: optional(Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))),
 }).annotate({ identifier: "Computer.SensitiveAskMetadata" })
 
 export const HandoffReason = Schema.Literals([
@@ -735,7 +737,40 @@ export const InspectResult = Schema.Struct({
     }),
   ),
   document: optional(Path),
-  clipboard: Schema.Struct({ agentOwned: Schema.Boolean }),
+  clipboard: Schema.Struct({
+    agentOwned: Schema.Boolean,
+    /** Complete text only, never a truncated preview. Desktop still checks the live clipboard before input. */
+    text: optional(Bounded(LIMITS.typeTextChars)),
+  }),
+  /** Observed on the desktop, never supplied by model input. Missing facts do not imply approval. */
+  layout: optional(
+    Schema.Struct({
+      platform: Schema.Literals(["macos", "windows"]),
+      keys: optional(
+        Schema.Record(
+          Bounded(64),
+          Schema.Union([
+            Bounded(32),
+            Schema.Struct({
+              key: Bounded(32),
+              shift: optional(Bounded(32)),
+              altGraph: optional(Bounded(32)),
+              shiftAltGraph: optional(Bounded(32)),
+            }),
+          ]),
+        ).check(
+          Schema.makeFilter((keys) => Object.keys(keys).length <= 256, { expected: "at most 256 physical keys" }),
+        ),
+      ),
+    }),
+  ),
+  focusedMenuShortcuts: optional(
+    Schema.Array(
+      Schema.Struct({ combo: Schema.Array(KeyName).check(Schema.isLengthBetween(1, 8)), label: Bounded(256) }),
+    ).check(Schema.isMaxLength(128)),
+  ),
+  /** Canonical executable or script path resolved at the actual target. */
+  programPath: optional(Path),
   elevated: optional(Schema.Boolean),
 }).annotate({ identifier: "Computer.InspectResult" })
 
@@ -911,7 +946,7 @@ export const BridgeCommands = {
   release: { request: command("release", { lease: Lease }), response: Ok },
   access: {
     /** `liftDeny` turns a recorded deny back into `ask`, never into a grant. */
-    request: command("access", { lease: Lease, app: AppQuery, liftDeny: optional(Schema.Boolean) }),
+    request: command("access", { lease: Lease, app: OpenTarget, liftDeny: optional(Schema.Boolean) }),
     response: AccessResponse,
   },
   grant: {
@@ -927,7 +962,13 @@ export const BridgeCommands = {
     response: ListAppsResponse,
   },
   openApp: {
-    request: command("openApp", { lease: Lease, app: OpenTarget, background: optional(Schema.Boolean) }),
+    request: command("openApp", {
+      lease: Lease,
+      app: OpenTarget,
+      background: optional(Schema.Boolean),
+      /** A path launch requires the desktop's observed, once-approved run_program request. */
+      requestID: optional(RequestID),
+    }),
     response: Schema.Struct({ identity: AppIdentity, launched: Schema.Boolean }),
   },
   focusWindow: {

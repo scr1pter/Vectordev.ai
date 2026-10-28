@@ -2,6 +2,7 @@ import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { createHash } from "node:crypto"
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { Image } from "@/image/image"
+import { ComputerSession } from "@/computer/session"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { Cause, Deferred, Effect, Exit, Fiber, Layer, Context, Scope, Schema } from "effect"
 import * as Stream from "effect/Stream"
@@ -182,6 +183,7 @@ const layer = Layer.effect(
     const scope = yield* Scope.Scope
     const status = yield* SessionStatus.Service
     const image = yield* Image.Service
+    const computerSessions = yield* ComputerSession.Service
     const events = yield* EventV2Bridge.Service
     const database = yield* Database.Service
     const auth = yield* Auth.Service
@@ -746,6 +748,7 @@ const layer = Layer.effect(
                   item.value.mime !== rawOutput.attachments?.[index]?.mime,
               )
             ) {
+              yield* computerSessions.invalidate(ctx.sessionID)
               yield* failToolCall(
                 value.id,
                 new Error(
@@ -1299,6 +1302,7 @@ export const node = LayerNode.make({
     SessionSummary.node,
     SessionStatus.node,
     Image.node,
+    ComputerSession.node,
     EventV2Bridge.node,
     Database.node,
     Auth.node,

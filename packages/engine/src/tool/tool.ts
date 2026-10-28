@@ -56,8 +56,11 @@ export type Context<M extends Metadata = Metadata> = {
   /**
    * Resolves with the person's answer, "once" or "always", so a tool can tell them apart; nothing when a rule allowed
    * the request without a prompt. A context that only checks rules may still return `Effect.void`.
+   * A caller may choose the request ID when another process must verify this exact ask and reply.
    */
-  ask(input: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">): Effect.Effect<void | "once" | "always">
+  ask(
+    input: Omit<PermissionV1.Request, "id" | "sessionID" | "tool"> & { id?: PermissionV1.Request["id"] },
+  ): Effect.Effect<void | "once" | "always">
 }
 
 export interface ExecuteResult<M extends Metadata = Metadata> {
