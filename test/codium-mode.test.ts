@@ -5,6 +5,7 @@ import { checkCodiumFunding } from "../api/_lib/codium-funding"
 import { codiumKey, codiumKeyIn, codiumKeyMode, openRouterKeyName, owedKeyName } from "../api/_lib/codium-keys"
 import { recordCodiumCharge } from "../api/_lib/codium-ledger"
 import { codiumKeyLimitUsd, codiumLimitProblems, renewalGraceMinutes, trustRampDays } from "../api/_lib/codium-limits"
+import { POOL_SCRIPTS } from "../api/_lib/codium-pool"
 import {
   cancelModelPlanAccount,
   modelPlanCheckout,
@@ -166,13 +167,18 @@ function store(input: unknown[]) {
   if (name === "ZREM") return 1
   if (name === "EVAL") {
     const [script, , key, token] = args as [string, string, string, string]
+    // The pool's scripts (codium-pool.ts): every hold fits, and no key here has debits (test/codium-pool.test.ts runs
+    // them for real).
+    if (script === POOL_SCRIPTS.HOLD || script === POOL_SCRIPTS.SETTLE || script === POOL_SCRIPTS.DEBIT) return 1
+    if (script === POOL_SCRIPTS.READ) return [0, 0, 0]
+    if (script === POOL_SCRIPTS.DEBITS) return [...hash(key)].flat()
+    if (script === POOL_SCRIPTS.APPLY) return 0
     if (script.includes("PTTL")) return world.store.get(key) === token ? 60_000 : -1
     if (script.includes("redis.call('DEL'")) {
       if (world.store.get(key) === token) world.store.delete(key)
       return 1
     }
-    // The hold and settle scripts, and the funding reservation scripts.
-    if (script.includes("ZREMRANGEBYSCORE") || script.startsWith("redis.call('ZREM'")) return 1
+    // The funding reservation scripts.
     if (script.includes("return reserved")) return 0
     if (script.includes("HSET")) return 1
   }

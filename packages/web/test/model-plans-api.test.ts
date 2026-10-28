@@ -1193,7 +1193,7 @@ describe("model plan HTTP inference", () => {
   test("parallel requests hold their largest cost, so together they cannot spend past the balance", async () => {
     await paid()
     await modelPlanCredential(user.id, fetcher)
-    // Each hold is "<ticket>:<credits>". A request settles its hold just after its answer ends.
+    // Each hold is "<ticket>:<purpose>:<runId or ->:<micro-dollars>". A request settles its hold just after its answer ends.
     const held = async (count: number, charge?: string) => {
       const members = async () => (await redis(["ZRANGE", heldKey, 0, -1])) as string[]
       for (let tries = 0; tries < 100; tries++) {
@@ -1222,15 +1222,15 @@ describe("model plan HTTP inference", () => {
     })
     // Finished requests keep only what they were charged, for a moment, until the key's usage shows it.
     expect(keys.get("hash_fixture1")!.data.usage).toBeCloseTo(4.972, 9)
-    expect(await held(2, "0.001")).toHaveLength(2)
+    expect(await held(2, "1000")).toHaveLength(2)
     state.chatDelay = 0
     expect((await chat()).status).toBe(200)
-    expect(await held(3, "0.001")).toHaveLength(3)
+    expect(await held(3, "1000")).toHaveLength(3)
     // A request the provider refuses releases its hold at once.
     keys.get("hash_fixture1")!.data.usage = 4
     state.upstreamStatus = 500
     expect((await chat()).status).toBe(503)
-    expect(await held(3, "0.001")).toHaveLength(3)
+    expect(await held(3, "1000")).toHaveLength(3)
     expect(chats()).toHaveLength(4)
   })
 
@@ -1245,14 +1245,14 @@ describe("model plan HTTP inference", () => {
     state.streamMode = "normal"
     expect((await chat()).status).toBe(200)
     // The finished answer settles to its charge just after it ends.
-    for (let tries = 0; tries < 100 && !(await members()).some((member) => member.endsWith(":0.001")); tries++)
+    for (let tries = 0; tries < 100 && !(await members()).some((member) => member.endsWith(":1000")); tries++)
       await Bun.sleep(10)
     const current = await members()
     expect(current).toHaveLength(2)
-    const kept = current.find((member) => !member.endsWith(":0.001"))
+    const kept = current.find((member) => !member.endsWith(":1000"))
     if (!kept) throw new Error("Expected the broken answer's hold")
     // Still the model's largest request, held until it lapses 11 minutes after the request started, not 30 seconds.
-    expect(Number(kept.split(":")[1])).toBeCloseTo(0.012288, 9)
+    expect(kept.split(":").slice(1)).toEqual(["chat", "-", "12288"])
     expect(Number(await redis(["ZSCORE", pool, kept]))).toBeGreaterThan(Date.now() + 600_000)
   })
 
