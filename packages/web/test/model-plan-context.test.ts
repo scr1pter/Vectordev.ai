@@ -14,7 +14,7 @@ const engine = path.join(import.meta.dir, "../../engine/src")
 const model = CODIUM_MODELS[0]
 const system = await Bun.file(path.join(engine, "session/prompt/default.txt")).text()
 const tools = await Promise.all(
-  ["read", "edit", "write", "grep", "glob", "task", "todowrite", "webfetch", "websearch", "apply_patch", "lsp"].map(
+  ["read", "edit", "write", "grep", "glob", "task", "todowrite", "webfetch", "apply_patch", "lsp"].map(
     async (name) => ({
       type: "function",
       function: {
