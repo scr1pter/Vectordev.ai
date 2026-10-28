@@ -551,6 +551,7 @@ describe("M11: a renewal never locks out someone who pays", () => {
     // Carry from an upgrade earlier in the month ends at the renewal.
     const record = JSON.parse(fakes.store.get(codiumKey("account", id))!)
     record.key.carry = { micro: 5_000_000, fromSubscription: "sub_old", fromStart: 1, fromCharge: "ch_old" }
+    fakes.stripe.load({ charges: [{ id: "ch_old", customer: record.customer, paid: true, refunded: false, disputed: false, amount_refunded: 0 }] })
     record.key.limitMicro = 53_000_000
     fakes.store.set(codiumKey("account", id), JSON.stringify(record))
     fakes.openRouter.keys.get(SEEDED)!.limit = 53

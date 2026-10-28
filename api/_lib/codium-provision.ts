@@ -45,6 +45,7 @@ export const ACTION_KINDS = [
   "reconcile",
   "supersede",
   "carry-trueup",
+  "purchase-confirmation",
   "finalize-renewal",
   "pool-ramp",
   "pause-collection",

@@ -230,8 +230,8 @@ describe("drainOutbox", () => {
     const fakes = codiumFakes({ now: T0 })
     const order: string[] = []
     let failFrozen = true
-    handle("supersede", async (action) => {
-      order.push(`supersede ${action.key}`)
+    handle("pool-ramp", async (action) => {
+      order.push(`pool-ramp ${action.key}`)
     })
     recorder("test-service", {
       fail: () => {
@@ -241,7 +241,7 @@ describe("drainOutbox", () => {
       },
       during: (t) => order.push(`${t.account} ${t.to.state}`),
     })
-    await enqueueAction("supersede", "sub_old", { reason: "upgrade" }, T0 - HOUR, fakes.fetcher, T0)
+    await enqueueAction("pool-ramp", "sub_old", { reason: "upgrade" }, T0 - HOUR, fakes.fetcher, T0)
     await change(fakes.fetcher, "account-active", {}, T0)
     const frozen = await change(fakes.fetcher, "account-frozen", { state: "frozen", reason: "disputed" }, T0 + 1000)
     expect(frozen.revokedBefore).toBe(T0 + 1000)
@@ -250,7 +250,7 @@ describe("drainOutbox", () => {
 
     expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 + 2000 })).toEqual({ ...NOTHING, applied: 4, retried: 1 })
     // The frozen account's items ran first; its failed one waits out its backoff in the priority lane.
-    expect(order).toEqual(["frozen failed", "supersede sub_old", "account-active active"])
+    expect(order).toEqual(["frozen failed", "pool-ramp sub_old", "account-active active"])
     expect(score(fakes, "test-service:account-frozen:1")).toBe(T0 + 2000 + outboxBackoffMs(1) - PRIORITY_LEAD_MS)
     failFrozen = false
     expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 + 2000 + outboxBackoffMs(1) - 1000 })).toEqual(NOTHING)
@@ -439,21 +439,21 @@ describe("drainOutbox", () => {
     const fakes = codiumFakes({ now: T0 })
     const ran: string[] = []
     let mode: "lose-lock" | "slow" | "plain" = "lose-lock"
-    handle("supersede", async (action) => {
+    handle("pool-ramp", async (action) => {
       ran.push(action.key)
       if (mode === "lose-lock") fakes.store.remove(codiumKey("outbox", "lock"))
       if (mode === "slow") await new Promise((resolve) => setTimeout(resolve, 60))
     })
     for (const [index, key] of ["sub_1", "sub_2", "sub_3", "sub_4"].entries())
-      await enqueueAction("supersede", key, {}, T0 + index, fakes.fetcher, T0)
+      await enqueueAction("pool-ramp", key, {}, T0 + index, fakes.fetcher, T0)
     expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 + 10 })).toEqual({ ...NOTHING, applied: 1 })
-    expect(queued(fakes)).toEqual(["supersede:sub_2", "supersede:sub_3", "supersede:sub_4"])
+    expect(queued(fakes)).toEqual(["pool-ramp:sub_2", "pool-ramp:sub_3", "pool-ramp:sub_4"])
     mode = "slow"
     expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 + 10, budgetMs: 25 })).toEqual({ ...NOTHING, applied: 1 })
     mode = "plain"
     expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 + 10, limit: 1 })).toEqual({ ...NOTHING, applied: 1 })
     expect(ran).toEqual(["sub_1", "sub_2", "sub_3"])
-    expect(queued(fakes)).toEqual(["supersede:sub_4"])
+    expect(queued(fakes)).toEqual(["pool-ramp:sub_4"])
   })
 
   test("a record that cannot be read is a dead letter at once, and a member without a record is dropped", async () => {
@@ -478,6 +478,7 @@ describe("enqueueAction and action handlers", () => {
       "reconcile",
       "supersede",
       "carry-trueup",
+      "purchase-confirmation",
       "finalize-renewal",
       "pool-ramp",
       "pause-collection",
@@ -508,10 +509,10 @@ describe("enqueueAction and action handlers", () => {
     expect(score(fakes, "pause-collection:sub_paused")).toBe(T0 - PRIORITY_LEAD_MS)
 
     // Queuing a dead letter's work again takes it off the dead letters.
-    fakes.store.command(["ZADD", codiumKey("outbox", "dead"), T0, "supersede:sub_dead"])
-    await enqueueAction("supersede", "sub_dead", {}, undefined, fakes.fetcher, T0)
+    fakes.store.command(["ZADD", codiumKey("outbox", "dead"), T0, "pool-ramp:sub_dead"])
+    await enqueueAction("pool-ramp", "sub_dead", {}, undefined, fakes.fetcher, T0)
     expect(dead(fakes)).toEqual([])
-    expect(queued(fakes)).toContain("supersede:sub_dead")
+    expect(queued(fakes)).toContain("pool-ramp:sub_dead")
 
     // Bad input is refused before anything is stored.
     const before = fakes.store.commands.length
@@ -533,20 +534,20 @@ describe("enqueueAction and action handlers", () => {
   test("an item queued again while it runs is not lost; an action without a handler is retried", async () => {
     const fakes = codiumFakes({ now: T0 })
     const seen: unknown[] = []
-    handle("carry-trueup", async (action, fetcher) => {
+    handle("pool-ramp", async (action, fetcher) => {
       seen.push(action.payload)
-      if (seen.length === 1) await enqueueAction("carry-trueup", action.key, { step: 2 }, undefined, fetcher, action.now)
+      if (seen.length === 1) await enqueueAction("pool-ramp", action.key, { step: 2 }, undefined, fetcher, action.now)
     })
-    await enqueueAction("carry-trueup", ACCOUNT, { step: 1 }, undefined, fakes.fetcher, T0)
+    await enqueueAction("pool-ramp", ACCOUNT, { step: 1 }, undefined, fakes.fetcher, T0)
     expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 })).toEqual({ ...NOTHING, applied: 2 })
     expect(seen).toEqual([{ step: 1 }, { step: 2 }])
     expect(queued(fakes)).toEqual([])
 
-    // pool-ramp has no handler until WP A10: it waits and is tried again, like any failure.
-    await enqueueAction("pool-ramp", ACCOUNT, {}, undefined, fakes.fetcher, T0)
+    // pause-collection has no handler until WP A10: it waits and is tried again, like any failure.
+    await enqueueAction("pause-collection", ACCOUNT, {}, undefined, fakes.fetcher, T0)
     expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 })).toEqual({ ...NOTHING, retried: 1 })
-    expect(record(fakes, `pool-ramp:${ACCOUNT}`)).toMatchObject({ attempts: 1 })
-    expect(record(fakes, `pool-ramp:${ACCOUNT}`).error).toStartWith("CODIUM_OUTBOX_NO_HANDLER")
+    expect(record(fakes, `pause-collection:${ACCOUNT}`)).toMatchObject({ attempts: 1 })
+    expect(record(fakes, `pause-collection:${ACCOUNT}`).error).toStartWith("CODIUM_OUTBOX_NO_HANDLER")
 
     // One handler per kind, only for listed kinds; one provisioner per id, with a valid id.
     expect(() => registerAction("reconcile", async () => {})).toThrow()

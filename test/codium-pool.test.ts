@@ -347,6 +347,8 @@ const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.origin === "https://api.stripe.com") {
     world.stripe++
     if (url.pathname === "/v1/subscriptions") return Response.json({ data: world.subscriptions, has_more: false })
+    if (url.pathname === "/v1/charges/ch_before")
+      return Response.json({ id: "ch_before", customer: "cus_pool", paid: true, refunded: false, disputed: false, amount_refunded: 0 })
     throw new Error(`Unexpected Stripe request ${url.pathname}`)
   }
   if (url.origin === "https://openrouter.ai" && url.pathname.startsWith("/api/v1/keys")) {

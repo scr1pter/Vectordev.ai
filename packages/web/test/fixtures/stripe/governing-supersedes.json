@@ -392,6 +392,7 @@
     "periodStart": 1791072000,
     "periodEnd": 1793664000,
     "key": "created",
+    "keyLimit": 103.75,
     "duplicates": []
   }
 }

@@ -550,6 +550,86 @@ export class FakeStripe {
       return ok({ object: "list", data: page, has_more: items.length > page.length, url: `/v1/${call.path}` })
     }
     const [resource, id, action] = parts
+    if (resource === "prices" && id && call.method === "GET") {
+      const price = [...this.objects.subscriptions.values()]
+        .flatMap((value) => {
+          const items = value.items as { data?: { price?: Json }[] } | undefined
+          return items?.data?.flatMap((item) => (item.price ? [item.price] : [])) ?? []
+        })
+        .find((price) => price.id === id)
+      if (price) return ok(price)
+      const amount = /^price_codium(10|50|100|200)$/.exec(id)?.[1]
+      return amount
+        ? ok({
+            id,
+            active: true,
+            currency: "usd",
+            unit_amount: Number(amount) * 100,
+            recurring: { interval: "month", interval_count: 1 },
+          })
+        : stripeError(404, "No such price.")
+    }
+    if (resource === "invoices" && !id && call.method === "GET")
+      return list(
+        [...this.objects.invoices.values()].filter(
+          (value) =>
+            (!call.query.get("customer") || value.customer === call.query.get("customer")) &&
+            (!call.query.get("subscription") || value.subscription === call.query.get("subscription")) &&
+            (!call.query.get("status") || value.status === call.query.get("status")),
+        ),
+      )
+    if (resource === "invoices" && id && call.method === "DELETE") {
+      const invoice = this.objects.invoices.get(id)
+      if (!invoice || invoice.status !== "draft") return stripeError(400, "Only draft invoices can be deleted.")
+      this.objects.invoices.delete(id)
+      return ok({ id, deleted: true })
+    }
+    if (resource === "checkout" && id === "sessions" && !action && call.method === "POST") {
+      const session = {
+        id: `cs_fixture${this.objects.checkout_sessions.size + 1}`,
+        url: "https://checkout.stripe.com/c/fixture",
+        status: "open",
+        customer: call.form?.get("customer"),
+        expires_at: Number(call.form?.get("expires_at")),
+        metadata: {},
+      }
+      setMetadata(session, call.form ?? new URLSearchParams())
+      this.objects.checkout_sessions.set(session.id, session)
+      return ok(session)
+    }
+    if (resource === "billing_portal" && id === "sessions" && call.method === "POST")
+      return ok({ url: "https://billing.stripe.com/p/fixture" })
+    if (resource === "subscription_schedules" && !id && call.method === "POST") {
+      const subscription = this.objects.subscriptions.get(call.form?.get("from_subscription") ?? "")
+      if (!subscription || subscription.schedule) return stripeError(400, "Cannot create schedule.")
+      const schedule = {
+        id: `sub_sched${this.objects.subscription_schedules.size + 1}`,
+        customer: subscription.customer,
+        subscription: subscription.id,
+        status: "active",
+        phases: [],
+      }
+      subscription.schedule = schedule.id
+      this.objects.subscription_schedules.set(schedule.id, schedule)
+      return ok(schedule)
+    }
+    if (resource === "subscription_schedules" && id && call.method === "POST") {
+      const schedule = this.objects.subscription_schedules.get(id)
+      if (!schedule) return stripeError(404, "No such schedule.")
+      if (action === "release") {
+        schedule.status = "released"
+        const subscription = this.objects.subscriptions.get(String(schedule.subscription))
+        if (subscription) subscription.schedule = null
+      } else {
+        const form = call.form ?? new URLSearchParams()
+        schedule.end_behavior = form.get("end_behavior")
+        schedule.phases = [0, 1].map((phase) => ({
+          start_date: Number(form.get(`phases[${phase}][start_date]`) ?? form.get("phases[0][end_date]")),
+          items: [{ price: form.get(`phases[${phase}][items][0][price]`), quantity: 1 }],
+        }))
+      }
+      return ok(schedule)
+    }
     if (resource === "subscriptions" && call.method === "GET" && !id) {
       const customer = call.query.get("customer")
       const status = call.query.get("status")
@@ -662,6 +742,11 @@ export class FakeStripe {
     if (!action) {
       if (form.has("auto_advance")) invoice.auto_advance = form.get("auto_advance") === "true"
       setMetadata(invoice, form)
+      return { status: 200, body: invoice }
+    }
+    if (action === "void") {
+      if (invoice.status !== "open") return stripeError(400, "Only open invoices can be voided.")
+      invoice.status = "void"
       return { status: 200, body: invoice }
     }
     if (action === "finalize") {
@@ -967,6 +1052,7 @@ export type StripeFixture = {
     cancelAtPeriodEnd?: boolean
     /** What happens to the account's OpenRouter key: made now, kept on, switched off, or there is none. */
     key: "created" | "enabled" | "disabled" | "none"
+    keyLimit?: number
     risk?: { blocked?: boolean; reason?: string; openDisputes?: string[]; efw?: string[] }
     duplicates?: string[]
     stripeCalls?: number

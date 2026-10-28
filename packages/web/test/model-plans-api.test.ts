@@ -17,6 +17,7 @@ import {
   readModelPlanAccount,
 } from "../../../api/_lib/model-plan-account"
 import {
+  handleModelPlanChange,
   handleModelPlanCheckout,
   handleModelPlanPortal,
   handleModelTopupRemoved,
@@ -333,6 +334,7 @@ const server = createServer((request, response) => {
   // /chat is the gateway as the other tests call it; the /api/model-plans paths are what Vector itself requests.
   if (request.url === "/api/model-plans/models") return void handleModelPlanModels(request, response, fetcher)
   if (request.url === "/api/model-plans/status") return void handleModelPlanStatus(request, response, fetcher)
+  if (request.url === "/api/model-plans/change") return void handleModelPlanChange(request, response, fetcher)
   if (request.url === "/api/model-plans/checkout") return void handleModelPlanCheckout(request, response, fetcher)
   if (request.url === "/api/model-plans/topup") return void handleModelTopupRemoved(request, response)
   if (request.url === "/api/model-plans/portal") return void handleModelPlanPortal(request, response, fetcher)
@@ -552,7 +554,7 @@ describe("subscription checkout with real billing leases", () => {
 // What the desktop app's main process sends: the Vector account token from its own sign-in and a JSON body, with no
 // Origin header.
 async function billing(
-  path: "checkout" | "topup" | "portal",
+  path: "checkout" | "topup" | "portal" | "change",
   body: unknown,
   token = mintCliToken(user, Date.now(), "desktop").token,
 ) {
@@ -610,6 +612,25 @@ describe("billing from the desktop app's Vector sign-in", () => {
     })
   })
 
+  test("plan changes require a desktop mark or web session and share a persistent ten-an-hour account limit", async () => {
+    expect(await billing("change", { plan: "invalid" }, mintCliToken(user).token)).toMatchObject({
+      status: 403,
+      body: { error: { code: "DESKTOP_SIGN_IN_REQUIRED" } },
+    })
+    expect(await billing("change", { plan: "invalid" }, "not-a-session")).toMatchObject({ status: 401 })
+    expect(await billing("change", { plan: "invalid" }, "browser-session")).toMatchObject({
+      status: 400,
+      body: { error: { code: "MODEL_PLAN_INVALID" } },
+    })
+    for (let attempt = 0; attempt < 9; attempt++)
+      expect(await billing("change", { plan: "invalid" })).toMatchObject({ status: 400 })
+    expect(await billing("change", { plan: "invalid" })).toMatchObject({
+      status: 429,
+      body: { error: { code: "RATE_LIMITED" } },
+    })
+    expect(calls.some((call) => call.path === "/v1/checkout/sessions")).toBe(false)
+  })
+
   test("the old top-up route answers 410 to every token and sells nothing", async () => {
     const removed = {
       status: 410,
@@ -661,14 +682,14 @@ describe("billing from the desktop app's Vector sign-in", () => {
   })
 })
 
-describe("plan changes in Stripe's customer portal", () => {
+describe("Codium portal compatibility and cancellation", () => {
   const portalSession = () => calls.findLast((call) => call.path === "/v1/billing_portal/sessions")?.body
 
-  test("the portal that changes plans opens only while Codium is on sale and its credits are funded", async () => {
+  test("the portal always uses the no-change configuration, including when sales are paused", async () => {
     await paid()
     process.env.STRIPE_MODEL_PLAN_CHANGE_PORTAL_CONFIG_ID = "bpc_changes"
     await modelPlanPortal(user.id, fetcher)
-    expect(portalSession()).toMatchObject({ configuration: "bpc_changes" })
+    expect(portalSession()).toMatchObject({ configuration: "bpc_fixture" })
 
     process.env.MODEL_PLANS_ENABLED = "false"
     await modelPlanPortal(user.id, fetcher)
@@ -709,9 +730,9 @@ describe("plan changes in Stripe's customer portal", () => {
     process.env.STRIPE_MODEL_PLAN_CHANGE_PORTAL_CONFIG_ID = "bpc_changes"
     await redis(["SET", accountKey, JSON.stringify({ customer: "cus_fixture" })])
     await expect(modelPlanPortal(user.id, fetcher, { flow: "change" })).rejects.toMatchObject({
-      statusCode: 404,
-      code: "MODEL_PLAN_MISSING",
-      message: "There is no paid Codium plan to change.",
+      statusCode: 409,
+      code: "MODEL_PLAN_CHANGE_UNAVAILABLE",
+      message: "Change plans on vectordev.ai/account.",
     })
     await expect(modelPlanPortal(user.id, fetcher, { flow: "cancel" })).rejects.toMatchObject({
       statusCode: 404,
@@ -719,15 +740,9 @@ describe("plan changes in Stripe's customer portal", () => {
       message: "There is no paid Codium plan to cancel.",
     })
     await paid()
-    expect(await billing("portal", { flow: "change" })).toMatchObject({ status: 200 })
-    expect(portalSession()).toEqual({
-      customer: "cus_fixture",
-      configuration: "bpc_changes",
-      return_url: "https://vectordev.ai/account",
-      "flow_data[type]": "subscription_update",
-      "flow_data[subscription_update][subscription]": "sub_fixture",
-      "flow_data[after_completion][type]": "redirect",
-      "flow_data[after_completion][redirect][return_url]": "https://vectordev.ai/account?model_plan=updated",
+    expect(await billing("portal", { flow: "change" })).toMatchObject({
+      status: 409,
+      body: { error: { code: "MODEL_PLAN_CHANGE_UNAVAILABLE" } },
     })
     await billing("portal", { flow: "cancel" })
     expect(portalSession()).toMatchObject({
@@ -740,7 +755,7 @@ describe("plan changes in Stripe's customer portal", () => {
     const opened = calls.filter((call) => call.path === "/v1/billing_portal/sessions").length
     expect(await billing("portal", { flow: "change" })).toMatchObject({
       status: 409,
-      body: { error: { code: "MODEL_PLAN_CHANGE_SCHEDULED" } },
+      body: { error: { code: "MODEL_PLAN_CHANGE_UNAVAILABLE" } },
     })
     delete state.subscriptions[0]!.schedule
     state.subscriptions[0]!.cancel_at_period_end = true
@@ -753,9 +768,8 @@ describe("plan changes in Stripe's customer portal", () => {
       status: 409,
       body: {
         error: {
-          code: "MODEL_PLAN_ENDING",
-          message:
-            "Your plan ends at the close of this billing period, so it cannot be changed. Choose a plan again after it ends.",
+          code: "MODEL_PLAN_CHANGE_UNAVAILABLE",
+          message: "Change plans on vectordev.ai/account.",
         },
       },
     })

@@ -182,6 +182,7 @@ export type SnapshotFacts = {
   periodStart: number
   periodEnd: number
   cancelAtPeriodEnd: boolean
+  scheduled?: { plan: PlanId; at: number }
   firstPaidAt?: number
   firstHighPaidAt?: number
   memberSince?: number
@@ -220,6 +221,7 @@ export function buildSnapshot(
     periodEnd: facts.periodEnd,
     meterEpoch: facts.subscription ? `${facts.subscription}:${facts.periodStart}` : "none",
     cancelAtPeriodEnd: facts.cancelAtPeriodEnd,
+    ...(facts.scheduled ? { scheduled: facts.scheduled } : {}),
     ...(facts.firstPaidAt === undefined ? {} : { firstPaidAt: facts.firstPaidAt }),
     ...(high === undefined ? {} : { firstHighPaidAt: high }),
     ...(facts.memberSince === undefined ? {} : { memberSince: facts.memberSince }),

@@ -177,7 +177,7 @@ describe("Stripe → state (contract §4.4), from fixtures", () => {
       if (expected.key === "created") {
         expect(created(fakes)).toHaveLength(1)
         const made = [...fakes.openRouter.keys.values()].find((value) => value.hash !== SEEDED)
-        expect(made).toMatchObject({ disabled: false, limit: Number(FIXTURE_CREDITS[rankPrice(expected.plan)]) })
+        expect(made).toMatchObject({ disabled: false, limit: expected.keyLimit ?? Number(FIXTURE_CREDITS[rankPrice(expected.plan)]) })
         if (seeded) expect(seeded.disabled).toBe(true)
       } else {
         expect(created(fakes)).toEqual([])
@@ -185,8 +185,10 @@ describe("Stripe → state (contract §4.4), from fixtures", () => {
         else expect(seeded?.disabled).toBe(expected.key === "disabled")
       }
 
-      // Reconcile reads Stripe; it never writes there (the side effects of disputes and warnings are WP A10's).
-      expect(fakes.stripe.calls.filter((call) => call.method !== "GET")).toEqual([])
+      // A09 cancels a paid upgrade's source. Disputes and fraud warnings gain their writes in A10.
+      const writes = fakes.stripe.calls.filter((call) => call.method !== "GET")
+      if (name === "governing-supersedes") expect(writes).toMatchObject([{ method: "DELETE", path: "subscriptions/sub_before" }])
+      else expect(writes).toEqual([])
       if (expected.stripeCalls !== undefined) expect(fakes.stripe.calls).toHaveLength(expected.stripeCalls)
 
       const account = await storedAccount(fakes, fixture.accountId)

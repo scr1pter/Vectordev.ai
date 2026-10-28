@@ -1,7 +1,7 @@
 import { requireAccountUser } from "./account.js"
 import { enforceRateLimit, requireTrustedJsonRequest } from "./abuse.js"
 import { verifyDesktopToken } from "./cli-token.js"
-import { modelPlanCheckout, modelPlanPortal } from "./model-plan-account.js"
+import { modelPlanChange, modelPlanCheckout, modelPlanPortal } from "./model-plan-account.js"
 import { requireModelPlanUser } from "./model-plan-chat.js"
 import { modelPlansEnabled, requireModelPlans } from "./model-plan-config.js"
 import { ApiError, handleApiError, json, readJson, requireMethod, type ApiRequest, type ApiResponse } from "./http.js"
@@ -87,6 +87,34 @@ export async function handleModelPlanPortal(request: ApiRequest, response: ApiRe
     if (flow !== undefined && flow !== "change" && flow !== "cancel")
       throw new ApiError(400, "BILLING_FLOW_INVALID", "Choose plan changes or cancellation.")
     json(response, 200, await modelPlanPortal(account.id, fetcher, { flow }))
+  } catch (error) {
+    handleApiError(response, error)
+  }
+}
+
+/** Plan changes spend only for the signed-in web account or the desktop's own token. */
+export async function handleModelPlanChange(request: ApiRequest, response: ApiResponse, fetcher: typeof fetch = fetch) {
+  try {
+    if (request.method !== "POST" && request.method !== "DELETE") requireMethod(request, "POST")
+    requireTrustedJsonRequest(request, 4096)
+    // Undoing a scheduled downgrade remains available when sales or the gateway is paused.
+    const account = await requireBillingUser(request, fetcher, { desktop: true })
+    await enforceRateLimit(request, response, {
+      scope: "model-plan-change",
+      identifier: account.id,
+      limit: 10,
+      windowSeconds: 3600,
+      requirePersistent: true,
+    })
+    if (request.method === "DELETE") {
+      json(response, 200, await modelPlanChange(account, undefined, fetcher))
+      return
+    }
+    requireModelPlans()
+    const body = await readJson<{ plan?: unknown }>(request, 4096)
+    if (typeof body?.plan !== "string")
+      throw new ApiError(400, "MODEL_PLAN_INVALID", "Choose an available Codium subscription.")
+    json(response, 200, await modelPlanChange(account, body.plan, fetcher))
   } catch (error) {
     handleApiError(response, error)
   }
