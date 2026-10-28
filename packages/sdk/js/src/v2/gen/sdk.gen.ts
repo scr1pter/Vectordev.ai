@@ -5569,7 +5569,7 @@ export class Memory extends HeyApiClient {
   /**
    * Erase learned memory
    *
-   * Erase what Vector learned for this repository, for the user, or everywhere. Files people wrote are left alone.
+   * Erase what Vector learned for this repository, for the user, or everywhere. The repository's Deep research runs go with its memory, and every run with everything; erasing what Vector learned about the user keeps them. Files people wrote are left alone.
    */
   public erase<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -5606,7 +5606,7 @@ export class Memory extends HeyApiClient {
   /**
    * Erase what Vector learned in a session
    *
-   * Forget every entry Vector learned whose only evidence is this session, so it is not learned again. What you wrote and what other sessions also taught stay. The session keeps its messages until you delete them.
+   * Forget every entry Vector learned whose only evidence is this session, so it is not learned again, and the Deep research runs the session started. What you wrote and what other sessions also taught stay. The session keeps its messages until you delete them.
    */
   public eraseSession<ThrowOnError extends boolean = false>(
     parameters: {

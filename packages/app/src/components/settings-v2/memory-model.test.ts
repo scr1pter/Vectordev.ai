@@ -368,5 +368,7 @@ describe("About you", () => {
     }
     expect(ERASE_SESSION.done(1)).toBe("Erased 1 thing Vector learned only in this session.")
     expect(ERASE_SESSION.confirm).toContain("The session keeps its messages until you delete it.")
+    // The engine forgets the session's research with what it learned there, so the confirmation says so.
+    expect(ERASE_SESSION.confirm).toContain("and the Deep research runs the session started.")
   })
 })

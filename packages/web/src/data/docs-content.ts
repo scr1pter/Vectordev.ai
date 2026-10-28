@@ -124,7 +124,7 @@ export const brainCommandRows = [
   ],
   [
     "vector memory erase",
-    "Erase what Vector learned in this repository; --personal for what it learned about you, --everywhere for all of it. Files you wrote are left alone.",
+    "Erase what Vector learned in this repository, with its Deep research runs; --personal for what it learned about you, --everywhere for all of it and every run. Files you wrote are left alone.",
   ],
 ]
 

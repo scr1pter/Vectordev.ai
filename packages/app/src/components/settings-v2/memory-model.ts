@@ -369,7 +369,7 @@ export const ERASE_SESSION = {
   /** The same, from Settings, for the session an item came from. */
   there: "Erase what Vector learned in that session",
   confirm:
-    "Vector forgets every entry whose only evidence is the session, and does not learn it again. What you wrote, and what other sessions also taught it, stay. The session keeps its messages until you delete it.",
+    "Vector forgets every entry whose only evidence is the session, and does not learn it again, and the Deep research runs the session started. What you wrote, and what other sessions also taught it, stay. The session keeps its messages until you delete it.",
   done: (count: number) =>
     count === 0
       ? "Vector had learned nothing that only this session taught it."
