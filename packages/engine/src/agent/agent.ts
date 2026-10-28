@@ -1,6 +1,7 @@
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { Config } from "@/config/config"
+import { ConfigAgent } from "@/config/agent"
 import { serviceUse } from "@vectordevai/core/effect/service-use"
 import { Provider } from "@/provider/provider"
 
@@ -699,6 +700,11 @@ const layer = Layer.effect(
         // A Subagent specialist turned off still takes its config, for the copy its helpers keep (below).
         const off = new Set<string>()
         for (const [key, value] of Object.entries(cfg.agent ?? {})) {
+          // A markdown agent with a reserved name fails to load (ConfigAgent); one from a config file is left out.
+          if (ConfigAgent.RESERVED.includes(key)) {
+            yield* Effect.logWarning(`agent "${key}" is ignored: the task tool's ${key} option uses that name`)
+            continue
+          }
           if (value.disable && !isNativeSpecialist(key)) {
             delete agents[key]
             continue

@@ -4,9 +4,21 @@ import path from "path"
 import { Exit, Schema } from "effect"
 import { Glob } from "@vectordevai/core/util/glob"
 import { ConfigAgentV1 } from "@vectordevai/core/v1/config/agent"
+import { InvalidError } from "@vectordevai/core/v1/config/error"
 import { configEntryNameFromPath } from "./entry-name"
 import * as ConfigMarkdown from "./markdown"
 import { ConfigParse } from "./parse"
+
+/** Names no agent may take: the task tool's fork option, and its permission pattern, use "fork". */
+export const RESERVED: readonly string[] = ["fork"]
+
+function refuseReserved(name: string, file: string) {
+  if (RESERVED.includes(name))
+    throw new InvalidError({
+      path: file,
+      message: `An agent cannot be named ${name}; the task tool's ${name} option uses it.`,
+    })
+}
 
 // `allowed` leaves out a prompt file that changed since the owner last approved it (PromptTrust).
 export async function load(dir: string, allowed: (file: string) => boolean) {
@@ -28,6 +40,7 @@ export async function load(dir: string, allowed: (file: string) => boolean) {
       ...md.data,
       prompt: md.content.trim(),
     }
+    refuseReserved(String(config.name), item)
     result[config.name] = ConfigParse.schema(ConfigAgentV1.Info, config, item)
   }
   return result
@@ -50,6 +63,7 @@ export async function loadMode(dir: string, allowed: (file: string) => boolean) 
       ...md.data,
       prompt: md.content.trim(),
     }
+    refuseReserved(config.name, item)
     const parsed = Schema.decodeUnknownExit(ConfigAgentV1.Info)(config, { errors: "all", propertyOrder: "original" })
     if (Exit.isSuccess(parsed)) {
       result[config.name] = {

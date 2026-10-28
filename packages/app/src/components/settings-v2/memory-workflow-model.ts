@@ -91,8 +91,8 @@ export function sized<T extends { tier: WorkflowTier }>(tiers: readonly T[]) {
 }
 
 /**
- * What a size runs with when nothing is learned: Thorough raises the agent's effort and pushes it to split the work,
- * Standard hands off a part when the agent decides it should, and Light works solo.
+ * What a size runs with when nothing is learned: Thorough raises effort for the agent and its subagents and pushes it
+ * to split the work, Standard hands off a part when the agent decides it should, and Light works solo.
  */
 export function sizeDefault(tier: WorkflowTier) {
   if (tier === "thorough") return "High effort, with subagents"

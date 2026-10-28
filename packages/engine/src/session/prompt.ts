@@ -2561,6 +2561,18 @@ const layer = Layer.effect(
           const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
           const invokedAgents = lastUserMsg?.parts.flatMap((p) => (p.type === "agent" ? [p.name] : [])) ?? []
           const promptOps = yield* ops()
+          // A greeting never reasons; otherwise the size sets effort where the user left it on its default, or a
+          // learned default drops Thorough's high effort to the model's own. Changing thinking settings rewrites
+          // Anthropic's cached messages, so there effort follows the size the tools do. A subagent runs at the effort
+          // its record holds (5.A.7). The task tool reads the same value to pass Thorough's effort down (5.E.1).
+          const sizedEffort: TaskSize.Effort | undefined = quick
+            ? "off"
+            : build
+              ? (tuned?.workflow?.effort ??
+                TaskSize.effort(ProviderTransform.usesCacheBreakpoints(model) ? build.offered : build.tier))
+              : session.parentID && !session.internal
+                ? childEffort(session)
+                : undefined
 
           const tools = yield* SessionTools.resolve({
             agent: stepAgent,
@@ -2575,6 +2587,7 @@ const layer = Layer.effect(
             personal: personal && audience === "owner",
             outward: audience === "outward",
             ...(delegationContext ? { delegation: delegationContext } : {}),
+            ...(sizedEffort ? { effort: sizedEffort } : {}),
             ...(build
               ? {
                   taskSize: {
@@ -2777,17 +2790,7 @@ const layer = Layer.effect(
             user: lastUser,
             agent: stepAgent,
             explore,
-            // A greeting never reasons; otherwise the size sets effort where the user left it on its default, or a
-            // learned default drops Thorough's high effort to the model's own. Changing thinking settings rewrites
-            // Anthropic's cached messages, so there effort follows the size the tools do.
-            effort: quick
-              ? "off"
-              : build
-                ? (tuned?.workflow?.effort ??
-                  TaskSize.effort(ProviderTransform.usesCacheBreakpoints(model) ? build.offered : build.tier))
-                : session.parentID && !session.internal
-                  ? childEffort(session)
-                  : undefined,
+            effort: sizedEffort,
             permission: session.permission,
             sessionID,
             parentSessionID: session.parentID,
@@ -4239,7 +4242,8 @@ function delegation(
   }
 }
 
-// A subagent's own effort, as its record holds it (5.A.7). The sized path carries "default" and "high".
+// A subagent's own effort, as its record holds it (5.A.7). The sized path carries "default" and "high"; a brief's low or
+// medium reaches the child as its variant.
 function childEffort(session: Session.Info): TaskSize.Effort | undefined {
   const effort = SubagentLifecycle.read(session)?.effort
   return effort === "default" || effort === "high" ? effort : undefined

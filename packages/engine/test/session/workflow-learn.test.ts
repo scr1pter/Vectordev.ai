@@ -329,6 +329,50 @@ it.instance(
   90_000,
 )
 
+// 5.E.1: a model the brief names is the agent's pick, not where general subagents run by default.
+it.instance(
+  "a general subagent on a model its brief named teaches no subagent model",
+  () =>
+    Effect.gen(function* () {
+      const llm = yield* TestLLMServer
+      const provider = providerConfig(llm.url, { cost: { input: 3, output: 15 } }).provider!.lmstudio!
+      const parent = provider.models!["test-model"]!
+      const { place } = yield* setup({
+        config: {
+          small_model: "lmstudio/small-model",
+          provider: {
+            lmstudio: {
+              ...provider,
+              models: {
+                ...provider.models,
+                "small-model": { ...parent, id: "small-model", cost: { input: 1, output: 5 } },
+              },
+            },
+          },
+        },
+      })
+      const sessionID = yield* chat()
+      yield* llm.tool("escalate", { reason: "A refactor across the whole parser" })
+      yield* llm.tool("task", {
+        description: "Split the lexer",
+        prompt: "Move the lexer into src/lexer.ts.",
+        subagent_type: "general",
+        model: "small",
+        background: false,
+      })
+      yield* llm.text("Moved the lexer.")
+      yield* llm.text("Refactored the parser.")
+      yield* send(sessionID, "Refactor the parser module into smaller files")
+      yield* settle()
+      expect((yield* llm.hits).map((hit) => hit.body.model)).toContain("small-model")
+      const [row] = yield* rows(place.repository)
+      expect(row).toMatchObject({ subagents: 1, subagent_model: null })
+      expect(JSON.parse(row!.subagent_models as string)).toEqual({})
+    }),
+  { git: true },
+  90_000,
+)
+
 it.instance(
   "only the build agent's own choice-free requests take a learned default",
   () =>

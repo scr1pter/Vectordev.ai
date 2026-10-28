@@ -401,6 +401,20 @@ exports[`tool parameters JSON Schema (wire shape) task 1`] = `
             "description": "A short (3-5 words) title for this subagent, shown to the user on its card, e.g. "Map auth middleware". Make it specific and distinct from sibling subagents",
             "type": "string",
           },
+          "effort": {
+            "description": "Never above your own effort",
+            "enum": [
+              "default",
+              "low",
+              "medium",
+              "high",
+            ],
+            "type": "string",
+          },
+          "model": {
+            "description": ""provider/model", a model ID on your provider, or "small". Never pricier than yours unless the user allowed it",
+            "type": "string",
+          },
           "owned_paths": {
             "description": "Repository-relative files or directory prefixes this subagent owns. Vector rejects overlapping ownership among active sibling subagents",
             "items": {

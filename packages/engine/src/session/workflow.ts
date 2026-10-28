@@ -373,7 +373,8 @@ function launches(part: SessionV1.ToolPart) {
   return Array.isArray(tasks) ? tasks.length : 1
 }
 
-// The models a task call ran its general subagents on, one per such launch that got one, as "provider/model".
+// The models a task call ran its general subagents on, one per such launch that got one, as "provider/model". A model
+// the brief named is the agent's pick, not a default, so it teaches nothing (5.E.1).
 function models(part: SessionV1.ToolPart) {
   if (part.state.status === "pending") return []
   const metadata = part.state.metadata ?? {}
@@ -381,6 +382,7 @@ function models(part: SessionV1.ToolPart) {
   return runs.flatMap((item: unknown) =>
     isRecord(item) &&
     item.agent === GENERAL_SUBAGENT &&
+    item.modelSource !== "call" &&
     isRecord(item.model) &&
     typeof item.model.providerID === "string"
       ? [`${item.model.providerID}/${String(item.model.modelID)}`]

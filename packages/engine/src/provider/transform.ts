@@ -1381,6 +1381,53 @@ export function effortOptions(model: Provider.Model, effort: TaskSize.Effort): R
   return model.variants?.high ?? {}
 }
 
+type Level = "off" | "low" | "medium" | "high"
+
+/** The level an effort or variant name stands for: high, xhigh and max are high; low and minimal low; none off. */
+export function level(value: unknown): Level | undefined {
+  if (value === "none" || value === "off" || value === "disabled") return "off"
+  if (value === "minimal" || value === "low") return "low"
+  if (value === "medium") return "medium"
+  if (value === "high" || value === "xhigh" || value === "max") return "high"
+  return undefined
+}
+
+// The reasoning level set options name, if they name one.
+function optionsLevel(options: Record<string, any>): Level | undefined {
+  const named = level(options.reasoningEffort) ?? level(options.reasoning_effort) ?? level(options.effort)
+  if (named) return named
+  if (isPlainObject(options.reasoning)) {
+    if (options.reasoning.enabled === false) return "off"
+    const effort = level(options.reasoning.effort)
+    if (effort) return effort
+  }
+  for (const setting of [options.thinking, options.reasoningConfig]) {
+    if (!isPlainObject(setting)) continue
+    if (setting.type === "disabled") return "off"
+    if (setting.type === "enabled" || setting.type === "adaptive") return "high"
+  }
+  if (isPlainObject(options.thinkingConfig)) {
+    if (options.thinkingConfig.thinkingBudget === 0) return "off"
+    const thinking = level(options.thinkingConfig.thinkingLevel)
+    if (thinking) return thinking
+  }
+  if (options.enable_thinking === false) return "off"
+  return undefined
+}
+
+/**
+ * The reasoning level a model runs at when nothing picks one: no variant, no size and no agent option. For example
+ * medium on GPT-5, which Vector sends at medium, and off for an Anthropic model, which thinks only when asked.
+ */
+export function defaultEffort(model: Provider.Model): Level {
+  if (!model.capabilities.reasoning) return "off"
+  const found = optionsLevel(mergeDeep(options({ model, sessionID: "" }), model.options ?? {}))
+  if (found) return found
+  if (model.api.npm.includes("anthropic") || model.api.id.includes("claude") || model.api.id.includes("anthropic"))
+    return "off"
+  return "medium"
+}
+
 // Maps model ID prefix to provider slug used in providerOptions.
 // Example: "amazon/nova-2-lite" → "bedrock"
 const SLUG_OVERRIDES: Record<string, string> = {

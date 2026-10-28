@@ -64,7 +64,7 @@ export const EscalateTool = Tool.define<typeof Parameters, Metadata, never>(
           title: "Thorough task",
           // The request's size note was written for its old size and stays as it was, so the prompt cache keeps it; this
           // result is what tells the model the size changed.
-          output: `This request is now Thorough from your next step: high reasoning effort for you. This replaces the size note on the request. Reason noted: ${params.reason.slice(0, 200)}`,
+          output: `This request is now Thorough from your next step: high reasoning effort for you and the subagents you launch. This replaces the size note on the request. Reason noted: ${params.reason.slice(0, 200)}`,
           metadata: { from: current.tier, to: "thorough" },
         }
       }),

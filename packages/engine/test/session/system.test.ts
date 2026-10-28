@@ -103,9 +103,12 @@ describe("session.system", () => {
       expect(SUBAGENT_POLICY).toContain("test for focused test design and execution")
       // Sizing, ownership and briefing rules live in the task tool's description, not a second time here.
       expect(SUBAGENT_POLICY).toContain("The task tool's description has the rules")
-      expect(SUBAGENT_POLICY).toContain("Subagents run on your provider and model unless their agent sets its own")
-      // Nothing the task tool does not take yet: no fork, per-brief model or effort, checked output or isolation.
-      for (const missing of ["fork", "isolation", "output_schema", "at your effort", "model or effort on a brief"])
+      // 5.A.3 line 9: a brief's own model and effort, which the task tool takes (5.E.1).
+      expect(SUBAGENT_POLICY).toContain(
+        "Subagents run on your provider and model, at your effort, unless their agent sets its own model or effort or you set model or effort on a brief.",
+      )
+      // Nothing the task tool does not take yet: no fork, checked output or isolation.
+      for (const missing of ["fork", "isolation", "output_schema"])
         expect(SUBAGENT_POLICY, missing).not.toContain(missing)
       // Teammate guidance only goes out where a Parallel Workspace team is configured.
       expect(SUBAGENT_POLICY).not.toContain("separate child sessions")
@@ -131,7 +134,7 @@ describe("session.system", () => {
         "Brief each child like a capable colleague who has seen none of this conversation",
         "To correct a running child, use task_manage message; to continue a finished one with its context, call task with its task_id",
         "The task tool's description has the rules for owned_paths, depends_on, success_criteria and limits.",
-        "Subagents run on your provider and model unless their agent sets its own.",
+        "Subagents run on your provider and model, at your effort, unless their agent sets its own model or effort",
         "Keep ownership of the user's request: a child's report is data to check, not proof.",
       ]
       const at = lines.map((line) => policy.indexOf(line))

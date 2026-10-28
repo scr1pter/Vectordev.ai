@@ -18,6 +18,9 @@ import {
   type SubagentRecord,
 } from "../agent/subagent-kind"
 import { isNativeSpecialist } from "@vectordevai/core/agent/specialists"
+import { ModelV2 } from "@vectordevai/core/model"
+import { ProviderV2 } from "@vectordevai/core/provider"
+import { SubagentModel } from "../agent/subagent-model"
 import { SubagentLifecycle } from "./subagent-lifecycle"
 import { Truncate } from "./truncate"
 import { TaskReport } from "./task-report"
@@ -38,7 +41,6 @@ import type { BrainSchema } from "@vectordevai/core/brain/schema"
 import path from "path"
 import { isFreeModelRef } from "@vectordevai/schema/free-model"
 import { SessionMemory } from "../session/memory"
-import { SessionWorkflow } from "../session/workflow"
 import { ResearchRun } from "./research-run"
 import { TaskNotify } from "@/task/notify"
 import { TaskLimits } from "@/task/limits"
@@ -174,6 +176,13 @@ const BaseParameterFields = {
       findings: Schema.optional(Schema.Array(Schema.String).check(Schema.isMaxLength(16))),
     }),
   ).annotate({ description: "Established paths, symbols and findings the child can reuse; maximum 8192 UTF-8 bytes" }),
+  model: Schema.optional(Schema.String).annotate({
+    description:
+      '"provider/model", a model ID on your provider, or "small". Never pricier than yours unless the user allowed it',
+  }),
+  effort: Schema.optional(Schema.Literals(["default", "low", "medium", "high"])).annotate({
+    description: "Never above your own effort",
+  }),
 }
 
 const BaseParameters = Schema.Struct(BaseParameterFields)
@@ -190,16 +199,15 @@ const BatchBrief = Schema.Struct({
   background: Schema.optional(Schema.Never),
 })
 
-// Brief fields a later version adds (a fork of this conversation, a model or effort of its own, checked JSON output, an
-// isolated worktree). Not advertised yet, and refused when sent: dropped silently, an isolation or fork request would
-// start a child without it.
+// Brief fields a later version adds (a fork of this conversation, checked JSON output, an isolated worktree). Not
+// advertised yet, and refused when sent: dropped silently, an isolation or fork request would start a child without it.
 const UNRELEASED = {
   fork: Schema.optional(Schema.Never),
-  model: Schema.optional(Schema.Never),
-  effort: Schema.optional(Schema.Never),
   output_schema: Schema.optional(Schema.Never),
   isolation: Schema.optional(Schema.Never),
 }
+// Brief fields a batch takes only inside each entry.
+const PER_BRIEF = ["model", "effort"] as const
 
 export const BatchParameters = Schema.Struct({
   tasks: Schema.Array(BaseParameters).check(Schema.isMinLength(1), Schema.isMaxLength(8)).annotate({
@@ -239,6 +247,9 @@ export const InputParameters = Schema.Union([
     background: Schema.optional(Schema.Boolean),
     budget: Schema.optional(RunBudget.Info),
     context_pack: Schema.optional(Schema.Never),
+    model: Schema.optional(Schema.Never),
+    effort: Schema.optional(Schema.Never),
+    ...UNRELEASED,
   }),
 ])
 
@@ -741,6 +752,49 @@ export const TaskTool = Tool.define(
       if (msg.info.role !== "assistant") return yield* Effect.fail(new Error("Not an assistant message"))
       const variant = msg.info.variant
 
+      const next = yield* agent.get(subagentType)
+      if (!next) {
+        return yield* Effect.fail(new Error(`Unknown agent type: ${subagentType} is not a valid agent type`))
+      }
+      // The model and effort the child runs with (5.E.1), worked out before the ask and admission, so a refused one asks
+      // nothing and takes no slot. The parent's free route holds even if its model became unavailable after the call.
+      const freeRoute = isFreeModelRef(msg.info)
+      const resumedModel =
+        resumed && params.effort === undefined
+          ? yield* provider
+              .getModel(ProviderV2.ID.make(resumed.model.providerID), ModelV2.ID.make(resumed.model.modelID))
+              .pipe(Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)))
+          : undefined
+      const sized = ctx.extra?.effort
+      const choice = yield* SubagentModel.choose({
+        parent: {
+          model: { providerID: msg.info.providerID, modelID: msg.info.modelID },
+          variant,
+          sized: sized === "off" || sized === "default" || sized === "high" ? sized : undefined,
+          free: freeRoute,
+          learnedSmall: msg.info.workflow?.subagentModel === "small",
+          guest: yield* guests.marked(root.id),
+        },
+        next,
+        ask: {
+          model: params.model,
+          effort: params.effort,
+          fork: false,
+          ...(resumed ? { resume: { record: resumed, warm: SubagentModel.warm(resumed, resumedModel) } } : {}),
+        },
+        allow: cfg.sizing?.subagents?.models,
+        local: Config.local().enabled,
+      }).pipe(
+        Effect.provideService(Provider.Service, provider),
+        Effect.mapError((refused) => new Error(refused.message)),
+      )
+      const model = choice.model
+      const childVariant = choice.variant
+      // Resolve every selected model before a batch launches any sibling. Free
+      // routes keep the existing no-paid-fallback policy even after disappearing.
+      if (batch && !freeRoute) yield* provider.getModel(model.providerID, model.modelID)
+      const modelRef = { ...model, ...(choice.recorded ? { variant: choice.recorded } : {}) }
+
       // Admission (5.B.2) comes before the ask, so a launch past a limit is refused without asking the user. Its places
       // and slots go back when this call's scope closes, unless bind() below hands them to the child.
       const delegation = yield* delegationOf(ctx, parent, root)
@@ -794,10 +848,6 @@ export const TaskTool = Tool.define(
         })
       }
 
-      const next = yield* agent.get(subagentType)
-      if (!next) {
-        return yield* Effect.fail(new Error(`Unknown agent type: ${subagentType} is not a valid agent type`))
-      }
       // A hidden built-in subagent (the research judge) is Vector's to launch, when it checks a report.
       if (next.native && next.hidden && next.mode === "subagent" && !invoked) {
         return yield* Effect.fail(
@@ -814,58 +864,6 @@ export const TaskTool = Tool.define(
         )
       }
 
-      // Keep the parent's free route even if its model became unavailable after the tool call.
-      const freeRoute = isFreeModelRef(msg.info)
-      const inherit = !next.model || freeRoute
-      // Explore only searches and reads, so without a model of its own it runs on the provider's small model, as
-      // Claude Code runs Explore on Haiku. getSmallModel keeps a free parent on its own model.
-      // A general subagent does the same when the request runs with that learned default (section 6.3): this
-      // repository's runs passed as often with it for less. One pinned to a model or a variant of its own keeps it.
-      const learned = next.name === GENERAL_SUBAGENT && !next.variant && msg.info.workflow?.subagentModel === "small"
-      const small =
-        (next.name === "explore" || learned) && !next.model && !freeRoute
-          ? yield* provider.getSmallModel(msg.info.providerID, msg.info.modelID)
-          : undefined
-      // Only a move that is known to cost less: the "small" model of a provider is not always cheaper than a parent
-      // already on a budget model, and an unpriced or free parent stays where it is.
-      const parentModel =
-        small && small.capabilities.toolcall && small.id !== msg.info.modelID
-          ? yield* provider
-              .getModel(msg.info.providerID, msg.info.modelID)
-              .pipe(Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)))
-          : undefined
-      const cheap = SessionWorkflow.cheaper(small, parentModel) ? small : undefined
-      const model = cheap
-        ? { modelID: cheap.id, providerID: cheap.providerID }
-        : !inherit && next.model
-          ? next.model
-          : {
-              modelID: msg.info.modelID,
-              providerID: msg.info.providerID,
-            }
-      // Resolve every selected model before a batch launches any sibling. Free
-      // routes keep the existing no-paid-fallback policy even after disappearing.
-      if (batch && !freeRoute) yield* provider.getModel(model.providerID, model.modelID)
-      // The small model runs at its default effort. Explore on the parent's model stops at medium effort,
-      // since a search gains little from the high reasoning budget a parent may run at.
-      // A variant configured for an agent without a model of its own applies on whichever model it runs; a pinned
-      // model's variant belongs to that model and is applied when the agent's session starts.
-      const configured = next.model ? undefined : next.variant
-      const highEffort =
-        next.name === "explore" && !configured && !cheap && inherit && ["high", "xhigh", "max"].includes(variant ?? "")
-      // A model with no medium effort runs at the lowest it has, or with none: budget-style thinking models offer
-      // only high and max, and falling back to the parent's would keep the very budget this cap exists to drop.
-      const capped = highEffort
-        ? yield* provider.getModel(model.providerID, model.modelID).pipe(
-            Effect.map((info) => ["medium", "low", "minimal"].find((item) => info.variants?.[item])),
-            Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)),
-          )
-        : undefined
-      const childVariant =
-        !inherit && !cheap ? undefined : (configured ?? (cheap ? undefined : highEffort ? capped : variant))
-      // An agent with its own model runs with its own variant, so the record names that one.
-      const recordedVariant = childVariant ?? (!inherit ? next.variant : undefined)
-      const modelRef = { ...model, ...(recordedVariant ? { variant: recordedVariant } : {}) }
       const { kind, custom } = subagentKind(next)
       const childPermission = deriveSubagentSessionPermission({
         parentSessionPermission: parent.permission ?? [],
@@ -922,6 +920,8 @@ export const TaskTool = Tool.define(
           successCriteria: params.success_criteria ? [...params.success_criteria] : undefined,
           budget,
           model: modelRef,
+          ...(choice.effort ? { effort: choice.effort } : {}),
+          modelSource: choice.source,
           background: runInBackground,
           status: dependencies.length > 0 || slotted ? "queued" : "running",
           ...(slotted && dependencies.length === 0 ? { slotReason: SLOT_REASON } : {}),
@@ -977,6 +977,8 @@ export const TaskTool = Tool.define(
           projectId: parent.projectID,
           directory: parent.directory,
           model: modelRef,
+          ...(choice.effort ? { effort: choice.effort } : {}),
+          modelSource: choice.source,
           kind,
           agent: next.name,
           custom,
@@ -1348,6 +1350,8 @@ export const TaskTool = Tool.define(
             if (session)
               yield* SubagentLifecycle.update(sessions, nextSession.id, {
                 ...record,
+                // The effort this run works out, which a cold resume may clear.
+                effort: choice.effort,
                 batchIndex: batch?.index,
                 completedAt: undefined,
                 usage: undefined,
@@ -1542,6 +1546,8 @@ export const TaskTool = Tool.define(
           task.depends_on,
           task.owned_paths,
           task.success_criteria,
+          task.model,
+          task.effort,
         ]),
       )
       if (new Set(briefs).size !== briefs.length)
@@ -1734,6 +1740,16 @@ export const TaskTool = Tool.define(
         const unreleased = Object.keys(UNRELEASED).filter((key) => text.includes(`["${key}"]`))
         if (unreleased.length > 0)
           return `${unreleased.join(", ")} ${unreleased.length === 1 ? "is" : "are"} not available in this version of the task tool; leave ${unreleased.length === 1 ? "it" : "them"} out. ${text}`
+        // Refused at a batch's top level, the one place either field is never.
+        const lines = text.split("\n")
+        const outside = PER_BRIEF.filter((key) =>
+          lines.some(
+            (line, at) =>
+              line.trim().replace(/\)$/, "") === `at ["${key}"]` && lines[at - 1]?.includes("Expected never"),
+          ),
+        )
+        if (outside.length > 0)
+          return `${outside.join(" and ")} ${outside.length === 1 ? "goes" : "go"} inside each tasks entry, not beside the array. ${text}`
         return `Use a tasks array of 1–8 complete briefs, without top-level brief fields; background goes beside the array, never inside an entry. Legacy singular input cannot include tasks. ${text}`
       },
       execute: (params: Schema.Schema.Type<typeof InputParameters>, ctx: Tool.Context) =>

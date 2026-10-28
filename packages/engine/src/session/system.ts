@@ -134,8 +134,8 @@ function specialistFocus(permitted?: readonly string[]) {
 }
 // When to delegate, how to launch and how to follow up live here; the parameter rules (owned_paths, depends_on,
 // success_criteria) and the limits live in the task tool's description, so a request carries each rule once. Work and
-// Thorough send the same lines, so the stable block stays cached across sizes. Forks, a brief's own model or effort,
-// checked JSON output and isolated worktrees are named here only once the task tool takes them.
+// Thorough send the same lines, so the stable block stays cached across sizes. Forks, checked JSON output and isolated
+// worktrees are named here only once the task tool takes them.
 const SUBAGENT_INTRO =
   "You can hand work to real child agents with the task tool. Each child starts with an empty context, works on its own and reports only to you; the user does not see its report."
 const SUBAGENT_WHEN = [
@@ -149,7 +149,7 @@ const SUBAGENT_ORCHESTRATION = [
   "The task tool's description has the rules for owned_paths, depends_on, success_criteria and limits.",
 ]
 const SUBAGENT_MODELS =
-  "Subagents run on your provider and model unless their agent sets its own. explore runs on the provider's small model only when that model can call tools and is known to cost less than yours, and otherwise on your model without high effort; a learned workflow default can move general subagents to that small model on the same terms."
+  "Subagents run on your provider and model, at your effort, unless their agent sets its own model or effort or you set model or effort on a brief. explore runs on the provider's small model only when that model can call tools and is known to cost less than yours, and otherwise on your model without high effort; a learned workflow default can move general subagents to that small model on the same terms."
 const SUBAGENT_TEAMMATES = [
   "Task-tool sibling subagents are separate child sessions; they are not automatically members of a Parallel Workspace team. Require send_teammate_message only when a workspace team is actually configured.",
   "If send_teammate_message reports that no team is configured, stop that coordination attempt. Do not search outside the workspace for team state, inspect Vector application data, logs, or packaged resources, or create a team marker. Continue independently and report the unavailable exchange to the parent.",
