@@ -149,6 +149,17 @@ test("the download page points installed copies at Check for Updates and install
   expect(install).toContain("free Vector account")
 })
 
+test("the download page tells Mac users the keychain may ask once after an update and Always Allow stops it", async () => {
+  // Read as rendered text: the note wraps across lines and markup.
+  const download = (await Bun.file(`${web}src/components/marketing/download/FreeDownload.tsx`).text())
+    .replace(/<[^>]+>/g, "")
+    .replace(/\s+/g, " ")
+  const note = download.match(/After an update, macOS may ask[^]*?once after each update\./)?.[0] ?? ""
+  expect(note).toContain("“Vector Safe Storage”")
+  expect(note).toContain("Choose Always Allow and it stops asking.")
+  expect(note).toContain("Until Vector is signed with an Apple Developer ID")
+})
+
 test("visitors without an account reach the installers from the footer and can sign up on the sign-in page", async () => {
   // /download and the footer's platform links send anonymous visitors to /login, where a free account is one
   // step away: the form's Sign up link switches it to creating one.
