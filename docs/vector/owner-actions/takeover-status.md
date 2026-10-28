@@ -24,7 +24,7 @@ checks. Push through the required pre-push typecheck; never bypass it.
 
 | Work | Branch | State / next gate |
 | --- | --- | --- |
-| Release 1.99.112 | `release-prep` | Version, unsigned allowlist and changelog prepared; test-only clock repair restores Linux coverage. Full candidate CI is green, including Linux/Windows tests, both browser suites and the 30-minute packet capture. Exact catalog parity and protected publication approval remain release-workflow gates. See `release-199112.md`. |
+| Release 1.99.112 | `release-prep` | Candidate `dfc98974` landed on clean `main` through all 23 pre-push checks. Full source CI is green. Release run [40781089625](https://github.com/scr1pter/claudeondfsfdaf/actions/runs/40781089625) was dispatched from that exact SHA with the existing catalog. Native checks, catalog parity and protected approval remain gates; publication is not claimed. See `release-199112.md`. |
 | Service setup prompt | `vector-takeover` | Written in `codex-setup-prompt.md`. No external setup performed. |
 | Multi-agent parity | `self-evolving` | WP1–22 inherited; WP23 committed with 237 passing cases and engine typecheck. WP24 committed in the follow-up worktree with 231 passing cases and independent review closed. WP25 is in progress; phase/final review and later work packages remain. |
 | Codium | `codium` | A00–08 inherited; A09 committed with 230 passing tests and API typecheck. Inherited CI fixture fixes are committed and the complete Codium CI run `40779479590` passes, including browser specs and all eight typechecks. A10 in progress; A11–60 and Track B remain. Protected provider end-to-end setup needs the owner. |
