@@ -107,9 +107,13 @@ describe("session.system", () => {
       expect(SUBAGENT_POLICY).toContain(
         "Subagents run on your provider and model, at your effort, unless their agent sets its own model or effort or you set model or effort on a brief.",
       )
-      // Nothing the task tool does not take yet: no fork, checked output or isolation.
-      for (const missing of ["fork", "isolation", "output_schema"])
-        expect(SUBAGENT_POLICY, missing).not.toContain(missing)
+      // Nothing the task tool does not take yet (isolation), and no rule its parameters already state (output_schema).
+      for (const missing of ["isolation", "output_schema"]) expect(SUBAGENT_POLICY, missing).not.toContain(missing)
+      // 5.A.3 lines 1 and 6: forks, which the task tool takes (5.E.3).
+      expect(SUBAGENT_POLICY).toContain("Each child starts with an empty context unless you fork it")
+      expect(SUBAGENT_POLICY).toContain(
+        "Fork instead when the work needs this conversation and your provider caches prompts.",
+      )
       // Teammate guidance only goes out where a Parallel Workspace team is configured.
       expect(SUBAGENT_POLICY).not.toContain("separate child sessions")
       expect(subagentPolicy({ ...ALL_SUBAGENTS, teammates: true })).toContain("stop that coordination attempt")
@@ -124,7 +128,7 @@ describe("session.system", () => {
       expect(subagentPolicy()).toBe(SUBAGENT_POLICY)
       expect(subagentPolicy(ALL_SUBAGENTS)).toBe(SUBAGENT_POLICY)
       const lines = [
-        "You can hand work to real child agents with the task tool. Each child starts with an empty context, works on its own",
+        "You can hand work to real child agents with the task tool. Each child starts with an empty context unless you fork it, works on its own",
         "Delegate when a child does it better than you would, not by default: independent parts that can run at the same time",
         "broad searches or research whose raw output would flood your context; and new work the user sends while you or your subagents are busy",
         "Do it yourself when it is small, a single file or a known lookup, tightly coupled to what you are editing, or needs back-and-forth with the user",

@@ -908,12 +908,17 @@ const layer: Layer.Layer<
       const ctx = yield* InstanceState.context
       const original = yield* get(input.sessionID)
       const title = getForkedTitle(original.title)
+      const metadata = structuredClone(original.metadata)
+      // A copy of a subagent fork is no fork: it does not inherit its parent's conversation (5.E.3).
+      const subagent = metadata?.subagent
+      if (subagent && typeof subagent === "object" && !Array.isArray(subagent) && "fork" in subagent)
+        delete (subagent as Record<string, unknown>).fork
       const session = yield* createNext({
         directory: ctx.directory,
         path: sessionPath(ctx.worktree, ctx.directory),
         workspaceID: original.workspaceID,
         title,
-        metadata: structuredClone(original.metadata),
+        metadata,
       })
       const msgs = yield* messages({ sessionID: input.sessionID })
       const idMap = new Map<string, MessageID>()

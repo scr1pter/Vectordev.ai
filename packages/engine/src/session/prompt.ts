@@ -86,6 +86,7 @@ import { Git } from "@/git"
 import { DOCUMENTS as MEMORY_DOCUMENTS } from "@/tool/memory"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { SessionTools } from "./tools"
+import { SessionFork } from "./fork"
 import { TitleUsage } from "./title-usage"
 import { LLMEvent } from "@vectordevai/llm"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
@@ -290,6 +291,7 @@ const layer = Layer.effect(
     const jobs = yield* BackgroundJob.Service
     const taskNotes = yield* TaskNotify.Service
     const taskLimits = yield* TaskLimits.Service
+    const forks = yield* SessionFork.Service
     const { db } = database
     const backgroundTasks = yield* InstanceState.make(
       Effect.fnUntraced(function* () {
@@ -2200,14 +2202,37 @@ const layer = Layer.effect(
       let decided: SessionWorkflow.Step | undefined
       // Before the first request, so a prompt arriving after the cache expired sends the cleared history.
       if (!resumed) yield* compaction.prune({ sessionID }).pipe(Effect.ignore)
+      // A fork (5.E.3) starts from its parent's conversation: its record names the fork point. Its requests name the
+      // tools its parent's rules allow, as the root's did; its own rules (FORK_DENIES) refuse what it may not run.
+      const forkRecord = session.parentID && !session.internal ? SubagentLifecycle.read(session) : undefined
+      const fork =
+        forkRecord?.fork && session.parentID ? { record: forkRecord, point: forkRecord.fork.point } : undefined
+      const forkParent = fork
+        ? Option.getOrUndefined(yield* sessions.get(session.parentID!).pipe(Effect.option))
+        : undefined
+      // What a fork inherits for the step being built, once its model is known, and what it inherited.
+      let inherit: Omit<SessionFork.InheritInput, "messages"> | undefined
+      let inherited: SessionFork.Inherited | undefined
+      const withInherited = Effect.fnUntraced(function* (own: SessionV1.WithParts[]) {
+        inherited = inherit ? yield* forks.inherited({ ...inherit, messages: own }) : undefined
+        return inherited ? [...inherited.messages, ...own] : own
+      })
+      // Whether a fork has sent a request in this run: only its first names the root's cache key.
+      let forkRequested = false
+      // Every reload of the history goes through here: a fork's own messages come after the history it inherits.
+      const history = Effect.fnUntraced(function* () {
+        return yield* withInherited(
+          yield* MessageV2.filterCompactedEffect(sessionID).pipe(Effect.provideService(Database.Service, database)),
+        )
+      })
 
       while (true) {
         yield* status.set(sessionID, { type: "busy" })
         yield* Effect.logInfo("loop", { "session.id": sessionID, step })
 
-        let msgs = yield* MessageV2.filterCompactedEffect(sessionID).pipe(
-          Effect.provideService(Database.Service, database),
-        )
+        // The fork's own messages alone until this step's model is known, which decides what it inherits.
+        inherit = undefined
+        let msgs = yield* history()
 
         const { user: lastUser, assistant: lastAssistant, finished: lastFinished, tasks } = MessageV2.latest(msgs)
 
@@ -2274,6 +2299,21 @@ const layer = Layer.effect(
             : selectedModel
         // The provider connection opens while the first request is prepared, rather than after it is sent.
         if (step === 1) yield* provider.preconnect(model)
+        if (fork) {
+          const name = onBuild(lastUser) ? "build" : lastUser.agent
+          const marked = yield* guests.marked(sessionID)
+          inherit = {
+            session,
+            record: fork.record,
+            model: { providerID: model.providerID, modelID: model.id },
+            variant: lastUser.model.variant,
+            agent: name,
+            personal: !marked && !freeModelMayTrain(model),
+            audience: audienceOf(session, name),
+            guest: marked,
+          }
+          msgs = yield* withInherited(msgs)
+        }
 
         // Every step sizes the request again from the projected history, so a raise or a message that joined the run
         // applies from the next step. Subagents, Vector's hidden helpers and custom agents keep their own setup.
@@ -2349,16 +2389,14 @@ const layer = Layer.effect(
             auto: task.auto,
             overflow: task.overflow,
             context: yield* researchDigest(sessionID),
+            // A fork's summary covers what it inherited; only its own messages can be kept word for word.
+            ...(fork?.record.fork?.from ? { floor: MessageID.make(fork.record.fork.from) } : {}),
           })
           if (result === "stop") break
           // The summary may replace the message that opened the request it covers. The marker records the request,
           // so it keeps its size and its judge, and a "continue" after it has work to continue.
           if (sized) {
-            const visible = new Set(
-              (yield* MessageV2.filterCompactedEffect(sessionID).pipe(
-                Effect.provideService(Database.Service, database),
-              )).map((message) => message.info.id),
-            )
+            const visible = new Set((yield* history()).map((message) => message.info.id))
             const carried = SessionTaskSize.carry(sized, (message) => !visible.has(message.info.id))
             if (carried)
               yield* sessions.updatePart({
@@ -2390,9 +2428,7 @@ const layer = Layer.effect(
           !lastFinished.summary &&
           (yield* compaction.clear({ sessionID, tokens: lastFinished.tokens }))
         )
-          msgs = yield* MessageV2.filterCompactedEffect(sessionID).pipe(
-            Effect.provideService(Database.Service, database),
-          )
+          msgs = yield* history()
 
         // An app's own quick-lane message is sized as a build request, so it runs on the build agent once it is work.
         // A helper session's agent may be a Subagent specialist Settings turned off, which only `helper` finds.
@@ -2419,6 +2455,23 @@ const layer = Layer.effect(
           : agent
         // The build agent and the research lead take their tools, effort and caps from the request's size.
         const build = sized && !chat && (agent.name === "build" || agent.name === ResearchRun.LEAD) ? sized : undefined
+        // A fork's inherited history as its parent's step sized it (that step's messages, without the launching one), so
+        // it carries the same size notes (I24), and a cold fork is offered the tools its parent was (5.E.3).
+        const parentUser = inherited?.messages.findLast((message) => message.info.role === "user")?.info
+        const forkRequests =
+          inherited && forkParent && parentUser?.role === "user" && sizable(forkParent, parentUser)
+            ? SessionTaskSize.size({
+                messages: inherited.messages.filter((message) => message.info.id !== fork?.point),
+                caching: ProviderTransform.caches(model),
+                lifetime: ProviderTransform.cacheLifetime(model),
+                auto: sizing?.auto,
+                judge: sizing?.judge,
+              })
+            : []
+        const forkSized = forkRequests.at(-1)
+        // What the step is offered: the request's size, or for a fork its parent's.
+        const shaped =
+          build ?? (forkSized && forkSized.tier !== "chat" && agent.name === "build" ? forkSized : undefined)
         // The user started the plan deep, which raised the request to Thorough: research's Focused default caps become
         // Deep's. A cap the owner armed since the run began stays as it is, and a guest's limits still hold.
         if (
@@ -2465,7 +2518,8 @@ const layer = Layer.effect(
           })
         // A subagent starts with how the owner works, and one a Thorough request launched with a brief besides, saved
         // on its first message as ids. A Vectorscope reviewer starts with how the owner reviews.
-        if (session.parentID && !session.internal)
+        // A fork starts from its parent's history, which already carries all that, and must never write to it.
+        if (session.parentID && !session.internal && !fork)
           msgs = yield* briefFor({ session, msgs, personal, agent: agent.name })
         if (session.internal?.startsWith(VECTORSCOPE))
           msgs = yield* reviewFor({ session, msgs, personal, agent: agent.name })
@@ -2493,12 +2547,15 @@ const layer = Layer.effect(
         // child session denies one by permission, and a subagent's own session is told not to start general Subagents
         // of its own. The plan reminder, which suggests explore, points at the task tool's list instead where it is not
         // permitted.
+        // A fork is told and offered what its parent was: it is rendered as the root, under the root's rules.
+        const rules = fork ? (forkParent?.permission ?? []) : session.permission
+        const nested = session.parentID !== undefined && !fork
         const subagents = SystemPrompt.subagentAvailability({
           agents: yield* agents.list(),
           permission: agent.permission,
-          session: session.permission,
+          session: rules,
           agent: agent.name,
-          nested: session.parentID !== undefined,
+          nested,
         })
         const explore = subagents.permitted?.includes("explore")
         // A learned workflow default (section 6.3), for the build agent's own requests only.
@@ -2519,6 +2576,15 @@ const layer = Layer.effect(
         // A quick agent is given no environment, so it is given no date either.
         if (!quick) msgs = SessionReminders.dates(msgs)
         if (requests.length > 0) msgs = sizeNotes(msgs, quick ? [] : requests, workflowNotes(requests, tuned?.workflow))
+        // A fork's inherited messages carry its parent's notes, with the learned default its launching step recorded.
+        else if (forkRequests.length > 0) {
+          const launching = inherited?.messages.find((message) => message.info.id === fork?.point)?.info
+          msgs = sizeNotes(
+            msgs,
+            forkRequests,
+            workflowNotes(forkRequests, launching?.role === "assistant" ? launching.workflow : undefined),
+          )
+        }
 
         const msg: SessionV1.Assistant = {
           id: MessageID.ascending(),
@@ -2613,13 +2679,13 @@ const layer = Layer.effect(
           // A request is offered what its size needs (5.A.1). On a caching provider the size here is the session's
           // highest while the cache is warm, and "no subagents" withholds nothing, so a smaller or capped follow-up sends
           // the same definitions; what it may not launch is refused when called instead.
-          const capped = build !== undefined && SessionTaskSize.capped(build.result)
+          const capped = shaped !== undefined && SessionTaskSize.capped(shaped.result)
           // "No subagents" or "don't be thorough": escalate may not raise the request.
-          const held = build !== undefined && SessionTaskSize.held(build.result)
-          const offer: TaskSize.Offer | undefined = build && {
+          const held = shaped !== undefined && SessionTaskSize.held(shaped.result)
+          const offer: TaskSize.Offer | undefined = shaped && {
             capped: capped && !ProviderTransform.caches(model),
-            children: build.snapshot.length > 0,
-            notified: build.notified !== undefined,
+            children: shaped.snapshot.length > 0,
+            notified: shaped.notified !== undefined,
           }
           if (quick) {
             // The quick lane's one tool: escalate, which hands the message to the full agent. `invalid` only answers a
@@ -2627,29 +2693,29 @@ const layer = Layer.effect(
             for (const id of Object.keys(tools))
               if (!(recoverable && QUICK_LANE_TOOLS.some((rule) => rule.permission === id))) delete tools[id]
             if (tools.escalate) tools.escalate = { ...tools.escalate, description: QUICK_DESCRIPTION }
-          } else if (build && agent.name === ResearchRun.LEAD) {
+          } else if (shaped && agent.name === ResearchRun.LEAD) {
             // Deep research (sections 5.2, 5.6a and 11.2). A Focused run is Work, and it may still hand independent
             // sub-questions to researchers, up to its own cap of 2 (a Deep run's is 4); the research run counts them,
             // and the lead's permissions let it launch nothing else. The user's "no subagents" keeps the lead on its
             // own, and once Run Guard warns no new researcher starts.
-            for (const id of TaskSize.withheld(build.offered, build.result.agents.length, offer))
+            for (const id of TaskSize.withheld(shaped.offered, shaped.result.agents.length, offer))
               if (capped || id !== "task") delete tools[id]
             // A capped lead has no researcher to launch, so none to manage either (5.B.5).
             if (capped) for (const id of ["task", "task_manage"]) delete tools[id]
             if ((yield* guard.snapshot(sessionID))?.warned === true) delete tools.task
             delete tools.escalate
-          } else if (build) {
-            for (const id of TaskSize.withheld(build.offered, build.result.agents.length, offer)) delete tools[id]
+          } else if (shaped) {
+            for (const id of TaskSize.withheld(shaped.offered, shaped.result.agents.length, offer)) delete tools[id]
             // A thorough request has nothing to raise to, and the user kept a held one at Work. On a caching provider
             // the tool keeps its place so a smaller follow-up sends the same definitions and reads the cached prefix;
             // it refuses to raise a held request.
-            if ((build.tier === "thorough" || held) && !ProviderTransform.caches(model)) delete tools.escalate
-            const why = capped ? CAPPED_REFUSAL : build.tier === "light" ? LIGHT_REFUSAL : undefined
+            if ((shaped.tier === "thorough" || held) && !ProviderTransform.caches(model)) delete tools.escalate
+            const why = capped ? CAPPED_REFUSAL : shaped.tier === "light" ? LIGHT_REFUSAL : undefined
             const delegate = tools.task?.execute
             if (why && delegate) {
               // Light may continue a subagent whose report arrived in it, as the agent that subagent ran.
               const resume =
-                !capped && build.notified !== undefined
+                !capped && shaped.notified !== undefined
                   ? new Map(
                       (yield* sessions.children(sessionID)).flatMap((child) => {
                         const record = SubagentLifecycle.read(child)
@@ -2657,7 +2723,7 @@ const layer = Layer.effect(
                       }),
                     )
                   : undefined
-              tools.task = { ...tools.task, execute: namedOnly(delegate, { named: build.result.agents, why, resume }) }
+              tools.task = { ...tools.task, execute: namedOnly(delegate, { named: shaped.result.agents, why, resume }) }
             }
             if (why && tools.workflow)
               tools.workflow = {
@@ -2671,7 +2737,8 @@ const layer = Layer.effect(
           if (!tools.task) delete tools.workflow
           // Memory is the main agent's: a subagent reports to it, and Vector's hidden helpers never learn. A workflow is
           // the main agent's too: its agents cannot launch subagents.
-          if (session.parentID || session.internal) {
+          // A fork keeps both definitions, as its parent sent them, and refuses them (SessionFork.REFUSED).
+          if ((session.parentID && !fork) || session.internal) {
             delete tools.memory
             delete tools.workflow
           }
@@ -2700,7 +2767,7 @@ const layer = Layer.effect(
           // Policies for a tool go only with a request that offers it, after this agent's permissions remove what it
           // may not use, as the request itself is built.
           const offered = Object.keys(
-            LLMRequestPrep.resolveTools({ tools, agent: stepAgent, permission: session.permission, user: lastUser }),
+            LLMRequestPrep.resolveTools({ tools, agent: stepAgent, permission: rules, user: lastUser }),
           )
           const [skills, env, snapshot, mcpInstructions, modelMsgs] = yield* Effect.all([
             quick ? Effect.succeed(undefined) : sys.skills(agent, { learned }),
@@ -2711,18 +2778,18 @@ const layer = Layer.effect(
                   subagents: {
                     ...delegation(
                       subagents,
-                      build && {
+                      shaped && {
                         offered: offered.includes("task"),
                         manage: offered.includes("task_manage"),
-                        named: build.result.agents,
-                        tier: build.tier,
+                        named: shaped.result.agents,
+                        tier: shaped.tier,
                         capped,
                       },
                     ),
                     teammates: offered.includes("send_teammate_message"),
                   },
                   tools: offered,
-                  nested: session.parentID !== undefined,
+                  nested,
                   workspace: !OUTWARD_AGENTS.has(agent.name),
                   // The day the history starts on; a later day is noted on the user message that starts it.
                   date: msgs.find((message) => message.info.role === "user")?.info.time.created,
@@ -2752,7 +2819,7 @@ const layer = Layer.effect(
                       : {}),
                   },
                 ).pipe(Effect.orDie),
-            quick ? Effect.succeed(undefined) : sys.mcp(agent, session.permission),
+            quick ? Effect.succeed(undefined) : sys.mcp(agent, rules),
             // The quick lane sends this request's own messages; autocomplete only the newest one, below.
             MessageV2.toModelMessagesEffect(
               stepAgent.name === "quick" ? msgs.filter((message) => message.info.id >= opened) : msgs,
@@ -2786,16 +2853,69 @@ const layer = Layer.effect(
           if (closing === "due") closing = "done"
           let chosen: LLM.StreamInput["toolChoice"]
           const retried = invalid.count
+          const retries = lastUser.executionMode === "fast" ? 1 : undefined
+          // A step a fork may start from keeps what it sends, before it is sent (5.E.3).
+          if (
+            !quick &&
+            !isLastStep &&
+            !session.parentID &&
+            !session.internal &&
+            offered.includes("task") &&
+            agent.name !== ResearchRun.LEAD &&
+            !OUTWARD_AGENTS.has(agent.name) &&
+            SessionFork.qualifies(model) &&
+            sizing?.subagents?.fork !== false &&
+            flags.backgroundSubagents &&
+            format.type !== "json_schema"
+          )
+            yield* forks.remember({
+              messageID: msg.id,
+              sessionID,
+              request: {
+                user: lastUser,
+                agent: stepAgent,
+                model,
+                explore,
+                effort: sizedEffort,
+                permission: session.permission,
+                stableSystem: [...env.stable],
+                system: [...system],
+                tools: { ...tools },
+                retries,
+              },
+              personal,
+              audience,
+            })
+          // A fork's request (5.E.3). While its parent's step is cached (warm), it sends that step's tools and system
+          // blocks as they were; cold, it sends what it worked out as the root, under the same names. Either way each
+          // tool runs as the fork's own, and the ones a fork may not run refuse. The first request of each run names the
+          // root's cache key, and the last inherited message takes the non-final cache breakpoint.
+          const warm = inherited?.prefix?.request
+          const keyed = fork !== undefined && !forkRequested
+          forkRequested = forkRequested || fork !== undefined
+          if (keyed && inherited)
+            yield* SubagentLifecycle.modify(sessions, sessionID, (current) =>
+              current.fork && current.fork.warm !== (warm !== undefined)
+                ? { patch: { fork: { ...current.fork, warm: warm !== undefined } }, value: undefined }
+                : { value: undefined },
+            ).pipe(Effect.ignore)
+          const ancestry = new Set(inherited?.messages.map((message) => message.info.id))
+          const inheritedCount = inherited
+            ? (yield* MessageV2.toModelMessagesEffect(
+                msgs.filter((message) => ancestry.has(message.info.id)),
+                model,
+              )).length
+            : 0
           const result = yield* handle.process({
             user: lastUser,
-            agent: stepAgent,
-            explore,
-            effort: sizedEffort,
-            permission: session.permission,
+            agent: warm?.agent ?? stepAgent,
+            explore: warm ? warm.explore : explore,
+            effort: warm ? warm.effort : sizedEffort,
+            permission: warm?.permission ?? rules,
             sessionID,
             parentSessionID: session.parentID,
-            stableSystem: env.stable,
-            system,
+            stableSystem: warm ? warm.stableSystem : env.stable,
+            system: warm?.system ?? system,
             messages: [
               ...(stepAgent.name === "autocomplete"
                 ? modelMsgs.filter((message) => message.role === "user").slice(-1)
@@ -2803,14 +2923,22 @@ const layer = Layer.effect(
               ...(closingStep ? [{ role: "user" as const, content: STRUCTURED_OUTPUT_CLOSING }] : []),
               ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS_PROMPT }] : []),
             ],
-            tools,
+            tools: fork
+              ? SessionFork.adopt({
+                  tools: warm?.tools ?? tools,
+                  own: tools,
+                  refused: SessionFork.REFUSED(yield* config.get()),
+                })
+              : tools,
             model,
             toolChoice: format.type === "json_schema" ? "required" : undefined,
             chose: (choice) => {
               chosen = choice
             },
             ...(closingStep ? { thinking: false as const } : {}),
-            retries: lastUser.executionMode === "fast" ? 1 : undefined,
+            ...(keyed && session.parentID ? { cacheKey: session.parentID } : {}),
+            ...(inheritedCount > 0 ? { boundary: inheritedCount - 1 } : {}),
+            retries: warm ? warm.retries : retries,
             answering: () => Deferred.doneUnsafe(answering, Effect.succeed(true)),
             // The digest in the system prompt carries the owner's rules, MEMORY.md and pinned entries too.
             carried: carried && { ...carried, personal: carried.personal + snapshot.personal },
@@ -4623,6 +4751,7 @@ export const node = LayerNode.make({
     BackgroundJob.node,
     TaskNotify.node,
     TaskLimits.node,
+    SessionFork.node,
     FreeModelGuests.node,
     Git.node,
     ResearchStore.node,

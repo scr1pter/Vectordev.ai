@@ -257,29 +257,27 @@ describe("tool parameters", () => {
     test("rejects missing prompt", () => {
       expect(accepts(Task, { description: "d", subagent_type: "general" })).toBe(false)
     })
-    // Fork and isolation land in a later version. Dropped silently, an isolation or fork request would start a child
-    // without it, so a call that sends one fails instead.
+    // Isolation lands in a later version. Dropped silently, an isolation request would start a child without it, so a
+    // call that sends one fails instead.
     test("refuses brief fields this version does not take, alone, in a batch or beside it, and advertises none", () => {
       const brief = { description: "d", prompt: "p" }
       expect(accepts(InputParameters, brief)).toBe(true)
       expect(accepts(InputParameters, { tasks: [brief] })).toBe(true)
-      for (const [key, value] of [
-        ["fork", true],
-        ["isolation", "worktree"],
-      ] as const) {
+      for (const [key, value] of [["isolation", "worktree"]] as const) {
         expect(accepts(InputParameters, { ...brief, [key]: value }), key).toBe(false)
         expect(accepts(InputParameters, { tasks: [brief, { ...brief, [key]: value }] }), key).toBe(false)
         expect(accepts(InputParameters, { tasks: [brief], [key]: value }), key).toBe(false)
         expect(JSON.stringify(toJsonSchema(BatchParameters)), key).not.toContain(`"${key}"`)
       }
     })
-    // 4.4: a brief's own model, effort and output_schema, alone or in each entry, never beside a batch's array.
-    test("takes model, effort and output_schema per brief, never at a batch's top level", () => {
+    // 4.4: a brief's own model, effort, output_schema and fork, alone or in each entry, never beside a batch's array.
+    test("takes model, effort, output_schema and fork per brief, never at a batch's top level", () => {
       const brief = { description: "d", prompt: "p" }
       for (const [key, value] of [
         ["model", "small"],
         ["effort", "low"],
         ["output_schema", { type: "object" }],
+        ["fork", true],
       ] as const) {
         expect(accepts(InputParameters, { ...brief, [key]: value }), key).toBe(true)
         expect(accepts(InputParameters, { tasks: [brief, { ...brief, [key]: value }] }), key).toBe(true)
@@ -292,6 +290,7 @@ describe("tool parameters", () => {
       expect(advertised).toContain('"model"')
       expect(advertised).toContain('"effort"')
       expect(advertised).toContain('"output_schema"')
+      expect(advertised).toContain('"fork"')
     })
   })
 

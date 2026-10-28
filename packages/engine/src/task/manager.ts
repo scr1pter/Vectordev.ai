@@ -31,6 +31,7 @@ import { DesktopTasks } from "./desktop"
 import { TaskLimits } from "./limits"
 import { TaskNotify } from "./notify"
 import { TaskSignals } from "./signals"
+import { SessionFork } from "@/session/fork"
 
 export class Error extends Schema.TaggedErrorClass<Error>()("TaskManager.Error", {
   code: Schema.Literals([
@@ -183,6 +184,7 @@ const layer = Layer.effect(
     const notify = yield* TaskNotify.Service
     const flags = yield* RuntimeFlags.Service
     const signals = yield* TaskSignals.Service
+    const forks = yield* SessionFork.Service
     const bridge = <A>(effect: Effect.Effect<A, DesktopTasks.Error>) =>
       effect.pipe(Effect.mapError((error) => new Error({ code: error.code, message: error.message })))
     const lock = SubagentLifecycle.controlLock
@@ -634,6 +636,31 @@ const layer = Layer.effect(
       return [...sent, ...reported].sort((left, right) => left.createdAt - right.createdAt).slice(-MAX_MESSAGES)
     })
 
+    // The model, variant and request shape a prompt into a child keeps: a fork's from its first own message (5.E.3),
+    // which also keeps its prefix held while it answers; any other child's from its record.
+    const shape = Effect.fnUntraced(function* (record: SubagentRecord, child?: SessionID) {
+      const fields: SessionFork.UserFields = record.fork
+        ? yield* forks.userFields(record)
+        : {
+            model: {
+              providerID: ProviderV2.ID.make(record.model.providerID),
+              modelID: ModelV2.ID.make(record.model.modelID),
+            },
+            ...(record.model.variant ? { variant: record.model.variant } : {}),
+          }
+      if (record.fork && child) yield* forks.hold(MessageID.make(record.fork.point), child)
+      const model = { providerID: fields.model.providerID, modelID: fields.model.modelID }
+      const extra = {
+        ...(fields.system !== undefined ? { system: fields.system } : {}),
+        ...(fields.tools ? { tools: fields.tools } : {}),
+        ...(fields.executionMode ? { executionMode: fields.executionMode } : {}),
+      }
+      return {
+        request: { model, variant: fields.variant, ...extra },
+        settle: { model, ...(fields.variant ? { variant: fields.variant } : {}), ...extra },
+      }
+    })
+
     const message: Interface["message"] = Effect.fn("TaskManager.message")(function* (input, ops) {
       const text = input.text.trim()
       const invalid = TaskMailbox.bodyError(text)
@@ -713,16 +740,13 @@ const layer = Layer.effect(
               },
               record.attempt,
             )
-            const model = {
-              providerID: ProviderV2.ID.make(record.model.providerID),
-              modelID: ModelV2.ID.make(record.model.modelID),
-            }
+            // A fork keeps the request shape of its first own message (5.E.3), and its prefix while it runs.
+            const shaped = yield* shape(value, session.id)
             const result = yield* ops.prompt({
               sessionID: session.id,
               messageID: entry.id,
               agent: record.agent,
-              model,
-              variant: record.model.variant,
+              ...shaped.request,
               ...(kept ? { format: kept } : {}),
               parts: [
                 {
@@ -731,6 +755,10 @@ const layer = Layer.effect(
                   text: TaskMailbox.envelope(text, { sender: input.sessionID, recipient: session.id, relation }),
                   ...(Object.keys(carried).length > 0 ? { metadata: carried } : {}),
                 },
+                // A fork answers in a ```json block, so every prompt into it repeats the schema (5.E.2).
+                ...(value.fork && value.structured
+                  ? [{ type: "text" as const, synthetic: true, text: SessionFork.answerIn(value.structured.schema) }]
+                  : []),
               ],
             })
             // A structured child's answer to the message is checked like its first one (5.E.2).
@@ -739,8 +767,7 @@ const layer = Layer.effect(
                 sessions,
                 ops,
                 sessionID: session.id,
-                model,
-                ...(record.model.variant ? { variant: record.model.variant } : {}),
+                ...shaped.settle,
                 agent: record.agent,
                 schema: value.structured.schema,
                 mode: value.fork ? "text" : "tool",
@@ -1308,23 +1335,23 @@ const layer = Layer.effect(
                     yield* SubagentLifecycle.update(sessions, id, { status: "running", slotReason: undefined }, attempt)
                   }
                   const since = MessageID.ascending()
-                  const model = {
-                    providerID: ProviderV2.ID.make(record.model.providerID),
-                    modelID: ModelV2.ID.make(record.model.modelID),
-                  }
+                  const shaped = yield* shape(record)
                   const structured = record.structured && !record.fork ? record.structured : undefined
                   const result = yield* ops.prompt({
                     sessionID: id,
                     messageID: since,
                     agent: record.agent,
-                    model,
-                    variant: record.model.variant,
+                    ...shaped.request,
                     ...(structured ? { format: TaskStructured.format(structured.schema) } : {}),
                     parts: [
                       {
                         type: "text",
                         synthetic: true,
-                        text: brief,
+                        // A fork answers in a ```json block, so every prompt into it repeats the schema (5.E.2).
+                        text:
+                          record.fork && record.structured
+                            ? `${brief}\n\n${SessionFork.answerIn(record.structured.schema)}`
+                            : brief,
                         ...(Object.keys(carried).length > 0 ? { metadata: carried } : {}),
                       },
                     ],
@@ -1334,8 +1361,7 @@ const layer = Layer.effect(
                     sessions,
                     ops,
                     sessionID: id,
-                    model,
-                    ...(record.model.variant ? { variant: record.model.variant } : {}),
+                    ...shaped.settle,
                     agent: record.agent,
                     schema: record.structured.schema,
                     mode: structured ? "tool" : "text",
@@ -1357,6 +1383,8 @@ const layer = Layer.effect(
                   ),
                 )
                 yield* limits.bind(admission, id)
+                // A fork's prefix stays while it runs (5.E.3).
+                if (record.fork) yield* forks.hold(MessageID.make(record.fork.point), id)
                 yield* jobs.start({
                   id,
                   type: "task",
@@ -1385,6 +1413,7 @@ const layer = Layer.effect(
                       typeof ran === "string" ? Effect.succeed(ran) : SubagentLifecycle.settleRun(ran),
                     ),
                     Effect.ensuring(limits.release(admission, id)),
+                    Effect.ensuring(record.fork ? forks.release(id) : Effect.void),
                   ),
                 })
                 yield* notify.watch({
@@ -1480,6 +1509,7 @@ export const node = LayerNode.make({
     TaskNotify.node,
     RuntimeFlags.node,
     TaskSignals.node,
+    SessionFork.node,
   ],
 })
 export * as TaskManager from "./manager"

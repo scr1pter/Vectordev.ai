@@ -13,7 +13,9 @@ import { eq } from "drizzle-orm"
 import { Clock, Context, Deferred, Effect, Layer, type Duration } from "effect"
 import type { SubagentRecord } from "@/agent/subagent-kind"
 import { InstanceState } from "@/effect/instance-state"
+import type { Provider } from "@/provider/provider"
 import { ProviderTransform } from "@/provider/transform"
+import { isFreeModelRef } from "@vectordevai/schema/free-model"
 import { NotFoundError } from "@/storage/storage"
 import { NativePatch } from "./llm/native-patch"
 import type { LLM } from "./llm"
@@ -339,6 +341,12 @@ export const node = LayerNode.make({ service: Service, layer, deps: [Database.no
 
 // Pure rules -----------------------------------------------------------------------------------------------------------
 
+/** Whether a model can carry forks: free and local ($0) models always, a paid one only where its provider caches. */
+export function qualifies(model: Provider.Model) {
+  const free = !model.cost.unpriced && model.cost.input === 0 && model.cost.output === 0
+  return free || isFreeModelRef({ providerID: model.providerID, modelID: model.id }) || ProviderTransform.caches(model)
+}
+
 /** What every task call in the launching message returned, as a fork sees it. */
 export const TASK_PLACEHOLDER = "Subagent started."
 /** What every other local tool call in the launching message returned, as a fork sees it. */
@@ -425,6 +433,11 @@ export function adopt(input: {
   )
 }
 
+/** How a fork with a schema answers (TaskStructured text mode): in its directive, and in every later prompt. */
+export function answerIn(schema: Record<string, unknown>) {
+  return `End with only a \`\`\`json block whose value matches this JSON Schema: ${JsonSchemaCheck.encode(schema)}`
+}
+
 /**
  * The fork's first own message. Later prompts into it are plain follow-ups. With a schema it answers with a ```json
  * block (TaskStructured text mode).
@@ -434,9 +447,7 @@ export function directive(i: { prompt: string; schema?: Record<string, unknown> 
     "<fork_assignment>",
     "You are a fork of the agent above, started to do only this. Do it yourself and end with your report to that agent; the user does not see it.",
     i.prompt.replace(/<(\/?)fork_assignment/g, "<\\$1fork_assignment"),
-    ...(i.schema
-      ? [`End with only a \`\`\`json block whose value matches this JSON Schema: ${JsonSchemaCheck.encode(i.schema)}`]
-      : []),
+    ...(i.schema ? [answerIn(i.schema)] : []),
     "</fork_assignment>",
   ].join("\n")
 }

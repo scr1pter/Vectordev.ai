@@ -2,6 +2,7 @@ import { Tool } from "./tool"
 import DESCRIPTION from "./task.txt"
 import { ToolJsonSchema } from "./json-schema"
 import { SessionV1 } from "@vectordevai/core/v1/session"
+import type { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import { BackgroundJob } from "@/background/job"
 import { Session } from "@/session/session"
 import { SessionStatus } from "@/session/status"
@@ -48,6 +49,8 @@ import { TaskLimits } from "@/task/limits"
 import { TaskSize } from "@vectordevai/core/task-size"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { isRecord } from "@/util/record"
+import { SessionFork } from "@/session/fork"
+import { usable } from "@/session/overflow"
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): Effect.Effect<void>
@@ -87,6 +90,8 @@ export const SLOT_REASON = TaskLimits.SLOT_REASON
 export const SUBTASK = "vector.task.subtask"
 const BATCH_WAITS =
   "This batch would wait for subagent slots while you wait for it. Launch it in the background (the default), or launch fewer. No child was started."
+/** Why a fresh fork waits before its slot: the response that launched it must finish first (5.E.3). */
+export const LAUNCHING_REASON = "Waiting for the launching response"
 
 // Past TaskLimits.BUSY running or waiting subagents a launch tells the agent, so it can tell the user (5.B.8).
 function busyNote(active: number, limit: number) {
@@ -147,7 +152,7 @@ const BaseParameterFields = {
       'A short (3-5 words) title for this subagent, shown to the user on its card, e.g. "Map auth middleware". Make it specific and distinct from sibling subagents',
   }),
   prompt: Schema.String.annotate({
-    description: "A standalone brief; the subagent sees none of your conversation",
+    description: "A standalone brief; the subagent sees none of your conversation unless fork is true",
   }),
   subagent_type: Schema.optional(Schema.String).annotate({
     description: "A listed agent type. Omit it for general only when general is listed",
@@ -187,6 +192,10 @@ const BaseParameterFields = {
   output_schema: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)).annotate({
     description: "A JSON Schema the final answer must match; you receive checked JSON",
   }),
+  fork: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "true: start from your whole conversation instead of a brief, sharing your prompt cache. Background only; no subagent_type, model, effort or context_pack",
+  }),
 }
 
 const BaseParameters = Schema.Struct(BaseParameterFields)
@@ -203,14 +212,13 @@ const BatchBrief = Schema.Struct({
   background: Schema.optional(Schema.Never),
 })
 
-// Brief fields a later version adds (a fork of this conversation, an isolated worktree). Not advertised yet, and
-// refused when sent: dropped silently, an isolation or fork request would start a child without it.
+// A brief field a later version adds (an isolated worktree). Not advertised yet, and refused when sent: dropped
+// silently, an isolation request would start a child without it.
 const UNRELEASED = {
-  fork: Schema.optional(Schema.Never),
   isolation: Schema.optional(Schema.Never),
 }
 // Brief fields a batch takes only inside each entry.
-const PER_BRIEF = ["model", "effort", "output_schema"] as const
+const PER_BRIEF = ["model", "effort", "output_schema", "fork"] as const
 
 export const BatchParameters = Schema.Struct({
   tasks: Schema.Array(BaseParameters).check(Schema.isMinLength(1), Schema.isMaxLength(8)).annotate({
@@ -253,6 +261,7 @@ export const InputParameters = Schema.Union([
     model: Schema.optional(Schema.Never),
     effort: Schema.optional(Schema.Never),
     output_schema: Schema.optional(Schema.Never),
+    fork: Schema.optional(Schema.Never),
     ...UNRELEASED,
   }),
 ])
@@ -348,6 +357,9 @@ export const TaskTool = Tool.define(
     const notifier = yield* TaskNotify.Service
     const limits = yield* TaskLimits.Service
     const guests = yield* FreeModelGuests.Service
+    // Forks need the prefixes the run loop keeps. Without them (a test that builds the task tool on its own) a fork is
+    // refused rather than started cold.
+    const forks = yield* Effect.serviceOption(SessionFork.Service)
 
     // The caller's root session and its depth below it. Walking past the depth limit cannot change the answer, so a
     // corrupt parent chain cannot keep it looping either.
@@ -420,6 +432,59 @@ export const TaskTool = Tool.define(
       return { cancelled: false, message: `Dependency ${job.id} failed${failure.error ? `: ${failure.error}` : "."}` }
     })
 
+    // Why a fresh fork cannot start (5.E.3), before the ask and before any child. A fork runs as this agent on this
+    // model from this step's request, so only the main agent forks, only in the background, and only where a cache can
+    // serve that request. Returns the context it inherits, in tokens, when it can start.
+    const forkRefusal = Effect.fn("TaskTool.forkRefusal")(function* (input: {
+      params: Schema.Schema.Type<typeof Parameters>
+      ctx: Tool.Context
+      parent: Session.Info
+      launching: SessionV1.Assistant
+      cfg: ConfigV1.Info
+    }) {
+      const { params, ctx, parent, launching, cfg } = input
+      const refuse = (message: string) => ({ refused: message }) as const
+      if (cfg.sizing?.subagents?.fork === false)
+        return refuse("Forks are turned off (sizing.subagents.fork); write a brief instead.")
+      if (parent.parentID || parent.internal)
+        return refuse("Only the main agent of a conversation can fork; write a brief instead.")
+      const named = params.subagent_type?.trim()
+      if (named && named !== ctx.agent)
+        return refuse(`A fork runs as you, the ${ctx.agent} agent; leave subagent_type out.`)
+      if (params.context_pack) return refuse("A fork already has your whole conversation; leave context_pack out.")
+      if (researchAgents.has(ctx.agent)) return refuse(`The ${ctx.agent} agent cannot fork; write a brief instead.`)
+      const user = yield* MessageV2.get({ sessionID: parent.id, messageID: launching.parentID }).pipe(
+        Effect.provideService(Database.Service, database),
+        Effect.option,
+      )
+      if (Option.isSome(user) && user.value.info.role === "user" && user.value.info.format?.type === "json_schema")
+        return refuse("This step must answer in a JSON schema, so it cannot fork; write a brief instead.")
+      const model = yield* provider
+        .getModel(ProviderV2.ID.make(launching.providerID), ModelV2.ID.make(launching.modelID))
+        .pipe(Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)))
+      if (!model) return refuse("Your model is not in the catalog; write a brief instead.")
+      if (!SessionFork.qualifies(model))
+        return refuse(
+          "Your provider does not cache prompts, so a fork would pay for your whole conversation again; write a brief instead.",
+        )
+      if (model.limit.context === 0) return refuse("Your model lists no context window; write a brief instead.")
+      // What the conversation weighed at its last finished step; the launching step itself is still running.
+      const recent = yield* sessions.messages({ sessionID: parent.id, limit: 8 })
+      const last = recent.findLast(
+        (message) => message.info.role === "assistant" && message.info.finish && message.info.id !== launching.id,
+      )?.info
+      const tokens =
+        last?.role === "assistant"
+          ? last.tokens.total ||
+            last.tokens.input + last.tokens.output + last.tokens.cache.read + last.tokens.cache.write
+          : 0
+      if (tokens > usable({ cfg, model }) / 2)
+        return refuse(
+          `Your conversation (${tokens} tokens) is over half of what your model can take, too long to fork; write a brief instead.`,
+        )
+      return { inherited: tokens } as const
+    })
+
     const prepare = Effect.fn("TaskTool.prepare")(function* (
       params: Schema.Schema.Type<typeof Parameters>,
       ctx: Tool.Context,
@@ -475,6 +540,22 @@ export const TaskTool = Tool.define(
       if (session && session.parentID !== ctx.sessionID) {
         return yield* Effect.fail(new Error(`Task ${params.task_id} is not a subagent of this session.`))
       }
+      // A fork of this conversation (5.E.3), started now or resumed by its task_id. It runs as this agent, so it skips
+      // the checks a brief's agent type goes through.
+      const resumedFork = session ? SubagentLifecycle.read(session)?.fork : undefined
+      if (params.fork === true && session && !resumedFork)
+        return yield* Effect.fail(new Error(`Task ${params.task_id} is not a fork; resume it without fork.`))
+      const forking = params.fork === true || resumedFork !== undefined
+      if (forking && Option.isNone(forks))
+        return yield* Effect.fail(new Error("Forks are not available in this engine; write a brief instead."))
+      if (forking && !flags.backgroundSubagents)
+        return yield* Effect.fail(
+          new Error(
+            "A fork runs only in the background, and background subagents are turned off; write a brief instead.",
+          ),
+        )
+      if (forking && params.background === false)
+        return yield* Effect.fail(new Error("A fork runs only in the background; leave background out."))
       // The description is the title on the subagent's card, the child session and the job.
       const title = subagentTitle(params.description, params.prompt)
       const dependencies = [...new Set(params.depends_on?.map((item) => item.trim()).filter(Boolean) ?? [])]
@@ -543,7 +624,17 @@ export const TaskTool = Tool.define(
       const known = new Set(agents.map((item) => item.name))
       const ran = session ? (SubagentLifecycle.read(session)?.agent ?? session.agent) : undefined
       const requested = params.subagent_type?.trim() || ran
-      const subagentType = resolveSubagentType(requested, (name) => known.has(name))
+      // A fork runs as the agent that launched it.
+      const subagentType = forking ? (ran ?? ctx.agent) : resolveSubagentType(requested, (name) => known.has(name))
+      const msg = yield* MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID }).pipe(
+        Effect.provideService(Database.Service, database),
+        Effect.orDie,
+      )
+      if (msg.info.role !== "assistant") return yield* Effect.fail(new Error("Not an assistant message"))
+      const variant = msg.info.variant
+      const fresh =
+        forking && !session ? yield* forkRefusal({ params, ctx, parent, launching: msg.info, cfg }) : undefined
+      if (fresh && "refused" in fresh) return yield* Effect.fail(new Error(fresh.refused))
       // A research session continues only as the agent it ran: resumed as another, its history of web pages would
       // reach an agent with a shell and edits, and another agent's history would reach a research agent unchecked.
       if (ran && ran !== subagentType && (researchAgents.has(ran) || researchAgents.has(subagentType)))
@@ -683,9 +774,18 @@ export const TaskTool = Tool.define(
       // So is a Subagent specialist turned off there (agent.<name>.disable), and an agent that never existed.
       const missing = !generalOff && !known.has(subagentType)
       // Naming one agent lets the user launch that agent without a prompt, not every subagent this turn.
-      const invoked = Array.isArray(ctx.extra?.invokedAgents) && ctx.extra.invokedAgents.includes(subagentType)
+      const invoked =
+        !forking && Array.isArray(ctx.extra?.invokedAgents) && ctx.extra.invokedAgents.includes(subagentType)
       const caller = parent.internal ? yield* agent.helper(ctx.agent) : yield* agent.get(ctx.agent)
-      if (generalOff || missing || (!requested && !invoked)) {
+      // The task permission's pattern "fork" decides forks: denied here, asked below.
+      if (
+        forking &&
+        Permission.evaluate(id, "fork", caller?.permission ?? [], parent.permission ?? []).action === "deny"
+      )
+        return yield* Effect.fail(
+          new Error(`The task permission denies forks to the ${ctx.agent} agent; write a brief instead.`),
+        )
+      if (!forking && (generalOff || missing || (!requested && !invoked))) {
         // An omitted type means the general Subagent only where the caller may launch it.
         const denied = (name: string) =>
           Permission.evaluate(id, name, caller?.permission ?? [], parent.permission ?? []).action === "deny"
@@ -731,7 +831,7 @@ export const TaskTool = Tool.define(
       // A session's rules come after its agent's, so one that allows task (a client's tools list) would otherwise hand
       // an agent a subagent its own rules deny: a research lead a general Subagent with a shell, or any agent a
       // researcher. What the calling agent itself denies stays denied, unless the user named the subagent.
-      if (!invoked && caller && Permission.evaluate(id, subagentType, caller.permission).action === "deny")
+      if (!forking && !invoked && caller && Permission.evaluate(id, subagentType, caller.permission).action === "deny")
         return yield* Effect.fail(new Error(`The ${ctx.agent} agent may not launch the ${subagentType} subagent.`))
 
       // The research lead starts with only what this brief says, and a researcher's searches leave the machine: both
@@ -772,13 +872,6 @@ export const TaskTool = Tool.define(
       const budget =
         brief?.type === "ok" && brief.budget ? SpendGuard.tighter(params.budget, brief.budget) : params.budget
 
-      const msg = yield* MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID }).pipe(
-        Effect.provideService(Database.Service, database),
-        Effect.orDie,
-      )
-      if (msg.info.role !== "assistant") return yield* Effect.fail(new Error("Not an assistant message"))
-      const variant = msg.info.variant
-
       const next = yield* agent.get(subagentType)
       if (!next) {
         return yield* Effect.fail(new Error(`Unknown agent type: ${subagentType} is not a valid agent type`))
@@ -793,11 +886,14 @@ export const TaskTool = Tool.define(
               .pipe(Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)))
           : undefined
       const sized = ctx.extra?.effort
+      // A resumed fork runs as its first own message asked, whatever this step runs on (5.E.3).
+      const shape = resumed?.fork && Option.isSome(forks) ? yield* forks.value.userFields(resumed) : undefined
+      const keptEffort = resumed?.effort === "default" || resumed?.effort === "high" ? resumed.effort : undefined
       const choice = yield* SubagentModel.choose({
         parent: {
-          model: { providerID: msg.info.providerID, modelID: msg.info.modelID },
-          variant,
-          sized: sized === "off" || sized === "default" || sized === "high" ? sized : undefined,
+          model: shape?.model ?? { providerID: msg.info.providerID, modelID: msg.info.modelID },
+          variant: shape ? shape.variant : variant,
+          sized: shape ? keptEffort : sized === "off" || sized === "default" || sized === "high" ? sized : undefined,
           free: freeRoute,
           learnedSmall: msg.info.workflow?.subagentModel === "small",
           guest: yield* guests.marked(root.id),
@@ -806,8 +902,10 @@ export const TaskTool = Tool.define(
         ask: {
           model: params.model,
           effort: params.effort,
-          fork: false,
-          ...(resumed ? { resume: { record: resumed, warm: SubagentModel.warm(resumed, resumedModel) } } : {}),
+          fork: forking,
+          ...(resumed && !forking
+            ? { resume: { record: resumed, warm: SubagentModel.warm(resumed, resumedModel) } }
+            : {}),
         },
         allow: cfg.sizing?.subagents?.models,
         local: Config.local().enabled,
@@ -866,24 +964,24 @@ export const TaskTool = Tool.define(
       if (!invoked) {
         yield* ctx.ask({
           permission: id,
-          patterns: [subagentType],
+          patterns: [forking ? "fork" : subagentType],
           always: ["*"],
           metadata: {
             description: title,
-            subagent_type: subagentType,
+            subagent_type: forking ? "fork" : subagentType,
           },
         })
       }
 
       // A hidden built-in subagent (the research judge) is Vector's to launch, when it checks a report.
-      if (next.native && next.hidden && next.mode === "subagent" && !invoked) {
+      if (!forking && next.native && next.hidden && next.mode === "subagent" && !invoked) {
         return yield* Effect.fail(
           new Error(`${subagentType} runs only when Vector checks a report; it cannot be launched with task.`),
         )
       }
       // A primary agent runs sessions of its own and is not in the task tool's list; only the user can hand it a
       // subtask, by naming it in a command.
-      if (next.mode === "primary" && !invoked) {
+      if (!forking && next.mode === "primary" && !invoked) {
         return yield* Effect.fail(
           new Error(
             `${subagentType} is a primary agent, not a subagent; set subagent_type to one from the task tool's list.`,
@@ -912,7 +1010,7 @@ export const TaskTool = Tool.define(
       // Plan mode promises no edits, so a subagent it launches takes on its edit rules, which come after the
       // subagent's own. Elsewhere a read-only agent may deliberately hand edits to a subagent that can make them.
       const inheritedEdits =
-        ctx.agent === "plan"
+        ctx.agent === "plan" && !forking
           ? ((yield* agent.get(ctx.agent))?.permission ?? []).filter((rule) => rule.permission === "edit")
           : []
       const ops = ctx.extra?.promptOps as TaskPromptOps
@@ -949,9 +1047,15 @@ export const TaskTool = Tool.define(
           model: modelRef,
           ...(choice.effort ? { effort: choice.effort } : {}),
           modelSource: choice.source,
+          // Its fork point; a resumed fork keeps the first own message it already has (5.E.3).
+          ...(forking
+            ? { fork: resumedFork ?? { point: ctx.messageID, ...(ctx.callID ? { callID: ctx.callID } : {}) } }
+            : {}),
           background: runInBackground,
-          status: dependencies.length > 0 || slotted ? "queued" : "running",
-          ...(slotted && dependencies.length === 0 ? { slotReason: SLOT_REASON } : {}),
+          status: dependencies.length > 0 || slotted || fresh ? "queued" : "running",
+          ...(dependencies.length === 0 && (fresh || slotted)
+            ? { slotReason: fresh ? LAUNCHING_REASON : SLOT_REASON }
+            : {}),
           startedAt,
           // Each run counts its own attempts and says whether its answer matched.
           ...(structured ? { structured: { ...structured, attempts: 0 } } : {}),
@@ -982,22 +1086,26 @@ export const TaskTool = Tool.define(
           (yield* sessions.create({
             parentID: ctx.sessionID,
             // Older clients read the agent from this suffix; cards read metadata.subagent.title.
-            title: `${title} (@${next.name} subagent)`,
+            title: `${title} (@${forking ? "fork" : next.name} subagent)`,
             agent: next.name,
             metadata: { [SubagentLifecycle.METADATA_KEY]: record },
-            permission: [
-              ...childPermission,
-              ...inheritedEdits,
-              ...childToolDenies.filter(
-                (deny) =>
-                  !childPermission.some(
-                    (rule) =>
-                      rule.permission === deny.permission &&
-                      rule.pattern === deny.pattern &&
-                      rule.action === deny.action,
+            // A fork keeps this session's rules, and denies what it may never run so an ask from inside a tool is
+            // refused too.
+            permission: forking
+              ? [...(parent.permission ?? []), ...SessionFork.FORK_DENIES(cfg)]
+              : [
+                  ...childPermission,
+                  ...inheritedEdits,
+                  ...childToolDenies.filter(
+                    (deny) =>
+                      !childPermission.some(
+                        (rule) =>
+                          rule.permission === deny.permission &&
+                          rule.pattern === deny.pattern &&
+                          rule.action === deny.action,
+                      ),
                   ),
-              ),
-            ],
+                ],
           }))
         if (!session) batch?.own(nextSession.id)
         const metadata = {
@@ -1008,6 +1116,8 @@ export const TaskTool = Tool.define(
           model: modelRef,
           ...(choice.effort ? { effort: choice.effort } : {}),
           modelSource: choice.source,
+          ...(forking ? { fork: true } : {}),
+          ...(fresh ? { inheritedTokens: fresh.inherited } : {}),
           kind,
           agent: next.name,
           custom,
@@ -1106,6 +1216,39 @@ export const TaskTool = Tool.define(
           else if (batch) yield* ctx.metadata({ title, metadata: partMetadata() })
         }, SubagentLifecycle.locked(claimLock))
 
+        // A fork's next prompt (5.E.3): its first run sends its assignment, which becomes its first own message, written
+        // once; every later prompt is a plain follow-up. Each keeps the request shape of that first message, or of the
+        // launching step before there is one.
+        const forkTurn = Effect.fn("TaskTool.forkTurn")(function* (service: SessionFork.Interface, brief: string) {
+          const since = MessageID.ascending()
+          const known = SubagentLifecycle.read(yield* sessions.get(nextSession.id))?.fork?.from
+          const kept =
+            known !== undefined &&
+            Option.isSome(
+              yield* MessageV2.get({ sessionID: nextSession.id, messageID: MessageID.make(known) }).pipe(
+                Effect.provideService(Database.Service, database),
+                Effect.option,
+              ),
+            )
+          // A first message that was never written (its run failed first) is written by the next run instead.
+          if (!kept)
+            yield* SubagentLifecycle.modify(sessions, nextSession.id, (current) =>
+              current.fork && current.fork.from === known
+                ? { patch: { fork: { ...current.fork, from: since } }, value: undefined }
+                : { value: undefined },
+            )
+          const current = SubagentLifecycle.read(yield* sessions.get(nextSession.id)) ?? record
+          return {
+            since,
+            shape: yield* service.userFields(current),
+            text: !kept
+              ? SessionFork.directive({ prompt: brief, ...(structured ? { schema: structured.schema } : {}) })
+              : structured
+                ? `${brief}\n\n${SessionFork.answerIn(structured.schema)}`
+                : brief,
+          }
+        })
+
         const runTask = Effect.fn("TaskTool.runTask")(function* () {
           // A prerequisite's checked JSON goes whole or as the file holding it, never cut (5.E.2); its last run's only.
           const handOff = (dependency: string, json: string) =>
@@ -1150,27 +1293,33 @@ export const TaskTool = Tool.define(
           const work = Effect.gen(function* () {
             // Queued for a prerequisite or a slot until now; running clears the reason.
             if (outcome.status === "queued") yield* transition({ status: "running", slotReason: undefined })
+            const brief = [
+              assignmentPrompt(briefed, subagentType === ResearchRun.RESEARCHER ? [] : ownedPaths),
+              ...prerequisites,
+            ].join("\n\n")
+            const turn = forking && Option.isSome(forks) ? yield* forkTurn(forks.value, brief) : undefined
             // A brief is the parent model's text, so @names in it attach files but never invoke agents in the child. A
             // researcher gets no file at all: what it sends leaves the machine.
-            const parts = (yield* ops.resolvePromptParts(
-              [
-                assignmentPrompt(briefed, subagentType === ResearchRun.RESEARCHER ? [] : ownedPaths),
-                ...prerequisites,
-              ].join("\n\n"),
-            )).filter(
+            const parts = (yield* ops.resolvePromptParts(turn?.text ?? brief)).filter(
               (part) => part.type !== "agent" && (subagentType !== ResearchRun.RESEARCHER || part.type !== "file"),
             )
-            const since = MessageID.ascending()
+            const since = turn?.since ?? MessageID.ascending()
+            // A fork's prompts keep its request shape (5.E.3); its schema is in its text, not a format.
+            const shape = turn && {
+              ...(turn.shape.system !== undefined ? { system: turn.shape.system } : {}),
+              ...(turn.shape.tools ? { tools: turn.shape.tools } : {}),
+              ...(turn.shape.executionMode ? { executionMode: turn.shape.executionMode } : {}),
+            }
+            const runModel = turn?.shape.model ?? { providerID: model.providerID, modelID: model.modelID }
+            const runVariant = turn ? turn.shape.variant : childVariant
             const result = yield* ops.prompt({
               messageID: since,
               sessionID: nextSession.id,
-              model: {
-                modelID: model.modelID,
-                providerID: model.providerID,
-              },
-              variant: childVariant,
+              model: runModel,
+              variant: runVariant,
               agent: next.name,
-              ...(structured ? { format: TaskStructured.format(structured.schema) } : {}),
+              ...(structured && !turn ? { format: TaskStructured.format(structured.schema) } : {}),
+              ...shape,
               parts,
             })
             if (!structured) return result
@@ -1179,11 +1328,12 @@ export const TaskTool = Tool.define(
               sessions,
               ops,
               sessionID: nextSession.id,
-              model: { providerID: model.providerID, modelID: model.modelID },
-              ...(childVariant ? { variant: childVariant } : {}),
+              model: runModel,
+              ...(runVariant ? { variant: runVariant } : {}),
               agent: next.name,
               schema: structured.schema,
-              mode: "tool",
+              mode: turn ? "text" : "tool",
+              ...shape,
               since,
               result,
               attempt: joinedAttempt ?? attempt,
@@ -1204,6 +1354,12 @@ export const TaskTool = Tool.define(
               ),
             )
           })
+          // A fresh fork starts once the response that launched it has finished. One whose launching response failed or
+          // was stopped is cancelled quietly, with no turn for the parent (5.E.3).
+          if (fresh && Option.isSome(forks)) {
+            const launched = yield* forks.value.ready({ sessionID: ctx.sessionID, messageID: ctx.messageID })
+            if (launched === "stopped") return yield* Effect.interrupt
+          }
           // The slot is taken only once the prerequisites are met, so a child waiting on a dependency holds none (5.B.3).
           if (!delegation) return yield* work
           return yield* limits.run(
@@ -1466,6 +1622,9 @@ export const TaskTool = Tool.define(
               })
             // The admission's place and any slot it reserved become the child's before its run can start.
             if (admission) yield* limits.bind(admission, nextSession.id)
+            // A fork's prefix stays while its job runs, before it waits on anything (5.E.3).
+            if (record.fork && Option.isSome(forks))
+              yield* forks.value.hold(MessageID.make(record.fork.point), nextSession.id)
             return yield* background.start({
               id: nextSession.id,
               type: id,
@@ -1525,6 +1684,15 @@ export const TaskTool = Tool.define(
           )
         }
         batch?.own(nextSession.id)
+        // Its hold lasts the whole job: every run, follow-up and message it takes (5.E.3).
+        if (record.fork && Option.isSome(forks))
+          yield* background
+            .wait({ id: info.id })
+            .pipe(
+              Effect.ensuring(forks.value.release(nextSession.id)),
+              Effect.ignore,
+              Effect.forkIn(scope, { startImmediately: true }),
+            )
 
         // A stop that landed while this call was still setting up came before the job existed, so neither the parent's
         // sweep of its jobs nor the abort listener below saw it.
@@ -1648,6 +1816,7 @@ export const TaskTool = Tool.define(
           task.model,
           task.effort,
           task.output_schema,
+          task.fork,
         ]),
       )
       if (new Set(briefs).size !== briefs.length)

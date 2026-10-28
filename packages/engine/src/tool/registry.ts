@@ -11,6 +11,7 @@ import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
 import { ReadTool } from "./read"
 import { TaskTool } from "./task"
+import { SessionFork } from "@/session/fork"
 import { TaskNotify } from "@/task/notify"
 import { TaskLimits } from "@/task/limits"
 import { TaskManageTool } from "./task-manage"
@@ -563,6 +564,8 @@ export const node = LayerNode.make({
     ResearchStore.node,
     ResearchRun.node,
     LearnedSkill.node,
+    // The task tool forks through it (Effect.serviceOption), so it must be built here.
+    SessionFork.node,
   ],
 })
 

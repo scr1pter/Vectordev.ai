@@ -134,17 +134,17 @@ function specialistFocus(permitted?: readonly string[]) {
 }
 // When to delegate, how to launch and how to follow up live here; the parameter rules (owned_paths, depends_on,
 // success_criteria) and the limits live in the task tool's description, so a request carries each rule once. Work and
-// Thorough send the same lines, so the stable block stays cached across sizes. Forks, checked JSON output and isolated
-// worktrees are named here only once the task tool takes them.
+// Thorough send the same lines, so the stable block stays cached across sizes. Isolated worktrees are named here only
+// once the task tool takes them.
 const SUBAGENT_INTRO =
-  "You can hand work to real child agents with the task tool. Each child starts with an empty context, works on its own and reports only to you; the user does not see its report."
+  "You can hand work to real child agents with the task tool. Each child starts with an empty context unless you fork it, works on its own and reports only to you; the user does not see its report."
 const SUBAGENT_WHEN = [
   "Delegate when a child does it better than you would, not by default: independent parts that can run at the same time as each other or as your own work, each substantial (several files, or a long check-and-repair loop); broad searches or research whose raw output would flood your context; and new work the user sends while you or your subagents are busy, when it does not depend on what is running.",
   "Do it yourself when it is small, a single file or a known lookup, tightly coupled to what you are editing, or needs back-and-forth with the user: a child reads everything again and costs more.",
 ]
 const SUBAGENT_ORCHESTRATION = [
   "Put every independent brief you already know about in one task call, in the background. Say in one line what you launched, then keep doing work that does not overlap, or end your turn. Vector notifies you when each one finishes: never poll, sleep or wait in a loop, and do not redo, re-read or re-check what a running child owns.",
-  "Brief each child like a capable colleague who has seen none of this conversation: the goal and why, what you already know, files and constraints, whether to edit or only research, how to verify, and what its final report must contain.",
+  "Brief each child like a capable colleague who has seen none of this conversation: the goal and why, what you already know, files and constraints, whether to edit or only research, how to verify, and what its final report must contain. Fork instead when the work needs this conversation and your provider caches prompts.",
   "To correct a running child, use task_manage message; to continue a finished one with its context, call task with its task_id rather than starting a new one; stop children whose work is no longer needed; answer the user's status questions from task_manage list or inspect.",
   "The task tool's description has the rules for owned_paths, depends_on, success_criteria and limits.",
 ]
