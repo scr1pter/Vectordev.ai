@@ -75,6 +75,9 @@ import type {
   ExperimentalSessionListData,
   ExperimentalSessionListErrors,
   ExperimentalSessionListResponses,
+  ExperimentalSessionStopData,
+  ExperimentalSessionStopErrors,
+  ExperimentalSessionStopResponses,
   ExperimentalSessionUsageData,
   ExperimentalSessionUsageErrors,
   ExperimentalSessionUsageResponses,
@@ -1133,6 +1136,26 @@ export class Session extends HeyApiClient {
       ExperimentalSessionBackgroundErrors,
       ThrowOnError
     >({ url: "/experimental/session/{sessionID}/background", ...options })
+  }
+
+  /**
+   * Stop a session
+   *
+   * Stop the session's main turn and, with helpers, every subagent working under it. No new turn starts until the next user message; partial work is kept.
+   */
+  public stop<ThrowOnError extends boolean = false>(options: Options<ExperimentalSessionStopData, ThrowOnError>) {
+    return (options.client ?? this.client).post<
+      ExperimentalSessionStopResponses,
+      ExperimentalSessionStopErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/session/{sessionID}/stop",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+    })
   }
 }
 

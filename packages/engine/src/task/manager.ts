@@ -23,6 +23,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { disposing } from "@/effect/instance-registry"
 import { DesktopTasks } from "./desktop"
 import { TaskLimits } from "./limits"
+import { TaskNotify } from "./notify"
 
 export class Error extends Schema.TaggedErrorClass<Error>()("TaskManager.Error", {
   code: Schema.Literals(["not_found", "forbidden", "invalid", "finished", "rate_limited"]),
@@ -34,6 +35,8 @@ export interface Interface {
     sessionID: SessionID
     descendants?: boolean
     limit?: number
+    /** Only work in flight: finished children are walked through but never listed (5.D.1). */
+    active?: boolean
   }) => Effect.Effect<Task.ListResult, Error>
   readonly inspect: (input: { sessionID: SessionID; taskID: string }) => Effect.Effect<Task.InspectResult, Error>
   readonly message: (
@@ -41,9 +44,21 @@ export interface Interface {
     ops: TaskPromptOps,
   ) => Effect.Effect<Task.MessageResult, Error>
   readonly stop: (
-    input: { sessionID: SessionID; taskIDs?: readonly string[]; all?: boolean; reason?: string },
+    input: {
+      sessionID: SessionID
+      taskIDs?: readonly string[]
+      all?: boolean
+      reason?: string
+      /** Who stopped them, recorded as `stop.by` (default "agent"). */
+      origin?: "agent" | "user"
+    },
     ops: TaskPromptOps,
   ) => Effect.Effect<Task.StopResult, Error>
+  /** Stops the session's main turn and, with `helpers`, every subagent working under it (5.D.1). */
+  readonly interrupt: (
+    input: { sessionID: SessionID; helpers: boolean; reason?: string },
+    ops: TaskPromptOps,
+  ) => Effect.Effect<Task.SessionStopResult, Error>
   readonly wait: (input: {
     sessionID: SessionID
     taskIDs: readonly string[]
@@ -56,6 +71,13 @@ export class Service extends Context.Service<Service, Interface>()("@vector/Task
 
 const ACTIVE = new Set<string>(["queued", "running", "waiting_on_user"])
 const MAX_TASKS = 200
+// Sessions the active board walks, finished ones included, before it calls itself truncated.
+const MAX_VISITED = 2000
+// "Stop including helpers" sweeps the board once, then again while a sweep still found work to stop (a grandchild
+// launched mid-sweep), at most this many times in all.
+const SWEEPS = 4
+const STOP_REASON = "Stopped by the parent session; partial work was retained."
+const INTERRUPT_REASON = "Stopped with the main agent; partial work was kept."
 const OUTPUT_LIMIT = 4096
 // A record whose engine is gone, found before TaskRecovery reported it: why it stopped is unknown (D.3).
 const abandon = (at: number) => ({
@@ -82,6 +104,7 @@ const layer = Layer.effect(
     const config = yield* Config.Service
     const guests = yield* FreeModelGuests.Service
     const store = yield* BackgroundJobStore.Service
+    const notify = yield* TaskNotify.Service
     const bridge = <A>(effect: Effect.Effect<A, DesktopTasks.Error>) =>
       effect.pipe(Effect.mapError((error) => new Error({ code: error.code, message: error.message })))
     const lock = SubagentLifecycle.controlLock
@@ -300,14 +323,16 @@ const layer = Layer.effect(
       const queue = [input.sessionID]
       const seen = new Set<string>(queue)
       const found: Session.Info[] = []
-      while (queue.length && found.length <= MAX_TASKS) {
+      // The active board lists only open records (abandoned ones too, so observe settles them), yet walks under every
+      // child, finished or not, until its own budget of sessions runs out: finished children never crowd it out.
+      while (queue.length && (input.active ? seen.size <= MAX_VISITED : found.length <= MAX_TASKS)) {
         const children = (yield* sessions.children(queue.shift()!))
           .filter((item) => !item.internal && SubagentLifecycle.read(item))
           .sort((left, right) => recentActiveFirst(SubagentLifecycle.read(left)!, SubagentLifecycle.read(right)!))
         for (const child of children) {
           if (seen.has(child.id)) continue
           seen.add(child.id)
-          found.push(child)
+          if (!input.active || SubagentLifecycle.open(SubagentLifecycle.read(child))) found.push(child)
           if (input.descendants) queue.push(child.id)
         }
         if (!input.descendants) break
@@ -323,16 +348,22 @@ const layer = Layer.effect(
       // A desktop workspace can expose the same native child session; retain its
       // richer source identity and controls, counting cumulative usage only once.
       const mirrored = new Set(external.tasks.flatMap((task) => (task.sessionID ? [task.sessionID] : [])))
+      const rows = input.active ? external.tasks.filter((task) => ACTIVE.has(task.status)) : external.tasks
       const tasks = [
-        ...native.filter((task) => !mirrored.has(task.id)),
-        ...external.tasks.map((task) => {
+        ...native.filter((task) => !mirrored.has(task.id) && (!input.active || ACTIVE.has(task.status))),
+        ...rows.map((task) => {
           const session = native.find((entry) => entry.id === task.sessionID)
           return session ? { ...task, usage: session.usage, budgetScopes: session.budgetScopes } : task
         }),
       ].sort(recentActiveFirst)
       return {
         tasks: tasks.slice(0, limit),
-        truncated: tasks.length > limit || external.truncated || found.length > limit || queue.length > 0,
+        // A desktop listing cut short matters to the active board only while it returned live rows.
+        truncated:
+          tasks.length > limit ||
+          (external.truncated && (!input.active || rows.length > 0)) ||
+          found.length > limit ||
+          queue.length > 0,
       }
     })
 
@@ -506,30 +537,48 @@ const layer = Layer.effect(
       )
     })
 
-    const stop: Interface["stop"] = Effect.fn("TaskManager.stop")(function* (input, ops) {
-      if (input.all && input.taskIDs?.length)
-        return yield* new Error({ code: "invalid", message: "Choose task IDs or all, not both." })
-      if (input.reason && input.reason.length > 1000)
-        return yield* new Error({ code: "invalid", message: "Stop reasons are limited to 1000 characters." })
+    // A row "Stop including helpers" reaches: a native subagent, never a desktop workspace or swarm (5.D.1).
+    const helper = (task: Task.Info) => task.source === "subagent" && !DesktopTasks.owns(task.id)
+
+    // Stops the selected tasks of the active board with their descendants and dependents, keeping partial work. With
+    // `helpers`, only native subagents are selectable and reached. Returns the stopped tasks and the board it read.
+    const halt = Effect.fn("TaskManager.halt")(function* (
+      input: {
+        sessionID: SessionID
+        taskIDs?: readonly string[]
+        all?: boolean
+        reason?: string
+        origin: "agent" | "user"
+        helpers?: boolean
+      },
+      ops: TaskPromptOps,
+    ) {
+      const reason = input.reason?.trim() || (input.helpers ? INTERRUPT_REASON : STOP_REASON)
       const directory = yield* InstanceState.directory
       const claimed = new Set<SessionID>()
       return yield* Effect.gen(function* () {
         const prepared = yield* SubagentLifecycle.locked(lock)(
           Effect.gen(function* () {
-            const board = yield* collect({ sessionID: input.sessionID, descendants: true, limit: MAX_TASKS })
+            const board = yield* collect({
+              sessionID: input.sessionID,
+              descendants: true,
+              active: true,
+              limit: MAX_TASKS,
+            })
             if (board.truncated)
               return yield* new Error({
                 code: "invalid",
                 message: "Too many descendants to stop atomically; select a narrower parent session.",
               })
-            const selected = input.all ? board.tasks.map((task) => task.id) : (input.taskIDs ?? [])
-            if (input.all && selected.length === 0) return { native: [], remote: [] }
+            const reachable = input.helpers ? board.tasks.filter(helper) : board.tasks
+            const selected = input.all ? reachable.map((task) => task.id) : (input.taskIDs ?? [])
+            if (input.all && selected.length === 0) return { native: [], remote: [], board: board.tasks }
             yield* select(input.sessionID, selected)
             const ids = new Set(selected)
             let changed = true
             while (changed) {
               changed = false
-              board.tasks.forEach((task) => {
+              reachable.forEach((task) => {
                 if (ids.has(task.id) || (!ids.has(task.parentSessionID) && !task.dependsOn.some((id) => ids.has(id))))
                   return
                 ids.add(task.id)
@@ -547,17 +596,12 @@ const layer = Layer.effect(
                   const attempt = SubagentLifecycle.read(session)?.attempt
                   SubagentLifecycle.stopping.add(session.id)
                   claimed.add(session.id)
-                  yield* SubagentLifecycle.update(
-                    sessions,
-                    session.id,
-                    { reason: input.reason?.trim() || "Stopped by the parent session; partial work was retained." },
-                    attempt,
-                  )
+                  yield* SubagentLifecycle.update(sessions, session.id, { reason }, attempt)
                   return { task, session, attempt }
                 }),
               { concurrency: 4 },
             )
-            return { native, remote: tasks.filter((task) => DesktopTasks.owns(task.id)) }
+            return { native, remote: tasks.filter((task) => DesktopTasks.owns(task.id)), board: board.tasks }
           }),
         )
         const native = yield* Effect.forEach(
@@ -577,11 +621,17 @@ const layer = Layer.effect(
                   // While Vector goes away, TaskRecovery owns the record (D.3).
                   if (!record || record.attempt !== entry.attempt || disposing(directory))
                     return yield* observe(current)
-                  if (record.status === "running" || record.status === "queued")
-                    yield* SubagentLifecycle.settle(sessions, session.id, { status: "cancelled" })
+                  const status = SubagentLifecycle.open(record)
+                    ? (yield* SubagentLifecycle.settle(sessions, session.id, { status: "cancelled" })).status
+                    : record.status
                   yield* persist(
                     session.id,
-                    SubagentLifecycle.scopeFields(yield* guard.scopes(session.id)),
+                    {
+                      ...SubagentLifecycle.scopeFields(yield* guard.scopes(session.id)),
+                      // Who stopped it, which decides whether resuming it waits for the user (D.3). A child that
+                      // finished before the stop reached it was not stopped.
+                      ...(status === "cancelled" ? { stop: { by: input.origin, at: Date.now() } } : {}),
+                    },
                     entry.attempt,
                   )
                   yield* guard.release(session.id)
@@ -615,8 +665,52 @@ const layer = Layer.effect(
         const remote = yield* Effect.forEach(prepared.remote, (task) =>
           bridge(desktop.get({ sessionID: input.sessionID, taskID: task.id })),
         )
-        return { tasks: [...native, ...remote] }
+        return { tasks: [...native, ...remote], board: prepared.board }
       }).pipe(Effect.ensuring(Effect.sync(() => claimed.forEach((id) => SubagentLifecycle.stopping.delete(id)))))
+    })
+
+    const stop: Interface["stop"] = Effect.fn("TaskManager.stop")(function* (input, ops) {
+      if (input.all && input.taskIDs?.length)
+        return yield* new Error({ code: "invalid", message: "Choose task IDs or all, not both." })
+      if (input.reason && input.reason.length > 1000)
+        return yield* new Error({ code: "invalid", message: "Stop reasons are limited to 1000 characters." })
+      const { tasks } = yield* halt({ ...input, origin: input.origin ?? "agent" }, ops)
+      return { tasks }
+    })
+
+    const interrupt: Interface["interrupt"] = Effect.fn("TaskManager.interrupt")(function* (input, ops) {
+      if (input.reason && input.reason.length > 1000)
+        return yield* new Error({ code: "invalid", message: "Stop reasons are limited to 1000 characters." })
+      const session = yield* get(input.sessionID)
+      // Fenced before anything stops: a helper that finishes meanwhile, or whose note is already held, is recorded
+      // without starting a turn until the user writes again (I5).
+      yield* notify.fence(session.id)
+      const aborted = (yield* statuses.get(session.id)).type !== "idle"
+      yield* ops.cancel(session.id)
+      if (!input.helpers) return { aborted, tasks: [], shells: 0, excluded: 0, skipped: 0 }
+      const stopped = new Map<string, Task.Info>()
+      let board: readonly Task.Info[] = []
+      for (let sweep = 0; sweep < SWEEPS; sweep++) {
+        const result = yield* halt(
+          { sessionID: session.id, all: true, reason: input.reason, origin: "user", helpers: true },
+          ops,
+        )
+        board = result.board
+        const fresh = result.tasks.filter((task) => !stopped.has(task.id))
+        result.tasks.forEach((task) => stopped.set(task.id, task))
+        // Background commands stop here too once they exist (WP33).
+        if (fresh.length === 0) break
+      }
+      // Desktop workspaces and swarms keep their own runners and are left running; the ones Vector cannot reach
+      // right now are counted apart.
+      const left = board.filter((task) => !helper(task))
+      return {
+        aborted,
+        tasks: [...stopped.values()],
+        shells: 0,
+        excluded: left.filter((task) => task.connection !== "disconnected").length,
+        skipped: left.filter((task) => task.connection === "disconnected").length,
+      }
     })
 
     const wait: Interface["wait"] = Effect.fn("TaskManager.wait")(function* (input) {
@@ -646,7 +740,7 @@ const layer = Layer.effect(
       return { tasks, timedOut: done._tag === "None" || !settled(tasks) }
     })
 
-    return Service.of({ list, inspect, message, stop, wait })
+    return Service.of({ list, inspect, message, stop, interrupt, wait })
   }),
 )
 
@@ -666,6 +760,7 @@ export const node = LayerNode.make({
     Config.node,
     FreeModelGuests.node,
     BackgroundJobStore.node,
+    TaskNotify.node,
   ],
 })
 export * as TaskManager from "./manager"

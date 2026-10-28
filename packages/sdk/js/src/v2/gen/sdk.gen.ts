@@ -65,6 +65,8 @@ import type {
   ExperimentalSessionBackgroundResponses,
   ExperimentalSessionListErrors,
   ExperimentalSessionListResponses,
+  ExperimentalSessionStopErrors,
+  ExperimentalSessionStopResponses,
   ExperimentalSessionUsageErrors,
   ExperimentalSessionUsageResponses,
   ExperimentalTaskBridgePollErrors,
@@ -1179,6 +1181,51 @@ export class Session extends HeyApiClient {
       ...params,
     })
   }
+
+  /**
+   * Stop a session
+   *
+   * Stop the session's main turn and, with helpers, every subagent working under it. No new turn starts until the next user message; partial work is kept.
+   */
+  public stop<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      helpers?: boolean
+      reason?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "helpers" },
+            { in: "body", key: "reason" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      ExperimentalSessionStopResponses,
+      ExperimentalSessionStopErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/session/{sessionID}/stop",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
 }
 
 export class Bridge extends HeyApiClient {
@@ -1325,6 +1372,7 @@ export class Task extends HeyApiClient {
       workspace?: string
       descendants?: "true" | "false"
       limit?: string
+      active?: "true" | "false"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -1338,6 +1386,7 @@ export class Task extends HeyApiClient {
             { in: "query", key: "workspace" },
             { in: "query", key: "descendants" },
             { in: "query", key: "limit" },
+            { in: "query", key: "active" },
           ],
         },
       ],

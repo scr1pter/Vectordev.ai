@@ -1408,6 +1408,71 @@ test("guests load the app's bootstrap routes, narrowed to their workspace", asyn
   }
 }, 30_000)
 
+test("a guest stops or backgrounds a session's helpers only when it controls that session", async () => {
+  // Seeing a shared workspace does not grant control of the owner's sessions; a session the guest was given does.
+  await using tmp = await tmpdir({ trusted: true, git: true, config: { formatter: false, lsp: false } })
+  const previousWorkspaceID = Flag.VECTOR_WORKSPACE_ID
+  const keys = [
+    "VECTOR_SERVER_USERNAME",
+    "VECTOR_SERVER_PASSWORD",
+    "VECTOR_SERVER_GUEST_USERNAME",
+    "VECTOR_SERVER_GUEST_PASSWORD",
+    "VECTOR_SERVER_GUEST_WORKSPACES",
+    "VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES",
+    "VECTOR_SERVER_GUEST_SESSIONS",
+    "VECTOR_DISABLE_DEFAULT_PLUGINS",
+  ] as const
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
+  const claimedID = SessionV2.ID.create()
+  Object.assign(process.env, {
+    VECTOR_SERVER_USERNAME: "vector",
+    VECTOR_SERVER_PASSWORD: "owner-secret",
+    VECTOR_SERVER_GUEST_USERNAME: "guest",
+    VECTOR_SERVER_GUEST_PASSWORD: "guest-secret",
+    VECTOR_SERVER_GUEST_WORKSPACES: "wrk_allowed",
+    VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES: JSON.stringify({ wrk_allowed: tmp.path }),
+    VECTOR_SERVER_GUEST_SESSIONS: claimedID,
+    VECTOR_DISABLE_DEFAULT_PLUGINS: "1",
+  })
+  const listener = await Server.listen({ hostname: "127.0.0.1", port: 0 })
+  const owner = { authorization: basic("vector", "owner-secret"), "content-type": "application/json" }
+  const guest = { authorization: basic("guest", "guest-secret"), "content-type": "application/json" }
+  const call = (route: string, init: RequestInit = {}) =>
+    fetch(new URL(route, listener.url), { ...init, keepalive: false })
+  try {
+    Flag.VECTOR_WORKSPACE_ID = "wrk_allowed"
+    const ownerSession = (await (
+      await call(`/session?directory=${encodeURIComponent(tmp.path)}`, { method: "POST", headers: owner, body: "{}" })
+    ).json()) as { id: string }
+    const claimed = await call("/api/session", {
+      method: "POST",
+      headers: owner,
+      body: JSON.stringify({ id: claimedID, location: { directory: tmp.path, workspaceID: "wrk_allowed" } }),
+    })
+    expect(claimed.status).toBe(200)
+    const stop = (id: string, headers: Record<string, string>) =>
+      call(`/experimental/session/${id}/stop`, { method: "POST", headers, body: JSON.stringify({ helpers: true }) })
+    const background = (id: string, headers: Record<string, string>) =>
+      call(`/experimental/session/${id}/background`, { method: "POST", headers })
+
+    expect((await stop(ownerSession.id, guest)).status).toBe(403)
+    expect((await background(ownerSession.id, guest)).status).toBe(403)
+    const mine = await stop(claimedID, guest)
+    expect(mine.status).toBe(200)
+    expect(await mine.json()).toEqual({ aborted: false, tasks: [], shells: 0, excluded: 0, skipped: 0 })
+    expect((await background(claimedID, guest)).status).toBe(200)
+    expect((await stop(ownerSession.id, owner)).status).toBe(200)
+  } finally {
+    Flag.VECTOR_WORKSPACE_ID = previousWorkspaceID
+    await listener.stop(true)
+    for (const key of keys) {
+      const value = previous[key]
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}, 30_000)
+
 test("a guest reads its repository's trust but is told only the owner can approve it", async () => {
   // Approving trust is owner-only, so the app must not ask an invited guest a question whose answer is refused.
   await using tmp = await tmpdir({

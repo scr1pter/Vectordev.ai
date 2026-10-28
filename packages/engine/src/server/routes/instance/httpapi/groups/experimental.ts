@@ -32,6 +32,7 @@ export const TaskListQuery = Schema.Struct({
   ...WorkspaceRoutingQueryFields,
   descendants: Schema.optional(QueryBoolean),
   limit: Schema.optional(Schema.NumberFromString.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 200 }))),
+  active: Schema.optional(QueryBoolean),
 })
 
 export const TaskMessageInput = Schema.Struct({
@@ -42,6 +43,11 @@ export const TaskMessageInput = Schema.Struct({
 export const TaskStopInput = Schema.Struct({
   taskIDs: Schema.optional(Schema.Array(Schema.String).check(Schema.isMinLength(1), Schema.isMaxLength(200))),
   all: Schema.optional(Schema.Boolean),
+  reason: Schema.optional(Schema.String.check(Schema.isMaxLength(1000))),
+})
+
+export const SessionStopInput = Schema.Struct({
+  helpers: Schema.Boolean,
   reason: Schema.optional(Schema.String.check(Schema.isMaxLength(1000))),
 })
 
@@ -120,6 +126,7 @@ export const ExperimentalPaths = {
   session: "/experimental/session",
   sessionUsage: "/experimental/session/usage",
   sessionBackground: "/experimental/session/:sessionID/background",
+  sessionStop: "/experimental/session/:sessionID/stop",
   taskList: "/experimental/session/:sessionID/tasks",
   taskInspect: "/experimental/session/:sessionID/tasks/:taskID",
   taskMessage: "/experimental/session/:sessionID/tasks/:taskID/message",
@@ -249,6 +256,20 @@ export const ExperimentalApi = HttpApi.make("experimental")
             summary: "Background subagents",
             description:
               "Detach any synchronous subagents currently blocking the session and continue them in the background.",
+          }),
+        ),
+        HttpApiEndpoint.post("sessionStop", ExperimentalPaths.sessionStop, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          payload: SessionStopInput,
+          success: described(Task.SessionStopResult, "What the stop reached"),
+          error: TaskApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "experimental.session.stop",
+            summary: "Stop a session",
+            description:
+              "Stop the session's main turn and, with helpers, every subagent working under it. No new turn starts until the next user message; partial work is kept.",
           }),
         ),
         HttpApiEndpoint.get("taskList", ExperimentalPaths.taskList, {

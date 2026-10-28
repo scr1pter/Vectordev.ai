@@ -383,6 +383,8 @@ function routeHttpApiWorkspace<E>(
       request.method === "POST" &&
       ((route.route.path.startsWith("/experimental/session/:sessionID/tasks/bridge/") && principal.kind !== "owner") ||
         ([
+          "/experimental/session/:sessionID/stop",
+          "/experimental/session/:sessionID/background",
           "/experimental/session/:sessionID/tasks/stop",
           "/experimental/session/:sessionID/tasks/:taskID/message",
         ].includes(route.route.path) &&

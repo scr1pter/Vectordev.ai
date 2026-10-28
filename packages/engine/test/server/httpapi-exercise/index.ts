@@ -1236,6 +1236,10 @@ const scenarios: Scenario[] = [
       (body as { workDelegation?: unknown }).workDelegation === true,
       "capabilities should report that Work requests are offered subagents",
     )
+    check(
+      (body as { sessionStop?: unknown }).sessionStop === true,
+      "capabilities should report the route that stops a session with its helpers",
+    )
   }),
   http.protected
     .post("/experimental/session/{sessionID}/background", "experimental.session.background")
@@ -1247,6 +1251,25 @@ const scenarios: Scenario[] = [
     }))
     .json(200, (body) => {
       check(body === false, "background route should be a no-op without running subagents")
+    }),
+  http.protected
+    .post("/experimental/session/{sessionID}/stop", "experimental.session.stop")
+    .mutating()
+    .seeded((ctx) => ctx.session({ title: "Session stop owner" }))
+    .at((ctx) => ({
+      path: route("/experimental/session/{sessionID}/stop", { sessionID: ctx.state.id }),
+      headers: ctx.headers(),
+      body: { helpers: true },
+    }))
+    .json(200, (body) => {
+      object(body)
+      array(body.tasks)
+      check(body.aborted === false, "stopping an idle session should abort no turn")
+      check(body.tasks.length === 0, "an idle session should have no helpers to stop")
+      check(
+        body.shells === 0 && body.excluded === 0 && body.skipped === 0,
+        "an idle session should have no commands or workspaces to count",
+      )
     }),
   http.protected.get("/experimental/resource", "experimental.resource.list").json(),
   http.protected
@@ -1277,6 +1300,18 @@ const scenarios: Scenario[] = [
         typeof (limits.spend as Record<string, unknown>).spentUsd === "number",
         "the task board should carry the request's subagent spend",
       )
+    }),
+  http.protected
+    .get("/experimental/session/{sessionID}/tasks", "experimental.task.list.active")
+    .seeded((ctx) => ctx.session({ title: "Active task board owner" }))
+    .at((ctx) => ({
+      path: `${route("/experimental/session/{sessionID}/tasks", { sessionID: ctx.state.id })}?active=true&descendants=true`,
+      headers: ctx.headers(),
+    }))
+    .json(200, (body) => {
+      object(body)
+      array(body.tasks)
+      check(body.tasks.length === 0 && body.truncated === false, "a fresh active task board should be empty")
     }),
   http.protected
     .get("/experimental/session/{sessionID}/tasks/{taskID}", "experimental.task.inspect.missing")

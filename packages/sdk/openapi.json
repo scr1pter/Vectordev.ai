@@ -2469,6 +2469,106 @@
         ]
       }
     },
+    "/experimental/session/{sessionID}/stop": {
+      "post": {
+        "tags": ["experimental"],
+        "operationId": "experimental.session.stop",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What the stop reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskSessionStopResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "TaskApiError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TaskApiError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Stop the session's main turn and, with helpers, every subagent working under it. No new turn starts until the next user message; partial work is kept.",
+        "summary": "Stop a session",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "helpers": {
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 1000
+                  }
+                },
+                "required": ["helpers"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.experimental.session.stop({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/experimental/session/{sessionID}/tasks": {
       "get": {
         "tags": ["experimental"],
@@ -2513,6 +2613,15 @@
             "in": "query",
             "schema": {
               "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "active",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false"]
             },
             "required": false
           }
@@ -47963,6 +48072,31 @@
           "attempt",
           "controls"
         ],
+        "additionalProperties": false
+      },
+      "TaskSessionStopResult": {
+        "type": "object",
+        "properties": {
+          "aborted": {
+            "type": "boolean"
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskInfo"
+            }
+          },
+          "shells": {
+            "type": "number"
+          },
+          "excluded": {
+            "type": "number"
+          },
+          "skipped": {
+            "type": "number"
+          }
+        },
+        "required": ["aborted", "tasks", "shells", "excluded", "skipped"],
         "additionalProperties": false
       },
       "TaskLimits": {

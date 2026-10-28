@@ -22,6 +22,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import {
   SessionListQuery,
+  SessionStopInput,
   ToolListQuery,
   WorktreeApiError,
   TaskApiError,
@@ -92,7 +93,12 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     }) {
       yield* access(ctx.params.sessionID)
       const result = yield* taskError(
-        tasks.list({ sessionID: ctx.params.sessionID, descendants: ctx.query.descendants, limit: ctx.query.limit }),
+        tasks.list({
+          sessionID: ctx.params.sessionID,
+          descendants: ctx.query.descendants,
+          limit: ctx.query.limit,
+          active: ctx.query.active,
+        }),
       )
       // The limits line carries the owner's configured limits, which only the owner sees (I19).
       const { limits, ...rest } = result
@@ -132,7 +138,22 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       payload: typeof TaskStopInput.Type
     }) {
       yield* access(ctx.params.sessionID, true)
-      return yield* shown(ctx.params.sessionID, yield* taskError(tasks.stop({ ...ctx.params, ...ctx.payload }, taskPrompts)))
+      return yield* shown(
+        ctx.params.sessionID,
+        yield* taskError(tasks.stop({ ...ctx.params, ...ctx.payload, origin: "user" }, taskPrompts)),
+      )
+    })
+
+    // "Stop including helpers" (5.D.1). Plain abort stays as it was, so revert, undo and halt never stop helpers.
+    const sessionStop = Effect.fn("ExperimentalHttpApi.sessionStop")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: typeof SessionStopInput.Type
+    }) {
+      yield* access(ctx.params.sessionID, true)
+      return yield* shown(
+        ctx.params.sessionID,
+        yield* taskError(tasks.interrupt({ sessionID: ctx.params.sessionID, ...ctx.payload }, taskPrompts)),
+      )
     })
 
     const taskWait = Effect.fn("ExperimentalHttpApi.taskWait")(function* (ctx: {
@@ -178,7 +199,12 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     })
 
     const capabilities = Effect.fn("ExperimentalHttpApi.capabilities")(function* () {
-      return { backgroundSubagents: flags.backgroundSubagents, subagentLimits: true, workDelegation: true }
+      return {
+        backgroundSubagents: flags.backgroundSubagents,
+        subagentLimits: true,
+        workDelegation: true,
+        sessionStop: true,
+      }
     })
 
     const tool = Effect.fn("ExperimentalHttpApi.tool")(function* (ctx: { query: typeof ToolListQuery.Type }) {
@@ -259,6 +285,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     const sessionBackground = Effect.fn("ExperimentalHttpApi.sessionBackground")(function* (ctx: {
       params: { sessionID: SessionID }
     }) {
+      yield* access(ctx.params.sessionID, true)
       if (!flags.backgroundSubagents) return false
       // A subagent's own tasks stay in the foreground, as the task tool keeps them: a background result would start a
       // turn of the subagent after its run ended, which no one reads and stopping the root cannot reach.
@@ -290,6 +317,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       .handle("session", session)
       .handle("sessionUsage", sessionUsage)
       .handle("sessionBackground", sessionBackground)
+      .handle("sessionStop", sessionStop)
       .handle("taskList", taskList)
       .handle("taskInspect", taskInspect)
       .handle("taskMessage", taskMessage)

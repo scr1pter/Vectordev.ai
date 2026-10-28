@@ -7012,6 +7012,14 @@ export type TaskInfo = {
   }
 }
 
+export type TaskSessionStopResult = {
+  aborted: boolean
+  tasks: Array<TaskInfo>
+  shells: number
+  excluded: number
+  skipped: number
+}
+
 export type TaskLimits = {
   running: number
   queued: number
@@ -11746,6 +11754,43 @@ export type ExperimentalSessionBackgroundResponses = {
 export type ExperimentalSessionBackgroundResponse =
   ExperimentalSessionBackgroundResponses[keyof ExperimentalSessionBackgroundResponses]
 
+export type ExperimentalSessionStopData = {
+  body?: {
+    helpers: boolean
+    reason?: string
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/session/{sessionID}/stop"
+}
+
+export type ExperimentalSessionStopErrors = {
+  /**
+   * TaskApiError | InvalidRequestError
+   */
+  400: TaskApiError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type ExperimentalSessionStopError = ExperimentalSessionStopErrors[keyof ExperimentalSessionStopErrors]
+
+export type ExperimentalSessionStopResponses = {
+  /**
+   * What the stop reached
+   */
+  200: TaskSessionStopResult
+}
+
+export type ExperimentalSessionStopResponse = ExperimentalSessionStopResponses[keyof ExperimentalSessionStopResponses]
+
 export type ExperimentalTaskListData = {
   body?: never
   path: {
@@ -11756,6 +11801,7 @@ export type ExperimentalTaskListData = {
     workspace?: string
     descendants?: "true" | "false"
     limit?: string
+    active?: "true" | "false"
   }
   url: "/experimental/session/{sessionID}/tasks"
 }

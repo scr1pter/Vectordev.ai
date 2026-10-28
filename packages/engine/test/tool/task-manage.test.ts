@@ -14,11 +14,16 @@ import { SessionID, MessageID, PartID } from "@/session/schema"
 import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
 import type { TaskPromptOps } from "@/tool/task"
 import type { SessionPrompt } from "@/session/prompt"
+import { TaskNotify } from "@/task/notify"
+import { DesktopTasks } from "@/task/desktop"
+import { Storage } from "@/storage/storage"
+import { InstanceState } from "@/effect/instance-state"
+import type { Task } from "@vectordevai/schema/task"
 import { disposeAllInstances } from "../fixture/fixture"
 import { pollWithTimeout, testEffect } from "../lib/effect"
 
 afterEach(disposeAllInstances)
-const it = testEffect(LayerNode.compile(LayerNode.group([TaskManager.node, TaskLimits.node, Session.node, Database.node, BackgroundJob.node, SessionStatus.node])))
+const it = testEffect(LayerNode.compile(LayerNode.group([TaskManager.node, TaskLimits.node, Session.node, Database.node, BackgroundJob.node, SessionStatus.node, TaskNotify.node, DesktopTasks.node, Storage.node])))
 const model = { providerID: ProviderV2.ID.make("local-test"), modelID: ModelV2.ID.make("fixture") }
 const child = Effect.fn("TaskManagerTest.child")(function* (parentID: SessionID, patch: object = {}) {
   const sessions = yield* Session.Service
@@ -412,6 +417,154 @@ describe("task management", () => {
     yield* Deferred.succeed(original, undefined)
     yield* manager.wait({ sessionID: root.id, taskIDs: [task.id] })
     expect(yield* limits.status(root.id)).toMatchObject({ running: 0, queued: 0 })
+  }))
+
+  // Stop including helpers (5.D.1). The active board lists work in flight only, so finished children never crowd it.
+  it.instance("the active board and stop-all reach the running child past 201 finished ones", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const jobs = yield* BackgroundJob.Service
+    const root = yield* sessions.create()
+    yield* Effect.forEach(Array.from({ length: 201 }), () => child(root.id, { status: "completed" }), { concurrency: 8 })
+    // A finished child's own running work is still walked to.
+    const finished = yield* child(root.id, { status: "completed" })
+    const grandchild = yield* child(finished.id)
+    const running = yield* child(root.id)
+    yield* jobs.start({ id: running.id, type: "task", run: Effect.never })
+    yield* jobs.start({ id: grandchild.id, type: "task", run: Effect.never })
+    expect((yield* manager.list({ sessionID: root.id, descendants: true })).truncated).toBe(true)
+    const active = yield* manager.list({ sessionID: root.id, descendants: true, active: true })
+    expect(active.truncated).toBe(false)
+    expect(active.tasks.map((task) => task.id).sort()).toEqual([running.id, grandchild.id].sort())
+    expect((yield* manager.list({ sessionID: root.id, active: true })).tasks.map((task) => task.id)).toEqual([running.id])
+    const result = yield* manager.stop({ sessionID: root.id, all: true }, ops)
+    expect(result.tasks.map((task) => task.id).sort()).toEqual([running.id, grandchild.id].sort())
+    expect(result.tasks.every((task) => task.status === "stopped")).toBe(true)
+    // The agent stopped them: resuming them never waits for the user.
+    expect(SubagentLifecycle.read(yield* sessions.get(running.id))?.stop).toEqual({ by: "agent", at: expect.any(Number) })
+    expect((yield* jobs.get(running.id))?.status).toBe("cancelled")
+  }))
+
+  it.instance("interrupt without helpers stops only the main turn", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const jobs = yield* BackgroundJob.Service
+    const statuses = yield* SessionStatus.Service
+    const root = yield* sessions.create()
+    const a = yield* child(root.id)
+    yield* jobs.start({ id: a.id, type: "task", run: Effect.never })
+    yield* statuses.set(root.id, { type: "busy" })
+    const cancelled: string[] = []
+    const result = yield* manager.interrupt(
+      { sessionID: root.id, helpers: false },
+      { ...ops, cancel: (id) => Effect.sync(() => void cancelled.push(id)) },
+    )
+    expect(result).toEqual({ aborted: true, tasks: [], shells: 0, excluded: 0, skipped: 0 })
+    expect(cancelled).toEqual([root.id])
+    expect((yield* jobs.get(a.id))?.status).toBe("running")
+    expect(SubagentLifecycle.read(yield* sessions.get(a.id))).toMatchObject({ status: "running" })
+    expect(SubagentLifecycle.read(yield* sessions.get(a.id))?.stop).toBeUndefined()
+    yield* jobs.cancel(a.id)
+  }))
+
+  it.instance("interrupt with helpers stops live descendants, dependents and workflow runs, and records who stopped them", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const jobs = yield* BackgroundJob.Service
+    const root = yield* sessions.create()
+    const a = yield* child(root.id)
+    const dependent = yield* child(root.id, { dependsOn: [a.id], status: "queued" })
+    const grandchild = yield* child(a.id)
+    const run = yield* child(root.id, { workflow: { role: "run", title: "Audit", revision: 1, progress: {} } })
+    const agent = yield* child(run.id, { workflow: { role: "agent", runID: run.id, stage: "scan", phase: "map", item: "src", key: "scan:src" } })
+    const done = yield* child(root.id, { status: "completed" })
+    const live = [a, dependent, grandchild, run, agent]
+    yield* Effect.forEach(live, (task) => jobs.start({ id: task.id, type: "task", run: Effect.never }))
+    const cancelled: string[] = []
+    const result = yield* manager.interrupt(
+      { sessionID: root.id, helpers: true },
+      { ...ops, cancel: (id) => Effect.sync(() => void cancelled.push(id)) },
+    )
+    expect(result).toMatchObject({ aborted: false, shells: 0, excluded: 0, skipped: 0 })
+    expect(result.tasks.map((task) => task.id).sort()).toEqual(live.map((task) => task.id).sort())
+    expect(result.tasks.every((task) => task.status === "stopped" && task.reason === "Stopped with the main agent; partial work was kept.")).toBe(true)
+    expect(cancelled[0]).toBe(root.id)
+    expect((yield* jobs.list()).every((job) => job.status === "cancelled")).toBe(true)
+    for (const task of live)
+      expect(SubagentLifecycle.read(yield* sessions.get(task.id))).toMatchObject({ status: "cancelled", stop: { by: "user", at: expect.any(Number) } })
+    // The user stopped them, so the agent resumes them only after the user writes again (D.3).
+    expect(SubagentLifecycle.needsHuman(SubagentLifecycle.read(yield* sessions.get(a.id))!)).toBe(true)
+    expect(SubagentLifecycle.read(yield* sessions.get(done.id))).toMatchObject({ status: "completed" })
+    expect(SubagentLifecycle.read(yield* sessions.get(done.id))?.stop).toBeUndefined()
+  }))
+
+  // I5: a helper whose report is still in the note window when the user stops everything starts no new turn.
+  it.instance("a child completing inside the note window after interrupt creates no new parent assistant message", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const jobs = yield* BackgroundJob.Service
+    const notify = yield* TaskNotify.Service
+    const root = yield* sessions.create()
+    const launch = reply({ sessionID: root.id, parts: [] })
+    yield* sessions.updateMessage(launch.info)
+    const task = yield* child(root.id, { parentMessageID: launch.info.id })
+    const prompts: SessionPrompt.PromptInput[] = []
+    // Writes what SessionPrompt.prompt would: the note, and an answer unless it is recorded with noReply.
+    const parentOps: TaskPromptOps = {
+      ...ops,
+      prompt: (input) => Effect.gen(function* () {
+        prompts.push(input)
+        yield* sessions.updateMessage({ id: input.messageID ?? MessageID.ascending(), role: "user", sessionID: input.sessionID, agent: "build", model, time: { created: Date.now() } })
+        const answer = reply(input)
+        if (!input.noReply) yield* sessions.updateMessage(answer.info)
+        return answer
+      }),
+    }
+    const gate = yield* Deferred.make<void>()
+    yield* jobs.start({ id: task.id, type: "task", metadata: { parentSessionId: root.id, background: true }, run: Deferred.await(gate).pipe(Effect.as("Found the cause")) })
+    yield* notify.watch({ jobID: task.id, parentID: root.id, taskID: task.id, attempt: 1, title: "Verify a component", startedAt: Date.now(), launchID: launch.info.id, ops: parentOps, agent: "build" })
+    yield* Deferred.succeed(gate, undefined)
+    // Its report is written and held in the window.
+    yield* pollWithTimeout(sessions.get(task.id).pipe(Effect.map((session) => SubagentLifecycle.read(session)?.notification)), "the report must be held for the parent")
+    expect(prompts).toEqual([])
+    yield* manager.interrupt({ sessionID: root.id, helpers: true }, parentOps)
+    yield* pollWithTimeout(Effect.sync(() => (prompts.length > 0 ? true : undefined)), "the held report must still be recorded")
+    expect(prompts[0]?.noReply).toBe(true)
+    expect(prompts[0]?.parts.map((part) => (part.type === "text" ? part.metadata?.taskQuiet : undefined))).toEqual([true])
+    const messages = yield* sessions.messages({ sessionID: root.id })
+    expect(messages.filter((message) => message.info.role === "assistant").map((message) => message.info.id)).toEqual([launch.info.id])
+  }))
+
+  // Desktop workspaces and swarms keep their own runners and Stop: the sweep leaves them running and counts them.
+  it.instance("a bridged workspace task survives interrupt and counts as excluded", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const jobs = yield* BackgroundJob.Service
+    const desktop = yield* DesktopTasks.Service
+    const storage = yield* Storage.Service
+    const root = yield* sessions.create()
+    const row = (id: string, source: Task.Info["source"]): Task.Info => ({
+      id, parentSessionID: root.id, source, title: "Workspace agent", status: "running", startedAt: Date.now(), elapsedMs: 0,
+      ownedPaths: [], dependsOn: [], resultAvailable: false, attempt: 1, controls: { inspect: true, message: true, stop: true },
+    })
+    // A team workspace and a Vector-runtime Parallel Workspace, which the desktop reports as a subagent.
+    const { lease } = yield* desktop.register({ sessionID: root.id, tasks: [row("workspace:team", "team"), row("workspace:vector", "subagent")] })
+    const native = yield* child(root.id)
+    yield* jobs.start({ id: native.id, type: "task", run: Effect.never })
+    const result = yield* manager.interrupt({ sessionID: root.id, helpers: true }, ops)
+    expect(result.tasks.map((task) => task.id)).toEqual([native.id])
+    expect(result).toMatchObject({ excluded: 2, skipped: 0 })
+    // No stop was sent to the desktop, and both rows still run.
+    expect((yield* desktop.poll({ sessionID: root.id, lease, timeout: 0 })).commands).toEqual([])
+    expect((yield* manager.list({ sessionID: root.id, active: true })).tasks.map((task) => task.id).sort()).toEqual(["workspace:team", "workspace:vector"])
+
+    // A row the desktop no longer serves cannot be reached: it is counted apart.
+    const other = yield* sessions.create()
+    yield* storage.write(["task-bridge", other.id], {
+      runtimeID: "another-engine", directory: yield* InstanceState.directory, leaseHash: "unused", expiresAt: 0, commands: [],
+      tasks: [{ ...row("workspace:gone", "team"), parentSessionID: other.id }],
+    })
+    expect(yield* manager.interrupt({ sessionID: other.id, helpers: true }, ops)).toEqual({ aborted: false, tasks: [], shells: 0, excluded: 0, skipped: 1 })
   }))
 
   it.instance("recovery attaches reports once, preserves launch checks, and starts no job", () => Effect.gen(function* () {
