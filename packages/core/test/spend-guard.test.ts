@@ -1247,7 +1247,8 @@ describe("SpendGuard delegated ledger", () => {
       expect((yield* guard.delegated("req-10"))?.stopped?.reason).toBe("cap")
       expect((yield* guard.delegated("req-10"))?.stopped?.message).toContain(ceiling)
 
-      // A predicted stop holds under the same ceiling and clears only when it rises.
+      // A predicted stop estimated the next step of the child that made it, which has stopped: re-arming under the
+      // same ceiling clears it while the spend is below it (4.8), so the next launch is admitted.
       const big = step({
         costUsd: 4.62,
         continues: true,
@@ -1257,10 +1258,36 @@ describe("SpendGuard delegated ledger", () => {
       })
       yield* guard.link(third, root, delegated("req-10-predicted", { usd: 5 }))
       expect((yield* guard.record(third, big)).reason).toBe("predicted")
-      yield* guard.link(fourth, root, delegated("req-10-predicted", { usd: 5 }))
       expect((yield* guard.delegated("req-10-predicted"))?.stopped?.reason).toBe("predicted")
-      yield* guard.link(fourth, root, delegated("req-10-predicted", { usd: 10 }))
-      expect((yield* guard.delegated("req-10-predicted"))?.stopped).toBeUndefined()
+      yield* guard.link(fourth, root, delegated("req-10-predicted", { usd: 5 }))
+      expect(yield* guard.delegated("req-10-predicted")).toMatchObject({ spentUsd: 4.62, stopped: undefined })
+      expect((yield* guard.record(fourth, step({ costUsd: 0.1 }))).state).not.toBe("stopped")
+    }),
+  )
+
+  it.effect("12. a child linked with no root run is paused by its own loop, and its sibling carries on", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      const idle = SessionID.make("ses_loop_root")
+      yield* guard.link(child, idle, delegated("req-12", { usd: 25 }))
+      yield* guard.link(sibling, idle, delegated("req-12", { usd: 25 }))
+      const verdicts: SpendGuard.Verdict[] = []
+      for (let index = 0; index < SpendGuard.LOOP_REPEATS; index++)
+        verdicts.push(yield* guard.record(child, step({ costUsd: 0.01, tools: [bash("bun test")] })))
+      expect(verdicts.slice(0, -1).map((verdict) => verdict.state)).toEqual(["ok", "ok"])
+      expect(verdicts.at(-1)).toMatchObject({ state: "stopped", reason: "loop" })
+      expect((yield* guard.stopped(child))?.reason).toBe("loop")
+      // The shared ledger takes no loop stop, so the sibling, and the next launch, go on.
+      expect((yield* guard.delegated("req-12"))?.stopped).toBeUndefined()
+      expect(yield* guard.stopped(sibling)).toBeUndefined()
+      expect((yield* guard.record(sibling, step({ costUsd: 0.01, tools: [bash("bun test")] }))).state).toBe("ok")
+      // A nested child's calls are watched on its own ledger, not again on its parent's.
+      const nested = SessionID.make("ses_loop_nested")
+      yield* guard.link(nested, sibling, delegated("req-12", { usd: 25 }))
+      for (let index = 0; index < SpendGuard.LOOP_REPEATS; index++)
+        yield* guard.record(nested, step({ costUsd: 0.01, tools: [bash("git status")] }))
+      expect((yield* guard.stopped(nested))?.reason).toBe("loop")
+      expect(yield* guard.stopped(sibling)).toBeUndefined()
     }),
   )
 

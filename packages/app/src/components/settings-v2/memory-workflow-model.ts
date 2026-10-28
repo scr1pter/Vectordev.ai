@@ -90,9 +90,13 @@ export function sized<T extends { tier: WorkflowTier }>(tiers: readonly T[]) {
   return tiers.filter((item): item is T & { tier: Exclude<WorkflowTier, "chat"> } => item.tier !== "chat")
 }
 
-/** What a size runs with when nothing is learned: Thorough raises effort for the agent and its subagents. */
+/**
+ * What a size runs with when nothing is learned: Thorough raises the agent's effort and pushes it to split the work,
+ * Standard hands off a part when the agent decides it should, and Light works solo.
+ */
 export function sizeDefault(tier: WorkflowTier) {
   if (tier === "thorough") return "High effort, with subagents"
+  if (tier === "standard") return "The model's default effort; subagents when the agent decides"
   return "The model's default effort, working solo"
 }
 

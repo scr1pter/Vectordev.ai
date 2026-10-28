@@ -903,3 +903,59 @@ it.instance(
     }),
   120_000,
 )
+
+it.instance(
+  "a Deep lead in a conversation that runs four subagents has three researchers, each on a slot it holds",
+  () =>
+    Effect.gen(function* () {
+      // Four at once: the lead holds its own slot and three for its researchers, so its run may have three.
+      const test = yield* setup({ budget: { subagents: { running: 4 } } })
+      const sessions = yield* Session.Service
+      const limits = yield* TaskLimits.Service
+      const build = yield* sessions.create({ title: "Build" })
+      const researcher = (hit: { body: Record<string, unknown> }) =>
+        JSON.stringify(hit.body).includes("research_assignment")
+      const question = "How do heat pumps age in cold climates?"
+      const entry = (area: string) => ({
+        description: area,
+        prompt: `What do studies say about ${area.toLowerCase()}?`,
+        subagent_type: "researcher",
+      })
+      yield* test.llm.tool("research", { question, depth: "deep", background: false })
+      yield* test.llm.toolMatch(lead, "research_plan", plan({ question, depth: "deep" }))
+      // Four researchers in one call: the run's fourth is refused with its own count, not for want of a slot.
+      yield* test.llm.toolMatch(lead, "task", {
+        tasks: ["Field studies", "Lifetimes", "Defrost cycles", "Refrigerants"].map(entry),
+      })
+      yield* test.llm.toolMatch(lead, "task", { tasks: ["Field studies", "Lifetimes", "Defrost cycles"].map(entry) })
+      yield* test.llm.textMatch(researcher, "Found A.")
+      yield* test.llm.textMatch(researcher, "Found B.")
+      yield* test.llm.textMatch(researcher, "Found C.")
+      yield* test.llm.textMatch(lead, "They lose a little efficiency each year.")
+      yield* test.llm.text("Done.")
+      yield* send({
+        sessionID: build.id,
+        agent: "build",
+        text: "Research how heat pumps age, thoroughly.",
+        size: "thorough",
+      })
+
+      const [leadSession] = yield* sessions.children(build.id)
+      expect(SubagentLifecycle.read(leadSession!)?.agent).toBe(ResearchRun.LEAD)
+      const [four, three] = yield* calls(leadSession!.id, "task")
+      expect(four?.state.status).toBe("error")
+      expect(output(four)).toContain("has its 3 researchers")
+      expect(output(four)).not.toContain("subagent slots")
+      expect(three?.state.status).toBe("completed")
+      for (const found of ["Found A.", "Found B.", "Found C."]) expect(output(three)).toContain(found)
+      const researchers = yield* sessions.children(leadSession!.id)
+      expect(researchers.map((child) => SubagentLifecycle.read(child)?.agent)).toEqual([
+        ResearchRun.RESEARCHER,
+        ResearchRun.RESEARCHER,
+        ResearchRun.RESEARCHER,
+      ])
+      expect(yield* limits.status(build.id)).toMatchObject({ running: 0, queued: 0, limit: 4 })
+      expect(guard.outside()).toEqual([])
+    }),
+  120_000,
+)

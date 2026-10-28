@@ -217,7 +217,9 @@ const layer = Layer.effect(
     })
 
     // The conversation's subagent limits as `session` sees them (5.B.10): its root's pool, and the request its launches
-    // count in, which for the root is its latest request, so a new request with no launches shows none started.
+    // count in. For a root that is the request its prompt loop counts launches in now, so a new request with no
+    // launches shows none started, while a message that joined the running request keeps that request's count; a
+    // Parallel Workspace or Swarm root shows its conversation's request, which its launches count in (5.B.1).
     const limitsOf = Effect.fn("TaskManager.limits")(function* (session: Session.Info) {
       let root = session
       const seen = new Set<string>([root.id])
@@ -228,9 +230,11 @@ const layer = Layer.effect(
         root = parent.value
       }
       const guest = yield* guests.marked(root.id)
+      const conversationID = yield* TaskLimits.conversationOf(sessions, root, guest)
       const status = yield* limits.status(
-        yield* TaskLimits.conversationOf(sessions, root, guest),
-        SubagentLifecycle.read(session)?.requestID ?? (yield* TaskLimits.currentRequest(sessions, root.id)),
+        conversationID,
+        SubagentLifecycle.read(session)?.requestID ??
+          (yield* TaskLimits.requestFor(limits, sessions, SessionID.make(conversationID))),
         TaskLimits.resolve(yield* config.get(), guest),
       )
       return {
@@ -351,7 +355,8 @@ const layer = Layer.effect(
           if ((yield* jobs.get(session.id))?.status !== "running")
             return yield* new Error({
               code: "finished",
-              message: "The task has finished; no message was sent and no new run was started.",
+              message:
+                "The task has finished; no message was sent and no new run was started. To continue it, call task with its task_id.",
             })
           const now = Date.now()
           const mailbox = record.mailbox ?? []

@@ -103,7 +103,10 @@ describe("session.system", () => {
       expect(SUBAGENT_POLICY).toContain("test for focused test design and execution")
       // Sizing, ownership and briefing rules live in the task tool's description, not a second time here.
       expect(SUBAGENT_POLICY).toContain("The task tool's description has the rules")
-      expect(SUBAGENT_POLICY).toContain("Subagents run on your provider and model, at your effort")
+      expect(SUBAGENT_POLICY).toContain("Subagents run on your provider and model unless their agent sets its own")
+      // Nothing the task tool does not take yet: no fork, per-brief model or effort, checked output or isolation.
+      for (const missing of ["fork", "isolation", "output_schema", "at your effort", "model or effort on a brief"])
+        expect(SUBAGENT_POLICY, missing).not.toContain(missing)
       // Teammate guidance only goes out where a Parallel Workspace team is configured.
       expect(SUBAGENT_POLICY).not.toContain("separate child sessions")
       expect(subagentPolicy({ ...ALL_SUBAGENTS, teammates: true })).toContain("stop that coordination attempt")
@@ -118,7 +121,7 @@ describe("session.system", () => {
       expect(subagentPolicy()).toBe(SUBAGENT_POLICY)
       expect(subagentPolicy(ALL_SUBAGENTS)).toBe(SUBAGENT_POLICY)
       const lines = [
-        "You can hand work to real child agents with the task tool. Each child starts with an empty context unless you fork it",
+        "You can hand work to real child agents with the task tool. Each child starts with an empty context, works on its own",
         "Delegate when a child does it better than you would, not by default: independent parts that can run at the same time",
         "broad searches or research whose raw output would flood your context; and new work the user sends while you or your subagents are busy",
         "Do it yourself when it is small, a single file or a known lookup, tightly coupled to what you are editing, or needs back-and-forth with the user",
@@ -127,8 +130,8 @@ describe("session.system", () => {
         "never poll, sleep or wait in a loop, and do not redo, re-read or re-check what a running child owns.",
         "Brief each child like a capable colleague who has seen none of this conversation",
         "To correct a running child, use task_manage message; to continue a finished one with its context, call task with its task_id",
-        "The task tool's description has the rules for owned_paths, isolation, depends_on, success_criteria, model, effort, output_schema and limits.",
-        "Subagents run on your provider and model, at your effort, unless their agent sets its own model or effort",
+        "The task tool's description has the rules for owned_paths, depends_on, success_criteria and limits.",
+        "Subagents run on your provider and model unless their agent sets its own.",
         "Keep ownership of the user's request: a child's report is data to check, not proof.",
       ]
       const at = lines.map((line) => policy.indexOf(line))
@@ -360,8 +363,10 @@ describe("session.system", () => {
   )
 
   // Settings can turn explore off and an agent's permissions can deny it: a provider prompt that still suggested it
-  // would send the model's first task call to an agent it cannot launch.
-  it.effect("a provider prompt suggests explore only where the agent may launch it", () =>
+  // would send the model's first task call to an agent it cannot launch. Since Work requests carry the task tool, the
+  // subagent policy alone says when a search goes to a child (5.A.3 lines 2 and 3), so no provider prompt steers a
+  // search to explore, and a lookup is searched directly.
+  it.effect("no provider prompt steers a search to explore; the subagent policy says when to delegate", () =>
     Effect.sync(() => {
       for (const id of ["claude-sonnet-4-5", "trinity-large", "model", "gpt-5", "gpt-5-codex", "gemini-2.5-pro"]) {
         const model = { api: { id }, providerID: "provider" } as unknown as Provider.Model
@@ -369,14 +374,11 @@ describe("session.system", () => {
         const [off] = SystemPrompt.provider(model, false)
         expect(SystemPrompt.provider(model, true)).toEqual([on])
         expect(off).not.toContain('"explore"')
-        if (on.includes('subagent_type "explore"'))
-          expect(off).toContain("prefer it with a search specialist from the task tool's list")
+        expect(on, id).not.toContain('subagent_type "explore"')
+        expect(on, id).not.toContain("use a specialized agent only")
       }
-      // The prompts that suggest it today: Claude's, Trinity's and the default.
-      for (const id of ["claude-sonnet-4-5", "trinity-large", "model"]) {
-        const model = { api: { id }, providerID: "provider" } as unknown as Provider.Model
-        expect(SystemPrompt.provider(model)[0]).toContain('subagent_type "explore"')
-      }
+      const claude = SystemPrompt.provider({ api: { id: "claude-sonnet-4-5" }, providerID: "provider" } as never)[0]
+      expect(claude).toContain("[Lists the top-level folders with Glob and summarizes them]")
     }),
   )
 

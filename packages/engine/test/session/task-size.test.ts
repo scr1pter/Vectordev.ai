@@ -23,6 +23,7 @@ import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, type SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
 import { SessionTaskSize } from "../../src/session/task-size"
+import { TaskLimits } from "../../src/task/limits"
 import { SubagentLifecycle } from "../../src/tool/subagent-lifecycle"
 import { isRecord } from "@/util/record"
 import { TestInstance } from "../fixture/fixture"
@@ -98,6 +99,7 @@ const it = testEffect(
       Ripgrep.node,
       FSUtil.node,
       Database.node,
+      TaskLimits.node,
       LayerNode.make({ service: TestLLMServer, layer: TestLLMServer.layer, deps: [] }),
     ]),
     [
@@ -1438,7 +1440,7 @@ describe("task sizing", () => {
   )
 
   it.instance(
-    "the user's no subagents holds: escalate cannot bring in subagents or the judge",
+    "the user's no subagents or don't be thorough holds: escalate raises nothing, and only no subagents stops launches",
     () =>
       Effect.gen(function* () {
         const { llm, prompt, sessions, directory } = yield* setup({ sizing: { judge: "thorough" } })
@@ -1446,6 +1448,7 @@ describe("task sizing", () => {
           "migrate the app to the new router across 40 files, no subagents",
           "don't be thorough, just migrate the app to the new router across 40 files",
         ]) {
+          const capped = text.includes("no subagents")
           const chat = yield* sessions.create({ title: "Pinned" })
           const before = (yield* llm.inputs).length
           yield* llm.tool("escalate", { reason: "every route changes" })
@@ -1454,14 +1457,17 @@ describe("task sizing", () => {
           const result = yield* send(prompt, chat.id, text)
           const bodies = (yield* llm.inputs).slice(before).filter((item) => !isTitle(item))
           expect(bodies, text).toHaveLength(3)
-          // Escalate is not offered on a capped request, and a call to it raises nothing.
+          // Escalate is not offered on a held request, and a call to it raises nothing.
           expect(toolNames(bodies[0]), text).not.toContain("escalate")
-          // No new subagents, but the ones already running stay the agent's to manage (5.A.1).
+          // "No subagents": no new subagents, but the ones already running stay the agent's to manage (5.A.1). "Don't be
+          // thorough" keeps the request at Work, which may still hand off a part, and is not reported as "no subagents".
           for (const body of bodies) {
-            expect(toolNames(body), text).not.toContain("task")
+            if (capped) expect(toolNames(body), text).not.toContain("task")
+            else expect(toolNames(body), text).toContain("task")
             expect(toolNames(body), text).toContain("task_manage")
             expect(body?.reasoning_effort, text).toBeUndefined()
           }
+          expect(JSON.stringify(bodies[0]?.messages).includes("The user asked for no new subagents"), text).toBe(capped)
           expect(result.info.role === "assistant" && result.info.size, text).toBe("standard")
           expect((yield* sessions.children(chat.id)).length, text).toBe(0)
         }
@@ -1811,6 +1817,9 @@ describe("task sizing", () => {
         // The joined message raised the request, so it carries a note of its own and the opener keeps its own.
         expect(JSON.stringify(users(joined)[0])).toContain("Standard request")
         expect(JSON.stringify(users(joined)[1])).toContain("Thorough request")
+        // Launches still count in the opener's request, and the Tasks board reads that one, not the joined message's.
+        const [opener] = (yield* MessageV2.filterCompactedEffect(chat.id)).filter(SessionTaskSize.real)
+        expect(yield* (yield* TaskLimits.Service).tracked(chat.id)).toBe(opener!.info.id)
       }),
     { git: true },
   )

@@ -84,7 +84,7 @@ export type Status = {
 export type Seed = { readonly spentUsd: number; readonly steps: number; readonly unpricedSteps: number }
 
 export class Refused extends Schema.TaggedErrorClass<Refused>()("TaskLimits.Refused", {
-  reason: Schema.Literals(["per_request", "batch", "slots", "spend", "workflow_runs"]),
+  reason: Schema.Literals(["per_request", "batch", "slots", "spend", "workflow_runs", "unavailable"]),
   message: Schema.String,
 }) {}
 
@@ -107,6 +107,13 @@ const spend = (spent: number, cap: number) =>
   new Refused({
     reason: "spend",
     message: `Subagents in this request reached their spend ceiling (${SpendGuard.formatUsd(spent)} of ${SpendGuard.formatUsd(cap)}). Do the remaining work yourself; the user can raise budget.subagents.usd, or a new request continues under a fresh ceiling. No child was started.`,
+  })
+// The request's launches and spend could not be read, so its limits cannot be checked.
+const unavailable = () =>
+  new Refused({
+    reason: "unavailable",
+    message:
+      "Vector could not read how many subagents this request has started. Try again, or do the work yourself. No child was started.",
   })
 /** The refusal for a workflow run launched while `runID` already runs in the conversation (budget.workflow.runs). */
 export const workflowRuns = (runID: string) =>
@@ -207,8 +214,9 @@ export const conversationOf = Effect.fnUntraced(function* (
 })
 
 /**
- * The request a root's launches count in now (5.B.2, 5.B.10): its latest message from the user. A note, a judge's
- * findings or a marker opens no request; a message with no parts yet counts as the user's. The root's ID when none.
+ * A root's latest message from the user, the request its launches count in when its prompt loop has recorded none (5.B.2,
+ * 5.B.10). A note, a judge's findings or a marker opens no request; a message with no parts yet counts as the user's.
+ * The root's ID when none.
  */
 export const currentRequest = (sessions: Pick<Session.Interface, "findMessage">, rootID: SessionID) =>
   sessions
@@ -220,6 +228,20 @@ export const currentRequest = (sessions: Pick<Session.Interface, "findMessage">,
       Effect.map((found): string => (Option.isSome(found) ? found.value.info.id : rootID)),
       Effect.catchCause(() => Effect.succeed<string>(rootID)),
     )
+
+/**
+ * The request a root's launches count in now: the one its prompt loop recorded with track(), so a message that joined
+ * the running request or a "thanks" a completion note made work keeps the request that launches count in; else its
+ * latest message from the user.
+ */
+export const requestFor = (
+  limits: Pick<Interface, "tracked">,
+  sessions: Pick<Session.Interface, "findMessage">,
+  rootID: SessionID,
+) =>
+  limits
+    .tracked(rootID)
+    .pipe(Effect.flatMap((found) => (found === undefined ? currentRequest(sessions, rootID) : Effect.succeed(found))))
 
 export type AdmitInput = {
   conversationID: string
@@ -261,6 +283,10 @@ export interface Interface {
   readonly status: (conversationID: string, requestID?: string, limits?: Limits) => Effect.Effect<Status>
   /** Counts the request's children and their spend from the database, once per key per process. */
   readonly seed: (conversationID: string, requestID: string) => Effect.Effect<Seed>
+  /** Records the request a root session's launches count in, as its prompt loop worked it out for this step. */
+  readonly track: (rootID: string, requestID: string) => Effect.Effect<void>
+  /** The request track() last recorded for a root in this process. */
+  readonly tracked: (rootID: string) => Effect.Effect<string | undefined>
 }
 
 export class Service extends ServiceContext.Service<Service, Interface>()("@vector/TaskLimits") {}
@@ -293,6 +319,8 @@ type Waiter = {
   readonly deferred: Deferred.Deferred<void>
 }
 type Request = { readonly launched: number; readonly pending: number; readonly seed: Seed }
+// What withSeed's function returned, and whether the request's count was read (else nothing counted was assumed).
+type Seeded<B> = { readonly value: B; readonly seeded: boolean }
 type Pool = {
   readonly limits?: Limits
   readonly held: ReadonlyMap<string, Holder>
@@ -410,6 +438,9 @@ function drain(pool: Pool): readonly [Pool, Deferred.Deferred<void>[]] {
   }
   return [next, woken]
 }
+
+// The limits from the current config apply at once: a raised running limit starts the waiters it now has room for.
+const limited = (pool: Pool, limits: Limits | undefined) => (limits ? drain({ ...pool, limits }) : drain(pool))
 
 type Placed = { readonly admission: Admission } | { readonly refused: Refused }
 
@@ -700,14 +731,16 @@ const layer = Layer.effect(
               seed: { spentUsd: Number(row?.spent ?? 0), steps: 0, unpricedSteps: Number(row?.unpriced ?? 0) },
             }
           }),
+          // Undefined when the count could not be read: nothing is kept, so the next call reads it again.
           Effect.catchCause((cause) =>
             Effect.logWarning("TaskLimits.seed: counting the request's subagents failed", { cause }).pipe(
-              Effect.as({ launched: 0, seed: NONE }),
+              Effect.as(undefined),
             ),
           ),
         )
 
-    // Runs `f` on the pool with the request counted from the database first, once per key while it is kept.
+    // Runs `f` on the pool with the request counted from the database first, once per key while it is kept. When the
+    // count cannot be read, `f` sees a request with nothing counted that is not kept, and `seeded` is false.
     const withSeed = <B>(
       pool: SynchronizedRef.SynchronizedRef<Pool>,
       conversationID: string,
@@ -715,13 +748,18 @@ const layer = Layer.effect(
       f: (current: Pool, request: Request) => readonly [B, Pool],
     ) =>
       Effect.uninterruptible(
-        SynchronizedRef.modifyEffect(pool, (current) => {
+        SynchronizedRef.modifyEffect(pool, (current): Effect.Effect<readonly [Seeded<B>, Pool]> => {
+          const run = (from: Pool, request: Request, seeded: boolean) => {
+            const [value, next] = f(from, request)
+            return [{ value, seeded }, next] as const
+          }
           const found = current.requests.get(requestID)
-          if (found) return Effect.succeed(f(current, found))
+          if (found) return Effect.succeed(run(current, found, true))
           return query(conversationID, requestID).pipe(
             Effect.map((counted) => {
+              if (!counted) return run(current, { launched: 0, pending: 0, seed: NONE }, false)
               const request = { launched: counted.launched, pending: 0, seed: counted.seed }
-              return f(withRequest(current, requestID, request), request)
+              return run(withRequest(current, requestID, request), request, true)
             }),
           )
         }),
@@ -729,7 +767,8 @@ const layer = Layer.effect(
 
     const seed = Effect.fn("TaskLimits.seed")(function* (conversationID: string, requestID: string) {
       const pool = yield* poolOf(conversationID)
-      return yield* withSeed(pool, conversationID, requestID, (current, request) => [request.seed, current] as const)
+      return (yield* withSeed(pool, conversationID, requestID, (current, request) => [request.seed, current] as const))
+        .value
     })
 
     const capacity = Effect.fn("TaskLimits.capacity")(function* (i: {
@@ -739,22 +778,28 @@ const layer = Layer.effect(
       need: number
     }) {
       const pool = yield* poolOf(i.conversationID)
-      const refused = yield* withSeed(pool, i.conversationID, i.requestID, (current, request) => {
+      const checked = yield* withSeed(pool, i.conversationID, i.requestID, (current, request) => {
         const left = Math.max(0, i.limits.perRequest - request.launched - request.pending)
-        return [i.need > left ? batch(i.need, left) : undefined, { ...current, limits: i.limits }] as const
+        const [next, woken] = limited(current, i.limits)
+        return [{ refused: i.need > left ? batch(i.need, left) : undefined, woken }, next] as const
       })
-      if (refused) return yield* Effect.fail(refused)
+      yield* wake(checked.value.woken)
+      if (!checked.seeded) return yield* Effect.fail(unavailable())
+      if (checked.value.refused) return yield* Effect.fail(checked.value.refused)
     })
 
     const admit = Effect.fn("TaskLimits.admit")(function* (i: AdmitInput) {
       const pool = yield* poolOf(i.conversationID)
       // The checks in order: the request's total, the delegated spend, then slots with the place taken atomically.
-      const request = yield* withSeed(
+      const counted = yield* withSeed(
         pool,
         i.conversationID,
         i.requestID,
         (current, request) => [request, current] as const,
       )
+      // A count that could not be read is never taken for none: the launch is refused, and the next one reads it again.
+      if (!counted.seeded) return yield* Effect.fail(unavailable())
+      const request = counted.value
       if (counts(i.origin) && request.launched + request.pending + i.count > i.limits.perRequest)
         return yield* Effect.fail(perRequest(request.launched + request.pending, i.limits.perRequest))
       // The ledger is re-armed with the current budget first, so a raised budget.subagents.usd admits again.
@@ -767,7 +812,15 @@ const layer = Layer.effect(
         return yield* Effect.fail(spend(ledgerNow.spentUsd, ledgerNow.budget.usd ?? i.limits.budget.usd ?? 0))
       const id = ++ids
       const placed = yield* Effect.acquireRelease(
-        change(pool, (current) => place(current, i, id)),
+        change(pool, (current) => {
+          // Waiters a raised running limit now has room for start first: they were there before this launch.
+          const [ready, woken] = limited(current, i.limits)
+          const [result, next] = place(ready, i, id)
+          return [{ result, woken }, next] as const
+        }).pipe(
+          Effect.tap(({ woken }) => wake(woken)),
+          Effect.map(({ result }) => result),
+        ),
         (result, exit) =>
           "admission" in result ? settle(pool, (current) => closed(current, id, Exit.isFailure(exit))) : Effect.void,
       )
@@ -816,11 +869,14 @@ const layer = Layer.effect(
       limits?: Limits,
     ) {
       const pool = yield* poolOf(conversationID)
-      const read = (current: Pool, request?: Request) =>
-        [{ pool: current, request }, limits ? { ...current, limits } : current] as const
-      const { pool: current, request } = requestID
-        ? yield* withSeed(pool, conversationID, requestID, read)
+      const read = (current: Pool, request?: Request) => {
+        const [next, woken] = limited(current, limits)
+        return [{ pool: next, request, woken }, next] as const
+      }
+      const { pool: current, request, woken } = requestID
+        ? (yield* withSeed(pool, conversationID, requestID, read)).value
         : yield* change(pool, (value) => read(value))
+      yield* wake(woken)
       // Before any launch in this process, the defaults, held to the guest limits for a guest's conversation.
       const effective = limits ?? current.limits ?? resolve({}, yield* guests.marked(conversationID as SessionID))
       const result: Status = {
@@ -848,7 +904,24 @@ const layer = Layer.effect(
       }
     })
 
-    return Service.of({ capacity, admit, bind, release, run, status, seed })
+    // The request each root's prompt loop last counted launches in, the most recently recorded last.
+    const requests = yield* Ref.make(new Map<string, string>())
+    const track = Effect.fn("TaskLimits.track")(function* (rootID: string, requestID: string) {
+      yield* Ref.update(requests, (current) => {
+        if (current.get(rootID) === requestID) return current
+        const next = new Map(current)
+        next.delete(rootID)
+        next.set(rootID, requestID)
+        for (const key of next.keys()) {
+          if (next.size <= POOLS) break
+          next.delete(key)
+        }
+        return next
+      })
+    })
+    const tracked = (rootID: string) => Ref.get(requests).pipe(Effect.map((current) => current.get(rootID)))
+
+    return Service.of({ capacity, admit, bind, release, run, status, seed, track, tracked })
   }),
 )
 

@@ -42,7 +42,9 @@ describe("Settings > Memory > Workflow insights", () => {
 
   test("says what each size runs with and the learned default against it, with the reason", () => {
     expect(sizeDefault("thorough")).toBe("High effort, with subagents")
-    expect(sizeDefault("standard")).toBe("The model's default effort, working solo")
+    // Standard is offered subagents and the agent decides when to use them (5.A.1); Light launches none.
+    expect(sizeDefault("standard")).toBe("The model's default effort; subagents when the agent decides")
+    expect(sizeDefault("light")).toBe("The model's default effort, working solo")
     const learned = card({
       tier: "thorough",
       arms: [arm()],

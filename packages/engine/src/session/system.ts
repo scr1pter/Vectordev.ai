@@ -26,9 +26,9 @@ import { MCP } from "@/mcp"
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
 
 /**
- * The provider's prompt. Some suggest the explore specialist for a search that spans several areas; with `explore`
- * false (Settings turned explore off, or this agent may not launch it) a task call naming it would fail, so they point
- * at the task tool's list instead.
+ * The provider's prompt. None names the explore specialist now: the subagent policy says when a search goes to a child
+ * (5.A.3). With `explore` false (Settings turned explore off, or this agent may not launch it) a mention would send a
+ * task call to an agent it cannot launch, so any would point at the task tool's list instead.
  */
 export function provider(model: Provider.Model, explore = true) {
   const prompt = providerPrompt(model)
@@ -132,23 +132,24 @@ function specialistFocus(permitted?: readonly string[]) {
   if (listed.length === 0) return ""
   return `: ${listed.map(([name, focus]) => `${name} for ${focus}`).join("; ")}`
 }
-// When to delegate, how to launch and how to follow up live here; the parameter rules (owned_paths, isolation,
-// depends_on, success_criteria, model, effort, output_schema) and the limits live in the task tool's description, so a
-// request carries each rule once. Work and Thorough send the same lines, so the stable block stays cached across sizes.
+// When to delegate, how to launch and how to follow up live here; the parameter rules (owned_paths, depends_on,
+// success_criteria) and the limits live in the task tool's description, so a request carries each rule once. Work and
+// Thorough send the same lines, so the stable block stays cached across sizes. Forks, a brief's own model or effort,
+// checked JSON output and isolated worktrees are named here only once the task tool takes them.
 const SUBAGENT_INTRO =
-  "You can hand work to real child agents with the task tool. Each child starts with an empty context unless you fork it, works on its own and reports only to you; the user does not see its report."
+  "You can hand work to real child agents with the task tool. Each child starts with an empty context, works on its own and reports only to you; the user does not see its report."
 const SUBAGENT_WHEN = [
   "Delegate when a child does it better than you would, not by default: independent parts that can run at the same time as each other or as your own work, each substantial (several files, or a long check-and-repair loop); broad searches or research whose raw output would flood your context; and new work the user sends while you or your subagents are busy, when it does not depend on what is running.",
   "Do it yourself when it is small, a single file or a known lookup, tightly coupled to what you are editing, or needs back-and-forth with the user: a child reads everything again and costs more.",
 ]
 const SUBAGENT_ORCHESTRATION = [
   "Put every independent brief you already know about in one task call, in the background. Say in one line what you launched, then keep doing work that does not overlap, or end your turn. Vector notifies you when each one finishes: never poll, sleep or wait in a loop, and do not redo, re-read or re-check what a running child owns.",
-  "Brief each child like a capable colleague who has seen none of this conversation: the goal and why, what you already know, files and constraints, whether to edit or only research, how to verify, and what its final report must contain. Fork instead when the work needs this conversation and your provider caches prompts.",
+  "Brief each child like a capable colleague who has seen none of this conversation: the goal and why, what you already know, files and constraints, whether to edit or only research, how to verify, and what its final report must contain.",
   "To correct a running child, use task_manage message; to continue a finished one with its context, call task with its task_id rather than starting a new one; stop children whose work is no longer needed; answer the user's status questions from task_manage list or inspect.",
-  "The task tool's description has the rules for owned_paths, isolation, depends_on, success_criteria, model, effort, output_schema and limits.",
+  "The task tool's description has the rules for owned_paths, depends_on, success_criteria and limits.",
 ]
 const SUBAGENT_MODELS =
-  "Subagents run on your provider and model, at your effort, unless their agent sets its own model or effort or you set model or effort on a brief. explore runs on the provider's small model only when that model can call tools and is known to cost less than yours, and otherwise on your model without high effort; a learned workflow default can move general subagents to that small model on the same terms."
+  "Subagents run on your provider and model unless their agent sets its own. explore runs on the provider's small model only when that model can call tools and is known to cost less than yours, and otherwise on your model without high effort; a learned workflow default can move general subagents to that small model on the same terms."
 const SUBAGENT_TEAMMATES = [
   "Task-tool sibling subagents are separate child sessions; they are not automatically members of a Parallel Workspace team. Require send_teammate_message only when a workspace team is actually configured.",
   "If send_teammate_message reports that no team is configured, stop that coordination attempt. Do not search outside the workspace for team state, inspect Vector application data, logs, or packaged resources, or create a team marker. Continue independently and report the unavailable exchange to the parent.",

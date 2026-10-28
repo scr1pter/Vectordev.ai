@@ -280,11 +280,28 @@ describe("TaskSize.classify", () => {
     // The cap is recorded, so nothing (escalate included) takes the request past Work.
     for (const text of [
       "migrate the app to the new router across 40 files, no subagents",
-      "don't be thorough, just migrate the app to the new router across 40 files",
       "don't use subagents, be thorough",
     ])
       expect(TaskSize.classify({ text }).reasons, text).toContain("capped")
     expect(TaskSize.classify({ text: "migrate the app to the new router across 40 files" }).reasons).toEqual(["work"])
+  })
+
+  // "Don't be thorough" keeps the request at Work, but it is not "no subagents": Work may still hand off a part.
+  test("don't be thorough holds the request at Work under its own reason, apart from no subagents", () => {
+    for (const text of [
+      "don't be thorough, just migrate the app to the new router across 40 files",
+      "no need to go deep, rewrite the entire backend",
+      "don't think too hard, fix the typo in README",
+    ]) {
+      const result = TaskSize.classify({ text })
+      expect(result.tier, text).toBe("standard")
+      expect(result.reasons, text).toContain(TaskSize.CAPPED_THOROUGH)
+      expect(result.reasons, text).not.toContain("capped")
+    }
+    expect(TaskSize.classify({ text: "don't be thorough", previous: "thorough", open: true }).tier).toBe("standard")
+    expect(TaskSize.classify({ text: "no subagents and don't be thorough, fix it" }).reasons).toEqual(
+      expect.arrayContaining(["capped", TaskSize.CAPPED_THOROUGH]),
+    )
   })
 
   test("Thorough ends with its run: after it finishes, a new message is sized fresh, whatever it changed", () => {
@@ -526,9 +543,10 @@ describe("TaskSize helpers", () => {
     expect(TaskSize.note("chat", { escalate: true, judge: true })).toBeUndefined()
   })
 
-  test("the Standard note says to delegate independent, substantial parts; Light launches none", () => {
+  // When to delegate is the subagent policy's, sent once in the system prompt; the Standard note does not repeat it.
+  test("the Standard note leaves delegation to the policy; Light launches none", () => {
     expect(TaskSize.note("standard", { escalate: false, judge: false })).toBe(
-      "<task_size>Standard request: keep a short to-do list for multi-step work, and delegate only an independent, substantial part or a broad search.</task_size>",
+      "<task_size>Standard request: keep a short to-do list for multi-step work.</task_size>",
     )
     expect(TaskSize.note("light", { escalate: false, judge: false })).toBe(
       "<task_size>Light request: do it directly, without a to-do list, and launch no subagents.</task_size>",

@@ -290,6 +290,55 @@ describe("task management", () => {
     yield* Fiber.join(running)
   }))
 
+  // A message sent while a request runs joins it (5.A.2), and its launches go on counting in the opener's request.
+  it.instance("list keeps the running request's count after a message joins it", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const limits = yield* TaskLimits.Service
+    const root = yield* sessions.create()
+    const user = (id: MessageID) => sessions.updateMessage({ id, role: "user", sessionID: root.id, agent: "build", model, time: { created: Date.now() } })
+    const request = MessageID.ascending()
+    yield* user(request)
+    // The prompt loop records the request it counts launches in, as it does at every step.
+    yield* limits.track(root.id, request)
+    yield* Effect.scoped(Effect.gen(function* () {
+      const admission = yield* limits.admit({ conversationID: root.id, requestID: request, limits: TaskLimits.resolve({}, false), origin: "root", count: 1 })
+      const launched = yield* child(root.id, { conversationID: root.id, rootSessionID: root.id, requestID: request })
+      yield* limits.bind(admission, launched.id)
+    }))
+    expect((yield* manager.list({ sessionID: root.id })).limits).toMatchObject({ launched: 1 })
+    // The user writes while it runs: a real user message, which the loop counts in the opener's request.
+    yield* user(MessageID.ascending())
+    yield* limits.track(root.id, request)
+    expect((yield* manager.list({ sessionID: root.id })).limits).toMatchObject({ launched: 1 })
+    // A request of its own, once its loop starts, shows none started.
+    const next = MessageID.ascending()
+    yield* user(next)
+    yield* limits.track(root.id, next)
+    expect((yield* manager.list({ sessionID: root.id })).limits).toMatchObject({ launched: 0 })
+  }))
+
+  // B.1: a Parallel Workspace or Swarm root shares its conversation's slots and its request, so its board shows them.
+  it.instance("a parallel-agent root's board shows its conversation's request", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const limits = yield* TaskLimits.Service
+    const parent = yield* sessions.create()
+    const request = MessageID.ascending()
+    yield* sessions.updateMessage({ id: request, role: "user", sessionID: parent.id, agent: "build", model, time: { created: Date.now() } })
+    const worker = yield* sessions.create({ metadata: { vector: { kind: "parallel-agent", parentSessionId: parent.id } } })
+    yield* sessions.updateMessage({ id: MessageID.ascending(), role: "user", sessionID: worker.id, agent: "build", model, time: { created: Date.now() } })
+    yield* Effect.scoped(Effect.gen(function* () {
+      const admission = yield* limits.admit({ conversationID: parent.id, requestID: request, limits: TaskLimits.resolve({}, false), origin: "root", count: 1 })
+      const launched = yield* child(worker.id, { conversationID: parent.id, rootSessionID: worker.id, requestID: request })
+      yield* limits.bind(admission, launched.id)
+    }))
+    expect((yield* manager.list({ sessionID: worker.id })).limits).toMatchObject({ launched: 1 })
+    expect((yield* manager.list({ sessionID: parent.id })).limits).toMatchObject({ launched: 1 })
+  }))
+
+  // One subagent at a time, set in the config: the board applies the config's limits, and a higher one would start the
+  // waiting message at once.
   it.instance("a message queued for a child whose run ended takes a subagent slot", () => Effect.gen(function* () {
     const sessions = yield* Session.Service
     const manager = yield* TaskManager.Service
@@ -330,7 +379,7 @@ describe("task management", () => {
     expect(SubagentLifecycle.read(yield* sessions.get(task.id))).toMatchObject({ status: "running" })
     expect(SubagentLifecycle.read(yield* sessions.get(task.id))?.slotReason).toBeUndefined()
     expect(yield* limits.status(root.id)).toMatchObject({ running: 0, queued: 0 })
-  }))
+  }), { trusted: true, config: { budget: { subagents: { running: 1 } } } })
 
   it.instance("a message steering a running child shares its slot", () => Effect.gen(function* () {
     const sessions = yield* Session.Service

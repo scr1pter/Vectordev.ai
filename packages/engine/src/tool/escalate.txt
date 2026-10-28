@@ -1,4 +1,4 @@
-Raise this request to Thorough only for exceptionally hard, high-stakes work you cannot do well at normal effort: a rewrite or migration across the whole system or dozens of files, or several large independent parts that each need deep reasoning. Thorough adds high reasoning effort for you and the subagents you launch, and Vector may check the finished work with its judge, all of which cost much more. On Work requests the task tool is already offered.
+Raise this request to Thorough only for exceptionally hard, high-stakes work you cannot do well at normal effort: a rewrite or migration across the whole system or dozens of files, or several large independent parts that each need deep reasoning. Thorough adds high reasoning effort for you, and Vector may check the finished work with its judge, all of which cost much more. On Work requests the task tool is already offered.
 
 Do not call it for ordinary work, however many steps it takes: building an app (a calculator, a landing page, a to-do app), adding a feature, fixing bugs, editing several files, writing tests, running commands, or deploying and publishing. Do that work yourself. When in doubt, do not call it.
 

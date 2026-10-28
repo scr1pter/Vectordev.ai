@@ -353,10 +353,13 @@ export function sets(options: Record<string, unknown> | undefined) {
   )
 }
 
-// The size came from Vector's rules: not the user's pick, "think hard" or "no subagents".
+// The size came from Vector's rules: not the user's pick, "think hard", "no subagents" or "don't be thorough".
 function automatic(result: TaskSize.Result) {
   return (
-    result.source !== "user" && !result.reasons.some((reason) => reason.startsWith("explicit:") || reason === "capped")
+    result.source !== "user" &&
+    !result.reasons.some(
+      (reason) => reason.startsWith("explicit:") || reason === "capped" || reason === TaskSize.CAPPED_THOROUGH,
+    )
   )
 }
 

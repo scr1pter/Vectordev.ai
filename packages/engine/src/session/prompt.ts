@@ -285,6 +285,7 @@ const layer = Layer.effect(
     const workflowSession = yield* SessionWorkflow.Service
     const jobs = yield* BackgroundJob.Service
     const taskNotes = yield* TaskNotify.Service
+    const taskLimits = yield* TaskLimits.Service
     const { db } = database
     const backgroundTasks = yield* InstanceState.make(
       Effect.fnUntraced(function* () {
@@ -2321,6 +2322,9 @@ const layer = Layer.effect(
                   msgs.findLast((message) => SessionTaskSize.real(message))?.info.id ??
                   lastUser.id,
               }
+        // The Tasks board reads the same request, so a message that joined the run, or a "thanks" a note made work,
+        // shows the launches of the request they count in (5.B.10).
+        if (delegationContext) yield* taskLimits.track(sessionID, delegationContext.requestID)
 
         if (task?.type === "subtask") {
           yield* handleSubtask({ task, model, lastUser, sessionID, session, msgs, delegation: delegationContext })
@@ -2477,7 +2481,8 @@ const layer = Layer.effect(
           : undefined
         // What this agent may launch here: a general or specialist turned off is missing from the list, Plan mode or a
         // child session denies one by permission, and a subagent's own session is told not to start general Subagents
-        // of its own. The prompts that suggest explore point at the task tool's list instead where it is not permitted.
+        // of its own. The plan reminder, which suggests explore, points at the task tool's list instead where it is not
+        // permitted.
         const subagents = SystemPrompt.subagentAvailability({
           agents: yield* agents.list(),
           permission: agent.permission,
@@ -2561,7 +2566,13 @@ const layer = Layer.effect(
             outward: audience === "outward",
             ...(delegationContext ? { delegation: delegationContext } : {}),
             ...(build
-              ? { taskSize: { tier: build.tier, capped: SessionTaskSize.capped(build.result) } }
+              ? {
+                  taskSize: {
+                    tier: build.tier,
+                    capped: SessionTaskSize.capped(build.result),
+                    held: SessionTaskSize.held(build.result),
+                  },
+                }
               : recoverable
                 ? { taskSize: { tier: "chat" as const } }
                 : {}),
@@ -2580,6 +2591,8 @@ const layer = Layer.effect(
           // highest while the cache is warm, and "no subagents" withholds nothing, so a smaller or capped follow-up sends
           // the same definitions; what it may not launch is refused when called instead.
           const capped = build !== undefined && SessionTaskSize.capped(build.result)
+          // "No subagents" or "don't be thorough": escalate may not raise the request.
+          const held = build !== undefined && SessionTaskSize.held(build.result)
           const offer: TaskSize.Offer | undefined = build && {
             capped: capped && !ProviderTransform.caches(model),
             children: build.snapshot.length > 0,
@@ -2604,10 +2617,10 @@ const layer = Layer.effect(
             delete tools.escalate
           } else if (build) {
             for (const id of TaskSize.withheld(build.offered, build.result.agents.length, offer)) delete tools[id]
-            // A thorough request has nothing to raise to, and the user kept a capped one at Work. On a caching provider
+            // A thorough request has nothing to raise to, and the user kept a held one at Work. On a caching provider
             // the tool keeps its place so a smaller follow-up sends the same definitions and reads the cached prefix;
-            // it refuses to raise a capped request.
-            if ((build.tier === "thorough" || capped) && !ProviderTransform.caches(model)) delete tools.escalate
+            // it refuses to raise a held request.
+            if ((build.tier === "thorough" || held) && !ProviderTransform.caches(model)) delete tools.escalate
             const why = capped ? CAPPED_REFUSAL : build.tier === "light" ? LIGHT_REFUSAL : undefined
             const delegate = tools.task?.execute
             if (why && delegate) {
@@ -4095,7 +4108,12 @@ function sizeNotes(
       const capped = SessionTaskSize.capped(entry.result)
       const lines = [
         index === 0 ? TaskSize.running(request.snapshot, "work") : undefined,
-        TaskSize.note(entry.result.tier, { escalate: !capped, judge: entry.judge !== "off", solo, capped }),
+        TaskSize.note(entry.result.tier, {
+          escalate: !SessionTaskSize.held(entry.result),
+          judge: entry.judge !== "off",
+          solo,
+          capped,
+        }),
       ].filter((line): line is string => line !== undefined)
       if (lines.length > 0) notes.set(entry.user.info.id, [...(notes.get(entry.user.info.id) ?? []), ...lines])
     }
@@ -4548,6 +4566,7 @@ export const node = LayerNode.make({
     SessionWorkflow.node,
     BackgroundJob.node,
     TaskNotify.node,
+    TaskLimits.node,
     FreeModelGuests.node,
     Git.node,
     ResearchStore.node,

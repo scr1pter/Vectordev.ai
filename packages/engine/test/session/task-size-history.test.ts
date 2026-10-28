@@ -186,7 +186,9 @@ describe("SessionTaskSize.size", () => {
       ])
       expect(requests[0]?.tier, text).toBe("standard")
       expect(requests[0]?.escalated, text).toBe(false)
-      expect(SessionTaskSize.capped(requests[0]!.result), text).toBe(true)
+      expect(SessionTaskSize.held(requests[0]!.result), text).toBe(true)
+      // Only "no subagents" stops new launches; "don't be thorough" keeps the request at Work and no more.
+      expect(SessionTaskSize.capped(requests[0]!.result), text).toBe(text.includes("no subagents"))
     }
   })
 

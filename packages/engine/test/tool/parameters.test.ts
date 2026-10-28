@@ -20,7 +20,7 @@ import { Parameters as Question } from "../../src/tool/question"
 import { Parameters as Read } from "../../src/tool/read"
 import { Parameters as Shell } from "../../src/tool/shell"
 import { Parameters as Skill } from "../../src/tool/skill"
-import { BatchParameters, Parameters as Task } from "../../src/tool/task"
+import { BatchParameters, InputParameters, Parameters as Task } from "../../src/tool/task"
 import { Parameters as Todo } from "../../src/tool/todo"
 import { Parameters as WebFetch } from "../../src/tool/webfetch"
 import { Parameters as Write } from "../../src/tool/write"
@@ -256,6 +256,24 @@ describe("tool parameters", () => {
     })
     test("rejects missing prompt", () => {
       expect(accepts(Task, { description: "d", subagent_type: "general" })).toBe(false)
+    })
+    // Fork, a brief's own model or effort, checked output and isolation land in a later version. Dropped silently, an
+    // isolation or fork request would start a child without it, so a call that sends one fails instead.
+    test("refuses brief fields this version does not take, alone or in a batch, and advertises none", () => {
+      const brief = { description: "d", prompt: "p" }
+      expect(accepts(InputParameters, brief)).toBe(true)
+      expect(accepts(InputParameters, { tasks: [brief] })).toBe(true)
+      for (const [key, value] of [
+        ["fork", true],
+        ["model", "small"],
+        ["effort", "high"],
+        ["output_schema", { type: "object" }],
+        ["isolation", "worktree"],
+      ] as const) {
+        expect(accepts(InputParameters, { ...brief, [key]: value }), key).toBe(false)
+        expect(accepts(InputParameters, { tasks: [brief, { ...brief, [key]: value }] }), key).toBe(false)
+        expect(JSON.stringify(toJsonSchema(BatchParameters)), key).not.toContain(`"${key}"`)
+      }
     })
   })
 

@@ -1323,7 +1323,7 @@ it.instance(
       expect(body).toContain("Do it yourself when it is small, a single file or a known lookup")
       expect(body).toContain("Put every independent brief you already know about in one task call, in the background")
       expect(body).toContain("To correct a running child, use task_manage message")
-      expect(body).toContain("Delegated batches run in the background by default")
+      expect(body).toContain("Background by default for the whole batch")
       expect(body).toContain("Omit subagent_type for general")
       expect(body).toContain("never poll")
       expect(body).not.toContain("Do the work yourself by default")
@@ -1380,24 +1380,26 @@ it.instance(
   15_000,
 )
 
+// Work requests carry the task tool, so only the policy says when a search goes to a child (5.A.3): the provider
+// prompt does not steer every search to explore as well.
 it.instance(
-  "loop suggests explore for a search that spans several areas while explore is on",
+  "loop leaves broad searches to the policy, without a provider-prompt explore preference",
   () =>
     Effect.gen(function* () {
       const body = yield* firstRequestBody({})
-      expect(body).toContain('prefer it with subagent_type \\"explore\\"')
+      expect(body).toContain("broad searches or research whose raw output would flood your context")
+      expect(body).not.toContain('prefer it with subagent_type \\"explore\\"')
     }),
   15_000,
 )
 
 // With explore turned off a prompt that still suggested it would send the model's first task call to a missing agent.
 it.instance(
-  "loop points a search at the task tool's list when config turns explore off",
+  "loop names no explore agent when config turns explore off",
   () =>
     Effect.gen(function* () {
       const body = yield* firstRequestBody({ config: { agent: { explore: { disable: true } } } })
       expect(body).not.toContain('subagent_type \\"explore\\"')
-      expect(body).toContain("prefer it with a search specialist from the task tool's list")
       expect(body).not.toContain("explore for read-only discovery")
     }),
   15_000,

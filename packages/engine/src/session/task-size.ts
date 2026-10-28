@@ -179,7 +179,7 @@ export function size(input: Input): Request[] {
       : escalated
     // The user's "no subagents" or "don't be thorough" in the message that opened the request holds against escalate
     // and a judge FAIL alike. Said in a message that joined the run, it stops new launches and lowers nothing.
-    const raised = !group.carried && states[0] && capped(states[0].result) ? undefined : escalation(group.messages)
+    const raised = !group.carried && states[0] && held(states[0].result) ? undefined : escalation(group.messages)
     const tier = raised ? TaskSize.max(result.tier, raised) : result.tier
     // A child this request launched itself reports at this request's size.
     const notified = launchers.includes(position) ? TaskSize.max(reportedTier ?? tier, tier) : reportedTier
@@ -337,11 +337,16 @@ export function dismissed(messages: readonly SessionV1.WithParts[]) {
 }
 
 /**
- * The user said "no subagents" or "don't be thorough": no new subagents for the request. Said in the message that opened
- * it, the request also stays Work and escalate may not raise it.
+ * The user said "no subagents": no new subagents for the request. Said in the message that opened it, the request also
+ * stays Work and escalate may not raise it.
  */
 export function capped(result: TaskSize.Result) {
   return result.reasons.includes("capped") || result.reasons.includes(CAPPED_JOINED)
+}
+
+/** The user kept the request at its size ("no subagents" or "don't be thorough"): escalate may not raise it. */
+export function held(result: TaskSize.Result) {
+  return capped(result) || result.reasons.includes(TaskSize.CAPPED_THOROUGH)
 }
 
 /**

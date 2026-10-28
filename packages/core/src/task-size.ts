@@ -13,12 +13,12 @@ export { Tier, Choice, JudgeMode } from "@vectordevai/schema/task-size"
 // - Everything else is Work, at the provider's default effort. Standard is offered every tool, subagents included, and
 //   the agent decides when a part is worth handing off. Light, a size only a sender picks, skips the to-do list and
 //   launches nothing, but keeps control of the subagents already working.
-// - Thorough (high effort for the agent and its subagents, the judge, and a push to split the work) comes only from the
-//   user's own ask in the message, from the agent's escalate call, or from a message that continues Thorough work.
-//   Never from words about the work's scope. Thorough ends with its run: the next message is sized fresh unless the
-//   reply asked the user a question or the message carries the work on.
+// - Thorough (high effort for the agent, the judge, and a push to split the work) comes only from the user's own ask in
+//   the message, from the agent's escalate call, or from a message that continues Thorough work. Never from words about
+//   the work's scope. Thorough ends with its run: the next message is sized fresh unless the reply asked the user a
+//   question or the message carries the work on.
 // - The user's "no subagents" stops new launches for that request at any size, and never takes away control of the
-//   subagents already working.
+//   subagents already working. Their "don't be thorough" only keeps the request at Work.
 
 /** Reasoning effort for a request when the user left effort on its default. */
 export type Effort = "off" | "default" | "high"
@@ -62,9 +62,10 @@ export type Result = {
   readonly source: Source
   /**
    * Stable reason codes, such as "greeting", "work" or "explicit:thorough"; clients turn them into copy. "capped" means
-   * the user said "no subagents" or "don't be thorough": nothing, escalate included, takes the request past Work.
-   * "capped:joined" means a message that joined a running request said it: no new subagents from then on, and the size
-   * stays.
+   * the user said "no subagents": no new subagents, and nothing, escalate included, takes the request past Work.
+   * "capped:thorough" (CAPPED_THOROUGH) means they said "don't be thorough": the request stays at Work, and subagents
+   * may still launch. "capped:joined" means a message that joined a running request said "no subagents": no new
+   * subagents from then on, and the size stays.
    */
   readonly reasons: readonly string[]
   /** false when the user said to skip the judge for this request. */
@@ -74,6 +75,9 @@ export type Result = {
 }
 
 const ORDER = { chat: 0, light: 1, standard: 2, thorough: 3 } as const satisfies Record<Tier, number>
+
+/** Reason a request gains when its user said "don't be thorough": it stays at Work, and subagents may still launch. */
+export const CAPPED_THOROUGH = "capped:thorough"
 
 export function rank(tier: Tier) {
   return ORDER[tier]
@@ -155,8 +159,9 @@ export function note(
   const capped = options.capped ? " The user asked for no new subagents." : ""
   if (tier === "light")
     return `<task_size>Light request: do it directly, without a to-do list, and launch no subagents.${escalate}${capped}</task_size>`
+  // When to delegate is the subagent policy's; the note does not say it again.
   if (tier === "standard")
-    return `<task_size>Standard request: keep a short to-do list for multi-step work, and delegate only an independent, substantial part or a broad search.${escalate}${capped}</task_size>`
+    return `<task_size>Standard request: keep a short to-do list for multi-step work.${escalate}${capped}</task_size>`
   if (tier === "thorough")
     return `<task_size>Thorough request: plan with the to-do list, split independent substantial parts across subagents launched together in the background when that is cheaper, and verify with the strongest checks available.${options.judge ? " Vector runs the judge after you finish, so do not launch it yourself." : ""}${options.solo ? " In this repository, Thorough work has passed as often without subagents for less: split only clearly independent, large parts." : ""}${capped}</task_size>`
   // A greeting goes out on the quick lane, which carries no note.
@@ -210,10 +215,13 @@ export function classify(input: Input): Result {
   if (input.auto === false) return result("thorough", "auto", ["auto-off"])
 
   // The user's own "no subagents", "skip the judge" and "don't be thorough" come out first, so they never read as the
-  // ask itself. "No subagents" and "don't be thorough" keep the request at Work, Thorough work it continues included.
+  // ask itself. "No subagents" and "don't be thorough" keep the request at Work, Thorough work it continues included;
+  // only "no subagents" stops new launches.
   const noJudge = NO_JUDGE.test(lower)
-  const capped = NO_SUBAGENTS.test(lower) || NOT_THOROUGH.test(lower)
-  const cap = capped ? ["capped"] : []
+  const noSubagents = NO_SUBAGENTS.test(lower)
+  const notThorough = NOT_THOROUGH.test(lower)
+  const capped = noSubagents || notThorough
+  const cap = [...(noSubagents ? ["capped"] : []), ...(notThorough ? [CAPPED_THOROUGH] : [])]
   // A force word counts only as the user's instruction about this request: a clause that asks for it ("be thorough",
   // "use subagents", "run the judge"), never a mention ("fix the bug with subagents not starting").
   const forced = instructions([NO_SUBAGENTS, NO_JUDGE, NOT_THOROUGH].reduce(strip, lower))

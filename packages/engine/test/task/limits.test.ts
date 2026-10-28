@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { Deferred, Effect, Exit, Fiber, Scope } from "effect"
+import { sql } from "drizzle-orm"
+import { Deferred, Effect, Exit, Fiber, Option, Scope } from "effect"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Database } from "@vectordevai/core/database/database"
 import { EventV2 } from "@vectordevai/core/event"
@@ -727,6 +728,103 @@ describe("TaskLimits seed and status", () => {
       const guests = yield* FreeModelGuests.Service
       yield* guests.mark(id("guest"))
       expect(yield* service.status(id("guest"))).toMatchObject({ limit: 4, perRequest: 8, launched: 0 })
+    }),
+  )
+})
+
+describe("TaskLimits limits and requests", () => {
+  // A conversation of its own, so its pool starts empty.
+  const RAISED = "ses_raised_conversation"
+  const run = (service: TaskLimits.Interface, started: string[], name: string) =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>()
+      const fiber = yield* service
+        .run(
+          { conversationID: RAISED, childID: id(name), origin: "root" },
+          Effect.sync(() => started.push(name)).pipe(Effect.andThen(Deferred.await(gate))),
+        )
+        .pipe(Effect.forkChild)
+      yield* settle
+      return { fiber, release: Deferred.succeed(gate, undefined).pipe(Effect.andThen(settle)) }
+    })
+
+  it.effect("a raised running limit starts the waiters it now has room for, by status or by admit", () =>
+    Effect.gen(function* () {
+      const service = yield* TaskLimits.Service
+      const started: string[] = []
+      yield* service.status(RAISED, undefined, limits(2))
+      const runs = yield* Effect.forEach(["raise_1", "raise_2", "raise_3", "raise_4", "raise_5"], (name) =>
+        run(service, started, name),
+      )
+      expect(started).toEqual(["raise_1", "raise_2"])
+      expect(yield* service.status(RAISED)).toMatchObject({ running: 2, queued: 3 })
+      // The config now allows 4: reading the board with it starts two waiters, in order, at once.
+      expect(yield* service.status(RAISED, undefined, limits(4))).toMatchObject({ running: 4, queued: 1, limit: 4 })
+      yield* settle
+      expect(started).toEqual(["raise_1", "raise_2", "raise_3", "raise_4"])
+      // An admission under 5 starts the last waiter before it takes its own place, which then waits behind the five.
+      const admission = yield* Effect.scoped(
+        service.admit({ conversationID: RAISED, requestID: REQUEST, limits: limits(5), origin: "root", count: 1 }),
+      )
+      yield* settle
+      expect(started).toEqual(["raise_1", "raise_2", "raise_3", "raise_4", "raise_5"])
+      expect(admission).toMatchObject({ running: 5, queued: 0, waits: true })
+      for (const item of runs) yield* item.release
+      expect(yield* service.status(RAISED)).toMatchObject({ running: 0, queued: 0 })
+    }),
+  )
+
+  it.effect("a request whose count cannot be read is refused, not counted as none, and read again next time", () =>
+    Effect.gen(function* () {
+      const { db } = yield* Database.Service
+      const service = yield* TaskLimits.Service
+      const request = "msg_unreadable"
+      const moved = db.run(sql`ALTER TABLE session RENAME TO session_moved`).pipe(Effect.orDie)
+      const back = db.run(sql`ALTER TABLE session_moved RENAME TO session`).pipe(Effect.orDie)
+      const refused = yield* Effect.acquireUseRelease(
+        moved,
+        () =>
+          Effect.gen(function* () {
+            const admitted = yield* Effect.scoped(
+              service.admit({ conversationID: RAISED, requestID: request, limits: limits(), origin: "root", count: 1 }),
+            ).pipe(Effect.flip)
+            const batch = yield* service
+              .capacity({ conversationID: RAISED, requestID: request, limits: limits(), need: 2 })
+              .pipe(Effect.flip)
+            // The board still answers, with nothing kept for the request.
+            expect((yield* service.status(RAISED, request, limits())).launched).toBe(0)
+            return [admitted, batch]
+          }),
+        () => back,
+      )
+      for (const item of refused) {
+        expect(item.reason).toBe("unavailable")
+        expect(item.message).toContain("No child was started.")
+      }
+      // Readable again: the next launch reads the count and is admitted.
+      const admitted = yield* Effect.scoped(
+        service
+          .admit({ conversationID: RAISED, requestID: request, limits: limits(), origin: "root", count: 1 })
+          .pipe(Effect.tap((admission) => service.bind(admission, id("readable")))),
+      )
+      expect(admitted.launched).toBe(1)
+      expect((yield* service.status(RAISED, request)).launched).toBe(1)
+    }),
+  )
+
+  it.effect("the request a root's launches count in is the one its prompt loop tracked, else its latest message", () =>
+    Effect.gen(function* () {
+      const service = yield* TaskLimits.Service
+      const root = id("tracked_root")
+      const latest = { findMessage: () => Effect.succeed(Option.none()) } as never
+      expect(yield* service.tracked(root)).toBeUndefined()
+      // Nothing tracked and no message: the root's own ID, as currentRequest gives.
+      expect(yield* TaskLimits.requestFor(service, latest, root)).toBe(root)
+      yield* service.track(root, "msg_opener")
+      yield* service.track(id("other_root"), "msg_other")
+      expect(yield* TaskLimits.requestFor(service, latest, root)).toBe("msg_opener")
+      yield* service.track(root, "msg_next")
+      expect(yield* service.tracked(root)).toBe("msg_next")
     }),
   )
 })

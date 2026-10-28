@@ -501,8 +501,9 @@ function prune(current: State): State {
 }
 
 // A delegated ledger takes the budget from the current config at every link, keeping its spend. A stop the new budget
-// no longer justifies is cleared: a predicted one only when the ceiling rises. Spend already past a lowered limit
-// stops it at once, so a launch checked against it is refused. The warning comes again only under a new ceiling.
+// no longer justifies is cleared, a predicted one included: it estimated the next step of the child that made it, which
+// has stopped. Spend already past a lowered limit stops it at once, so a launch checked against it is refused. The
+// warning comes again only under a new ceiling.
 function rearm(run: Run, budget: RunBudget.Info): Run {
   const next = {
     ...run,
@@ -511,9 +512,7 @@ function rearm(run: Run, budget: RunBudget.Info): Run {
     warned: run.warned && run.budget.usd === budget.usd && run.budget.warnAt === budget.warnAt,
     stopped: undefined,
   }
-  const raised = budget.usd === undefined || budget.usd > (run.budget.usd ?? 0)
-  if (run.stopped?.reason === "loop" || (run.stopped?.reason === "predicted" && !raised))
-    return { ...next, stopped: run.stopped }
+  if (run.stopped?.reason === "loop") return { ...next, stopped: run.stopped }
   const reason =
     budget.usd !== undefined && run.spentUsd >= budget.usd
       ? "cap"
@@ -602,18 +601,15 @@ const layer = Layer.effect(
       keys(current, sessionID).flatMap((key) => {
         const ledger = current.ledgers.get(key)
         if (!ledger) return []
-        // Loop detection belongs to the launch run, not to several nested budgets. Every scope still counts
-        // actual spend and steps once, including in-flight work that finishes after any applicable stop.
+        // Loop detection belongs to the launch run, not to several nested budgets; a child whose launch is its
+        // request's delegated ledger has it on its own ledger, which watches only its own calls. Every scope still
+        // counts actual spend and steps once, including in-flight work that finishes after any applicable stop.
+        const watched = !current.quiet.has(sessionID) && (ledger.kind !== "child" || ledger.id === sessionID)
         return [
           {
             key,
             ledger,
-            next: afterStep(
-              ledger.run,
-              current.quiet.has(sessionID) ? { ...step, tools: [] } : step,
-              sessionID,
-              ledger.kind,
-            ),
+            next: afterStep(ledger.run, watched ? step : { ...step, tools: [] }, sessionID, ledger.kind),
           },
         ]
       })
@@ -791,11 +787,13 @@ const layer = Layer.effect(
             scopes.push(batchKey)
           }
           const childKey = current.next + Number(batch !== undefined && !found)
+          // The delegated ledger the child runs on when its root has no run is shared and never pauses a loop, so the
+          // child's own ledger does: a loop then stops that child alone.
           ledgers.set(childKey, {
             kind: "child",
             id: childID,
             lineage: launch,
-            run: start(childID, options?.budget ?? {}, false),
+            run: start(childID, options?.budget ?? {}, ledgers.get(launch)?.kind === "delegated"),
           })
           scopes.push(childKey)
           return {
