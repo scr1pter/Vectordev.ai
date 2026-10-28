@@ -45,6 +45,63 @@ const DOOM_LOOP_THRESHOLD = 3
 // Tools that change files. Without a snapshot to diff, a successful call to one of these counts as a file change for
 // the spend guard's loop rules.
 const FILE_TOOLS = new Set(["edit", "write", "apply_patch"])
+const COMPUTER_OBSERVATIONS = new Set([
+  "screenshot",
+  "zoom",
+  "cursor_position",
+  "wait",
+  "scroll",
+  "read_ui",
+  "list_apps",
+])
+
+// Screenshot labels, capture IDs and encoded pixels change even when the desktop does not. Both loop guards
+// compare the action's actual target and perceptual frame hash instead. Observations always count as new work.
+function computerSignature(id: string, input: Record<string, unknown>, metadata: Record<string, unknown>) {
+  const actions = Array.isArray(input.actions) && input.actions.length ? input.actions.filter(isRecord) : [input]
+  const frame = isRecord(metadata.frame) ? metadata.frame.hash : undefined
+  const repeat =
+    actions.length > 0 &&
+    !actions.every((action) => COMPUTER_OBSERVATIONS.has(String(action.action))) &&
+    typeof frame === "string" &&
+    frame.length > 0
+  const target = isRecord(metadata.target) ? metadata.target : undefined
+  const point = isRecord(metadata.point) ? metadata.point : undefined
+  const app = isRecord(metadata.app) ? metadata.app.key : undefined
+  const signature = JSON.stringify(
+    actions.map((action) => ({
+      action: action.action,
+      app: actions.length === 1 ? (app ?? action.app) : action.app,
+      window: action.window,
+      display: actions.length === 1 ? (metadata.display ?? action.display) : action.display,
+      target: actions.length === 1 && target ? { role: target.role, name: target.name } : undefined,
+      point: actions.length === 1 && point ? { x: point.x, y: point.y } : { x: action.x, y: action.y },
+      ref: actions.length === 1 && point ? undefined : action.ref,
+      path: Array.isArray(action.path)
+        ? action.path.map((item) => (isRecord(item) ? { x: item.x, y: item.y } : item))
+        : undefined,
+      modifiers: action.modifiers,
+      text: action.text,
+      keys: action.keys,
+      repeat: action.repeat,
+      seconds: action.seconds,
+      direction: action.direction,
+      amount: action.amount,
+      region: isRecord(action.region)
+        ? { x0: action.region.x0, y0: action.region.y0, x1: action.region.x1, y1: action.region.y1 }
+        : undefined,
+      query: action.query,
+    })),
+  )
+  return {
+    input: signature,
+    output: createHash("sha256")
+      .update(repeat ? `${signature}\n${frame}` : id)
+      .digest("hex"),
+    repeat,
+  }
+}
+
 export type Result = "compact" | "stop" | "continue"
 
 export interface Handle {
@@ -313,10 +370,20 @@ const layer = Layer.effect(
         if (!match || match.part.state.status !== "running") return
         // A digest of what the call returned, so the spend guard's loop rules can tell a repeat from a call that got
         // a new answer.
-        const digest = createHash("sha256")
-          .update([output.output, ...(output.attachments ?? []).map((attachment) => attachment.url)].join("\n"))
-          .digest("hex")
-        ctx.stepTools = ctx.stepTools.map((item) => (item.callID === toolCallID ? { ...item, output: digest } : item))
+        const signature =
+          match.part.tool === "computer"
+            ? computerSignature(match.part.id, match.part.state.input, output.metadata)
+            : {
+                input: JSON.stringify(match.part.state.input),
+                output: createHash("sha256")
+                  .update([output.output, ...(output.attachments ?? []).map((attachment) => attachment.url)].join("\n"))
+                  .digest("hex"),
+              }
+        ctx.stepTools = ctx.stepTools.map((item) =>
+          item.callID === toolCallID
+            ? { ...item, input: signature.input, output: signature.output }
+            : item,
+        )
         yield* session.updatePart({
           ...match.part,
           state: {
@@ -330,6 +397,57 @@ const layer = Layer.effect(
           },
         })
         yield* settleToolCall(toolCallID)
+      })
+
+      // This runs only for a normal result event, after settlement. The abort path can complete a call too, but
+      // must not open a new permission request. Page back through this user turn so separate assistant steps count.
+      const checkComputerLoop = Effect.fn("SessionProcessor.checkComputerLoop")(function* (
+        part: SessionV1.ToolPart,
+        metadata: Record<string, unknown>,
+      ) {
+        if (part.state.status !== "running") return
+        const signature = computerSignature(part.id, part.state.input, metadata)
+        if (!signature.repeat) return
+        const recent: SessionV1.ToolPart[] = []
+        let before: string | undefined
+        while (recent.length < DOOM_LOOP_THRESHOLD) {
+          const page = yield* MessageV2.page({ sessionID: ctx.sessionID, limit: DOOM_LOOP_THRESHOLD, before }).pipe(
+            Effect.provideService(Database.Service, database),
+            Effect.orDie,
+          )
+          for (const message of page.items.slice().reverse()) {
+            if (message.info.role !== "assistant" || message.info.parentID !== ctx.assistantMessage.parentID) return
+            for (const item of message.parts.slice().reverse()) {
+              if (item.type !== "tool") continue
+              recent.push(item)
+              if (recent.length === DOOM_LOOP_THRESHOLD) break
+            }
+            if (recent.length === DOOM_LOOP_THRESHOLD) break
+          }
+          if (!page.more || !page.cursor) break
+          before = page.cursor
+        }
+        if (
+          recent.length !== DOOM_LOOP_THRESHOLD ||
+          !recent.every((item) => {
+            if (item.tool !== "computer" || item.state.status !== "completed") return false
+            const other = computerSignature(item.id, item.state.input, item.state.metadata)
+            return other.input === signature.input && other.output === signature.output
+          })
+        )
+          return
+        const internal = (yield* session.get(ctx.sessionID).pipe(Effect.orDie)).internal
+        const agent = internal
+          ? yield* agents.helper(ctx.assistantMessage.agent)
+          : yield* agents.get(ctx.assistantMessage.agent)
+        yield* permission.ask({
+          permission: "doom_loop",
+          patterns: ["computer"],
+          sessionID: ctx.sessionID,
+          metadata: { tool: "computer", input: part.state.input },
+          always: ["computer"],
+          ruleset: agent.permission,
+        })
       })
 
       const failToolCall = Effect.fn("SessionProcessor.failToolCall")(function* (toolCallID: string, error: unknown) {
@@ -561,6 +679,10 @@ const layer = Layer.effect(
                 : value.providerMetadata,
             }))
 
+            // Computer repeats require the completed frame hash; an input-only check would reject observation
+            // loops and repeated actions whose result shows progress before their result can arrive.
+            if (value.name === "computer") return
+
             const parts = yield* MessageV2.parts(ctx.assistantMessage.id).pipe(
               Effect.provideService(Database.Service, database),
             )
@@ -603,17 +725,35 @@ const layer = Layer.effect(
               return
             }
             const rawOutput = toolResultOutput(value)
+            const computer = toolCall?.part.tool === "computer"
             const normalized = yield* Effect.forEach(rawOutput.attachments ?? [], (attachment) =>
               attachment.mime.startsWith("image/")
                 ? image.normalize(attachment).pipe(
                     Effect.catchIf(
-                      (error) => error instanceof Image.ResizerUnavailableError,
+                      (error) => !computer && error instanceof Image.ResizerUnavailableError,
                       () => Effect.succeed(attachment),
                     ),
                     Effect.exit,
                   )
                 : Effect.succeed(Exit.succeed<SessionV1.FilePart>(attachment)),
             )
+            if (
+              computer &&
+              normalized.some(
+                (item, index) =>
+                  Exit.isFailure(item) ||
+                  item.value.url !== rawOutput.attachments?.[index]?.url ||
+                  item.value.mime !== rawOutput.attachments?.[index]?.mime,
+              )
+            ) {
+              yield* failToolCall(
+                value.id,
+                new Error(
+                  "Computer screenshot could not be preserved within image limits. Capture a fresh screenshot within the configured limits before using its coordinates.",
+                ),
+              )
+              return
+            }
             const omitted = normalized.filter(Exit.isFailure).length
             const attachments = normalized.filter(Exit.isSuccess).map((item) => item.value)
             const output = {
@@ -625,6 +765,7 @@ const layer = Layer.effect(
               attachments: attachments.length ? attachments : undefined,
             }
             yield* completeToolCall(value.id, output)
+            if (computer && toolCall) yield* checkComputerLoop(toolCall.part, output.metadata)
             return
           }
 

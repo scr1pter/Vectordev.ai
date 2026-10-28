@@ -32,6 +32,8 @@ import { Plugin } from "../plugin"
 import { MAX_STEPS_PROMPT } from "@vectordevai/core/session/runner/max-steps"
 import { ToolRegistry } from "@/tool/registry"
 import { ComputerAvailability } from "@/computer/availability"
+import { ComputerScale } from "@/computer/scale"
+import { ComputerScreens } from "@/computer/screens"
 import { Computer } from "@vectordevai/schema/computer"
 import { assertExternalDirectoryEffect, readPatterns } from "@/tool/external-directory"
 import type { Tool } from "@/tool/tool"
@@ -2553,6 +2555,7 @@ const layer = Layer.effect(
           const offered = Object.keys(
             LLMRequestPrep.resolveTools({ tools, agent: stepAgent, permission: session.permission, user: lastUser }),
           )
+          const history = stepAgent.name === "quick" ? msgs.filter((message) => message.info.id >= opened) : msgs
           const [skills, env, snapshot, mcpInstructions, modelMsgs] = yield* Effect.all([
             quick ? Effect.succeed(undefined) : sys.skills(agent),
             quick
@@ -2599,10 +2602,9 @@ const layer = Layer.effect(
                 ).pipe(Effect.orDie),
             quick ? Effect.succeed(undefined) : sys.mcp(agent, session.permission),
             // The quick lane sends this request's own messages; autocomplete only the newest one, below.
-            MessageV2.toModelMessagesEffect(
-              stepAgent.name === "quick" ? msgs.filter((message) => message.info.id >= opened) : msgs,
-              model,
-            ),
+            MessageV2.toModelMessagesEffect(history, model, {
+              dropMedia: ComputerScreens.keep(history, ComputerScale.plan(model, yield* config.get())),
+            }),
           ])
           const instructions = snapshot.instructions
           if (tools.memory && snapshot.documents)

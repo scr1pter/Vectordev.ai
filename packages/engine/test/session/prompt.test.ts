@@ -310,6 +310,73 @@ function makeHttpNoLLMServer(input?: { mcpInstructions?: MCP.ServerInstructions[
 
 const it = testEffect(makeHttp())
 const computerPrompts = testEffect(makeHttp({ computer: true }))
+
+computerPrompts.instance("the model request prunes old computer images while retaining recent and other images", () =>
+  withComputer(
+    Effect.gen(function* () {
+      yield* useServerConfig(providerCfg)
+      const sessions = yield* Session.Service
+      const provider = yield* ProviderSvc.Service
+      const prompt = yield* SessionPrompt.Service
+      const model = yield* provider.getModel(ref.providerID, ref.modelID)
+      model.limit.context = 64_000
+      model.capabilities.input.image = true
+      const chat = yield* sessions.create({ title: "Screenshot history" })
+      const previous = yield* seed(chat.id, { finish: "stop" })
+      const data = ["old-one", "old-two", "recent-one", "recent-two", "browser-image"].map((text) =>
+        Buffer.from(text).toString("base64"),
+      )
+      for (const [index, encoded] of data.entries()) {
+        yield* sessions.updatePart({
+          id: PartID.ascending(),
+          sessionID: chat.id,
+          messageID: previous.assistant.id,
+          type: "tool",
+          tool: index === 4 ? "browser" : "computer",
+          callID: `screenshot-${index}`,
+          state: {
+            status: "completed",
+            input: { action: "screenshot" },
+            output: `Screenshot ${index}`,
+            title: "Read screen",
+            metadata: {
+              action: "screenshot",
+              frame: { id: `frame-${index}`, width: 1, height: 1, hash: "0123456789abcdef" },
+            },
+            time: { start: index, end: index + 1 },
+            attachments: [
+              {
+                id: PartID.ascending(),
+                sessionID: chat.id,
+                messageID: previous.assistant.id,
+                type: "file",
+                mime: "image/png",
+                url: `data:image/png;base64,${encoded}`,
+              },
+            ],
+          },
+        })
+      }
+      yield* user(chat.id, "Continue", "build", "thorough")
+      yield* prompt.loop({ sessionID: chat.id })
+      const request = computerRequests.findLast((request) => request.sessionID === chat.id)
+      if (!request) throw new Error("No model request captured")
+      const messages = JSON.stringify(request.messages)
+      expect(messages).not.toContain(data[0])
+      expect(messages).not.toContain(data[1])
+      for (const encoded of data.slice(2)) expect(messages).toContain(encoded)
+      expect(messages.split("[Earlier screenshot removed]")).toHaveLength(3)
+      const stored = (yield* sessions.messages({ sessionID: chat.id })).find(
+        (message) => message.info.id === previous.assistant.id,
+      )
+      expect(
+        stored?.parts.filter(
+          (part) => part.type === "tool" && part.state.status === "completed" && part.state.attachments?.length,
+        ),
+      ).toHaveLength(5)
+    }),
+  ),
+)
 const closingSnapshot = { entered: defer<void>(), release: defer<void>(), tracks: 0 }
 const finishingSnapshots = testEffect(
   LayerNode.compile(LayerNode.group([promptRoot, testLLMServerNode]), [
