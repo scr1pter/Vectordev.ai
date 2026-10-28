@@ -160,15 +160,20 @@ test("request sizing and the Run Guard are called desktop features wherever the 
 // Messages API against Claude Code at the same rates. The README quoted it until it was reduced to one word (owner,
 // 24 October 2026); the investor page's footnote quotes it now, and test/investor-page.test.ts holds its range and
 // caveats to the archive.
-test("the investor page's cost claim names the revision the efficiency archive froze, and no page goes past it", async () => {
+test("the investor page's cost claim dates the runtime the efficiency archive froze, and no page goes past it", async () => {
   const investors = await read("src/pages/investors.astro")
-  // The footnote names the archive and the revision it froze. The landing page no longer carries the note (owner,
-  // 27 October 2026).
+  // The archive freezes one revision of the runtime, committed on 11 October 2026. The footnote gives that date, not
+  // the commit or the archive's place in Vector's repository, which readers of the public page cannot open. The
+  // landing page no longer carries the note (owner, 27 October 2026).
   const archive = await Bun.file(path.join(repo, "docs/benchmarks/vector-efficiency-2026-10/README.md")).text()
   const revision = archive.match(/integrated command-line runtime is frozen at `([0-9a-f]{40})`/)?.[1]
   expect(revision).toBeDefined()
   expect(lander).not.toContain("Low cost, measured")
-  expect(investors).toContain(`(commit ${revision?.slice(0, 9)}) and Claude Code 2.1.215`)
+  expect(investors).toContain("Vector's runtime as of 11 October 2026 and Claude Code 2.1.215")
+  // The frontmatter's comment may point at the archive; the page it renders does not.
+  const rendered = investors.slice(investors.indexOf("---", 3) + 3)
+  expect(rendered).not.toContain(revision!.slice(0, 7))
+  expect(rendered).not.toContain("docs/benchmarks")
   // Never a bare superlative, and nothing from the archive where Claude Code or Codex comes out ahead.
   expect(
     [page, investors].filter((text) => /\bcheapest\b|\blowest[- ]cost\b|MiB|wall[- ]time|Codex [^,.]*cheaper/i.test(text)),
@@ -274,4 +279,15 @@ test("the landing page names neither the upstream project nor Cloud Services", (
     [],
   )
   expect(page).not.toMatch(/Cloud [Ss]ervices/)
+})
+
+// The pictures of the app work in a sample repository, the same ~/code/myapp the terminal docs use, never in the
+// folder on the owner's computer that Vector itself is built in.
+test("the app pictures show a sample repository, not the owner's folder", () => {
+  const traces = /~\/Vectordev|>\s*Vectordev\.ai\s*<|\/Users\/|\/home\/[a-z]|\.codex\/worktrees/
+  expect(shots.filter((shot) => traces.test(shot.text)).map((shot) => shot.file)).toEqual([])
+  const named = (file: string) => shots.find((shot) => shot.file.endsWith(file))?.text ?? ""
+  expect(named("ShotSession.astro")).toContain('<span class="ss-prompt">~/code/myapp (')
+  expect(named("ShotTasksPanel.astro")).toContain("the currently staged patch in ~/code/myapp on branch")
+  expect(named("ShotSidebar.astro")).toContain('<span class="sb-project-name">myapp</span>')
 })

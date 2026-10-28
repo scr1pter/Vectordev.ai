@@ -169,6 +169,8 @@ test("the eval figures in the docs are the dated report's", () => {
   expect(knowledgeEval.caveat).toContain(
     `The eval is ${words[report.fixture.documents]} short specs for a small invented repository and ${requests} requests, written alongside the feature, with no language model call. It is not an independent benchmark.`,
   )
+  // Readers of the docs cannot open Vector's repository, so the caveat does not point to where the report sits in it.
+  expect(knowledgeEval.caveat).not.toMatch(/docs\/benchmarks|Vector's repository/)
   expect(documents).toContain("{knowledgeEval.summary}")
   expect(documents).toContain("{knowledgeEval.caveat}")
 })
