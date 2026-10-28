@@ -24,7 +24,7 @@ checks. Push through the required pre-push typecheck; never bypass it.
 
 | Work | Branch | State / next gate |
 | --- | --- | --- |
-| Release 1.99.112 | `release-prep` | Candidate `dfc98974` landed on clean `main` through all 23 pre-push checks. Full source CI is green. Release run [40781089625](https://github.com/scr1pter/claudeondfsfdaf/actions/runs/40781089625) was dispatched from that exact SHA with the existing catalog. Native checks, catalog parity and protected approval remain gates; publication is not claimed. See `release-199112.md`. |
+| Release 1.99.112 | `release-prep` | Candidate `dfc98974` landed on clean `main` through all 23 pre-push checks. Full source CI is green. Release run [40781089625](https://github.com/scr1pter/claudeondfsfdaf/actions/runs/40781089625) was dispatched from that exact SHA with the existing catalog. Full source CI, native tests, catalog parity and all platform builds passed. The publish job is waiting for the owner's `production-release` review; publication is not claimed. See `release-199112.md`. |
 | Service setup prompt | `vector-takeover` | Written in `codex-setup-prompt.md`. No external setup performed. |
 | Multi-agent parity | `self-evolving` | WP1–22 inherited; WP23 committed with 237 passing cases and engine typecheck. WP24 committed in the follow-up worktree with 231 passing cases and independent review closed. WP25 is in progress; phase/final review and later work packages remain. |
 | Codium | `codium` | A00–08 inherited; A09 committed with 230 passing tests and API typecheck. Inherited CI fixture fixes are committed and the complete Codium CI run `40779479590` passes, including browser specs and all eight typechecks. A10 in progress; A11–60 and Track B remain. Protected provider end-to-end setup needs the owner. |
@@ -57,8 +57,10 @@ as part of Codium. Do not implement Vector Labs, team features or parked R2 work
   later releases and unlisted main merges need separate authorization.
 - Keep the existing catalog for 1.99.112, as the owner directed. The restored
   catalog is separate; landing it later requires coordinated fork and mirror pins.
-  This session receives HTTP 403 listing Actions variables; release validation
-  must continue to enforce catalog parity.
+  This session receives HTTP 403 listing Actions variables. Release catalog job
+  `123143384093` verified the existing fork revision
+  `52edfd113616e57761c70fd5d01ac578d645211c` and the unchanged
+  `a96b465110dd2fcc38e0dcca1a4115e12ea43ddaafdb0ebf587e15026767bf14` digest.
 - Codium's ordinary CI already ran, including its typecheck matrix; the handoff
   note about branch approval was stale. Its protected provider end-to-end lane
   still requires the owner's `codium-test` environment and test-only secrets.
