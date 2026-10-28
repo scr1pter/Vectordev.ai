@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto"
 import { drainOutbox } from "../_lib/codium-provision.js"
+import { queueCollectionSweep } from "../_lib/codium-collection.js"
 // Registers the `finalize-renewal` action this cron runs (contract §4.4).
 import "../_lib/codium-renewal.js"
 import { drainDebitApplies } from "../_lib/model-plan-account.js"
@@ -24,6 +25,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
       throw new ApiError(401, "NOT_AUTHORIZED", "This endpoint is reserved for the Codium outbox job.")
     if (!process.env.STRIPE_SECRET_KEY?.trim()) return json(response, 200, { enabled: false })
     const started = Date.now()
+    await queueCollectionSweep(fetcher, started)
     const outbox = await drainOutbox({ budgetMs: OUTBOX_BUDGET_MS, fetcher })
     // Another drain holds the lock and runs the debits after it.
     const debits = outbox.busy

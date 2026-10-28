@@ -1,4 +1,5 @@
 import { checkCodiumFunding, CODIUM_FUNDING_MAX_AGE_MS, readCodiumFunding } from "./codium-funding.js"
+import { rememberCollectionInvoice } from "./codium-collection.js"
 import { codiumKeyLimitUsd } from "./codium-limits.js"
 import { notifyOwner } from "./codium-owner.js"
 import { enqueueAction, registerAction } from "./codium-provision.js"
@@ -144,7 +145,7 @@ export async function finalizeRenewal(
       if (!raw || !own) return skipped("not-codium")
       const reason = await refusal({ record, raw, own, standings, fetcher, now })
       if (reason) {
-        const paused = PAUSES.has(reason) && (await stopCollection(invoice, raw, reason, verify, fetcher, now))
+        const paused = PAUSES.has(reason) && (await stopCollection(account, invoice, raw, reason, verify, fetcher, now))
         await alertOwner(account, subscription, invoiceId, reason, paused, fetcher)
         return { outcome: "refused", invoice: invoiceId, account, reason, paused }
       }
@@ -193,7 +194,7 @@ async function refusal(input: {
   now: number
 }): Promise<RenewalRefusal | undefined> {
   const { record, raw, own, standings, fetcher, now } = input
-  if (!modelPlansEnabled() || (await readSwitch("codium", fetcher)) === "off") return "codium-off"
+  if (!modelPlansEnabled() || (await readSwitch("codium", fetcher, { fresh: true })) === "off") return "codium-off"
   // A dispute, a fraud warning, a block or a deletion holds the account whatever Stripe says.
   if (riskState(record)) return "frozen"
   if (standings.some((value) => value.supersedes === own.id && value.state !== "none")) return "superseded"
@@ -236,6 +237,7 @@ async function renewalFunded(credits: number | undefined, fetcher: typeof fetch,
  * takes this charge. Returns whether collection is paused now.
  */
 async function stopCollection(
+  account: string,
   invoice: Record<string, unknown>,
   subscription: Record<string, unknown>,
   reason: RenewalRefusal,
@@ -244,10 +246,11 @@ async function stopCollection(
   now: number,
 ) {
   const id = String(invoice.id)
+  await rememberCollectionInvoice(account, String(subscription.id), id, verify, fetcher)
   const hour = Math.floor(now / 3_600_000)
   const pausable = ["active", "past_due", "unpaid", "trialing"].includes(String(subscription.status))
   const pause = stripeRecord(subscription.pause_collection) ? subscription.pause_collection : undefined
-  if (pausable && pause?.behavior !== "void") {
+  if (pausable && !subscription.pause_collection) {
     await verify()
     await modelPlanStripe(
       `subscriptions/${encodeURIComponent(String(subscription.id))}`,
@@ -263,11 +266,15 @@ async function stopCollection(
     await verify()
     await modelPlanStripe(
       `invoices/${encodeURIComponent(id)}`,
-      { method: "POST", idempotency: `vector-hold-${id}-${hour}`, body: new URLSearchParams({ auto_advance: "false" }) },
+      {
+        method: "POST",
+        idempotency: `vector-hold-${id}-${hour}`,
+        body: new URLSearchParams({ auto_advance: "false" }),
+      },
       fetcher,
     )
   }
-  return pausable || pause?.behavior === "void"
+  return (pausable && !subscription.pause_collection) || pause?.behavior === "void"
 }
 
 const REFUSAL_LINES: Record<RenewalRefusal, string> = {

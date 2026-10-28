@@ -4,6 +4,7 @@ import { Option, Schema } from "effect"
 import { codiumKey, owedKeyName } from "./codium-keys.js"
 import { ApiError } from "./http.js"
 import { MODEL_PLAN_ROOT, modelPlans } from "./model-plan-config.js"
+import { notifyOwner } from "./codium-owner.js"
 import { stripeRecord } from "./model-plan-stripe.js"
 import { persistentStore } from "./persistent-store.js"
 
@@ -29,11 +30,42 @@ const Funding = Schema.Struct({
   required: Schema.NullOr(Schema.Number),
   keys: Schema.NullOr(Schema.Number),
   notifiedAt: Schema.optional(Schema.Number),
+  notificationPending: Schema.optional(Schema.Boolean),
+  // Private amounts and rates are integer cents; runway is days, or unknown until spend has been observed.
+  usage: Schema.optional(Schema.NullOr(Schema.Number)),
+  totalCredits: Schema.optional(Schema.NullOr(Schema.Number)),
+  usageResetAt: Schema.optional(Schema.Number),
+  spendPerDay: Schema.optional(Schema.NullOr(Schema.Number)),
+  spendPerHour: Schema.optional(Schema.NullOr(Schema.Number)),
+  runwayDays: Schema.optional(Schema.NullOr(Schema.Number)),
+  lowWater: Schema.optional(Schema.Boolean),
+  spike: Schema.optional(Schema.Boolean),
+  topupWatchdog: Schema.optional(
+    Schema.Struct({
+      threshold: Schema.Number,
+      observedCredits: Schema.Number,
+      since: Schema.optional(Schema.Number),
+      overdue: Schema.Boolean,
+    }),
+  ),
 })
 export type CodiumFunding = typeof Funding.Type
 
+const HistoryPoint = Schema.Struct({
+  checkedAt: Schema.Number,
+  balance: Schema.Number,
+  owed: Schema.Number,
+  reserved: Schema.Number,
+  required: Schema.Number,
+  keys: Schema.Number,
+  usage: Schema.Number,
+  totalCredits: Schema.Number,
+})
+export type CodiumFundingPoint = typeof HistoryPoint.Type
+
 // Read at each call: the mode namespace comes from the environment.
 const FUNDING_KEY = () => codiumKey("funding")
+const HISTORY_KEY = () => codiumKey("funding", "history")
 const LOCK_KEY = () => codiumKey("funding", "lock")
 // One reservation per checkout, "<checkout's idempotency key>" -> "<lapses at>:<cents>". A buyer's new checkout gives
 // back their earlier checkout's reservation only when that one can no longer be paid (it closed it, or Stripe had), so
@@ -57,6 +89,11 @@ export const FUNDING_SCRIPTS = {
 // sale runs a check of its own first.
 export const CODIUM_FUNDING_MAX_AGE_MS = 15 * 60_000
 const REMINDER_MS = 24 * 60 * 60_000
+const HOUR_MS = 60 * 60_000
+const HISTORY_MS = 7 * REMINDER_MS
+const HISTORY_INTERVAL_MS = 5 * 60_000
+const MAX_HISTORY_POINTS = HISTORY_MS / HISTORY_INTERVAL_MS + 1
+const TOPUP_DEADLINE_MS = 20 * 60_000
 // Bounds the key listing; an account this large needs a different store of what is owed.
 const MAX_KEYS = 50_000
 
@@ -66,13 +103,40 @@ export async function readCodiumFunding(fetcher: typeof fetch = fetch) {
   return Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(Funding))(saved))
 }
 
+/** Private owner telemetry, coalesced into five-minute buckets and retained for seven days. */
+export async function readCodiumFundingHistory(fetcher: typeof fetch = fetch, now = Date.now()) {
+  const saved = await persistentStore(["GET", HISTORY_KEY()], fetcher)
+  if (saved === null) return []
+  const points = Option.getOrUndefined(
+    Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(HistoryPoint)))(saved),
+  )
+  if (
+    !points ||
+    points.length > MAX_HISTORY_POINTS ||
+    points.some(
+      (point) =>
+        Object.values(point).some((value) => !Number.isSafeInteger(value)) ||
+        point.usage < 0 ||
+        point.totalCredits < 0 ||
+        point.owed < 0 ||
+        point.reserved < 0 ||
+        point.required < 0 ||
+        point.keys < 0,
+    )
+  )
+    throw new ApiError(503, "CODIUM_FUNDING_HISTORY_UNAVAILABLE", "Codium funding history could not be verified.")
+  return points
+    .filter((point) => point.checkedAt >= now - HISTORY_MS && point.checkedAt <= now)
+    .sort((first, second) => first.checkedAt - second.checkedAt)
+}
+
 /** Reads the balance and what is owed, opens or pauses sales, and emails the owner when that changes. */
 export async function checkCodiumFunding(fetcher: typeof fetch = fetch, now = Date.now()) {
   const lease = randomUUID()
   // One check at a time, so a change of state sends one email.
   const lock = LOCK_KEY()
   if ((await persistentStore(["SET", lock, lease, "NX", "PX", 60_000], fetcher)) !== "OK")
-    return { ...(await readCodiumFunding(fetcher)), notified: false, ran: false }
+    return { ...(await readCodiumFunding(fetcher)), notified: false, alerts: 0, ran: false }
   return measureFunding(fetcher, now).finally(() =>
     persistentStore(["EVAL", FUNDING_SCRIPTS.RELEASE, 1, lock, lease], fetcher).catch(() => undefined),
   )
@@ -81,7 +145,7 @@ export async function checkCodiumFunding(fetcher: typeof fetch = fetch, now = Da
 async function measureFunding(fetcher: typeof fetch, now: number) {
   const previous = await readCodiumFunding(fetcher)
   // A check that cannot finish pauses sales at once: without a reading, selling could promise credits Vector cannot pay.
-  const reading = await fundingReading(fetcher, now).then(
+  const reading = await fundingReading(fetcher, now, previous).then(
     (value) => ({
       ...value,
       status: value.balance >= value.required ? ("open" as const) : ("paused" as const),
@@ -98,6 +162,15 @@ async function measureFunding(fetcher: typeof fetch, now: number) {
       reserved: null,
       required: null,
       keys: null,
+      usage: null,
+      totalCredits: null,
+      usageResetAt: previous?.usageResetAt,
+      spendPerDay: null,
+      spendPerHour: null,
+      runwayDays: null,
+      lowWater: false,
+      spike: false,
+      topupWatchdog: previous?.topupWatchdog,
       failure,
     }),
   )
@@ -114,18 +187,43 @@ async function measureFunding(fetcher: typeof fetch, now: number) {
     required: reading.required,
     keys: reading.keys,
     notifiedAt: changed ? undefined : previous?.notifiedAt,
+    notificationPending: changed
+      ? previous !== undefined || reading.status === "paused"
+      : previous?.notificationPending,
+    usage: reading.usage,
+    totalCredits: reading.totalCredits,
+    usageResetAt: reading.usageResetAt,
+    spendPerDay: reading.spendPerDay,
+    spendPerHour: reading.spendPerHour,
+    runwayDays: reading.runwayDays,
+    lowWater: reading.lowWater,
+    spike: reading.spike,
+    topupWatchdog: reading.topupWatchdog,
   }
   await persistentStore(["SET", FUNDING_KEY(), JSON.stringify(funding)], fetcher)
   // Tell the owner when sales pause or the reason changes, each day they stay paused, and when they reopen.
   const notify =
     funding.status === "paused"
       ? funding.notifiedAt === undefined || now - funding.notifiedAt >= REMINDER_MS
-      : changed && previous !== undefined
-  const notified = notify && (await emailOwner(funding, reading.failure, fetcher))
-  if (notified) await persistentStore(["SET", FUNDING_KEY(), JSON.stringify({ ...funding, notifiedAt: now })], fetcher)
+      : funding.notificationPending === true
+  const alerts = await fundingAlerts(funding, fetcher)
+  const notification = notify ? await emailOwner(funding, reading.failure, fetcher, now) : undefined
+  const delivered = notification === "sent" || notification === "duplicate"
+  if (delivered)
+    await persistentStore(
+      ["SET", FUNDING_KEY(), JSON.stringify({ ...funding, notifiedAt: now, notificationPending: false })],
+      fetcher,
+    )
   // The scheduled job still reports the failure, so its log shows the check did not run.
   if (funding.reason === "unavailable") throw reading.failure
-  return { ...funding, notifiedAt: notified ? now : funding.notifiedAt, notified, ran: true }
+  return {
+    ...funding,
+    notifiedAt: delivered ? now : funding.notifiedAt,
+    notificationPending: delivered ? false : funding.notificationPending,
+    notified: notification === "sent" || alerts > 0,
+    alerts: alerts + Number(notification === "sent"),
+    ran: true,
+  }
 }
 
 /**
@@ -134,22 +232,150 @@ async function measureFunding(fetcher: typeof fetch, now: number) {
  * to refuse a purchase, the next check pauses sales and tells the owner, unless the balance has grown since. Codium
  * sells monthly plans only, so the largest purchase is the largest plan's credits.
  */
-async function fundingReading(fetcher: typeof fetch, now: number) {
+async function fundingReading(fetcher: typeof fetch, now: number, previous: CodiumFunding | undefined) {
   const margin = fundingMargin()
+  const thresholds = fundingThresholds()
   const largest = Math.max(0, ...modelPlans().map((plan) => Math.round(plan.credits * 100)))
-  const balance = await openRouterBalance(fetcher)
+  const account = await openRouterBalance(fetcher)
   const owed = await creditsOwed(fetcher, now)
   const reserved = Number(
     await persistentStore(["EVAL", `${RESERVATIONS}return reserved`, 1, RESERVED_KEY(), now, "", ""], fetcher),
   )
   if (!Number.isSafeInteger(reserved)) throw unavailable()
-  return {
-    balance,
+  const point = {
+    checkedAt: now,
+    ...account,
     owed: owed.cents,
     reserved,
     required: Math.ceil(((owed.cents + reserved + largest) * (100 + margin.percent)) / 100) + margin.cents,
     keys: owed.keys,
   }
+  return { ...point, ...(await fundingObservations(point, thresholds, previous, fetcher)) }
+}
+
+async function fundingObservations(
+  point: CodiumFundingPoint,
+  thresholds: { topup: number | undefined; spike: number | undefined },
+  previous: CodiumFunding | undefined,
+  fetcher: typeof fetch,
+) {
+  if (Object.values(point).some((value) => !Number.isSafeInteger(value))) throw unavailable()
+  const bucket = Math.floor(point.checkedAt / HISTORY_INTERVAL_MS)
+  const recorded = await readCodiumFundingHistory(fetcher, point.checkedAt)
+  // Detect before coalescing: the higher counter may be the reading this same bucket replaces.
+  const lastUsage = previous?.usage ?? recorded.at(-1)?.usage
+  const usageResetAt = lastUsage !== undefined && point.usage < lastUsage ? point.checkedAt : previous?.usageResetAt
+  const history = [
+    ...recorded.filter((item) => Math.floor(item.checkedAt / HISTORY_INTERVAL_MS) !== bucket),
+    point,
+  ].slice(-MAX_HISTORY_POINTS)
+  await persistentStore(["SET", HISTORY_KEY(), JSON.stringify(history), "PX", HISTORY_MS], fetcher)
+  // Provider usage is cumulative. Top-ups do not reduce measured spend; a usage adjustment starts a fresh baseline.
+  const reset = history.findLastIndex((item, index) => index > 0 && item.usage < history[index - 1]!.usage)
+  const observed = history
+    .slice(Math.max(0, reset))
+    .filter((item) => usageResetAt === undefined || item.checkedAt >= usageResetAt)
+  const spendPerDay = spendingRate(observed, REMINDER_MS)
+  const spendPerHour = spendingRate(
+    observed.filter((item) => item.checkedAt >= point.checkedAt - HOUR_MS),
+    HOUR_MS,
+  )
+  const earlier = previous?.topupWatchdog
+  const since =
+    thresholds.topup !== undefined && point.balance < thresholds.topup
+      ? earlier?.threshold === thresholds.topup && earlier.observedCredits === point.totalCredits
+        ? (earlier.since ?? point.checkedAt)
+        : point.checkedAt
+      : undefined
+  return {
+    usageResetAt,
+    spendPerDay,
+    spendPerHour,
+    runwayDays:
+      spendPerDay !== null && spendPerDay > 0
+        ? Math.round((Math.max(0, point.balance) / spendPerDay) * 100) / 100
+        : null,
+    lowWater: point.balance >= point.required && point.balance <= point.required * 1.25,
+    spike: thresholds.spike !== undefined && spendPerHour !== null && spendPerHour >= thresholds.spike,
+    topupWatchdog:
+      thresholds.topup === undefined
+        ? undefined
+        : {
+            threshold: thresholds.topup,
+            observedCredits: point.totalCredits,
+            since,
+            overdue: since !== undefined && point.checkedAt - since >= TOPUP_DEADLINE_MS,
+          },
+  }
+}
+
+function spendingRate(points: readonly CodiumFundingPoint[], period: number) {
+  const first = points[0]
+  const last = points.at(-1)
+  if (!first || !last || last.checkedAt - first.checkedAt < HISTORY_INTERVAL_MS) return null
+  const rate = Math.ceil(((last.usage - first.usage) * period) / (last.checkedAt - first.checkedAt))
+  if (!Number.isSafeInteger(rate) || rate < 0) throw unavailable()
+  return rate
+}
+
+function fundingThresholds() {
+  const cents = (name: string) => {
+    const raw = process.env[name]?.trim()
+    if (!raw) return undefined
+    const value = Number(raw)
+    const amount = Math.round(value * 100)
+    if (!Number.isFinite(value) || amount <= 0 || !Number.isSafeInteger(amount))
+      throw new ApiError(503, "CODIUM_FUNDING_CONFIGURATION", "The Codium funding alerts are not configured correctly.")
+    return amount
+  }
+  return {
+    topup: cents("CODIUM_OPENROUTER_TOPUP_THRESHOLD_USD"),
+    spike: cents("CODIUM_SPEND_SPIKE_USD_PER_HOUR"),
+  }
+}
+
+async function fundingAlerts(funding: CodiumFunding, fetcher: typeof fetch) {
+  if (funding.balance === null || funding.required === null) return 0
+  const alerts = [
+    ...(funding.lowWater
+      ? [
+          {
+            kind: "funding-low-water",
+            subject: "Vector Codium funding is low",
+            lines: [
+              "OpenRouter's balance is at or below 1.25 times the amount required to fund Codium sales.",
+              "Check the dashboard's auto top-up settings before the funding guard has to pause new sales.",
+            ],
+          },
+        ]
+      : []),
+    ...(funding.topupWatchdog?.overdue
+      ? [
+          {
+            kind: `funding-topup:${funding.topupWatchdog.since}`,
+            subject: "Vector Codium OpenRouter auto top-up has not arrived",
+            lines: [
+              "OpenRouter's balance has stayed below the configured auto top-up threshold for at least 20 minutes without a detected credit addition.",
+              "Check https://openrouter.ai/settings/credits and the funding card. Vector cannot purchase credits by API.",
+            ],
+          },
+        ]
+      : []),
+    ...(funding.spike
+      ? [
+          {
+            kind: "funding-spend-spike",
+            subject: "Vector Codium OpenRouter spend spike",
+            lines: [
+              "Observed OpenRouter usage has reached the configured hourly spend alert threshold.",
+              "Review the provider dashboard and Codium activity. This warning does not change existing subscribers' access.",
+            ],
+          },
+        ]
+      : []),
+  ]
+  const sent = await Promise.all(alerts.map((alert) => notifyOwner(alert, fetcher)))
+  return sent.filter((result) => result === "sent").length
 }
 
 /**
@@ -226,10 +452,16 @@ async function openRouterBalance(fetcher: typeof fetch) {
     typeof data.total_credits !== "number" ||
     typeof data.total_usage !== "number" ||
     !Number.isFinite(data.total_credits) ||
-    !Number.isFinite(data.total_usage)
+    !Number.isFinite(data.total_usage) ||
+    data.total_credits < 0 ||
+    data.total_usage < 0
   )
     throw unavailable()
-  return Math.floor((data.total_credits - data.total_usage) * 100)
+  return {
+    balance: Math.floor((data.total_credits - data.total_usage) * 100),
+    usage: Math.ceil(data.total_usage * 100),
+    totalCredits: Math.floor(data.total_credits * 100),
+  }
 }
 
 /** What every enabled, unexpired Codium key could still spend: its credit limit less its usage. */
@@ -296,11 +528,7 @@ function fundingMargin() {
   return { percent, cents: Math.round(dollars * 100) }
 }
 
-async function emailOwner(funding: CodiumFunding, failure: unknown, fetcher: typeof fetch) {
-  const key = process.env.RESEND_API_KEY?.trim()
-  const from = process.env.VECTOR_PURCHASE_EMAIL_FROM?.trim()
-  const to = process.env.CODIUM_OWNER_EMAIL?.trim() || process.env.VECTOR_BUG_REPORT_TO?.trim()
-  if (!key || !from || !to) return false
+async function emailOwner(funding: CodiumFunding, failure: unknown, fetcher: typeof fetch, now: number) {
   const money = (cents: number | null) => (cents === null ? "unknown" : `$${(cents / 100).toFixed(2)}`)
   const amounts = [
     `OpenRouter balance: ${money(funding.balance)}`,
@@ -342,14 +570,13 @@ async function emailOwner(funding: CodiumFunding, failure: unknown, fetcher: typ
               "Add credits at https://openrouter.ai/settings/credits, or raise the auto top-up threshold above the amount needed.",
             ],
           }
-  const response = await fetcher("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
-    body: JSON.stringify({ from, to, subject: message.subject, text: message.lines.join("\n") }),
-    redirect: "error",
-    signal: AbortSignal.timeout(10_000),
-  }).catch(() => undefined)
-  return response?.ok === true
+  return notifyOwner(
+    {
+      kind: `funding:${funding.status}:${funding.reason ?? "healthy"}:${funding.since}:${Math.floor(now / REMINDER_MS)}`,
+      ...message,
+    },
+    fetcher,
+  )
 }
 
 function unavailable() {

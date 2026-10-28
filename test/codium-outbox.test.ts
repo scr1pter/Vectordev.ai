@@ -754,7 +754,8 @@ describe("the outbox cron", () => {
     const answer = await call(fakes.fetcher, "GET", "Bearer cron-fixture-secret")
     expect(answer).toEqual({
       status: 200,
-      body: { enabled: true, outbox: { ...NOTHING, applied: 1 }, debits: { applied: 0, retried: 0 } },
+      // The revocation, A11 switch-generation scan and its indexed account collection check each complete.
+      body: { enabled: true, outbox: { ...NOTHING, applied: 3 }, debits: { applied: 0, retried: 0 } },
     })
     expect(await runTokensRevokedBefore(ACCOUNT, fakes.fetcher)).toBe(fakes.clock.now)
 

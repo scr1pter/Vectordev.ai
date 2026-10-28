@@ -1,6 +1,6 @@
 # A10 risk build notes
 
-Implemented on `codium-next`, based on A09 at `38aae992`. Local validation and independent safety review are complete; protected provider e2e and branch CI remain release checks.
+Implemented on `codium-next`, based on A09 at `38aae992`. Local validation and independent safety review are complete. Full branch CI passed at canonical `ee181efa`; protected provider e2e remains a release check.
 
 ## Boundaries
 
@@ -49,6 +49,8 @@ All tests ran one file at a time from `packages/web`, with a 30-second per-test 
 - `packages/web/test/codium-payments.test.ts`: 22 passing against real Valkey and local HTTP providers. Its fakes now support the authoritative invoice/subscription reads and collection writes A10 requires.
 
 Total: **277 unique passing tests across 10 files**, including **7 real Valkey cases**; API typecheck passed. The ephemeral server was shut down afterward. Independent billing review rechecked pause ownership/idempotency, direct admission, pending liability and full/visible origin allocation and found no remaining confirmed blockers.
+
+Full GitHub acceptance: [run 40783630533](https://github.com/scr1pter/claudeondfsfdaf/actions/runs/40783630533) completed successfully at canonical `ee181efa`, including all eight typechecks, all selected test files, browser checks, and API/client gates. The inherited legacy top-up-removal fixture now permits paid-history fields and supports the deferred-liability read; this CI-only fix is included in the A11 worktree.
 
 ## Protected test-mode e2e checklist
 

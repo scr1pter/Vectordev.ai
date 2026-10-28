@@ -4,7 +4,8 @@ import { persistentStore } from "./persistent-store.js"
 /*
  * Owner alerts for Vector Codium (contract §4.6 `owner:alert:<kind>`). WP A06 starts this module with the one sender
  * the outbox needs: dead letters and the `owner-notify` provisioner. WP A11 generalises the funding check's email into
- * it. An alert names accounts by id only, never by email, and carries no amounts.
+ * it. An alert names accounts by id only, never by email. Funding amounts are private to the owner's email; other
+ * provisioner alerts carry no amounts. Nothing this sender returns exposes the email contents.
  */
 
 /** What became of an alert: sent now, sent before (deduplicated), not configured here, or the send failed. */

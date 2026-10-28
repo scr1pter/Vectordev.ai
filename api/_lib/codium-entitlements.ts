@@ -1,4 +1,8 @@
-import { ENTITLEMENTS, type EntitlementSnapshot, type Entitlements } from "../../packages/schema/src/codium-entitlements.js"
+import {
+  ENTITLEMENTS,
+  type EntitlementSnapshot,
+  type Entitlements,
+} from "../../packages/schema/src/codium-entitlements.js"
 import { PLANS, type PlanId } from "../../packages/schema/src/codium-plan.js"
 import { codiumKey } from "./codium-keys.js"
 import { renewalGraceMinutes } from "./codium-limits.js"
@@ -11,6 +15,7 @@ import {
   runMeterAdd,
   SNAPSHOT_RECHECK_MS,
 } from "./codium-snapshot.js"
+import { readSwitch } from "./codium-switches.js"
 import { ApiError } from "./http.js"
 import { reconcileModelPlanAccount } from "./model-plan-account.js"
 import { persistentStore } from "./persistent-store.js"
@@ -103,6 +108,8 @@ export async function requireEntitlement(
   fetcher: typeof fetch = fetch,
   now = Date.now(),
 ): Promise<EntitlementSnapshot> {
+  if (perk === "codium" && (await readSwitch("codium", fetcher, { now })) !== "on")
+    throw new ApiError(503, "MODEL_PLANS_DISABLED", "Vector Codium is temporarily unavailable.")
   const snapshot = await readEntitlement(account, fetcher, now)
   if (!snapshot || snapshot.state === "none")
     throw new ApiError(402, "MODEL_PLAN_REQUIRED", "Choose a Vector Codium plan to use this.")
@@ -115,7 +122,9 @@ export async function requireEntitlement(
   }
   if (snapshot.state === "paused") {
     const reason =
-      snapshot.reason === "action_required" || snapshot.reason === "payment_pending" ? snapshot.reason : "payment_failed"
+      snapshot.reason === "action_required" || snapshot.reason === "payment_pending"
+        ? snapshot.reason
+        : "payment_failed"
     throw new ApiError(402, "MODEL_PLAN_PAYMENT_REQUIRED", PAYMENT_MESSAGES[reason], {
       detail: { reason, action: ACTIONS[reason] },
     })

@@ -12,6 +12,7 @@ import { withBillingMutation } from "./billing-lock.js"
 import { requireCodiumSales, reserveCodiumSale } from "./codium-funding.js"
 import { writeRampOwed } from "./codium-ramp.js"
 import { readSwitch } from "./codium-switches.js"
+import { syncCodiumCollection } from "./codium-collection.js"
 import {
   authenticatedCharge,
   blockFraudCard,
@@ -524,6 +525,14 @@ export async function reconcileModelPlanAccount(
       // Access is durably stopped before a refund/cancel/pause can fail or time out.
       if (standing.state === "ended" || standing.state === "none") await writeRampOwed(id, 0, fetcher)
       await applyRiskEffects(id, updated, current, review.actionable, verify, fetcher, now)
+      await syncCodiumCollection(
+        id,
+        (await readModelPlanAccount(id, fetcher)) ?? updated,
+        current,
+        verify,
+        fetcher,
+        now,
+      )
       if (updated.poolRamp && now < updated.poolRamp.until)
         await enqueueAction(
           "pool-ramp",
@@ -835,7 +844,8 @@ async function applyRiskEffects(
     return
   }
   // Another risk hold, an owner pause, a stopped service or a superseded subscription never gets auto-resumed.
-  if (riskState(account) || !modelPlansEnabled() || (await readSwitch("codium", fetcher)) !== "on") return
+  if (riskState(account) || !modelPlansEnabled() || (await readSwitch("codium", fetcher, { fresh: true })) !== "on")
+    return
   const governing = planStanding(id, account, owned, now, { known: knownPeriods(account, undefined) }).governing
   const cleared = new Set<string>()
   for (const paused of risk.paused ?? []) {
@@ -1458,6 +1468,8 @@ export async function modelPlanCredential(
   requiredCredits = 0,
   options: { purpose?: PoolPurpose; runId?: string } = {},
 ) {
+  if ((await readSwitch("codium", fetcher, { now })) !== "on")
+    throw new ApiError(503, "MODEL_PLANS_DISABLED", "Vector Codium is temporarily unavailable.")
   // A request's largest cost, in whole micro-dollars and never rounded down.
   const required = requiredCredits > 0 ? usdToMicroCeil(requiredCredits) : 0
   return holdCredits(
@@ -2581,7 +2593,7 @@ export async function modelPlanChange(
         await saveAccount(user.id, { ...account, downgrade: undefined }, fetcher)
         return { scheduled: { plan: planID, at: paid.end * 1000 } }
       }
-      if ((await readSwitch("sales", fetcher)) !== "on") throw changeUnavailable()
+      if ((await readSwitch("sales", fetcher, { fresh: true })) !== "on") throw changeUnavailable()
       const funding = await requireCodiumSales(fetcher, now)
       const riskFields = await checkoutRiskFields(user.id, account.customer, target.price, fetcher)
       const requires3DS = "payment_method_options[card][request_three_d_secure]" in riskFields
@@ -2692,7 +2704,7 @@ export async function modelPlanCheckout(
   const priceID = plan.priceID
   requireCodiumCheckoutUser(user)
   // Sell only credits Vector's OpenRouter balance can pay for.
-  if ((await readSwitch("sales", fetcher)) !== "on") throw changeUnavailable()
+  if ((await readSwitch("sales", fetcher, { fresh: true })) !== "on") throw changeUnavailable()
   const funding = await requireCodiumSales(fetcher, now)
   return withAccountLease(
     user.id,

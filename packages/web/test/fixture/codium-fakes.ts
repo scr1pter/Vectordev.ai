@@ -4,6 +4,7 @@ import { FUNDING_SCRIPTS } from "../../../../api/_lib/codium-funding"
 import { RAMP_SCRIPTS } from "../../../../api/_lib/codium-ramp"
 import { POOL_SCRIPTS } from "../../../../api/_lib/codium-pool"
 import { OUTBOX_SCRIPTS } from "../../../../api/_lib/codium-provision"
+import { SWITCH_SCRIPTS } from "../../../../api/_lib/codium-switches"
 import { SNAPSHOT_SCRIPTS } from "../../../../api/_lib/codium-snapshot"
 
 /*
@@ -52,6 +53,7 @@ export class FakeClock {
 type Value =
   | { kind: "string"; value: string }
   | { kind: "hash"; value: Map<string, string> }
+  | { kind: "set"; value: Set<string> }
   | { kind: "zset"; value: Map<string, number> }
 type Script = (keys: string[], argv: string[]) => unknown
 
@@ -117,6 +119,22 @@ export class FakeStore {
         return args.reduce((count, key) => count + (this.remove(key) ? 1 : 0), 0)
       case "PTTL":
         return this.pttl(args[0]!)
+      case "SMEMBERS":
+        return [...this.members(args[0]!)]
+      case "SADD": {
+        const members = this.members(args[0]!)
+        const before = members.size
+        args.slice(1).forEach((value) => members.add(value))
+        return members.size - before
+      }
+      case "SREM": {
+        const members = this.members(args[0]!)
+        const removed = args.slice(1).reduce((sum, value) => sum + (members.delete(value) ? 1 : 0), 0)
+        this.prune(args[0]!)
+        return removed
+      }
+      case "ZSCAN":
+        return ["0", [...this.zset(args[0]!)].flatMap(([member, score]) => [member, String(score)])]
       case "HSET":
         this.hash(args[0]!).set(args[1]!, args[2]!)
         return 1
@@ -192,6 +210,13 @@ export class FakeStore {
     this.data.set(key, { kind: "hash", value: created })
     return created
   }
+  members(key: string) {
+    const value = this.live(key)
+    if (value?.kind === "set") return value.value
+    const created = new Set<string>()
+    this.data.set(key, { kind: "set", value: created })
+    return created
+  }
   zset(key: string) {
     const value = this.live(key)
     if (value?.kind === "zset") return value.value
@@ -265,6 +290,42 @@ export class FakeStore {
           if (Number(argv[5]) < required) return 0
           this.hash(key!).set(argv[1]!, `${argv[4]}:${argv[3]}`)
           return 1
+        },
+      ],
+      [
+        SWITCH_SCRIPTS.WRITE,
+        ([key, audit], [value, record, event, now, before, ttl]) => {
+          const raw = this.get(key!)
+          const old = raw?.startsWith("{") ? JSON.parse(raw) : undefined
+          const previous = old?.value ?? raw ?? "on"
+          if (previous === value && old?.generation && old?.changedAt !== undefined) return [raw, 0]
+          const saved = JSON.parse(record!)
+          if (value === "off" && previous === "off" && old?.offSince !== undefined) saved.offSince = old.offSince
+          const rawSaved = JSON.stringify(saved)
+          this.set(key!, rawSaved)
+          const entries = this.zset(audit!)
+          for (const [member, score] of entries) if (score <= Number(before)) entries.delete(member)
+          entries.set(JSON.stringify({ ...JSON.parse(event!), previous }), Number(now))
+          this.expires.set(audit!, this.clock.now + Number(ttl))
+          return [rawSaved, 1]
+        },
+      ],
+      [
+        SWITCH_SCRIPTS.DISABLE,
+        ([key, audit], [id, disabled, event, now, before, ttl]) => {
+          const members = this.members(key!)
+          const had = members.has(id!)
+          if (disabled === "1") members.add(id!)
+          else members.delete(id!)
+          this.prune(key!)
+          const changed = had !== (disabled === "1")
+          if (changed) {
+            const entries = this.zset(audit!)
+            for (const [member, score] of entries) if (score <= Number(before)) entries.delete(member)
+            entries.set(event!, Number(now))
+            this.expires.set(audit!, this.clock.now + Number(ttl))
+          }
+          return changed ? 1 : 0
         },
       ],
       [
