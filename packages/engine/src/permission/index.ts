@@ -12,6 +12,10 @@ import { UNREAD } from "@/tool/shell/unread"
 
 export const Event = PermissionV1.Event
 
+/** The feedback a permission request no one answered in time is declined with (`sizing.subagents.ask_timeout`). */
+export const TIMED_OUT =
+  "No one answered this permission request in time, so it was declined. Do not retry it or work around it; continue without it and say so in your report."
+
 export interface Interface {
   readonly ask: (input: PermissionV1.AskInput) => Effect.Effect<void, PermissionV1.Error>
   readonly reply: (input: PermissionV1.ReplyInput) => Effect.Effect<void, PermissionV1.NotFoundError>

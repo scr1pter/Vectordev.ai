@@ -91,6 +91,18 @@ export interface Interface {
     agent: string
     variant?: string
   }) => Effect.Effect<void>
+  /**
+   * Writes quiet notes into the parent now, as one message that starts no turn, without the window: a short-lived
+   * process may exit before a held note is sent (restart recovery). A parent with a pending revert gets them through
+   * the window, which waits the revert out.
+   */
+  readonly post: (input: {
+    parentID: SessionID
+    notes: readonly Note[]
+    ops: TaskPromptOps
+    agent: string
+    variant?: string
+  }) => Effect.Effect<void>
   /** Saves a child's report, caps it, and enqueues its result note. */
   readonly result: (input: ResultInput) => Effect.Effect<void>
   /** Waits for a background job, settles its child, and enqueues the child's result note. Returns at once. */
@@ -356,7 +368,8 @@ const layer = Layer.effect(
         else st.windows.delete(parentID)
       })
 
-    const deliver = Effect.fnUntraced(function* (parentID: SessionID, batch: readonly Pending[]) {
+    // `now`: the notes are written before this returns, and never start a turn.
+    const deliver = Effect.fnUntraced(function* (parentID: SessionID, batch: readonly Pending[], now = false) {
       // A revert started while the notes were held is waited out here too.
       yield* unreverted(parentID, 1_000)
       const kept = (yield* Effect.forEach(batch, (item) =>
@@ -390,7 +403,7 @@ const layer = Layer.effect(
         const { note } = item
         if (note.kind !== "result" || !note.taskID || !note.launchID || !final(note.state)) return Effect.succeed([item])
         const taskID = note.taskID
-        return SubagentLifecycle.claimNotification(sessions, taskID, note.attempt, messageID, {
+        return SubagentLifecycle.claimNotification(sessions, database, taskID, note.attempt, messageID, {
           stale: note.stale,
           note: { text: note.text, state: note.state, launchID: note.launchID },
         }).pipe(
@@ -404,10 +417,10 @@ const layer = Layer.effect(
       })).flat()
       const lead = sent[0]
       if (!lead) return
-      const silent = fenced.has(parentID) || halted || !sent.some((item) => wakes(item.note))
+      const silent = now || fenced.has(parentID) || halted || !sent.some((item) => wakes(item.note))
       // The parent's turn runs on its own: the window is free again once the message is on its way, so a note landing
       // during that turn joins it. A prompt that never wrote the message gives its claims back for recovery.
-      yield* lead.ops
+      const write = lead.ops
         .prompt({
           sessionID: parentID,
           messageID,
@@ -435,9 +448,8 @@ const layer = Layer.effect(
               ? Effect.void
               : Effect.logWarning("the parent could not take its task notes", { parentID, cause }),
           ),
-          Effect.interruptible,
-          Effect.forkIn(scope, { startImmediately: true }),
         )
+      yield* now ? write : write.pipe(Effect.interruptible, Effect.forkIn(scope, { startImmediately: true }))
     })
 
     const state = yield* InstanceState.make<State>(
@@ -476,6 +488,21 @@ const layer = Layer.effect(
           st.windows.set(input.parentID, window)
           yield* schedule(st, input.parentID)
         }),
+      )
+    })
+
+    const post: Interface["post"] = Effect.fn("TaskNotify.post")(function* (input) {
+      if (input.notes.length === 0) return
+      const parent = yield* sessions.get(input.parentID).pipe(Effect.option)
+      const pending = input.notes.map((note) => ({ note, ops: input.ops, agent: input.agent, variant: input.variant }))
+      if (Option.isSome(parent) && parent.value.revert)
+        return yield* Effect.forEach(pending, (item) => enqueue({ parentID: input.parentID, ...item }), {
+          discard: true,
+        })
+      yield* deliver(input.parentID, pending, true).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("task notes could not be delivered", { parentID: input.parentID, cause }),
+        ),
       )
     })
 
@@ -592,7 +619,7 @@ const layer = Layer.effect(
     const fence = (parentID: SessionID) => Effect.sync(() => void fenced.add(parentID))
     const unfence = (parentID: SessionID) => Effect.sync(() => void fenced.delete(parentID))
 
-    return Service.of({ enqueue, result, watch, fence, unfence })
+    return Service.of({ enqueue, post, result, watch, fence, unfence })
   }),
 )
 

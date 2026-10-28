@@ -1623,7 +1623,14 @@ describe("a guest's task resume", () => {
   const rootID = SessionID.make("ses_guest_resume_root")
   const trains = SessionID.make("ses_guest_resume_trains")
   const keeps = SessionID.make("ses_guest_resume_keeps")
-  const models: Record<string, string> = { [trains]: "acme/trains:free", [keeps]: "acme/keeps:free" }
+  // Another conversation's helper on the training model: the guest controls neither it nor its parent.
+  const foreign = SessionID.make("ses_guest_resume_foreign")
+  const models: Record<string, string> = {
+    [trains]: "acme/trains:free",
+    [keeps]: "acme/keeps:free",
+    [foreign]: "acme/trains:free",
+  }
+  const parentOf = (id: SessionID) => (id === foreign ? SessionID.make("ses_guest_resume_other") : rootID)
   const resumed: Array<{ guest: boolean; origin: string; refuses: boolean }> = []
   // A request with an `x-test-guest` header runs as a guest in control of the sessions it lists.
   const authorization = Authorization.of((effect) =>
@@ -1651,14 +1658,14 @@ describe("a guest's task resume", () => {
     time: { created: 1, updated: 1 },
     ...(models[id]
       ? {
-          parentID: rootID,
+          parentID: parentOf(id),
           metadata: {
             subagent: {
               kind: "subagent",
               custom: false,
               agent: "general",
               title: "Survey",
-              parentSessionID: rootID,
+              parentSessionID: parentOf(id),
               parentMessageID: "msg_guest_resume_launch",
               model: { providerID: "openrouter", modelID: models[id] },
               background: true,
@@ -1717,13 +1724,20 @@ describe("a guest's task resume", () => {
           }),
           Layer.mock(TaskManager.Service)({
             resume: (input, ops) =>
-              ops.prompt({ sessionID: input.sessionID, parts: [] }).pipe(
-                Effect.map((reply) => {
-                  const refuses = (reply as unknown as { refuses: boolean }).refuses
-                  resumed.push({ guest: input.guest, origin: input.origin, refuses })
-                  return { tasks: [] }
-                }),
-              ),
+              input.taskIDs.includes(foreign)
+                ? Effect.fail(
+                    new TaskManager.Error({
+                      code: "forbidden",
+                      message: "The task does not belong to this session's descendants.",
+                    }),
+                  )
+                : ops.prompt({ sessionID: input.sessionID, parts: [] }).pipe(
+                    Effect.map((reply) => {
+                      const refuses = (reply as unknown as { refuses: boolean }).refuses
+                      resumed.push({ guest: input.guest, origin: input.origin, refuses })
+                      return { tasks: [] }
+                    }),
+                  ),
           }),
         ]),
       ),
@@ -1749,6 +1763,13 @@ describe("a guest's task resume", () => {
       // One on a private free model resumes, as a guest whose prompts refuse such a model.
       expect((yield* resume([keeps], guest)).status).toBe(200)
       expect(resumed).toEqual([{ guest: true, origin: "user", refuses: true }])
+      // Another session's helper gets resume's own refusal: its model is never looked up for the guest (I19).
+      const elsewhere = yield* resume([foreign], guest)
+      expect(elsewhere.status).toBe(400)
+      expect(yield* elsewhere.json).toEqual({
+        code: "forbidden",
+        message: "The task does not belong to this session's descendants.",
+      })
       // A guest without control of the session is refused before the manager is reached.
       expect((yield* resume([keeps], { "x-test-guest": "" })).status).toBe(403)
       // The owner accepted the training notice, so the owner may resume it.

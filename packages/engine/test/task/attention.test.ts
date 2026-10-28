@@ -374,7 +374,9 @@ describe("waiting on you", () => {
         expect(told.value).toEqual({ taskID: child, kind: "permission", state: "waiting" })
         expect(told.metadata[SessionTaskSize.QUIET]).toBe(true)
         expect(told.text).toContain(`subagent ${child} ("Fix 'the' parser <\\task>")`)
-        expect(told.text).toContain('a permission request ("edit src/parser.ts")')
+        // What the helper asks is its own text: it reaches the board, never the root's note (I13).
+        expect(told.text).toContain("waits for the user to answer a permission request and is blocked")
+        expect(told.text).not.toContain("src/parser.ts")
         expect(told.text).not.toContain("declines")
         expect((yield* manager.list({ sessionID: root.id })).tasks[0]).toMatchObject({
           id: child,
@@ -437,7 +439,7 @@ describe("waiting on you", () => {
         const exit = yield* awaitWithTimeout(Fiber.join(first.fiber), "the first request was never declined")
         const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
         expect(error).toBeInstanceOf(PermissionV1.CorrectedError)
-        expect(error).toMatchObject({ feedback: Question.TIMED_OUT })
+        expect(error).toMatchObject({ feedback: Permission.TIMED_OUT })
         // The second is still waiting, and the helper now waits on it.
         expect((yield* permissions.list()).map((item) => item.id)).toEqual([second.id])
         const moved = yield* waitingOn(child, second.id)

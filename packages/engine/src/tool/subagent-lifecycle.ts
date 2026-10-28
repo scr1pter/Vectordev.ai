@@ -1,3 +1,4 @@
+import { and, eq, isNull, sql } from "drizzle-orm"
 import { Effect, Option, Schema, Semaphore } from "effect"
 import type { SessionV1 } from "@vectordevai/core/v1/session"
 import type { Session } from "@/session/session"
@@ -16,6 +17,7 @@ import { randomUUID } from "node:crypto"
 import { RunBudget } from "@vectordevai/schema/run-budget"
 import { Task } from "@vectordevai/schema/task"
 import { Database } from "@vectordevai/core/database/database"
+import { SessionTable } from "@vectordevai/core/session/sql"
 import type { SpendGuard } from "@vectordevai/core/spend-guard"
 import { BackgroundJobStore } from "@vectordevai/core/background-job-store"
 import { BackgroundJob } from "@/background/job"
@@ -89,14 +91,22 @@ export function ownedHere(record: Pick<SubagentRecord, "runtimeID">) {
   return record.runtimeID === RUNTIME_ID || record.runtimeID?.startsWith(`${BackgroundJobStore.PROCESS_ID}:`) === true
 }
 
+/** How long an older Vector's open helper (a legacy runtime ID, no lease to probe) must be idle to read as gone. */
+export const LEGACY_IDLE = 30 * 60_000
+
 /**
  * The liveness of the record's runtime when no job row is needed to tell (D.3): this process's own ID and open lease
- * are alive, a closed lease and a legacy runtime ID (no ":") dead. Undefined for another process's lease.
+ * are alive, a closed lease dead. A legacy runtime ID (no ":") is dead, except open work whose session was `updated`
+ * within LEGACY_IDLE: an older Vector may still be running it. Undefined for another process's lease.
  */
-export function localLiveness(record: Pick<SubagentRecord, "runtimeID">): BackgroundJobStore.Liveness | undefined {
+export function localLiveness(
+  record: Pick<SubagentRecord, "runtimeID" | "status">,
+  updated?: number,
+): BackgroundJobStore.Liveness | undefined {
   const runtime = record.runtimeID
   if (runtime === RUNTIME_ID) return "alive"
-  if (!runtime?.includes(":")) return "dead"
+  if (!runtime?.includes(":"))
+    return open(record) && updated !== undefined && updated > Date.now() - LEGACY_IDLE ? "unknown" : "dead"
   if (runtime.startsWith(`${BackgroundJobStore.PROCESS_ID}:`))
     return BackgroundJobStore.alive({ runtime, pid: process.pid, boot: 0, machine: "" })
   return undefined
@@ -104,19 +114,21 @@ export function localLiveness(record: Pick<SubagentRecord, "runtimeID">): Backgr
 
 /**
  * Whether an engine may still be running the record's work: `localLiveness`, else from the job row of another
- * process's lease, which alone keeps the machine id. A lease with no row is dead, as a foreign runtime always was.
+ * process's lease, which alone keeps the machine id and the heartbeat. The row is written after the record, so with
+ * none the record's owner decides: dead once its pid is gone, or when the record has no owner; unknown otherwise.
  */
 export const liveness = Effect.fnUntraced(function* (
   store: BackgroundJobStore.Interface,
-  childID: string,
-  record: Pick<SubagentRecord, "runtimeID" | "parentSessionID">,
+  child: Pick<Session.Info, "id" | "time">,
+  record: Pick<SubagentRecord, "runtimeID" | "parentSessionID" | "status" | "owner">,
 ) {
-  const local = localLiveness(record)
+  const local = localLiveness(record, child.time.updated)
   if (local) return local
   const row = (yield* store.forParent(record.parentSessionID)).find(
-    (item) => item.id === childID && item.owner.runtime === record.runtimeID,
+    (item) => item.id === child.id && item.owner.runtime === record.runtimeID,
   )
-  return row ? BackgroundJobStore.alive(row.owner) : ("dead" as const)
+  if (row) return BackgroundJobStore.liveness(row)
+  return !record.owner || BackgroundJobStore.exited(record.owner.pid) ? ("dead" as const) : ("unknown" as const)
 })
 
 /** Whether resuming this helper waits for the user: it was interrupted and not resumed since, or the user stopped it. */
@@ -371,10 +383,12 @@ export const CLAIM_GRACE = 60_000
 /**
  * Claims a child's undelivered completion note for the parent message `messageID`, for this attempt: sets
  * `notification.messageID` while it is unset, or while it is still `stale` (a claim whose message was never written).
- * `note` is stored when the record has none. Returns whether this call won, so each note is delivered once.
+ * `note` is stored when the record has none. Returns whether this call won, so each note is delivered once, also
+ * between engines on one vector.db: the check and the claim are one conditional UPDATE.
  */
 export function claimNotification(
   sessions: Session.Interface,
+  database: Database.Interface,
   childID: SessionID,
   attempt: number | undefined,
   messageID: MessageID,
@@ -387,12 +401,29 @@ export function claimNotification(
     const note = stored ?? options.note
     if (!record || !note || (attempt !== undefined && record.attempt !== attempt)) return false
     if (stored?.messageID !== undefined && stored.messageID !== options.stale) return false
+    const claimed = { ...note, messageID, claimedAt: Date.now() }
+    const field = (path: string) => sql`json_extract(${SessionTable.metadata}, ${`$.${METADATA_KEY}.${path}`})`
+    const value = JSON.stringify(claimed)
+    const won = yield* database.db
+      .update(SessionTable)
+      .set({ metadata: sql`json_set(${SessionTable.metadata}, ${`$.${METADATA_KEY}.notification`}, json(${value}))` })
+      .where(
+        and(
+          eq(SessionTable.id, childID),
+          stored?.messageID === undefined
+            ? isNull(field("notification.messageID"))
+            : eq(field("notification.messageID"), stored.messageID),
+          record.attempt === undefined ? isNull(field("attempt")) : eq(field("attempt"), record.attempt),
+        ),
+      )
+      .returning({ id: SessionTable.id })
+      .get()
+      .pipe(Effect.orDie)
+    if (!won) return false
+    // Published like every record write, so clients and the event log carry the claim.
     yield* sessions.setMetadata({
       sessionID: childID,
-      metadata: {
-        ...info.metadata,
-        [METADATA_KEY]: merge(record, { notification: { ...note, messageID, claimedAt: Date.now() } }),
-      },
+      metadata: { ...info.metadata, [METADATA_KEY]: merge(record, { notification: claimed }) },
     })
     return true
   }).pipe(locked(metadataLock))
@@ -452,7 +483,7 @@ export function recover(sessions: Session.Interface, database: Database.Interfac
         yield* write(sessions, child.id, { notification: undefined }, record.attempt)
         return []
       }
-      if (!(yield* claimNotification(sessions, child.id, record.attempt, messageID, { stale }))) return []
+      if (!(yield* claimNotification(sessions, database, child.id, record.attempt, messageID, { stale }))) return []
       return [{ type: "text" as const, synthetic: true, text: note.text, metadata: { taskNotification: { taskID: child.id, state: note.state, recovered: true } } }]
     }))).flat()
   })

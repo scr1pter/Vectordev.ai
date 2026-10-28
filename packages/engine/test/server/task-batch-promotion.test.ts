@@ -28,6 +28,7 @@ import { SessionStatus } from "@/session/status"
 import { TaskManager } from "@/task/manager"
 import { TaskLimits } from "@/task/limits"
 import { TaskNotify } from "@/task/notify"
+import { TaskSignals } from "@/task/signals"
 import { DesktopTasks } from "@/task/desktop"
 import { MessageID, type SessionID } from "@/session/schema"
 import { ExperimentalApi } from "@/server/routes/instance/httpapi/groups/experimental"
@@ -68,6 +69,7 @@ const manager = (
     | FreeModelGuests.Service
     | BackgroundJobStore.Service
     | TaskNotify.Service
+    | TaskSignals.Service
     | RuntimeFlags.Service
   >
 ).pipe(
@@ -85,6 +87,7 @@ const manager = (
     Layer.mock(FreeModelGuests.Service)({}),
     Layer.mock(BackgroundJobStore.Service)({}),
     Layer.mock(TaskNotify.Service)({}),
+    Layer.mock(TaskSignals.Service)({}),
   ]),
 )
 const api = HttpApi.make("vector-instance").addHttpApi(ExperimentalApi)

@@ -55,18 +55,18 @@ export function excerpt(text: string) {
   return [...TaskSize.neutralizeTags(text.replace(/\s+/g, " ").trim())].slice(0, SUMMARY).join("").trim() || undefined
 }
 
-/** The quiet note a helper's root gets when the helper starts waiting, or when Vector declined its request. */
+/**
+ * The quiet note a helper's root gets when the helper starts waiting, or when Vector declined its request. What the
+ * helper asks stays out of it: that is the helper's own text, and the board shows it (Task.Info.waiting.summary).
+ */
 export function note(input: {
   taskID: string
   title: string
   kind: Kind
-  summary?: string
   state: "waiting" | "expired"
   minutes?: number
 }) {
-  const what = `${input.kind === "permission" ? "a permission request" : "a question"}${
-    input.summary ? ` ("${input.summary.replace(/"/g, "'")}")` : ""
-  }`
+  const what = input.kind === "permission" ? "a permission request" : "a question"
   const who = `subagent ${input.taskID} ("${TaskSize.titled(input.title)}")`
   if (input.state === "expired")
     return `Vector note: no one answered ${what} from ${who} within ${input.minutes} min, so Vector declined it and the subagent carries on without it.`
@@ -182,7 +182,7 @@ const layer = Layer.effect(
         asks.delete(requestID)
         const declined =
           ask.kind === "permission"
-            ? yield* permissions.expire(requestID, Question.TIMED_OUT)
+            ? yield* permissions.expire(requestID, Permission.TIMED_OUT)
             : yield* questions.expire(requestID)
         yield* moveOn(ask, requestID)
         const child = declined ? yield* find(ask.childID) : undefined

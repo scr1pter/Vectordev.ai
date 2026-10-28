@@ -34,6 +34,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
 import { disposeAllInstances, requireInstance, TestInstance } from "../fixture/fixture"
 import { InstanceStore } from "@/project/instance-store"
+import { markDisposing } from "@/effect/instance-registry"
 import { BackgroundJobStore } from "@vectordevai/core/background-job-store"
 import { awaitWithTimeout, pollWithTimeout, testEffect } from "../lib/effect"
 import { ProviderV2 } from "@vectordevai/core/provider"
@@ -5442,6 +5443,53 @@ describe("task shutdown", () => {
         // The dependent's prerequisite was interrupted, so its own prompt never started.
         expect(started).toHaveLength(4)
         expect(started).not.toContain(dependent)
+      }),
+    { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } },
+  )
+})
+
+// Only the prerequisite is interrupted here: the dependent's own job stays open, so only the `interrupted` mapping in
+// dependencyFailure keeps its prompt from starting.
+describe("task shutdown dependencies", () => {
+  background.instance(
+    "a prerequisite interrupted while Vector goes away never starts its dependent's prompt",
+    () =>
+      Effect.gen(function* () {
+        const jobs = yield* BackgroundJob.Service
+        const ctx = yield* requireInstance
+        const seeded = yield* seed()
+        const def = yield* (yield* TaskTool).init()
+        const started: string[] = []
+        const ops: TaskPromptOps = {
+          ...stubOps(),
+          prompt: (input) => Effect.sync(() => void started.push(input.sessionID)).pipe(Effect.andThen(Effect.never)),
+        }
+        const call = (callID: string) =>
+          taskContext({ sessionID: seeded.chat.id, messageID: seeded.assistant.id, promptOps: ops, callID })
+        const brief = (area: string) => ({
+          description: `Inspect ${area}`,
+          prompt: `Inspect ${area} and report.`,
+          subagent_type: "general",
+        })
+        const first = yield* def.execute({ ...brief("parser") }, call("call_prerequisite"))
+        const prerequisite = (first.metadata as { sessionId: string }).sessionId
+        const second = yield* def.execute({ ...brief("lexer"), depends_on: [prerequisite] }, call("call_dependent"))
+        const dependent = (second.metadata as { sessionId: string }).sessionId
+        yield* pollWithTimeout(
+          Effect.sync(() => (started.includes(prerequisite) ? true : undefined)),
+          "the prerequisite should have started",
+          "5 seconds",
+        )
+
+        const release = markDisposing(ctx.directory)
+        yield* Effect.gen(function* () {
+          expect((yield* jobs.cancel(prerequisite))?.status).toBe("interrupted")
+          // The dependent treats it as stopped work: it stops too, the quiet way, without prompting.
+          const waited = yield* jobs.wait({ id: dependent, timeout: 5_000 })
+          expect(waited.timedOut).toBe(false)
+          expect(waited.info?.status).toBe("interrupted")
+        }).pipe(Effect.ensuring(Effect.sync(release)))
+        expect(started).toEqual([prerequisite])
       }),
     { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } },
   )

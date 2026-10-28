@@ -64,7 +64,12 @@ export interface Store {
   readonly started: (row: Started) => Effect.Effect<void, unknown>
   readonly settled: (id: string, p: Settled) => Effect.Effect<void, unknown>
   readonly promoted: (id: string, p: Holder) => Effect.Effect<void, unknown>
+  /** Marks the lease's running rows as still held at `at` (a heartbeat). */
+  readonly heartbeat?: (owner: string, at: number) => Effect.Effect<void, unknown>
 }
+
+/** How often a registry refreshes its running durable rows, so other engines can tell it is alive (milliseconds). */
+export const HEARTBEAT = 60_000
 
 // A durable job's row writes, in order: each waits for the one before it, so a settlement never lands before the row.
 type Writes = { holder: Holder; tail?: Deferred.Deferred<void> }
@@ -220,6 +225,25 @@ export const makeWith = Effect.fnUntraced(function* (o: {
       }),
     )
   const detach = <A, E>(effect: Effect.Effect<A, E>) => effect.pipe(Effect.forkDetach({ startImmediately: true }))
+
+  // While a durable job runs, its rows' heartbeat is refreshed every minute: a pid that answers may belong to another
+  // process by now (Windows reuses them quickly), and a heartbeat that stopped tells other engines the lease is gone.
+  const beat = o.store?.heartbeat
+  const runtime = o.owner?.runtime
+  if (beat && runtime)
+    yield* Effect.sleep(HEARTBEAT).pipe(
+      Effect.andThen(SynchronizedRef.get(state.jobs)),
+      Effect.flatMap((jobs) =>
+        [...jobs.values()].some((job) => job.durable && job.info.status === "running")
+          ? Effect.suspend(() => beat(runtime, Date.now())).pipe(
+              Effect.timeout(STORE_TIMEOUT),
+              Effect.catchCause((cause) => Effect.logWarning("background job heartbeat was not written", { cause })),
+            )
+          : Effect.void,
+      ),
+      Effect.forever,
+      Effect.forkIn(state.scope, { startImmediately: true }),
+    )
 
   const settle = Effect.fn("BackgroundJob.settle")(function* (
     id: string,

@@ -228,7 +228,7 @@ const layer = Layer.effect(
           Effect.gen(function* () {
             const record = SubagentLifecycle.read(agent)
             if (record?.workflow?.role !== "agent" || !SubagentLifecycle.open(record)) return
-            if ((yield* jobs.get(agent.id)) || (yield* SubagentLifecycle.liveness(store, agent.id, record)) !== "dead")
+            if ((yield* jobs.get(agent.id)) || (yield* SubagentLifecycle.liveness(store, agent, record)) !== "dead")
               return
             yield* SubagentLifecycle.update(sessions, agent.id, abandon(at), record.attempt)
           }),
@@ -270,7 +270,7 @@ const layer = Layer.effect(
         !job &&
         !live &&
         SubagentLifecycle.open(record) &&
-        (yield* SubagentLifecycle.liveness(store, initial.id, record)) === "dead"
+        (yield* SubagentLifecycle.liveness(store, initial, record)) === "dead"
       if (abandoned) {
         const at = Date.now()
         yield* SubagentLifecycle.update(sessions, initial.id, abandon(at), record.attempt)
@@ -443,7 +443,7 @@ const layer = Layer.effect(
     ): Effect.fn.Return<Task.ListResult | SiblingList, Error> {
       if (input.siblings) return yield* siblings(input)
       const session = yield* get(input.sessionID)
-      const result = yield* collect(input)
+      const { cut: _, ...result } = yield* collect(input)
       // The board never fails for want of its limits line.
       const counted = yield* limitsOf(session).pipe(
         Effect.catchCause((cause) =>
@@ -494,15 +494,16 @@ const layer = Layer.effect(
           return session ? { ...task, usage: session.usage, budgetScopes: session.budgetScopes } : task
         }),
       ].sort(recentActiveFirst)
-      return {
-        tasks: tasks.slice(0, limit),
-        // A desktop listing cut short matters to the active board only while it returned live rows.
-        truncated:
-          tasks.length > limit ||
+      // What the board leaves out: native rows (a walk cut short, or past the limit), or desktop rows. A desktop listing
+      // cut short matters to the active board only while it returned live rows.
+      const omitted = tasks.slice(limit)
+      const cut = {
+        native: found.length > limit || queue.length > 0 || omitted.some((task) => !DesktopTasks.owns(task.id)),
+        desktop:
           (external.truncated && (!input.active || rows.length > 0)) ||
-          found.length > limit ||
-          queue.length > 0,
+          omitted.some((task) => DesktopTasks.owns(task.id)),
       }
+      return { tasks: tasks.slice(0, limit), truncated: cut.native || cut.desktop, cut }
     })
 
     const inspect: Interface["inspect"] = Effect.fn("TaskManager.inspect")(function* (input) {
@@ -793,8 +794,13 @@ const layer = Layer.effect(
       return { taskID: session.id, parentSessionID: parentID, woke: admitted.woke, at }
     })
 
-    const select = Effect.fn("TaskManager.select")(function* (sessionID: SessionID, ids: readonly string[]) {
-      if (ids.length === 0 || ids.length > MAX_TASKS)
+    // `capped`: the IDs were chosen by a caller, not collected from the board.
+    const select = Effect.fn("TaskManager.select")(function* (
+      sessionID: SessionID,
+      ids: readonly string[],
+      capped = true,
+    ) {
+      if (ids.length === 0 || (capped && ids.length > MAX_TASKS))
         return yield* new Error({ code: "invalid", message: "Choose 1–200 task IDs." })
       return yield* Effect.forEach([...new Set(ids)], (id) =>
         DesktopTasks.owns(id)
@@ -805,6 +811,18 @@ const layer = Layer.effect(
 
     // A row "Stop including helpers" reaches: a native subagent, never a desktop workspace or swarm (5.D.1).
     const helper = (task: Task.Info) => task.source === "subagent" && !DesktopTasks.owns(task.id)
+
+    // This instance's running task jobs below the session that `tasks` does not list. A board walk cut short by a long
+    // history still reaches every live helper this way, since the running limits bound the registry.
+    const unlisted = Effect.fn("TaskManager.unlisted")(function* (sessionID: SessionID, tasks: readonly Task.Info[]) {
+      const known = new Set(tasks.map((task) => task.id))
+      const found = yield* Effect.forEach(
+        (yield* jobs.list()).filter((job) => job.type === "task" && job.status === "running" && !known.has(job.id)),
+        (job) => requireTask(sessionID, job.id).pipe(Effect.flatMap(observe), Effect.option),
+        { concurrency: 4 },
+      )
+      return found.flatMap((task) => (Option.isSome(task) && ACTIVE.has(task.value.status) ? [task.value] : []))
+    })
 
     // Stops the selected tasks of the active board with their descendants and dependents, keeping partial work. With
     // `helpers`, only native subagents are selectable and reached. Returns the stopped tasks and the board it read.
@@ -831,15 +849,21 @@ const layer = Layer.effect(
               active: true,
               limit: MAX_TASKS,
             })
-            if (board.truncated)
+            // Chosen IDs stop together or not at all, and so does everything while desktop rows are missing (helpers
+            // never include them). A long history never blocks stopping everything: the live native helpers the board
+            // left out are added from the job registry.
+            if (board.truncated && (!input.all || (board.cut.desktop && !input.helpers)))
               return yield* new Error({
                 code: "invalid",
                 message: "Too many descendants to stop atomically; select a narrower parent session.",
               })
-            const reachable = input.helpers ? board.tasks.filter(helper) : board.tasks
+            const listed = board.cut.native
+              ? [...board.tasks, ...(yield* unlisted(input.sessionID, board.tasks))]
+              : board.tasks
+            const reachable = input.helpers ? listed.filter(helper) : listed
             const selected = input.all ? reachable.map((task) => task.id) : (input.taskIDs ?? [])
-            if (input.all && selected.length === 0) return { native: [], remote: [], board: board.tasks }
-            yield* select(input.sessionID, selected)
+            if (input.all && selected.length === 0) return { native: [], remote: [], board: listed }
+            yield* select(input.sessionID, selected, !input.all)
             const ids = new Set(selected)
             let changed = true
             while (changed) {
@@ -851,7 +875,7 @@ const layer = Layer.effect(
                 changed = true
               })
             }
-            const tasks = yield* select(input.sessionID, [...ids])
+            const tasks = yield* select(input.sessionID, [...ids], !input.all)
             const native = yield* Effect.forEach(
               tasks.filter((task) => !DesktopTasks.owns(task.id)),
               (task) =>
@@ -867,7 +891,7 @@ const layer = Layer.effect(
                 }),
               { concurrency: 4 },
             )
-            return { native, remote: tasks.filter((task) => DesktopTasks.owns(task.id)), board: board.tasks }
+            return { native, remote: tasks.filter((task) => DesktopTasks.owns(task.id)), board: listed }
           }),
         )
         const native = yield* Effect.forEach(
@@ -1031,7 +1055,7 @@ const layer = Layer.effect(
       if ((yield* jobs.get(session.id))?.status === "running" || SubagentLifecycle.stopping.has(session.id))
         return yield* running
       if (!SubagentLifecycle.ownedHere(record)) {
-        const owner = yield* SubagentLifecycle.liveness(store, session.id, record)
+        const owner = yield* SubagentLifecycle.liveness(store, session, record)
         // The user is asked to confirm an owner Vector cannot reach; the agent never resumes one.
         if (owner === "alive" || (owner === "unknown" && origin === "agent"))
           return yield* new Error({
@@ -1088,6 +1112,17 @@ const layer = Layer.effect(
           code: "invalid",
           message: "Background subagents are turned off (VECTOR_DISABLE_BACKGROUND_SUBAGENTS), so nothing can resume.",
         })
+      // What the main agent took in travels with its words to the child (D.6); the user's own words carry nothing.
+      const carried =
+        input.origin === "agent" && text
+          ? SessionMemory.carried(
+              SessionMemory.taint(
+                yield* sessions
+                  .messages({ sessionID: root.id })
+                  .pipe(Effect.catch(() => Effect.succeed([] as SessionV1.WithParts[]))),
+              ),
+            )
+          : {}
       const guest = input.guest || (yield* guests.marked(root.id))
       const conversationID = yield* TaskLimits.conversationOf(sessions, root, guest)
       const requestID = yield* TaskLimits.requestFor(limits, sessions, SessionID.make(conversationID))
@@ -1191,7 +1226,7 @@ const layer = Layer.effect(
                     : [
                         record.stop?.by === "user"
                           ? SubagentLifecycle.RESUME_STOPPED_BRIEF
-                          : record.interruption
+                          : record.interruption && record.interruption.resumedAt === undefined
                             ? SubagentLifecycle.RESUME_BRIEF
                             : SubagentLifecycle.RESUME_ENDED_BRIEF,
                       ]),
@@ -1212,7 +1247,14 @@ const layer = Layer.effect(
                       modelID: ModelV2.ID.make(record.model.modelID),
                     },
                     variant: record.model.variant,
-                    parts: [{ type: "text", synthetic: true, text: brief }],
+                    parts: [
+                      {
+                        type: "text",
+                        synthetic: true,
+                        text: brief,
+                        ...(Object.keys(carried).length > 0 ? { metadata: carried } : {}),
+                      },
+                    ],
                   })
                 })
                 const waiting = Effect.sync(() => {

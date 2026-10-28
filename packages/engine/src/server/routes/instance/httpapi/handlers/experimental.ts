@@ -136,7 +136,8 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     })
 
     // Resume (D.3): the user continues stopped, failed or interrupted helpers. A guest's resume runs under the guest
-    // limits and budget, and is refused at once for a helper on a free model that may train.
+    // limits and budget, and is refused at once for a helper on a free model that may train. Only this session's own
+    // children are checked, so the answer says nothing about other sessions (I19); resume refuses those itself.
     const taskResume = Effect.fn("ExperimentalHttpApi.taskResume")(function* (ctx: {
       params: { sessionID: SessionID }
       payload: typeof TaskResumeInput.Type
@@ -149,7 +150,9 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
           const record = Option.isNone(id)
             ? undefined
             : yield* sessions.get(id.value).pipe(
-                Effect.map(SubagentLifecycle.read),
+                Effect.map((child) =>
+                  child.parentID === ctx.params.sessionID ? SubagentLifecycle.read(child) : undefined,
+                ),
                 Effect.catchCause(() => Effect.succeed(undefined)),
               )
           const model =

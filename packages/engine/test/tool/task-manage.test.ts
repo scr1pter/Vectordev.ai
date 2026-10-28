@@ -1,8 +1,12 @@
 import { afterEach, describe, expect } from "bun:test"
+import { spawnSync } from "node:child_process"
+import { randomUUID } from "node:crypto"
+import { sql } from "drizzle-orm"
 import { Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { Database } from "@vectordevai/core/database/database"
+import { BackgroundJobStore } from "@vectordevai/core/background-job-store"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { TaskManager } from "@/task/manager"
@@ -19,6 +23,8 @@ import { DesktopTasks } from "@/task/desktop"
 import { Storage } from "@/storage/storage"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { TaskMailbox } from "@vectordevai/core/task-mailbox"
+import { BrainSchema } from "@vectordevai/core/brain/schema"
+import { SessionMemory } from "@/session/memory"
 import { InstanceState } from "@/effect/instance-state"
 import type { Task } from "@vectordevai/schema/task"
 import { disposeAllInstances } from "../fixture/fixture"
@@ -35,6 +41,13 @@ const child = Effect.fn("TaskManagerTest.child")(function* (parentID: SessionID,
     runtimeID: SubagentLifecycle.RUNTIME_ID, attempt: 1, ...patch,
   } } })
 })
+
+// A session nothing has written to for an hour, as an older Vector's helper whose engine is gone.
+const idle = (id: SessionID) =>
+  Effect.gen(function* () {
+    const { db } = yield* Database.Service
+    yield* db.run(sql`UPDATE session SET time_updated = ${Date.now() - 60 * 60_000} WHERE id = ${id}`)
+  })
 
 function reply(input: SessionPrompt.PromptInput): SessionV1.WithParts {
   return { info: {
@@ -57,6 +70,7 @@ describe("task management", () => {
     const manager = yield* TaskManager.Service
     const root = yield* sessions.create()
     const a = yield* child(root.id, { runtimeID: "previous-process", ownedPaths: ["src/a"], dependsOn: ["previous-task"] })
+    yield* idle(a.id)
     yield* child(a.id, { status: "completed" })
     yield* sessions.create({ parentID: root.id, internal: "review" })
     yield* sessions.create({ parentID: root.id, metadata: { subagent: {} } })
@@ -447,6 +461,26 @@ describe("task management", () => {
     expect((yield* jobs.get(running.id))?.status).toBe("cancelled")
   }))
 
+  it.instance("stop-all reaches a live helper the walk left off a full board", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const jobs = yield* BackgroundJob.Service
+    const root = yield* sessions.create()
+    // The oldest of 201 open helpers is the one a board of 200 leaves out.
+    const oldest = yield* child(root.id, { startedAt: 1_000 })
+    yield* jobs.start({ id: oldest.id, type: "task", run: Effect.never })
+    yield* Effect.forEach(Array.from({ length: 200 }), () => child(root.id), { concurrency: 8 })
+    const board = yield* manager.list({ sessionID: root.id, descendants: true, active: true })
+    expect(board.truncated).toBe(true)
+    expect(board.tasks.map((task) => task.id)).not.toContain(oldest.id)
+    // Chosen IDs still stop together or not at all.
+    expect(yield* manager.stop({ sessionID: root.id, taskIDs: [oldest.id] }, ops).pipe(Effect.flip)).toMatchObject({ code: "invalid" })
+    const result = yield* manager.stop({ sessionID: root.id, all: true }, ops)
+    expect(result.tasks).toHaveLength(201)
+    expect(result.tasks.find((task) => task.id === oldest.id)?.status).toBe("stopped")
+    expect((yield* jobs.get(oldest.id))?.status).toBe("cancelled")
+  }))
+
   it.instance("interrupt without helpers stops only the main turn", () => Effect.gen(function* () {
     const sessions = yield* Session.Service
     const manager = yield* TaskManager.Service
@@ -725,6 +759,75 @@ describe("task management", () => {
     const error = yield* manager.resume({ sessionID: root.id, taskIDs: [task.id], origin: "user", guest: false }, ops).pipe(Effect.flip)
     expect(error).toMatchObject({ code: "limit", message: expect.stringContaining("spend ceiling") })
     expect(yield* jobs.list()).toEqual([])
+  }))
+
+  it.instance("an interrupted child that was resumed and then failed resumes with the ended brief", () => Effect.gen(function* () {
+    const manager = yield* TaskManager.Service
+    const jobs = yield* BackgroundJob.Service
+    const { root, launch } = yield* launched()
+    const at = Date.now() - 1_000
+    // Its interruption was resumed already; this run ended on its own.
+    const task = yield* helper(root.id, launch, { status: "error", attempt: 2, interruption: { at, cause: "shutdown", reportedAt: at, resumedAt: at } })
+    const prompts: SessionPrompt.PromptInput[] = []
+    const resumeOps: TaskPromptOps = { ...ops, prompt: (input) => Effect.sync(() => void prompts.push(input)).pipe(Effect.as(reply(input))) }
+    yield* manager.resume({ sessionID: root.id, taskIDs: [task.id], origin: "agent", guest: false }, resumeOps)
+    yield* jobs.wait({ id: task.id })
+    expect(briefs(prompts, task.id)).toEqual([SubagentLifecycle.RESUME_ENDED_BRIEF])
+  }))
+
+  it.instance("the main agent's resume message carries what it read, and the user's does not", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const jobs = yield* BackgroundJob.Service
+    const { root, launch } = yield* launched()
+    // The main agent fetched a web page in the turn that launched its helpers.
+    yield* sessions.updatePart({
+      id: PartID.ascending(), sessionID: root.id, messageID: launch, type: "tool", callID: "call_fetch", tool: "webfetch",
+      state: { status: "completed", input: {}, output: "page", title: "docs", metadata: {}, time: { start: 0, end: 1 } },
+    })
+    const prompts: SessionPrompt.PromptInput[] = []
+    const resumeOps: TaskPromptOps = { ...ops, prompt: (input) => Effect.sync(() => void prompts.push(input)).pipe(Effect.as(reply(input))) }
+    const metadata = (id: string) => prompts.filter((input) => input.sessionID === id).map((input) => input.parts[0]?.type === "text" ? input.parts[0].metadata : undefined)
+    const agent = yield* helper(root.id, launch, { status: "error" })
+    yield* manager.resume({ sessionID: root.id, taskIDs: [agent.id], text: "Use the vendor's retry rules", origin: "agent", guest: false }, resumeOps)
+    yield* jobs.wait({ id: agent.id })
+    expect(metadata(agent.id)).toEqual([{ [BrainSchema.OUTSIDE]: "subagent", [SessionMemory.HOLD]: "web" }])
+    const user = yield* helper(root.id, launch, { status: "error" })
+    yield* manager.resume({ sessionID: root.id, taskIDs: [user.id], text: "Use the vendor's retry rules", origin: "user", guest: false }, resumeOps)
+    yield* jobs.wait({ id: user.id })
+    expect(metadata(user.id)).toEqual([undefined])
+  }))
+
+  it.instance("a helper whose job row is not written yet stays running while its owner's pid answers", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const root = yield* sessions.create()
+    const { boot } = BackgroundJobStore.current()
+    const lease = () => `${randomUUID()}:${randomUUID()}`
+    // Another engine's lease, before its row lands: its process (the one that started this test) runs.
+    const live = yield* child(root.id, { runtimeID: lease(), owner: { pid: process.ppid, boot } })
+    const gone = yield* child(root.id, { runtimeID: lease(), owner: { pid: spawnSync(process.execPath, ["-e", ""]).pid, boot } })
+    const board = (yield* manager.list({ sessionID: root.id })).tasks
+    expect(board.find((task) => task.id === live.id)?.status).toBe("running")
+    expect(SubagentLifecycle.read(yield* sessions.get(live.id))).toMatchObject({ status: "running" })
+    expect(SubagentLifecycle.read(yield* sessions.get(live.id))?.interruption).toBeUndefined()
+    expect(board.find((task) => task.id === gone.id)?.status).toBe("stopped")
+  }))
+
+  it.instance("an older Vector's helper stays running until its session has been idle, and resume refuses it meanwhile", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const { root, launch } = yield* launched()
+    const task = yield* helper(root.id, launch, { status: "running", runtimeID: "previous-process" })
+    yield* said(root.id, "Resume it")
+    expect((yield* manager.list({ sessionID: root.id })).tasks[0]).toMatchObject({ id: task.id, status: "running" })
+    const refused = (origin: "agent" | "user") =>
+      manager.resume({ sessionID: root.id, taskIDs: [task.id], origin, guest: false }, ops).pipe(Effect.flip)
+    expect(yield* refused("agent")).toMatchObject({ code: "running", message: expect.stringContaining("may still be running") })
+    expect(yield* refused("user")).toMatchObject({ code: "running" })
+    expect(SubagentLifecycle.read(yield* sessions.get(task.id))).toMatchObject({ status: "running", attempt: 1 })
+    yield* idle(task.id)
+    expect((yield* manager.list({ sessionID: root.id })).tasks[0]).toMatchObject({ id: task.id, status: "stopped" })
   }))
 
   it.instance("the board offers resume for a finished direct child that started", () => Effect.gen(function* () {

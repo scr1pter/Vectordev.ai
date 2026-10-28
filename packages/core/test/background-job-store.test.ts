@@ -91,6 +91,7 @@ describe("BackgroundJobStore", () => {
             attempt: 1,
             owner,
             startedAt: 1_000,
+            heartbeatAt: expect.any(Number),
             metadata: { agent: "explore" },
           },
         ])
@@ -252,6 +253,28 @@ describe("BackgroundJobStore", () => {
     ),
   )
 
+  it.live("a heartbeat refreshes only its lease's running rows", () =>
+    withStore((store) =>
+      Effect.gen(function* () {
+        const owner = foreign(process.ppid)
+        const running = row({ owner })
+        const ended = row({ owner })
+        const other = row({ owner: foreign(process.ppid) })
+        for (const job of [running, ended, other]) yield* store.started(job)
+        yield* store.settled(ended.id, { owner: owner.runtime, attempt: 1, status: "completed", completedAt: 2_000 })
+        const { db } = yield* Database.Service
+        yield* db.run(sql`UPDATE background_job SET time_updated = 5`)
+        yield* store.heartbeat(owner.runtime, 9_000)
+        const rows = yield* store.forParent("ses_parent")
+        expect(Object.fromEntries(rows.map((item) => [item.id, item.heartbeatAt]))).toEqual({
+          [running.id]: 9_000,
+          [ended.id]: 5,
+          [other.id]: 5,
+        })
+      }),
+    ),
+  )
+
   it.live("prune deletes old ended rows, keeping running and unreported interrupted ones", () =>
     withStore((store) =>
       Effect.gen(function* () {
@@ -310,6 +333,27 @@ describe("BackgroundJobStore.alive", () => {
       expect(BackgroundJobStore.alive({ ...parent, machine: "another-machine" })).toBe("unknown")
       expect(BackgroundJobStore.alive({ ...foreign(exitedPid()), machine: "another-machine" })).toBe("unknown")
     }),
+  )
+
+  it.live(
+    "a running row whose owner stopped its heartbeat is dead whatever its pid answers, once awake long enough",
+    () =>
+      Effect.sync(() => {
+        const now = Date.now()
+        const live = { owner: foreign(process.ppid), status: "running" as const }
+        const stale = { ...live, heartbeatAt: now - BackgroundJobStore.STALE - 1_000 }
+        BackgroundJobStore.useAwakeSince(now - BackgroundJobStore.STALE - 1_000)
+        expect(BackgroundJobStore.liveness({ ...live, heartbeatAt: now })).toBe("alive")
+        expect(BackgroundJobStore.liveness(stale)).toBe("dead")
+        // Only running rows have a heartbeat, and another machine's clock is not this one's.
+        expect(BackgroundJobStore.liveness({ ...stale, status: "interrupted" })).toBe("alive")
+        expect(BackgroundJobStore.liveness({ ...stale, owner: { ...stale.owner, machine: "another-machine" } })).toBe(
+          "unknown",
+        )
+        // Just after a wake (or a start), every engine here gets time to beat again.
+        BackgroundJobStore.useAwakeSince(now)
+        expect(BackgroundJobStore.liveness(stale)).toBe("alive")
+      }),
   )
 
   it.live("the machine id is a private file every engine of this state folder shares", () =>

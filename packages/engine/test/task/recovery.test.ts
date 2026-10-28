@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process"
 import path from "node:path"
 import { describe, expect } from "bun:test"
+import { sql } from "drizzle-orm"
 import { Effect, Layer } from "effect"
 import { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import { SessionV1 } from "@vectordevai/core/v1/session"
@@ -267,9 +268,16 @@ const helper = Effect.fn("RecoveryTest.helper")(function* (
   return child.id
 })
 
+// A session nothing has written to for an hour, as an older Vector's helper whose engine is gone.
+const idle = (id: SessionID) =>
+  Effect.gen(function* () {
+    const { db } = yield* Database.Service
+    yield* db.run(sql`UPDATE session SET time_updated = ${Date.now() - 60 * 60_000} WHERE id = ${id}`)
+  })
+
 // A durable row for a helper's job under `holder`, still running or already interrupted.
 const row = Effect.fn("RecoveryTest.row")(function* (
-  input: { id: SessionID; parentID: SessionID; directory: string; holder: BackgroundJobStore.Owner },
+  input: { id: SessionID; parentID: SessionID; directory: string; holder: BackgroundJobStore.Owner; attempt?: number },
   status: "running" | "interrupted" = "running",
 ) {
   const store = yield* BackgroundJobStore.Service
@@ -281,14 +289,14 @@ const row = Effect.fn("RecoveryTest.row")(function* (
     sessionID: input.id,
     directory: input.directory,
     background: true,
-    attempt: 1,
+    attempt: input.attempt ?? 1,
     startedAt: Date.now(),
     owner: input.holder,
   })
   if (status === "interrupted")
     yield* store.settled(input.id, {
       owner: input.holder.runtime,
-      attempt: 1,
+      attempt: input.attempt ?? 1,
       status: "interrupted",
       completedAt: Date.now(),
     })
@@ -439,7 +447,8 @@ describe("task recovery", () => {
         part: "launched",
         record: { runtimeID: "previous-process" },
       })
-      // Listing the board finds it abandoned before recovery runs.
+      // Listing the board finds it abandoned before recovery runs: its session has been idle.
+      yield* idle(marked)
       yield* manager.list({ sessionID: root.id })
       expect((yield* record(marked))?.interruption).toEqual({ at: expect.any(Number), cause: "unknown" })
       const legacy = yield* helper(root, {
@@ -448,6 +457,7 @@ describe("task recovery", () => {
         part: "launched",
         record: { runtimeID: "previous-process" },
       })
+      yield* idle(legacy)
 
       expect(yield* recovery.reconcile()).toEqual({ reported: 2 })
       expect(yield* recovery.reconcile()).toEqual({ reported: 0 })
@@ -460,6 +470,63 @@ describe("task recovery", () => {
       expect(yield* notes(root.id, "taskInterrupted")).toHaveLength(1)
       expect(yield* llm.calls).toBe(0)
     }),
+  )
+
+  it.instance("an older Vector's helper whose session is still active is left running until it has been idle", () =>
+    Effect.gen(function* () {
+      const { llm, recovery } = yield* setup()
+      const root = yield* conversation()
+      // An older Vector may still be running it: it keeps no lease to probe.
+      const busy = yield* helper(root, {
+        title: "Still working",
+        callID: "call_busy",
+        part: "launched",
+        record: { runtimeID: "previous-process" },
+      })
+
+      expect(yield* recovery.reconcile()).toEqual({ reported: 0 })
+      expect(yield* record(busy)).toMatchObject({ status: "running" })
+      expect((yield* record(busy))?.interruption).toBeUndefined()
+      expect(yield* notes(root.id, "taskInterrupted")).toEqual([])
+
+      yield* idle(busy)
+      expect(yield* recovery.reconcile()).toEqual({ reported: 1 })
+      expect((yield* record(busy))?.interruption).toMatchObject({ cause: "unknown", reportedAt: expect.any(Number) })
+      expect(yield* llm.calls).toBe(0)
+    }),
+  )
+
+  it.instance(
+    "a helper interrupted again after a resume is reported with the new stop's time, before the pass returns",
+    () =>
+      Effect.gen(function* () {
+        const { llm, recovery } = yield* setup()
+        const { directory } = yield* requireInstance
+        const root = yield* conversation()
+        const gone = owner(exited())
+        const earlier = Date.now() - 60 * 60_000
+        const id = yield* helper(root, {
+          title: "Resumed once",
+          callID: "call_resumed",
+          part: "launched",
+          record: {
+            runtimeID: gone.runtime,
+            attempt: 2,
+            interruption: { at: earlier, cause: "crash", reportedAt: earlier, resumedAt: earlier + 1_000 },
+          },
+        })
+        yield* row({ id, parentID: root.id, directory, holder: gone, attempt: 2 })
+        const before = Date.now()
+
+        expect(yield* recovery.reconcile()).toEqual({ reported: 1 })
+        const interruption = (yield* record(id))?.interruption
+        expect(interruption).toMatchObject({ cause: "crash", reportedAt: expect.any(Number) })
+        expect(interruption?.at).toBeGreaterThanOrEqual(before)
+        expect(interruption?.resumedAt).toBeUndefined()
+        // Written by the time the pass returns: a short-lived command exits right after it (no note window).
+        expect((yield* notes(root.id, "taskInterrupted")).map((item) => item.value)).toEqual([{ taskIDs: [id] }])
+        expect(yield* llm.calls).toBe(0)
+      }),
   )
 
   it.instance(

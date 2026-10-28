@@ -6,7 +6,7 @@ import os from "node:os"
 import path from "node:path"
 import { and, asc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm"
 import { Context, Effect, Layer } from "effect"
-import type { BackgroundJob } from "./background-job"
+import { HEARTBEAT, type BackgroundJob } from "./background-job"
 import { BackgroundJobTable } from "./background-job.sql"
 import { Database } from "./database/database"
 import { makeGlobalNode } from "./effect/app-node"
@@ -101,6 +101,7 @@ const leases = new Set<string>()
 
 /** Opens a lease for one instance. Jobs that run under it count as alive until `close`, then as dead. */
 export function open(): Owner {
+  awakeSince(Date.now())
   const owner = { ...current(), runtime: `${PROCESS_ID}:${randomUUID()}` }
   leases.add(owner.runtime)
   return owner
@@ -134,6 +135,11 @@ function host(owner: Owner): Liveness {
 const PROBE_TTL = 5_000
 const probes = new Map<number, { at: number; state: "alive" | "dead" | undefined }>()
 
+/** Whether no process holds `pid` any more (signal 0 answers ESRCH). */
+export function exited(pid: number) {
+  return probe(pid) === "dead"
+}
+
 function probe(pid: number) {
   if (!Number.isSafeInteger(pid) || pid <= 0) return undefined
   const now = Date.now()
@@ -157,6 +163,44 @@ function signal(pid: number): "alive" | "dead" | undefined {
   }
 }
 
+/** How long a running row may go without its owner's heartbeat (BackgroundJob.HEARTBEAT) before that owner is gone. */
+export const STALE = 5 * HEARTBEAT
+
+// When this process last woke: a gap in its own minute ticks means the machine slept, and every engine on it slept too.
+// Their heartbeats are judged only once this process has been awake for STALE again, so they have time to beat.
+let awake = { since: Date.now(), last: Date.now() }
+let ticker: ReturnType<typeof setInterval> | undefined
+
+function awakeSince(now: number) {
+  if (!ticker) {
+    ticker = setInterval(() => tick(Date.now()), HEARTBEAT)
+    ticker.unref?.()
+  }
+  tick(now)
+  return awake.since
+}
+
+function tick(now: number) {
+  if (now - awake.last > 3 * HEARTBEAT) awake.since = now
+  awake.last = Math.max(awake.last, now)
+}
+
+/** Tests: this process has been awake since `since`. */
+export function useAwakeSince(since: number) {
+  awake = { since, last: Date.now() }
+}
+
+/**
+ * `alive` for a row: besides its owner, a running row whose owner on this machine stopped its heartbeat for STALE is
+ * dead, whatever answers its pid now.
+ */
+export function liveness(row: Pick<Row, "owner" | "status" | "heartbeatAt">, now = Date.now()): Liveness {
+  const owner = alive(row.owner)
+  if (owner === "dead" || row.status !== "running" || row.owner.runtime.startsWith(`${PROCESS_ID}:`)) return owner
+  if (row.owner.machine !== current().machine) return owner
+  return now - row.heartbeatAt > STALE && now - awakeSince(now) >= STALE ? "dead" : owner
+}
+
 export type Row = {
   id: string
   type: string
@@ -172,6 +216,8 @@ export type Row = {
   startedAt: number
   completedAt?: number
   reportedAt?: number
+  /** The owner's last heartbeat while the row runs: its last write otherwise. */
+  heartbeatAt: number
   metadata?: Record<string, unknown>
 }
 
@@ -179,12 +225,13 @@ export type Row = {
 export type Candidate = Row & { cause: "crash" | "shutdown" | "disposed" }
 
 /** A helper an older Vector left running, recorded under its legacy runtime ID. */
-export type Legacy = Omit<Row, "status" | "owner" | "error" | "completedAt" | "reportedAt"> & {
+export type Legacy = Omit<Row, "status" | "owner" | "error" | "completedAt" | "reportedAt" | "heartbeatAt"> & {
   runtime: string
   at: number
 }
 
 export interface Interface extends BackgroundJob.Store {
+  readonly heartbeat: (owner: string, at: number) => Effect.Effect<void>
   /** This directory's unreported rows whose work stopped: running under a dead owner, or interrupted. */
   readonly candidates: (directory: string) => Effect.Effect<Candidate[]>
   /** Marks the row interrupted and reported, once: false when another engine, lease or attempt got there first. */
@@ -232,6 +279,7 @@ function decode(row: typeof BackgroundJobTable.$inferSelect): Row {
     startedAt: row.started_at,
     ...(row.completed_at === null ? {} : { completedAt: row.completed_at }),
     ...(row.reported_at === null ? {} : { reportedAt: row.reported_at }),
+    heartbeatAt: row.time_updated,
     ...(row.metadata === null ? {} : { metadata: row.metadata }),
   }
 }
@@ -279,6 +327,15 @@ export function make(db: Database.Interface["db"]): Interface {
     yield* db.update(BackgroundJobTable).set({ background: true }).where(held(id, p)).run().pipe(Effect.orDie)
   })
 
+  const heartbeat = Effect.fn("BackgroundJobStore.heartbeat")(function* (owner: string, at: number) {
+    yield* db
+      .update(BackgroundJobTable)
+      .set({ time_updated: at })
+      .where(and(eq(BackgroundJobTable.owner_runtime, owner), eq(BackgroundJobTable.status, "running")))
+      .run()
+      .pipe(Effect.orDie)
+  })
+
   const candidates = Effect.fn("BackgroundJobStore.candidates")(function* (directory: string) {
     const rows = yield* db
       .select()
@@ -295,7 +352,7 @@ export function make(db: Database.Interface["db"]): Interface {
       .pipe(Effect.orDie)
     return rows.flatMap((item): Candidate[] => {
       const row = decode(item)
-      if (row.status === "running") return alive(row.owner) === "dead" ? [{ ...row, cause: "crash" }] : []
+      if (row.status === "running") return liveness(row) === "dead" ? [{ ...row, cause: "crash" }] : []
       return [{ ...row, cause: host(row.owner) === "alive" ? "disposed" : "shutdown" }]
     })
   })
@@ -374,7 +431,7 @@ export function make(db: Database.Interface["db"]): Interface {
     return removed.length
   })
 
-  return { started, settled, promoted, candidates, claim, insertLegacy, forParent, prune }
+  return { started, settled, promoted, heartbeat, candidates, claim, insertLegacy, forParent, prune }
 }
 
 const layer = Layer.effect(

@@ -2,6 +2,7 @@ import { describe, expect } from "bun:test"
 import { BackgroundJob } from "@vectordevai/core/background-job"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Context, Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect"
+import * as TestClock from "effect/testing/TestClock"
 import { it } from "./lib/effect"
 
 const jobsLayer = LayerNode.compile(BackgroundJob.node)
@@ -432,6 +433,27 @@ describe("BackgroundJob durable rows", () => {
         }
       }),
     20_000,
+  )
+
+  it.effect("a registry refreshes its lease's heartbeat every minute while a durable job runs", () =>
+    Effect.gen(function* () {
+      const beats: string[] = []
+      const { store } = recorder()
+      const { scope, jobs } = yield* registry({
+        ...store,
+        heartbeat: (runtime) => Effect.sync(() => void beats.push(runtime)),
+      })
+      yield* TestClock.adjust("1 minute")
+      // Nothing durable runs yet: no heartbeat.
+      expect(beats).toEqual([])
+      const job = yield* jobs.start({ type: "task", durable, run: Effect.never })
+      yield* TestClock.adjust("1 minute")
+      expect(beats).toEqual([owner.runtime])
+      yield* jobs.cancel(job.id)
+      yield* TestClock.adjust("1 minute")
+      expect(beats).toEqual([owner.runtime])
+      yield* Scope.close(scope, Exit.void)
+    }),
   )
 
   it.live("non-durable jobs never touch the store", () =>

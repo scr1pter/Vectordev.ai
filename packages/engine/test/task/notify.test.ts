@@ -523,7 +523,7 @@ describe("TaskNotify", () => {
         notification: { text: "report", state: "completed", launchID: launch },
       })
       const human = MessageID.ascending()
-      expect(yield* SubagentLifecycle.claimNotification(sessions, taken, 1, human)).toBe(true)
+      expect(yield* SubagentLifecycle.claimNotification(sessions, yield* Database.Service, taken, 1, human)).toBe(true)
 
       yield* arrived(prompts)
       yield* Effect.sleep(`${QUIET * 2} millis`)

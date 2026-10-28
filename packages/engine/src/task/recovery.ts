@@ -137,7 +137,15 @@ const layer = Layer.effect(
           ...(scopes.length > 0 ? SubagentLifecycle.scopeFields(scopes) : {}),
           reason: SubagentLifecycle.INTERRUPTED_REASON,
           slotReason: undefined,
-          interruption: { at: Math.min(at, record.interruption?.at ?? at), cause, reportedAt: now },
+          // An earlier mark of this same stop (observe's) may be older; an interruption already resumed is another stop.
+          interruption: {
+            at:
+              record.interruption && record.interruption.resumedAt === undefined
+                ? Math.min(at, record.interruption.at)
+                : at,
+            cause,
+            reportedAt: now,
+          },
         },
         record.attempt,
       )
@@ -152,18 +160,17 @@ const layer = Layer.effect(
       return { child, record } satisfies Found
     })
 
-    // This directory's helper sessions from the last 7 days that recovery may act on. At boot: open or unreported ones,
-    // and every report note; later passes look only for report notes nothing has claimed.
+    // This directory's helper sessions from the last 7 days that recovery may act on: open or unreported ones, and
+    // report notes, at boot every one, later only those nothing has claimed.
     const scan = Effect.fnUntraced(function* (ctx: InstanceContext, now: number, boot: boolean) {
       const field = (path: string) => sql`json_extract(${SessionTable.metadata}, ${`$.subagent${path}`})`
-      const unclaimed = and(isNotNull(field(".notification.text")), isNull(field(".notification.messageID")))
-      const wanted = boot
-        ? or(
-            inArray(field(".status"), ["running", "queued"]),
-            and(isNotNull(field(".interruption")), isNull(field(".interruption.reportedAt"))),
-            isNotNull(field(".notification.text")),
-          )
-        : unclaimed
+      const wanted = or(
+        inArray(field(".status"), ["running", "queued"]),
+        and(isNotNull(field(".interruption")), isNull(field(".interruption.reportedAt"))),
+        boot
+          ? isNotNull(field(".notification.text"))
+          : and(isNotNull(field(".notification.text")), isNull(field(".notification.messageID"))),
+      )
       const rows = yield* database.db
         .select()
         .from(SessionTable)
@@ -191,7 +198,7 @@ const layer = Layer.effect(
     const undelivered = Effect.fnUntraced(function* ({ child, record }: Found, root: Session.Info) {
       const stored = record.notification
       if (!stored || SubagentLifecycle.ownedHere(record)) return undefined
-      if ((yield* SubagentLifecycle.liveness(store, child.id, record)) !== "dead") return undefined
+      if ((yield* SubagentLifecycle.liveness(store, child, record)) !== "dead") return undefined
       const stale = stored.messageID
       if (
         stale &&
@@ -254,34 +261,36 @@ const layer = Layer.effect(
       )
 
       const records = yield* scan(ctx, now, boot)
-      // At boot, helpers an older Vector left running: they have no row, so one is inserted to report them once.
-      if (boot)
-        yield* each(
-          records.filter(
-            ({ record }) =>
-              unreported(record) && !(record.runtimeID ?? "").includes(":") && !SubagentLifecycle.ownedHere(record),
-          ),
+      // Helpers an older Vector left running: they have no row, so one is inserted to report them once. An older Vector
+      // keeps no lease, so its open work counts as stopped only once its session has been idle (LEGACY_IDLE).
+      yield* each(
+        records.filter(
           ({ child, record }) =>
-            store
-              .insertLegacy({
-                id: child.id,
-                type: "task",
-                title: record.title,
-                parentSessionID: record.parentSessionID,
-                sessionID: child.id,
-                directory: ctx.directory,
-                background: record.background,
-                ...(record.attempt === undefined ? {} : { attempt: record.attempt }),
-                startedAt: record.startedAt,
-                runtime: record.runtimeID ?? "",
-                at: now,
-              })
-              .pipe(
-                Effect.flatMap((inserted) =>
-                  inserted ? settle(child.id, record.attempt, "unknown", now, now) : Effect.succeed(undefined),
-                ),
+            unreported(record) &&
+            !(record.runtimeID ?? "").includes(":") &&
+            SubagentLifecycle.localLiveness(record, child.time.updated) === "dead",
+        ),
+        ({ child, record }) =>
+          store
+            .insertLegacy({
+              id: child.id,
+              type: "task",
+              title: record.title,
+              parentSessionID: record.parentSessionID,
+              sessionID: child.id,
+              directory: ctx.directory,
+              background: record.background,
+              ...(record.attempt === undefined ? {} : { attempt: record.attempt }),
+              startedAt: record.startedAt,
+              runtime: record.runtimeID ?? "",
+              at: now,
+            })
+            .pipe(
+              Effect.flatMap((inserted) =>
+                inserted ? settle(child.id, record.attempt, "unknown", now, now) : Effect.succeed(undefined),
               ),
-        )
+            ),
+      )
 
       // One note per root: the interrupted helpers, then the reports recovered for it.
       const groups = new Map<string, Group>()
@@ -310,12 +319,14 @@ const layer = Layer.effect(
         { discard: true },
       )
 
-      // An archived conversation keeps its records settled and reported, and gets no note.
+      // An archived conversation keeps its records settled and reported, and gets no note. The notes are written now,
+      // not held in a window: a short-lived command (`vector mcp list`) exits before a window would send them.
       yield* Effect.forEach(
         [...groups.values()].filter((item) => item.root.time.archived === undefined),
         ({ root, helpers, notes }) =>
-          Effect.forEach(
-            [
+          notify.post({
+            parentID: root.id,
+            notes: [
               ...(helpers.length > 0
                 ? [
                     {
@@ -330,9 +341,9 @@ const layer = Layer.effect(
                 : []),
               ...notes,
             ],
-            (item) => notify.enqueue({ parentID: root.id, note: item, ops, agent: root.agent ?? "build" }),
-            { discard: true },
-          ),
+            ops,
+            agent: root.agent ?? "build",
+          }),
         { discard: true },
       )
 

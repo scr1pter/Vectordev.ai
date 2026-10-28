@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { sql } from "drizzle-orm"
 import { Cause, Effect, Exit } from "effect"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { SessionV1 } from "@vectordevai/core/v1/session"
@@ -108,6 +109,7 @@ describe("SubagentLifecycle.claimNotification", () => {
   it.instance("two concurrent claims win once, and a claimed note is not claimed again", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service
+      const database = yield* Database.Service
       const { id, launch } = yield* parent()
       const a = yield* child(id, launch, { notification: { text: "Report", state: "completed", launchID: launch } })
       const first = MessageID.ascending()
@@ -115,8 +117,8 @@ describe("SubagentLifecycle.claimNotification", () => {
 
       const won = yield* Effect.all(
         [
-          SubagentLifecycle.claimNotification(sessions, a, 1, first),
-          SubagentLifecycle.claimNotification(sessions, a, 1, second),
+          SubagentLifecycle.claimNotification(sessions, database, a, 1, first),
+          SubagentLifecycle.claimNotification(sessions, database, a, 1, second),
         ],
         { concurrency: "unbounded" },
       )
@@ -124,7 +126,7 @@ describe("SubagentLifecycle.claimNotification", () => {
       const claimed = SubagentLifecycle.read(yield* sessions.get(a))?.notification?.messageID
       expect(claimed).toBe(won[0] ? first : second)
 
-      expect(yield* SubagentLifecycle.claimNotification(sessions, a, 1, MessageID.ascending())).toBe(false)
+      expect(yield* SubagentLifecycle.claimNotification(sessions, database, a, 1, MessageID.ascending())).toBe(false)
       expect(SubagentLifecycle.read(yield* sessions.get(a))?.notification?.messageID).toBe(claimed)
     }),
   )
@@ -132,16 +134,35 @@ describe("SubagentLifecycle.claimNotification", () => {
   it.instance("a claim for another attempt, or with no note, loses", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service
+      const database = yield* Database.Service
       const { id, launch } = yield* parent()
       const a = yield* child(id, launch, {
         attempt: 2,
         notification: { text: "Report", state: "completed", launchID: launch },
       })
       const b = yield* child(id, launch)
-      expect(yield* SubagentLifecycle.claimNotification(sessions, a, 1, MessageID.ascending())).toBe(false)
+      expect(yield* SubagentLifecycle.claimNotification(sessions, database, a, 1, MessageID.ascending())).toBe(false)
       expect(SubagentLifecycle.read(yield* sessions.get(a))?.notification?.messageID).toBeUndefined()
-      expect(yield* SubagentLifecycle.claimNotification(sessions, b, 1, MessageID.ascending())).toBe(false)
-      expect(yield* SubagentLifecycle.claimNotification(sessions, a, 2, MessageID.ascending())).toBe(true)
+      expect(yield* SubagentLifecycle.claimNotification(sessions, database, b, 1, MessageID.ascending())).toBe(false)
+      expect(yield* SubagentLifecycle.claimNotification(sessions, database, a, 2, MessageID.ascending())).toBe(true)
+    }),
+  )
+
+  it.instance("a claim another engine wrote after this one read the note unclaimed wins", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const database = yield* Database.Service
+      const { id, launch } = yield* parent()
+      const a = yield* child(id, launch, { notification: { text: "Report", state: "completed", launchID: launch } })
+      // This engine read the record before the other engine's claim landed in the shared vector.db.
+      const before = yield* sessions.get(a)
+      const theirs = MessageID.ascending()
+      const path = "$.subagent.notification.messageID"
+      yield* database.db.run(sql`UPDATE session SET metadata = json_set(metadata, ${path}, ${theirs}) WHERE id = ${a}`)
+      const stale = { ...sessions, get: () => Effect.succeed(before) } as Session.Interface
+
+      expect(yield* SubagentLifecycle.claimNotification(stale, database, a, 1, MessageID.ascending())).toBe(false)
+      expect(SubagentLifecycle.read(yield* sessions.get(a))?.notification?.messageID).toBe(theirs)
     }),
   )
 
