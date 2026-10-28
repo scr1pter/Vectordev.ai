@@ -1,5 +1,67 @@
 # Owner action: Vector model catalog and provider artwork
 
+## Prepared Codium restoration (28 October 2026)
+
+The `catalog-112` application branch restores the four OpenRouter entries missing
+from the earlier reviewed fork export: DeepSeek V4.1 Flash 1017, Claude Haiku 5.5,
+Kimi K3.1 Pro and Gemini 4 Argon. GPT-6 Luna and its price tiers were already
+present. This restores the exact model facts and costs from the application's
+reviewed 23 October snapshot at `bb2971e0bc10a43cc9b50f47950e48d4286cf92a`;
+it does not claim a new live provider or ZDR audit.
+
+Fork branch `codium-112` in `scr1pter/vector-model-catalog` now contains complete
+lab records and override-only OpenRouter records. The merged source metadata
+matches all four reviewed application records exactly. The fork's mandatory
+validation passed, and two local web builds under Bun 1.3.14 produced identical
+raw export bytes after frozen installation with lifecycle scripts disabled.
+Semantic comparison found only the four additions; every existing provider and
+model value is unchanged. No sync, inference, billing or deployment ran.
+
+- Fork source revision: `d6c7d3eee3fd72ac8301574a9c9df12acb6d2e50`.
+- Reviewed source/export revision: `06e1cdd7b981c006291b938ad94f4dd6e40f61bd`.
+- Committed export: `vector/api.json`, SHA-256
+  `850dd7f9ea8b55752d421c7582c9e137a55a9fbe936f66711f3039cbb3446c99`;
+  5,313,020 bytes, 226 providers and 8,387 models.
+- Prepared application mirror: 5,185,951 bytes, 219 supported providers and 8,188
+  models, SHA-256
+  `784309673addec6790370607fa73cdeb6d7cede19a2406b7c39d20de2183aaf3`.
+- Import used `freshCatalog` against the clean, exact committed fork revision,
+  preserving the existing provider and bundled-SDK allowlists. Semantic
+  comparison again found only the four restored models.
+- `bun test --timeout 30000 test/model-plan-catalog.test.ts` from `packages/web`
+  passed all 26 tests and 100 assertions, including the restored canonical mirror
+  regression test. Machine-readable provenance is in
+  `docs/vector/build/catalog-112.provenance.json`.
+
+**Release coordination remains required.** Do not merge or deploy this mirror
+change independently of the release catalog decision. The previous fork pin and
+current public mirror may still identify the older snapshot; a release prepared
+from that pin will fail against a newly deployed mirror. Conversely, a release
+using the restored export will fail while the public mirror still has old bytes.
+Reading repository Actions variables returned `403 Resource not accessible by
+integration` during preparation, so their current values have not been verified
+or changed.
+
+Before using the restoration in a release, the owner must review and retain the
+fork commit on GitHub, check the actual release inputs, and coordinate these
+steps:
+
+1. If fork-based preparation is configured, set the nonsecret Actions variables
+   `VECTOR_CATALOG_FORK_REPOSITORY=scr1pter/vector-model-catalog` and
+   `VECTOR_CATALOG_FORK_REVISION=06e1cdd7b981c006291b938ad94f4dd6e40f61bd`.
+   Do not change only one variable or use a moving branch as the revision. If
+   both are intentionally unset, retain the documented desktop-only committed
+   snapshot path and verify its application commit and digest instead.
+2. Merge/deploy the application mirror only through the owner's approved release
+   process, then verify both public aliases return the exact prepared bytes.
+3. Use that same prepared digest for the reviewed candidate's binaries and
+   immutable per-version catalog. Preserve old immutable catalogs; do not
+   overwrite a published version or relax the mirror equality gate.
+
+The preparation and test results below establish offline provenance only. They
+do not establish a deployed mirror, changed release configuration, a published
+installer or current upstream availability.
+
 ## Current state (2 October 2026)
 
 The owner approved creation of the public [Vector catalog fork](https://github.com/scr1pter/vector-model-catalog). The reviewed release input is pinned to `690fd27d61c7a8acc5fd93aeda4f128d67d149fd`, including its committed `vector/api.json` and validated artwork. The complete MIT license remains in the fork and Vector's notices.
