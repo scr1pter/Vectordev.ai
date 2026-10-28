@@ -24,8 +24,8 @@ export const upcomingRelease = {
 export const publishedDesktopVersion = "1.99.111"
 
 // Vector Brain arrives in desktop 1.99.110. The site deploys from main, so until the download page offers that release
-// the landing page and the investor page say it is coming in it, and from then on that it is new in it. README.md
-// cannot read this, so test/brain-docs.test.ts holds its wording to the same version.
+// the landing page and the investor page say it is coming in it, and from then on that it is new in it. The readme and
+// heading labels are for README.md, which has had no section on the brain since 24 October 2026.
 export function brainCopy(published: string) {
   const [major = 0, minor = 0, patch = 0] = published.split(".").map(Number)
   if (major > 1 || (major === 1 && (minor > 99 || (minor === 99 && patch >= 110))))

@@ -5,19 +5,18 @@ import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { TaskSize } from "@vectordevai/core/task-size"
 import { BrainEmbedManifest } from "@vectordevai/core/brain/embed-manifest"
 import { brainBudgetRows, brainCommandRows, documentCommandRows, knowledgeEval, modelCommandRows } from "../src/data/docs-content"
-import { brainCopy, brainRelease, publishedDesktopVersion } from "../src/data/vector-releases"
+import { brainRelease, publishedDesktopVersion } from "../src/data/vector-releases"
 import { docsMoved, docsNav } from "../src/data/docs-nav"
 
-// The brain's docs pages (desktop 1.99.110) and the README's section on it describe what this tree does: the budgets
-// are the engine's, the commands are the CLI's, and every number comes from the dated knowledge eval.
+// The brain's docs pages (desktop 1.99.110) describe what this tree does: the budgets are the engine's, the commands
+// are the CLI's, and every number comes from the dated knowledge eval. The README no longer has a section on the brain
+// (owner, 24 October 2026), so the pages carry what it said and are held to it here.
 const web = path.join(import.meta.dir, "..")
 const repo = path.join(web, "../..")
 const read = async (file: string) => (await Bun.file(path.join(repo, file)).text()).replace(/\s+/g, " ")
 const brain = await read("packages/web/src/pages/docs/brain.astro")
 const documents = await read("packages/web/src/pages/docs/documents.astro")
 const meaning = await read("packages/web/src/pages/docs/search-by-meaning.astro")
-const readme = await read("README.md")
-const section = readme.slice(readme.indexOf("### Vector Brain"), readme.indexOf("### Agents"))
 const report = await Bun.file(path.join(repo, `${knowledgeEval.report}/report.json`)).json()
 const words = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]
 
@@ -105,19 +104,9 @@ test("the budgets the brain page gives are the ones recall uses", () => {
       `Up to ${Brain.recallBudget(tier)} tokens, or ${BrainKnowledge.budget(tier, { documents: true, tight: false })} in a repository with documents.`,
     )
   }
-  // The README's ceiling is the Thorough budget with documents, and it bounds recall only: like the brain page, the
-  // README says every request but a greeting also carries the fixed part.
-  expect(section).toContain(
-    `On top of that, Vector recalls only the few lines that bear on the request, within a budget set by its size, at most ${BrainKnowledge.budget("thorough", { documents: true, tight: false })} tokens for a Thorough request in a repository with documents.`,
-  )
-  expect(section).toContain(
-    `Every request but a greeting carries a fixed part: your rules, about ${Brain.BUDGET.memory} tokens of \`MEMORY.md\`, the entries you pinned (about ${Brain.BUDGET.pinned} tokens) and one line saying what else the brain holds`,
-  )
-  expect(section).toContain('A greeting such as "hi" carries none of it.')
   expect(brain).toContain(
     `Every request but a greeting carries your rules, the start of <code>MEMORY.md</code> (about ${Brain.BUDGET.memory} tokens of it), the entries you pinned (about ${Brain.BUDGET.pinned} tokens) and one line saying what else the brain holds.`,
   )
-  expect(section).not.toMatch(/sends your model only the few lines/)
   // What the page says about the cached part, a file read and a subagent's brief.
   expect(brain).toContain(`about ${Brain.BUDGET.memory} tokens of it`)
   expect(brain).toContain(`(about ${Brain.BUDGET.pinned} tokens)`)
@@ -163,7 +152,7 @@ test("every terminal command the pages list is one the CLI has", async () => {
   expect(missing).toEqual([])
 })
 
-test("the eval figures in the docs and the README are the dated report's", () => {
+test("the eval figures in the docs are the dated report's", () => {
   const working = report.found.working
   const hops = report.found.hops
   const requests = report.fixture.working + report.fixture.hops + report.fixture.irrelevant
@@ -182,38 +171,10 @@ test("the eval figures in the docs and the README are the dated report's", () =>
   )
   expect(documents).toContain("{knowledgeEval.summary}")
   expect(documents).toContain("{knowledgeEval.caveat}")
-  expect(section).toContain(
-    `On the [knowledge eval of 19 October 2026](${knowledgeEval.report}/README.md), recall through code links brought in the governing requirement for ${working.pagerank} of ${working.tasks} tasks that named the files they touch, against ${working.keywords} of ${working.tasks} by keywords alone, at ${Math.round(report.tokens.light.mean)} tokens a Light request on average, and ${report.fixture.irrelevant} unrelated requests carried none.`,
-  )
-  expect(section).toContain(
-    `Keywords and meaning, with no code links, found ${working.meaning} of ${working.tasks}. The eval is ${words[report.fixture.documents]} short specs and ${requests} requests written alongside the feature, with no language model call; it is not an independent benchmark.`,
-  )
-})
-
-// README.md cannot read the published version, so it is held to it here: coming in 1.99.110 until the download page
-// offers that release, then from it. Publishing 1.99.110 fails this test until the README says so.
-test("the README names the release the brain ships in, as coming until it is published", () => {
-  expect(readme).toContain(brainRelease.readme)
-  expect(section).toStartWith(brainRelease.heading)
-  const other = brainCopy(Bun.semver.order(publishedDesktopVersion, "1.99.110") < 0 ? "1.99.110" : "1.99.109")
-  expect(readme).not.toContain(other.readme)
-  expect(readme).not.toContain(other.heading)
-  expect(section).toContain("with the next CLI release")
-})
-
-// The owner's control line (20 October 2026) sits in the README's paragraph on the brain's release, so it is labelled
-// with it, and says only what the brain does: it is stored on this computer, the model is the user's pick, and Memory
-// lists what it learned with Undo and erase. Free models that may train are named as the exception.
-test("the README's control line says what the brain lets you control, and the exception", () => {
-  const paragraph = readme.slice(readme.indexOf(brainRelease.readme), readme.indexOf("Vector is free."))
-  expect(paragraph).toContain(
-    'Your prompts, your data, your Vector: the brain lives on your computer, you choose who runs the model for each request, and you can see, undo or erase what it learned in Settings → Memory. Free models labelled "May train on your prompts" are the exception.',
-  )
-  expect(readme).not.toMatch(/\bfully\b|controlled only by you|only you control|your prompts never/i)
 })
 
 test("the brain's copy keeps to the owner's wording rules", () => {
-  for (const text of [brain, documents, meaning, section, knowledgeEval.summary, knowledgeEval.caveat, knowledgeEval.meaning, knowledgeEval.floor]) {
+  for (const text of [brain, documents, meaning, knowledgeEval.summary, knowledgeEval.caveat, knowledgeEval.meaning, knowledgeEval.floor]) {
     expect(text).not.toMatch(/\bexactly\b|never exceeds|absolute privacy|guaranteed/i)
     expect(text).not.toMatch(/\bprojects?\b/i)
     expect(text).not.toMatch(/(cheaper|faster) than Codex|Codex[^.]*(cheaper|faster)/i)
@@ -222,7 +183,7 @@ test("the brain's copy keeps to the owner's wording rules", () => {
   }
   // Every PDF and doc claim stays inside what the readers do: no text read from images until a later release.
   expect(documents).toContain("Pictures of text, such as scanned pages, are named but not read")
-  expect(`${brain} ${documents} ${section}`).not.toMatch(/\bOCR\b/)
+  expect(`${brain} ${documents}`).not.toMatch(/\bOCR\b/)
 })
 
 test("Search by meaning has its own page, from desktop 1.99.110, with the manifest's model, size, license and revision", async () => {
@@ -244,7 +205,7 @@ test("Search by meaning has its own page, from desktop 1.99.110, with the manife
     "never for a free model labelled <strong>May train on your prompts</strong>, or in a session a guest is in",
   )
   expect(documents).toContain('<a href="/docs/search-by-meaning">Search by meaning</a>')
-  expect(section).toContain("With the optional local search model, a one-time 24 MB download you ask for")
+  expect(documents).toContain("With the optional local search model, a one-time download you ask for")
   // Only the preview's two tokenizer files have no pinned sha256, and every place that promises the hash says so.
   const unpinned = Object.values(BrainEmbedManifest.MODELS).flatMap((model) =>
     Object.values(model.files).flatMap((file) => (file && !file.sha256 ? [`${model.id}/${file.name}`] : [])),
