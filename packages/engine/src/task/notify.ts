@@ -40,6 +40,8 @@ export type Note = {
   wake: boolean
   recovered?: boolean
   quiet?: boolean
+  /** A stale claim on a result note (its engine stopped before writing the message), which this delivery takes over. */
+  stale?: string
 }
 
 export type ResultInput = {
@@ -382,6 +384,7 @@ const layer = Layer.effect(
         if (note.kind !== "result" || !note.taskID || !note.launchID || !final(note.state)) return Effect.succeed([item])
         const taskID = note.taskID
         return SubagentLifecycle.claimNotification(sessions, taskID, note.attempt, messageID, {
+          stale: note.stale,
           note: { text: note.text, state: note.state, launchID: note.launchID },
         }).pipe(
           Effect.catch(() => Effect.succeed(false)),
@@ -520,10 +523,10 @@ const layer = Layer.effect(
     })
 
     const settled = Effect.fnUntraced(function* (input: WatchInput, info: BackgroundJob.Info | undefined) {
-      if (!info || info.status === "running") return
+      // A run Vector interrupted while going away is TaskRecovery's to settle and report (D.3).
+      if (!info || info.status === "running" || info.status === "interrupted") return
       if (SubagentLifecycle.read(yield* sessions.get(input.taskID))?.attempt !== input.attempt) return
-      // Interrupted while its instance went away: settled as stopped, as before restart recovery existed.
-      const status = info.status === "interrupted" ? "cancelled" : info.status
+      const status = info.status
       const done = yield* SubagentLifecycle.locked(SubagentLifecycle.controlLock)(
         Effect.gen(function* () {
           const finished = yield* SubagentLifecycle.finish(sessions, guard, input.taskID, input.attempt, {

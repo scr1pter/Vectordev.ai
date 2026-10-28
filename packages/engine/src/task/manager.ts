@@ -18,6 +18,9 @@ import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { ModelV2 } from "@vectordevai/core/model"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { Config } from "@/config/config"
+import { BackgroundJobStore } from "@vectordevai/core/background-job-store"
+import { InstanceState } from "@/effect/instance-state"
+import { disposing } from "@/effect/instance-registry"
 import { DesktopTasks } from "./desktop"
 import { TaskLimits } from "./limits"
 
@@ -54,6 +57,13 @@ export class Service extends Context.Service<Service, Interface>()("@vector/Task
 const ACTIVE = new Set<string>(["queued", "running", "waiting_on_user"])
 const MAX_TASKS = 200
 const OUTPUT_LIMIT = 4096
+// A record whose engine is gone, found before TaskRecovery reported it: why it stopped is unknown (D.3).
+const abandon = (at: number) => ({
+  status: "cancelled" as const,
+  completedAt: at,
+  reason: "Engine restarted; partial work was retained. Resume explicitly to continue.",
+  interruption: { at, cause: "unknown" as const },
+})
 const recentActiveFirst = (left: { status: string; startedAt: number }, right: { status: string; startedAt: number }) =>
   Number(ACTIVE.has(right.status)) - Number(ACTIVE.has(left.status)) || right.startedAt - left.startedAt
 
@@ -71,6 +81,7 @@ const layer = Layer.effect(
     const limits = yield* TaskLimits.Service
     const config = yield* Config.Service
     const guests = yield* FreeModelGuests.Service
+    const store = yield* BackgroundJobStore.Service
     const bridge = <A>(effect: Effect.Effect<A, DesktopTasks.Error>) =>
       effect.pipe(Effect.mapError((error) => new Error({ code: error.code, message: error.message })))
     const lock = SubagentLifecycle.controlLock
@@ -110,6 +121,23 @@ const layer = Layer.effect(
       return yield* new Error({ code: "forbidden", message: "The task does not belong to this session's descendants." })
     })
 
+    // A workflow run whose engine is gone leaves its own running or queued agents behind with it (D.3). Inert until
+    // runs exist (WP31).
+    const cascade = Effect.fn("TaskManager.cascade")(function* (runID: SessionID, at: number) {
+      yield* Effect.forEach(
+        yield* sessions.children(runID),
+        (agent) =>
+          Effect.gen(function* () {
+            const record = SubagentLifecycle.read(agent)
+            if (record?.workflow?.role !== "agent" || !SubagentLifecycle.open(record)) return
+            if ((yield* jobs.get(agent.id)) || (yield* SubagentLifecycle.liveness(store, agent.id, record)) !== "dead")
+              return
+            yield* SubagentLifecycle.update(sessions, agent.id, abandon(at), record.attempt)
+          }),
+        { concurrency: 4, discard: true },
+      )
+    })
+
     const observe = Effect.fn("TaskManager.observe")(function* (
       initial: Session.Info,
     ): Effect.fn.Return<Task.Info, Error> {
@@ -119,19 +147,13 @@ const layer = Layer.effect(
       const abandoned =
         !job &&
         !live &&
-        (record.status === "running" || record.status === "queued") &&
-        record.runtimeID !== SubagentLifecycle.RUNTIME_ID
-      if (abandoned)
-        yield* SubagentLifecycle.update(
-          sessions,
-          initial.id,
-          {
-            status: "cancelled",
-            completedAt: Date.now(),
-            reason: "Engine restarted; partial work was retained. Resume explicitly to continue.",
-          },
-          record.attempt,
-        )
+        SubagentLifecycle.open(record) &&
+        (yield* SubagentLifecycle.liveness(store, initial.id, record)) === "dead"
+      if (abandoned) {
+        const at = Date.now()
+        yield* SubagentLifecycle.update(sessions, initial.id, abandon(at), record.attempt)
+        if (record.workflow?.role === "run") yield* cascade(initial.id, at)
+      }
       const session = abandoned ? yield* get(initial.id) : initial
       const current = SubagentLifecycle.read(session)!
       const pending = [...(yield* permissions.list()), ...(yield* questions.list())].some(
@@ -213,6 +235,17 @@ const layer = Layer.effect(
           message: ACTIVE.has(status) && job?.status === "running" && !SubagentLifecycle.stopping.has(session.id),
           stop: ACTIVE.has(status) && !SubagentLifecycle.stopping.has(session.id),
         },
+        ...(current.interruption
+          ? {
+              interrupted: SubagentLifecycle.defined({
+                at: current.interruption.at,
+                cause: current.interruption.cause,
+                reported: current.interruption.reportedAt !== undefined,
+                resumedAt: current.interruption.resumedAt,
+                dismissedAt: current.interruption.dismissedAt,
+              }) as Task.Interrupted,
+            }
+          : {}),
       }
     })
 
@@ -478,6 +511,7 @@ const layer = Layer.effect(
         return yield* new Error({ code: "invalid", message: "Choose task IDs or all, not both." })
       if (input.reason && input.reason.length > 1000)
         return yield* new Error({ code: "invalid", message: "Stop reasons are limited to 1000 characters." })
+      const directory = yield* InstanceState.directory
       const claimed = new Set<SessionID>()
       return yield* Effect.gen(function* () {
         const prepared = yield* SubagentLifecycle.locked(lock)(
@@ -540,7 +574,9 @@ const layer = Layer.effect(
                   claimed.delete(session.id)
                   const current = yield* get(session.id)
                   const record = SubagentLifecycle.read(current)
-                  if (!record || record.attempt !== entry.attempt) return yield* observe(current)
+                  // While Vector goes away, TaskRecovery owns the record (D.3).
+                  if (!record || record.attempt !== entry.attempt || disposing(directory))
+                    return yield* observe(current)
                   if (record.status === "running" || record.status === "queued")
                     yield* SubagentLifecycle.settle(sessions, session.id, { status: "cancelled" })
                   yield* persist(
@@ -629,6 +665,7 @@ export const node = LayerNode.make({
     TaskLimits.node,
     Config.node,
     FreeModelGuests.node,
+    BackgroundJobStore.node,
   ],
 })
 export * as TaskManager from "./manager"

@@ -190,8 +190,8 @@ export function running(children: readonly Running[], lane: "quick" | "work") {
 const RUNNING_SHOWN = 6
 const RUNNING_TITLE = 60
 
-// A title a model wrote, as one short line that cannot close the quotes or the tags around it.
-function titled(title: string) {
+/** A title a model wrote, as one short line that cannot close the quotes or the tags around it. */
+export function titled(title: string) {
   const line = [...title.replace(/\s+/g, " ").replace(/"/g, "'").trim()].slice(0, RUNNING_TITLE).join("").trim()
   return neutralizeTags(line) || "untitled"
 }

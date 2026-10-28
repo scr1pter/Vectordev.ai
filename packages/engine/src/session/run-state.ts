@@ -1,5 +1,6 @@
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { InstanceState } from "@/effect/instance-state"
+import { disposing } from "@/effect/instance-registry"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { Runner } from "@/effect/runner"
 import { BackgroundJob } from "@/background/job"
@@ -101,6 +102,8 @@ const layer = Layer.effect(
     // writes.
     const settleIdle = Effect.fnUntraced(function* (sessionID: SessionID) {
       yield* status.set(sessionID, { type: "idle" })
+      // While Vector goes away, TaskRecovery owns the record (D.3).
+      if (disposing(yield* InstanceState.directory)) return
       if (yield* background.get(sessionID)) return
       const record = yield* sessions.get(sessionID).pipe(
         Effect.map(SubagentLifecycle.read),

@@ -65,6 +65,7 @@ import { BrainWorkflow } from "@vectordevai/core/brain/workflow"
 import { LearnedSkill } from "@/skill/learned"
 import { TaskNotify } from "@/task/notify"
 import { TaskLimits } from "@/task/limits"
+import { TaskRecovery } from "@/task/recovery"
 
 export const AppLayer = AppNodeBuilderV1.build(
   LayerNode.group([
@@ -92,6 +93,7 @@ export const AppLayer = AppNodeBuilderV1.build(
     BackgroundJob.node,
     TaskNotify.node,
     TaskLimits.node,
+    TaskRecovery.node,
     RuntimeFlags.node,
     EventV2Bridge.node,
     SessionRunState.node,

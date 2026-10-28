@@ -32,7 +32,9 @@ import { Provider } from "@/provider/provider"
 import { Permission } from "@/permission"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
-import { disposeAllInstances, TestInstance } from "../fixture/fixture"
+import { disposeAllInstances, requireInstance, TestInstance } from "../fixture/fixture"
+import { InstanceStore } from "@/project/instance-store"
+import { BackgroundJobStore } from "@vectordevai/core/background-job-store"
 import { awaitWithTimeout, pollWithTimeout, testEffect } from "../lib/effect"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
@@ -70,6 +72,7 @@ const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
       TaskLimits.node,
       TaskManager.node,
       FreeModelGuests.node,
+      BackgroundJobStore.node,
     ]),
     // The note window runs in milliseconds here: 300 of quiet, held at most a second.
     [[RuntimeFlags.node, RuntimeFlags.layer({ noteQuietMs: 300, noteHoldMs: 1_000, ...flags })]],
@@ -5147,5 +5150,78 @@ describe("subagent limits", () => {
         expect((yield* (yield* TaskLimits.Service).status(parent.id, opener)).launched).toBe(3)
       }),
     capped({ running: 2 }),
+  )
+})
+
+// An update, quit or instance disposal interrupts helpers: their rows say so and their records are left for restart
+// recovery to report, never settled as cancelled (D.3, I26).
+describe("task shutdown", () => {
+  background.instance(
+    "disposing an instance leaves every helper's row interrupted and its record running or queued",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const store = yield* BackgroundJobStore.Service
+        const ctx = yield* requireInstance
+        const seeded = yield* seed()
+        const def = yield* (yield* TaskTool).init()
+        // Every child's run starts and then works until the instance goes away.
+        const started: string[] = []
+        const ops: TaskPromptOps = {
+          ...stubOps(),
+          prompt: (input) => Effect.sync(() => void started.push(input.sessionID)).pipe(Effect.andThen(Effect.never)),
+        }
+        const call = (callID: string) =>
+          taskContext({ sessionID: seeded.chat.id, messageID: seeded.assistant.id, promptOps: ops, callID })
+        const brief = (area: string) => ({
+          description: `Inspect ${area}`,
+          prompt: `Inspect ${area} and report.`,
+          subagent_type: "general",
+        })
+        // A background prerequisite and a dependent queued behind it.
+        const first = yield* def.execute({ ...brief("parser") }, call("call_prerequisite"))
+        const prerequisite = (first.metadata as { sessionId: string }).sessionId
+        const second = yield* def.execute({ ...brief("lexer"), depends_on: [prerequisite] }, call("call_dependent"))
+        const dependent = (second.metadata as { sessionId: string }).sessionId
+        // A foreground single and a two-entry foreground batch, each waiting on its children.
+        const single = yield* def
+          .execute({ ...brief("printer"), background: false }, call("call_single"))
+          .pipe(Effect.forkChild({ startImmediately: true }))
+        const batch = yield* def
+          .execute({ background: false, tasks: [brief("api"), brief("cli")] }, call("call_batch"))
+          .pipe(Effect.forkChild({ startImmediately: true }))
+        yield* pollWithTimeout(
+          Effect.sync(() => (started.length >= 4 ? true : undefined)),
+          "every helper but the dependent should have started",
+          "5 seconds",
+        )
+
+        yield* InstanceStore.Service.use((instances) => instances.dispose(ctx))
+
+        const single_ = yield* Fiber.join(single)
+        expect(single_.output).toContain('state="cancelled"')
+        expect(single_.output).toContain(SubagentLifecycle.INTERRUPTED_REASON)
+        yield* Fiber.join(batch)
+        // Nothing settles them afterwards either.
+        yield* Effect.sleep("300 millis")
+        const rows = yield* store.forParent(seeded.chat.id)
+        expect(rows).toHaveLength(5)
+        expect(rows.map((row) => row.status)).toEqual(Array(5).fill("interrupted"))
+        const records = (yield* sessions.children(seeded.chat.id)).map((child) => ({
+          id: child.id,
+          record: SubagentLifecycle.read(child),
+        }))
+        expect(records).toHaveLength(5)
+        for (const { id, record } of records) {
+          expect(record?.status).toBe(id === dependent ? "queued" : "running")
+          expect(record?.runtimeID).toBe(rows[0].owner.runtime)
+          expect(record?.owner).toEqual({ pid: process.pid, boot: rows[0].owner.boot })
+          expect(record?.notification).toBeUndefined()
+        }
+        // The dependent's prerequisite was interrupted, so its own prompt never started.
+        expect(started).toHaveLength(4)
+        expect(started).not.toContain(dependent)
+      }),
+    { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } },
   )
 })

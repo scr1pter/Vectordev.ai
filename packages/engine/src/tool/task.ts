@@ -26,6 +26,7 @@ import { Config } from "@/config/config"
 import { Cause, Effect, Exit, Option, Schema, Scope, Semaphore } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
+import { disposing } from "@/effect/instance-registry"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@vectordevai/core/database/database"
@@ -897,6 +898,8 @@ export const TaskTool = Tool.define(
         const startedAt = Date.now()
         let attempt = (session ? (SubagentLifecycle.read(session)?.attempt ?? 0) : 0) + 1
         const batchID = `${ctx.sessionID}:${ctx.callID ?? ctx.messageID}`
+        // The instance lease the job runs under, so a later engine can tell whether this child's work is still running.
+        const lease = yield* background.lease()
         const record: SubagentRecord = {
           kind,
           agent: next.name,
@@ -908,7 +911,8 @@ export const TaskTool = Tool.define(
           ...(batch ? { batchIndex: batch.index } : {}),
           batchID,
           attempt,
-          runtimeID: SubagentLifecycle.RUNTIME_ID,
+          runtimeID: lease?.runtime ?? SubagentLifecycle.RUNTIME_ID,
+          ...(lease ? { owner: { pid: lease.pid, boot: lease.boot } } : {}),
           ownedPaths,
           dependsOn: dependencies,
           successCriteria: params.success_criteria ? [...params.success_criteria] : undefined,
@@ -1050,6 +1054,8 @@ export const TaskTool = Tool.define(
           error: string | undefined,
           persist: boolean,
         ) {
+          // A child stopped while Vector goes away is TaskRecovery's to settle (D.3).
+          if (status === "cancelled" && disposing(instance.directory)) return
           const done = yield* SubagentLifecycle.finish(sessions, guard, nextSession.id, attempt, { status, error })
           if (!done) return
           settledPart(done.settled, done.hold)
@@ -1171,9 +1177,10 @@ export const TaskTool = Tool.define(
           }
           yield* background.wait({ id: nextSession.id }).pipe(
             Effect.flatMap((waited) =>
-              waited.info && waited.info.status !== "running"
+              // An interrupted run (Vector going away) is TaskRecovery's to settle (D.3).
+              waited.info && waited.info.status !== "running" && waited.info.status !== "interrupted"
                 ? SubagentLifecycle.outcome(sessions, nextSession.id, {
-                    status: waited.info.status === "interrupted" ? "cancelled" : waited.info.status,
+                    status: waited.info.status,
                     error: waited.info.error,
                   }).pipe(
                     Effect.flatMap((value) => {
@@ -1354,6 +1361,13 @@ export const TaskTool = Tool.define(
               type: id,
               title,
               metadata,
+              // A row in vector.db, so a restart can tell the parent this child was interrupted (D.3).
+              durable: {
+                parentSessionID: ctx.sessionID,
+                sessionID: nextSession.id,
+                directory: instance.directory,
+                attempt,
+              },
               promotable: !batch?.multiple,
               onPromote: batch?.multiple
                 ? undefined
@@ -1452,6 +1466,13 @@ export const TaskTool = Tool.define(
                 ? waiting
                 : Effect.raceFirst(waiting, background.waitForPromotion(nextSession.id))
               if (!batch?.multiple && result?.metadata?.background === true) return backgroundResult()
+              // Vector going away stopped the child: TaskRecovery settles it and tells the parent (D.3).
+              if (result?.status === "interrupted")
+                return rendered(title, partMetadata(), {
+                  sessionID: nextSession.id,
+                  state: "cancelled",
+                  text: SubagentLifecycle.INTERRUPTED_REASON,
+                })
               // Calls that fail before reaching the child have no output to preserve.
               if (result?.status === "error" && result.output === undefined) {
                 yield* finish("error", result.error, true)
@@ -1460,7 +1481,7 @@ export const TaskTool = Tool.define(
               // The returned metadata carries the outcome, so the part needs no later
               // patch. A stopped subagent returns the cancelled note instead of failing.
               const settled =
-                result?.status === "cancelled" || result?.status === "interrupted" || ctx.abort.aborted
+                result?.status === "cancelled" || ctx.abort.aborted
                   ? "cancelled"
                   : result?.status === "error"
                     ? "error"
@@ -1485,8 +1506,8 @@ export const TaskTool = Tool.define(
           (_, exit) =>
             Effect.gen(function* () {
               if (!Exit.hasInterrupts(exit)) return
-              yield* Effect.all([cancel, background.cancel(nextSession.id)], { discard: true })
-              yield* finish("cancelled", undefined, true)
+              const [, stopped] = yield* Effect.all([cancel, background.cancel(nextSession.id)])
+              if (stopped?.status !== "interrupted") yield* finish("cancelled", undefined, true)
             }).pipe(
               Effect.ensuring(
                 Effect.sync(() => {
@@ -1532,6 +1553,7 @@ export const TaskTool = Tool.define(
         status: "pending",
       }))
       const owned = new Map<number, SessionID>()
+      const directory = yield* InstanceState.directory
       const lock = Semaphore.makeUnsafe(1)
       let returned = false
       yield* Effect.addFinalizer(() =>
@@ -1646,12 +1668,15 @@ export const TaskTool = Tool.define(
             const cancelled = Exit.hasInterrupts(exit)
             const error = Cause.pretty(exit.cause)
             const sessionID = owned.get(index)
-            if (sessionID)
-              yield* SubagentLifecycle.settle(sessions, sessionID, {
-                status: cancelled ? "cancelled" : "error",
-                error,
-              })
-            yield* publish(index, { status: cancelled ? "cancelled" : "error", error, completedAt: Date.now() })
+            // While Vector goes away, TaskRecovery settles the child and its entry (D.3).
+            if (!cancelled || !disposing(directory)) {
+              if (sessionID)
+                yield* SubagentLifecycle.settle(sessions, sessionID, {
+                  status: cancelled ? "cancelled" : "error",
+                  error,
+                })
+              yield* publish(index, { status: cancelled ? "cancelled" : "error", error, completedAt: Date.now() })
+            }
             const head = `<task_entry index="${index}" state="${cancelled ? "cancelled" : "error"}">`
             return { text: error, render: (text: string) => `${head}\n${text}\n</task_entry>` }
           }),

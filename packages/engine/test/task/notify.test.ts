@@ -570,7 +570,8 @@ describe("TaskNotify", () => {
     }),
   )
 
-  it.instance("disposing the instance neither drops a held note nor leaves a watched child running", () =>
+  // Disposal interrupts the watched child, which TaskRecovery then reports; it is never settled as cancelled (D.3, I26).
+  it.instance("disposing the instance neither drops a held note nor settles an interrupted child", () =>
     Effect.gen(function* () {
       const notify = yield* TaskNotify.Service
       const jobs = yield* BackgroundJob.Service
@@ -613,18 +614,19 @@ describe("TaskNotify", () => {
       const delivered = yield* pollWithTimeout(
         Effect.sync(() => {
           const notes = prompts.flatMap(notifications)
-          return notes.length >= 2 ? notes : undefined
+          return notes.length >= 1 ? notes : undefined
         }),
-        "expected both notes after the instance was disposed",
+        "expected the held note after the instance was disposed",
         "5 seconds",
       )
-      expect(delivered).toContainEqual({ taskID: held, state: "completed" })
-      expect(delivered).toContainEqual({ taskID: running, state: "cancelled" })
-      // The child is settled and its card was told so.
-      expect(settled.map((outcome) => outcome.status)).toEqual(["cancelled"])
+      expect(delivered).toEqual([{ taskID: held, state: "completed" }])
+      // The interrupted child is left for restart recovery: no note, no settlement, its record still running.
+      yield* Effect.sleep("300 millis")
+      expect(prompts.flatMap(notifications)).toEqual([{ taskID: held, state: "completed" }])
+      expect(settled).toEqual([])
       const record = SubagentLifecycle.read(yield* sessions.get(running))
-      expect(record?.status).toBe("cancelled")
-      expect(record?.notification?.messageID).toBeDefined()
+      expect(record?.status).toBe("running")
+      expect(record?.notification).toBeUndefined()
     }),
   )
 })

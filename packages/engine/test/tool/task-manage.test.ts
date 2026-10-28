@@ -60,6 +60,9 @@ describe("task management", () => {
     expect((yield* manager.list({ sessionID: root.id, descendants: true })).tasks).toHaveLength(2)
     expect((yield* manager.list({ sessionID: root.id, descendants: true, limit: 1 })).truncated).toBe(true)
     expect(SubagentLifecycle.read(yield* sessions.get(a.id))?.status).toBe("cancelled")
+    // Its engine is gone and no restart report said why (D.3).
+    expect(SubagentLifecycle.read(yield* sessions.get(a.id))?.interruption).toEqual({ at: expect.any(Number), cause: "unknown" })
+    expect(direct.tasks[0].interrupted).toEqual({ at: expect.any(Number), cause: "unknown", reported: false })
   }))
 
   it.instance("concurrent lifecycle patches preserve mailbox and outcome fields", () => Effect.gen(function* () {

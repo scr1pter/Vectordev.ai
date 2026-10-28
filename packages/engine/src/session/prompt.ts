@@ -3363,7 +3363,7 @@ const layer = Layer.effect(
           const item = { id: child.id, title: record.title }
           if (record.status !== "running" && record.status !== "queued")
             return record.notification && record.notification.messageID === undefined ? [item] : []
-          if (record.runtimeID === SubagentLifecycle.RUNTIME_ID) return [item]
+          if (SubagentLifecycle.localLiveness(record) === "alive") return [item]
           const live = (yield* jobs.get(child.id)) !== undefined || (yield* status.get(child.id)).type !== "idle"
           return live ? [item] : []
         }),

@@ -17,6 +17,7 @@ import { RunBudget } from "@vectordevai/schema/run-budget"
 import { Task } from "@vectordevai/schema/task"
 import { Database } from "@vectordevai/core/database/database"
 import type { SpendGuard } from "@vectordevai/core/spend-guard"
+import { BackgroundJobStore } from "@vectordevai/core/background-job-store"
 import { BackgroundJob } from "@/background/job"
 import { SessionMemory } from "@/session/memory"
 
@@ -33,7 +34,7 @@ import { SessionMemory } from "@/session/memory"
 
 /** Key of the lifecycle record in a child session's metadata. */
 export const METADATA_KEY = "subagent"
-// Observation identity only: this never claims durable or clustered execution ownership.
+// The runtime ID of a record written without an instance lease; a launch records its lease (BackgroundJobStore.Owner).
 export const RUNTIME_ID = randomUUID()
 // Admission, messaging and Stop share one short critical section; execution runs outside it. Take it with `locked`, so
 // an interrupted caller cannot keep it, and hold it only for in-memory and database steps.
@@ -78,6 +79,41 @@ export type Outcome = Partial<Pick<SubagentRecord, "status" | "completedAt" | "u
 export function open(record: Pick<SubagentRecord, "status"> | undefined) {
   return record?.status === "queued" || record?.status === "running"
 }
+
+/** Whether this process runs or ran the record's work: its runtime ID is this process's own, or one of its leases. */
+export function ownedHere(record: Pick<SubagentRecord, "runtimeID">) {
+  return record.runtimeID === RUNTIME_ID || record.runtimeID?.startsWith(`${BackgroundJobStore.PROCESS_ID}:`) === true
+}
+
+/**
+ * The liveness of the record's runtime when no job row is needed to tell (D.3): this process's own ID and open lease
+ * are alive, a closed lease and a legacy runtime ID (no ":") dead. Undefined for another process's lease.
+ */
+export function localLiveness(record: Pick<SubagentRecord, "runtimeID">): BackgroundJobStore.Liveness | undefined {
+  const runtime = record.runtimeID
+  if (runtime === RUNTIME_ID) return "alive"
+  if (!runtime?.includes(":")) return "dead"
+  if (runtime.startsWith(`${BackgroundJobStore.PROCESS_ID}:`))
+    return BackgroundJobStore.alive({ runtime, pid: process.pid, boot: 0, machine: "" })
+  return undefined
+}
+
+/**
+ * Whether an engine may still be running the record's work: `localLiveness`, else from the job row of another
+ * process's lease, which alone keeps the machine id. A lease with no row is dead, as a foreign runtime always was.
+ */
+export const liveness = Effect.fnUntraced(function* (
+  store: BackgroundJobStore.Interface,
+  childID: string,
+  record: Pick<SubagentRecord, "runtimeID" | "parentSessionID">,
+) {
+  const local = localLiveness(record)
+  if (local) return local
+  const row = (yield* store.forParent(record.parentSessionID)).find(
+    (item) => item.id === childID && item.owner.runtime === record.runtimeID,
+  )
+  return row ? BackgroundJobStore.alive(row.owner) : ("dead" as const)
+})
 
 /** Whether resuming this helper waits for the user: it was interrupted and not resumed since, or the user stopped it. */
 export function needsHuman(record: Pick<SubagentRecord, "interruption" | "stop">) {
@@ -358,7 +394,7 @@ export function recover(sessions: Session.Interface, database: Database.Interfac
     return (yield* Effect.forEach(children, (child) => Effect.gen(function* () {
       const record = read(child)
       const note = record?.notification
-      if (!note || record.runtimeID === RUNTIME_ID) return []
+      if (!note || ownedHere(record)) return []
       // A claim whose message was never written (its engine stopped first) is taken over once its grace has passed.
       const stale = note.messageID
       if (stale && ((note.claimedAt ?? 0) > Date.now() - CLAIM_GRACE || (yield* written(database, parentID, stale))))
