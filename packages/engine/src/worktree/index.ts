@@ -12,11 +12,12 @@ import { errorMessage } from "../util/error"
 import { GlobalBus } from "@/bus/global"
 import { Git } from "@/git"
 import { gitEnvironment, refusal } from "@vectordevai/core/git"
-import { Effect, Layer, Path, Schema, Scope, Context } from "effect"
+import { Effect, Layer, Path, Schema, Scope, Context, Option } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { AppProcess } from "@vectordevai/core/process"
 import { InstanceState } from "@/effect/instance-state"
+import { FileLock } from "@/tool/file-lock"
 import { WorktreeEvent } from "@vectordevai/schema/worktree-event"
 
 export const Event = WorktreeEvent
@@ -121,6 +122,11 @@ export interface Interface {
   readonly makeWorktreeInfo: (options?: { name?: string; detached?: boolean }) => Effect.Effect<Info, Error>
   readonly createFromInfo: (info: Info, startCommand?: string) => Effect.Effect<void, Error>
   readonly create: (input?: CreateInput) => Effect.Effect<Info, Error>
+  /** Raw task checkout primitive: no sandbox registration, instance boot or start scripts. */
+  readonly createForTask: (
+    info: Info,
+    options: { from: string; env?: Record<string, string | undefined> },
+  ) => Effect.Effect<Info, Error>
   readonly list: () => Effect.Effect<(Omit<Info, "branch"> & { branch?: string })[], Error>
   readonly remove: (input: RemoveInput) => Effect.Effect<boolean, Error>
   readonly reset: (input: ResetInput) => Effect.Effect<boolean, Error>
@@ -155,7 +161,7 @@ const layer: Layer.Layer<
     // With Vector Local on, a git command that connects (a fetch, a submodule update) is decided on each remote it would
     // reach before git starts, and with Web access None git may use only file remotes.
     const git = Effect.fnUntraced(
-      function* (args: string[], opts?: { cwd?: string }) {
+      function* (args: string[], opts?: { cwd?: string; env?: Record<string, string | undefined> }) {
         const query = (more: string[]) =>
           appProcess.run(ChildProcess.make("git", more, { cwd: opts?.cwd, extendEnv: true, stdin: "ignore" })).pipe(
             Effect.map((result) => (result.exitCode === 0 ? result.stdout.toString("utf8") : "")),
@@ -164,7 +170,12 @@ const layer: Layer.Layer<
         const refused = yield* refusal(args, query)
         if (refused) return { code: 128, text: "", stderr: refused } satisfies GitResult
         const result = yield* appProcess.run(
-          ChildProcess.make("git", args, { cwd: opts?.cwd, extendEnv: true, stdin: "ignore", env: gitEnvironment() }),
+          ChildProcess.make("git", args, {
+            cwd: opts?.cwd,
+            extendEnv: true,
+            stdin: "ignore",
+            env: { ...opts?.env, ...gitEnvironment() },
+          }),
         )
         return {
           code: result.exitCode,
@@ -302,6 +313,56 @@ const layer: Layer.Layer<
       return info
     })
 
+    const createForTask: Interface["createForTask"] = Effect.fn("Worktree.createForTask")(function* (info, options) {
+      const ctx = yield* InstanceState.context
+      if (ctx.project.vcs !== "git")
+        return yield* new NotGitError({ message: "Worktrees are only supported for Git repositories" })
+      const root = pathSvc.join(Global.Path.data, "task-worktree", ctx.project.id)
+      const directory = pathSvc.join(root, info.name)
+      if (
+        !/^[A-Za-z0-9_-]+$/.test(info.name) ||
+        info.branch !== `vector/subagent/${info.name}` ||
+        FileLock.key(directory) !== FileLock.key(info.directory) ||
+        !FSUtil.writableInside(Global.Path.data, info.directory) ||
+        !options.from.trim() ||
+        options.from.startsWith("-")
+      )
+        return yield* new CreateFailedError({ message: "Invalid isolated task worktree placement or seed." })
+      const args = [
+        "-c",
+        "core.fsmonitor=false",
+        ...(process.platform === "win32" ? ["-c", "core.longpaths=true"] : []),
+      ]
+      const env = { ...options.env, GIT_LFS_SKIP_SMUDGE: "1" }
+      const common = yield* git([...args, "rev-parse", "--git-common-dir"], { cwd: ctx.worktree, env })
+      if (common.code !== 0)
+        return yield* new CreateFailedError({ message: common.stderr || "Failed to locate git metadata" })
+      return yield* FileLock.forTree(pathSvc.resolve(ctx.worktree, common.text.trim()))(
+        Effect.gen(function* () {
+          if (yield* fs.exists(info.directory).pipe(Effect.orDie))
+            return yield* new CreateFailedError({ message: "The isolated task worktree directory already exists." })
+          yield* fs.makeDirectory(root, { recursive: true }).pipe(Effect.orDie)
+          const created = yield* git(
+            [...args, "worktree", "add", "--no-checkout", "-b", info.branch!, "--", info.directory, options.from],
+            { cwd: ctx.worktree, env },
+          )
+          if (created.code !== 0)
+            return yield* new CreateFailedError({
+              message: created.stderr || created.text || "Failed to create task worktree",
+            })
+          const populated = yield* git([...args, "reset", "--hard", options.from], { cwd: info.directory, env })
+          if (populated.code !== 0)
+            return yield* new CreateFailedError({
+              message:
+                populated.stderr ||
+                populated.text ||
+                "Failed to populate task worktree; its registry entry remains available for recovery.",
+            })
+          return info
+        }),
+      )
+    })
+
     const canonical = Effect.fnUntraced(function* (input: string) {
       const abs = pathSvc.resolve(input)
       const real = yield* fs.realPath(abs).pipe(Effect.catch(() => Effect.succeed(abs)))
@@ -340,6 +401,25 @@ const layer: Layer.Layer<
       return undefined
     })
 
+    const registeredTask = Effect.fnUntraced(function* (directory: string, branch: string | undefined) {
+      const ctx = yield* InstanceState.context
+      const root = yield* canonical(pathSvc.join(Global.Path.data, "task-worktree", ctx.project.id))
+      if (pathSvc.dirname(directory) !== root) return false
+      const id = pathSvc.basename(directory)
+      const file = pathSvc.join(Global.Path.data, "task-isolation", ctx.project.id, id, "record.json")
+      const value = yield* fs.readJson(file).pipe(Effect.option)
+      if (Option.isNone(value)) return false
+      const decoded = Schema.decodeUnknownOption(Schema.Struct({ directory: Schema.String, branch: Schema.String }))(
+        value.value,
+      )
+      if (Option.isNone(decoded)) return false
+      return (
+        (yield* canonical(decoded.value.directory)) === directory &&
+        decoded.value.branch === `vector/subagent/${id}` &&
+        branch === `refs/heads/${decoded.value.branch}`
+      )
+    })
+
     const list = Effect.fn("Worktree.list")(function* () {
       const ctx = yield* InstanceState.context
       if (ctx.project.vcs !== "git") {
@@ -357,7 +437,7 @@ const layer: Layer.Layer<
         Effect.gen(function* () {
           if (!entry.path) return undefined
           const directory = yield* canonical(entry.path)
-          if (directory === primary) return undefined
+          if (directory === primary || (yield* registeredTask(directory, entry.branch))) return undefined
           const name = pathSvc.basename(directory).toLowerCase()
           return {
             name: name === primaryName ? pathSvc.basename(pathSvc.dirname(directory)) : name,
@@ -620,7 +700,7 @@ const layer: Layer.Layer<
       return true
     })
 
-    return Service.of({ makeWorktreeInfo, createFromInfo, create, list, remove, reset })
+    return Service.of({ makeWorktreeInfo, createFromInfo, create, createForTask, list, remove, reset })
   }),
 )
 

@@ -497,6 +497,8 @@ type State = {
   configDirectory: string | undefined
   deps: Fiber.Fiber<void>[]
   trust: WorkspaceTrust.Snapshot
+  trustInputs: readonly string[]
+  trustInputWorkspace: string
   trusted: boolean
   trustedSnapshot: WorkspaceTrust.TrustedSnapshot | undefined
   ceiling: PermissionCeiling | undefined
@@ -552,6 +554,7 @@ export interface Interface {
   readonly waitForDependencies: () => Effect.Effect<void>
   readonly trust: () => Effect.Effect<TrustStatus>
   readonly approve: () => Effect.Effect<void>
+  readonly inheritTrust: (directory: string) => Effect.Effect<boolean>
   readonly permissionCeiling: () => Effect.Effect<PermissionCeiling | undefined>
   readonly researchDomains: () => Effect.Effect<ResearchDomains>
   /**
@@ -1954,14 +1957,17 @@ const layer = Layer.effect(
           if (updated === normalized) return
           yield* fs.writeFileString(filepath, updated).pipe(Effect.catch(() => Effect.void))
         })
+        const trustInputs = [
+          ...projectFiles,
+          ...projectTuiFiles,
+          ...projectDirectories,
+          ...localAgentConfig,
+          ...(tuiConfig?.project ? [tuiConfig.path] : []),
+        ]
         const captureTrustSnapshot = () =>
-          WorkspaceTrust.snapshot(trustWorkspace, [
-            ...projectFiles,
-            ...projectTuiFiles,
-            ...projectDirectories,
-            ...localAgentConfig,
-            ...(tuiConfig?.project ? [tuiConfig.path] : []),
-          ]).catch((cause) => WorkspaceTrust.unavailableSnapshot(trustWorkspace, cause))
+          WorkspaceTrust.snapshot(trustWorkspace, trustInputs).catch((cause) =>
+            WorkspaceTrust.unavailableSnapshot(trustWorkspace, cause),
+          )
         const existingTrustSnapshot = yield* Effect.promise(captureTrustSnapshot)
         const snapshotFailure = WorkspaceTrust.unavailableReason(existingTrustSnapshot)
         if (snapshotFailure) {
@@ -2442,6 +2448,8 @@ const layer = Layer.effect(
               : agentConfigDir?.path,
           deps,
           trust: trustSnapshot,
+          trustInputs,
+          trustInputWorkspace: trustWorkspace,
           trusted,
           trustedSnapshot,
           ceiling:
@@ -2529,6 +2537,29 @@ const layer = Layer.effect(
     const approve = Effect.fn("Config.approve")(function* () {
       yield* InstanceState.useEffect(state, (s) =>
         Effect.promise(() => WorkspaceTrust.approve(Global.Path.state, s.trust)),
+      )
+    })
+
+    const inheritTrust = Effect.fn("Config.inheritTrust")(function* (directory: string) {
+      return yield* InstanceState.useEffect(state, (s) =>
+        Effect.tryPromise({
+          try: async () => {
+            if (!s.trusted || Flag.VECTOR_PURE) return false
+            // loaded() omits TUI settings and declined inputs; inheritance must compare the exact capture inputs.
+            const inputs = s.trustInputs.map((input) => {
+              if (FSUtil.contains(s.trustInputWorkspace, input)) {
+                return path.join(directory, path.relative(s.trustInputWorkspace, input))
+              }
+              if (FSUtil.contains(s.trust.workspace, input)) {
+                return path.join(directory, path.relative(s.trust.workspace, input))
+              }
+              return input
+            })
+            const child = await WorkspaceTrust.snapshot(directory, inputs)
+            return WorkspaceTrust.inherit(Global.Path.state, s.trust, child)
+          },
+          catch: (cause) => cause,
+        }).pipe(Effect.orElseSucceed(() => false)),
       )
     })
 
@@ -2694,6 +2725,7 @@ const layer = Layer.effect(
       trust,
       trustedPath,
       approve,
+      inheritTrust,
       permissionCeiling,
       researchDomains,
       localPolicy,
