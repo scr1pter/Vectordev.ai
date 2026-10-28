@@ -82,6 +82,7 @@ const environment = [
   "VERCEL_ENV",
   "CODIUM_STRIPE_MODE",
   "CODIUM_TEST_CREDIT_CAP_USD",
+  "CODIUM_3DS_MIN_USD",
   "VECTOR_ADMIN_EMAILS",
   "MODEL_PLANS_MIN_CLIENT",
   "MODEL_PLANS_ENABLED",
@@ -215,6 +216,8 @@ const upstream = Bun.serve({
           recurring: { interval: "month", interval_count: 1 },
         })
       }
+      if (url.pathname === "/v1/invoices" && request.method === "GET")
+        return Response.json({ data: [], has_more: false })
       if (url.pathname === "/v1/checkout/sessions") {
         if (request.method === "GET") {
           expect(url.searchParams.get("customer")).toBe("cus_fixture")
@@ -388,6 +391,7 @@ beforeEach(async () => {
     SUPABASE_URL: upstream.url.origin,
     SUPABASE_PUBLISHABLE_KEY: "fixture-publishable",
   })
+  delete process.env.CODIUM_3DS_MIN_USD
   delete process.env.VERCEL_ENV
   delete process.env.MODEL_PLANS_MIN_CLIENT
   delete process.env.STRIPE_MODEL_PLAN_CHANGE_PORTAL_CONFIG_ID
@@ -464,6 +468,28 @@ const mutations = () => calls.filter((call) => call.path.startsWith("/api/v1/key
 const chats = () => calls.filter((call) => call.path === "/api/v1/chat/completions")
 
 describe("subscription checkout with real billing leases", () => {
+  test("HTTP checkout and Plus→Max upgrade forward the exact subscription 3DS field", async () => {
+    expect(await billing("checkout", { plan: "vector-100" })).toMatchObject({ status: 200 })
+    expect(
+      calls.findLast((call) => call.path === "/v1/checkout/sessions" && call.method === "POST")!.body,
+    ).toMatchObject({
+      mode: "subscription",
+      "payment_method_options[card][request_three_d_secure]": "any",
+      "metadata[vector_3ds_requested]": "true",
+    })
+
+    // A paid Plus invoice is below Max's price and cannot exempt the upgrade.
+    await paid()
+    expect(await billing("change", { plan: "vector-100" })).toMatchObject({ status: 200 })
+    expect(
+      calls.findLast((call) => call.path === "/v1/checkout/sessions" && call.method === "POST")!.body,
+    ).toMatchObject({
+      mode: "subscription",
+      "payment_method_options[card][request_three_d_secure]": "any",
+      "subscription_data[metadata][vector_supersedes]": "sub_fixture",
+    })
+  })
+
   test("replaces a pending subscription checkout when its allowance or Stripe price changes", async () => {
     const first = await modelPlanCheckout(user, "vector-10", fetcher)
     process.env.MODEL_PLAN_10_CREDITS_USD = "7"

@@ -117,11 +117,17 @@ export async function scheduleDowngrade(
 }
 
 /** Cancellation and invoice cleanup converge from current Stripe state, including retries after a lost response. */
-export async function supersedeSubscription(customer: string, subscription: string, fetcher: typeof fetch) {
+export async function supersedeSubscription(
+  customer: string,
+  subscription: string,
+  fetcher: typeof fetch,
+  verify: () => Promise<void> = async () => {},
+) {
   const old = await modelPlanStripe(`subscriptions/${encodeURIComponent(subscription)}`, {}, fetcher)
   if (stripeId(old.customer) !== customer) throw changeUnavailable()
   if (old.status !== "canceled") {
     await releaseDowngrade(old, fetcher)
+    await verify()
     await modelPlanStripe(
       `subscriptions/${encodeURIComponent(subscription)}`,
       {
@@ -143,7 +149,8 @@ export async function supersedeSubscription(customer: string, subscription: stri
   if (!invoices.complete) throw changeUnavailable()
   for (const invoice of invoices.data) {
     if (typeof invoice.id !== "string") throw changeUnavailable()
-    if (invoice.status === "open")
+    if (invoice.status === "open") {
+      await verify()
       await modelPlanStripe(
         `invoices/${encodeURIComponent(invoice.id)}/void`,
         {
@@ -152,7 +159,10 @@ export async function supersedeSubscription(customer: string, subscription: stri
         },
         fetcher,
       )
-    if (invoice.status === "draft")
+    }
+    if (invoice.status === "draft") {
+      await verify()
       await modelPlanStripe(`invoices/${encodeURIComponent(invoice.id)}`, { method: "DELETE" }, fetcher)
+    }
   }
 }

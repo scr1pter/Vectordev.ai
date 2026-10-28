@@ -5,6 +5,7 @@ import { checkCodiumFunding } from "../api/_lib/codium-funding"
 import { codiumKey, codiumKeyIn, codiumKeyMode, openRouterKeyName, owedKeyName } from "../api/_lib/codium-keys"
 import { recordCodiumCharge } from "../api/_lib/codium-ledger"
 import { codiumKeyLimitUsd, codiumLimitProblems, renewalGraceMinutes, trustRampDays } from "../api/_lib/codium-limits"
+import { RAMP_SCRIPTS } from "../api/_lib/codium-ramp"
 import { POOL_SCRIPTS } from "../api/_lib/codium-pool"
 import { SNAPSHOT_SCRIPTS } from "../api/_lib/codium-snapshot"
 import {
@@ -168,6 +169,17 @@ function store(input: unknown[]) {
   if (name === "ZREM") return 1
   if (name === "EVAL") {
     const [script, , key, token] = args as [string, string, string, string]
+    if (script === RAMP_SCRIPTS.WRITE) {
+      const version = args[3]!
+      const account = args[4]!
+      const previous = Number(hash(key).get(account) ?? 0)
+      const value = args[6] === "raise" ? Math.max(previous, Number(args[5])) : Number(args[5])
+      if (value) hash(key).set(account, String(value))
+      else hash(key).delete(account)
+      if (value !== previous) world.store.set(version, String(Number(world.store.get(version) ?? 0) + 1))
+      return value
+    }
+    if (script === RAMP_SCRIPTS.READ) return [world.store.get(args[3]!) ?? "0", [...hash(key)].flat()]
     // The pool's scripts (codium-pool.ts): every hold fits, and no key here has debits (test/codium-pool.test.ts runs
     // them for real).
     if (script === POOL_SCRIPTS.HOLD || script === POOL_SCRIPTS.SETTLE || script === POOL_SCRIPTS.DEBIT) return 1
@@ -231,7 +243,14 @@ function paidSubscription(user: { id: string }, price = 10) {
       paid: true,
       status: "paid",
       amount_paid: price * 100,
-      charge: { id: "ch_mode", paid: true, refunded: false, disputed: false, amount_refunded: 0 },
+      charge: {
+        id: "ch_mode",
+        paid: true,
+        refunded: false,
+        disputed: false,
+        amount_refunded: 0,
+        payment_method_details: { card: { three_d_secure: { result: "authenticated" } } },
+      },
       lines: { data: [{ price: { id: `price_mode${price}` }, period: { start, end }, proration: false }] },
     },
   }
@@ -240,6 +259,7 @@ function paidSubscription(user: { id: string }, price = 10) {
 function stripe(call: Call, url: URL) {
   const route = call.path.replace(/^\/v1\//, "")
   if (call.method === "POST" && route === "customers") return Response.json({ id: "cus_mode" })
+  if (call.method === "GET" && route === "invoices") return Response.json({ data: [], has_more: false })
   if (call.method === "GET" && route === "subscriptions")
     return Response.json({ data: world.subscriptions, has_more: false })
   if (call.method === "DELETE" && route.startsWith("subscriptions/")) {

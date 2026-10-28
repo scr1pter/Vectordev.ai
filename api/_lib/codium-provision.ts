@@ -222,7 +222,23 @@ const OwnerAlertPayload = Schema.Struct({
 // ── Registries ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
 const provisioners = new Map<string, PerkProvisioner>()
-const actions = new Map<string, ActionHandler>()
+/** Independent action registries keep scoped drains isolated without replacing production handlers. */
+export function createActionRegistry() {
+  const handlers = new Map<string, ActionHandler>()
+  return {
+    get: (kind: string) => handlers.get(kind),
+    register(kind: ActionKind, handler: ActionHandler) {
+      if (!(ACTION_KINDS as readonly string[]).includes(kind)) throw new Error(`Unknown outbox action ${kind}.`)
+      if (handlers.has(kind)) throw new Error(`The outbox action ${kind} already has a handler.`)
+      handlers.set(kind, handler)
+      return () => {
+        if (handlers.get(kind) === handler) handlers.delete(kind)
+      }
+    },
+  }
+}
+export type ActionRegistry = ReturnType<typeof createActionRegistry>
+const actions = createActionRegistry()
 
 /** Adds a provisioner (the static list is codium-provisioners.ts). Returns a function that removes it again. */
 export function registerProvisioner(provisioner: PerkProvisioner) {
@@ -236,12 +252,7 @@ export function registerProvisioner(provisioner: PerkProvisioner) {
 
 /** The handler that runs one kind of action. Returns a function that removes it again. */
 export function registerAction(kind: ActionKind, handler: ActionHandler) {
-  if (!(ACTION_KINDS as readonly string[]).includes(kind)) throw new Error(`Unknown outbox action ${kind}.`)
-  if (actions.has(kind)) throw new Error(`The outbox action ${kind} already has a handler.`)
-  actions.set(kind, handler)
-  return () => {
-    if (actions.get(kind) === handler) actions.delete(kind)
-  }
+  return actions.register(kind, handler)
 }
 
 function isConfigured(provisioner: PerkProvisioner) {
@@ -395,12 +406,12 @@ async function enqueueRecord(
 }
 
 // The outbox's own action: an owner alert retried until it is sent. Unreadable or unconfigured alerts are dropped.
-actions.set(OWNER_ALERT, async (action, fetcher) => {
+async function runOwnerAlert(action: OutboxAction, fetcher: typeof fetch) {
   const alert = Option.getOrUndefined(Schema.decodeUnknownOption(OwnerAlertPayload)(action.payload))
   if (!alert) return
   if ((await notifyOwner(alert, fetcher)) === "failed")
     throw new ApiError(503, "CODIUM_OWNER_ALERT_FAILED", "The owner alert could not be sent.")
-})
+}
 
 // ── The drain ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -424,7 +435,13 @@ export type DrainResult = {
  * with nothing due costs one store read and takes no lock.
  */
 export async function drainOutbox(
-  options: { budgetMs?: number; now?: number; fetcher?: typeof fetch; limit?: number } = {},
+  options: {
+    budgetMs?: number
+    now?: number
+    fetcher?: typeof fetch
+    limit?: number
+    actionRegistry?: ActionRegistry
+  } = {},
 ): Promise<DrainResult> {
   const fetcher = options.fetcher ?? fetch
   const budget = options.budgetMs ?? OUTBOX_DRAIN_BUDGET_MS
@@ -449,7 +466,7 @@ export async function drainOutbox(
         const remaining = await persistentStore(["EVAL", LOCK_CHECK, 1, lockKey(), token], fetcher)
         if (typeof remaining !== "number" || remaining < LOCK_MIN_REMAINING_MS) return result
         handled++
-        result[await runItem(id, clock(), fetcher)]++
+        result[await runItem(id, clock(), fetcher, options.actionRegistry ?? actions)]++
       }
     }
     return result
@@ -472,7 +489,7 @@ async function dueItems(now: number, count: number, fetcher: typeof fetch): Prom
 
 type Outcome = Exclude<keyof DrainResult, "busy">
 
-async function runItem(id: string, now: number, fetcher: typeof fetch): Promise<Outcome> {
+async function runItem(id: string, now: number, fetcher: typeof fetch, registry: ActionRegistry): Promise<Outcome> {
   const raw = await persistentStore(["GET", itemKey(id)], fetcher)
   if (typeof raw !== "string") {
     // The record is gone (cleared by hand, or lost with the store): nothing is left to run.
@@ -482,7 +499,7 @@ async function runItem(id: string, now: number, fetcher: typeof fetch): Promise<
   const record = decodeRecord(raw)
   if (!record) return fail(id, raw, undefined, new Error("The outbox item could not be read."), now, fetcher, true)
   if (record.type === "provision") return runProvision(id, raw, record, now, fetcher)
-  const handler = actions.get(record.kind)
+  const handler = record.kind === OWNER_ALERT ? runOwnerAlert : registry.get(record.kind)
   try {
     if (!handler) throw new ApiError(503, "CODIUM_OUTBOX_NO_HANDLER", `No handler runs ${record.kind} here.`)
     await handler(

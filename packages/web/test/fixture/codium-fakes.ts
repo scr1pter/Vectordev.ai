@@ -1,5 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
+import { FUNDING_SCRIPTS } from "../../../../api/_lib/codium-funding"
+import { RAMP_SCRIPTS } from "../../../../api/_lib/codium-ramp"
 import { POOL_SCRIPTS } from "../../../../api/_lib/codium-pool"
 import { OUTBOX_SCRIPTS } from "../../../../api/_lib/codium-provision"
 import { SNAPSHOT_SCRIPTS } from "../../../../api/_lib/codium-snapshot"
@@ -232,7 +234,60 @@ export class FakeStore {
   private registerBuiltInScripts() {
     const last = (member: string) => Number(/:(\d+)$/.exec(member)?.[1] ?? 0)
     const microOf = (debit: string) => Number(/"micro":(\d+)/.exec(debit)?.[1] ?? 0)
+    const reservations = (key: string, argv: string[]) => {
+      const values = this.hash(key)
+      let reserved = 0
+      for (const [id, saved] of values) {
+        const match = /^(\d+):(\d+)$/.exec(saved)
+        if (!match || Number(match[1]) <= Number(argv[0]) || id === argv[2]) values.delete(id)
+        else if (id !== argv[1]) reserved += Number(match[2])
+      }
+      this.prune(key)
+      return reserved
+    }
     const scripts: [string, Script][] = [
+      [
+        FUNDING_SCRIPTS.RELEASE,
+        ([key], [token]) => {
+          if (this.get(key!) !== token) return 0
+          this.remove(key!)
+          return 1
+        },
+      ],
+      [FUNDING_SCRIPTS.RESERVED, ([key], argv) => reservations(key!, argv)],
+      [
+        FUNDING_SCRIPTS.RESERVE,
+        ([key], argv) => {
+          const reserved = reservations(key!, argv)
+          const required =
+            Math.ceil(((Number(argv[6]) + reserved + Number(argv[3])) * (100 + Number(argv[7]))) / 100) +
+            Number(argv[8])
+          if (Number(argv[5]) < required) return 0
+          this.hash(key!).set(argv[1]!, `${argv[4]}:${argv[3]}`)
+          return 1
+        },
+      ],
+      [
+        RAMP_SCRIPTS.WRITE,
+        ([owed, version], [account, cents, mode]) => {
+          const values = this.hash(owed!)
+          const previous = Number(values.get(account!) ?? 0)
+          const value = mode === "raise" ? Math.max(previous, Number(cents)) : Number(cents)
+          if (value) values.set(account!, String(value))
+          else values.delete(account!)
+          this.prune(owed!)
+          if (value !== previous) this.set(version!, String(Number(this.get(version!) ?? 0) + 1))
+          return value
+        },
+      ],
+      [
+        RAMP_SCRIPTS.READ,
+        ([owed, version]) => {
+          const entries = [...this.hash(owed!)].flat()
+          this.prune(owed!)
+          return [this.get(version!) ?? "0", entries]
+        },
+      ],
       [LEASE_CHECK, ([key], [token]) => (this.get(key!) === token ? this.pttl(key!) : -1)],
       [
         LEASE_RELEASE,
@@ -672,6 +727,25 @@ export class FakeStripe {
     if (resource === "invoices" && id && call.method === "GET")
       return found(this.expandOrUndefined(this.objects.invoices.get(id), expand))
     if (resource === "invoices" && id && call.method === "POST") return this.invoiceAction(id, action, call)
+    if (resource === "refunds" && !id && call.method === "POST") {
+      const charge = this.objects.charges.get(call.form?.get("charge") ?? "")
+      if (!charge || charge.paid !== true || charge.refunded === true)
+        return stripeError(400, "Charge cannot be refunded.")
+      const amount = Number(charge.amount) - Number(charge.amount_refunded ?? 0)
+      const refund = {
+        id: `re_fraud${this.objects.refunds.size + 1}`,
+        charge: charge.id,
+        amount,
+        status: "succeeded",
+        reason: call.form?.get("reason"),
+      }
+      charge.amount_refunded = charge.amount
+      charge.refunded = true
+      this.objects.refunds.set(refund.id, refund)
+      return ok(refund)
+    }
+    if (resource === "radar" && id === "value_list_items" && call.method === "POST")
+      return ok({ id: "rsli_fixture", value_list: call.form?.get("value_list"), value: call.form?.get("value") })
     if (resource === "refunds" && id && call.method === "GET") return found(this.objects.refunds.get(id))
     if (resource === "subscription_schedules" && id && call.method === "GET")
       return found(this.objects.subscription_schedules.get(id))

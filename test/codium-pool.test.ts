@@ -1,3 +1,4 @@
+import { RAMP_SCRIPTS } from "../api/_lib/codium-ramp"
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { RedisClient } from "bun"
 import {
@@ -132,6 +133,34 @@ function growTtl(key: string, ms: string) {
 
 /** The pool's scripts as TypeScript, one line of Lua at a time, plus the account lease's two. */
 const scripts = new Map<string, (keys: string[], argv: string[]) => unknown>([
+  [
+    RAMP_SCRIPTS.WRITE,
+    ([owed, version], [account, cents, mode]) => {
+      const values = hash(owed!)
+      const previous = Number(values.get(account!) ?? 0)
+      const value = mode === "raise" ? Math.max(previous, Number(cents)) : Number(cents)
+      if (value) values.set(account!, String(value))
+      else values.delete(account!)
+      prune(owed!)
+      if (value !== previous)
+        memory.data.set(version!, {
+          kind: "string",
+          value: String(
+            Number(live(version!)?.kind === "string" ? (live(version!) as { value: string }).value : 0) + 1,
+          ),
+        })
+      return value
+    },
+  ],
+  [
+    RAMP_SCRIPTS.READ,
+    ([owed, version]) => {
+      const current = live(version!)
+      const entries = [...hash(owed!)].flat()
+      prune(owed!)
+      return [current?.kind === "string" ? current.value : "0", entries]
+    },
+  ],
   [
     POOL_SCRIPTS.HOLD,
     ([held, debits], [now, base, required, score, member, ttl]) => {
@@ -348,7 +377,14 @@ const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
     world.stripe++
     if (url.pathname === "/v1/subscriptions") return Response.json({ data: world.subscriptions, has_more: false })
     if (url.pathname === "/v1/charges/ch_before")
-      return Response.json({ id: "ch_before", customer: "cus_pool", paid: true, refunded: false, disputed: false, amount_refunded: 0 })
+      return Response.json({
+        id: "ch_before",
+        customer: "cus_pool",
+        paid: true,
+        refunded: false,
+        disputed: false,
+        amount_refunded: 0,
+      })
     throw new Error(`Unexpected Stripe request ${url.pathname}`)
   }
   if (url.origin === "https://openrouter.ai" && url.pathname.startsWith("/api/v1/keys")) {
@@ -411,7 +447,14 @@ function subscription(price: (typeof PRICES)[number]) {
       paid: true,
       status: "paid",
       amount_paid: price * 100,
-      charge: { id: "ch_pool", paid: true, refunded: false, disputed: false, amount_refunded: 0 },
+      charge: {
+        id: "ch_pool",
+        paid: true,
+        refunded: false,
+        disputed: false,
+        amount_refunded: 0,
+        payment_method_details: { card: { three_d_secure: { result: "authenticated" } } },
+      },
       lines: { data: [{ price: { id: `price_pool${price}` }, period: { start, end }, proration: false }] },
     },
   }

@@ -10,9 +10,19 @@ import { isPlanId, rank, type PlanId } from "../../packages/schema/src/codium-pl
 import type { AccountUser } from "./account.js"
 import { withBillingMutation } from "./billing-lock.js"
 import { requireCodiumSales, reserveCodiumSale } from "./codium-funding.js"
+import { writeRampOwed } from "./codium-ramp.js"
 import { readSwitch } from "./codium-switches.js"
+import {
+  authenticatedCharge,
+  blockFraudCard,
+  codiumChargeOwned,
+  checkoutRiskFields,
+  fraudRefundEnabled,
+  readFraudWarning,
+  refundFraudWarning,
+} from "./codium-risk.js"
 import { codiumKey, openRouterKeyName } from "./codium-keys.js"
-import { codiumKeyLimitUsd, renewalGraceMinutes, TRUST_RAMP } from "./codium-limits.js"
+import { codiumKeyLimitUsd, renewalGraceMinutes, TRUST_RAMP, POOL_RAMP } from "./codium-limits.js"
 import { enqueueAction, registerAction } from "./codium-provision.js"
 import { checkoutConsentFields, CODIUM_TERMS_DATE, sendCodiumConfirmation } from "./codium-consent.js"
 import {
@@ -68,6 +78,7 @@ import {
 import {
   modelPlanOrigin,
   modelPlans,
+  modelPlansEnabled,
   MODEL_PLAN_ROOT,
   requireCodiumCheckoutUser,
   subscriptionPlanCredits,
@@ -100,6 +111,10 @@ const Risk = Schema.Struct({
   at: Schema.optional(Schema.Number),
   openDisputes: Schema.Record(Schema.String, Schema.Struct({ status: Schema.String, at: Schema.Number })),
   efw: Schema.Array(Schema.String),
+  efwWarnings: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  refundTargets: Schema.optional(Schema.Record(Schema.String, Schema.Array(Schema.String))),
+  paused: Schema.optional(Schema.Array(Schema.String)),
+  pauseTokens: Schema.optional(Schema.Record(Schema.String, Schema.String)),
 })
 type Risk = typeof Risk.Type
 const NO_RISK: Risk = { blocked: false, openDisputes: {}, efw: [] }
@@ -113,6 +128,14 @@ const Account = Schema.Struct({
   risk: Schema.optional(Risk),
   // Set by WP A10 once a rank 3 or higher payment passed 3-D Secure.
   highValueVerified: Schema.optional(Schema.Boolean),
+  poolRamp: Schema.optional(
+    Schema.Struct({
+      startedAt: Schema.Number,
+      until: Schema.Number,
+      charge: Schema.String,
+      ultraPeriod: Schema.optional(Schema.String),
+    }),
+  ),
   // Milliseconds. The first paid invoice; the first paid invoice of a rank 3 or higher price (restarted after a gap of
   // more than 14 days without a paid period: the trust ramp); the start of an unbroken Max or Ultra run (private); and
   // the end of the last paid period, which measures that gap.
@@ -145,6 +168,10 @@ const Account = Schema.Struct({
       fromAppliedMicro: Micro,
       origins: Schema.Array(CarryOrigin),
       sourceOrigins: Schema.Array(CarryOrigin),
+      visibleOrigins: Schema.Array(CarryOrigin),
+      fromVisibleLimitMicro: Micro,
+      fullMicro: Micro,
+      rampUntil: Schema.optional(Schema.Number),
     }),
   ),
   key: Schema.optional(
@@ -160,6 +187,7 @@ const Account = Schema.Struct({
       // carry an upgrade brought (WP A09), and the limit last set on the key, credits + carry − applied debits. A
       // record written before these existed has no debits, so its limit is its credits.
       creditsMicro: Schema.optional(Micro),
+      fullCreditsMicro: Schema.optional(Micro),
       carry: Schema.optional(
         Schema.Struct({
           micro: Micro,
@@ -173,6 +201,10 @@ const Account = Schema.Struct({
           revoked: Schema.optional(Schema.Boolean),
           origins: Schema.optional(Schema.Array(CarryOrigin)),
           sourceOrigins: Schema.optional(Schema.Array(CarryOrigin)),
+          visibleOrigins: Schema.optional(Schema.Array(CarryOrigin)),
+          fromVisibleLimitMicro: Schema.optional(Micro),
+          fullMicro: Schema.optional(Micro),
+          rampUntil: Schema.optional(Schema.Number),
           revokedOrigins: Schema.optional(Schema.Array(Schema.String)),
         }),
       ),
@@ -387,10 +419,11 @@ export async function reconcileModelPlanAccount(
           verify,
         )
         if (account.key) await disableKey(account.key, verify, fetcher)
+        await writeRampOwed(id, 0, fetcher)
         return closed
       }
       const listed = await listSubscriptions(account.customer, fetcher)
-      const review = await reviewRisk(account, listed, options.hint, fetcher, now)
+      const review = await reviewRisk(id, account, listed, options.hint, fetcher, now)
       const current = listed.map((subscription) => clearWonDispute(subscription, review.cleared))
       const reviewed = { ...account, risk: review.risk }
       const standing = revokedRenewal(
@@ -399,7 +432,7 @@ export async function reconcileModelPlanAccount(
       )
       const updated = await recordCheckoutConsent(
         id,
-        revokeEndedKey(recordPaidHistory(reviewed, standing), standing),
+        revokeEndedKey(recordPoolRamp(reviewed, recordPaidHistory(reviewed, standing), standing), standing),
         standing.state === "active",
         fetcher,
         verify,
@@ -449,6 +482,15 @@ export async function reconcileModelPlanAccount(
               }
             : {}),
           ...history(updated),
+          ...(updated.poolRamp
+            ? {
+                poolUntil: updated.poolRamp.until,
+                poolDailyShare:
+                  updated.poolRamp.ultraPeriod === `${governing?.id}:${governing?.start}`
+                    ? POOL_RAMP.ultraDailyShare
+                    : undefined,
+              }
+            : {}),
           source,
         },
         stored,
@@ -460,7 +502,37 @@ export async function reconcileModelPlanAccount(
       // period: the key stops at once (M5). The snapshot that ends access, and the outbox items it queues, are written
       // first, so every service that reads it stops even while OpenRouter cannot be reached; a PATCH that fails throws,
       // and the queued reconcile switches the key off when it runs again.
+      if (standing.state === "frozen") {
+        // A disputed payment may become usable again before any key was provisioned. Keep that obligation funded too.
+        const contracted = current.reduce((sum, subscription) => {
+          const invoice = stripeRecord(subscription.latest_invoice) ? subscription.latest_invoice : undefined
+          const metadata = stripeRecord(subscription.metadata) ? subscription.metadata : undefined
+          const plan = modelPlans().find((value) => value.id === metadata?.vector_plan)
+          return subscription.status === "active" &&
+            metadata?.vector_account_id === id &&
+            invoice?.paid === true &&
+            plan
+            ? sum + usdToMicro(codiumKeyLimitUsd(plan.credits))
+            : sum
+        }, 0)
+        const previous = updated.key
+          ? (updated.key.fullCreditsMicro ?? keyPool(updated.key).creditsMicro) + carryPotential(updated.key.carry)
+          : 0
+        await writeRampOwed(id, Math.max(contracted, previous), fetcher, "raise")
+      }
       if (!serving && updated.key) await disableKey(updated.key, verify, fetcher)
+      // Access is durably stopped before a refund/cancel/pause can fail or time out.
+      if (standing.state === "ended" || standing.state === "none") await writeRampOwed(id, 0, fetcher)
+      await applyRiskEffects(id, updated, current, review.actionable, verify, fetcher, now)
+      if (updated.poolRamp && now < updated.poolRamp.until)
+        await enqueueAction(
+          "pool-ramp",
+          `${id}:${updated.poolRamp.startedAt}`,
+          { account: id, until: updated.poolRamp.until },
+          updated.poolRamp.until,
+          fetcher,
+          now,
+        )
       return snapshot
     },
     fetcher,
@@ -606,6 +678,7 @@ async function disputeOutcome(charge: string, fetcher: typeof fetch) {
  * may pay for their month again.
  */
 async function reviewRisk(
+  accountID: string,
   account: Account,
   subscriptions: readonly Record<string, unknown>[],
   hint: ReconcileHint | undefined,
@@ -617,10 +690,25 @@ async function reviewRisk(
     ...before,
     openDisputes: { ...before.openDisputes },
     efw: [...before.efw],
+    efwWarnings: { ...before.efwWarnings },
+    refundTargets: { ...before.refundTargets },
+    paused: [...(before.paused ?? [])],
+    pauseTokens: { ...before.pauseTokens },
   }
   const charges = new Set<string>(Object.keys(risk.openDisputes))
-  if (hint?.kind === "dispute" && validChargeId(hint.charge)) charges.add(hint.charge)
+  if (
+    hint?.kind === "dispute" &&
+    validChargeId(hint.charge) &&
+    (await codiumChargeOwned(accountID, account.customer, hint.charge, fetcher))
+  )
+    charges.add(hint.charge)
   for (const subscription of subscriptions) {
+    if (
+      !stripeRecord(subscription.metadata) ||
+      subscription.metadata.vector_account_id !== accountID ||
+      !isPlanId(subscription.metadata.vector_plan)
+    )
+      continue
     const charge = latestCharge(subscription)
     if (charge?.disputed === true && typeof charge.id === "string") charges.add(charge.id)
   }
@@ -635,19 +723,176 @@ async function reviewRisk(
     if (outcome.kind === "won") cleared.add(charge)
     else if (!risk.blocked) Object.assign(risk, { blocked: true, reason: "disputed", at: now })
   }
+  const warnings = new Map<string, Awaited<ReturnType<typeof readFraudWarning>>>()
   if (hint?.kind === "efw") {
-    const warning = await modelPlanStripe(`radar/early_fraud_warnings/${encodeURIComponent(hint.id)}`, {}, fetcher)
-    const charge =
-      typeof warning.charge === "string"
-        ? warning.charge
-        : stripeRecord(warning.charge) && typeof warning.charge.id === "string"
-          ? warning.charge.id
-          : undefined
-    if (charge && validChargeId(charge) && (!hint.charge || hint.charge === charge) && !risk.efw.includes(charge))
-      risk.efw.push(charge)
+    const warning = await readFraudWarning(accountID, account.customer, hint.id, fetcher)
+    warnings.set(hint.id, warning)
+    if (warning && (!hint.charge || hint.charge === warning.charge) && !risk.efw.includes(warning.charge))
+      risk.efw.push(warning.charge)
+    if (warning && (!hint.charge || hint.charge === warning.charge)) risk.efwWarnings[hint.id] = warning.charge
   }
-  const unchanged = JSON.stringify(risk) === JSON.stringify(before)
-  return { risk: unchanged && !account.risk ? undefined : risk, cleared }
+  const actionable: string[] = []
+  for (const [warningID, charge] of Object.entries(risk.efwWarnings)) {
+    const warning = warnings.has(warningID)
+      ? warnings.get(warningID)
+      : await readFraudWarning(accountID, account.customer, warningID, fetcher)
+    if (warning?.charge === charge && warning.actionable && fraudRefundEnabled()) actionable.push(charge)
+  }
+  const currentCharges = subscriptions.flatMap((subscription) => {
+    const paid = paidModelPlan(clearWonDispute(subscription, cleared), accountID, now)
+    return paid?.charge ? [paid.charge] : []
+  })
+  for (const source of actionable)
+    risk.refundTargets[source] = [...new Set([...(risk.refundTargets[source] ?? []), ...currentCharges])]
+  if (actionable.length && (!risk.blocked || risk.reason === "owner"))
+    Object.assign(risk, { blocked: true, reason: "early_fraud_warning", at: now })
+  // A fresh observation that collection is unpaused starts a new idempotent intent. A prior successful intent may
+  // have been deliberately undone by the owner, so its old Stripe key must not be reused.
+  for (const subscription of subscriptions) {
+    if (
+      subscription.status === "canceled" ||
+      typeof subscription.id !== "string" ||
+      !stripeRecord(subscription.metadata) ||
+      subscription.metadata.vector_account_id !== accountID ||
+      !isPlanId(subscription.metadata.vector_plan)
+    )
+      continue
+    const collection = stripeRecord(subscription.pause_collection) ? subscription.pause_collection : undefined
+    const owned =
+      collection?.behavior === "void" && !collection.resumes_at && subscription.metadata.vector_risk_pause === accountID
+    if (subscription.pause_collection && !owned) {
+      const at = risk.paused.indexOf(subscription.id)
+      if (at >= 0) risk.paused.splice(at, 1)
+      delete risk.pauseTokens[subscription.id]
+      continue
+    }
+    if (Object.keys(risk.openDisputes).length && !subscription.pause_collection) {
+      if (!risk.paused.includes(subscription.id)) risk.paused.push(subscription.id)
+      risk.pauseTokens[subscription.id] = randomUUID()
+    }
+  }
+  const normalized: Risk = {
+    ...risk,
+    efwWarnings: Object.keys(risk.efwWarnings).length ? risk.efwWarnings : undefined,
+    refundTargets: Object.keys(risk.refundTargets).length ? risk.refundTargets : undefined,
+    paused: risk.paused.length ? risk.paused : undefined,
+    pauseTokens: risk.paused.length ? risk.pauseTokens : undefined,
+  }
+  const unchanged = JSON.stringify(normalized) === JSON.stringify(before)
+  return { risk: unchanged && !account.risk ? undefined : normalized, cleared, actionable }
+}
+
+/** Financial side effects run only after the snapshot and key reflect the hold. Callers own the billing lease. */
+async function applyRiskEffects(
+  id: string,
+  account: Account,
+  listed: readonly Record<string, unknown>[],
+  actionable: readonly string[],
+  verify: () => Promise<void>,
+  fetcher: typeof fetch,
+  now: number,
+) {
+  const owned = listed.filter(
+    (subscription) =>
+      stripeRecord(subscription.metadata) &&
+      subscription.metadata.vector_account_id === id &&
+      isPlanId(subscription.metadata.vector_plan),
+  )
+  const risk = account.risk
+  if (!risk) return
+  const ending = risk.blocked && (risk.reason === "disputed" || risk.reason === "early_fraud_warning")
+  if (ending) {
+    // Stop future billing even if the refund provider is unavailable. Targets were persisted before cancellation.
+    for (const subscription of owned) {
+      await verify()
+      await supersedeSubscription(account.customer, String(subscription.id), fetcher, verify)
+    }
+    for (const charge of new Set(actionable)) {
+      await verify()
+      await refundFraudWarning(account.customer, charge, risk.refundTargets?.[charge] ?? [], fetcher, verify)
+    }
+    for (const charge of new Set(actionable)) await blockFraudCard(account.customer, charge, fetcher, verify)
+    return
+  }
+  if (Object.keys(risk.openDisputes).length) {
+    for (const subscription of owned) {
+      if (!risk.paused?.includes(String(subscription.id)) || subscription.status === "canceled") continue
+      const collection = stripeRecord(subscription.pause_collection) ? subscription.pause_collection : undefined
+      const metadata = stripeRecord(subscription.metadata) ? subscription.metadata : undefined
+      if (collection?.behavior === "void" && !collection.resumes_at && metadata?.vector_risk_pause === id) continue
+      if (subscription.pause_collection) continue
+      await verify()
+      await modelPlanStripe(
+        `subscriptions/${encodeURIComponent(String(subscription.id))}`,
+        {
+          method: "POST",
+          idempotency: `vector-risk-pause-${digest(`${id}:${subscription.id}:${risk.pauseTokens?.[String(subscription.id)]}`)}`,
+          body: new URLSearchParams({ "pause_collection[behavior]": "void", "metadata[vector_risk_pause]": id }),
+        },
+        fetcher,
+      )
+    }
+    return
+  }
+  // Another risk hold, an owner pause, a stopped service or a superseded subscription never gets auto-resumed.
+  if (riskState(account) || !modelPlansEnabled() || (await readSwitch("codium", fetcher)) !== "on") return
+  const governing = planStanding(id, account, owned, now, { known: knownPeriods(account, undefined) }).governing
+  const cleared = new Set<string>()
+  for (const paused of risk.paused ?? []) {
+    const subscription = owned.find((value) => value.id === paused)
+    if (!subscription || subscription.status === "canceled") {
+      cleared.add(paused)
+      continue
+    }
+    if (governing?.id !== paused) continue
+    if (!subscription.pause_collection) {
+      cleared.add(paused)
+      continue
+    }
+    const collection = stripeRecord(subscription.pause_collection) ? subscription.pause_collection : undefined
+    if (
+      collection?.behavior !== "void" ||
+      collection.resumes_at ||
+      !stripeRecord(subscription.metadata) ||
+      subscription.metadata.vector_risk_pause !== id
+    ) {
+      cleared.add(paused)
+      continue
+    }
+    await verify()
+    await modelPlanStripe(
+      `subscriptions/${encodeURIComponent(paused)}`,
+      {
+        method: "POST",
+        idempotency: `vector-risk-resume-${digest(`${id}:${paused}:${risk.pauseTokens?.[paused]}`)}`,
+        body: new URLSearchParams({ pause_collection: "", "metadata[vector_risk_pause]": "" }),
+      },
+      fetcher,
+    )
+    cleared.add(paused)
+  }
+  if (cleared.size) {
+    const latest = await readModelPlanAccount(id, fetcher)
+    if (!latest?.risk) return
+    const remaining = (latest.risk.paused ?? []).filter((paused) => !cleared.has(paused))
+    await verify()
+    await saveAccount(
+      id,
+      {
+        ...latest,
+        risk: {
+          ...latest.risk,
+          paused: remaining.length ? remaining : undefined,
+          pauseTokens: remaining.length
+            ? Object.fromEntries(
+                Object.entries(latest.risk.pauseTokens ?? {}).filter(([sub]) => remaining.includes(sub)),
+              )
+            : undefined,
+        },
+      },
+      fetcher,
+    )
+  }
 }
 
 const validChargeId = (value: unknown): value is string =>
@@ -943,6 +1188,82 @@ function recordPaidHistory(account: Account, standing: ReturnType<typeof planSta
   }
 }
 
+/** Remember the first high-value payment, so changing tier cannot bypass its risk window. */
+function recordPoolRamp(before: Account, account: Account, standing: ReturnType<typeof planStanding>): Account {
+  const paid = standing.state === "active" ? standing.governing?.paid : undefined
+  if (!paid || rank(paid.plan.id) < 3 || account.firstHighPaidAt === undefined) return account
+  const fresh = before.firstHighPaidAt !== account.firstHighPaidAt
+  const secure = paid.authenticated
+  const ramp = fresh
+    ? secure
+      ? undefined
+      : {
+          startedAt: account.firstHighPaidAt,
+          until: account.firstHighPaidAt + POOL_RAMP.hours * 3_600_000,
+          charge: paid.charge ?? "",
+        }
+    : account.poolRamp
+  return {
+    ...account,
+    highValueVerified: fresh ? secure : account.highValueVerified || secure,
+    poolRamp: ramp
+      ? {
+          ...ramp,
+          ...(paid.plan.id === "vector-200" && paid.start * 1000 < ramp.until
+            ? { ultraPeriod: `${paid.id}:${paid.start}` }
+            : {}),
+        }
+      : undefined,
+  }
+}
+
+/** Direct admission can race the payment webhook; it establishes the same persisted cohort before granting a key. */
+async function preparePaidHistory(
+  id: string,
+  account: Account,
+  paid: NonNullable<ReturnType<typeof paidModelPlan>>,
+  verify: () => Promise<void>,
+  fetcher: typeof fetch,
+  now: number,
+) {
+  const standing = {
+    state: "active" as const,
+    reason: undefined,
+    duplicates: [] as string[],
+    governing: {
+      id: paid.id,
+      plan: paid.plan.id as PlanId,
+      state: "active" as const,
+      start: paid.start,
+      end: paid.end,
+      cancelAtPeriodEnd: paid.cancelAtPeriodEnd,
+      created: 0,
+      paid,
+    },
+  }
+  const updated = recordPoolRamp(account, recordPaidHistory(account, standing), standing)
+  if (accountChanged(account, updated)) {
+    await verify()
+    await saveAccount(id, updated, fetcher)
+  }
+  if (updated.poolRamp && now < updated.poolRamp.until)
+    await enqueueAction(
+      "pool-ramp",
+      `${id}:${updated.poolRamp.startedAt}`,
+      { account: id, until: updated.poolRamp.until },
+      updated.poolRamp.until,
+      fetcher,
+      now,
+    )
+  return updated
+}
+
+function monthlyCreditsMicro(account: Account, paid: NonNullable<ReturnType<typeof paidModelPlan>>, now: number) {
+  const factor =
+    rank(paid.plan.id) >= 3 && account.poolRamp && now < account.poolRamp.until ? POOL_RAMP.creditsShare : 1
+  return usdToMicro(codiumKeyLimitUsd(paid.plan.credits * factor))
+}
+
 /**
  * The paid month a subscription grants now, or undefined: an active subscription of this account on one configured
  * plan at its exact monthly price, whose latest invoice is paid in full for the current period by a charge that is
@@ -1035,6 +1356,7 @@ export function paidModelPlan(subscription: unknown, accountID: string, now = Da
     cancelAtPeriodEnd: subscription.cancel_at_period_end === true,
     ...(Number.isSafeInteger(paidAt) && paidAt > 0 ? { paidAt: paidAt * 1000 } : {}),
     ...(typeof charge.id === "string" ? { charge: charge.id } : {}),
+    authenticated: authenticatedCharge(charge),
     ...(typeof metadata.vector_supersedes === "string" && metadata.vector_supersedes
       ? { supersedes: metadata.vector_supersedes }
       : {}),
@@ -1350,7 +1672,7 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
         ? keyPool(current)
         : { creditsMicro: usdToMicro(codiumKeyLimitUsd(paid.plan.credits)), carryMicro: 0 }
       if (most.creditsMicro + most.carryMicro < requiredMicro) throw monthlyShortfall()
-      const funding = await provisionMonthlyKey(id, account, paid, fetcher, verify)
+      const funding = await provisionMonthlyKey(id, account, paid, fetcher, verify, now)
       requireMonthlyCredits(funding.limitMicro - funding.usageMicro, requiredMicro)
       return {
         key: funding.key,
@@ -1408,12 +1730,28 @@ async function provisionMonthlyKey(
   verify: () => Promise<void>,
   now = Date.now(),
 ) {
+  account = await preparePaidHistory(id, account, paid, verify, fetcher, now)
+  const previous = account.key
+  const samePeriod = previous?.subscription === paid.id && previous.start === paid.start
+  const source = samePeriod
+    ? carryPotential(previous?.carry)
+    : previous && paid.supersedes === previous.subscription
+      ? (previous.fullCreditsMicro ?? keyPool(previous).creditsMicro) + carryPotential(previous.carry)
+      : 0
+  // A paid key creation may fail longer than its checkout reservation lives. Keep the entire pending obligation funded.
+  await writeRampOwed(id, usdToMicro(codiumKeyLimitUsd(paid.plan.credits)) + source, fetcher, "raise")
   const context = `${id}:${paid.id}:${paid.start}`
   // M11: the key outlives its period by the renewal grace; a paid renewal replaces it, anything else switches it off.
   const expires = keyExpiresAt(paid.end)
   if (account.key?.subscription === paid.id && account.key.start === paid.start) {
     account = await refreshCarry(id, account, fetcher, verify)
     await finishUpgrade(id, account, paid, fetcher, verify, now)
+    const desiredCredits = monthlyCreditsMicro(account, paid, now)
+    if (account.key!.creditsMicro !== desiredCredits) {
+      account = { ...account, key: { ...account.key!, creditsMicro: desiredCredits, provisioning: true } }
+      await verify()
+      await saveAccount(id, account, fetcher)
+    }
     const key = account.key!
     const converged = await convergeKey(id, account, key, verify, fetcher, { expiresAt: expires })
     const published = await publishKey(id, converged.account, verify, fetcher)
@@ -1436,7 +1774,7 @@ async function provisionMonthlyKey(
   }
   await verify()
   // A new period starts at the plan's credits; in test mode the key holds no more than the test cap.
-  const creditsMicro = usdToMicro(codiumKeyLimitUsd(paid.plan.credits))
+  const creditsMicro = monthlyCreditsMicro(account, paid, now)
   const carried = upgrade
     ? {
         micro: Math.max(0, usdToMicro(codiumKeyLimitUsd(microToUsd(creditsMicro + upgrade.micro))) - creditsMicro),
@@ -1448,13 +1786,24 @@ async function provisionMonthlyKey(
         fromAppliedMicro: upgrade.fromAppliedMicro,
         origins: allocateCarry(
           Math.max(0, usdToMicro(codiumKeyLimitUsd(microToUsd(creditsMicro + upgrade.micro))) - creditsMicro),
-          upgrade.sourceOrigins,
+          upgrade.visibleOrigins,
         ),
         sourceOrigins: upgrade.sourceOrigins,
+        visibleOrigins: upgrade.visibleOrigins,
+        fromVisibleLimitMicro: upgrade.fromVisibleLimitMicro,
+        fullMicro: upgrade.fullMicro,
+        rampUntil: upgrade.rampUntil,
         trueupAt: upgrade.at + 12 * 60_000,
       }
     : undefined
   const limitMicro = creditsMicro + (carried?.micro ?? 0)
+  const fullCreditsMicro = usdToMicro(codiumKeyLimitUsd(paid.plan.credits))
+  await writeRampOwed(
+    id,
+    Math.max(0, fullCreditsMicro - creditsMicro + (carried?.fullMicro ?? carried?.micro ?? 0) - (carried?.micro ?? 0)),
+    fetcher,
+    "raise",
+  )
   const result = await openRouterManagement(
     "",
     {
@@ -1488,6 +1837,7 @@ async function provisionMonthlyKey(
       end: paid.end,
       credits: paid.plan.credits,
       creditsMicro,
+      fullCreditsMicro,
       ...(carried ? { carry: carried } : {}),
       limitMicro,
     },
@@ -1510,7 +1860,17 @@ async function provisionMonthlyKey(
 
 /** Only a fully checked key is visible to concurrent model admissions. */
 async function publishKey(id: string, account: Account, verify: () => Promise<void>, fetcher: typeof fetch) {
-  if (!account.key?.provisioning) return account
+  const key = account.key
+  if (!key) return account
+  const deferred = Math.max(
+    0,
+    (key.fullCreditsMicro ?? keyPool(key).creditsMicro) -
+      keyPool(key).creditsMicro +
+      carryPotential(key.carry) -
+      (key.carry?.micro ?? 0),
+  )
+  await writeRampOwed(id, deferred, fetcher)
+  if (!key.provisioning) return account
   const published = { ...account, key: { ...account.key, provisioning: undefined } }
   await verify()
   await saveAccount(id, published, fetcher)
@@ -1898,10 +2258,17 @@ async function prepareUpgrade(
   if (!stripeRecord(data) || typeof data.usage !== "number" || !Number.isFinite(data.usage) || data.usage < 0)
     throw new ApiError(503, "MODEL_PLAN_KEY_INVALID", "Your remaining allowance could not be verified.")
   const ledger = await readPoolLedger(id, key.hash, now, fetcher)
-  const fromLimitMicro = expectedLimitMicro(keyPool(key), ledger.appliedMicro)
-  const micro = carryMicro(fromLimitMicro, usdToMicro(data.usage), ledger.heldMicro)
+  const fromVisibleLimitMicro = expectedLimitMicro(keyPool(key), ledger.appliedMicro)
+  const fullBase = (key.fullCreditsMicro ?? keyPool(key).creditsMicro) + carryPotential(key.carry)
+  const fromLimitMicro = Math.max(0, fullBase - ledger.appliedMicro)
+  const micro = carryMicro(fromVisibleLimitMicro, usdToMicro(data.usage), ledger.heldMicro)
+  const fullMicro = carryMicro(fromLimitMicro, usdToMicro(data.usage))
   // Keep every paid origin across repeated upgrades: a later reversal cannot be laundered through another plan.
   const sourceOrigins = [
+    { charge: before.charge, micro: key.fullCreditsMicro ?? keyPool(key).creditsMicro },
+    ...carryPotentialOrigins(key.carry),
+  ]
+  const visibleOrigins = [
     { charge: before.charge, micro: keyPool(key).creditsMicro },
     ...(key.carry?.origins ?? (key.carry?.micro ? [{ charge: key.carry.fromCharge, micro: key.carry.micro }] : [])),
   ]
@@ -1910,8 +2277,12 @@ async function prepareUpgrade(
     start: paid.start,
     at: now,
     micro,
-    origins: allocateCarry(micro, sourceOrigins),
+    fullMicro,
+    origins: allocateCarry(micro, visibleOrigins),
     sourceOrigins,
+    visibleOrigins,
+    fromVisibleLimitMicro,
+    ...(account.poolRamp && now < account.poolRamp.until ? { rampUntil: account.poolRamp.until } : {}),
     fromSubscription: key.subscription,
     fromStart: key.start,
     fromCharge: before.charge,
@@ -1925,6 +2296,14 @@ async function prepareUpgrade(
 }
 
 // Email delivery never gates a paid entitlement. The outbox retries outages independently of provisioning.
+registerAction("pool-ramp", async (action, fetcher) => {
+  const payload = action.payload
+  if (!stripeRecord(payload) || typeof payload.account !== "string" || typeof payload.until !== "number")
+    throw changeUnavailable()
+  if (action.now < payload.until) throw new ApiError(503, "MODEL_PLAN_RAMP_PENDING", "Your allowance is being updated.")
+  await reconcileModelPlanAccount(payload.account, fetcher, action.now, { source: "outbox" })
+})
+
 registerAction("purchase-confirmation", async (action, fetcher) => {
   const payload = action.payload
   if (
@@ -1962,6 +2341,17 @@ function allocateCarry(micro: number, origins: readonly { charge: string; micro:
     micro -= kept
     return kept ? [{ charge: origin.charge, micro: kept }] : []
   })
+}
+
+function carryPotentialOrigins(carried: AccountKey["carry"]) {
+  if (!carried) return []
+  return allocateCarry(
+    carried.fullMicro ?? carried.micro,
+    carried.sourceOrigins ?? [{ charge: carried.fromCharge, micro: carried.micro }],
+  ).filter((origin) => !carried.revokedOrigins?.includes(origin.charge))
+}
+function carryPotential(carried: AccountKey["carry"]) {
+  return carryPotentialOrigins(carried).reduce((sum, origin) => sum + origin.micro, 0)
 }
 
 /** Every originating payment remains accountable after repeated upgrades, not just the latest subscription. */
@@ -2041,6 +2431,15 @@ async function finishUpgrade(
       fetcher,
       now,
     )
+  if (carried?.fromHash && carried.rampUntil && now < carried.rampUntil)
+    await enqueueAction(
+      "carry-trueup",
+      `${id}:${account.key!.hash}:ramp`,
+      { account: id, hash: account.key!.hash },
+      carried.rampUntil,
+      fetcher,
+      now,
+    )
   await verify()
   await supersedeSubscription(account.customer, paid.supersedes, fetcher)
 }
@@ -2065,7 +2464,7 @@ registerAction("carry-trueup", async (action, fetcher) => {
       const refreshed = await refreshCarry(id, saved, fetcher, verify)
       // A source reversal discovered here must lower the actual provider limit even when no true-up may proceed.
       const repaired = await convergeKey(id, refreshed, refreshed.key!, verify, fetcher)
-      const account = repaired.account
+      const account = await publishKey(id, repaired.account, verify, fetcher)
       const key = account.key!
       const carried = key.carry
       if (
@@ -2092,12 +2491,19 @@ registerAction("carry-trueup", async (action, fetcher) => {
         throw new ApiError(503, "MODEL_PLAN_CARRY_PENDING", "Your remaining allowance is being updated.")
       // Replaced keys no longer get their limits PATCHed when hosted debits settle. Subtract that durable debit delta.
       const lateDebits = Math.max(0, ledger.appliedMicro - (carried.fromAppliedMicro ?? 0))
-      const finalLimit = Math.max(0, carried.fromLimitMicro - lateDebits)
+      const limited = carried.rampUntil !== undefined && action.now < carried.rampUntil
+      const finalLimit = Math.max(
+        0,
+        (limited ? (carried.fromVisibleLimitMicro ?? carried.fromLimitMicro) : carried.fromLimitMicro) - lateDebits,
+      )
+      const fullMicro = carryMicro(Math.max(0, carried.fromLimitMicro - lateDebits), usdToMicro(data.usage))
       // Allocate historical spend against the original origin order before excluding reversed payments.
       // Filtering that order first could resurrect an older allowance that was already consumed.
       const candidates = allocateCarry(
         carryMicro(finalLimit, usdToMicro(data.usage)),
-        carried.sourceOrigins ?? [{ charge: carried.fromCharge, micro: finalLimit }],
+        (limited ? carried.visibleOrigins : carried.sourceOrigins) ?? [
+          { charge: carried.fromCharge, micro: finalLimit },
+        ],
       ).filter((origin) => !carried.revokedOrigins?.includes(origin.charge))
       const proposed = Math.max(
         carried.micro,
@@ -2106,10 +2512,11 @@ registerAction("carry-trueup", async (action, fetcher) => {
       const credits = keyPool(key).creditsMicro
       const raised = Math.min(proposed, usdToMicro(codiumKeyLimitUsd(microToUsd(credits + proposed))) - credits)
       const origins = proposed > carried.micro ? allocateCarry(raised, candidates) : carried.origins
-      const updated = { ...account, key: { ...key, carry: { ...carried, micro: raised, origins } } }
+      const updated = { ...account, key: { ...key, carry: { ...carried, micro: raised, fullMicro, origins } } }
       await verify()
       await saveAccount(id, updated, fetcher)
-      await convergeKey(id, updated, updated.key, verify, fetcher)
+      const converged = await convergeKey(id, updated, updated.key, verify, fetcher)
+      await publishKey(id, converged.account, verify, fetcher)
     },
     fetcher,
   )
@@ -2176,6 +2583,8 @@ export async function modelPlanChange(
       }
       if ((await readSwitch("sales", fetcher)) !== "on") throw changeUnavailable()
       const funding = await requireCodiumSales(fetcher, now)
+      const riskFields = await checkoutRiskFields(user.id, account.customer, target.price, fetcher)
+      const requires3DS = "payment_method_options[card][request_three_d_secure]" in riskFields
       const earlier = account.checkout && account.checkout.expires > now ? account.checkout : undefined
       const pending = earlier
         ? await modelPlanStripe(`checkout/sessions/${encodeURIComponent(earlier.id)}`, {}, fetcher)
@@ -2188,7 +2597,8 @@ export async function modelPlanChange(
         stripeRecord(pending.metadata) &&
         pending.metadata.vector_price_id === target.priceID &&
         pending.metadata.vector_model_credits_usd === String(target.credits) &&
-        pending.metadata.vector_terms_date === CODIUM_TERMS_DATE
+        pending.metadata.vector_terms_date === CODIUM_TERMS_DATE &&
+        pending.metadata.vector_3ds_requested === String(requires3DS)
       )
         return { url: earlier.url }
       if (pending?.status === "open") {
@@ -2226,6 +2636,8 @@ export async function modelPlanChange(
             "line_items[0][price]": target.priceID,
             "line_items[0][quantity]": "1",
             ...checkoutConsentFields(target),
+            ...riskFields,
+            "metadata[vector_3ds_requested]": String(requires3DS),
             "metadata[vector_model_credits_usd]": String(target.credits),
             "metadata[vector_price_id]": target.priceID,
             "subscription_data[metadata][vector_account_id]": user.id,
@@ -2315,6 +2727,8 @@ export async function modelPlanCheckout(
         )
       )
         throw new ApiError(409, "MODEL_PLAN_EXISTS", "You already have a subscription. Manage it from your account.")
+      const riskFields = await checkoutRiskFields(user.id, customer, plan.price, fetcher)
+      const requires3DS = "payment_method_options[card][request_three_d_secure]" in riskFields
       const earlier = account.checkout && account.checkout.expires > now ? account.checkout : undefined
       const pending = earlier
         ? await modelPlanStripe(`checkout/sessions/${encodeURIComponent(earlier.id)}`, {}, fetcher)
@@ -2332,7 +2746,8 @@ export async function modelPlanCheckout(
         stripeRecord(pending.metadata) &&
         pending.metadata.vector_model_credits_usd === String(plan.credits) &&
         pending.metadata.vector_price_id === priceID &&
-        pending.metadata.vector_terms_date === CODIUM_TERMS_DATE
+        pending.metadata.vector_terms_date === CODIUM_TERMS_DATE &&
+        pending.metadata.vector_3ds_requested === String(requires3DS)
       )
         return { url: earlier.url }
       if (pending?.status === "open") await verify()
@@ -2379,6 +2794,8 @@ export async function modelPlanCheckout(
             mode: "subscription",
             "payment_method_types[0]": "card",
             ...checkoutConsentFields(plan),
+            ...riskFields,
+            "metadata[vector_3ds_requested]": String(requires3DS),
             customer,
             client_reference_id: user.id,
             "line_items[0][price]": priceID,
@@ -2528,6 +2945,8 @@ export async function cancelModelPlanAccount(id: string, fetcher: typeof fetch =
       await commitSnapshot(closingFacts(id, closing, stored.previous, "request"), stored, fetcher, Date.now(), verify)
       if (account.key)
         await openRouterManagement(`/${encodeURIComponent(account.key.hash)}`, { disabled: true }, fetcher, "PATCH")
+      await verify()
+      await writeRampOwed(id, 0, fetcher)
       const query = new URLSearchParams({ customer: account.customer, status: "open", limit: "100" })
       const pending = await modelPlanStripe(`checkout/sessions?${query}`, {}, fetcher)
       if (!Array.isArray(pending.data) || pending.has_more === true)

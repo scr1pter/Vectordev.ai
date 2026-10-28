@@ -349,7 +349,14 @@
         "paid": true,
         "payment_intent": "pi_twoPlus",
         "refunded": false,
-        "status": "succeeded"
+        "status": "succeeded",
+        "payment_method_details": {
+          "card": {
+            "three_d_secure": {
+              "result": "authenticated"
+            }
+          }
+        }
       },
       {
         "id": "ch_twoMax",
@@ -375,7 +382,14 @@
         "paid": true,
         "payment_intent": "pi_twoMax",
         "refunded": false,
-        "status": "succeeded"
+        "status": "succeeded",
+        "payment_method_details": {
+          "card": {
+            "three_d_secure": {
+              "result": "authenticated"
+            }
+          }
+        }
       }
     ]
   },

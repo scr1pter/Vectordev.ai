@@ -84,7 +84,12 @@ function paidUpgrade(
     amount_paid: amount * 100,
     lines: { data: [{ price, proration: false, period: { start, end } }] },
   })
-  Object.assign(charge, { id: `ch_${subscriptionID}`, invoice: `in_${subscriptionID}`, amount: amount * 100 })
+  Object.assign(charge, {
+    id: `ch_${subscriptionID}`,
+    invoice: `in_${subscriptionID}`,
+    amount: amount * 100,
+    payment_method_details: { card: { three_d_secure: { result: "authenticated" } } },
+  })
   fakes.stripe.load({ subscriptions: [subscription], invoices: [invoice], charges: [charge] })
 }
 

@@ -4,6 +4,7 @@ import { codiumKey } from "../api/_lib/codium-keys"
 import {
   ACTION_KINDS,
   configuredProvisioners,
+  createActionRegistry,
   drainOutbox,
   enqueueAction,
   OUTBOX_DEAD_KEEP_MS,
@@ -15,6 +16,7 @@ import {
   registerProvisioner,
   requeueBehindProvisioners,
   type ActionHandler,
+  type ActionRegistry,
   type PerkProvisioner,
   type Transition,
 } from "../api/_lib/codium-provision"
@@ -69,8 +71,10 @@ const OWNER_ALERTS = {
 
 let restore = () => {}
 let cleanup: (() => void)[] = []
+let scopedActions: ActionRegistry | undefined
 beforeEach(() => {
   restore = codiumTestEnvironment()
+  scopedActions = undefined
 })
 afterEach(() => {
   for (const off of cleanup.reverse()) off()
@@ -130,7 +134,12 @@ function recorder(id: string, options: { fail?: () => boolean; during?: (t: Tran
 }
 
 function handle(kind: Parameters<typeof registerAction>[0], handler: ActionHandler) {
-  cleanup.push(registerAction(kind, handler))
+  scopedActions ??= createActionRegistry()
+  cleanup.push(scopedActions.register(kind, handler))
+}
+
+function drainScoped(options: Parameters<typeof drainOutbox>[0]) {
+  return drainOutbox({ ...options, ...(scopedActions ? { actionRegistry: scopedActions } : {}) })
 }
 
 // ── Items in the snapshot's EVAL ───────────────────────────────────────────────────────────────────────────────────
@@ -151,7 +160,9 @@ describe("provisioner items", () => {
     // The stubs are not configured; owner-notify is once owner alerts are.
     expect(configuredProvisioners()).toEqual(["github-runs"])
     const first = await change(fakes.fetcher, ACCOUNT, {}, T0)
-    const writes = fakes.store.commands.filter((command) => command[0] === "EVAL" && command[1] === SNAPSHOT_SCRIPTS.WRITE)
+    const writes = fakes.store.commands.filter(
+      (command) => command[0] === "EVAL" && command[1] === SNAPSHOT_SCRIPTS.WRITE,
+    )
     expect(writes).toHaveLength(1)
     expect(writes[0]!.slice(3, 3 + Number(writes[0]![2]))).toContain(itemKey(`github-runs:${ACCOUNT}:1`))
     expect(queued(fakes)).toEqual([`github-runs:${ACCOUNT}:1`])
@@ -172,11 +183,7 @@ describe("provisioner items", () => {
     environment(OWNER_ALERTS)
     expect(configuredProvisioners()).toEqual(["github-runs", "owner-notify"])
     const second = await change(fakes.fetcher, ACCOUNT, { cancelAtPeriodEnd: true }, T0 + 1000)
-    expect(queued(fakes)).toEqual([
-      `github-runs:${ACCOUNT}:1`,
-      `github-runs:${ACCOUNT}:2`,
-      `owner-notify:${ACCOUNT}:2`,
-    ])
+    expect(queued(fakes)).toEqual([`github-runs:${ACCOUNT}:1`, `github-runs:${ACCOUNT}:2`, `owner-notify:${ACCOUNT}:2`])
     expect(record(fakes, `owner-notify:${ACCOUNT}:2`)).toMatchObject({
       cause: "cancel_scheduled",
       from: JSON.parse(JSON.stringify(first)),
@@ -199,7 +206,7 @@ describe("drainOutbox", () => {
     const fakes = codiumFakes({ now: T0 })
     const applied = recorder("test-service")
     await change(fakes.fetcher, ACCOUNT, {}, T0)
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 })).toEqual({ ...NOTHING, applied: 2 })
+    expect(await drainScoped({ fetcher: fakes.fetcher, now: T0 })).toEqual({ ...NOTHING, applied: 2 })
     expect(applied.map((t) => [t.to.version, t.cause, t.from])).toEqual([[1, "first_payment", undefined]])
     expect(queued(fakes)).toEqual([])
     expect(fakes.store.get(itemKey(`test-service:${ACCOUNT}:1`))).toBeUndefined()
@@ -209,17 +216,17 @@ describe("drainOutbox", () => {
 
     // A minute with nothing due: one read, no lock.
     const before = fakes.store.commands.length
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 + 60_000 })).toEqual(NOTHING)
+    expect(await drainScoped({ fetcher: fakes.fetcher, now: T0 + 60_000 })).toEqual(NOTHING)
     expect(fakes.store.commands.slice(before).map((command) => command[0])).toEqual(["ZRANGEBYSCORE"])
 
     // Another drain holds the lock: this one leaves everything to it.
     await change(fakes.fetcher, ACCOUNT, { cancelAtPeriodEnd: true }, T0 + 1000)
     fakes.store.command(["SET", codiumKey("outbox", "lock"), "another-drain", "PX", 60_000])
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 + 1000 })).toEqual({ ...NOTHING, busy: true })
+    expect(await drainScoped({ fetcher: fakes.fetcher, now: T0 + 1000 })).toEqual({ ...NOTHING, busy: true })
     expect(applied).toHaveLength(1)
     expect(fakes.store.get(codiumKey("outbox", "lock"))).toBe("another-drain")
     fakes.clock.advance(60_001)
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 + 61_001 })).toEqual({ ...NOTHING, applied: 2 })
+    expect(await drainScoped({ fetcher: fakes.fetcher, now: T0 + 61_001 })).toEqual({ ...NOTHING, applied: 2 })
     expect(applied.map((t) => [t.cause, t.from?.version, t.to.version])).toEqual([
       ["first_payment", undefined, 1],
       ["cancel_scheduled", 1, 2],
@@ -248,13 +255,17 @@ describe("drainOutbox", () => {
     expect(score(fakes, "test-service:account-frozen:1")).toBe(T0 + 1000 - PRIORITY_LEAD_MS)
     expect(score(fakes, "test-service:account-active:1")).toBe(T0)
 
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 + 2000 })).toEqual({ ...NOTHING, applied: 4, retried: 1 })
+    expect(await drainScoped({ fetcher: fakes.fetcher, now: T0 + 2000 })).toEqual({
+      ...NOTHING,
+      applied: 4,
+      retried: 1,
+    })
     // The frozen account's items ran first; its failed one waits out its backoff in the priority lane.
     expect(order).toEqual(["frozen failed", "pool-ramp sub_old", "account-active active"])
     expect(score(fakes, "test-service:account-frozen:1")).toBe(T0 + 2000 + outboxBackoffMs(1) - PRIORITY_LEAD_MS)
     failFrozen = false
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 + 2000 + outboxBackoffMs(1) - 1000 })).toEqual(NOTHING)
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 + 2000 + outboxBackoffMs(1) })).toEqual({
+    expect(await drainScoped({ fetcher: fakes.fetcher, now: T0 + 2000 + outboxBackoffMs(1) - 1000 })).toEqual(NOTHING)
+    expect(await drainScoped({ fetcher: fakes.fetcher, now: T0 + 2000 + outboxBackoffMs(1) })).toEqual({
       ...NOTHING,
       applied: 1,
     })
@@ -269,25 +280,28 @@ describe("drainOutbox", () => {
     await change(fakes.fetcher, ACCOUNT, {}, T0)
     const id = `flaky:${ACCOUNT}:1`
     // github-runs and owner-notify (nothing to tell about a first payment) apply; flaky fails its first try.
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 })).toEqual({ ...NOTHING, applied: 2, retried: 1 })
+    expect(await drainScoped({ fetcher: fakes.fetcher, now: T0 })).toEqual({ ...NOTHING, applied: 2, retried: 1 })
     let now = T0
     const waits: number[] = []
     for (let attempts = 1; attempts < OUTBOX_MAX_ATTEMPTS; attempts++) {
       expect(record(fakes, id)).toMatchObject({ attempts, error: "TEST_DOWN: The test service is down." })
       const due = score(fakes, id)
       waits.push(due - now)
-      expect(await drainOutbox({ fetcher: fakes.fetcher, now: due - 1000 })).toEqual(NOTHING)
+      expect(await drainScoped({ fetcher: fakes.fetcher, now: due - 1000 })).toEqual(NOTHING)
       now = due
       const last = attempts + 1 === OUTBOX_MAX_ATTEMPTS
       // On the last try it becomes a dead letter, and its owner alert is sent in the same drain.
-      expect(await drainOutbox({ fetcher: fakes.fetcher, now })).toEqual(
+      expect(await drainScoped({ fetcher: fakes.fetcher, now })).toEqual(
         last ? { ...NOTHING, dead: 1, applied: 1 } : { ...NOTHING, retried: 1 },
       )
     }
     expect(waits).toEqual([30, 60, 120, 240, 480, 960, 1920, 3600, 3600].map((seconds) => seconds * 1000))
     expect(queued(fakes)).toEqual([])
     expect(dead(fakes)).toEqual([id])
-    expect(record(fakes, id)).toMatchObject({ attempts: OUTBOX_MAX_ATTEMPTS, error: "TEST_DOWN: The test service is down." })
+    expect(record(fakes, id)).toMatchObject({
+      attempts: OUTBOX_MAX_ATTEMPTS,
+      error: "TEST_DOWN: The test service is down.",
+    })
     expect(fakes.store.expires.get(itemKey(id))).toBe(fakes.clock.now + OUTBOX_DEAD_KEEP_MS)
     expect(fakes.store.get(provKey("flaky", ACCOUNT))).toBeUndefined()
     expect(applied).toEqual([])
@@ -305,7 +319,7 @@ describe("drainOutbox", () => {
     expect(await requeueBehindProvisioners(ACCOUNT, fakes.fetcher, now)).toBe(1)
     expect(dead(fakes)).toEqual([])
     expect(record(fakes, id)).toMatchObject({ attempts: 0, version: 1 })
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now })).toEqual({ ...NOTHING, applied: 1 })
+    expect(await drainScoped({ fetcher: fakes.fetcher, now })).toEqual({ ...NOTHING, applied: 1 })
     expect(applied.map((t) => t.to.version)).toEqual([1])
     expect(fakes.store.get(provKey("flaky", ACCOUNT))).toBe("1")
     expect(fakes.mail.sent).toHaveLength(1)
@@ -315,18 +329,22 @@ describe("drainOutbox", () => {
     environment(OWNER_ALERTS)
     const fakes = codiumFakes({ now: T0 })
     fakes.mail.fail = true
-    // pool-ramp has no handler until WP A10, so it fails on every try.
+    // An explicitly empty registry exercises missing handlers independently of installed production actions.
+    scopedActions = createActionRegistry()
     await enqueueAction("pool-ramp", ACCOUNT, {}, T0, fakes.fetcher, T0)
     let now = T0
     for (let drain = 0; drain < 2 * OUTBOX_MAX_ATTEMPTS + 2; drain++) {
-      await drainOutbox({ fetcher: fakes.fetcher, now })
+      await drainScoped({ fetcher: fakes.fetcher, now })
       now += HOUR
     }
     const alert = `owner-alert:outbox-dead:pool-ramp:${ACCOUNT}`
     expect(dead(fakes).sort()).toEqual([alert, `pool-ramp:${ACCOUNT}`].sort())
     expect(queued(fakes)).toEqual([])
     expect(record(fakes, `pool-ramp:${ACCOUNT}`).error).toStartWith("CODIUM_OUTBOX_NO_HANDLER")
-    expect(record(fakes, alert)).toMatchObject({ attempts: OUTBOX_MAX_ATTEMPTS, error: expect.stringContaining("CODIUM_OWNER_ALERT_FAILED") })
+    expect(record(fakes, alert)).toMatchObject({
+      attempts: OUTBOX_MAX_ATTEMPTS,
+      error: expect.stringContaining("CODIUM_OWNER_ALERT_FAILED"),
+    })
     expect(fakes.mail.sent).toEqual([])
     // Each failed send gave its dedupe mark back, so a later send is not mistaken for a duplicate.
     expect(fakes.store.get(codiumKey("owner", "alert", `outbox-dead:pool-ramp:${ACCOUNT}`))).toBeUndefined()
@@ -339,7 +357,11 @@ describe("drainOutbox", () => {
     const late = fakes.store.get(itemKey(`test-service:${ACCOUNT}:1`))!
     const frozen = await change(fakes.fetcher, ACCOUNT, { state: "frozen", reason: "disputed" }, T0 + 1000)
     // The freeze (version 2) is in the priority lane, so it runs first; version 1 then has nothing left to do.
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 + 2000 })).toEqual({ ...NOTHING, applied: 2, skipped: 2 })
+    expect(await drainScoped({ fetcher: fakes.fetcher, now: T0 + 2000 })).toEqual({
+      ...NOTHING,
+      applied: 2,
+      skipped: 2,
+    })
     expect(applied.map((t) => t.to.version)).toEqual([2])
     expect(fakes.store.get(provKey("test-service", ACCOUNT))).toBe("2")
     expect(await runTokensRevokedBefore(ACCOUNT, fakes.fetcher)).toBe(frozen.revokedBefore!)
@@ -357,7 +379,7 @@ describe("drainOutbox", () => {
       T0,
       "replace",
     ])
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 + 3000 })).toEqual({ ...NOTHING, skipped: 1 })
+    expect(await drainScoped({ fetcher: fakes.fetcher, now: T0 + 3000 })).toEqual({ ...NOTHING, skipped: 1 })
     expect(applied.map((t) => t.to.version)).toEqual([2])
     expect(fakes.store.get(provKey("test-service", ACCOUNT))).toBe("2")
     // The snapshot itself: an older version is refused, and queues nothing.
@@ -368,7 +390,7 @@ describe("drainOutbox", () => {
     // In the same lane, versions apply in order.
     await change(fakes.fetcher, "in-order", {}, T0)
     await change(fakes.fetcher, "in-order", { cancelAtPeriodEnd: true }, T0 + 1000)
-    await drainOutbox({ fetcher: fakes.fetcher, now: T0 + 2000 })
+    await drainScoped({ fetcher: fakes.fetcher, now: T0 + 2000 })
     expect(applied.filter((t) => t.account === "in-order").map((t) => t.to.version)).toEqual([1, 2])
     expect(fakes.store.get(provKey("test-service", "in-order"))).toBe("2")
   })
@@ -381,7 +403,7 @@ describe("drainOutbox", () => {
     expect(queued(fakes)).toEqual([`github-runs:${ACCOUNT}:1`, `test-service:${ACCOUNT}:1`])
     for (const id of queued(fakes)) fakes.store.remove(itemKey(id))
     fakes.store.remove(codiumKey("outbox"))
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 })).toEqual(NOTHING)
+    expect(await drainScoped({ fetcher: fakes.fetcher, now: T0 })).toEqual(NOTHING)
     expect(applied).toEqual([])
 
     // The sweep finds both provisioners behind the snapshot and queues them again, still in the priority lane.
@@ -390,7 +412,7 @@ describe("drainOutbox", () => {
     expect(score(fakes, `test-service:${ACCOUNT}:1`)).toBe(T0 + HOUR - PRIORITY_LEAD_MS)
     // While they wait, running it again queues nothing new.
     expect(await requeueBehindProvisioners(ACCOUNT, fakes.fetcher, T0 + HOUR)).toBe(0)
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 + HOUR })).toEqual({ ...NOTHING, applied: 2 })
+    expect(await drainScoped({ fetcher: fakes.fetcher, now: T0 + HOUR })).toEqual({ ...NOTHING, applied: 2 })
     expect(applied.map((t) => [t.to.version, t.to.state, t.cause, t.from])).toEqual([
       [1, "frozen", "early_fraud_warning", undefined],
     ])
@@ -400,7 +422,7 @@ describe("drainOutbox", () => {
     // A provisioner configured after the change catches up the same way: here, owner alerts switched on later.
     environment(OWNER_ALERTS)
     expect(await requeueBehindProvisioners(ACCOUNT, fakes.fetcher, T0 + 2 * HOUR)).toBe(1)
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 + 2 * HOUR })).toEqual({ ...NOTHING, applied: 1 })
+    expect(await drainScoped({ fetcher: fakes.fetcher, now: T0 + 2 * HOUR })).toEqual({ ...NOTHING, applied: 1 })
     expect(fakes.mail.sent.map((mail) => mail.subject)).toEqual([
       "Vector Codium: an account is on hold (early_fraud_warning)",
     ])
@@ -420,16 +442,16 @@ describe("drainOutbox", () => {
     })
     await change(fakes.fetcher, ACCOUNT, { state: "frozen", reason: "owner" }, T0)
     // The store goes away right after the provisioner's work, before the drain records it.
-    await expect(drainOutbox({ fetcher: fakes.fetcher, now: T0 })).rejects.toMatchObject({
+    await expect(drainScoped({ fetcher: fakes.fetcher, now: T0 })).rejects.toMatchObject({
       code: "PERSISTENT_STORE_UNAVAILABLE",
     })
     fakes.store.down = false
     expect(queued(fakes)).toContain(`test-service:${ACCOUNT}:1`)
     expect(fakes.store.get(provKey("test-service", ACCOUNT))).toBeUndefined()
     // Its lock could not be given back, so nothing runs until it lapses; then the work runs again (it is idempotent).
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 })).toEqual({ ...NOTHING, busy: true })
+    expect(await drainScoped({ fetcher: fakes.fetcher, now: T0 })).toEqual({ ...NOTHING, busy: true })
     fakes.clock.advance(50_000 + 30_000 + 1)
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now: fakes.clock.now })).toMatchObject({ applied: 1 })
+    expect(await drainScoped({ fetcher: fakes.fetcher, now: fakes.clock.now })).toMatchObject({ applied: 1 })
     expect(applied.map((t) => t.to.version)).toEqual([1, 1])
     expect(fakes.store.get(provKey("test-service", ACCOUNT))).toBe("1")
     expect(queued(fakes)).toEqual([])
@@ -446,12 +468,15 @@ describe("drainOutbox", () => {
     })
     for (const [index, key] of ["sub_1", "sub_2", "sub_3", "sub_4"].entries())
       await enqueueAction("pool-ramp", key, {}, T0 + index, fakes.fetcher, T0)
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 + 10 })).toEqual({ ...NOTHING, applied: 1 })
+    expect(await drainScoped({ fetcher: fakes.fetcher, now: T0 + 10 })).toEqual({ ...NOTHING, applied: 1 })
     expect(queued(fakes)).toEqual(["pool-ramp:sub_2", "pool-ramp:sub_3", "pool-ramp:sub_4"])
     mode = "slow"
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 + 10, budgetMs: 25 })).toEqual({ ...NOTHING, applied: 1 })
+    expect(await drainScoped({ fetcher: fakes.fetcher, now: T0 + 10, budgetMs: 25 })).toEqual({
+      ...NOTHING,
+      applied: 1,
+    })
     mode = "plain"
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 + 10, limit: 1 })).toEqual({ ...NOTHING, applied: 1 })
+    expect(await drainScoped({ fetcher: fakes.fetcher, now: T0 + 10, limit: 1 })).toEqual({ ...NOTHING, applied: 1 })
     expect(ran).toEqual(["sub_1", "sub_2", "sub_3"])
     expect(queued(fakes)).toEqual(["pool-ramp:sub_4"])
   })
@@ -461,7 +486,7 @@ describe("drainOutbox", () => {
     fakes.store.set(itemKey("broken:1"), "not json")
     fakes.store.command(["ZADD", codiumKey("outbox"), T0, "broken:1"])
     fakes.store.command(["ZADD", codiumKey("outbox"), T0, "orphan:1"])
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 })).toEqual({ ...NOTHING, dead: 1, skipped: 1 })
+    expect(await drainScoped({ fetcher: fakes.fetcher, now: T0 })).toEqual({ ...NOTHING, dead: 1, skipped: 1 })
     expect(dead(fakes)).toEqual(["broken:1"])
     expect(queued(fakes)).toEqual([])
     // Without owner alerts configured, no alert is queued.
@@ -472,6 +497,19 @@ describe("drainOutbox", () => {
 // ── Actions ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 describe("enqueueAction and action handlers", () => {
+  test("scoped action registries isolate identical kinds while production still rejects duplicates", () => {
+    const first = createActionRegistry()
+    const second = createActionRegistry()
+    const a = async () => {}
+    const b = async () => {}
+    first.register("pool-ramp", a)
+    second.register("pool-ramp", b)
+    expect(first.get("pool-ramp")).toBe(a)
+    expect(second.get("pool-ramp")).toBe(b)
+    expect(() => first.register("pool-ramp", b)).toThrow("already has a handler")
+    expect(() => registerAction("reconcile", a)).toThrow("already has a handler")
+  })
+
   test("one item per kind and key: the latest payload, the earliest due time, off the dead letters", async () => {
     const fakes = codiumFakes({ now: T0 })
     expect(ACTION_KINDS).toEqual([
@@ -539,13 +577,13 @@ describe("enqueueAction and action handlers", () => {
       if (seen.length === 1) await enqueueAction("pool-ramp", action.key, { step: 2 }, undefined, fetcher, action.now)
     })
     await enqueueAction("pool-ramp", ACCOUNT, { step: 1 }, undefined, fakes.fetcher, T0)
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 })).toEqual({ ...NOTHING, applied: 2 })
+    expect(await drainScoped({ fetcher: fakes.fetcher, now: T0 })).toEqual({ ...NOTHING, applied: 2 })
     expect(seen).toEqual([{ step: 1 }, { step: 2 }])
     expect(queued(fakes)).toEqual([])
 
-    // pause-collection has no handler until WP A10: it waits and is tried again, like any failure.
+    // This scoped registry intentionally lacks pause-collection, regardless of production's installed handlers.
     await enqueueAction("pause-collection", ACCOUNT, {}, undefined, fakes.fetcher, T0)
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now: T0 })).toEqual({ ...NOTHING, retried: 1 })
+    expect(await drainScoped({ fetcher: fakes.fetcher, now: T0 })).toEqual({ ...NOTHING, retried: 1 })
     expect(record(fakes, `pause-collection:${ACCOUNT}`)).toMatchObject({ attempts: 1 })
     expect(record(fakes, `pause-collection:${ACCOUNT}`).error).toStartWith("CODIUM_OUTBOX_NO_HANDLER")
 
@@ -565,7 +603,7 @@ describe("enqueueAction and action handlers", () => {
     fakes.store.set(codiumKey("account", fixture.accountId), JSON.stringify(fixture.account))
     // A hint that is not one reconcile knows is ignored.
     await enqueueAction("reconcile", fixture.accountId, { hint: { kind: "nonsense" } }, undefined, fakes.fetcher, now)
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now })).toEqual({ ...NOTHING, applied: 2 })
+    expect(await drainScoped({ fetcher: fakes.fetcher, now })).toEqual({ ...NOTHING, applied: 2 })
     const snapshot = await readSnapshot(fixture.accountId, fakes.fetcher)
     expect(snapshot).toMatchObject({ state: "active", plan: "vector-10", version: 1, source: "outbox" })
     expect(fakes.store.get(provKey("github-runs", fixture.accountId))).toBe("1")
@@ -576,7 +614,7 @@ describe("enqueueAction and action handlers", () => {
     expect(hash).toBeString()
     await enqueueAction("debit-apply", `${fixture.accountId}:${hash}`, {}, undefined, fakes.fetcher, now)
     await enqueueAction("debit-apply", `${fixture.accountId}:replaced_key`, {}, undefined, fakes.fetcher, now)
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now })).toEqual({ ...NOTHING, applied: 2 })
+    expect(await drainScoped({ fetcher: fakes.fetcher, now })).toEqual({ ...NOTHING, applied: 2 })
   })
 })
 
@@ -586,7 +624,7 @@ describe("github-runs", () => {
   test("turns revokedBefore into a mark run-token checks read, and only ever moves it forward", async () => {
     const fakes = codiumFakes({ now: T0 })
     await change(fakes.fetcher, ACCOUNT, {}, T0)
-    await drainOutbox({ fetcher: fakes.fetcher, now: T0 })
+    await drainScoped({ fetcher: fakes.fetcher, now: T0 })
     // Nothing is revoked while the account is active, and nothing is written.
     expect(fakes.store.get(runTokensRevokedKey(ACCOUNT))).toBeUndefined()
     expect(await runTokensRevokedBefore(ACCOUNT, fakes.fetcher)).toBeUndefined()
@@ -594,7 +632,7 @@ describe("github-runs", () => {
 
     const frozen = await change(fakes.fetcher, ACCOUNT, { state: "frozen", reason: "disputed" }, T0 + HOUR)
     expect(frozen.revokedBefore).toBe(T0 + HOUR)
-    await drainOutbox({ fetcher: fakes.fetcher, now: T0 + HOUR })
+    await drainScoped({ fetcher: fakes.fetcher, now: T0 + HOUR })
     expect(runTokensRevokedKey(ACCOUNT)).toBe(`vector:codium:test:runs:revoked-before:${ACCOUNT}`)
     expect(await runTokensRevokedBefore(ACCOUNT, fakes.fetcher)).toBe(T0 + HOUR)
     expect(await runTokenRevoked(ACCOUNT, T0 + HOUR - 1, fakes.fetcher)).toBe(true)
@@ -604,14 +642,16 @@ describe("github-runs", () => {
     // A won dispute keeps the mark: tokens issued before the freeze stay revoked.
     const back = await change(fakes.fetcher, ACCOUNT, {}, T0 + 2 * HOUR)
     expect(back.revokedBefore).toBe(T0 + HOUR)
-    await drainOutbox({ fetcher: fakes.fetcher, now: T0 + 2 * HOUR })
+    await drainScoped({ fetcher: fakes.fetcher, now: T0 + 2 * HOUR })
     expect(await runTokensRevokedBefore(ACCOUNT, fakes.fetcher)).toBe(T0 + HOUR)
     // Whatever order work arrives in, the mark never moves back.
     await githubRuns.apply({ account: ACCOUNT, to: { ...frozen, revokedBefore: T0 }, cause: "disputed" }, fakes.fetcher)
     expect(await runTokensRevokedBefore(ACCOUNT, fakes.fetcher)).toBe(T0 + HOUR)
     // An unreadable mark fails closed.
     fakes.store.set(runTokensRevokedKey(ACCOUNT), "unreadable")
-    await expect(runTokenRevoked(ACCOUNT, T0, fakes.fetcher)).rejects.toMatchObject({ code: "CODIUM_OUTBOX_UNAVAILABLE" })
+    await expect(runTokenRevoked(ACCOUNT, T0, fakes.fetcher)).rejects.toMatchObject({
+      code: "CODIUM_OUTBOX_UNAVAILABLE",
+    })
   })
 })
 
@@ -623,7 +663,7 @@ describe("owner-notify", () => {
     const step = async (overrides: Partial<SnapshotFacts>) => {
       now += HOUR
       const snapshot = await change(fakes.fetcher, ACCOUNT, overrides, now)
-      await drainOutbox({ fetcher: fakes.fetcher, now })
+      await drainScoped({ fetcher: fakes.fetcher, now })
       return snapshot
     }
     await step({})
@@ -656,9 +696,9 @@ describe("owner-notify", () => {
     fakes.mail.fail = true
     now += HOUR
     await change(fakes.fetcher, ACCOUNT, { state: "frozen", reason: "early_fraud_warning" }, now)
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now })).toEqual({ ...NOTHING, applied: 1, retried: 1 })
+    expect(await drainScoped({ fetcher: fakes.fetcher, now })).toEqual({ ...NOTHING, applied: 1, retried: 1 })
     fakes.mail.fail = false
-    expect(await drainOutbox({ fetcher: fakes.fetcher, now: now + outboxBackoffMs(1) })).toEqual({
+    expect(await drainScoped({ fetcher: fakes.fetcher, now: now + outboxBackoffMs(1) })).toEqual({
       ...NOTHING,
       applied: 1,
     })
@@ -804,7 +844,7 @@ describe.skipIf(!valkeyURL)("the outbox's Lua on Valkey", () => {
     await change(fetcher, "valkey-active", {}, now)
     const frozen = await change(fetcher, "valkey-frozen", { state: "frozen", reason: "disputed" }, now)
     expect(Number(await redis("ZSCORE", outbox, "github-runs:valkey-frozen:1"))).toBe(now - PRIORITY_LEAD_MS)
-    expect(await drainOutbox({ fetcher, now })).toMatchObject({ applied: 4, retried: 2, busy: false })
+    expect(await drainScoped({ fetcher, now })).toMatchObject({ applied: 4, retried: 2, busy: false })
     expect(await runTokensRevokedBefore("valkey-frozen", fetcher)).toBe(frozen.revokedBefore!)
     expect(await redis("GET", codiumKey("outbox", "lock"))).toBeNull()
     expect(mail.map((sent) => sent.subject)).toEqual(["Vector Codium: an account is on hold (disputed)"])
@@ -812,7 +852,7 @@ describe.skipIf(!valkeyURL)("the outbox's Lua on Valkey", () => {
     let at = now
     for (let attempt = 2; attempt <= OUTBOX_MAX_ATTEMPTS; attempt++) {
       at += HOUR
-      await drainOutbox({ fetcher, now: at })
+      await drainScoped({ fetcher, now: at })
     }
     expect((await redis("ZRANGE", deadLetters, 0, -1)) as string[]).toEqual([
       "valkey-service:valkey-active:1",
@@ -823,7 +863,7 @@ describe.skipIf(!valkeyURL)("the outbox's Lua on Valkey", () => {
     failing = false
     expect(await requeueBehindProvisioners("valkey-frozen", fetcher, at)).toBe(1)
     expect(await requeueBehindProvisioners("valkey-active", fetcher, at)).toBe(1)
-    expect(await drainOutbox({ fetcher, now: at })).toMatchObject({ applied: 2 })
+    expect(await drainScoped({ fetcher, now: at })).toMatchObject({ applied: 2 })
     expect(applied.map((t) => t.account).sort()).toEqual(["valkey-active", "valkey-frozen"])
     expect(await redis("GET", provKey("valkey-service", "valkey-frozen"))).toBe("1")
     expect(await redis("ZRANGE", deadLetters, 0, -1)).toEqual([])

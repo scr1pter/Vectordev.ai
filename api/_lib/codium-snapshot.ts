@@ -161,7 +161,9 @@ export const NO_CAPS: Entitlements = Object.freeze<Entitlements>({
  * one at a time, with jobs of two hours at most. A plain copy, so it can be stored and changed.
  */
 export function effectiveCaps(plan: PlanId | null, ramp: EntitlementSnapshot["ramp"], now: number): Entitlements {
-  const caps = structuredClone(plan ? ENTITLEMENTS[plan] : NO_CAPS) as { -readonly [K in keyof Entitlements]: Entitlements[K] }
+  const caps = structuredClone(plan ? ENTITLEMENTS[plan] : NO_CAPS) as {
+    -readonly [K in keyof Entitlements]: Entitlements[K]
+  }
   if (caps.hosted && now < ramp.hostedUntil)
     caps.hosted = {
       ...caps.hosted,
@@ -187,6 +189,8 @@ export type SnapshotFacts = {
   firstHighPaidAt?: number
   memberSince?: number
   source: SnapshotSource
+  poolUntil?: number
+  poolDailyShare?: number
 }
 
 /**
@@ -204,10 +208,10 @@ export function buildSnapshot(
   const ramp = {
     hostedUntil: high === undefined ? 0 : high + trustRampDays() * DAY_MS,
     browserFrom: high === undefined ? 0 : high + TRUST_RAMP.browserAfterMs,
+    ...(facts.poolUntil === undefined ? {} : { poolUntil: facts.poolUntil }),
   }
   // Run tokens and relay sessions issued before a freeze stop working (the github-runs and remote provisioners).
-  const revokedBefore =
-    facts.state === "frozen" && previous?.state !== "frozen" ? now : previous?.revokedBefore
+  const revokedBefore = facts.state === "frozen" && previous?.state !== "frozen" ? now : previous?.revokedBefore
   const candidate: EntitlementSnapshot = {
     v: 1,
     version: baseVersion + 1,
@@ -227,7 +231,10 @@ export function buildSnapshot(
     ...(facts.memberSince === undefined ? {} : { memberSince: facts.memberSince }),
     ramp,
     ...(revokedBefore === undefined ? {} : { revokedBefore }),
-    caps: effectiveCaps(facts.plan, ramp, now),
+    caps: {
+      ...effectiveCaps(facts.plan, ramp, now),
+      ...(facts.poolDailyShare === undefined ? {} : { dailyShare: facts.poolDailyShare }),
+    },
     updatedAt: now,
     checkedAt: now,
     source: facts.source,

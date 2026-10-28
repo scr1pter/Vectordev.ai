@@ -1,3 +1,4 @@
+import { rampOwedCents, rampVersion } from "./codium-ramp.js"
 import { randomUUID } from "node:crypto"
 import { Option, Schema } from "effect"
 import { codiumKey, owedKeyName } from "./codium-keys.js"
@@ -46,6 +47,12 @@ const RESERVATIONS =
 // other reservation and this one, with the margin (ARGV[8] percent plus ARGV[9] cents), all in one step so purchases
 // made at the same moment cannot each pass against the same balance.
 const RESERVE = `${RESERVATIONS}if tonumber(ARGV[6]) < math.ceil((tonumber(ARGV[7]) + reserved + tonumber(ARGV[4])) * (100 + tonumber(ARGV[8])) / 100) + tonumber(ARGV[9]) then return 0 end redis.call('HSET', KEYS[1], ARGV[2], ARGV[5] .. ':' .. ARGV[4]) return 1`
+/** Shared with the store-boundary fixtures; both scripts also run on real Valkey in CI. */
+export const FUNDING_SCRIPTS = {
+  RESERVE,
+  RESERVED: `${RESERVATIONS}return reserved`,
+  RELEASE: "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0",
+} as const
 // The cron checks every ten minutes. A sale needs a reading from about one interval ago; an older one is stale, so the
 // sale runs a check of its own first.
 export const CODIUM_FUNDING_MAX_AGE_MS = 15 * 60_000
@@ -67,16 +74,7 @@ export async function checkCodiumFunding(fetcher: typeof fetch = fetch, now = Da
   if ((await persistentStore(["SET", lock, lease, "NX", "PX", 60_000], fetcher)) !== "OK")
     return { ...(await readCodiumFunding(fetcher)), notified: false, ran: false }
   return measureFunding(fetcher, now).finally(() =>
-    persistentStore(
-      [
-        "EVAL",
-        "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0",
-        1,
-        lock,
-        lease,
-      ],
-      fetcher,
-    ).catch(() => undefined),
+    persistentStore(["EVAL", FUNDING_SCRIPTS.RELEASE, 1, lock, lease], fetcher).catch(() => undefined),
   )
 }
 
@@ -236,6 +234,7 @@ async function openRouterBalance(fetcher: typeof fetch) {
 
 /** What every enabled, unexpired Codium key could still spend: its credit limit less its usage. */
 async function creditsOwed(fetcher: typeof fetch, now: number) {
+  const version = await rampVersion(fetcher)
   const owed = (await codiumKeys(fetcher)).filter(
     (key) =>
       key.disabled !== true &&
@@ -249,12 +248,14 @@ async function creditsOwed(fetcher: typeof fetch, now: number) {
   )
   return {
     keys: owed.length,
-    cents: owed.reduce(
-      (sum, key) =>
-        sum +
-        Math.max(0, Math.ceil((Number(key.limit) - (typeof key.usage === "number" ? key.usage : 0)) * 100 - 1e-6)),
-      0,
-    ),
+    cents:
+      (await rampOwedCents(version, fetcher)) +
+      owed.reduce(
+        (sum, key) =>
+          sum +
+          Math.max(0, Math.ceil((Number(key.limit) - (typeof key.usage === "number" ? key.usage : 0)) * 100 - 1e-6)),
+        0,
+      ),
   }
 }
 

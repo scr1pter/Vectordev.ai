@@ -67,6 +67,12 @@ function seed(fixture: StripeFixture, options: { now?: number } = {}) {
     const { subscription, start, end } = fixture.key
     const owner = fixture.objects.subscriptions?.find((value) => value.id === subscription)
     const credits = Number((owner?.metadata as Record<string, string>).vector_model_credits_usd)
+    // These fixtures begin with an already provisioned high-tier month, so its first-payment cohort predates
+    // the renewal under test. First-payment pool ramps are covered separately in codium-risk.test.ts.
+    record.firstPaidAt = start * 1000
+    record.firstHighPaidAt = start * 1000
+    record.paidThrough = end * 1000
+    record.highValueVerified = true
     // As provisioning makes it since WP A07: expiring at the period's end plus the renewal grace.
     fakes.openRouter.seed(SEEDED, {
       name: `Vector test ${fixture.accountId} ${subscription} ${start}`,
@@ -551,12 +557,19 @@ describe("M11: a renewal never locks out someone who pays", () => {
     // Carry from an upgrade earlier in the month ends at the renewal.
     const record = JSON.parse(fakes.store.get(codiumKey("account", id))!)
     record.key.carry = { micro: 5_000_000, fromSubscription: "sub_old", fromStart: 1, fromCharge: "ch_old" }
-    fakes.stripe.load({ charges: [{ id: "ch_old", customer: record.customer, paid: true, refunded: false, disputed: false, amount_refunded: 0 }] })
+    fakes.stripe.load({
+      charges: [
+        { id: "ch_old", customer: record.customer, paid: true, refunded: false, disputed: false, amount_refunded: 0 },
+      ],
+    })
     record.key.limitMicro = 53_000_000
     fakes.store.set(codiumKey("account", id), JSON.stringify(record))
     fakes.openRouter.keys.get(SEEDED)!.limit = 53
     const renewing = await reconcileModelPlanAccount(id, fakes.fetcher, end + MINUTE)
-    expect(renewing).toMatchObject({ state: "renewing", meterEpoch: `sub_renewing:${fixture.expect.periodStart * 1000}` })
+    expect(renewing).toMatchObject({
+      state: "renewing",
+      meterEpoch: `sub_renewing:${fixture.expect.periodStart * 1000}`,
+    })
     expect(fakes.openRouter.keys.get(SEEDED)).toMatchObject({ disabled: false, limit: 53 })
 
     // An hour later Stripe finalizes the draft and the card pays it, with no help from Vector.
@@ -583,7 +596,11 @@ describe("M11: a renewal never locks out someone who pays", () => {
     expect(snapshot!.meterEpoch).not.toBe(renewing.meterEpoch)
     expect(fakes.openRouter.keys.get(SEEDED)?.disabled).toBe(true)
     const account = await readModelPlanAccount(id, fakes.fetcher)
-    expect(account?.key).toMatchObject({ subscription: "sub_renewing", start: nextStart / 1000, limitMicro: 48_000_000 })
+    expect(account?.key).toMatchObject({
+      subscription: "sub_renewing",
+      start: nextStart / 1000,
+      limitMicro: 48_000_000,
+    })
     expect(account?.key?.carry).toBeUndefined()
     expect(fakes.openRouter.keys.get(account!.key!.hash)).toMatchObject({
       disabled: false,

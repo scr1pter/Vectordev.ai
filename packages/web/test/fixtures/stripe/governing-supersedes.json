@@ -355,7 +355,14 @@
         "paid": true,
         "payment_intent": "pi_before",
         "refunded": false,
-        "status": "succeeded"
+        "status": "succeeded",
+        "payment_method_details": {
+          "card": {
+            "three_d_secure": {
+              "result": "authenticated"
+            }
+          }
+        }
       },
       {
         "id": "ch_after",
@@ -381,7 +388,14 @@
         "paid": true,
         "payment_intent": "pi_after",
         "refunded": false,
-        "status": "succeeded"
+        "status": "succeeded",
+        "payment_method_details": {
+          "card": {
+            "three_d_secure": {
+              "result": "authenticated"
+            }
+          }
+        }
       }
     ]
   },

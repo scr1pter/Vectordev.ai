@@ -173,6 +173,35 @@ const server = Bun.serve({
         return Response.json({ id: "cus_buyer", metadata: { vector_account_id: user.id } })
       if (url.pathname === "/v1/subscriptions")
         return Response.json({ data: stripe.subscriptions.map(expandedSubscription), has_more: false })
+      if (url.pathname.startsWith("/v1/subscriptions/")) {
+        const subscription = stripe.subscriptions.find((value) => value.id === parts[3])
+        if (!subscription) return new Response(null, { status: 404 })
+        if (request.method === "DELETE") subscription.status = "canceled"
+        if (request.method === "POST") {
+          if (body["pause_collection[behavior]"])
+            subscription.pause_collection = { behavior: body["pause_collection[behavior]"] }
+          if (body.pause_collection === "") subscription.pause_collection = null
+          const metadata = subscription.metadata as Record<string, unknown>
+          if (body["metadata[vector_risk_pause]"] !== undefined)
+            metadata.vector_risk_pause = body["metadata[vector_risk_pause]"]
+        }
+        return Response.json(expandedSubscription(subscription))
+      }
+      if (url.pathname === "/v1/invoices" && request.method === "GET")
+        return Response.json({
+          data: [...stripe.invoices.values()].filter(
+            (invoice) =>
+              (!url.searchParams.get("customer") || invoice.customer === url.searchParams.get("customer")) &&
+              (!url.searchParams.get("subscription") ||
+                invoice.subscription === url.searchParams.get("subscription")) &&
+              (!url.searchParams.get("status") || invoice.status === url.searchParams.get("status")),
+          ),
+          has_more: false,
+        })
+      if (url.pathname.startsWith("/v1/invoices/")) {
+        const invoice = stripe.invoices.get(parts[3]!)
+        return invoice ? Response.json(invoice) : new Response(null, { status: 404 })
+      }
       if (url.pathname === "/v1/disputes")
         return Response.json({
           data: stripe.disputes.filter(
@@ -416,7 +445,11 @@ function subscribe(price = 10, start = Math.floor(Date.now() / 1000) - 3600) {
     customer: "cus_buyer",
     status: "active",
     cancel_at_period_end: false,
-    metadata: { vector_account_id: user.id, vector_model_credits_usd: String(price / 2) },
+    metadata: {
+      vector_account_id: user.id,
+      vector_plan: `vector-${price}`,
+      vector_model_credits_usd: String(price / 2),
+    },
     items: {
       data: [
         {

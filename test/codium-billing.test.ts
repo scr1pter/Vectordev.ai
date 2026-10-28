@@ -177,7 +177,10 @@ describe("Stripe → state (contract §4.4), from fixtures", () => {
       if (expected.key === "created") {
         expect(created(fakes)).toHaveLength(1)
         const made = [...fakes.openRouter.keys.values()].find((value) => value.hash !== SEEDED)
-        expect(made).toMatchObject({ disabled: false, limit: expected.keyLimit ?? Number(FIXTURE_CREDITS[rankPrice(expected.plan)]) })
+        expect(made).toMatchObject({
+          disabled: false,
+          limit: expected.keyLimit ?? Number(FIXTURE_CREDITS[rankPrice(expected.plan)]),
+        })
         if (seeded) expect(seeded.disabled).toBe(true)
       } else {
         expect(created(fakes)).toEqual([])
@@ -185,10 +188,22 @@ describe("Stripe → state (contract §4.4), from fixtures", () => {
         else expect(seeded?.disabled).toBe(expected.key === "disabled")
       }
 
-      // A09 cancels a paid upgrade's source. Disputes and fraud warnings gain their writes in A10.
+      // Paid upgrades cancel the old subscription; A10 holds also stop collection or cancel a lost dispute.
       const writes = fakes.stripe.calls.filter((call) => call.method !== "GET")
-      if (name === "governing-supersedes") expect(writes).toMatchObject([{ method: "DELETE", path: "subscriptions/sub_before" }])
-      else expect(writes).toEqual([])
+      const cancellation =
+        name === "governing-supersedes" ? "sub_before" : name === "ended-dispute-lost" ? "sub_lost" : undefined
+      const paused =
+        name === "frozen-dispute-open"
+          ? "sub_disputed"
+          : name === "frozen-dispute-previous-charge"
+            ? "sub_steady"
+            : undefined
+      if (cancellation) expect(writes).toMatchObject([{ method: "DELETE", path: `subscriptions/${cancellation}` }])
+      else if (paused) {
+        expect(writes).toHaveLength(1)
+        expect(writes[0]).toMatchObject({ method: "POST", path: `subscriptions/${paused}` })
+        expect(writes[0]!.form!.get("pause_collection[behavior]")).toBe("void")
+      } else expect(writes).toEqual([])
       if (expected.stripeCalls !== undefined) expect(fakes.stripe.calls).toHaveLength(expected.stripeCalls)
 
       const account = await storedAccount(fakes, fixture.accountId)
@@ -196,7 +211,8 @@ describe("Stripe → state (contract §4.4), from fixtures", () => {
         const risk = account?.risk
         if (expected.risk.blocked !== undefined) expect(risk?.blocked).toBe(expected.risk.blocked)
         if (expected.risk.reason !== undefined) expect(risk?.reason).toBe(expected.risk.reason)
-        if (expected.risk.openDisputes) expect(Object.keys(risk?.openDisputes ?? {})).toEqual(expected.risk.openDisputes)
+        if (expected.risk.openDisputes)
+          expect(Object.keys(risk?.openDisputes ?? {})).toEqual(expected.risk.openDisputes)
         if (expected.risk.efw) expect(risk?.efw).toEqual(expected.risk.efw)
       }
       if (expected.duplicates)
@@ -404,13 +420,15 @@ describe("a dispute on any Codium charge freezes the account (M5)", () => {
       state: "ended",
       reason: "closing",
     })
-    expect(riskState(risk({ blocked: true, reason: "disputed", openDisputes: { ch_1: { status: "x", at: 1 } } }))).toEqual(
-      { state: "ended", reason: "disputed" },
+    expect(
+      riskState(risk({ blocked: true, reason: "disputed", openDisputes: { ch_1: { status: "x", at: 1 } } })),
+    ).toEqual({ state: "ended", reason: "disputed" })
+    expect(riskState(risk({ blocked: true, reason: "owner", openDisputes: { ch_1: { status: "x", at: 1 } } }))).toEqual(
+      {
+        state: "frozen",
+        reason: "disputed",
+      },
     )
-    expect(riskState(risk({ blocked: true, reason: "owner", openDisputes: { ch_1: { status: "x", at: 1 } } }))).toEqual({
-      state: "frozen",
-      reason: "disputed",
-    })
     expect(riskState(risk({ efw: ["ch_2"] }))).toEqual({ state: "frozen", reason: "early_fraud_warning" })
     expect(riskState(risk({ blocked: true, reason: "early_fraud_warning" }))).toEqual({
       state: "ended",
@@ -502,7 +520,9 @@ function paidMonth(
   const template = loadStripeFixture("active-paid").objects
   const suffix = `${options.subscription.slice(4)}${options.start}`
   const price = {
-    ...structuredClone((template.subscriptions![0]!.items as { data: { price: Record<string, unknown> }[] }).data[0]!.price),
+    ...structuredClone(
+      (template.subscriptions![0]!.items as { data: { price: Record<string, unknown> }[] }).data[0]!.price,
+    ),
     id: `price_codium${options.plan}`,
     unit_amount: options.plan * 100,
     unit_amount_decimal: String(options.plan * 100),
@@ -534,7 +554,12 @@ function paidMonth(
   const charge = { ...structuredClone(template.charges![0]!), id: `ch_${suffix}`, amount: options.plan * 100 }
   const intent = { ...structuredClone(template.payment_intents![0]!), id: `pi_${suffix}` }
   fakes.stripe.objects.subscriptions.clear()
-  fakes.stripe.load({ subscriptions: [subscription], invoices: [invoice], charges: [charge], payment_intents: [intent] })
+  fakes.stripe.load({
+    subscriptions: [subscription],
+    invoices: [invoice],
+    charges: [charge],
+    payment_intents: [intent],
+  })
 }
 
 describe("payment history: firstPaidAt, firstHighPaidAt, memberSince", () => {
@@ -623,7 +648,9 @@ describe("the snapshot write", () => {
       version: 1,
     })
     expect(fakes.store.get(codiumKey("status", id))).toBeUndefined()
-    expect(fakes.store.zset(codiumKey("idx", "period-end")).get(id)).toBe(loadStripeFixture("active-paid").expect.periodEnd * 1000)
+    expect(fakes.store.zset(codiumKey("idx", "period-end")).get(id)).toBe(
+      loadStripeFixture("active-paid").expect.periodEnd * 1000,
+    )
     // sales-opened-at is set by the first paid reconcile only.
     expect(fakes.store.get(codiumKey("sales-opened-at"))).toBe(String(now))
   })
@@ -714,7 +741,9 @@ describe("read rules and M4: no Stripe call on a hot path", () => {
     const later = now + 5 * HOUR
     await Promise.all(
       Array.from({ length: 50 }, (_, index) =>
-        index % 2 ? readEntitlement(id, fakes.fetcher, later) : requireEntitlement(id, "cloudAgents", fakes.fetcher, later),
+        index % 2
+          ? readEntitlement(id, fakes.fetcher, later)
+          : requireEntitlement(id, "cloudAgents", fakes.fetcher, later),
       ),
     )
     expect(fakes.stripe.calls).toEqual([])
@@ -848,7 +877,12 @@ describe("requireEntitlement", () => {
       now,
     )
     await writeSnapshot(snapshot, undefined, fakes.fetcher, now)
-    return { fakes, snapshot, check: (perk: Parameters<typeof requireEntitlement>[1], at = now) => requireEntitlement(account, perk, fakes.fetcher, at) }
+    return {
+      fakes,
+      snapshot,
+      check: (perk: Parameters<typeof requireEntitlement>[1], at = now) =>
+        requireEntitlement(account, perk, fakes.fetcher, at),
+    }
   }
 
   test("refuses by state with the contract's codes, and passes active and renewing within grace", async () => {
@@ -910,7 +944,10 @@ describe("requireEntitlement", () => {
     // Velocity and Labs are "Coming" on every plan: nothing to use yet, and no plan to name.
     const ultra = await stored({ plan: "vector-200" })
     expect((await ultra.check("hosted")).plan).toBe("vector-200")
-    await expect(ultra.check("velocity")).rejects.toMatchObject({ code: "CODIUM_PERK_REQUIRED", detail: { perk: "velocity" } })
+    await expect(ultra.check("velocity")).rejects.toMatchObject({
+      code: "CODIUM_PERK_REQUIRED",
+      detail: { perk: "velocity" },
+    })
     await expect(ultra.check("labs")).rejects.toMatchObject({ detail: { perk: "labs" } })
     expect(cheapestPlanWith("cloudAgents")).toBe("vector-10")
     expect(cheapestPlanWith("vote")).toBe("vector-100")
@@ -955,9 +992,7 @@ describe("meterAdd", () => {
     expect(results.filter((value) => value.ok)).toHaveLength(5)
     expect(await meterAdd(snapshot, "cloud-agent-runs", 0, 5, fakes.fetcher)).toEqual({ ok: true, used: 5 })
     const key = meterKey(snapshot, "cloud-agent-runs")
-    expect(key).toBe(
-      `vector:codium:test:meter:${fixture.accountId}:${snapshot.meterEpoch}:cloud-agent-runs`,
-    )
+    expect(key).toBe(`vector:codium:test:meter:${fixture.accountId}:${snapshot.meterEpoch}:cloud-agent-runs`)
     expect(fakes.store.expires.get(key)).toBe(snapshot.periodEnd + 40 * DAY)
     // The next period's epoch starts from nothing.
     const next = { ...snapshot, meterEpoch: `${snapshot.subscription}:${snapshot.periodEnd}` }
@@ -966,7 +1001,15 @@ describe("meterAdd", () => {
       code: "CODIUM_METER_INVALID",
     })
     const none = buildSnapshot(
-      { account: "x", state: "none", plan: null, periodStart: 0, periodEnd: 0, cancelAtPeriodEnd: false, source: "request" },
+      {
+        account: "x",
+        state: "none",
+        plan: null,
+        periodStart: 0,
+        periodEnd: 0,
+        cancelAtPeriodEnd: false,
+        source: "request",
+      },
       undefined,
       Date.now(),
     )
@@ -1007,10 +1050,15 @@ describe.skipIf(!valkeyURL)("the snapshot's Lua on Valkey", () => {
       expect((await writeSnapshot(first, undefined, fetcher, now)).written).toBe(true)
       expect(await readSnapshot(facts.account, fetcher)).toEqual(first)
       expect(await client!.send("EXISTS", [codiumKey("status", facts.account)])).toBe(0)
-      expect(Number(await client!.send("ZSCORE", [codiumKey("idx", "period-end"), facts.account]))).toBe(facts.periodEnd)
+      expect(Number(await client!.send("ZSCORE", [codiumKey("idx", "period-end"), facts.account]))).toBe(
+        facts.periodEnd,
+      )
       expect(await client!.send("GET", [codiumKey("sales-opened-at")])).toBe(String(now))
       // The configured provisioners' items (WP A06: github-runs) are written with the listener's, at the same score.
-      expect(await client!.send("ZRANGE", [codiumKey("outbox"), "0", "-1"])).toEqual(["github-runs:valkey-account:1", "p:1"])
+      expect(await client!.send("ZRANGE", [codiumKey("outbox"), "0", "-1"])).toEqual([
+        "github-runs:valkey-account:1",
+        "p:1",
+      ])
       expect(await client!.send("GET", [codiumKey("outbox", "item", "p:1")])).toBe('{"v":1}')
 
       const ended = buildSnapshot({ ...facts, state: "ended", reason: "canceled" }, first, now + 1000)
