@@ -21,6 +21,7 @@ import { Config } from "@/config/config"
 import { BackgroundJobStore } from "@vectordevai/core/background-job-store"
 import { InstanceState } from "@/effect/instance-state"
 import { disposing } from "@/effect/instance-registry"
+import { RuntimeFlags } from "@/effect/runtime-flags"
 import { DesktopTasks } from "./desktop"
 import { TaskLimits } from "./limits"
 import { TaskNotify } from "./notify"
@@ -59,6 +60,11 @@ export interface Interface {
     input: { sessionID: SessionID; helpers: boolean; reason?: string },
     ops: TaskPromptOps,
   ) => Effect.Effect<Task.SessionStopResult, Error>
+  /** Moves a root session's running foreground subagents, batch entries included, to the background (5.D.2). */
+  readonly promote: (input: {
+    sessionID: SessionID
+    taskIDs?: readonly string[]
+  }) => Effect.Effect<Task.PromoteResult, Error>
   readonly wait: (input: {
     sessionID: SessionID
     taskIDs: readonly string[]
@@ -105,6 +111,7 @@ const layer = Layer.effect(
     const guests = yield* FreeModelGuests.Service
     const store = yield* BackgroundJobStore.Service
     const notify = yield* TaskNotify.Service
+    const flags = yield* RuntimeFlags.Service
     const bridge = <A>(effect: Effect.Effect<A, DesktopTasks.Error>) =>
       effect.pipe(Effect.mapError((error) => new Error({ code: error.code, message: error.message })))
     const lock = SubagentLifecycle.controlLock
@@ -159,6 +166,26 @@ const layer = Layer.effect(
           }),
         { concurrency: 4, discard: true },
       )
+    })
+
+    // Move to background is offered for a running foreground child of a root session (5.D.2): a subagent's own children
+    // stay in its run, since their reports would start a turn of the subagent after that run ended.
+    const movable = Effect.fn("TaskManager.movable")(function* (
+      session: Session.Info,
+      job: BackgroundJob.Info | undefined,
+      status: Task.Status,
+    ) {
+      if (
+        !flags.backgroundSubagents ||
+        !ACTIVE.has(status) ||
+        job?.status !== "running" ||
+        job.metadata?.background === true ||
+        SubagentLifecycle.stopping.has(session.id) ||
+        !session.parentID
+      )
+        return false
+      const parent = yield* sessions.get(session.parentID).pipe(Effect.option)
+      return Option.isSome(parent) && !parent.value.parentID
     })
 
     const observe = Effect.fn("TaskManager.observe")(function* (
@@ -257,6 +284,7 @@ const layer = Layer.effect(
           inspect: true,
           message: ACTIVE.has(status) && job?.status === "running" && !SubagentLifecycle.stopping.has(session.id),
           stop: ACTIVE.has(status) && !SubagentLifecycle.stopping.has(session.id),
+          ...((yield* movable(session, job, status)) ? { background: true } : {}),
         },
         ...(current.interruption
           ? {
@@ -713,6 +741,35 @@ const layer = Layer.effect(
       }
     })
 
+    // Move to background (5.D.2): each of a root session's running foreground subagents, a batch's entries included,
+    // keeps running, the call that waited on it returns, and it reports later in its own note.
+    const promote: Interface["promote"] = Effect.fn("TaskManager.promote")(function* (input) {
+      if (input.taskIDs && (input.taskIDs.length === 0 || input.taskIDs.length > MAX_TASKS))
+        return yield* new Error({ code: "invalid", message: "Choose 1–200 task IDs." })
+      const session = yield* get(input.sessionID)
+      if (session.parentID || !flags.backgroundSubagents) return { tasks: [] }
+      const wanted = input.taskIDs && new Set(input.taskIDs)
+      const foreground = (yield* jobs.list()).filter(
+        (job) =>
+          job.type === "task" &&
+          job.status === "running" &&
+          job.metadata?.parentSessionId === session.id &&
+          job.metadata.background !== true &&
+          (!wanted || wanted.has(job.id)),
+      )
+      const promoted = yield* Effect.forEach(foreground, (job) => jobs.promote(job.id), { concurrency: "unbounded" })
+      const tasks = yield* Effect.forEach(
+        promoted.flatMap((job) => (job?.metadata?.background === true ? [SessionID.make(job.id)] : [])),
+        (id) =>
+          get(id).pipe(
+            Effect.flatMap((child) => (SubagentLifecycle.read(child) ? observe(child) : Effect.succeed(undefined))),
+            Effect.catchTag("TaskManager.Error", () => Effect.succeed(undefined)),
+          ),
+        { concurrency: 4 },
+      )
+      return { tasks: tasks.filter((task) => task !== undefined) }
+    })
+
     const wait: Interface["wait"] = Effect.fn("TaskManager.wait")(function* (input) {
       if (
         !Number.isFinite(input.timeout ?? 30_000) ||
@@ -740,7 +797,7 @@ const layer = Layer.effect(
       return { tasks, timedOut: done._tag === "None" || !settled(tasks) }
     })
 
-    return Service.of({ list, inspect, message, stop, interrupt, wait })
+    return Service.of({ list, inspect, message, stop, interrupt, promote, wait })
   }),
 )
 
@@ -761,6 +818,7 @@ export const node = LayerNode.make({
     FreeModelGuests.node,
     BackgroundJobStore.node,
     TaskNotify.node,
+    RuntimeFlags.node,
   ],
 })
 export * as TaskManager from "./manager"

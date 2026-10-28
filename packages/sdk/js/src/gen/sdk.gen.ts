@@ -81,6 +81,9 @@ import type {
   ExperimentalSessionUsageData,
   ExperimentalSessionUsageErrors,
   ExperimentalSessionUsageResponses,
+  ExperimentalTaskBackgroundData,
+  ExperimentalTaskBackgroundErrors,
+  ExperimentalTaskBackgroundResponses,
   ExperimentalTaskBridgePollData,
   ExperimentalTaskBridgePollErrors,
   ExperimentalTaskBridgePollResponses,
@@ -1302,6 +1305,28 @@ export class Task extends HeyApiClient {
       ThrowOnError
     >({
       url: "/experimental/session/{sessionID}/tasks/wait",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+    })
+  }
+
+  /**
+   * Move session tasks to the background
+   *
+   * Move the session's running foreground subagents, or the selected ones, to the background, batch entries included. Each keeps running and reports later on its own.
+   */
+  public background<ThrowOnError extends boolean = false>(
+    options: Options<ExperimentalTaskBackgroundData, ThrowOnError>,
+  ) {
+    return (options.client ?? this.client).post<
+      ExperimentalTaskBackgroundResponses,
+      ExperimentalTaskBackgroundErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/session/{sessionID}/tasks/background",
       ...options,
       headers: {
         "Content-Type": "application/json",

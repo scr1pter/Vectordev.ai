@@ -111,6 +111,8 @@ const it = testEffect(
                 skipped: 0,
               }
             }),
+          // The session background route reaches promote (5.D.2); this file checks only who may call it.
+          promote: () => Effect.succeed({ tasks: [] }),
         }),
         Layer.mock(Session.Service)({
           get: () =>

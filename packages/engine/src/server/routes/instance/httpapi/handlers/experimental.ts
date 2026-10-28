@@ -1,5 +1,4 @@
 import { Agent } from "@/agent/agent"
-import { BackgroundJob } from "@/background/job"
 import { InstanceState } from "@/effect/instance-state"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { MCP } from "@/mcp"
@@ -16,13 +15,14 @@ import type { SessionID } from "@/session/schema"
 import { ToolJsonSchema } from "@/tool/json-schema"
 import { ToolRegistry } from "@/tool/registry"
 import { Worktree } from "@/worktree"
-import { Effect, Option } from "effect"
+import { Effect } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import {
   SessionListQuery,
   SessionStopInput,
+  TaskBackgroundInput,
   ToolListQuery,
   WorktreeApiError,
   TaskApiError,
@@ -64,7 +64,6 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     const registry = yield* ToolRegistry.Service
     const worktreeSvc = yield* Worktree.Service
     const sessions = yield* Session.Service
-    const background = yield* BackgroundJob.Service
     const flags = yield* RuntimeFlags.Service
     const tasks = yield* TaskManager.Service
     const desktop = yield* DesktopTasks.Service
@@ -156,6 +155,18 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       )
     })
 
+    // Move to background (5.D.2): the session's running foreground subagents, or the selected ones.
+    const taskBackground = Effect.fn("ExperimentalHttpApi.taskBackground")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: void | typeof TaskBackgroundInput.Type
+    }) {
+      yield* access(ctx.params.sessionID, true)
+      return yield* shown(
+        ctx.params.sessionID,
+        yield* taskError(tasks.promote({ sessionID: ctx.params.sessionID, taskIDs: ctx.payload?.taskIDs })),
+      )
+    })
+
     const taskWait = Effect.fn("ExperimentalHttpApi.taskWait")(function* (ctx: {
       params: { sessionID: SessionID }
       payload: typeof TaskWaitInput.Type
@@ -204,6 +215,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
         subagentLimits: true,
         workDelegation: true,
         sessionStop: true,
+        taskPromote: true,
       }
     })
 
@@ -286,20 +298,11 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       params: { sessionID: SessionID }
     }) {
       yield* access(ctx.params.sessionID, true)
-      if (!flags.backgroundSubagents) return false
-      // A subagent's own tasks stay in the foreground, as the task tool keeps them: a background result would start a
-      // turn of the subagent after its run ended, which no one reads and stopping the root cannot reach.
-      const session = yield* sessions.get(ctx.params.sessionID).pipe(Effect.option)
-      if (Option.isNone(session) || session.value.parentID) return false
-      const jobs = (yield* background.list()).filter(
-        (job) =>
-          job.type === "task" &&
-          job.status === "running" &&
-          job.metadata?.parentSessionId === ctx.params.sessionID &&
-          job.metadata.background !== true,
-      )
-      const promoted = yield* Effect.forEach(jobs, (job) => background.promote(job.id), { concurrency: "unbounded" })
-      return promoted.some((job) => job !== undefined)
+      // The older form of the task background route: whether anything moved, and false for a session it cannot reach.
+      const result = yield* tasks
+        .promote({ sessionID: ctx.params.sessionID })
+        .pipe(Effect.catchTag("TaskManager.Error", () => Effect.succeed({ tasks: [] })))
+      return result.tasks.length > 0
     })
 
     const resource = Effect.fn("ExperimentalHttpApi.resource")(function* () {
@@ -323,6 +326,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       .handle("taskMessage", taskMessage)
       .handle("taskStop", taskStop)
       .handle("taskWait", taskWait)
+      .handle("taskBackground", taskBackground)
       .handle("taskBridgeRegister", taskBridgeRegister)
       .handle("taskBridgePoll", taskBridgePoll)
       .handle("taskBridgeReceipt", taskBridgeReceipt)

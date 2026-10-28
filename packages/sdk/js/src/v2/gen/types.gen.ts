@@ -7097,6 +7097,10 @@ export type TaskWaitResult = {
   attention?: Array<string>
 }
 
+export type TaskPromoteResult = {
+  tasks: Array<TaskInfo>
+}
+
 export type TaskBridgeRegisterInput = {
   lease?: string
   tasks: Array<TaskInfo>
@@ -11976,6 +11980,43 @@ export type ExperimentalTaskWaitResponses = {
 }
 
 export type ExperimentalTaskWaitResponse = ExperimentalTaskWaitResponses[keyof ExperimentalTaskWaitResponses]
+
+export type ExperimentalTaskBackgroundData = {
+  body?: {
+    taskIDs?: Array<string>
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/session/{sessionID}/tasks/background"
+}
+
+export type ExperimentalTaskBackgroundErrors = {
+  /**
+   * TaskApiError | InvalidRequestError
+   */
+  400: TaskApiError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type ExperimentalTaskBackgroundError = ExperimentalTaskBackgroundErrors[keyof ExperimentalTaskBackgroundErrors]
+
+export type ExperimentalTaskBackgroundResponses = {
+  /**
+   * Tasks moved to the background
+   */
+  200: TaskPromoteResult
+}
+
+export type ExperimentalTaskBackgroundResponse =
+  ExperimentalTaskBackgroundResponses[keyof ExperimentalTaskBackgroundResponses]
 
 export type ExperimentalTaskBridgeRegisterData = {
   body?: TaskBridgeRegisterInput

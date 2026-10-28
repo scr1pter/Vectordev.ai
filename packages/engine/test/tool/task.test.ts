@@ -20,7 +20,7 @@ import { SessionRunState } from "@/session/run-state"
 import { SessionRevert } from "@/session/revert"
 import { SessionStatus } from "@/session/status"
 
-import { TaskTool, type TaskPromptOps } from "../../src/tool/task"
+import { TaskTool, type BatchMetadata, type TaskPromptOps } from "../../src/tool/task"
 import { TaskNotify } from "@/task/notify"
 import { TaskLimits } from "@/task/limits"
 import { TaskManager } from "@/task/manager"
@@ -3915,10 +3915,8 @@ describe("task batches", () => {
         )
         expect(new Set(prompts.map((input) => input.sessionID)).size).toBe(2)
         const kids = yield* sessions.children(chat.id)
-        for (const kid of kids) {
-          expect(yield* jobs.promote(kid.id)).toBeUndefined()
-          expect((yield* jobs.get(kid.id))?.metadata?.background).not.toBe(true)
-        }
+        // Foreground entries, until Move to background promotes them (5.D.2).
+        for (const kid of kids) expect((yield* jobs.get(kid.id))?.metadata?.background).not.toBe(true)
         expect(kids.map((kid) => kid.metadata?.subagent)).toEqual(
           expect.arrayContaining([
             expect.objectContaining({ callID: "call_batch", batchIndex: 0 }),
@@ -3994,6 +3992,229 @@ describe("task batches", () => {
         expect(texts.toSorted()).toEqual([TaskSize.neutralizeTags(reports.alpha!), reports.beta])
         expect(texts.join("\n")).not.toContain("</task_result>")
         expect(texts.join("\n")).not.toContain("<system-reminder>")
+      }),
+    { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } },
+  )
+
+  // 5.D.2: Move to background frees the main turn from a foreground batch, entry by entry.
+  const notified = (notes: readonly SessionPrompt.PromptInput[]) =>
+    notes.flatMap((note) =>
+      note.parts.flatMap((part) => {
+        const meta =
+          part.type === "text" ? (part.metadata?.taskNotification as { taskID?: string } | undefined) : undefined
+        return meta?.taskID ? [meta.taskID] : []
+      }),
+    )
+  // Children that start, by brief, and wait for the gate unless their brief is in `quick`. The parent's notes are kept.
+  const gated = (input: {
+    chat: SessionID
+    gate: Deferred.Deferred<void>
+    quick?: string[]
+    cancel?: TaskPromptOps["cancel"]
+    run?: (
+      input: SessionPrompt.PromptInput,
+      work: Effect.Effect<SessionV1.WithParts>,
+    ) => Effect.Effect<SessionV1.WithParts>
+  }) => {
+    const started = new Map<string, SessionID>()
+    const notes: SessionPrompt.PromptInput[] = []
+    const ops: TaskPromptOps = {
+      ...stubOps(),
+      ...(input.cancel ? { cancel: input.cancel } : {}),
+      prompt: (prompt) => {
+        if (prompt.sessionID === input.chat)
+          return Effect.sync(() => {
+            notes.push(prompt)
+            return reply(prompt, "noted")
+          })
+        const text = prompt.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n")
+        const area = ["alpha", "beta"].find((name) => text.includes(`Inspect ${name} and report`))!
+        started.set(area, prompt.sessionID)
+        const work = (input.quick?.includes(area) ? Effect.void : Deferred.await(input.gate)).pipe(
+          Effect.as(reply(prompt, `${area} verified`)),
+        )
+        return input.run ? input.run(prompt, work) : work
+      },
+    }
+    return { ops, started, notes }
+  }
+  const entries = (metadata: object) => ("taskBatch" in metadata ? (metadata as BatchMetadata).tasks : [])
+
+  background.instance(
+    "promoting both entries of a running foreground batch returns the call at once, and each reports in its own note",
+    () =>
+      Effect.gen(function* () {
+        const jobs = yield* BackgroundJob.Service
+        const manager = yield* TaskManager.Service
+        const sessions = yield* Session.Service
+        const { chat, assistant } = yield* seed()
+        const def = yield* foregroundTaskDefinition(yield* TaskTool)
+        const gate = yield* Deferred.make<void>()
+        const children = gated({ chat: chat.id, gate })
+        const fiber = yield* def
+          .execute(
+            { tasks: [brief("alpha"), brief("beta")] },
+            taskContext({
+              sessionID: chat.id,
+              messageID: assistant.id,
+              callID: "call_promote",
+              promptOps: children.ops,
+            }),
+          )
+          .pipe(Effect.forkChild)
+        yield* pollWithTimeout(
+          Effect.sync(() => (children.started.size === 2 ? true : undefined)),
+          "both batch entries must start",
+        )
+        const alpha = children.started.get("alpha")!
+        const beta = children.started.get("beta")!
+        // The board offers Move to background for each running foreground entry, and only until it moves.
+        const offered = (yield* manager.list({ sessionID: chat.id })).tasks.filter((task) => task.controls.background)
+        expect(offered.map((task) => task.id).toSorted()).toEqual([alpha, beta].toSorted())
+        const moved = yield* manager.promote({ sessionID: chat.id })
+        expect(moved.tasks.map((task) => task.id).toSorted()).toEqual([alpha, beta].toSorted())
+        expect(moved.tasks.some((task) => task.controls.background)).toBe(false)
+
+        const result = yield* awaitWithTimeout(
+          Fiber.join(fiber),
+          "the batch call never returned after Move to background",
+        )
+        expect(result.metadata).toMatchObject({ taskBatch: 1, status: "running" })
+        expect(entries(result.metadata)).toMatchObject([
+          { index: 0, sessionId: alpha, status: "running", background: true },
+          { index: 1, sessionId: beta, status: "running", background: true },
+        ])
+        // One line per promoted entry, and the background guidance once, above them.
+        expect(result.output).toContain(`<task_entry index="0" id="${alpha}" state="running"/>`)
+        expect(result.output).toContain(`<task_entry index="1" id="${beta}" state="running"/>`)
+        expect(result.output.match(/working in the background/g)).toHaveLength(1)
+        expect(result.output.indexOf("working in the background")).toBeLessThan(result.output.indexOf("<task_entry"))
+        expect(result.output).not.toContain("<task id=")
+        for (const child of [alpha, beta]) {
+          expect((yield* jobs.get(child))?.status).toBe("running")
+          expect(SubagentLifecycle.read(yield* sessions.get(child))?.background).toBe(true)
+        }
+
+        yield* Deferred.succeed(gate, undefined)
+        yield* pollWithTimeout(
+          Effect.sync(() => (notified(children.notes).length === 2 ? true : undefined)),
+          "each promoted entry must report in its own note",
+          "5 seconds",
+        )
+        expect(notified(children.notes).toSorted()).toEqual([alpha, beta].toSorted())
+        expect(JSON.stringify(children.notes.map((note) => note.parts))).toContain("alpha verified")
+        expect(JSON.stringify(children.notes.map((note) => note.parts))).toContain("beta verified")
+      }),
+    { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } },
+  )
+
+  background.instance(
+    "a finished entry's report stays inline when its sibling moves to the background",
+    () =>
+      Effect.gen(function* () {
+        const jobs = yield* BackgroundJob.Service
+        const manager = yield* TaskManager.Service
+        const { chat, assistant } = yield* seed()
+        const def = yield* foregroundTaskDefinition(yield* TaskTool)
+        const gate = yield* Deferred.make<void>()
+        const children = gated({ chat: chat.id, gate, quick: ["alpha"] })
+        const fiber = yield* def
+          .execute(
+            { tasks: [brief("alpha"), brief("beta")] },
+            taskContext({ sessionID: chat.id, messageID: assistant.id, callID: "call_half", promptOps: children.ops }),
+          )
+          .pipe(Effect.forkChild)
+        yield* pollWithTimeout(
+          Effect.gen(function* () {
+            const alpha = children.started.get("alpha")
+            if (!alpha || !children.started.has("beta")) return undefined
+            return (yield* jobs.get(alpha))?.status === "completed" ? true : undefined
+          }),
+          "alpha must finish while beta still runs",
+        )
+        const alpha = children.started.get("alpha")!
+        const beta = children.started.get("beta")!
+        const moved = yield* manager.promote({ sessionID: chat.id, taskIDs: [alpha, beta] })
+        expect(moved.tasks.map((task) => task.id)).toEqual([beta])
+
+        const result = yield* awaitWithTimeout(
+          Fiber.join(fiber),
+          "the batch call never returned after Move to background",
+        )
+        expect(entries(result.metadata)).toMatchObject([
+          { index: 0, sessionId: alpha, status: "completed" },
+          { index: 1, sessionId: beta, status: "running", background: true },
+        ])
+        expect(result.output).toContain('<task_entry index="0" state="completed">')
+        expect(result.output).toContain("alpha verified")
+        expect(result.output).toContain(`<task_entry index="1" id="${beta}" state="running"/>`)
+        expect(result.output.match(/working in the background/g)).toHaveLength(1)
+
+        yield* Deferred.succeed(gate, undefined)
+        yield* pollWithTimeout(
+          Effect.sync(() => (notified(children.notes).length > 0 ? true : undefined)),
+          "the promoted entry must report in its own note",
+          "5 seconds",
+        )
+        // The finished entry was reported inline, so only the promoted one sends a note.
+        expect(notified(children.notes)).toEqual([beta])
+      }),
+    { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } },
+  )
+
+  background.instance(
+    "aborting the parent after Move to background leaves the batch's entries running",
+    () =>
+      Effect.gen(function* () {
+        const jobs = yield* BackgroundJob.Service
+        const manager = yield* TaskManager.Service
+        const runState = yield* SessionRunState.Service
+        const { chat, assistant } = yield* seed()
+        const def = yield* foregroundTaskDefinition(yield* TaskTool)
+        const gate = yield* Deferred.make<void>()
+        const abort = new AbortController()
+        // As the real prompt does: a child's run is its session's runner, which Stop interrupts.
+        const children = gated({
+          chat: chat.id,
+          gate,
+          cancel: (sessionID) => runState.cancel(sessionID),
+          run: (input, work) => runState.ensureRunning(input.sessionID, Effect.succeed(stopped(input)), work),
+        })
+        const fiber = yield* def
+          .execute(
+            { tasks: [brief("alpha"), brief("beta")] },
+            {
+              ...taskContext({
+                sessionID: chat.id,
+                messageID: assistant.id,
+                callID: "call_abort",
+                promptOps: children.ops,
+              }),
+              abort: abort.signal,
+            },
+          )
+          .pipe(Effect.forkChild)
+        yield* pollWithTimeout(
+          Effect.sync(() => (children.started.size === 2 ? true : undefined)),
+          "both batch entries must start",
+        )
+        expect((yield* manager.promote({ sessionID: chat.id })).tasks).toHaveLength(2)
+        yield* awaitWithTimeout(Fiber.join(fiber), "the batch call never returned after Move to background")
+
+        // Stop on the parent: its signal and the session stop, which sweeps the foreground work under it.
+        abort.abort()
+        yield* runState.cancel(chat.id)
+        const alpha = children.started.get("alpha")!
+        const beta = children.started.get("beta")!
+        for (const child of [alpha, beta]) expect((yield* jobs.get(child))?.status).toBe("running")
+
+        yield* Deferred.succeed(gate, undefined)
+        for (const child of [alpha, beta]) expect((yield* jobs.wait({ id: child })).info?.status).toBe("completed")
+        yield* pollWithTimeout(
+          Effect.sync(() => (notified(children.notes).length === 2 ? true : undefined)),
+          "both entries must still report",
+          "5 seconds",
+        )
       }),
     { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } },
   )

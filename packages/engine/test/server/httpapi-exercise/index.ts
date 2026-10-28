@@ -1240,6 +1240,10 @@ const scenarios: Scenario[] = [
       (body as { sessionStop?: unknown }).sessionStop === true,
       "capabilities should report the route that stops a session with its helpers",
     )
+    check(
+      (body as { taskPromote?: unknown }).taskPromote === true,
+      "capabilities should report the route that moves a session's tasks to the background",
+    )
   }),
   http.protected
     .post("/experimental/session/{sessionID}/background", "experimental.session.background")
@@ -1348,6 +1352,20 @@ const scenarios: Scenario[] = [
       object(body)
       array(body.tasks)
       check(body.tasks.length === 0, "stopping an empty board should not start work")
+    }),
+  http.protected
+    .post("/experimental/session/{sessionID}/tasks/background", "experimental.task.background")
+    .mutating()
+    .seeded((ctx) => ctx.session({ title: "Task background owner" }))
+    .at((ctx) => ({
+      path: route("/experimental/session/{sessionID}/tasks/background", { sessionID: ctx.state.id }),
+      headers: ctx.headers(),
+      body: {},
+    }))
+    .json(200, (body) => {
+      object(body)
+      array(body.tasks)
+      check(body.tasks.length === 0, "a fresh session should have no task to move to the background")
     }),
   http.protected
     .post("/experimental/session/{sessionID}/tasks/wait", "experimental.task.wait.invalid")

@@ -290,9 +290,10 @@ type Report = {
   text: string
 }
 
-// A launch's result. A batch re-renders `report` once each entry's text is cut to its share of the output (5.C.5).
-function rendered<M extends object>(title: string, metadata: M, report: Report) {
-  return { title, metadata, output: renderOutput(report), report }
+// A launch's result. A batch re-renders `report` once each entry's text is cut to its share of the output (5.C.5), and
+// shows a promoted entry (moved to the background while the call waited) as one line (5.D.2).
+function rendered<M extends object>(title: string, metadata: M, report: Report, promoted = false) {
+  return { title, metadata, output: renderOutput(report), report, promoted }
 }
 
 function renderOutput(input: Report) {
@@ -1368,20 +1369,19 @@ export const TaskTool = Tool.define(
                 directory: instance.directory,
                 attempt,
               },
-              promotable: !batch?.multiple,
-              onPromote: batch?.multiple
-                ? undefined
-                : Effect.all([
-                    Effect.sync(() => {
-                      detached = true
-                    }),
-                    ctx.metadata({
-                      title,
-                      metadata: { ...partMetadata(), background: true, jobId: nextSession.id },
-                    }),
-                    SubagentLifecycle.update(sessions, nextSession.id, { background: true }),
-                    notify(nextSession.id),
-                  ]),
+              // Move to background frees the call from a single child or from each entry of a batch; a promoted entry
+              // reports on its own (5.D.2). Whole even if the caller that promoted it goes away, so it is always watched.
+              onPromote: Effect.all([
+                Effect.sync(() => {
+                  detached = true
+                }),
+                ctx.metadata({
+                  title,
+                  metadata: { ...partMetadata(), background: true, jobId: nextSession.id },
+                }),
+                SubagentLifecycle.update(sessions, nextSession.id, { background: true }),
+                notify(nextSession.id),
+              ]).pipe(Effect.uninterruptible),
               // A run that never took its slot, stopped first or failed on a prerequisite, gives back what was bound.
               run: guardedRun().pipe(
                 Effect.ensuring(admission ? limits.release(admission, nextSession.id) : Effect.void),
@@ -1423,7 +1423,7 @@ export const TaskTool = Tool.define(
         // Through the promotion path, as Move to background does: the call returns and the note arrives later.
         else if (promoteNow) yield* background.promote(info.id)
 
-        function backgroundResult() {
+        function backgroundResult(promoted = false) {
           // Still waiting for a slot: the one its admission found taken, or one another child took first.
           const queued = admission !== undefined && outcome.status === "queued" && queuedReason === SLOT_REASON
           return rendered(
@@ -1438,6 +1438,8 @@ export const TaskTool = Tool.define(
                 ...(busy && admission ? [busyNote(admission.active, admission.limits.running)] : []),
               ].join("\n"),
             },
+            // A queued entry keeps its full text, which says it waits for a slot.
+            promoted && !queued,
           )
         }
 
@@ -1462,10 +1464,8 @@ export const TaskTool = Tool.define(
           () =>
             Effect.gen(function* () {
               const waiting = background.wait({ id: nextSession.id }).pipe(Effect.map((waited) => waited.info))
-              const result = yield* batch?.multiple
-                ? waiting
-                : Effect.raceFirst(waiting, background.waitForPromotion(nextSession.id))
-              if (!batch?.multiple && result?.metadata?.background === true) return backgroundResult()
+              const result = yield* Effect.raceFirst(waiting, background.waitForPromotion(nextSession.id))
+              if (result?.metadata?.background === true) return backgroundResult(true)
               // Vector going away stopped the child: TaskRecovery settles it and tells the parent (D.3).
               if (result?.status === "interrupted")
                 return rendered(title, partMetadata(), {
@@ -1658,8 +1658,13 @@ export const TaskTool = Tool.define(
             const exit = yield* Effect.exit(launch)
             if (Exit.isSuccess(exit)) {
               yield* publish(index, exit.value.metadata)
-              const head = `<task_entry index="${index}" state="${items[index].status}">`
               const report = exit.value.report
+              // Moved to the background while the call waited: one line here, its report later in its own note (5.D.2).
+              if (exit.value.promoted) {
+                const line = `<task_entry index="${index}" id="${report.sessionID}" state="running"/>`
+                return { text: "", promoted: true, render: () => line }
+              }
+              const head = `<task_entry index="${index}" state="${items[index].status}">`
               return {
                 text: TaskSize.neutralizeTags(report.text),
                 render: (text: string) => `${head}\n${renderOutput({ ...report, text })}\n</task_entry>`,
@@ -1684,11 +1689,16 @@ export const TaskTool = Tool.define(
       )
       returned = true
       const busy = busiest.active > TaskLimits.BUSY ? [busyNote(busiest.active, busiest.limit)] : []
+      // The background guidance is said once, above the entries, however many were promoted.
+      const started = results.some((result) => "promoted" in result) ? [BACKGROUND_STARTED] : []
       // Every report shares the output fairly, so the last child's is never cut away by the ones before it (5.C.5).
       const cuts = TaskReport.cuts(
         results.map((result) => TaskReport.size(result.text)),
         yield* truncate.limits(),
-        { reserved: TaskReport.size(busy.map((line) => `\n\n${line}`).join("")), notice: Truncate.NOTICE },
+        {
+          reserved: TaskReport.size([...started, ...busy].map((line) => `\n\n${line}`).join("")),
+          notice: Truncate.NOTICE,
+        },
       )
       const entries = yield* Effect.forEach(results, (result, index) => {
         const cut = cuts[index]
@@ -1701,7 +1711,7 @@ export const TaskTool = Tool.define(
         title,
         // Set, so the tool wrapper does not cut the joined entries again.
         metadata: { ...metadata(), truncated: entries.some((entry) => entry.truncated) },
-        output: [...entries.map((entry) => entry.output), ...busy].join("\n\n"),
+        output: [...started, ...entries.map((entry) => entry.output), ...busy].join("\n\n"),
       }
     })
 

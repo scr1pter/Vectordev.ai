@@ -46,6 +46,10 @@ export const TaskStopInput = Schema.Struct({
   reason: Schema.optional(Schema.String.check(Schema.isMaxLength(1000))),
 })
 
+export const TaskBackgroundInput = Schema.Struct({
+  taskIDs: Schema.optional(Schema.Array(Schema.String).check(Schema.isMinLength(1), Schema.isMaxLength(200))),
+})
+
 export const SessionStopInput = Schema.Struct({
   helpers: Schema.Boolean,
   reason: Schema.optional(Schema.String.check(Schema.isMaxLength(1000))),
@@ -132,6 +136,7 @@ export const ExperimentalPaths = {
   taskMessage: "/experimental/session/:sessionID/tasks/:taskID/message",
   taskStop: "/experimental/session/:sessionID/tasks/stop",
   taskWait: "/experimental/session/:sessionID/tasks/wait",
+  taskBackground: "/experimental/session/:sessionID/tasks/background",
   taskBridgeRegister: "/experimental/session/:sessionID/tasks/bridge/register",
   taskBridgePoll: "/experimental/session/:sessionID/tasks/bridge/poll",
   taskBridgeReceipt: "/experimental/session/:sessionID/tasks/bridge/receipt",
@@ -335,6 +340,21 @@ export const ExperimentalApi = HttpApi.make("experimental")
             summary: "Wait for session tasks",
             description:
               "Wait for any or all selected children with a bounded timeout and no polling or model requests.",
+          }),
+        ),
+        HttpApiEndpoint.post("taskBackground", ExperimentalPaths.taskBackground, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          // No body moves every one.
+          payload: [HttpApiSchema.NoContent, TaskBackgroundInput],
+          success: described(Task.PromoteResult, "Tasks moved to the background"),
+          error: TaskApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "experimental.task.background",
+            summary: "Move session tasks to the background",
+            description:
+              "Move the session's running foreground subagents, or the selected ones, to the background, batch entries included. Each keeps running and reports later on its own.",
           }),
         ),
         HttpApiEndpoint.post("taskBridgeRegister", ExperimentalPaths.taskBridgeRegister, {

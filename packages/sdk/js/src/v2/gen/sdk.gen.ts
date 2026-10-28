@@ -69,6 +69,8 @@ import type {
   ExperimentalSessionStopResponses,
   ExperimentalSessionUsageErrors,
   ExperimentalSessionUsageResponses,
+  ExperimentalTaskBackgroundErrors,
+  ExperimentalTaskBackgroundResponses,
   ExperimentalTaskBridgePollErrors,
   ExperimentalTaskBridgePollResponses,
   ExperimentalTaskBridgeReceiptErrors,
@@ -1571,6 +1573,49 @@ export class Task extends HeyApiClient {
       ThrowOnError
     >({
       url: "/experimental/session/{sessionID}/tasks/wait",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Move session tasks to the background
+   *
+   * Move the session's running foreground subagents, or the selected ones, to the background, batch entries included. Each keeps running and reports later on its own.
+   */
+  public background<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      taskIDs?: Array<string>
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "taskIDs" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      ExperimentalTaskBackgroundResponses,
+      ExperimentalTaskBackgroundErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/session/{sessionID}/tasks/background",
       ...options,
       ...params,
       headers: {
