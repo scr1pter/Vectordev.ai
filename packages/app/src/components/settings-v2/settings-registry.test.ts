@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test"
+import { Hands } from "@vectordevai/schema/hands"
 import { filterSettingsGroups, isSettingsTab, settingsGroups, settingsItemCount } from "./settings-registry"
 
 describe("settings registry", () => {
   test("keeps every settings page reachable", () => {
-    expect(settingsItemCount(settingsGroups)).toBe(15)
+    expect(settingsItemCount(settingsGroups)).toBe(16)
     expect(settingsGroups.flatMap((group) => group.items.map((item) => item.value))).toEqual([
       "account",
       "general",
@@ -12,6 +13,7 @@ describe("settings registry", () => {
       "usage",
       "spend",
       "subagents",
+      "computer",
       "providers",
       "models",
       "servers",
@@ -21,6 +23,23 @@ describe("settings registry", () => {
       "accessibility",
       "about",
     ])
+  })
+
+  test("finds desktop app control by its name and dedicated vocabulary", () => {
+    const agents = settingsGroups.find((group) => group.title === "Agents & environment")
+    expect(agents?.items.find((item) => item.value === "computer")?.label).toBe(Hands.NAME)
+    for (const query of [
+      Hands.NAME,
+      Hands.SHORT,
+      "computer use",
+      "screen recording",
+      "always allowed apps",
+      "blocked apps",
+    ])
+      expect(filterSettingsGroups(query).flatMap((group) => group.items.map((item) => item.value))).toEqual([
+        "computer",
+      ])
+    expect(isSettingsTab("computer")).toBe(true)
   })
 
   test("puts Keyboard shortcuts in the Workspace group, found by what people call them", () => {

@@ -6,6 +6,7 @@
     "types": ["node", "bun"]
   },
   "include": [
+    "../src/features/computer/fake-platform.ts",
     "./public-viewer.playwright.config.ts",
     "./performance/timeline-stability/**/*.spec.ts",
     "./performance/timeline-stability/fixture.test.ts",
@@ -21,6 +22,7 @@
     "./regression/external-agent-chat.spec.ts",
     "./regression/free-models.spec.ts",
     "./regression/host-locally.spec.ts",
+    "./regression/hands-smoke.spec.ts",
     "./regression/mock-server-events.spec.ts",
     "./regression/public-share-consent.spec.ts",
     "./regression/public-share-delete.spec.ts",

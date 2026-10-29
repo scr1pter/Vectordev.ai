@@ -28,6 +28,8 @@ export interface MockServerConfig {
   fileList?: (path: string) => unknown | Promise<unknown>
   fileContent?: (path: string) => unknown | Promise<unknown>
   sessionStatus?: unknown
+  /** Omitted models an older engine without the capabilities route. */
+  capabilities?: unknown
 }
 
 export async function mockVectorServer(page: Page, config: MockServerConfig) {
@@ -62,6 +64,7 @@ export async function mockVectorServer(page: Page, config: MockServerConfig) {
     "/permission",
     "/question",
     "/session/status",
+    "/experimental/capabilities",
     "/file",
     "/file/content",
   ]
@@ -78,6 +81,10 @@ export async function mockVectorServer(page: Page, config: MockServerConfig) {
     if (path === "/global/event") return sse(route, config.events?.(), config.eventRetry)
     if (path === "/event") return sse(route, config.directoryEvents?.(), config.eventRetry)
     if (path === "/global/health") return json(route, { healthy: true })
+    if (path === "/experimental/capabilities")
+      return config.capabilities === undefined
+        ? json(route, { error: "Not found" }, undefined, 404)
+        : json(route, config.capabilities)
     if (path === "/permission")
       return json(route, typeof config.permissions === "function" ? config.permissions() : (config.permissions ?? []))
     if (path === "/question")

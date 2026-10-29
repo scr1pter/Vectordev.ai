@@ -195,6 +195,8 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
   return {
     platform: "desktop",
     os,
+    // Older preloads do not expose this API; D22 supplies the desktop implementation.
+    computer: "computer" in window.api ? (window.api.computer as Platform["computer"]) : undefined,
     version: pkg.version,
     windowID: windowState.id,
 

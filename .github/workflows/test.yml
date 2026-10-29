@@ -6,13 +6,20 @@ on:
       - main
   pull_request:
   workflow_dispatch:
+    inputs:
+      hands_benchmark:
+        description: Run only the production app baseline for the desktop app-control work
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   # Keep every run on main so cancelled checks do not pollute the default branch
   # commit history. PRs and other branches still share a group and cancel stale runs.
   # Expressions have no ternary, so this is the `&&`/`||` idiom; it is safe here only
   # because both format() results are non-empty strings and can never read as falsy.
-  group: ${{ github.ref == 'refs/heads/main' && format('{0}-{1}', github.workflow, github.run_id) || format('{0}-{1}', github.workflow, github.event.pull_request.number || github.ref) }}
+  # Manual benchmarks never cancel the normal checks for the same branch.
+  group: ${{ github.event_name == 'workflow_dispatch' && inputs.hands_benchmark && format('{0}-hands-benchmark-{1}', github.workflow, github.ref) || (github.ref == 'refs/heads/main' && format('{0}-{1}', github.workflow, github.run_id) || format('{0}-{1}', github.workflow, github.event.pull_request.number || github.ref)) }}
   cancel-in-progress: true
 
 permissions:
@@ -24,6 +31,7 @@ env:
 
 jobs:
   unit:
+    if: github.event_name != 'workflow_dispatch' || !inputs.hands_benchmark
     name: unit (${{ matrix.settings.name }})
     strategy:
       fail-fast: false
@@ -107,6 +115,7 @@ jobs:
   # stray Bun API passes them all and still fails every desktop message ("Bun is not defined", 1.99.99). This boots
   # the bundle under Node and sends one prompt through a Read tool call against a fake model.
   desktop-engine-node:
+    if: github.event_name != 'workflow_dispatch' || !inputs.hands_benchmark
     name: desktop engine bundle (node)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -141,6 +150,7 @@ jobs:
         run: node script/smoke-node-bundle.ts
 
   engine-linux:
+    if: github.event_name != 'workflow_dispatch' || !inputs.hands_benchmark
     name: engine (linux, shard ${{ matrix.shard }}/4)
     strategy:
       fail-fast: false
@@ -184,6 +194,7 @@ jobs:
           VECTOR_EXPERIMENTAL_DISABLE_FILEWATCHER: "false"
 
   engine-windows:
+    if: github.event_name != 'workflow_dispatch' || !inputs.hands_benchmark
     name: engine (windows, shard ${{ matrix.shard }}/6)
     strategy:
       fail-fast: false
@@ -243,6 +254,7 @@ jobs:
           VECTOR_EXPERIMENTAL_DISABLE_FILEWATCHER: "true"
 
   e2e:
+    if: github.event_name != 'workflow_dispatch' || !inputs.hands_benchmark
     name: e2e (${{ matrix.settings.name }})
     strategy:
       fail-fast: false
@@ -314,3 +326,119 @@ jobs:
           path: |
             packages/app/e2e/test-results
             packages/app/e2e/playwright-report
+
+  hands-benchmark:
+    name: production app benchmark
+    if: github.event_name == 'workflow_dispatch' && inputs.hands_benchmark
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      CI: true
+      VECTOR_CHANNEL: prod
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright-browsers
+      PLAYWRIGHT_PORT: "4568"
+      PLAYWRIGHT_WORKERS: "1"
+      PLAYWRIGHT_HTML_OUTPUT_DIR: ${{ runner.temp }}/hands-app-benchmark/report
+      VECTOR_PERFORMANCE_RUN_ID: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+      # Match the documented production timeline workload; detailed profiling stays off.
+      TIMELINE_CPU_THROTTLE: "4"
+      TIMELINE_DELTA_COUNT: "40"
+      TIMELINE_HISTORY_TURNS: "80"
+      TIMELINE_EVENT_BATCH: "1"
+      TIMELINE_CPU_PROFILE: "0"
+      FORCE_COLOR: "0"
+    steps:
+      - name: Checkout benchmark commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          # Keep the same Chromium extraction workaround as the ordinary e2e job.
+          node-version: "24.15"
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile
+
+      - name: Install Chromium and system dependencies
+        working-directory: packages/app
+        run: bunx playwright install --with-deps chromium
+
+      - name: Record benchmark provenance
+        working-directory: packages/app
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs")
+          const os = require("node:os")
+          const path = require("node:path")
+          const { execFileSync } = require("node:child_process")
+          const directory = path.join(process.env.RUNNER_TEMP, "hands-app-benchmark")
+          fs.mkdirSync(directory, { recursive: true })
+          fs.writeFileSync(path.join(directory, "manifest.json"), JSON.stringify({
+            commit: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+            ref: process.env.GITHUB_REF,
+            runID: process.env.VECTOR_PERFORMANCE_RUN_ID,
+            node: process.version,
+            bun: execFileSync("bun", ["--version"], { encoding: "utf8" }).trim(),
+            playwright: execFileSync("bunx", ["playwright", "--version"], { encoding: "utf8" }).trim(),
+            platform: process.platform,
+            arch: process.arch,
+            cpu: os.cpus()[0]?.model,
+            cpuCount: os.availableParallelism(),
+            memoryBytes: os.totalmem(),
+            workers: 1,
+            repeats: 3,
+            channel: process.env.VECTOR_CHANNEL,
+            timeline: { historyTurns: 80, deltas: 40, cpuThrottle: 4, eventBatch: 1, detailedProfiling: false },
+          }, null, 2) + "\n")
+          NODE
+
+      - name: Measure production navigation and timeline
+        working-directory: packages/app
+        run: |
+          set -euo pipefail
+          # This config builds and serves dist, refuses a reused server, and runs serially. It uses HTTP fixtures;
+          # no live engine or model account is needed. Repeat exactly these cases for the after-change comparison.
+          bunx playwright test \
+            --config e2e/performance/playwright.config.ts \
+            e2e/performance/timeline/first-navigation-benchmark.spec.ts \
+            e2e/performance/timeline/session-timeline-benchmark.spec.ts \
+            --project=chromium --workers=1 --retries=0 --repeat-each=3 \
+            --grep 'performance: first navigation paint|streams assistant text in v2 with review pane closed' \
+            --output "$RUNNER_TEMP/hands-app-benchmark/results" \
+            2>&1 | tee "$RUNNER_TEMP/hands-app-benchmark/run.log"
+
+      - name: Extract structured measurements
+        if: always()
+        working-directory: packages/app
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs")
+          const path = require("node:path")
+          const directory = path.join(process.env.RUNNER_TEMP, "hands-app-benchmark")
+          const log = path.join(directory, "run.log")
+          if (!fs.existsSync(log)) process.exit(0)
+          const metrics = fs.readFileSync(log, "utf8").split("\n").flatMap((line) => {
+            const match = line.match(/BENCHMARK (\{.*\})/)
+            return match ? [JSON.parse(match[1])] : []
+          })
+          fs.writeFileSync(path.join(directory, "metrics.json"), JSON.stringify(metrics, null, 2) + "\n")
+          NODE
+
+      - name: Preserve benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hands-app-benchmark-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/hands-app-benchmark/
+          if-no-files-found: warn
+          retention-days: 30
