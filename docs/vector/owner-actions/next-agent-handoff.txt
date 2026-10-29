@@ -1,0 +1,1101 @@
+Handoff: take over everything for Vector — paused checkpoint, 2026-10-28
+
+READ THIS WHOLE PROMPT BEFORE ACTING. The owner asked to save a checkpoint and pause because their current agent session was running low on usage. You are the next agent with more usage, continuing the original implementation request. The full handoff is NOT finished. Do not mistake saved drafts, passing component tests, or an empty production acceptance registry for a completed feature.
+
+Exact snapshot time: 2026-10-28 21:46:01 America/Los_Angeles / 2026-10-29 04:46:01 UTC.
+Repository: https://github.com/scr1pter/claudeondfsfdaf
+Checkpoint branch: vector-takeover.
+This prompt: docs/vector/owner-actions/next-agent-handoff.txt.
+Recovery files: docs/vector/checkpoints/2026-10-28/.
+The commit containing this prompt and those files is the checkpoint publication. Read the latest branch and its commit before resuming; the branch may have advanced since this text was written.
+
+The two unfinished source trees are preserved as full Git patches, including every new untracked source file. They are recovery artifacts, not product commits. Published product branches remain at tested checkpoints. Do not apply these patches directly to main.
+
+0. First five minutes
+
+1. Read this prompt, the checkpoint manifest, and the applicable AGENTS.md files.
+2. Check GitHub branch heads and workflow conclusions. GitHub is the source of truth.
+3. Preserve any newer work. If you are on this same workspace, the unfinished edits already exist in the worktrees; DO NOT apply the recovery patches over them.
+4. On a different machine, restore each patch on its exact recorded base in a separate feature worktree, using git apply --check first. The manifest includes hashes, file lists and complete resulting Git tree IDs.
+5. Resume WP28 and A17 one work package at a time. Finish their integration and required tests before calling them complete. Do not restart completed A09–A16 or WP23–WP27.
+6. No background work should be running from the paused session. All implementation/review workers were told to freeze; all Bun, typecheck, Valkey and test sessions were consumed and exited. Check before starting another workload.
+7. The owner's latest financial policy answer is already given: use LARGER FIXED RESERVATIONS and PRESERVE CURRENT CONTEXT WINDOWS. Do not ask that question again.
+8. The owner already delegated approval of the specific desktop 1.99.112 release. The blocker is GitHub integration permission, not missing owner consent. Details below.
+
+1. Who and what
+
+The owner is Krishna, a solo founder building Vector, https://vectordev.ai, an AI coding-agent harness. They work across computers, so code and plans must be recoverable from GitHub rather than a single local checkout.
+
+The public repository is scr1pter/claudeondfsfdaf. Older repository names redirect. The default branch is main; the website deploys from main. Do not name the open-source project the code was originally derived from.
+
+The stack is a Bun 1.3.14 monorepo with Turborepo, Effect 4, TypeScript/tsgo, SolidJS in packages/app, Electron 42 in packages/desktop, Astro in packages/web, and a Vercel api/ directory. The engine runs under Node in the desktop sidecar. New engine runtime code must use Node APIs even though the generic AGENTS.md prefers Bun APIs.
+
+Published desktop metadata still says 1.99.111. Desktop 1.99.112 has passed its source checks and all platform builds but is still waiting at a protected publication job. The published version marker must stay 1.99.111 until actual publication is verified. CLI/npm remains 1.99.99; no CLI release was authorized here.
+
+The owner values questions about genuine ambiguities after inspecting the repo. They explicitly appreciated being asked what the planned 550B model meant. They do not want you to invent business decisions or ask questions the repo already answers.
+
+The owner requested no detailed multi-agent parity progress updates until it is finished. Keep ordinary progress messages concise and material. Do not report partial multi-agent work as done.
+
+2. Latest owner decisions and authorization
+
+These override older plans and the original pasted briefing:
+
+- Cloud GitHub development sessions / the handoff's “Open from GitHub” cloud-environment work were canceled. Do not implement that item, buy a sandbox provider, or rent hardware for it without renewed direction.
+- Vector Velocity is the owner's PLANNED 550B+ parameter model. It is not a released model, a measured performance claim, or evidence of trained weights. Its Max/Ultra perk stays Coming, with no date.
+- Keep the EXISTING model catalog for desktop 1.99.112. Do not merge the restored catalog or change Actions pins for that release.
+- The owner answered “you approve it” for the protected production-release review on run 40781089625. You may approve that exact verified release if a capable authenticated connection is available. Do not ask for the same consent again.
+- That consent is NOT blanket permission to merge other PRs to main, change repository protections, publish later releases, deploy Codium, or change account settings.
+- The owner chose: “Use larger fixed reservations to preserve context windows; requests may require more available balance.”
+- That choice authorizes revising A17's fixed-reservation derivation/table. It does not authorize shrinking the context windows, paid model calls, metadata probes, account settings, purchases, or activating unverified routes.
+- The original decision to keep pricing/plan files public stands. Do not ask again.
+- Required sign-in was dropped. Do not revive it.
+- No team features, Vector Labs implementation, Chrome extension, parked R2 work, or takeover of other owners' work.
+- At pause the owner requested this extremely detailed handoff and a saved checkpoint. Do not restart this paused session's workers after producing the handoff.
+
+3. Non-negotiable working rules
+
+Git and source
+
+- Never touch the owner's checkout folder named Vectordev.ai.
+- Work in isolated feature worktrees.
+- Push main only from a clean checkout of main.
+- Never use git stash, git reset --hard, --no-verify, or force-push.
+- Every push must pass the required pre-push typecheck on the exact source being pushed.
+- Commit as:
+  git -c user.name=Vector -c user.email=bot@vectordev.ai commit ...
+- Use conventional commit/PR titles.
+- Branch names have at most three hyphen-separated words; no slash prefixes.
+- This session was Codex, so it did not add a Claude co-author. The earlier handoff requested a Claude co-author for actual Claude-made commits; do not misattribute Codex work.
+- Do not manually edit generated client files. Generate them after public Protocol/HttpApi changes.
+- Keep source, tests, plans, decisions and deviations pushed at stable checkpoints.
+- Unfinished source was saved as patches at pause because current WP28/A17 are incomplete and unvalidated. Do not bypass the hook to publish those drafts as ordinary feature code.
+
+Resource use and tests
+
+- The original owner preference was Opus at xhigh, rather than max, for build/review agents when that model is available. This Codex team inherited its permitted default model. Do not invent unavailable model overrides or change models to bypass a capacity error.
+- Consider remaining usage before launching a large team. This session is intentionally paused; do not restart workers after writing the checkpoint.
+- Keep local work light.
+- ONE LOCAL BUN WORKLOAD AT A TIME across all agents: tests, installs, generators, package checks and git pushes.
+- Tests run one file at a time, from the owning package, with a 30-second per-test timeout.
+- Do not run tests from repo root.
+- Never run local whole suites, Playwright, Electron, heavy production builds, or direct full Turbo runs.
+- The mandatory pre-push hook's serialized 23-package typecheck is the required exception. It currently runs with concurrency 1.
+- Full suites, browser tests and production builds run on GitHub.
+- Run package checks with bun typecheck; do not invoke tsc directly.
+- Install dependencies with bun install --ignore-scripts --frozen-lockfile.
+- Do not add low-value tests that merely copy implementation. Preserve meaningful existing checks and add actual race/boundary regressions.
+- Once appropriate tests pass, repeat them only for changed source, a failure, an unresolved concern, or the mandatory push hook.
+
+Secrets, accounts and external actions
+
+- Never read credential files or dump environment variables.
+- Never put the owner's personal email in source or logs.
+- Use configured CLI authentication normally; do not search for another credential when an integration returns 403.
+- Do not call real Stripe, OpenRouter or customer GitHub APIs for Codium implementation or testing.
+- Repository GitHub operations and CI inspection/dispatch for this task are authorized; that is different from probing customer integrations.
+- No live provider inference, paid benchmark, credit purchase, Codium deployment or account setup was performed.
+- Test services are loopback fakes, disposable Valkey and disposable Postgres.
+- Ask before unapproved public claims, purchases, account settings, unlisted merges to main, or releases beyond 1.99.112.
+- Do not send Slack/email messages. The handoff covers setup prompts, not actual messaging.
+
+Ownership exclusions
+
+Do not edit:
+- api/cloud-agents/*
+- api/_lib/cloud-agents-*.ts
+- api/_lib/github-oidc.ts
+
+These belong to the separate @vector/GitHub implementation. The Codium-owned api/_lib/codium-cloud-agents.ts contract is a different file. Respect Hands and the other workstreams too.
+
+4. Current environment and worktrees
+
+This session used a managed Linux cloud environment, not the owner's Mac. Its cwd is /workspace. The owner-facing timezone was America/Los_Angeles; GitHub/host logs are UTC.
+
+Tools:
+- Bun: /workspace/.tools/bun/node_modules/.bin/bun, version 1.3.14.
+- Node: version 24.
+- gh: /usr/bin/gh, configured through the connected GitHub integration.
+- Valkey:
+  binary /workspace/.tools/valkey/usr/bin/valkey-server
+  library directory /workspace/.tools/valkey/usr/lib/x86_64-linux-gnu
+- Mandatory local workload wrapper:
+  /workspace/.tools/vector-serial
+  It is a shell wrapper around:
+  flock --close /workspace/.cache/vector-bun-workload.lock
+- All agents still need an explicit parent slot grant. The wrapper is a second barrier, not a replacement for coordination.
+- Do not nest this wrapper inside the pre-push hook.
+- Shared hook path is /workspace/vector-takeover/.husky.
+- On a new machine, verify core.hooksPath points to a real checked-out hook. Frozen installs with scripts disabled may not install Husky automatically. Configure the local repo hook explicitly; do not let a missing hook turn into a verification bypass.
+- The Linux flock wrapper may not exist on a Mac; use an equivalent local locking mechanism plus explicit parent coordination rather than launching overlapping Bun workloads.
+
+Typical focused command:
+  PATH=/workspace/.tools/bun/node_modules/.bin:$PATH /workspace/.tools/vector-serial bun test --timeout 30000 test/FILE.test.ts
+
+Typical push:
+  PATH=/workspace/.tools/bun/node_modules/.bin:$PATH TURBO_TELEMETRY_DISABLED=1 TURBO_CACHE_DIR=/workspace/.cache/vector-typecheck /workspace/.tools/vector-serial git push origin BRANCH
+
+For tests/imports that load Global paths, use fresh task-local XDG roots under /tmp, plus VECTOR_TEST_HOME where relevant. Do not repurpose HOME or CODEX_HOME. We hit EROFS at /home/agent/.local/share/vector when a core preload did not set XDG roots; that was an environment setup failure, not a production failure.
+
+Network:
+- Read the cloud-environment-runtime skill at the start of resumed managed-cloud work.
+- Inspect environment_status and /etc/codex/network-policy.json.
+- The last observed policy was enforced and current; no VPN, secret bindings or outbound identity bindings were configured.
+- Preserve inherited proxy and CA settings. Do not bypass a destination denial.
+- Exec commands needing GitHub or localhost networking used with_additional_permissions with network enabled.
+- Read the Docker reference before Docker work.
+- Explicitly select the managed local Docker socket and clear endpoint/context/TLS selectors for those commands; preserve DOCKER_CONFIG and registry credentials.
+- Docker 28.4 was available. A disposable 256 MB/1 CPU Postgres16 container was used only for A16 SQL tests, then stopped and removed.
+- The Postgres image cache remains; no live test container should remain.
+- No Valkey service should remain. Old zombie process entries are not live workloads.
+- At pause there were no live Bun/tsgo workloads; source workers were frozen.
+
+Disk:
+- The workspace overlay is 32 GB. Last observation was about 3.2 GB free after the temporary Docker image.
+- Earlier ENOSPC was handled by removing only reinstallable node_modules from inactive vector-catalog and vector-codium-ci, then reinstalling where needed.
+- Do not delete source or the owner's checkout.
+- Avoid new redundant dependency trees; reuse the existing worktrees where sensible.
+
+Worktree map:
+- /workspace/vector-takeover: branch vector-takeover, checkpoint documentation, setup prompt, PR15. The new prompt/patch artifacts are saved here.
+- /workspace/vector-evolve: canonical self-evolving, clean at 59242ac0.
+- /workspace/vector-evolve-next: multiagent-next, base 59242ac0, UNCOMMITTED WP28 source.
+- /workspace/vector-codium: canonical codium, clean at 14bc7d42.
+- /workspace/vector-codium-ci: codium-integration, clean at 14bc7d42 after the CI fixture repair.
+- /workspace/vector-codium-next: codium-next, base 14bc7d42, UNCOMMITTED A17 source.
+- /workspace/vector-approved: approved-fixes, clean/pushed 279d4292.
+- /workspace/vector-ci-timers: ci-timers, clean/pushed eaffaf26.
+- /workspace/vector-scope: vectorscope, clean/pushed 91f6f332.
+- /workspace/vector-release-timers: main, clean at dfc98974.
+- /workspace/vector-release-112: release-prep at the same approved release source.
+- /workspace/vector-catalog: catalog-112, deferred restoration branch; dependencies removed when inactive.
+- /workspace/vector-catalog-data: catalog fork branch codium-112 at 06e1cdd7.
+- The local parity-bench branch at 581f131f is an UNUSED, UNPUSHED harness-only draft. See section 9. Do not mistake it for active work.
+
+Mac-only paths from the original handoff, if on the owner's Mac:
+- ~/.cache/vector-evolve
+- ~/.cache/vector-codium
+- ~/.cache/vector-main
+- ~/.cache/vector-release-112
+Newer .vector-build specifications/deviation notes and the old partial A09 patch were unavailable here. Do not claim they were recovered. Compare them before overwriting anything if they are available on the Mac.
+
+5. Recovery checkpoint: exact contents and restore procedure
+
+Recovery directory:
+  docs/vector/checkpoints/2026-10-28/
+
+manifest.json records source paths, branches, base commits, every changed/new file's hash, patch hashes and resulting full Git tree IDs.
+
+Snapshot A:
+- Name: multiagent-wp28.
+- Patch: multiagent-wp28.patch.
+- Base: 59242ac0cf1e95398c8888a8b2d86c0202b15661.
+- 59 changed/new source files.
+- Patch size: 345976 bytes.
+- SHA256: 2d659889b6e47573e594353a2cd280eeee40d544860f57ca3a4079f35dc6482e
+- Resulting Git tree: 4203f0de186f538bbe55c94050731f998a053def
+
+Snapshot B:
+- Name: codium-a17.
+- Patch: codium-a17.patch.
+- Base: 14bc7d4283b176dd962dbdf1d0c44b3101aa3607.
+- 18 changed/new source files.
+- Patch size: 157767 bytes.
+- SHA256: fece4d5429300dab6787f3d2a5bf1a2d9e71f12f86d6465f23ec6766c6fa767e
+- Resulting Git tree: a3e417196baad1469860734586b535c87cbda117
+
+Both patches were actually applied to separate temporary Git indexes initialized at their recorded bases. The resulting trees matched exactly. The real worktree status and real indexes were unchanged. This verifies that tracked and untracked source was preserved; it is not a runtime/typecheck acceptance of the drafts.
+
+On this same workspace:
+- Inspect the existing dirty worktrees first.
+- Do not reapply patches or reset/stash their edits.
+- Verify their HEADs and compare the manifest if something is missing.
+- Resume in place or create another isolated review worktree.
+
+On a different machine:
+- Fetch vector-takeover, self-evolving, codium and relevant other branches.
+- Check whether newer commits already include this work.
+- Create a worktree at the exact base commit, not blindly the latest branch head.
+- Example for isolation:
+  git worktree add -b isolation-resume /YOUR/PATH/vector-isolation 59242ac0cf1e95398c8888a8b2d86c0202b15661
+  From that worktree:
+  git apply --check /ABS/PATH/TO/CHECKPOINT/multiagent-wp28.patch
+  git apply /ABS/PATH/TO/CHECKPOINT/multiagent-wp28.patch
+- Example for Codium:
+  git worktree add -b codium-resume /YOUR/PATH/vector-codium 14bc7d4283b176dd962dbdf1d0c44b3101aa3607
+  Then check/apply codium-a17.patch.
+- Verify patch SHA256 first and resulting files against manifest.json.
+- A temporary index can be used to stage the restored snapshot and compare its write-tree ID without disturbing the real index.
+- On a platform with line-ending conversion, compare the normalized Git tree as well as raw file hashes; preserve newer work instead of rewriting it blindly.
+- Install frozen dependencies with scripts disabled and resume focused checks.
+- Keep new branch names short.
+- Never apply either patch onto main.
+
+Selected local verification logs are preserved in logs/ inside the checkpoint:
+- WP27 pre-push.
+- A16 pre-push.
+- SQL-CI repair pre-push.
+- WP28 audience run and targeted private sharing round-trip run, where available.
+Read run boundaries below before treating a log as coverage of the final patch.
+
+6. main and desktop release 1.99.112 — source ready, publication blocked
+
+Main:
+  dfc98974329f17c6814a923ac12ebe38b6673f38
+
+GitHub main was checked again during this checkpoint work and still matched that SHA.
+
+Main includes the approved release112 work and terms/privacy changes, version112 preparation, unsigned allowlist, first-launch and agent-environment work, and a causal local-fit timing-fixture repair.
+
+PR17 was merged:
+  https://github.com/scr1pter/claudeondfsfdaf/pull/17
+
+Full general CI on exact main:
+  40781041233 — SUCCESS.
+
+Release run:
+  https://github.com/scr1pter/claudeondfsfdaf/actions/runs/40781089625
+- Workflow-dispatch source: exact main dfc98974.
+- tag: v1.99.112
+- allow_unsigned: true
+- prerelease: false
+- attempt: 1
+- All source checks, native desktop tests, catalog parity, smoke builds, and Linux/macOS/Windows platform builds passed.
+- Only “Publish release and update feeds” is waiting.
+- Publish job: 123153528239.
+- Protected environment: production-release, ID24414940156.
+
+The owner authorized the agent to approve this exact job. GitHub's pending-deployments GET reported current_user_can_approve=true. The actual review POST returned:
+  HTTP403 Resource not accessible by integration.
+
+This was a GitHub App/integration capability failure. It was NOT an automatic approval-review rejection. No environment protection setting was changed.
+
+The attempted approval used the exact environment ID, state approved and a bounded comment. Do not repeat the 403 indefinitely or hunt for another credential. A new agent with a legitimately capable authenticated browser/connection may approve the exact run after verifying source/inputs; existing owner authorization persists.
+
+At the last tool discovery there were no Browser JS, list-tabs, CUA, or browser-control tools, despite the browser skill being listed. Browser skill was read; authenticated UI fallback was unavailable. If new tools exist now, use the appropriate skill and prefer purpose-built APIs where sufficient. Do not automate an unrelated browser through shell or inspect credential files.
+
+If the owner must click in GitHub, the path is Review deployments → Approve and deploy on that run. They were already told the integration blocker.
+
+Catalog for112:
+- KEEP EXISTING, explicitly chosen by owner.
+- Fork revision: 52edfd113616e57761c70fd5d01ac578d645211c.
+- Source and embedded SHA256:
+  a96b465110dd2fcc38e0dcca1a4115e12ea43ddaafdb0ebf587e15026767bf14
+- Catalog job123143384093 verified actual pin/parity.
+- Listing Actions variables returned403, but logs proved the release's real pin.
+- Do not switch112 to the deferred restored fork.
+
+After publication actually runs:
+1. Require publish-job success.
+2. Verify installer integrity/account gates, all six platform targets, all four update feeds, staged/committed production pointers and version112.
+3. Only then update publishedDesktopVersion to1.99.112, remove Coming availability, regenerate changelog/shipped-copy fixtures, and finalize the release owner record.
+4. Make those metadata updates from clean main, with appropriate focused checks and the required push hook.
+5. Do not publish npm/CLI or113.
+6. Do not rerun only publish on a new workflow attempt: artifact names are attempt-specific.
+7. A pushed v* tag alone cannot publish.
+8. Do not infer publication solely from GitHub's latest-release endpoint. The111 GitHub release is a draft while separate production download/update pointers were verified by its successful workflow.
+
+Relevant docs:
+- docs/vector/owner-actions/release-approval.md
+- docs/vector/owner-actions/release-199111.md
+- docs/vector/owner-actions/release-199112.md
+
+7. Multi-agent parity — self-evolving targets113
+
+Contract:
+  docs/vector/build/multiagent-parity-spec.md
+Deviations:
+  docs/vector/build/multiagent-parity-deviations.md
+
+Published canonical head:
+  59242ac0cf1e95398c8888a8b2d86c0202b15661
+- WP27 feature commit757f8d0a.
+- Follow-up retention fix59242ac0.
+- Canonical /workspace/vector-evolve is clean at592.
+- Full mandatory23-package pre-push passed (20 cached,1m4.776s).
+- No main merge or113 release is authorized.
+
+Inherited:
+- WP1–22 were already done.
+- Phase4 review base is d4a90679.
+- Phase5 review MUST cover WP22 too, so use d4a90679, not merely the last WP27 commit.
+- WP23–26 were finished, reviewed and pushed here.
+- WP23 claims and admission; WP24 shell/git writes; WP25 isolation copy/trust/raw worktree helpers; WP26 home/work/lineage and lightweight placement.
+- Prior WP26 task-tool file had two timing failures in one run; do not rewrite that history. A later full134-case task-tool run during WP27 passed.
+
+7.1 What published WP27 does
+
+It supplies the internal isolation registry and workspace lifecycle, still requiring WP28 public wiring:
+- Private authoritative registry, expected reserved path/branch, Git directory/common-directory/backpointer validation.
+- Temporary indexes seed staged/unstaged/untracked files without changing the parent's actual index.
+- Safe copy mode with caps, trust and links.
+- Lightweight child instances with LSP/MCP defaults off and snapshots disabled.
+- Per-child locks and stopping/joining descendants before snapshot/dispose/remove/dropWork.
+- Off-tree Git/copy merge planning, checkpoints, rollback and reconciliation.
+- Partial merges, stacked dependencies, resume and recovery.
+- Private authority paths protected from detected recursive writes.
+- A real core BackgroundJob completion/drain barrier, including cancellation finalizers, duplicate cancellation and same-ID reuse. Durable store writes remain nonblocking during ordinary work and are joined on registry disposal.
+
+Important WP27 fixes discovered before publication:
+- Failed settlement must not discard bytes with an empty placeholder snapshot.
+- Copy file growing above capture cap must not become a “deletion” of the parent.
+- Git result containing only a new oversized file must not be removed as unchanged.
+- Unsupported output is retained with a recoverable failed record through settlement/merge/discard/sweep.
+- Unchanged large baseline files and intentionally excluded inputs still behave intentionally.
+- Git assume-unchanged/skip-worktree flags can hide even small changed bytes from diff/status/git add; staging and cleanup inspection must account for them using private/disposable indexes.
+- Preserve absent sparse entries rather than manufacture deletions when clearing flags.
+- Raw large-file baseline fingerprints are tied to logical blob identity so unchanged CRLF/smudged baselines are not falsely rejected.
+- Oversized physical copy baseline deletion/reduction must not vanish from capped hashes.
+- New/changed/deleted symlinks are retained if outside supported logical results.
+- Filename maps and rehydration use null prototypes; __proto__, constructor and toString must not disappear or create fake baseline entries.
+
+WP27 test accounting:
+-386 distinct covered cases across15 files; two platform-specific skips on Linux.
+- Full69-case isolation file passed before the final narrow null-map correction.
+- Final12 affected cases passed after that correction, including3 additional filename cases.
+- Thus72 isolation cases were covered, but there was NOT a subsequent full72-case green file run.
+- Full core copy29 passed.
+- Final engine/core package types passed.
+- Earlier other coverage included core jobs22, bases6, claims9, shell ownership34, manager44, run-state5, task-tool134, LSP4/MCP4/snapshot3, raw worktrees5, lifecycle14 and removal1.
+- Original two cap data-loss controls failed on the old production source.
+- A separate native Git control proved hidden index flags hide actual changed bytes.
+- Preserve those evidence boundaries; do not inflate count totals by summing overlapping reruns.
+
+7.2 Frozen WP28 snapshot
+
+Base592; branch multiagent-next;59-file patch in the checkpoint.
+This is NOT ready to publish.
+
+Source ownership at pause:
+- Lead /root/multiagent:
+  core BackgroundJob completion callback/test;
+  engine task/isolation, manager, notify, recovery;
+  tool task/task-manage/read/tool.ts;
+  session prompt/revert/tools;
+  schema/task changes;
+  remaining CLI/tool integration.
+- /root/multiagent/trust_inheritance:
+  core audience.sql.ts/audience.ts/tests;
+  migration20261029032955_session_audience.ts, schema.json and generated core schema/migration files;
+  core Event/FreeModelGuests/Session/public-session-share/archive;
+  legacy session lineage plus tests;
+  new engine/tool/private-access.ts helper/tests.
+- /root/multiagent/git_classifier:
+  engine/server HTTP/auth/fs/event/sync/session/location/routing;
+  control-plane/workspace transfer;
+  new server request-owner/session-audience/fs-access helpers;
+  HTTP/auth/transport tests;
+  engine share/session actor plumbing;
+  two spec policy clarification lines.
+- /root/approved_fixes independently reviewed HTTP/privacy and did not author those fixes.
+
+WP28 source drafted:
+- Per-entry isolation params; Never at batch top-level.
+- Preflight before permission ask.
+- Durable owner-family fence before child Created/private briefing.
+- Reserve/start/resume inside the admitted slot.
+- Actual work routing while child Session rows retain home placement.
+- Normal full-job save vs interrupted mark-settling/fork behavior.
+- Counts line generated by Vector outside model report text.
+- Manager direct-child checks and counts-only safe projection constructor.
+- Prompt, revert and recovery admission hooks.
+- Lightweight SessionCleanup tombstone from trusted Session.Info rather than doing Git during Session.remove or overwriting a concurrent settlement record.
+- Durable audience/lineage/guest-input primitives, archive markers, HTTP/SSE/proxy/directory guards.
+- Current-client private transfer refusal.
+Most engine integration is still unvalidated.
+
+WP28 current test ledger:
+- Background jobs25 passed, including3 new completion barriers.
+- Audience14 passed at its described freeze.
+- Latest full sharing24 run:22 passed,2 NEW private export/import cases failed because the fixture encoded parentID:undefined instead of omitting that wire key.
+- Fixture fixed; those exact2 v1/v2 round-trip cases then passed in1.475s.
+- Do not claim a subsequent full24 green run.
+- Earlier audience12/share22/free-model-guests3/core types passed.
+- Current guest-input/public-import extension raised sharing to27 cases; those latest additions are UNRUN.
+- Current core types have NOT been rerun after that extension.
+- New private-access helper6 cases: UNRUN.
+- Engine lineage4: UNRUN.
+- HTTP privacy9 plus authorization/transport additions: UNRUN.
+- No full WP28 engine/server typecheck.
+- No SDK/client generation or exerciser validation for WP28.
+- All processes exited at pause.
+
+WP28 remaining implementation:
+- Public changes/merge/discard routes.
+- Capability and owner-route regex updates.
+- SDK/client/exerciser generation and corresponding tests.
+- Actual Shell scan/Git metadata/read rechecks and raw-output gates.
+- MCP pre-truncation/output guard integration.
+- Finish ReadTool/SessionTools integration; current Context assertReadable/assertGitReadable/assertOutput and some wrappers are only partially wired.
+- CLI export must preserve local privacy and guest-input markers and refuse PRIVATE public-format conversion.
+- Guest-only ordinary public sharing need not be banned; public imports are treated as untrusted/guest.
+- Actual orphan/retired shared-descendant execution tests.
+- Slow-save/cancel/late-extension/same-ID completion races.
+- Recheck source authority/privacy after all wiring, then phase reviews.
+
+7.3 WP28 invariants that must survive continuation
+
+Privacy is not just deleting isolation.directory:
+- Arbitrary tool text, attachments, errors, reports, history, diffs and replay can contain paths.
+- Persist a monotonic owner-only conversation-family fence BEFORE private output.
+- Include ancestors receiving child reports, descendants, future children/forks and durable IDs left after intermediate deletion.
+- TaskPlace's process maps and live FreeModelGuests ancestry are not sufficient authority.
+- A controlling guest is still a guest.
+- Owner credentials carrying the forwarded-guest marker are still restricted.
+- Do not trust ambient RequestPrincipal's default OWNER, model Tool.extra hints, or untrusted metadata as ownership proof.
+- Restrictive imported markers can reduce disclosure; they must not grant filesystem authority.
+- Persist guest-input participation before admission/wake/Created. An owner-runner may process queued guest input later; the persistent restriction must survive that loss of request context.
+- Both legacy and V2 creation now have actor-aware draft boundaries. Verify actual production callers, including fork/import.
+- Core Event preflight validates outer/inner session identity before any projector/listener and before the first replayAll batch event.
+- Event metadata alone is not durable: event SQL stores id/aggregate/seq/type/data; old sync envelopes also drop metadata.
+- Ordinary isolation:undefined metadata must NOT fence unrelated families.
+- Public-session-share auto flush/restart/finalizer retries are a disclosure sink.
+- The shared withPublic guard now captures an immutable archive/preview atomically, then releases the DB write transaction before network create/update. Do not reintroduce a global SQLite write lock across HTTP.
+- Preserve owner local export/preview. The restriction is guest/public disclosure, not banning the owner from their own raw data.
+- A parentless archive import/fork must retain known/private and guest-input provenance.
+- Public-format imported transcripts have no trusted owner-participation provenance and are conservatively untrusted/guest.
+- Unknown/private paths must not become authority from a serialized marker.
+
+HTTP/event surfaces:
+- Legacy SessionAccess and matched-session routing before claim/workspace exceptions.
+- Session/messages/parts/diff/children/status, lists and active sessions.
+- Task inspect/wait/list/results, permissions/questions.
+- Legacy directory/global SSE and V2 durable/global SSE.
+- Remote proxy and direct location/filesystem paths.
+- Recheck after raw JSON reads before outward serialization.
+- Recheck while dequeuing/emitting streams, not only at connection/enqueue time.
+- Do not let a secondary nested session ID grant scope; require a trusted primary reference.
+- Recursively check nested known private session/directory references consistently.
+- Owner full payloads remain intact.
+
+Safe counts exception:
+- The spec grants view access to changes while patch/merge/discard are owner-only.
+- An explicit server-owned safe projection was chosen.
+- Ordinary view authorization is still required.
+- Only stable validated identity/status/counts, generic constant title, empty relative-file list and no arbitrary report/error/agent/title text.
+- No patch, branch, directory or raw paths.
+- Construct by whitelist, not spreading raw records.
+- Never allow a client header/query/DTO flag to bypass final gates.
+- No Git/diff loading merely to serve safe counts.
+- Test scoped guest positive, unscoped negative, malicious stored title/report and owner full response.
+
+Tool boundary:
+- A different nonprivate guest conversation in the same repo can run git worktree list and disclose private roots unless guarded.
+- Durable private roots must include task registry/artifacts and per-task linked Git metadata, not only the checkout path.
+- Do not blanket mark the whole ordinary repo .git private.
+- Ancestor listing and symlink aliases need checks.
+- Suppress private raw tool output BEFORE processor/history/model consumption, not only HTTP delivery.
+- Recognized Git metadata/ref introspection needs conservative guest guards based on durable state, including after restart.
+- String redaction is defense only; it cannot make arbitrary attachments or encoded interpreter exfiltration safe.
+- This is not an OS filesystem sandbox. Do not claim otherwise.
+
+Transfer policy chosen for bounded WP28:
+- No private cross-engine transfer until restrictive provenance can be preserved.
+- Current Workspace.connectSSE and syncHistory send restricting x-vector-session-replication:1.
+- The marker reduces disclosure even with owner credentials; it grants no authority.
+- Source history refuses private data with a post-read check; live/global delivery rechecks at dequeue.
+- sessionWarp refuses a private source BEFORE target/network work.
+- Preserve the marker through proxy/header allowlists.
+- Preserve ordinary unmarked owner UI access.
+- Legacy/modified raw owner clients cannot be distinguished from legitimate owner UI; document the current-client boundary.
+- Existing pre-fence public replicas cannot be retroactively revoked. Because fencing precedes first private bytes, those old copies should contain no new private paths/patches.
+- Do not promise retroactive erasure.
+- Guest-input EVER provenance must also be carried or refused; otherwise an owner-default receiver could isolate a formerly guest-authored transcript.
+- Mixed public/private history refusal must not cause silent retry loops, stuck cursors or a falsely connected status.
+- Test an existing listener opened before fencing, zero-network private warp, unrestricted positive flow, and ancestor reports without their own isolation metadata.
+
+Completion/lifetime:
+- Core completion hook runs once after all joined run finalizers, before ordinary done/waiters release and outside controlLock.
+- Finishing state must prevent a late extension or same-ID run from entering a checkout being retired.
+- Normal completion waits for saving.
+- Interrupted completion durably marks settling then forks save so Stop does not wait on Git.
+- Failed save retains recoverable bytes.
+- A direct prompt to a retired shared descendant restores a validated ancestor placement or refuses BEFORE provider calls/spend/writes; never fall back to home.
+- Deletion enqueueing uses trusted Session.Info without requiring ambient InstanceRef and without Git/loading inside Session.remove.
+
+7.4 After WP28
+
+- Run focused package files individually, required core/engine/server/schema checks and generated checks.
+- Conduct both Phase5 reviews: spec/tests and safety/cost/portability, from d4a90679 including WP22.
+- Fix actual findings and record deviations.
+- At a stable boundary integrate current approved main into the feature branch. Main dfc98974 is NOT an ancestor of current self-evolving; merge base was6eaf445a.
+- Do not manually resolve generated output; regenerate.
+- Then run full GitHub CI on the exact stable integration.
+- Continue Phase6 WP29–32, Phase7 WP33, Phase8 WP34–39, Phase9 WP40a/WP40b.
+- Final review/full CI/merge plan goes to the owner.
+- No main merge or desktop113 release consent was given.
+
+8. Codium — A00–A16 published; A17 draft
+
+Contract:
+  docs/vector/build/codium-build-spec.md
+Owner decisions:
+  docs/vector/build/codium-tiers-v3-changes.md, especially6–8, win over older contract text.
+Related:
+  codium-label-plan.md and codium-cloud-agents contracts.
+
+Canonical published head:
+  14bc7d4283b176dd962dbdf1d0c44b3101aa3607
+Branches codium and codium-integration point there; codium-next has the same HEAD plus uncommitted A17 edits.
+The CI-only14bc repair is already safely fast-forwarded into the A17 dirty tree.
+
+Owner product rules:
+- Usage is a percentage and the label Codium, not tokens/prices.
+- Plus10, Pro50, Max100, Ultra200 are distinct tiers.
+- No top-ups or annual plans.
+- Plus gets DeepSeek, Terra optional/manual, Haiku and Luna.
+- Pro adds Sol, Kimi and Argon.
+- Max gets Sonnet and Astra; Ultra gets Opus/Astra Long and future Labs listing only.
+- Velocity is Max/Ultra Coming, no date.
+- Max/up cloud services cannot lose money; no new Brain/RAG perk.
+- @vector per paid plan:5h/15h/40h with2 simultaneous/120h with6.
+- ZDR true and data_collection deny are mandatory.
+- No real provider calls or deployment during this implementation.
+
+8.1 Completed A00–A14 / P2
+
+A00–A08 plus P1 were inherited at591cd1f0.
+A09–A14 were finished here:
+- Plan-change consent/carry and old-pool accounting.
+- Risk and allowance ramps.
+- Runtime switches/funding checks.
+- Google owner controls/refund intents.
+- Signed Vercel spend callbacks and escalation.
+- Stripe setup/configuration and cron gating.
+
+Important source fixes already included:
+- Reject future funding checkedAt in cached and busy-fallback paths.
+- Payment-method portal update works without a paid subscription and without cancelling schedules.
+- Owner dashboard SalesReady uses canonical readiness, including missing OpenRouter key.
+- Historical Stripe identity/name exceptions are exactly four file+line matches with negative guards, not a broad bypass.
+- Flat Vercel callback HMAC and monotonic escalation, no account API mutation.
+- Owner OAuth requires recent original Google authentication, not a refreshed JWT iat.
+- Refund previews have immutable targets and fences, held intents, atomic outbox/freeze-before-money and correct retry/provenance handling.
+- Stripe setup rejects runtime keys, has four monthly prices, no top-up loop, exact20 webhook events and no-change portal handling.
+- Five implemented billing crons stay; seven future schedules are gated until routes exist.
+
+P2 review:
+- Both review angles closed.
+-116 targeted repair cases passed, including actual HTTP and local Valkey.
+- Canonical merge of approved main was9ccc9372 (sole context-fixture tool conflict fixed using actual browser description).
+- Both review authorship limitations are documented; one contract reviewer authored some prior funding/frontend/setup pieces, the financial reviewer was independent.
+
+P2 CI:
+- D04 scoped run40801970723 succeeded.
+- D04 full general40802391033 failed only3 obsolete top-up browser assertions on Linux/Windows.
+- Repair4539d83b touched only account-settings fixture/spec and its maintained E2E tsconfig include.
+- Fixture offers four monthly plans, purchased.bought:false, rejects top-up requests, models legacy portal-change failure.
+- Tests retain current plan, free monthly checkout, exhausted subscriber, cancel/error/busy/refresh/deletion coverage.
+- That spec passed E2E types; both reviewers closed.
+- Exact453 scoped40810014805 SUCCESS.
+- Exact453 full general40810044741 SUCCESS, all15 jobs including Linux+Windows browser suites.
+- Therefore P2 is source-validated; do not restart its completed work.
+
+Some codium-p2-review.md wording still says checks “follow this record.” Update that stale future tense when finalizing the next documentation checkpoint; the actual CI facts above are verified.
+
+8.2 A15 catalog — staged, not provider acceptance
+
+A15 source73cd78a4; merged P2 browser repair at56bb1b69.
+-138 unique cases across6 files passed.
+- One preexisting release-mirror skip remains; do not call it provider acceptance.
+- API types passed.
+- Web Astro0errors/0warnings/105hints.
+- Full pre-push23 passed.
+- The active five-model definitions, public/runtime date and112 mirror/pins stayed unchanged.
+-18 owner-contract candidates are staged only behind explicit internal tiered access/audit.
+- No environment flag can qualify unknown routes for spending.
+- Runtime gateway must project the real five's new access floors: Kimi/Argon require Pro, not Plus merely because the larger catalog is staged.
+
+Only raw committed provider capture:
+  packages/web/test/fixtures/codium-endpoints-2026-10-23.json
+- Commitcf06809ddd70d2a47e805e34245040d03359b1b9.
+-14414bytes.
+- SHA2563c37e89169bc4ccb0a4792f5bbb65ce97340731fcf1dcf6018ee95d7805889e0.
+- Public models and endpoints/zdr capture.
+- Kimi:moonshotai/mxfp4.
+- DeepSeek:nebius/fp8.
+- Argon:google-vertex/global.
+- Haiku:amazon-bedrock.
+- Luna:azure.
+
+The Oct27 file is a TARGET MANIFEST referencing those unchanged Oct23 bytes. It explicitly preserves the old capturedAt/digest and missing evidence. It is NOT a fabricated Oct27 endpoint snapshot.
+
+Missing:
+- Real newer model/route/ZDR/effort evidence for Terra, Sol, Sonnet, Astra, Opus.
+- Exact fast tags moonshotai/highspeed and google-vertex/global/priority.
+- Exact selected-endpoint effort support for xhigh/max.
+- Current catalog fork06e1 has only generic older model metadata for several models and no endpoint/ZDR proof; Terra is absent.
+- A generic reasoning parameter or model-level effort list is not endpoint-specific advanced-effort evidence.
+
+Audit:
+- Matches upstream or id.
+- Exact providerOnly tag intersection with captured ZDR endpoints.
+- Checks largest per-tier contexts and output/quantization/options/cache prices.
+- Explicit prompt cap, not merely an estimated configured context window, determines price-tier reachability.
+- Default staged audit remains blocked. Its tests intentionally prove that failure.
+- No live metadata or inference calls were made to remove the gap.
+
+Read:
+  docs/vector/build/codium-a15-catalog-notes.md
+
+8.3 A16 callers/tokens — complete source, client login still needs A19
+
+A16 commit:
+  071dfe37483efd0563567edbd26a3adb96e5e946
+-219 unique passing cases across14 files,0skips/0failures.
+- API types passed.
+- Final Astro189files,0errors/0warnings/113hints.
+- Actual Valkey tested malformed-purpose/nonconsuming PKCE, concurrent one-use exchange, account+jti revocation and sibling survival.
+- Actual local Postgres shares10/team16 cases passed.
+- All local test services stopped.
+- Independent source/test/final notes reviews closed.
+- Full required push check passed.
+
+Behavior:
+- Signed desktop/CLI/run caller domains.
+- Strict numeric client gate; local only outside both production signals.
+- Only marked tokens spend at chat/models; ordinary status/free auth remains compatible.
+- Exact run prefix registry; production registrations remain absent until downstream service/admission enforcement.
+- Server-saved CLI PKCE purpose, not request-supplied mark.
+- Single-use code consumption preserved.
+- Random jti and individual revocation.
+- Strict token grammar/suffix/domain checks.
+- New jti grants require authoritative checks at every access-granting use: free chat, profile/verify, public-share/team writes.
+- Telemetry parsing grants no access and remains separate.
+- Desktop portal/deletion domains are not broadened by CLI/run grants.
+- No team/sharing feature was built; existing auth was kept consistent.
+
+MANDATORY A19 extra files beyond its original list:
+- packages/engine/src/cli/vector-account.ts
+- packages/engine/src/cli/cmd/vector-login.ts
+- packages/web/src/lib/desktop-sign-in.ts
+- packages/web/src/components/marketing/account/CliTokenPage.tsx
+- Required callback/return-path plumbing.
+
+Why:
+- Current website decoder still rejects purpose=cli.
+- Current engine vector login still uses copy/paste flow.
+- A16 proved backend HTTP code mint/exchange/replay only.
+- A19 MUST wire the full website→approval→callback→exchange→authenticated CLI flow, preserve server-bound purpose, store marked grant without displaying it, retain legacy copied tokens as unmarked and add an offline full-flow test with replay/tampering refusals.
+- Do not claim real vector login acceptance from direct backend tests.
+- Existing API test modern-client adapters are explicit/named fixtures. They must not hide old SDK behavior.
+- A19 cannot be marked done until this integration is finished.
+
+Read:
+  docs/vector/build/codium-a16-callers-notes.md
+
+8.4 CI-only database repair14bc
+
+A16 scoped run40813507565 at071 failed:
+-59/60 selected test files passed.
+- Only packages/web/test/public-shares-api.test.ts failed BEFORE cases because generic Postgres URL pointed at vector_codium_test.
+- The suite deliberately accepts only vector_shares_test.
+- Team SQL was previously skipped because its explicit URL was absent.
+- No auth assertion failed in that run.
+
+Fixed one workflow file:
+  .github/workflows/vector-codium.yml
+- Postgres service/health/default URL use vector_shares_test.
+- Prepare isolated vector_teams_test in the service container.
+- Set explicit VECTOR_TEST_TEAMS_POSTGRES_URL.
+- Preserve loopback/database safety guards and pinned service digests.
+-22 existing workflow-compliance cases/274assertions passed.
+- Full pre-push23 cached pass in1.256s.
+- Pushed codium and codium-integration at14bc.
+- Fresh scoped run40818236335 SUCCESS.
+- Do not re-debug or rerun the obsolete071 database mismatch.
+- The original P2 full general run remains valid for its exact453 source.
+
+8.5 Frozen A17 —18-file recovery patch, NOT accepted
+
+Base14bc. Source is only uncommitted in codium-next and the saved patch.
+
+Eight modified files:
+- api/_lib/codium-pool.ts
+- api/_lib/model-plan-account.ts
+- api/_lib/model-plan-chat.ts
+- api/_lib/model-plan-config.ts
+- api/_lib/model-plan-status.ts
+- packages/web/test/model-plan-entitlements.test.ts
+- packages/web/test/model-plans-api.test.ts
+- packages/web/test/model-plans.test.ts
+
+Ten new files:
+- api/_lib/codium-reservations.ts
+- api/_lib/codium-spend-ledger.ts
+- api/_lib/model-plan-admit.ts
+- api/_lib/model-plan-catalog-policy.ts
+- api/_lib/model-plan-gateway-hooks.ts
+- docs/vector/build/codium-a17-context-decision.md
+- packages/web/test/model-plan-admit.test.ts
+- packages/web/test/model-plan-catalog-policy.test.ts
+- packages/web/test/model-plan-gateway-hooks.test.ts
+- packages/web/test/model-plan-reservations.test.ts
+
+Ownership:
+- /root/codium owns gateway/catalog/reservations/account/pool/status integration and HTTP cases.
+- /root/setup_prompt authored the new spend-ledger/admission/Valkey test slice.
+- /root/billing_review independently reviewed financial/auth boundaries.
+- Use canonical agent targets when reusing those workers. send_message does NOT wake a completed worker; use followup_task and require an acknowledgment.
+- A delayed wake meant the ledger initially stayed a read-only design; that is now resolved. Actual coherent source and57 runtime cases exist in the checkpoint.
+
+A17 component tests:
+-77 pure cases: policy2, reservation9, entitlements66.
+-57 ADMIT cases:26 adapter and31 actual Valkey.
+-12 gateway-hooks cases.
+-146 unique passing cases total.
+- Initial ADMIT run had only a ZSCORE string/number expectation mismatch; normalize with Number, rerun57 passed.
+- All processes and the ephemeral Valkey exited.
+- No full API/Astro/gateway/common-pool integration acceptance yet.
+- These passes were at their described frozen components; later integration edits still need affected reruns.
+- No A17 commit/push or closure.
+
+8.6 A17 financial policy: resolved choice, rigorous evidence gate
+
+The prior fixed hold claimed to cover a whole request, but local input checks estimate:
+- decoded JSON bytes divided by4 for context;
+- ASCII divided by2 plus framing for prompt price-tier cap.
+The source comment explicitly admits dense hashes can exceed that estimate.
+
+Captured Kimi native context is1,048,576, while active configured window is128,000. A local configured window is not enforced by the provider's much larger native window. Haiku/Luna higher price tiers also depend on actual prompt tokens, not that estimate.
+
+The owner chose LARGER FIXED RESERVATIONS, PRESERVING CURRENT WINDOWS.
+
+Current source approach:
+- Use trusted captured native input bound plus configured max output.
+- Use maximum ALL captured base/override/cache-write/reasoning rates.
+- Round UP to integer micro-dollars.
+- Count full native context as input without subtracting the output, deliberately conservative.
+- Preserve existing advertised compaction windows.
+- Max/Ultra reserve TWO attempts when retry may dispatch.
+- Do not assume first429/503 was nonbilling.
+- Unknown first-attempt billing retains its conservative attempt cost; cancellation before retry must not release it as if nothing dispatched.
+- Native output bound must include hidden reasoning, or qualification fails.
+- Actual route pin/native-window/rate/output semantics still need external acceptance evidence.
+- Exact captured endpoint pins plus allow_fallbacks:false and existing ZDR/data-denial/parameter restrictions bind routing.
+- Broad router price/quantization filters alone do not bind native window facts.
+- ROUTE_ACCEPTANCES is intentionally EMPTY. Unknown/default real routes must return unavailable BEFORE credential/hold/fetch until qualified evidence exists.
+- No environment bypass or fabricated acceptance.
+- All18 candidates remain staged where facts are absent.
+- Real modelPlanRequestCredits throws/unavailable for missing native facts.
+- Explicit nominalModelPlanRequestCredits is read-only/status/synthetic, not a spending authority.
+- Gateway tests inject trusted synthetic reservation/qualification explicitly.
+- Preserve text-only/local-function-tool restrictions; plugins/preset/modalities/fallback model lists are rejected so extra billed add-ons cannot bypass the bound.
+- No live inference/metadata probe was authorized by the owner's policy answer.
+
+Illustrative one-attempt captured maxima (verify current code and micro rounding):
+- DeepSeek .3342336 USD before micro ceiling.
+- Kimi/Argon2.179072.
+- Haiku1.04.
+- Luna .268644.
+Max/Ultra two-attempt amounts are larger. These are reservations, not user-facing token prices or measured invoices. They are not live route acceptance.
+
+Read the saved decision note before altering this policy.
+
+8.7 A17 admission/ledger invariants and remaining blockers
+
+Intended atomic ADMIT order:
+- enabled/client/caller/catalog;
+- snapshot402 before403, livemode;
+- per-minute tier guard;
+- model access;
+- effective context;
+- service hooks;
+- credential;
+- one atomic admission EVAL with one deadline;
+- upstream, possible bounded priority retry;
+- always release concurrency, settle, afterSettle.
+
+Shared ledger:
+- Fresh private-key/pool-epoch genesis, not a “recent enough” provider usage estimate.
+- A provider usage timestamp or2-second age cutoff does NOT prove all earlier charges are included.
+- A30-second settled bridge can expire while a recent usage query still omits the charge.
+- Durable committed spend/reservation floor avoids reopening money from that lag.
+- It must feed common HOLD/READ, carry/status/ready/converge/true-up, not only model ADMIT.
+- Funding must retain actual provider-usage liability; do not reduce owed merely because local conservative spend is larger.
+- Unknown postdispatch outcomes retain worst-case allowance.
+- Abandoned open reservations do not become free money when concurrency/660s sets expire.
+- DONE ticket compaction must retain a cumulative floor and remain bounded.
+- Current epochs without trusted genesis fail closed.
+- Genesis nonce belongs to one newly created, never exposed key; no silent reinitialization.
+- Preserve integer micro-dollar safety, cjson array shape, overflow/type/corruption checks, TTL monotonicity and idempotent settlement.
+- Do not claim Redis script errors roll back prior writes; validate before harmful mutations.
+
+Run upgrade safety:
+- A run's settled total is global while open reservations may belong to an old pool.
+- New-pool admission cannot ignore old open cost.
+- Chosen bounded solution binds run→pool/epoch atomically and refuses the old signed run after an upgrade; a fresh token/run is required.
+- Retention must outlast every accepted run/producer lifetime; do not allow reuse to launder budgets.
+- Immutable old-pool settlement still charges the original source.
+- New error codes must be final/nonretrying and included in A19/service consumers.
+- Test overlap, same-pool retries, distinct new run/new pool, and late old settlement.
+
+UNRESOLVED at final review:
+1. prepareUpgrade disables/reads source usage+ledger before saving a transition barrier. An external delayed HOLD can land between the source ledger read and later upgrade intent save while account JSON still matches. Persist the transition/provisioning barrier BEFORE observing source balances, or enforce an equivalent atomic exclusion.
+2. Common nonmodel HOLD needs exact current raw-account/private-key/period/intent fencing. Do not fix only model ADMIT.
+3. Complete conservative floor integration in readyKey, converge, status, carry and carry true-up. Preserve old-pool identity and avoid double debit/usage laundering.
+4. holdPool admission TTL must start after credential waits, not from an old pre-await timestamp.
+5. Actual delayed-HOLD/upgrade, stale usage/bridge expiry, carry/source-floor and gateway HTTP regressions are not final-review verified.
+6. Run full actual Valkey pool/billing/owner regression files after integration, API types and Astro, then final source review.
+7. Generic HOLD currently supplies monthly+run-epoch protection, while future nonmodel producers must enforce shared day/Brain/run caps atomically. The lead records this as required A51/future producer work; do not let it disappear when those services become active.
+8. No A17 completeness claim until those integration gates pass.
+
+Important files for next financial review:
+- api/_lib/model-plan-account.ts
+- api/_lib/codium-pool.ts
+- api/_lib/codium-spend-ledger.ts
+- api/_lib/model-plan-admit.ts
+- packages/web/test/model-plan-admit.test.ts
+- packages/web/test/model-plans-api.test.ts
+- test/codium-pool.test.ts
+- Existing A09/A10/A11/A12 financial regressions and the new carry/delayed-HOLD tests.
+
+Do not weaken native qualification, fixed-reserve policy, raw-account fences or test guards merely to get existing fixtures green.
+
+8.8 Remaining Codium phases
+
+Continue one WP at a time:
+- P3 A17–A20: admission/chat, models/status/estimate, core/engine clients including the required real login flow, app/desktop plan UI.
+- A20 owns the current desktop legacy Change-plan/top-up copy and controls, NOT A27. The P2 browser fixture deliberately models current backend rejection until A20 replaces that flow.
+- P4 A21–A26: labels/accounting/usage surfaces.
+- After A21, the contract calls for merging Codium into self-evolving for shared billing schema; coordinate both branches and regenerate clients. This is a feature-branch integration, not main permission.
+- P5 A27–A35: site/perks.
+- P6 A37–A43, thenA36: services/remote.
+- P7 A44–A50: vault/ops.
+- P8 A51–A58: hosted/deploy source.
+- A59: integration with the separate @vector owner, after their prerequisites.
+- A60: owner go-live/legal/configuration/provider acceptance.
+- Track B B01–B11 on codium-113 only after multi-agent finishes.
+
+Never build Vector Labs. Do not edit the separately owned cloud-agent/GitHub files. No live service calls/deployment are authorized by writing these phases.
+
+The original handoff's “ordinary CI branch approval is blocked” was stale. Ordinary Codium CI works. Protected codium-test environment returned404 and still needs owner setup/test-only secrets/explicit real-provider authorization. Do not confuse ordinary offline CI with that acceptance lane.
+
+9. Corrected benchmark scope
+
+I initially interpreted an app-only AGENTS rule as repository-wide. It is actually packages/app/AGENTS.md:4: before changing app session/timeline code, record and compare a production benchmark.
+
+Current WP28 source is core/engine/server, not production app session/timeline code. A mock-engine navigation benchmark cannot measure the backend audience changes. The unnecessary preparation was parked.
+
+- Local branch parity-bench retains commit581f131f90064c84cc3f7042781c98386d541d4d.
+- Five harness-only files, no production changes.
+- No Bun, push, dispatch or CI cost.
+- Canonical /workspace/vector-evolve was restored clean to self-evolving592.
+- It is not part of the recovery patches or accepted work.
+- If later app session/timeline changes need the rule, evaluate a relevant baseline then.
+- Do not run that draft merely because it exists.
+- Functional/privacy/backend race checks remain required.
+
+10. Approved copy/tokenomics/title/SSE work — PR19
+
+Branch approved-fixes:
+  279d4292a649aa28dbd69aeadf4c0217d04d02ce
+Draft PR:
+  https://github.com/scr1pter/claudeondfsfdaf/pull/19
+
+Implemented:
+- Standard to-do guidance only for substantial milestones or a requested plan.
+- Planned550B+ Velocity wording; removed unmeasured cost claim.
+- New work session titles from first useful typed line, max50 Unicode code points.
+- Attachments may supply basename/user-authored comment, not hidden text, previews, full paths or file content.
+- Greetings retain engine retitle behavior.
+- Existing engine suppresses separate title request for client-named sessions.
+- SSE cleanup observes a rejected reader.cancel after deadline while retaining the primary typed ProviderResponseStreamError.
+- Wrapper/error moved to import-free provider/response-stall.ts; error.ts reexports same class identity.
+- No timeout default/retry policy change.
+
+Validation:
+- Focused core/web/composer/title/engine/provider checks.
+- Fake request-count control: named work session1 main request vs untitled main+title.
+- Native Node old cleanup RED/new cleanup GREEN.
+- Actual fake-cloud SDK deadline case9assertions and existing local/cloud deadline13.
+- App/engine types and required23-package push check.
+- Full required PR CI SUCCESS, including Linux/Windows units, all engine shards, both browsers, Node bundle, website and Vector Local.
+- Optional footprint/production-benchmark jobs correctly skip in ordinary PR CI.
+- PR is draft and NOT merged. Owner consent for112 review is not consent to merge PR19.
+
+Evidence:
+- Production navigation before05ff/after5fd jobs passed9/9 each, zero blank/unknown, mixed timings.
+- They are navigation-only fixtures, not evidence of first-prompt latency.
+- Raw docs/benchmarks/vector-title-2026-10/.
+- Four offline footprint jobs, recorded run40795116370: Messages/Responses ×Standard/Thorough,8 valid scripted sessions,5 parent requests each, no helpers/warmup/unplayed errors.
+- Raw docs/benchmarks/vector-footprint-2026-10/.
+- Standard/Thorough reasoning settings differ; this is not isolated prompt causality.
+- Byte figures/session: Messages208159/271359; Responses200685/260475.
+- chars/4 token/cost/cache values are synthetic estimates, not live cache hits or invoices.
+- No live savings/quality/latency claim.
+
+Remaining tokenomics items:
+- API-key prefix is already stable.
+- Paid warmup,24-hour retention, WebSocket rollout, tool-list incremental sending, prompt trims/default effort and cheaper subagents need their own evidence/design.
+- Cloud configured header/chunk timeouts already work; default cloud chunk timeout remains a policy decision.
+- Node fetch has no existing preconnect hook; an unrelated raw TLS socket would not warm the SDK's actual pool or preserve proxy/Local policy.
+- Memory profiling must target the current release; old offline values are not a current baseline.
+- Live cache proposal at docs/vector/owner-actions/first-request-cache-check.md is PLANNING ONLY: no ready live driver/key or paid authorization.
+- That proposal contains unusually strict packaged-sidecar/hard-dollar prerequisites from planning; do not manufacture a permanent approval barrier from those extra assumptions. Reconcile with the actual audit and owner's authorized scope, prepare a concrete safe experiment, then ask budget only if genuinely needed.
+- No live provider calls were made.
+- Published CLI remains an owner action.
+
+11. CI timing fixture — PR18
+
+Branch ci-timers:
+  eaffaf261f921055e1892847a90a0e05bfd53d6d
+Draft PR:
+  https://github.com/scr1pter/claudeondfsfdaf/pull/18
+
+Only session-traffic.test.ts fixture changed.
+- CPU delays crossing a400ms throttle caused9 metadata reads instead of8.
+- Controlled native450ms pause reproduces old failure.
+- Fixed logical-clock fixture drains SDK parsing through native MessageChannel, preserves history/provider/spending assertions.
+- Bounded1000 pulses and closed channels; fake timers restored.
+-70 related cases passed, all23 push checks passed.
+- Full required Linux/Windows CI, browsers, Node bundle and Vector Local SUCCESS.
+- Not merged to main; separate owner approval still needed.
+
+Do not call this a production traffic/cost change.
+
+12. VectorScope plan — complete planning, no runtime/eval
+
+Branch vectorscope:
+  91f6f332
+File:
+  docs/vector/build/vectorscope-plan.md
+About356 lines,20 VS work packages.
+
+It includes:
+- Measurement first:100 real bug-fix commits,25 controls, holdout, human judges, metrics/budget/gates.
+- Separate review/fix coding agent identity/model/prompt/permissions/memory.
+- Read-only-by-default MCP with per-server consent and untrusted-PR data-egress limits.
+- Trusted base snapshots and fixes with explicit consent.
+- Workflow/CLI compatibility, verify-default divergence, context/tools, reply handling and rollout.
+- No team features.
+- No paid eval or measured quality claim.
+
+Plan only was the owner's choice. Do not silently implement all VS runtime packages in this handoff unless further authorized; the original task was to write/push the plan.
+
+The CLI1.99.99 pin bug depends on publishing an updated CLI. Source-only work cannot update npm. Do not claim it is resolved by a desktop version bump.
+
+13. Setup prompt — complete, no account changes
+
+File:
+  docs/vector/owner-actions/codex-setup-prompt.md
+Branch vector-takeover / PR15.
+
+It is a supervised prompt for:
+- Vector GitHub App registration/permissions from actual code.
+- Slack Socket Mode registration only; bot is not built.
+- OpenRouter privacy according to published terms.
+
+Rules:
+- Owner handles sign-in,2FA,passwords,payments,CAPTCHA.
+- Show each Create/Save/Install and wait for owner confirmation.
+- Secrets go directly to the actual environment/secret destination, never chat/repo.
+- Download private keys to Downloads; never open them.
+- No unlisted account changes.
+- Finish with names/status, no secret values.
+- GitHub App and desktop device-flow OAuth are distinct.
+- Codium OpenRouter account has ZDR on/logging off; free-model account has its separate documented policy, including ZDR off where specified.
+- No registration/privacy/account operation was actually performed.
+
+Read exact sources:
+SERVICE-INDEPENDENCE-STATUS.md, owner-actions/github-app.md/openrouter.md/codium-payments.md, env examples, engine GitHub app command, desktop code and the committed setup prompt.
+
+14. Deferred catalog restoration
+
+Catalog fork:
+  https://github.com/scr1pter/vector-model-catalog/pull/1
+Branch codium-112:
+  06e1cdd7b981c006291b938ad94f4dd6e40f61bd
+App branch catalog-112:
+  255cfd83
+
+Four older reviewed model records were restored through the fork and mirror test reenabled.26 tests/100assertions passed. The owner chose to defer it for112.
+
+Do not merge it or change Actions pins for112. Landing later needs coordinated fork revision, embedded mirror and source/output digests. Existing raw/prepared snapshot digests in the prior records remain useful but do not certify newer endpoint routing.
+
+15. Other workstreams and external owner gates
+
+Hands:
+- Separate hands branch/owner.
+- Original handoff:5 of73 packages at e435d807.
+- Respect their contract and files; inspect current GitHub only if integration needs it.
+
+@vector:
+- Separate owner and cloud-agent/GitHub files.
+- Codium supplies its entitlement/budget interface; A59 integrates later.
+- Do not assume the original “not yet on GitHub” status is still current.
+
+Queued:
+- Vector everywhere bots after Codium: GitHub, Slack, Linear, Jira, laptop-first/owner Actions.
+- No bot implementation or messages here.
+- r2-downloads parked.
+- GitHub publisher work stopped.
+- No team features or Labs implementation.
+
+Owner/external tasks still include:
+- GitHub App/Slack registration and privacy setup via supervised prompt.
+- Stripe products/keys/webhook and test environment.
+- Protected codium-test environment/test secrets and explicit real-service acceptance.
+- Apple signing credentials.
+- npm CLI publication.
+- Budget/model/dataset gates before paid VectorScope eval.
+- Actual Codium A60 go-live/deploy/account changes.
+Do not turn this list into unsolicited account actions.
+
+16. Evidence and current GitHub links
+
+main:
+  dfc98974329f17c6814a923ac12ebe38b6673f38
+
+Release112:
+  https://github.com/scr1pter/claudeondfsfdaf/actions/runs/40781089625
+  Builds/checks success, publish waiting, approval integration403.
+
+P2 full general:
+  https://github.com/scr1pter/claudeondfsfdaf/actions/runs/40810044741
+  SUCCESS exact4539d83b.
+
+P2 scoped:
+  https://github.com/scr1pter/claudeondfsfdaf/actions/runs/40810014805
+  SUCCESS exact4539d83b.
+
+A16 scoped old:
+  https://github.com/scr1pter/claudeondfsfdaf/actions/runs/40813507565
+  FAILED only SQL test database guard,59/60files passed.
+
+A16 scoped fixed:
+  https://github.com/scr1pter/claudeondfsfdaf/actions/runs/40818236335
+  SUCCESS exact14bc7d42.
+
+Draft PR15:
+  https://github.com/scr1pter/claudeondfsfdaf/pull/15
+  Setup/status/checkpoint docs; attached to task.
+
+Draft PR18:
+  https://github.com/scr1pter/claudeondfsfdaf/pull/18
+  Fixture-only timing repair, all required CI green; attached.
+
+Draft PR19:
+  https://github.com/scr1pter/claudeondfsfdaf/pull/19
+  Approved copy/title/SSE/offline evidence, all required CI green; attached.
+
+Catalog PR1:
+  https://github.com/scr1pter/vector-model-catalog/pull/1
+  Deferred for112; attached.
+
+No new PR is required merely to resume the recovery patches. Finish stable WPs and reviews first. Attach every new PR to the task if the environment supports that artifact tool.
+
+17. Suggested next order and completion standard
+
+1. Confirm checkpoint recovery and no newer work.
+2. Check release112's actual publication state; act only within the already approved exact run.
+3. Restore/resume WP28 and A17, preserve their ownership boundaries, and coordinate one Bun workload.
+4. For WP28, finish remaining public/tool/CLI/transfer code before claiming feature integration. Run latest core27/source checks, helper/lineage/HTTP/auth/transport tests, actual task/manager/recovery races, generated checks/types. Conduct both Phase5 reviews.
+5. For A17, close pre-observation upgrade barrier/commonHOLD/floor/TTL integration and race tests. Run actual Lua and gateway/pool/account regressions, API/Astro, then final review. Preserve owner-approved larger native-bound/two-attempt reservations and fail-closed route evidence.
+6. Stable feature-source commits and required pushes; full CI at phase gates.
+7. Continue the remaining ordered phases, not unrelated canceled work.
+8. Prepare a concrete merge/release plan for owner approval. Do not merge main or ship113 because a feature branch is green.
+9. Report what changed, the actual tests, and remaining external gates without calling an incomplete workstream done.
+10. If a business or cost decision is genuinely missing after repo inspection, ask one clear question and continue independent authorized work. Do not invent policy or repeatedly ask already answered questions.
+
+The previous agent paused intentionally. The checkpoint is designed so you can resume without redoing its completed work or trusting incomplete drafts as production-ready.
+

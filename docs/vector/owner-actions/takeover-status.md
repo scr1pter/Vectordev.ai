@@ -1,5 +1,11 @@
 # Vector handoff execution
 
+Paused at the owner's request. The detailed continuation prompt is
+[next-agent-handoff.txt](next-agent-handoff.txt). Unfinished A17/WP28 source,
+including new files, is preserved as verified recovery patches in
+[the checkpoint directory](../checkpoints/2026-10-28/manifest.json). These drafts
+are not accepted product commits. No implementation worker is running.
+
 Baseline checked 28 October 2026: `main` is `b3669a6b`; `self-evolving` starts
 at `e92862a2`; `codium` starts at `591cd1f0`. GitHub is the source of truth.
 Changes below belong to separate work branches and do not imply deployment.
@@ -26,8 +32,8 @@ checks. Push through the required pre-push typecheck; never bypass it.
 | --- | --- | --- |
 | Release 1.99.112 | `release-prep` | Exact source `dfc98974` passed full CI, native tests, catalog parity and all platform builds in [40781089625](https://github.com/scr1pter/claudeondfsfdaf/actions/runs/40781089625), using the existing catalog. The owner authorized the agent to approve this run. GitHub rejected the connected integration's review POST with HTTP 403, so the protected publish job still waits. Publication is not claimed. See `release-199112.md`. |
 | Service setup prompt | `vector-takeover` | Written in `codex-setup-prompt.md`. No external setup performed. |
-| Multi-agent parity | `self-evolving` | WP1–22 inherited; WP23–27 committed and pushed at `59242ac0`. WP27 has 386 covered passing cases across 15 files and all 23 pre-push checks passing. Retention regressions preserve uncaptured edits through cleanup, including oversized files and Git index flags. Exact run boundaries and two platform skips are recorded in the branch notes. WP28 is underway; phase/final review and later packages remain. |
-| Codium | `codium` | P2 at `4539d83b` passed complete scoped CI and full Linux/Windows CI [40810044741](https://github.com/scr1pter/claudeondfsfdaf/actions/runs/40810044741). A15/A16 are pushed on both `codium` and `codium-next` at `071dfe37`: 138 catalog tests and 219 authentication tests pass, with API/web types and required pre-push checks. New models remain inactive pending gateway enforcement and provider evidence. A17 is underway; A19 must complete the website/CLI login flow. Later work and Track B remain. |
+| Multi-agent parity | `self-evolving` | WP1–27 are pushed at `59242ac0`; WP27 has 386 covered passing cases and required push checks. WP28 is paused as a 59-file recovery snapshot with partial core validation. Tool/public-route/CLI integration, current types/generation and phase reviews remain. The detailed handoff records exact coverage and privacy limits. |
+| Codium | `codium` | A00–16 and the SQL CI repair are pushed at `14bc7d42`. P2 full Linux/Windows CI and current scoped CI pass. A17 is paused as an 18-file recovery snapshot: 146 component cases pass, but shared-floor/carry/HOLD integration, race tests and final checks remain. The owner chose larger fixed reservations while preserving context windows. Later phases and Track B remain. |
 | VectorScope | `vectorscope` | Measurement-first build plan written in `docs/vector/build/vectorscope-plan.md`. Runtime implementation and paid eval have not started. |
 | Approved tokenomics/copy | `approved-fixes` | [Draft PR19](https://github.com/scr1pter/claudeondfsfdaf/pull/19), source `279d4292`, contains milestone-only task tracking, planned 550B+ Velocity wording, initial work-session titles and stream-deadline cleanup. Focused tests, native Node regression and all 23 pre-push checks pass; full required PR CI passes, including both browser platforms and the Node engine bundle. Both navigation jobs passed 9/9 samples, with mixed timings. Four offline footprint jobs completed eight valid sessions; raw evidence and limits are preserved. Live cache work remains a proposal. |
 | CI timing fixture | `ci-timers` | [Draft PR18](https://github.com/scr1pter/claudeondfsfdaf/pull/18), source `eaffaf26`, has full Linux/Windows CI, browser, Node bundle and Vector Local checks passing. Controlled delayed execution reproduces the old extra-read failure and passes after the fixture repair. Current request-count and spending assertions remain intact. |
