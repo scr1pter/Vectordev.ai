@@ -2,6 +2,8 @@
 
 The build contract is [hands-build-spec.md](./hands-build-spec.md). Read [hands-deviations.md](./hands-deviations.md) before continuing. Work only on `hands`, implement one work package at a time in the contract's order, and push each package. Do not merge or push to `main`.
 
+The detailed continuation prompt is [hands-handoff.md](./hands-handoff.md), in the original five-section briefing format. It records the code checkpoint at `49155228`, all remaining work packages and validation boundaries. Implementation was paused for handoff; D5b has no implementation changes yet.
+
 ## Completed and current work
 
 The first 23 work packages, through D6a, are implemented and pushed. D6a in `3bb67725` has passing local model/controller/copy tests, app/browser-fixture typechecks and Linux/Windows browser tests. D5b is next.
