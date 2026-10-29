@@ -3,10 +3,26 @@ import { createStore } from "solid-js/store"
 import type { Computer } from "@vectordevai/schema/computer"
 import { Hands } from "@vectordevai/schema/hands"
 import { useLanguage } from "@/context/language"
+import { Button } from "@vectordevai/ui/button"
+import { useDialog } from "@vectordevai/ui/context/dialog"
+import { requestComposerPrompt } from "@/utils/composer-handoff"
 
-/** Read-only platform status until the onboarding and preference controls arrive in D6b. */
+/** Setup entry and platform status; the full preference controls arrive in D6b. */
 export function SettingsComputerStatus(props: { computer: Computer.ComputerPlatform }) {
   const language = useLanguage()
+  const dialog = useDialog()
+  let mounted = true
+  onCleanup(() => {
+    mounted = false
+  })
+  const setup = async () => {
+    const { showComputerOnboarding } = await import("@/features/computer/onboarding")
+    if (!mounted) return
+    return showComputerOnboarding(dialog, {
+      computer: props.computer,
+      onTry: (text) => requestComposerPrompt({ text, send: false }),
+    })
+  }
   const [store, setStore] = createStore<{
     status?: Awaited<ReturnType<Computer.ComputerPlatform["status"]>>
     phase?: Computer.ComputerPhase
@@ -54,6 +70,15 @@ export function SettingsComputerStatus(props: { computer: Computer.ComputerPlatf
         <h2 class="settings-v2-page-title">{language.t("computer.name", { name: Hands.NAME })}</h2>
       </div>
       <Show when={status()}>{(value) => <p role="status">{value()}</p>}</Show>
+      <Show when={props.computer.supported}>
+        <Button
+          variant="secondary"
+          disabled={!store.status || store.failed || store.status.reason === "policy_disabled"}
+          onClick={() => void setup()}
+        >
+          {language.t("computer.action.setUp")}
+        </Button>
+      </Show>
     </section>
   )
 }

@@ -1211,10 +1211,15 @@ export const dict = {
   "computer.onboarding.windows.captureBlocked":
     "Windows is blocking screen capture for apps. Open Privacy & security and allow it for desktop apps.",
   "computer.onboarding.tryIt": "Try it",
+  "computer.onboarding.checkFailed": "Could not check {{name}} permissions. Try again.",
+  "computer.onboarding.saveFailed": "Could not save {{name}} setup. Try again.",
+  "computer.onboarding.chooseExample": "Choose an example, then Finish to put it in your message.",
+  "computer.onboarding.exampleNeedsComposer": "Open a conversation with an empty message to try this {{name}} example.",
   "computer.onboarding.example.receipts": "@{{mention}} put my October receipts into a {{app}} table",
   "computer.onboarding.example.chart": "@{{app}} copy the Q3 chart into my {{destinationApp}} deck",
   "computer.onboarding.example.simulator":
     "@{{mention}} open the app you just built in the {{app}} and tap through sign-up",
+  "computer.onboarding.example.builtApp": "@{{mention}} open the app you just built and try signing up",
 
   "computer.mention.group": "Computer",
   "computer.mention.description": "Let Vector use apps on your computer",
@@ -1433,6 +1438,8 @@ export const dict = {
   "computer.status.granted": "Granted",
   "computer.status.denied": "Not granted",
   "computer.status.notDetermined": "Not yet requested",
+  "computer.status.unknown": "Could not check",
+  "computer.status.resetAfterUpdate": "Reset after update",
   "computer.status.restricted": "Restricted",
   "computer.status.notApplicable": "Not needed",
   "computer.status.working": "Working",
