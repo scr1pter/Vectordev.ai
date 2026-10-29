@@ -454,12 +454,18 @@ async function paid() {
 }
 async function chat(
   body: unknown = { model: model.id, messages: [{ role: "user", content: "fixture prompt" }] },
-  token = mintCliToken(user).token,
+  token = mintCliToken(user, Date.now(), "desktop").token,
   headers: Record<string, string> = {},
 ) {
   const response = await fetch(`${state.origin}/chat`, {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${token}`, ...headers },
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${token}`,
+      "x-vector-client": "1.99.113",
+      "x-vector-catalog": "2",
+      ...headers,
+    },
     body: JSON.stringify(body),
   })
   return new Response(await response.arrayBuffer(), { status: response.status, headers: response.headers })
@@ -1369,13 +1375,21 @@ describe("Codium credits used from Vector", () => {
     if (!url.startsWith(`${ModelPlanStatus.SITE}/api/model-plans/`)) throw new Error(`Unexpected destination ${url}`)
     return fetch(`${state.origin}${url.slice(ModelPlanStatus.SITE.length)}`, init)
   }
+  // A19 will add these headers to the production SDK. This explicit fixture adapter keeps these older SDK plumbing
+  // tests exercising billing while A16 separately tests that the unadapted client is refused.
+  const modernClientFixture = (url: string, init: RequestInit) => {
+    const headers = new Headers(init.headers)
+    headers.set("x-vector-client", "1.99.113")
+    headers.set("x-vector-catalog", "2")
+    return forward(url, { ...init, headers })
+  }
   const turn = (token: string) => {
-    const catalog = ModelPlans.createClient({ request: forward })
+    const catalog = ModelPlans.createClient({ request: modernClientFixture })
     return ModelPlans.createFetch({
       modelID: model.id,
       credential: async () => token,
       catalog: (value) => catalog.catalog(value, { wait: true }),
-      request: forward,
+      request: modernClientFixture,
     })("https://vectordev.ai/api/model-plans/chat/completions", {
       method: "POST",
       body: JSON.stringify({ model: model.id, messages: [{ role: "user", content: "Fix the failing test" }] }),
@@ -1384,8 +1398,8 @@ describe("Codium credits used from Vector", () => {
 
   test("a signed-in turn is debited from the monthly credits, and running out stops at Buy credits", async () => {
     await paid()
-    const token = mintCliToken(user).token
-    const catalog = await ModelPlans.createClient({ request: forward }).catalog(token, { force: true })
+    const token = mintCliToken(user, Date.now(), "desktop").token
+    const catalog = await ModelPlans.createClient({ request: modernClientFixture }).catalog(token, { force: true })
     expect(catalog).toEqual({
       enabled: true,
       models: [
@@ -1473,8 +1487,8 @@ describe("Codium credits used from Vector", () => {
   test("while sales are off Vector lists no Codium and a turn sends nothing", async () => {
     await paid()
     process.env.MODEL_PLANS_ENABLED = "false"
-    const token = mintCliToken(user).token
-    expect(await ModelPlans.createClient({ request: forward }).catalog(token, { force: true })).toEqual({
+    const token = mintCliToken(user, Date.now(), "desktop").token
+    expect(await ModelPlans.createClient({ request: modernClientFixture }).catalog(token, { force: true })).toEqual({
       enabled: false,
       models: [],
     })

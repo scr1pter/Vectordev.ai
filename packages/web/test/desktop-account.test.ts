@@ -1,10 +1,15 @@
-import { afterAll, beforeAll, expect, test } from "bun:test"
+import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test"
 import { createHash, randomBytes } from "node:crypto"
 import { createServer } from "node:http"
 import codeHandler from "../../../api/account/cli-code"
 import exchangeHandler from "../../../api/account/cli-exchange"
 import deleteHandler from "../../../api/account/delete"
-import { verifyCliToken, verifyDeletionGrant, verifyDesktopToken } from "../../../api/_lib/cli-token"
+import {
+  verifyCliToken,
+  verifyCliTokenClaims,
+  verifyDeletionGrant,
+  verifyDesktopToken,
+} from "../../../api/_lib/cli-token"
 import {
   deletionConfirmation,
   deletionNeedsSignIn,
@@ -71,6 +76,9 @@ const server = createServer((request, response) => {
   void (request.url === "/code" ? codeHandler(request, response) : exchangeHandler(request, response))
 })
 
+// Each case owns its limiter window; attempt-exhaustion assertions still share counters within their own case.
+beforeEach(() => counts.clear())
+
 beforeAll(async () => {
   Object.assign(process.env, {
     NODE_ENV: "development",
@@ -129,6 +137,24 @@ test("desktop sign-in requires a real authenticated session and rejects unsafe i
   expect((await request("/code", binding(), { origin: "https://foreign.example" })).status).toBe(403)
   expect((await request("/code", { state: "invalid", challenge: "invalid" })).status).toBe(400)
   expect((await request("/code", { padding: "a".repeat(2_100) })).status).toBe(413)
+})
+
+test("HTTP CLI code exchange uses the saved purpose and never grants desktop billing authority", async () => {
+  const input = binding()
+  const minted = await request("/code", { ...input, purpose: "cli" })
+  expect(minted.status).toBe(200)
+  const code = await minted.json()
+  const response = await request("/exchange", { ...input, code: code.code, purpose: "desktop", client: "desktop" })
+  expect(response.status).toBe(200)
+  const exchanged = await response.json()
+  expect(verifyCliTokenClaims(exchanged.token)).toMatchObject({
+    id: user.id,
+    email: user.email,
+    client: "cli",
+    jti: expect.any(String),
+  })
+  expect(() => verifyDesktopToken(exchanged.token)).toThrow("Sign in to Vector again")
+  expect((await request("/exchange", { ...input, code: code.code })).status).toBe(400)
 })
 
 test("PKCE and state bind one code to one desktop and concurrent replay has only one winner", async () => {

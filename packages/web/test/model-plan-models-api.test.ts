@@ -64,10 +64,16 @@ afterAll(() => {
 })
 
 const models = (token?: string) =>
-  fetch(`${origin.url}/api/model-plans/models`, token ? { headers: { authorization: `Bearer ${token}` } } : {})
+  fetch(`${origin.url}/api/model-plans/models`, {
+    headers: {
+      "x-vector-client": "1.99.113",
+      "x-vector-catalog": "2",
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+  })
 
 test("a signed-in account without credits sees the catalog, and only its revocation is checked", async () => {
-  const response = await models(mintCliToken(user).token)
+  const response = await models(mintCliToken(user, Date.now(), "desktop").token)
   expect(response.status).toBe(200)
   const body = await response.json()
   // Vector offers the first model as Codium's default.
@@ -104,14 +110,14 @@ test("while sales are off the catalog is empty and nothing is checked, signed in
 
 test("an incomplete server configuration answers that Codium is temporarily unavailable", async () => {
   delete process.env.OPENROUTER_MANAGEMENT_KEY
-  const response = await models(mintCliToken(user).token)
+  const response = await models(mintCliToken(user, Date.now(), "desktop").token)
   expect(response.status).toBe(503)
   expect(await response.json()).toMatchObject({ error: { code: "MODEL_PLANS_CONFIGURATION" } })
 })
 
 test("revoked, forged and missing account tokens are refused", async () => {
   state.revoked = true
-  expect((await models(mintCliToken(user).token)).status).toBe(401)
+  expect((await models(mintCliToken(user, Date.now(), "desktop").token)).status).toBe(401)
   state.revoked = false
   expect((await models(`${mintCliToken(user).token}x`)).status).toBe(401)
   expect((await models()).status).toBe(401)

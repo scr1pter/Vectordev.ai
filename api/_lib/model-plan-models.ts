@@ -1,6 +1,6 @@
-import { requireModelPlanUser } from "./model-plan-chat.js"
+import { requireModelPlanCaller, requireModelPlanClient } from "./model-plan-caller.js"
 import { configuredPlanModels, modelPlansEnabled, requireModelPlans } from "./model-plan-config.js"
-import { handleApiError, json, requireMethod, type ApiRequest, type ApiResponse } from "./http.js"
+import { ApiError, handleApiError, json, requireMethod, type ApiRequest, type ApiResponse } from "./http.js"
 
 export async function handleModelPlanModels(request: ApiRequest, response: ApiResponse, fetcher: typeof fetch = fetch) {
   try {
@@ -9,8 +9,16 @@ export async function handleModelPlanModels(request: ApiRequest, response: ApiRe
       json(response, 200, { enabled: false, models: [] })
       return
     }
+    // Older clients cannot interpret the new paid caller contract; catalog reads remain an empty list.
+    try {
+      requireModelPlanClient(request)
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.code !== "CODIUM_UPDATE_REQUIRED") throw error
+      json(response, 200, { enabled: false, models: [] })
+      return
+    }
     requireModelPlans()
-    await requireModelPlanUser(request, fetcher)
+    await requireModelPlanCaller(request, fetcher)
     // Every signed-in account sees the catalog, so choosing a Codium model without credits leads to buying them.
     // The public /config lists the same models, and each chat request checks the balance itself, so this
     // frequently polled read never calls Stripe or OpenRouter. Vector lists the models in this order and offers the

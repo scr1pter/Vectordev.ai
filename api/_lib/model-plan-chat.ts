@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 import { once } from "node:events"
 import { Option, Schema } from "effect"
 import { enforceRateLimit, requireTrustedJsonRequest } from "./abuse.js"
-import { verifyCliToken } from "./cli-token.js"
+import { requireModelPlanCaller, requireModelPlanClient } from "./model-plan-caller.js"
 import { modelPlanCredential } from "./model-plan-account.js"
 import {
   configuredPlanModels,
@@ -14,14 +14,13 @@ import {
 } from "./model-plan-config.js"
 import { stripeRecord } from "./model-plan-stripe.js"
 import { ApiError, json, readJson, requireMethod, type ApiRequest, type ApiResponse } from "./http.js"
-import { requireUnrevokedAccount } from "./revocation.js"
+import { requireUnrevokedCliToken } from "./revocation.js"
 
 const MAX_BYTES = 4_500_000
 export async function requireModelPlanUser(request: ApiRequest, fetcher: typeof fetch = fetch, now = Date.now()) {
   const token = /^Bearer (vct_[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+)$/.exec(String(request.headers.authorization ?? ""))?.[1]
-  const account = verifyCliToken(token ?? "", now)
-  await requireUnrevokedAccount(account.id, fetcher)
-  return account
+  const account = await requireUnrevokedCliToken(token ?? "", fetcher, now)
+  return { id: account.id, email: account.email }
 }
 
 export function modelPlanRequest(body: unknown, models: readonly ModelPlanModel[]) {
@@ -368,7 +367,9 @@ export async function handleModelPlanChat(request: ApiRequest, response: ApiResp
     requireMethod(request, "POST")
     requireTrustedJsonRequest(request, MAX_BYTES)
     requireModelPlans()
-    const account = await requireModelPlanUser(request, fetcher)
+    requireModelPlanClient(request)
+    const caller = await requireModelPlanCaller(request, fetcher)
+    const account = caller.account
     const body = modelPlanRequest(await readJson(request, MAX_BYTES), configuredPlanModels())
     await enforceRateLimit(request, response, {
       scope: "model-plan-minute",
