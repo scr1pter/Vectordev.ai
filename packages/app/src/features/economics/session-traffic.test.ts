@@ -187,18 +187,23 @@ function createApp(engine: ReturnType<typeof createEngine>) {
 async function settle(engine: ReturnType<typeof createEngine>) {
   const channel = new MessageChannel()
   try {
-    for (let quiet = 0; quiet < 3; ) {
+    for (let quiet = 0, pulses = 0; pulses < 1_000; pulses++) {
       const before = engine.requests.length
       const elapsed = Bun.sleep(25)
       vi.advanceTimersByTime(25)
       await elapsed
       // A native event-loop turn drains SDK response parsing without advancing the fake clock again.
       await new Promise<void>((resolve) => {
-        channel.port1.onmessage = () => resolve()
+        channel.port1.addEventListener("message", () => resolve(), { once: true })
+        channel.port1.start()
         channel.port2.postMessage(undefined)
       })
       quiet = engine.state.inflight === 0 && engine.requests.length === before ? quiet + 1 : 0
+      if (quiet === 3) return
     }
+    throw new Error(
+      `Session traffic did not settle after 1,000 logical pulses (${engine.requests.length} requests, ${engine.state.inflight} in flight)`,
+    )
   } finally {
     channel.port1.close()
     channel.port2.close()
