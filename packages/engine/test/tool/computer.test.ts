@@ -1,7 +1,8 @@
 import { expect } from "bun:test"
-import { mkdir, readdir, writeFile } from "node:fs/promises"
+import { createHash } from "node:crypto"
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
-import { Context, Deferred, Effect, Fiber, Layer, Queue, Result } from "effect"
+import { Context, Deferred, Effect, Fiber, Layer, Queue, Result, Schema } from "effect"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Computer } from "@vectordevai/schema/computer"
 import { ComputerTransport } from "@/computer/transport"
@@ -16,6 +17,7 @@ import { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { Agent } from "@/agent/agent"
 import { ComputerAvailability } from "@/computer/availability"
+import { ComputerLog } from "@/computer/log"
 import { ComputerSession } from "@/computer/session"
 import { Config } from "@/config/config"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -291,6 +293,7 @@ const toolTests = testEffect(
       ComputerAvailability.node,
       ComputerTransport.node,
       ComputerSession.node,
+      ComputerLog.node,
       Config.node,
       Session.node,
       Provider.node,
@@ -2149,3 +2152,420 @@ for (const grant of ["task", "always"] as const) {
       ),
   )
 }
+
+const parseComputerLog = (line: string) =>
+  Schema.decodeUnknownSync(ComputerLog.Record)(Schema.decodeUnknownSync(Schema.UnknownFromJsonString)(line))
+
+toolTests.instance("the action log leaves submitted input unconfirmed when the bridge returns no progress", () =>
+  toolCase(({ desktop, execute, sessionID }) =>
+    Effect.gen(function* () {
+      desktop.handle = ({ body }) =>
+        body.command === "act" ? { ok: false, code: "failed", error: "The action result is unavailable." } : undefined
+      const result = yield* execute(
+        {
+          action: "click",
+          actions: [...threeClicks, { action: "read_ui", app: "Notes" }],
+        },
+        { callID: "call_audit_unknown" },
+      )
+      expect(result.metadata.code).toBe("failed")
+      const log = yield* readComputerLog(sessionID)
+      const records = log.records.filter((entry) => entry.call === "call_audit_unknown")
+      expect(records.filter((entry) => entry.decision === "unconfirmed").map((entry) => entry.step?.index)).toEqual([
+        0, 1, 2,
+      ])
+      expect(records.filter((entry) => entry.decision === "not_executed").map((entry) => entry.step?.index)).toEqual([
+        3,
+      ])
+      expect(records.filter((entry) => entry.decision === "executed")).toHaveLength(0)
+    }),
+  ),
+)
+
+const readComputerLog = Effect.fn("test.readComputerLog")(function* (sessionID: Session.Info["id"]) {
+  const global = yield* Global.Service
+  const file = path.join(global.data, "computer", "log", `${sessionID}.jsonl`)
+  const source = yield* Effect.promise(() => readFile(file, "utf8"))
+  const records = source.trim().split("\n").map(parseComputerLog)
+  return { file, source, records }
+})
+
+toolTests.instance("the action log records approval and input before the bridge without retaining typed content", () =>
+  toolCase(({ desktop, execute, sessionID }) =>
+    Effect.gen(function* () {
+      const global = yield* Global.Service
+      const file = path.join(global.data, "computer", "log", `${sessionID}.jsonl`)
+      const text = "Private draft for the quarterly planning meeting"
+      const intent = "Intent must remain outside the local audit record"
+      const clipboard = "Unrelated clipboard contents remain private"
+      desktop.inspect = {
+        ...desktop.inspect,
+        element: { role: "text", label: "Document", secure: false, enabled: true, editable: true },
+        clipboard: { agentOwned: true, text: clipboard },
+      }
+      desktop.handle = async ({ body }) => {
+        if (body.command !== "act") return
+        const records = (await readFile(file, "utf8")).trim().split("\n").map(parseComputerLog)
+        expect(records).toContainEqual(
+          expect.objectContaining({
+            decision: "attempted",
+            call: "call_audit_type",
+            step: { index: 0, action: "type" },
+          }),
+        )
+        expect(records).toContainEqual(
+          expect.objectContaining({ decision: "answer", permission: "computer_app", answer: "once" }),
+        )
+        expect(records.filter((record) => record.decision === "executed")).toHaveLength(0)
+      }
+      const result = yield* execute({ action: "type", text, ref: "ui_1", intent }, { callID: "call_audit_type" })
+      expect(result.metadata.code).toBeUndefined()
+      const log = yield* readComputerLog(sessionID)
+      const executed = log.records.filter((record) => record.decision === "executed")
+      expect(executed).toEqual([
+        expect.objectContaining({ call: "call_audit_type", step: { index: 0, action: "type" }, app: appKey }),
+      ])
+      expect(log.records).toContainEqual(expect.objectContaining({ decision: "ask", permission: "computer_app" }))
+      expect(log.records.some((record) => record.target === "Document")).toBe(true)
+      const typed = log.records.flatMap((record) => (record.text ? [record.text] : []))
+      expect(typed.length).toBeGreaterThan(0)
+      for (const value of typed)
+        expect(value).toEqual({
+          length: text.length,
+          hash: createHash("sha256").update(text).digest("hex").slice(0, 12),
+        })
+      for (const forbidden of [text, intent, clipboard, imageData, "data:image/", "screenshotRemoved", "stepDigest"])
+        expect(log.source).not.toContain(forbidden)
+      expect(log.records.every((record) => typeof record.t === "number")).toBe(true)
+    }),
+  ),
+)
+
+toolTests.instance("the action log associates a program approval with its mixed batch action", () =>
+  toolCase(({ desktop, execute, sessionID }) =>
+    Effect.gen(function* () {
+      const text = "Private draft for the next planning meeting"
+      desktop.identity = { ...desktop.identity, path: "/Applications/Resolved Notes.app" }
+      desktop.inspect = {
+        ...desktop.inspect,
+        element: { role: "text", label: "Document", secure: false, enabled: true, editable: true },
+      }
+      const result = yield* execute({
+        action: "type",
+        actions: [
+          { action: "type", text, ref: "ui_1" },
+          { action: "open_app", app: "/Applications/Notes Alias.app" },
+        ],
+      })
+      expect(result.metadata.code).toBeUndefined()
+      const sensitive = desktop.requests.filter((request) => request.permission === "computer_sensitive")
+      expect(sensitive).toHaveLength(1)
+      expect(sensitive[0].metadata).toMatchObject({ action: "open", why: "run_program", stepIndex: 0 })
+      const log = yield* readComputerLog(sessionID)
+      const approval = log.records.filter((record) => record.permission === "computer_sensitive")
+      expect(approval.map((record) => record.decision)).toEqual(["ask", "answer"])
+      for (const record of approval) {
+        expect(record.step).toEqual({ index: 1, action: "open_app" })
+        expect(record.text).toBeUndefined()
+      }
+      expect(log.source).not.toContain(text)
+    }),
+  ),
+)
+
+toolTests.instance("the action log retains a pre-lease policy refusal without inventing an executed step", () =>
+  toolCase(({ execute, bridge, sessionID }) =>
+    Effect.gen(function* () {
+      const deniedResources: Tool.Context["deniedResources"] = (input) =>
+        Effect.succeed(input.permission === "computer_observe" ? input.patterns.filter((key) => key === "*") : [])
+      const result = yield* execute(
+        { action: "screenshot", app: "Notes" },
+        { deniedResources, callID: "call_audit_refused" },
+      )
+      expect(result.metadata.code).toBe("blocked")
+      expect(bridge.commands()).toEqual([])
+      const log = yield* readComputerLog(sessionID)
+      expect(log.records).toContainEqual(
+        expect.objectContaining({ call: "call_audit_refused", decision: "refusal", code: "blocked" }),
+      )
+      expect(log.records.filter((record) => record.decision === "executed")).toHaveLength(0)
+      expect(log.records.filter((record) => record.decision === "ask")).toHaveLength(0)
+    }),
+  ),
+)
+
+toolTests.instance("the action log records each completed batch prefix once across a sensitive pending gate", () =>
+  toolCase(({ desktop, execute, sessionID }) =>
+    Effect.gen(function* () {
+      const acts: Extract<Computer.BridgeRequest, { command: "act" }>[] = []
+      desktop.handle = ({ body }) => {
+        if (body.command !== "act") return
+        acts.push(body)
+        if (acts.length !== 1) return
+        return {
+          done: 1,
+          state: desktop.state,
+          pending: { index: 1, kind: "sensitive", why: "send", inspect: desktop.inspect },
+        }
+      }
+      const result = yield* execute({ action: "click", actions: threeClicks }, { callID: "call_audit_batch" })
+      expect(result.metadata.code).toBeUndefined()
+      expect(acts).toHaveLength(2)
+      const log = yield* readComputerLog(sessionID)
+      expect(log.records.filter((record) => record.decision === "executed").map((record) => record.step)).toEqual([
+        { index: 0, action: "click" },
+        { index: 1, action: "click" },
+        { index: 2, action: "click" },
+      ])
+      expect(log.records).toContainEqual(
+        expect.objectContaining({
+          decision: "ask",
+          permission: "computer_sensitive",
+          step: { index: 1, action: "click" },
+        }),
+      )
+      expect(log.records).toContainEqual(
+        expect.objectContaining({
+          decision: "answer",
+          permission: "computer_sensitive",
+          answer: "once",
+          step: { index: 1, action: "click" },
+        }),
+      )
+      expect(log.records.filter((record) => record.decision === "not_executed")).toHaveLength(0)
+    }),
+  ),
+)
+
+toolTests.instance("the action log distinguishes a declined pending action from the unexecuted batch suffix", () =>
+  toolCase(({ desktop, execute, sessionID }) =>
+    Effect.gen(function* () {
+      desktop.answers.push("once", "reject")
+      desktop.handle = ({ body }) =>
+        body.command === "act"
+          ? {
+              done: 1,
+              state: desktop.state,
+              pending: { index: 1, kind: "sensitive", why: "send", inspect: desktop.inspect },
+            }
+          : undefined
+      const result = yield* execute({ action: "click", actions: threeClicks }, { callID: "call_audit_denied" })
+      expect(result.metadata.code).toBe("denied")
+      const log = yield* readComputerLog(sessionID)
+      expect(
+        log.records.filter((record) => record.decision === "executed").map((record) => record.step?.index),
+      ).toEqual([0])
+      expect(log.records).toContainEqual(
+        expect.objectContaining({ decision: "answer", permission: "computer_sensitive", answer: "reject" }),
+      )
+      // The real fixture asks through orDie, matching SessionTools' defect-based rejection boundary.
+      expect(
+        log.records
+          .filter((record) => record.decision === "answer" && record.permission === "computer_sensitive")
+          .map((record) => record.answer),
+      ).toEqual(["reject"])
+      expect(log.records).toContainEqual(
+        expect.objectContaining({ decision: "refusal", code: "denied", step: { index: 1, action: "click" } }),
+      )
+      expect(log.records).toContainEqual(
+        expect.objectContaining({ decision: "not_executed", step: { index: 2, action: "click" } }),
+      )
+    }),
+  ),
+)
+
+toolTests.instance("the action log records takeover and resume while leaving interrupted input unexecuted", () =>
+  toolCase(({ desktop, execute, sessionID }) =>
+    Effect.gen(function* () {
+      desktop.handle = ({ body }) =>
+        body.command === "act"
+          ? {
+              done: 0,
+              state: { ...desktop.state, phase: "paused", pause: "input" },
+            }
+          : undefined
+      const result = yield* execute({ action: "click", actions: threeClicks }, { callID: "call_audit_takeover" })
+      expect(result.metadata.paused).toMatchObject({ by: "input" })
+      const log = yield* readComputerLog(sessionID)
+      expect(log.records).toContainEqual(expect.objectContaining({ decision: "take_over" }))
+      expect(log.records).toContainEqual(expect.objectContaining({ decision: "resume" }))
+      expect(
+        log.records.filter((record) => record.decision === "executed" && record.step?.action === "click"),
+      ).toHaveLength(0)
+      expect(
+        log.records.filter((record) => record.decision === "not_executed").map((record) => record.step?.index),
+      ).toEqual([0, 1, 2])
+    }),
+  ),
+)
+
+toolTests.instance("the action log records handoff and the user's Continue answer without its free-text reason", () =>
+  toolCase(({ desktop, execute, sessionID }) =>
+    Effect.gen(function* () {
+      const reason = "Private details for the person at the computer"
+      desktop.questionAnswers.push("Continue")
+      const result = yield* execute({ action: "handoff", app: "Notes", reason }, { callID: "call_audit_handoff" })
+      expect(result.metadata.handoff).toMatchObject({ reason: "other" })
+      const log = yield* readComputerLog(sessionID)
+      expect(log.records).toContainEqual(expect.objectContaining({ decision: "handoff" }))
+      expect(log.records).toContainEqual(expect.objectContaining({ decision: "ask", permission: "handoff" }))
+      expect(log.records).toContainEqual(
+        expect.objectContaining({ decision: "answer", permission: "handoff", answer: "continue" }),
+      )
+      expect(log.records).toContainEqual(expect.objectContaining({ decision: "resume" }))
+      expect(log.source).not.toContain(reason)
+      expect(log.source).not.toContain(imageData)
+    }),
+  ),
+)
+
+toolTests.instance("the action log records the check-in and Keep going answer at the action allowance", () =>
+  toolCase(({ execute, sessionID }) =>
+    Effect.gen(function* () {
+      const computer = yield* ComputerSession.Service
+      const instance = yield* TestInstance
+      yield* computer.serialized({ rootSessionID: sessionID, sessionID, directory: instance.directory }, (state) =>
+        Effect.sync(() => {
+          state.actions = 299
+        }),
+      )
+      const result = yield* execute({ action: "read_ui", app: "Notes" }, { callID: "call_audit_checkin" })
+      expect(result.metadata.code).toBeUndefined()
+      const log = yield* readComputerLog(sessionID)
+      expect(log.records).toContainEqual(expect.objectContaining({ decision: "ask", permission: "check_in" }))
+      expect(log.records).toContainEqual(
+        expect.objectContaining({ decision: "answer", permission: "check_in", answer: "keep_going" }),
+      )
+      expect(log.records.filter((record) => record.decision === "executed").map((record) => record.step)).toEqual([
+        { index: 0, action: "read_ui" },
+      ])
+    }),
+  ),
+)
+
+toolTests.instance("deleting a session removes the action log created by its real computer tool", () =>
+  toolCase(({ execute, sessionID }) =>
+    Effect.gen(function* () {
+      yield* execute({ action: "read_ui", app: "Notes" })
+      const log = yield* readComputerLog(sessionID)
+      expect(log.records.length).toBeGreaterThan(0)
+      const computer = yield* ComputerSession.Service
+      const sessions = yield* Session.Service
+      yield* computer.release(sessionID)
+      yield* sessions.remove(sessionID)
+      const exists = yield* Effect.promise(() =>
+        readFile(log.file, "utf8").then(
+          () => true,
+          (error: NodeJS.ErrnoException) => {
+            expect(error.code).toBe("ENOENT")
+            return false
+          },
+        ),
+      )
+      expect(exists).toBe(false)
+    }),
+  ),
+)
+
+toolTests.instance("an unavailable local action log prevents input and reports no private filesystem details", () =>
+  toolCase(({ execute, bridge, sessionID }) =>
+    Effect.gen(function* () {
+      const global = yield* Global.Service
+      const file = path.join(global.data, "computer", "log", `${sessionID}.jsonl`)
+      yield* Effect.acquireRelease(
+        Effect.promise(() => mkdir(file, { recursive: true })),
+        () => Effect.promise(() => rm(file, { recursive: true, force: true })),
+      )
+      const result = yield* execute({ action: "click", ref: "ui_1" })
+      expect(result.metadata.code).toBe("failed")
+      expect(bridge.commands()).not.toContain("act")
+      expect(result.output).not.toContain(file)
+      expect(result.output).not.toContain("EISDIR")
+    }),
+  ),
+)
+
+toolTests.instance("a log failure after input cancels its lease before queued computer work can proceed", () =>
+  toolCase(({ desktop, execute, bridge, sessionID }) =>
+    Effect.gen(function* () {
+      const global = yield* Global.Service
+      const computer = yield* ComputerSession.Service
+      const instance = yield* TestInstance
+      const file = path.join(global.data, "computer", "log", `${sessionID}.jsonl`)
+      const entered = yield* Deferred.make<void>()
+      const response = Promise.withResolvers<void>()
+      const queuedState = { ran: false }
+      yield* Effect.addFinalizer(() => Effect.promise(() => rm(file, { recursive: true, force: true })))
+      desktop.handle = async (call) => {
+        if (call.body.command !== "act") return
+        Deferred.doneUnsafe(entered, Effect.void)
+        const stop = () => response.resolve()
+        call.signal.addEventListener("abort", stop, { once: true })
+        await response.promise
+        call.signal.removeEventListener("abort", stop)
+        if (call.signal.aborted) return new Response(null, { status: 499 })
+        await rm(file)
+        await mkdir(file)
+        return { done: 1, state: desktop.state }
+      }
+      const running = yield* execute({ action: "click", ref: "ui_1" }).pipe(Effect.forkChild)
+      yield* awaitWithTimeout(Deferred.await(entered), "the input did not reach the fake desktop", "5 seconds")
+      const queued = yield* computer
+        .serialized({ rootSessionID: sessionID, sessionID, directory: instance.directory }, () =>
+          Effect.sync(() => {
+            queuedState.ran = true
+          }),
+        )
+        .pipe(Effect.result, Effect.forkChild)
+      // Let the queued worker reserve its FIFO ticket while the fake desktop holds the first response.
+      yield* Effect.yieldNow
+      response.resolve()
+      const result = yield* awaitWithTimeout(
+        Fiber.join(running),
+        "the audit failure did not finish cleanup",
+        "10 seconds",
+      )
+      const pending = yield* awaitWithTimeout(Fiber.join(queued), "the queued generation did not stop", "10 seconds")
+      expect(result.metadata.code).toBe("failed")
+      expect(Result.isFailure(pending)).toBe(true)
+      expect(queuedState.ran).toBe(false)
+      expect(bridge.commands().filter((command) => command === "act")).toHaveLength(1)
+      expect(bridge.commands()).toContain("cancel")
+      expect(bridge.commands()).toContain("release")
+      expect(bridge.commands()).not.toContain("screenshot")
+    }),
+  ),
+)
+
+toolTests.instance(
+  "an act without confirmed progress logs submitted steps as unconfirmed and skips only the unsent suffix",
+  () =>
+    toolCase(({ desktop, execute, bridge, sessionID }) =>
+      Effect.gen(function* () {
+        desktop.handle = ({ body }) =>
+          body.command === "act"
+            ? { ok: false, code: "failed", error: "The desktop could not confirm progress." }
+            : undefined
+        const result = yield* execute(
+          {
+            action: "click",
+            actions: [...threeClicks, { action: "read_ui", app: "Notes" }],
+          },
+          { callID: "call_audit_unconfirmed" },
+        )
+        expect(result.metadata.code).toBe("failed")
+        expect(bridge.commands().filter((command) => command === "act")).toHaveLength(1)
+        expect(bridge.commands()).not.toContain("readUi")
+        const log = yield* readComputerLog(sessionID)
+        expect(log.records.filter((record) => record.decision === "unconfirmed").map((record) => record.step)).toEqual([
+          { index: 0, action: "click" },
+          { index: 1, action: "click" },
+          { index: 2, action: "click" },
+        ])
+        expect(log.records.filter((record) => record.decision === "executed")).toHaveLength(0)
+        expect(log.records.filter((record) => record.decision === "not_executed").map((record) => record.step)).toEqual(
+          [{ index: 3, action: "read_ui" }],
+        )
+      }),
+    ),
+)

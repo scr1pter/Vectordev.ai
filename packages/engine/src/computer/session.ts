@@ -1,10 +1,12 @@
-import { Cause, Clock, Context, Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect"
+import { Cause, Clock, Context, Deferred, Effect, Exit, Fiber, Layer, Option, Scope } from "effect"
 import { makeGlobalNode } from "@vectordevai/core/effect/app-node"
 import { EventV2 } from "@vectordevai/core/event"
 import { serviceUse } from "@vectordevai/core/effect/service-use"
 import { Computer } from "@vectordevai/schema/computer"
+import { SessionV1 } from "@vectordevai/schema/session-v1"
 import { SessionStatusEvent } from "@vectordevai/schema/session-status-event"
 import type { MessageID, SessionID } from "@/session/schema"
+import { ComputerLog } from "./log"
 import { ComputerTransport } from "./transport"
 
 export type Input = {
@@ -59,6 +61,8 @@ export interface Interface {
   readonly stop: (state: State) => Effect.Effect<void>
   /** Call outside serialized: it aborts and waits for the current callback to unwind. */
   readonly release: (rootSessionID: SessionID) => Effect.Effect<void>
+  /** Retire before deleting a session so queued or concurrent calls cannot acquire a successor lease. */
+  readonly retire: (rootSessionID: SessionID) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@vector/ComputerSession") {}
@@ -74,6 +78,10 @@ type Task = {
   heartbeat?: Fiber.Fiber<void, never>
   publish?: (state: Computer.ComputerState) => Effect.Effect<void>
   publishedAt?: number
+  control: { queue: Deferred.Deferred<void>[]; key?: string; waiting: boolean }
+  reported: number
+  stopCode?: Computer.ComputerErrorCode
+  stopPhase?: Computer.ComputerPhase
   closing?: Deferred.Deferred<void>
 }
 type Root = {
@@ -145,10 +153,12 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const transport = yield* ComputerTransport.Service
+    const log = yield* ComputerLog.Service
     const events = yield* EventV2.Service
     const scope = yield* Scope.Scope
     // The desktop lock belongs to a root conversation across directories, not to an InstanceState scope.
     const roots = new Map<SessionID, Root>()
+    const retired = new Set<SessionID>()
     const tasks = new WeakMap<State, Task>()
 
     const finish = Effect.fn("ComputerSession.finish")(function* (root: Root, task: Task) {
@@ -160,7 +170,27 @@ export const layer = Layer.effect(
       root.task = undefined
       for (const signal of task.signals) signal.removeEventListener("abort", task.abort)
       task.signals.clear()
+      const wasStopped = task.state.signal.aborted
       task.controller.abort()
+      const envelope = { v: Computer.PROTOCOL, ...task.input } as const
+      const cleanup = (lease?: number) =>
+        Effect.gen(function* () {
+          yield* transport.request({ ...envelope, command: "cancel", ...(lease === undefined ? {} : { lease }) }).pipe(
+            Effect.interruptible,
+            Effect.timeout("5 seconds"),
+            Effect.catchCause(() => Effect.void),
+          )
+          if (lease === undefined) return false
+          return yield* transport.request({ ...envelope, command: "release", lease }).pipe(
+            Effect.interruptible,
+            Effect.timeout("5 seconds"),
+            Effect.as(true),
+            Effect.catchCause(() => Effect.succeed(false)),
+          )
+        })
+      // A journal's native append may be uninterruptible. Release any known held input before joining its worker.
+      const immediateLease = task.state.lease
+      const released = immediateLease === undefined ? false : yield* cleanup(immediateLease)
       if (task.heartbeat) yield* Fiber.interrupt(task.heartbeat)
       task.state.grants.clear()
       invalidate(task.state)
@@ -170,15 +200,23 @@ export const layer = Layer.effect(
       yield* exclusive(
         root,
         Effect.gen(function* () {
-          const envelope = { v: Computer.PROTOCOL, ...task.input } as const
           const lease = task.state.lease
-          yield* transport.request({ ...envelope, command: "cancel", ...(lease === undefined ? {} : { lease }) }).pipe(
-            Effect.interruptible,
-            Effect.timeout("5 seconds"),
-            Effect.catchCause(() => Effect.void),
-          )
-          if (lease !== undefined)
-            yield* transport.request({ ...envelope, command: "release", lease }).pipe(
+          // An acquire can settle with a lease during interruption. Clean that lease after its worker has joined.
+          if (!released || lease !== immediateLease) yield* cleanup(lease)
+          // Input is released first. An unavailable audit disk must never strand the desktop lease.
+          // A retired conversation is being deleted; do not append after its deletion barrier.
+          if (!retired.has(task.input.rootSessionID))
+            yield* Effect.gen(function* () {
+              if (wasStopped)
+                yield* log.append({
+                  rootSessionID: task.input.rootSessionID,
+                  call: "control",
+                  decision: "stop",
+                  code: task.stopCode ?? "stopped",
+                  ...(task.stopPhase ? { target: task.stopPhase } : {}),
+                })
+              yield* log.append({ rootSessionID: task.input.rootSessionID, call: "control", decision: "release" })
+            }).pipe(
               Effect.interruptible,
               Effect.timeout("5 seconds"),
               Effect.catchCause(() => Effect.void),
@@ -210,6 +248,11 @@ export const layer = Layer.effect(
       if (root.closing) yield* Deferred.await(root.closing)
     })
 
+    const retire = Effect.fn("ComputerSession.retire")(function* (rootSessionID: SessionID) {
+      retired.add(rootSessionID)
+      yield* release(rootSessionID)
+    })
+
     const invalidateRoot = Effect.fn("ComputerSession.invalidate")((rootSessionID: SessionID) =>
       Effect.sync(() => {
         const task = roots.get(rootSessionID)?.task
@@ -217,12 +260,20 @@ export const layer = Layer.effect(
       }),
     )
 
-    const stop = Effect.fn("ComputerSession.stop")((state: State) => Effect.sync(() => tasks.get(state)?.abort()))
+    const stop = Effect.fn("ComputerSession.stop")((state: State) =>
+      Effect.sync(() => {
+        const task = tasks.get(state)
+        if (!task) return
+        task.stopCode ??= "stopped"
+        task.abort()
+      }),
+    )
 
     const report = Effect.fn("ComputerSession.report")(function* (state: State, desktop: Computer.ComputerState) {
       const task = tasks.get(state)
       if (!task || state.signal.aborted) return yield* stopped()
       if (desktop.lease !== state.lease || (desktop.holder && desktop.holder.sessionID !== task.input.rootSessionID)) {
+        task.stopCode = "changed"
         task.abort()
         return yield* stopped()
       }
@@ -230,6 +281,78 @@ export const layer = Layer.effect(
       if (state.signal.aborted) return yield* stopped()
       state.desktopPhase = desktop.phase
       state.desktopWaiting = ["asking", "handoff", "paused", "waiting"].includes(desktop.phase)
+      const version = ++task.reported
+      if (["off", "setup", "ready", "done", "stopped"].includes(desktop.phase)) {
+        task.stopPhase = desktop.phase
+        task.stopCode ??= "stopped"
+        task.abort()
+        // Stop is effective before publication or audit. A slow listener cannot delay input cleanup.
+        const now = yield* Clock.currentTimeMillis
+        if (task.publish && (task.publishedAt === undefined || now - task.publishedAt >= 1000)) {
+          task.publishedAt = now
+          yield* task.publish(desktop).pipe(
+            Effect.interruptible,
+            Effect.timeout("1 second"),
+            Effect.catchCause(() => Effect.void),
+            Effect.forkIn(scope),
+          )
+        }
+        return yield* stopped()
+      }
+      // Audit transitions independently of the UI publication throttle, including between tool calls.
+      yield* exclusive(
+        task.control,
+        Effect.gen(function* () {
+          if (state.signal.aborted || retired.has(task.input.rootSessionID)) return yield* stopped()
+          const key = `${desktop.phase}:${desktop.pause ?? ""}`
+          if (task.control.key === key) return
+          const decision: ComputerLog.Input["decision"] | undefined =
+            desktop.phase === "paused" || desktop.phase === "waiting"
+              ? "take_over"
+              : desktop.phase === "handoff"
+                ? "handoff"
+                : desktop.phase === "working" && task.control.waiting
+                  ? "resume"
+                  : undefined
+          if (decision)
+            yield* log
+              .append({
+                rootSessionID: task.input.rootSessionID,
+                call: "control",
+                decision,
+                // Both values are closed protocol enums. Never record state labels, details, titles or icons.
+                target: desktop.pause ?? desktop.phase,
+              })
+              .pipe(
+                Effect.timeoutOrElse({
+                  duration: "5 seconds",
+                  orElse: () =>
+                    new ComputerTransport.ComputerError({
+                      code: "failed",
+                      message: "The local action record is unavailable.",
+                    }),
+                }),
+                Effect.mapError(
+                  () =>
+                    new ComputerTransport.ComputerError({
+                      code: "failed",
+                      message: "The local action record is unavailable.",
+                    }),
+                ),
+                Effect.onError(() =>
+                  Effect.sync(() => {
+                    if (!state.signal.aborted) task.stopCode = "failed"
+                    task.abort()
+                  }),
+                ),
+              )
+          task.control.key = key
+          if (decision === "take_over" || decision === "handoff") task.control.waiting = true
+          if (decision === "resume") task.control.waiting = false
+        }),
+      )
+      if (state.signal.aborted) return yield* stopped()
+      if (task.reported !== version) return
       const now = yield* Clock.currentTimeMillis
       if (state.signal.aborted) return yield* stopped()
       if (task.publish && (task.publishedAt === undefined || now - task.publishedAt >= 1000)) {
@@ -237,10 +360,6 @@ export const layer = Layer.effect(
         yield* task.publish(desktop)
       }
       if (state.signal.aborted) return yield* stopped()
-      if (["off", "setup", "ready", "done", "stopped"].includes(desktop.phase)) {
-        task.abort()
-        return yield* stopped()
-      }
     })
 
     const start: Interface["start"] = Effect.fn("ComputerSession.start")(function* <R>(
@@ -263,7 +382,17 @@ export const layer = Layer.effect(
         yield* report(state, reply.state)
       }).pipe(
         Effect.forever,
-        Effect.catchCause(() => Effect.sync(task.abort)),
+        Effect.catchCause((cause) =>
+          Effect.sync(() => {
+            const error = Cause.findErrorOption(cause)
+            if (!Cause.hasInterrupts(cause))
+              task.stopCode ??=
+                Option.isSome(error) && error.value instanceof ComputerTransport.ComputerError
+                  ? error.value.code
+                  : "failed"
+            task.abort()
+          }),
+        ),
       )
       task.heartbeat = yield* heartbeat.pipe(Effect.forkIn(scope))
       if (state.signal.aborted) {
@@ -281,6 +410,7 @@ export const layer = Layer.effect(
           code: "unavailable",
           message: "Computer use requires the attended root conversation.",
         })
+      if (retired.has(input.rootSessionID)) return yield* stopped()
       if (input.signal?.aborted) return yield* stopped()
       const root: Root =
         roots.get(input.rootSessionID) ??
@@ -291,6 +421,7 @@ export const layer = Layer.effect(
         } satisfies Root)
       roots.set(input.rootSessionID, root)
       if (root.closing) yield* Deferred.await(root.closing)
+      if (retired.has(input.rootSessionID)) return yield* stopped()
       if (input.signal?.aborted) return yield* stopped()
       const fresh = !root.task
       if (!root.task) {
@@ -300,6 +431,8 @@ export const layer = Layer.effect(
           abort: () => controller.abort(),
           signals: new Set(),
           workers: new Set(),
+          control: { queue: [], waiting: false },
+          reported: 0,
           input: { rootSessionID: input.rootSessionID, sessionID: input.sessionID, directory: input.directory },
           state: {
             frames: [],
@@ -369,6 +502,12 @@ export const layer = Layer.effect(
     })
 
     const unsubscribe = yield* events.listen((event) => {
+      if (event.type === SessionV1.Event.Deleted.type) {
+        const data = event.data
+        if (typeof data !== "object" || data === null || !("sessionID" in data) || typeof data.sessionID !== "string")
+          return Effect.void
+        return retire(data.sessionID as SessionID)
+      }
       // SessionStatus publishes a deprecated Idle event after Status; consuming both could stop a new task.
       if (event.type !== SessionStatusEvent.Status.type) return Effect.void
       const data = event.data
@@ -393,14 +532,18 @@ export const layer = Layer.effect(
         { discard: true },
       ),
     )
-    return Service.of({ serialized, invalidate: invalidateRoot, start, report, stop, release })
+    return Service.of({ serialized, invalidate: invalidateRoot, start, report, stop, release, retire })
   }),
 )
 
-export const node = makeGlobalNode({ service: Service, layer, deps: [ComputerTransport.node, EventV2.node] })
+export const node = makeGlobalNode({
+  service: Service,
+  layer,
+  deps: [ComputerTransport.node, ComputerLog.node, EventV2.node],
+})
 
 /** Tickets reserve their position until exit, including the interval before an awakened waiter runs. */
-function exclusive<A, E, R>(root: Root, effect: Effect.Effect<A, E, R>) {
+function exclusive<A, E, R>(root: Pick<Root, "queue">, effect: Effect.Effect<A, E, R>) {
   return Effect.acquireUseRelease(
     Effect.sync(() => {
       const ticket = Deferred.makeUnsafe<void>()

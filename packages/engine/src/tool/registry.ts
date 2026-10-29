@@ -68,6 +68,7 @@ import { ModelV2 } from "@vectordevai/core/model"
 import { BrowserTool } from "./browser"
 import { ComputerTool } from "./computer"
 import { ComputerSession } from "@/computer/session"
+import { ComputerLog } from "@/computer/log"
 import { ComputerTransport } from "@/computer/transport"
 import { Image } from "@/image/image"
 import { ComputerAvailability } from "@/computer/availability"
@@ -552,6 +553,7 @@ export const node = LayerNode.make({
     Config.node,
     ComputerAvailability.node,
     ComputerSession.node,
+    ComputerLog.node,
     ComputerTransport.node,
     Image.node,
     ConfigDependencies.node,

@@ -6,6 +6,7 @@ import { EventV2 } from "@vectordevai/core/event"
 import { Computer } from "@vectordevai/schema/computer"
 import { SessionStatusEvent } from "@vectordevai/schema/session-status-event"
 import { ComputerSession } from "@/computer/session"
+import { ComputerLog } from "@/computer/log"
 import { ComputerTransport } from "@/computer/transport"
 import { MessageID, SessionID } from "@/session/schema"
 import { testEffect } from "../lib/effect"
@@ -41,12 +42,18 @@ const desktopState = (lease: number, phase: Computer.ComputerPhase = "working"):
 })
 
 function fixture<A, E, R>(
-  body: (service: ComputerSession.Interface, calls: Computer.BridgeRequest[]) => Effect.Effect<A, E, R>,
+  body: (
+    service: ComputerSession.Interface,
+    calls: Computer.BridgeRequest[],
+    audit: ComputerLog.Input[],
+  ) => Effect.Effect<A, E, R>,
   heartbeat?: (lease: number) => Effect.Effect<Computer.ComputerState, ComputerTransport.ComputerError>,
+  append?: ComputerLog.Interface["append"],
 ) {
   return Effect.scoped(
     Effect.gen(function* () {
       const calls: Computer.BridgeRequest[] = []
+      const audit: ComputerLog.Input[] = []
       const transport = ComputerTransport.Service.of({
         request: <Q extends Computer.BridgeRequest>(request: Q) =>
           Effect.gen(function* () {
@@ -61,9 +68,23 @@ function fixture<A, E, R>(
           }),
       })
       const context = yield* Layer.build(
-        ComputerSession.layer.pipe(Layer.provide(Layer.succeed(ComputerTransport.Service, transport))),
+        ComputerSession.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.succeed(ComputerTransport.Service, transport),
+              Layer.mock(ComputerLog.Service, {
+                append: (input) =>
+                  append
+                    ? append(input)
+                    : Effect.sync(() => {
+                        audit.push(input)
+                      }),
+              }),
+            ),
+          ),
+        ),
       )
-      return yield* body(Context.get(context, ComputerSession.Service), calls)
+      return yield* body(Context.get(context, ComputerSession.Service), calls, audit)
     }),
   )
 }
@@ -696,4 +717,251 @@ it.effect("late reports and Resume cannot publish or restart an aborted generati
       expect(state.activeSince).toBeUndefined()
     }),
   ),
+)
+
+it.effect("control transitions are audited independently of publication and without screen labels", () =>
+  fixture((sessions, calls, audit) =>
+    Effect.gen(function* () {
+      const published: Computer.ComputerState[] = []
+      const state = yield* sessions.serialized(input, (state) =>
+        Effect.gen(function* () {
+          state.lease = 61
+          yield* sessions.start(state, (desktop) => Effect.sync(() => void published.push(desktop)))
+          return state
+        }),
+      )
+      yield* sessions.report(state, desktopState(61))
+      const paused = {
+        ...desktopState(61, "paused"),
+        pause: "input" as const,
+        step: "Private window title",
+        secureInputHolder: "Private credential application",
+      }
+      yield* sessions.report(state, paused)
+      yield* sessions.report(state, paused)
+      yield* sessions.report(state, { ...paused, pause: "button" })
+      yield* sessions.report(state, desktopState(61, "handoff"))
+      yield* sessions.report(state, desktopState(61))
+      expect(published).toHaveLength(1)
+      expect(audit.map((entry) => [entry.call, entry.decision, entry.target])).toEqual([
+        ["control", "take_over", "input"],
+        ["control", "take_over", "button"],
+        ["control", "handoff", "handoff"],
+        ["control", "resume", "working"],
+      ])
+      const stopped = yield* sessions.report(state, desktopState(61, "stopped")).pipe(Effect.result)
+      expect(Result.isFailure(stopped)).toBe(true)
+      yield* sessions.release(input.rootSessionID)
+      expect(audit.map((entry) => entry.decision)).toEqual([
+        "take_over",
+        "take_over",
+        "handoff",
+        "resume",
+        "stop",
+        "release",
+      ])
+      expect(audit.every((entry) => entry.rootSessionID === input.rootSessionID)).toBe(true)
+      expect(JSON.stringify(audit)).not.toContain("Private")
+      expect(calls.map((call) => call.command)).toEqual(["cancel", "release"])
+    }),
+  ),
+)
+
+it.effect("heartbeats record take-over and resume while no tool call is running", () => {
+  const desktop = { phase: "paused" as Computer.ComputerPhase }
+  return fixture(
+    (sessions, calls, audit) =>
+      Effect.gen(function* () {
+        yield* sessions.serialized(input, (state) =>
+          Effect.gen(function* () {
+            state.lease = 63
+            yield* sessions.start(state, () => Effect.void)
+          }),
+        )
+        yield* TestClock.adjust(4000)
+        expect(calls.map((call) => call.command)).toEqual(["heartbeat", "heartbeat"])
+        expect(audit.map((entry) => entry.decision)).toEqual(["take_over"])
+        desktop.phase = "handoff"
+        yield* TestClock.adjust(2000)
+        desktop.phase = "working"
+        yield* TestClock.adjust(2000)
+        expect(audit.map((entry) => entry.decision)).toEqual(["take_over", "handoff", "resume"])
+        yield* sessions.release(input.rootSessionID)
+      }),
+    (lease) => Effect.succeed(desktopState(lease, desktop.phase)),
+  )
+})
+
+it.effect("an audit failure during a live transition stops and releases the desktop", () =>
+  fixture(
+    (sessions, calls) =>
+      Effect.gen(function* () {
+        const state = yield* sessions.serialized(input, (state) =>
+          Effect.sync(() => {
+            state.lease = 65
+            return state
+          }),
+        )
+        const result = yield* sessions.report(state, desktopState(65, "paused")).pipe(Effect.result)
+        expect(Result.isFailure(result)).toBe(true)
+        if (Result.isFailure(result)) expect(result.failure.message).toBe("The local action record is unavailable.")
+        yield* sessions.release(input.rootSessionID)
+        expect(state.signal.aborted).toBe(true)
+        expect(state.lease).toBeUndefined()
+        expect(calls.map((call) => call.command)).toEqual(["cancel", "release"])
+      }),
+    undefined,
+    () => new ComputerLog.Error({ code: "failed", message: "The local action record is unavailable." }),
+  ),
+)
+
+it.effect("cleanup releases input before waiting on a bounded audit write", () =>
+  fixture(
+    (sessions, calls) =>
+      Effect.gen(function* () {
+        const state = yield* sessions.serialized(input, (state) =>
+          Effect.sync(() => {
+            state.lease = 67
+            return state
+          }),
+        )
+        const closing = yield* sessions.release(input.rootSessionID).pipe(Effect.forkChild)
+        yield* TestClock.adjust(0)
+        expect(calls.map((call) => call.command)).toEqual(["cancel", "release"])
+        yield* TestClock.adjust(5000)
+        yield* Fiber.join(closing)
+        expect(state.lease).toBeUndefined()
+      }),
+    undefined,
+    () => Effect.never,
+  ),
+)
+
+it.effect("retiring a root blocks new calls while cleanup drains and also blocks cold reacquisition", () =>
+  fixture((sessions, calls, audit) =>
+    Effect.gen(function* () {
+      const entered = yield* Deferred.make<ComputerSession.State>()
+      const draining = yield* Deferred.make<void>()
+      const finish = yield* Deferred.make<void>()
+      const active = yield* sessions
+        .serialized(input, (state) =>
+          Effect.gen(function* () {
+            state.lease = 69
+            yield* Deferred.succeed(entered, state)
+            return yield* Effect.never.pipe(
+              Effect.ensuring(Deferred.succeed(draining, undefined).pipe(Effect.andThen(Deferred.await(finish)))),
+            )
+          }),
+        )
+        .pipe(Effect.result, Effect.forkChild)
+      const state = yield* Deferred.await(entered)
+      const retiring = yield* sessions.retire(input.rootSessionID).pipe(Effect.forkChild)
+      yield* Deferred.await(draining)
+      const called = { value: false }
+      const next = yield* sessions
+        .serialized(input, () =>
+          Effect.sync(() => {
+            called.value = true
+          }),
+        )
+        .pipe(Effect.result)
+      expect(Result.isFailure(next)).toBe(true)
+      expect(called.value).toBe(false)
+      yield* Deferred.succeed(finish, undefined)
+      yield* Fiber.join(retiring)
+      expect(Result.isFailure(yield* Fiber.join(active))).toBe(true)
+      expect(state.signal.aborted).toBe(true)
+      expect(calls.map((call) => call.command)).toEqual(["cancel", "release"])
+      expect(audit).toHaveLength(0)
+      const cold = SessionID.make("ses_cold_deleted")
+      yield* sessions.retire(cold)
+      const missing = yield* sessions
+        .serialized({ ...input, rootSessionID: cold, sessionID: cold }, () =>
+          Effect.sync(() => {
+            called.value = true
+          }),
+        )
+        .pipe(Effect.result)
+      expect(Result.isFailure(missing)).toBe(true)
+      expect(called.value).toBe(false)
+      expect(calls).toHaveLength(2)
+    }),
+  ),
+)
+
+it.effect("a known lease releases input before joining an uninterruptible journal worker", () =>
+  Effect.gen(function* () {
+    const entered = yield* Deferred.make<void>()
+    const flushed = yield* Deferred.make<void>()
+    const append: ComputerLog.Interface["append"] = (entry) =>
+      entry.decision === "executed"
+        ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(flushed)), Effect.uninterruptible)
+        : Effect.void
+    return yield* fixture(
+      (sessions, calls) =>
+        Effect.gen(function* () {
+          const active = yield* sessions
+            .serialized(input, (state) =>
+              Effect.gen(function* () {
+                state.lease = 71
+                yield* append({
+                  rootSessionID: input.rootSessionID,
+                  call: "mouse",
+                  decision: "executed",
+                  step: { index: 0, action: "mouse_down" },
+                })
+              }),
+            )
+            .pipe(Effect.result, Effect.forkChild)
+          yield* Deferred.await(entered)
+          const closing = yield* sessions.release(input.rootSessionID).pipe(Effect.forkChild)
+          yield* TestClock.adjust(0)
+          expect(calls.map((call) => call.command)).toEqual(["cancel", "release"])
+          yield* Deferred.succeed(flushed, undefined)
+          yield* Fiber.join(closing)
+          expect(Result.isFailure(yield* Fiber.join(active))).toBe(true)
+          expect(calls.map((call) => call.command)).toEqual(["cancel", "release"])
+        }),
+      undefined,
+      append,
+    )
+  }),
+)
+
+it.effect("a terminal report stops before journal I/O and paused journal time is not active time", () =>
+  Effect.gen(function* () {
+    const entered = yield* Deferred.make<void>()
+    const flushed = yield* Deferred.make<void>()
+    return yield* fixture(
+      (sessions, calls) =>
+        Effect.gen(function* () {
+          const state = yield* sessions.serialized(input, (state) =>
+            Effect.gen(function* () {
+              state.lease = 73
+              yield* sessions.start(state, () => Effect.void)
+              return state
+            }),
+          )
+          yield* TestClock.adjust(100)
+          const pause = yield* sessions
+            .report(state, { ...desktopState(73, "paused"), pause: "input" })
+            .pipe(Effect.result, Effect.forkChild)
+          yield* Deferred.await(entered)
+          yield* TestClock.adjust(500)
+          expect(state.desktopWaiting).toBe(true)
+          expect(yield* ComputerSession.elapsed(state)).toBe(100)
+          const stopped = yield* sessions.report(state, desktopState(73, "stopped")).pipe(Effect.result)
+          expect(Result.isFailure(stopped)).toBe(true)
+          expect(state.signal.aborted).toBe(true)
+          yield* TestClock.adjust(0)
+          expect(calls.map((call) => call.command)).toEqual(["cancel", "release"])
+          yield* Deferred.succeed(flushed, undefined)
+          expect(Result.isFailure(yield* Fiber.join(pause))).toBe(true)
+          yield* sessions.release(input.rootSessionID)
+          expect(calls.map((call) => call.command)).toEqual(["cancel", "release"])
+        }),
+      undefined,
+      () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(flushed)), Effect.uninterruptible),
+    )
+  }),
 )
