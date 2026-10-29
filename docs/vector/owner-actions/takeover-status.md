@@ -24,12 +24,13 @@ checks. Push through the required pre-push typecheck; never bypass it.
 
 | Work | Branch | State / next gate |
 | --- | --- | --- |
-| Release 1.99.112 | `release-prep` | Candidate `dfc98974` landed on clean `main` through all 23 pre-push checks. Full source CI is green. Release run [40781089625](https://github.com/scr1pter/claudeondfsfdaf/actions/runs/40781089625) was dispatched from that exact SHA with the existing catalog. Full source CI, native tests, catalog parity and all platform builds passed. The publish job is waiting for the owner's `production-release` review; publication is not claimed. See `release-199112.md`. |
+| Release 1.99.112 | `release-prep` | Exact source `dfc98974` passed full CI, native tests, catalog parity and all platform builds in [40781089625](https://github.com/scr1pter/claudeondfsfdaf/actions/runs/40781089625), using the existing catalog. The owner authorized the agent to approve this run. GitHub rejected the connected integration's review POST with HTTP 403, so the protected publish job still waits. Publication is not claimed. See `release-199112.md`. |
 | Service setup prompt | `vector-takeover` | Written in `codex-setup-prompt.md`. No external setup performed. |
 | Multi-agent parity | `self-evolving` | WP1–22 inherited; WP23–26 committed and pushed with focused checks and independent review closed. WP26 at `fbefa794` passed all 23 pre-push checks. Its 22 new cases passed; existing regression results and the isolated timing failures are recorded in the branch's deviation notes. WP27 source work is in a separate checkout. Phase/final review and later work packages remain. |
-| Codium | `codium` | A00–11 committed and pushed; complete A11 CI `40786941008` passes. Funding follow-up `9df0ae17` passed 57 focused tests, API typecheck, independent review and all 23 pre-push checks. Its CI found Windows package-feed failures before tests and an unrelated app traffic-count failure under investigation. A12 passed 386 tests across 15 files plus API, schema and web checks; final review and canonical push remain. A13–60 and Track B remain. Protected provider end-to-end setup needs the owner. |
+| Codium | `codium` | A00–14 and P2 review repairs are pushed at `d04a2808`, including current main. Both review passes closed; 116 targeted repair tests and all 23 pre-push checks pass. Complete Codium CI `40801970723` passes; fresh general CI [40802391033](https://github.com/scr1pter/claudeondfsfdaf/actions/runs/40802391033) is running. A15's staged catalog passed 106 initial checks and API types; compatibility/web checks remain. New models stay inactive pending enforcement and provider evidence. A16–60 and Track B remain. |
 | VectorScope | `vectorscope` | Measurement-first build plan written in `docs/vector/build/vectorscope-plan.md`. Runtime implementation and paid eval have not started. |
-| Approved tokenomics/copy | `approved-fixes` | Standard task tracking and planned 550B+ Vector Velocity wording validated by 47 tests. Title fix `5fd08374` passed 63 focused tests, app/engine types and all 23 pre-push checks. Both production navigation benchmark jobs passed: before `123174150755` and after `123180412102`. The fake-provider regression confirms one main request and no separate title request on the client-named path. Remaining audit recommendations still need their documented evidence; no live model cost or cache-hit result is claimed. |
+| Approved tokenomics/copy | `approved-fixes` | [Draft PR19](https://github.com/scr1pter/claudeondfsfdaf/pull/19), source `279d4292`, contains milestone-only task tracking, planned 550B+ Velocity wording, initial work-session titles and stream-deadline cleanup. Focused tests, native Node regression and all 23 pre-push checks pass; full PR CI is running. Both navigation jobs passed 9/9 samples, with mixed timings. Four offline footprint jobs completed eight valid sessions; raw evidence and limits are preserved. Live cache work remains a proposal. |
+| CI timing fixture | `ci-timers` | [Draft PR18](https://github.com/scr1pter/claudeondfsfdaf/pull/18), source `eaffaf26`, has full Linux/Windows CI, browser, Node bundle and Vector Local checks passing. Controlled delayed execution reproduces the old extra-read failure and passes after the fixture repair. Current request-count and spending assertions remain intact. |
 | Reviewed catalog restoration | `catalog-112` / catalog fork `codium-112` | Four prior reviewed model records restored through the fork; canonical mirror test re-enabled (26 tests pass). The owner chose to keep the existing catalog for 1.99.112; restoration remains deferred on separate branches. |
 
 Newer Mac-only specs, deviations and the partial A09 patch were unavailable in
@@ -53,8 +54,12 @@ as part of Codium. Do not implement Vector Labs, team features or parked R2 work
 
 ## Owner and external gates
 
-- Approve `production-release` in GitHub for the approved 1.99.112 run only;
-  later releases and unlisted main merges need separate authorization.
+- The owner has authorized approval of the specific 1.99.112 run. GitHub reports
+  the reviewer eligible, but the connected integration's approval POST returns
+  `403 Resource not accessible by integration`. Browser-control tools are absent
+  from this session. A GitHub UI approval or a connection with review capability
+  is still needed; no protection setting was changed. Later releases and unlisted
+  main merges need separate authorization.
 - Keep the existing catalog for 1.99.112, as the owner directed. The restored
   catalog is separate; landing it later requires coordinated fork and mirror pins.
   This session receives HTTP 403 listing Actions variables. Release catalog job
