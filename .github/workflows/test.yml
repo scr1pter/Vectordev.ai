@@ -343,7 +343,6 @@ jobs:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright-browsers
       PLAYWRIGHT_PORT: "4568"
       PLAYWRIGHT_WORKERS: "1"
-      PLAYWRIGHT_HTML_OUTPUT_DIR: ${{ runner.temp }}/hands-app-benchmark/report
       VECTOR_PERFORMANCE_RUN_ID: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
       # Match the documented production timeline workload; detailed profiling stays off.
       TIMELINE_CPU_THROTTLE: "4"
@@ -406,6 +405,7 @@ jobs:
         working-directory: packages/app
         run: |
           set -euo pipefail
+          export PLAYWRIGHT_HTML_OUTPUT_DIR="$RUNNER_TEMP/hands-app-benchmark/report"
           # This config builds and serves dist, refuses a reused server, and runs serially. It uses HTTP fixtures;
           # no live engine or model account is needed. Repeat exactly these cases for the after-change comparison.
           bunx playwright test \
