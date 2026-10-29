@@ -98,14 +98,18 @@ describe("A13 raw Vercel Spend signature and exact team binding", () => {
     })
     untouched(other)
   })
-  test.each([null, "", "a".repeat(39), "g".repeat(40), `sha1=${"a".repeat(40)}`, ["a".repeat(40), "b".repeat(40)]])(
-    "refuses missing, malformed or duplicate signature headers: %j",
-    async (signature) => {
-      const fakes = codiumFakes({ now })
-      expect(await callback(fakes, body(), { signature })).toMatchObject({ status: 401 })
-      untouched(fakes)
-    },
-  )
+  test.each([
+    { signature: null },
+    { signature: "" },
+    { signature: "a".repeat(39) },
+    { signature: "g".repeat(40) },
+    { signature: `sha1=${"a".repeat(40)}` },
+    { signature: ["a".repeat(40), "b".repeat(40)] },
+  ])("refuses missing, malformed or duplicate signature headers: %j", async ({ signature }) => {
+    const fakes = codiumFakes({ now })
+    expect(await callback(fakes, body(), { signature })).toMatchObject({ status: 401 })
+    untouched(fakes)
+  })
   test("wrong signatures are refused before JSON parsing and known signatures still require valid JSON", async () => {
     const fakes = codiumFakes({ now })
     expect(await callback(fakes, undefined, { raw: "{broken", signature: "a".repeat(40) })).toMatchObject({
