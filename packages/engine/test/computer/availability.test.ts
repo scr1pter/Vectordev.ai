@@ -235,9 +235,51 @@ describe("computer availability", () => {
             const service = yield* ComputerAvailability.Service
             expect(yield* service.unavailable()).toBe("offline")
             expect(yield* service.capabilities()).toEqual({ available: false, reason: "offline" })
+            expect(yield* service.actions()).toEqual([])
             expect(offline.calls).toHaveLength(0)
           }),
         (previous) => Effect.sync(() => Egress.configure(previous)),
+      ),
+    ),
+  )
+
+  const labelled = fixture()
+  labelled.it.instance("the cached capability probe records its local bridge source without credentials", () =>
+    environment(
+      Effect.acquireUseRelease(
+        Effect.sync(() => {
+          const previous = Egress.policy()
+          const events: ReturnType<typeof Egress.events> = []
+          const unsubscribe = Egress.subscribe((event) => {
+            if (event.source === "computer-bridge") events.push(event)
+          })
+          Egress.configure(LocalPolicy.resolve({ global: { enabled: true, web: "network" } }))
+          return { previous, events, unsubscribe }
+        }),
+        ({ events }) =>
+          Effect.gen(function* () {
+            const service = yield* ComputerAvailability.Service
+            expect((yield* service.capabilities()).available).toBe(true)
+            expect(yield* service.actions()).toEqual(ready.actions)
+            expect(labelled.calls).toHaveLength(1)
+            expect(events).toMatchObject([
+              {
+                source: "computer-bridge",
+                purpose: "integration",
+                class: "this-computer",
+                origin: "http://127.0.0.1:45100",
+                method: "GET",
+                decision: "allow",
+              },
+            ])
+            expect(JSON.stringify(events)).not.toContain("computer-test")
+            expect(JSON.stringify(events)).not.toContain("/computer/capabilities")
+          }),
+        ({ previous, unsubscribe }) =>
+          Effect.sync(() => {
+            unsubscribe()
+            Egress.configure(previous)
+          }),
       ),
     ),
   )

@@ -3,6 +3,8 @@ import { Cause, Effect, Exit, Fiber, Layer, Option, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { Computer } from "@vectordevai/schema/computer"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import { ComputerTransport } from "@/computer/transport"
 import { testEffect } from "../lib/effect"
 
@@ -266,6 +268,57 @@ remote.it.effect("the reserved remote backend cannot send a request or a bridge 
       })
       expect(remote.calls).toHaveLength(0)
     }),
+  ),
+)
+
+const localCleanup = fixture(() =>
+  Effect.sync(() => {
+    // The decision is recorded before the HTTP client receives the cleanup request.
+    expect(Egress.events().at(-1)).toMatchObject({ source: "computer-bridge", method: "POST", decision: "allow" })
+    return { ok: true }
+  }),
+)
+localCleanup.it.effect("Local None still permits labelled loopback cancel and release without logging their secrets", () =>
+  environment(
+    Effect.acquireUseRelease(
+      Effect.sync(() => {
+        const previous = Egress.policy()
+        const events: ReturnType<typeof Egress.events> = []
+        const unsubscribe = Egress.subscribe((event) => {
+          if (event.source === "computer-bridge") events.push(event)
+        })
+        Egress.configure(LocalPolicy.resolve({ global: { enabled: true, web: "none" } }))
+        return { previous, events, unsubscribe }
+      }),
+      ({ events }) =>
+        Effect.gen(function* () {
+          const transport = yield* ComputerTransport.Service
+          yield* transport.request({ ...envelope, command: "cancel", lease: 1 })
+          yield* transport.request({ ...envelope, command: "release", lease: 1 })
+          expect(localCleanup.calls.map((call) => call.input.command)).toEqual(["cancel", "release"])
+          expect(events).toHaveLength(2)
+          for (const event of events) {
+            expect(event).toMatchObject({
+              source: "computer-bridge",
+              purpose: "integration",
+              class: "this-computer",
+              origin: "http://127.0.0.1:45100",
+              method: "POST",
+              tool: "computer",
+              decision: "allow",
+            })
+            expect(event.bytes_out).toBeGreaterThan(0)
+          }
+          expect(JSON.stringify(events)).not.toContain("transport-clock-fixture")
+          expect(JSON.stringify(events)).not.toContain("/fixture")
+          expect(JSON.stringify(events)).not.toContain("/computer/command")
+        }),
+      ({ previous, unsubscribe }) =>
+        Effect.sync(() => {
+          unsubscribe()
+          Egress.configure(previous)
+        }),
+    ),
   ),
 )
 

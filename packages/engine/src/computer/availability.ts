@@ -119,21 +119,26 @@ const layer = Layer.effect(
                 : "desktop"
         const probe = yield* Effect.cachedWithTTL(
           bridge
-            ? client
-                .execute(
-                  HttpClientRequest.get(bridge.url).pipe(
-                    HttpClientRequest.setHeaders({
-                      authorization: `Bearer ${bridge.token}`,
-                      [Computer.BRIDGE.protocolHeader]: String(Computer.PROTOCOL),
-                    }),
-                  ),
-                )
-                .pipe(
-                  Effect.flatMap(HttpClientResponse.schemaBodyJson(Computer.Capabilities)),
-                  Effect.map((capabilities): Probe => ({ capabilities })),
-                  Effect.timeout("5 seconds"),
-                  Effect.catch(() => Effect.succeed<Probe>({ reason: "bridge_unavailable" })),
-                )
+            ? Effect.gen(function* () {
+                const decision = Egress.decide({ source: "computer-bridge", url: bridge.url, method: "GET" })
+                if (decision.decision !== "allow") return { reason: "bridge_unavailable" } satisfies Probe
+                return yield* client
+                  .execute(
+                    HttpClientRequest.get(bridge.url).pipe(
+                      HttpClientRequest.setHeaders({
+                        authorization: `Bearer ${bridge.token}`,
+                        [Computer.BRIDGE.protocolHeader]: String(Computer.PROTOCOL),
+                      }),
+                    ),
+                  )
+                  .pipe(
+                    Effect.flatMap(HttpClientResponse.schemaBodyJson(Computer.Capabilities)),
+                    Effect.map((capabilities): Probe => ({ capabilities })),
+                  )
+              }).pipe(
+                Effect.timeout("5 seconds"),
+                Effect.catch(() => Effect.succeed<Probe>({ reason: "bridge_unavailable" })),
+              )
             : Effect.succeed<Probe>({ reason: "no_desktop_bridge" }),
           Duration.seconds(30),
         )
@@ -177,6 +182,7 @@ const layer = Layer.effect(
     })
 
     const actions = Effect.fn("ComputerAvailability.actions")(function* () {
+      if (yield* policy()) return []
       const current = yield* InstanceState.get(state)
       return (yield* current.probe).capabilities?.actions ?? []
     })

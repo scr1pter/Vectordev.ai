@@ -22,16 +22,19 @@ import { MessageID, PartID, SessionID } from "@/session/schema"
 import { Session } from "@/session/session"
 import { testEffect } from "../lib/effect"
 
-class Fixture extends Context.Service<Fixture, { file: string }>()("test/ComputerPrune") {}
+class Fixture extends Context.Service<Fixture, { file: string; database: Database.Interface }>()("test/ComputerPrune") {}
 const fixture = Layer.effect(
   Fixture,
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
     const directory = yield* fs.makeTempDirectoryScoped({ prefix: "vector-computer-prune-" })
-    return { file: path.join(directory, "screenshots.db") }
+    const file = path.join(directory, "screenshots.db")
+    // Own the database inside the directory's scope so Windows releases its file handles before removal.
+    const context = yield* Layer.build(Database.layerFromPath(file))
+    return { file, database: Context.get(context, Database.Service) }
   }),
 ).pipe(Layer.provide(NodeFileSystem.layer), Layer.orDie)
-const database = Layer.unwrap(Effect.map(Fixture, (value) => Database.layerFromPath(value.file))).pipe(
+const database = Layer.effect(Database.Service, Effect.map(Fixture, (value) => value.database)).pipe(
   Layer.provide(fixture),
 )
 const it = testEffect(

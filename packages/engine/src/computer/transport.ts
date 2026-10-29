@@ -1,8 +1,9 @@
-import { NodeHttpClient } from "@effect/platform-node"
+import { NodeHttpClient } from "@vectordevai/core/effect/platform-node"
 import { Cause, Context, Effect, Exit, FileSystem, Layer, Option, Schema } from "effect"
 import { HttpClient, HttpClientRequest, HttpIncomingMessage } from "effect/unstable/http"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { serviceUse } from "@vectordevai/core/effect/service-use"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 import { Computer } from "@vectordevai/schema/computer"
 
 export class ComputerError extends Schema.TaggedErrorClass<ComputerError>()("ComputerError", {
@@ -49,6 +50,16 @@ export const layer = Layer.effect(
       const body = JSON.stringify(input)
       if (Buffer.byteLength(body) > Computer.LIMITS.bridgeBodyBytes)
         return yield* new ComputerError({ code: "failed", message: "The computer request is too large." })
+      // This labels only the already validated loopback IPC. Cleanup must still reach the desktop when Hands is off.
+      const decision = Egress.decide({
+        source: "computer-bridge",
+        url: bridge.url,
+        method: "POST",
+        tool: "computer",
+        bytes: Buffer.byteLength(body),
+      })
+      if (decision.decision !== "allow")
+        return yield* new ComputerError({ code: "unavailable", message: "The local computer bridge is unavailable." })
       const response = yield* http
         .execute(
           HttpClientRequest.post(bridge.url).pipe(
