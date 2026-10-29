@@ -359,6 +359,44 @@ async function appliedVersion(provisioner: string, account: string, fetcher: typ
 
 // ── Actions ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** Owner holds and their repair action become durable together, including a unique publication token. */
+export const ACCOUNT_RECONCILE_SCRIPT = `redis.call('SET', KEYS[4], ARGV[5]) ${ENQUEUE}`
+export async function saveAccountAndReconcile(
+  account: string,
+  record: unknown,
+  fetcher: typeof fetch,
+  now = Date.now(),
+) {
+  const id = actionItemId("reconcile", account)
+  const action: ActionRecord = {
+    v: 1,
+    type: "action",
+    kind: "reconcile",
+    key: account,
+    priority: true,
+    payload: { ownerIntent: randomUUID() },
+    attempts: 0,
+    createdAt: now,
+  }
+  await persistentStore(
+    [
+      "EVAL",
+      ACCOUNT_RECONCILE_SCRIPT,
+      4,
+      outboxKey(),
+      itemKey(id),
+      deadKey(),
+      codiumKey("account", account),
+      id,
+      JSON.stringify(action),
+      outboxScore(now, true),
+      "replace",
+      JSON.stringify(record),
+    ],
+    fetcher,
+  )
+}
+
 /**
  * Queues durable work, due at `at` (now by default). One item per kind and key: queuing it again replaces its payload,
  * keeps the earlier due time and starts its tries over, and takes it off the dead letters. Resolves once the item is

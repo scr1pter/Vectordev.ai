@@ -407,9 +407,26 @@
         { "key": "Content-Type", "value": "text/plain; charset=utf-8" },
         { "key": "Cache-Control", "value": "no-store" }
       ]
+    },
+    {
+      "source": "/owner/:path*",
+      "headers": [
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow, noarchive"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
+        }
+      ]
     }
   ],
   "rewrites": [
+    {
+      "source": "/owner/codium",
+      "destination": "/owner/codium/index.html"
+    },
     {
       "source": "/design-lab/:path*",
       "destination": "/api/design-lab/serve?path=:path*"

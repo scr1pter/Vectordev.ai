@@ -21,10 +21,11 @@ import {
   fraudRefundEnabled,
   readFraudWarning,
   refundFraudWarning,
+  stripeObjectId,
 } from "./codium-risk.js"
 import { codiumKey, openRouterKeyName } from "./codium-keys.js"
 import { codiumKeyLimitUsd, renewalGraceMinutes, TRUST_RAMP, POOL_RAMP } from "./codium-limits.js"
-import { enqueueAction, registerAction } from "./codium-provision.js"
+import { enqueueAction, registerAction, saveAccountAndReconcile } from "./codium-provision.js"
 import { checkoutConsentFields, CODIUM_TERMS_DATE, sendCodiumConfirmation } from "./codium-consent.js"
 import {
   carryMicro,
@@ -84,7 +85,7 @@ import {
   requireCodiumCheckoutUser,
   subscriptionPlanCredits,
 } from "./model-plan-config.js"
-import { modelPlanStripe, stripeMode, stripeRecord } from "./model-plan-stripe.js"
+import { listStripe, modelPlanStripe, stripeMode, stripeRecord } from "./model-plan-stripe.js"
 import { ApiError } from "./http.js"
 import { persistentStore } from "./persistent-store.js"
 
@@ -127,6 +128,33 @@ const Account = Schema.Struct({
   customer: Schema.String,
   closing: Schema.optional(Schema.Boolean),
   risk: Schema.optional(Risk),
+  riskCleared: Schema.optional(
+    Schema.Struct({
+      warnings: Schema.Array(Schema.String),
+      disputes: Schema.Array(
+        Schema.Struct({ id: Schema.String, charge: Schema.String, status: Schema.Literal("lost") }),
+      ),
+    }),
+  ),
+  ownerRefunded: Schema.optional(Schema.Struct({ subscription: Schema.String, periodStart: Schema.Number })),
+  ownerEnd: Schema.optional(
+    Schema.Struct({
+      id: Schema.String,
+      at: Schema.Number,
+      customer: Schema.String,
+      charge: Schema.NullOr(Schema.String),
+      refundCents: Micro,
+      refundAttempt: Schema.optional(Micro),
+      refund: Schema.optional(
+        Schema.Struct({ amount: Micro, id: Schema.optional(Schema.String), status: Schema.optional(Schema.String) }),
+      ),
+      subscription: Schema.NullOr(Schema.String),
+      periodStart: Schema.NullOr(Schema.Number),
+      subscriptions: Schema.Array(Schema.String),
+      checkouts: Schema.Array(Schema.String),
+      done: Schema.Boolean,
+    }),
+  ),
   // Set by WP A10 once a rank 3 or higher payment passed 3-D Secure.
   highValueVerified: Schema.optional(Schema.Boolean),
   poolRamp: Schema.optional(
@@ -248,10 +276,15 @@ function withAccountLease<T>(id: string, work: (verify: () => Promise<void>) => 
 export async function readModelPlanAccount(id: string, fetcher: typeof fetch = fetch) {
   const saved = await persistentStore(["GET", accountKey(id)], fetcher)
   if (saved === null) return undefined
-  const decoded = Schema.decodeUnknownOption(Schema.fromJsonString(Account))(saved)
-  if (Option.isNone(decoded))
-    throw new ApiError(503, "MODEL_PLAN_ACCOUNT_INVALID", "Model access could not be verified.")
-  return decoded.value
+  return decodeModelPlanAccount(saved)
+}
+export function decodeModelPlanAccount(raw: unknown) {
+  const decoded =
+    typeof raw === "string"
+      ? Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(Account))(raw))
+      : undefined
+  if (!decoded) throw new ApiError(503, "MODEL_PLAN_ACCOUNT_INVALID", "Model access could not be verified.")
+  return decoded
 }
 
 /**
@@ -426,7 +459,7 @@ export async function reconcileModelPlanAccount(
       const listed = await listSubscriptions(account.customer, fetcher)
       const review = await reviewRisk(id, account, listed, options.hint, fetcher, now)
       const current = listed.map((subscription) => clearWonDispute(subscription, review.cleared))
-      const reviewed = { ...account, risk: review.risk }
+      const reviewed = { ...account, risk: review.risk, riskCleared: review.riskCleared }
       const standing = revokedRenewal(
         reviewed,
         planStanding(id, reviewed, current, now, { known: knownPeriods(account, stored.previous) }),
@@ -525,6 +558,8 @@ export async function reconcileModelPlanAccount(
       // Access is durably stopped before a refund/cancel/pause can fail or time out.
       if (standing.state === "ended" || standing.state === "none") await writeRampOwed(id, 0, fetcher)
       await applyRiskEffects(id, updated, current, review.actionable, verify, fetcher, now)
+      if (updated.ownerEnd && !updated.ownerEnd.done)
+        return finishOwnerEnd(id, (await readModelPlanAccount(id, fetcher)) ?? updated, verify, fetcher, now)
       await syncCodiumCollection(
         id,
         (await readModelPlanAccount(id, fetcher)) ?? updated,
@@ -666,17 +701,31 @@ const LOST_DISPUTE = new Set(["lost"])
  * once every one of them was won or closed as an inquiry. A charge Stripe marks disputed with no dispute listed, or
  * with more than one page of them, counts as open.
  */
-async function disputeOutcome(charge: string, fetcher: typeof fetch) {
+async function disputeOutcome(
+  charge: string,
+  fetcher: typeof fetch,
+  acknowledged: readonly { id: string; charge: string; status: "lost" }[] = [],
+) {
   const query = new URLSearchParams({ charge, limit: "100" })
   const result = await modelPlanStripe(`disputes?${query}`, {}, fetcher)
   const disputes = Array.isArray(result.data) ? result.data.filter(stripeRecord) : []
   if (result.has_more !== false || !disputes.length || disputes.some((value) => value.charge !== charge))
     return { kind: "open" as const, status: "unknown" }
-  const lost = disputes.find((value) => LOST_DISPUTE.has(String(value.status)))
-  if (lost) return { kind: "lost" as const, status: String(lost.status) }
-  const open = disputes.find((value) => !WON_DISPUTE.has(String(value.status)))
+  const open = disputes.find(
+    (value) => !WON_DISPUTE.has(String(value.status)) && !LOST_DISPUTE.has(String(value.status)),
+  )
   if (open) return { kind: "open" as const, status: typeof open.status === "string" ? open.status : "unknown" }
-  return { kind: "won" as const, status: "won" }
+  const lost = disputes.filter((value) => LOST_DISPUTE.has(String(value.status)))
+  if (
+    lost.some(
+      (value) =>
+        !acknowledged.some(
+          (entry) => entry.id === value.id && entry.charge === charge && entry.status === value.status,
+        ),
+    )
+  )
+    return { kind: "lost" as const, status: "lost" }
+  return lost.length ? { kind: "acknowledged" as const, status: "lost" } : { kind: "won" as const, status: "won" }
 }
 
 /**
@@ -722,18 +771,21 @@ async function reviewRisk(
     if (charge?.disputed === true && typeof charge.id === "string") charges.add(charge.id)
   }
   const cleared = new Set<string>()
+  let acknowledged = [...(account.riskCleared?.disputes ?? [])]
   for (const charge of charges) {
-    const outcome = await disputeOutcome(charge, fetcher)
+    const outcome = await disputeOutcome(charge, fetcher, acknowledged)
     if (outcome.kind === "open") {
+      acknowledged = acknowledged.filter((entry) => entry.charge !== charge)
       risk.openDisputes[charge] = { status: outcome.status, at: before.openDisputes[charge]?.at ?? now }
       continue
     }
     delete risk.openDisputes[charge]
     if (outcome.kind === "won") cleared.add(charge)
-    else if (!risk.blocked) Object.assign(risk, { blocked: true, reason: "disputed", at: now })
+    else if (outcome.kind === "lost" && !risk.blocked)
+      Object.assign(risk, { blocked: true, reason: "disputed", at: now })
   }
   const warnings = new Map<string, Awaited<ReturnType<typeof readFraudWarning>>>()
-  if (hint?.kind === "efw") {
+  if (hint?.kind === "efw" && !account.riskCleared?.warnings.includes(hint.id)) {
     const warning = await readFraudWarning(accountID, account.customer, hint.id, fetcher)
     warnings.set(hint.id, warning)
     if (warning && (!hint.charge || hint.charge === warning.charge) && !risk.efw.includes(warning.charge))
@@ -788,7 +840,12 @@ async function reviewRisk(
     pauseTokens: risk.paused.length ? risk.pauseTokens : undefined,
   }
   const unchanged = JSON.stringify(normalized) === JSON.stringify(before)
-  return { risk: unchanged && !account.risk ? undefined : normalized, cleared, actionable }
+  return {
+    risk: unchanged && !account.risk ? undefined : normalized,
+    cleared,
+    actionable,
+    riskCleared: account.riskCleared ? { ...account.riskCleared, disputes: acknowledged } : undefined,
+  }
 }
 
 /** Financial side effects run only after the snapshot and key reflect the hold. Callers own the billing lease. */
@@ -928,9 +985,11 @@ function clearWonDispute(subscription: Record<string, unknown>, cleared: Readonl
  */
 export function riskState(account: {
   closing?: boolean
+  ownerEnd?: { done: boolean }
   risk?: Risk
 }): { state: PlanState; reason: PlanReason } | undefined {
   if (account.closing) return { state: "ended", reason: "closing" }
+  if (account.ownerEnd && !account.ownerEnd.done) return { state: "frozen", reason: "owner" }
   const risk = account.risk
   if (!risk) return undefined
   if (risk.blocked && (risk.reason === "disputed" || risk.reason === "early_fraud_warning"))
@@ -1149,7 +1208,7 @@ export function governingStanding(standings: readonly Standing[]) {
 /** The account's state: its risk record first, then its governing subscription's. */
 export function planStanding(
   accountID: string,
-  account: { closing?: boolean; risk?: Risk },
+  account: Pick<Account, "closing" | "risk" | "ownerEnd" | "ownerRefunded">,
   subscriptions: readonly unknown[],
   now = Date.now(),
   context: StandingContext = {},
@@ -1159,7 +1218,19 @@ export function planStanding(
     .filter((value) => value !== undefined)
   const { governing, duplicates } = governingStanding(standings)
   const held = riskState(account)
-  const state = held ?? (governing ? { state: governing.state, reason: governing.reason } : { state: "none" as const })
+  const refunded =
+    governing?.state === "ended" &&
+    ((account.ownerRefunded?.subscription === governing.id &&
+      account.ownerRefunded.periodStart === governing.start * 1000) ||
+      (account.ownerEnd?.done &&
+        account.ownerEnd.charge !== null &&
+        governing.id === account.ownerEnd.subscription &&
+        governing.start * 1000 === account.ownerEnd.periodStart))
+  const state =
+    held ??
+    (governing
+      ? { state: governing.state, reason: refunded ? ("refunded" as const) : governing.reason }
+      : { state: "none" as const })
   return { state: state.state, reason: state.reason, governing, duplicates }
 }
 
@@ -2928,6 +2999,477 @@ export async function modelPlanPortal(
   if (typeof result.url !== "string" || !result.url.startsWith("https://billing.stripe.com/"))
     throw new ApiError(502, "BILLING_PORTAL_UNAVAILABLE", "Subscription management could not be opened.")
   return { url: result.url }
+}
+
+/** An owner quote is a confirmation fence, never an amount supplied to the refund provider. */
+export function ownerRefundQuote(
+  id: string,
+  account: Account,
+  listed: readonly Record<string, unknown>[],
+  now = Date.now(),
+) {
+  if (account.ownerEnd && !account.ownerEnd.done) {
+    const operation = account.ownerEnd
+    return {
+      expectedCharge: operation.charge,
+      expectedRefundCents: operation.refundCents,
+      expectedSubscription: operation.subscription,
+      expectedPeriodStart: operation.periodStart,
+    }
+  }
+  const current = listed.filter((subscription) => subscription.customer === account.customer)
+  const governing = planStanding(id, account, current, now).governing
+  const source = current.find((value) => value.id === governing?.id)
+  // Cancellation stops access; it does not make the current paid invoice ineligible for an owner's cash refund.
+  const paid =
+    governing?.paid ??
+    (source?.status === "canceled" ? paidModelPlan({ ...source, status: "active" }, id, now) : undefined)
+  const base = {
+    expectedSubscription: governing?.id ?? null,
+    expectedPeriodStart: governing ? governing.start * 1000 : null,
+  }
+  if (!paid) return { ...base, expectedCharge: null, expectedRefundCents: 0 }
+  const charge = source && latestCharge(source)
+  if (
+    !charge ||
+    !validChargeId(charge.id) ||
+    charge.paid !== true ||
+    charge.currency !== "usd" ||
+    !Number.isSafeInteger(charge.amount) ||
+    !Number.isSafeInteger(charge.amount_refunded) ||
+    Number(charge.amount) <= 0 ||
+    Number(charge.amount_refunded) < 0 ||
+    Number(charge.amount_refunded) > Number(charge.amount)
+  )
+    return undefined
+  return {
+    ...base,
+    expectedCharge: charge.id,
+    expectedRefundCents: Number(charge.amount) - Number(charge.amount_refunded),
+  }
+}
+export type OwnerRefundQuote = NonNullable<ReturnType<typeof ownerRefundQuote>>
+
+/** Freeze and bind immutable targets before external writes. The existing reconcile outbox discovers/retries this intent. */
+export async function refundEndModelPlanAccount(
+  id: string,
+  expected: OwnerRefundQuote,
+  fetcher: typeof fetch = fetch,
+  now = Date.now(),
+) {
+  const operation = await withCodiumLease(
+    id,
+    async (verify) => {
+      const account = await readModelPlanAccount(id, fetcher)
+      if (!account || account.closing)
+        throw new ApiError(409, "CODIUM_ACCOUNT_UNAVAILABLE", "This Codium account cannot be changed.")
+      if (
+        account.ownerEnd?.done &&
+        expected.expectedCharge === account.ownerEnd.charge &&
+        expected.expectedSubscription === account.ownerEnd.subscription &&
+        expected.expectedPeriodStart === account.ownerEnd.periodStart &&
+        expected.expectedRefundCents === account.ownerEnd.refundCents
+      )
+        return account.ownerEnd.id
+      const listed = await listSubscriptions(account.customer, fetcher)
+      const quote = ownerRefundQuote(id, account, listed, now)
+      if (
+        !quote ||
+        Object.keys(expected).some(
+          (key) => expected[key as keyof OwnerRefundQuote] !== quote[key as keyof OwnerRefundQuote],
+        )
+      )
+        throw new ApiError(
+          409,
+          "CODIUM_REFUND_CHANGED",
+          "The current payment changed. Refresh and confirm the updated payment.",
+        )
+      if (account.ownerEnd && !account.ownerEnd.done) {
+        const failed = account.ownerEnd.refund?.status === "failed" || account.ownerEnd.refund?.status === "canceled"
+        await verify()
+        if (failed)
+          await saveAccountAndReconcile(
+            id,
+            {
+              ...account,
+              ownerEnd: {
+                ...account.ownerEnd,
+                refundAttempt: (account.ownerEnd.refundAttempt ?? 0) + 1,
+                refund: undefined,
+              },
+            },
+            fetcher,
+            now,
+          )
+        else await enqueueAction("reconcile", id, {}, undefined, fetcher, now)
+        return account.ownerEnd.id
+      }
+      if (quote.expectedCharge && !(await codiumChargeOwned(id, account.customer, quote.expectedCharge, fetcher)))
+        throw new ApiError(
+          409,
+          "CODIUM_REFUND_CHANGED",
+          "The current payment could not be verified. Refresh and try again.",
+        )
+      // A session can complete after the first subscription read. Include every status and the durably bound
+      // session explicitly; otherwise an open-only list can omit both it and its newly created subscription.
+      const checkouts = await listStripe("checkout/sessions", [["customer", account.customer]], {}, fetcher)
+      if (!checkouts.complete)
+        throw new ApiError(503, "MODEL_PLAN_CLEANUP", "Pending Codium checkouts could not be verified.")
+      const captured = checkouts.data.filter((session) => ownerCheckoutOwned(id, account, session))
+      if (account.checkout && !captured.some((session) => session.id === account.checkout!.id)) {
+        const bound = await modelPlanStripe(`checkout/sessions/${encodeURIComponent(account.checkout.id)}`, {}, fetcher)
+        if (!ownerCheckoutOwned(id, account, bound))
+          throw new ApiError(503, "MODEL_PLAN_CLEANUP", "The saved Codium checkout could not be verified.")
+        captured.push(bound)
+      }
+      if (captured.some((session) => typeof session.id !== "string"))
+        throw new ApiError(503, "MODEL_PLAN_CLEANUP", "Pending Codium checkouts could not be verified.")
+      // Confirm the quoted payment again after session discovery. A newly paid checkout must require a new
+      // confirmation; a later completion remains covered by its immutable captured session target.
+      const current = await listSubscriptions(account.customer, fetcher)
+      const confirmed = ownerRefundQuote(id, account, current, now)
+      if (
+        !confirmed ||
+        Object.keys(expected).some(
+          (key) => expected[key as keyof OwnerRefundQuote] !== confirmed[key as keyof OwnerRefundQuote],
+        )
+      )
+        throw new ApiError(409, "CODIUM_REFUND_CHANGED", "The current payment changed. Refresh and confirm the updated payment.")
+      const intent = {
+        id: randomUUID(),
+        at: now,
+        customer: account.customer,
+        charge: quote.expectedCharge,
+        refundCents: quote.expectedRefundCents,
+        subscription: quote.expectedSubscription,
+        periodStart: quote.expectedPeriodStart,
+        subscriptions: current
+          .filter(
+            (subscription) =>
+              subscription.customer === account.customer &&
+              stripeRecord(subscription.metadata) &&
+              subscription.metadata.vector_account_id === id &&
+              isPlanId(subscription.metadata.vector_plan),
+          )
+          .map((subscription) => String(subscription.id)),
+        checkouts: captured.map((session) => String(session.id)),
+        done: false,
+      }
+      const held = { ...account, ownerEnd: intent }
+      await verify()
+      await saveAccountAndReconcile(id, held, fetcher, now)
+      // An interruption after this save is also found by ordinary reconciliation/sweeps through the frozen snapshot.
+      const stored = await readSnapshotForWrite(id, fetcher)
+      await commitSnapshot(
+        { ...closingFacts(id, held, stored.previous, "owner"), state: "frozen", reason: "owner" },
+        stored,
+        fetcher,
+        now,
+        verify,
+      )
+      const keyOwed = account.key
+        ? (account.key.fullCreditsMicro ?? keyPool(account.key).creditsMicro) + carryPotential(account.key.carry)
+        : 0
+      const contracted = current.reduce((sum, subscription) => {
+        const paid = paidModelPlan(subscription, id, now)
+        return sum + (paid ? usdToMicro(codiumKeyLimitUsd(paid.plan.credits)) : 0)
+      }, 0)
+      const owed = Math.max(keyOwed, contracted)
+      await writeRampOwed(id, owed, fetcher, "raise")
+      if (account.key) await disableKey(account.key, verify, fetcher)
+      await verify()
+      await enqueueAction("reconcile", id, {}, undefined, fetcher, now)
+      return intent.id
+    },
+    fetcher,
+  )
+  // Work remains queued if the bounded immediate attempt fails. The caller can retry the same confirmation safely.
+  await reconcileModelPlanAccount(id, fetcher, now, { source: "owner" })
+  return operation
+}
+
+function ownerCheckoutOwned(id: string, account: Account, session: Record<string, unknown>, captured = false) {
+  const known = account.checkout && account.checkout.id === session.id && isPlanId(account.checkout.plan)
+  if (
+    session.customer !== account.customer ||
+    session.mode !== "subscription" ||
+    (session.client_reference_id !== id && !(known && session.client_reference_id == null))
+  )
+    return false
+  if (captured || known) return true
+  const metadata = stripeRecord(session.metadata) ? session.metadata : undefined
+  return (
+    modelPlans().some((plan) => plan.priceID && plan.priceID === metadata?.vector_price_id) &&
+    Number.isFinite(Number(metadata?.vector_model_credits_usd)) &&
+    Number(metadata?.vector_model_credits_usd) > 0
+  )
+}
+
+async function finishOwnerEnd(
+  id: string,
+  account: Account,
+  verify: () => Promise<void>,
+  fetcher: typeof fetch,
+  now: number,
+) {
+  const operation = account.ownerEnd
+  if (!operation || operation.done || operation.customer !== account.customer)
+    throw new ApiError(503, "CODIUM_OWNER_OPERATION_INVALID", "The saved owner operation could not be verified.")
+  const targets = new Set(operation.subscriptions)
+  for (const checkout of operation.checkouts) {
+    const session = await modelPlanStripe(`checkout/sessions/${encodeURIComponent(checkout)}`, {}, fetcher)
+    if (!ownerCheckoutOwned(id, account, session, true))
+      throw new ApiError(503, "CODIUM_OWNER_OPERATION_INVALID", "The saved checkout could not be verified.")
+    if (session.status === "open") {
+      await verify()
+      await modelPlanStripe(
+        `checkout/sessions/${encodeURIComponent(checkout)}/expire`,
+        { method: "POST", idempotency: `vector-owner-expire-${operation.id}-${checkout}` },
+        fetcher,
+      )
+    }
+    // A captured pending checkout can finish while it is being stopped. Its resulting subscription remains bound to that immutable checkout target.
+    const subscription = stripeObjectId(session.subscription)
+    if (session.status === "complete" && subscription) targets.add(subscription)
+  }
+  for (const subscription of targets) {
+    const current = await modelPlanStripe(`subscriptions/${encodeURIComponent(subscription)}`, {}, fetcher)
+    if (
+      current.customer !== account.customer ||
+      !stripeRecord(current.metadata) ||
+      current.metadata.vector_account_id !== id ||
+      !isPlanId(current.metadata.vector_plan)
+    )
+      throw new ApiError(503, "CODIUM_OWNER_OPERATION_INVALID", "The saved subscription could not be verified.")
+    await supersedeSubscription(account.customer, subscription, fetcher, verify)
+  }
+  if (operation.charge) await settleOwnerRefund(id, account, verify, fetcher)
+  const latest = await readModelPlanAccount(id, fetcher)
+  if (!latest || latest.ownerEnd?.id !== operation.id)
+    throw new ApiError(503, "CODIUM_OWNER_OPERATION_INVALID", "The saved owner operation changed.")
+  const refunded =
+    operation.charge && operation.subscription && operation.periodStart !== null
+      ? { subscription: operation.subscription, periodStart: operation.periodStart }
+      : latest.ownerRefunded
+  const ended = {
+    ...latest,
+    ownerEnd: { ...latest.ownerEnd, done: true },
+    ownerRefunded: refunded,
+    ...(latest.key
+      ? {
+          key: {
+            ...latest.key,
+            revoked:
+              refunded &&
+              refunded.subscription === latest.key.subscription &&
+              refunded.periodStart === latest.key.start * 1000
+                ? ("refunded" as const)
+                : ("canceled" as const),
+          },
+        }
+      : {}),
+  }
+  await verify()
+  await saveAccount(id, ended, fetcher)
+  await writeRampOwed(id, 0, fetcher)
+  const stored = await readSnapshotForWrite(id, fetcher)
+  const facts = closingFacts(id, ended, stored.previous, "owner")
+  return commitSnapshot(
+    {
+      ...facts,
+      state: "ended",
+      reason:
+        ended.ownerRefunded &&
+        ended.ownerRefunded.subscription === facts.subscription &&
+        ended.ownerRefunded.periodStart === facts.periodStart
+          ? "refunded"
+          : "canceled",
+    },
+    stored,
+    fetcher,
+    now,
+    verify,
+  )
+}
+
+/** A successful HTTP response can still describe pending/failed money. Only settled refunds finish the operation. */
+async function settleOwnerRefund(id: string, account: Account, verify: () => Promise<void>, fetcher: typeof fetch) {
+  const operation = account.ownerEnd!
+  const source = operation.charge!
+  const charge = await modelPlanStripe(`charges/${encodeURIComponent(source)}`, {}, fetcher)
+  if (
+    !(await codiumChargeOwned(id, account.customer, source, fetcher, charge)) ||
+    charge.paid !== true ||
+    charge.currency !== "usd" ||
+    !Number.isSafeInteger(charge.amount) ||
+    !Number.isSafeInteger(charge.amount_refunded) ||
+    Number(charge.amount) <= 0 ||
+    Number(charge.amount_refunded) < 0 ||
+    Number(charge.amount_refunded) > Number(charge.amount)
+  )
+    throw ownerOperationInvalid()
+  const remaining = Number(charge.amount) - Number(charge.amount_refunded)
+  if (remaining > operation.refundCents)
+    throw new ApiError(409, "CODIUM_REFUND_CHANGED", "The saved payment amount changed. Refresh the owner page.")
+  const attempt = operation.refundAttempt ?? 0
+  const listed = await listStripe("refunds", [["charge", source]], {}, fetcher)
+  if (!listed.complete) throw ownerOperationInvalid()
+  const matching = listed.data.filter(
+    (refund) =>
+      stripeRecord(refund.metadata) &&
+      refund.metadata.vector_owner_operation === operation.id &&
+      String(refund.metadata.vector_owner_attempt) === String(attempt),
+  )
+  if (matching.length > 1) throw ownerOperationInvalid()
+  let intent = operation.refund
+  let refund = intent?.id ? await modelPlanStripe(`refunds/${encodeURIComponent(intent.id)}`, {}, fetcher) : matching[0]
+  const persist = async (next: { amount: number; id?: string; status?: string }) => {
+    const latest = await readModelPlanAccount(id, fetcher)
+    if (!latest || latest.ownerEnd?.id !== operation.id || (latest.ownerEnd.refundAttempt ?? 0) !== attempt)
+      throw ownerOperationInvalid()
+    await verify()
+    await saveAccount(id, { ...latest, ownerEnd: { ...latest.ownerEnd, refund: next } }, fetcher)
+  }
+  if (!refund && remaining > 0) {
+    intent = intent ?? { amount: remaining }
+    if (remaining < intent.amount)
+      throw new ApiError(
+        409,
+        "CODIUM_REFUND_CHANGED",
+        "Another refund changed the saved payment. Review it in Stripe before retrying.",
+      )
+    await persist(intent)
+    await verify()
+    refund = await modelPlanStripe(
+      "refunds",
+      {
+        method: "POST",
+        idempotency: `vector-owner-refund-${operation.id}-${attempt}`,
+        body: new URLSearchParams({
+          charge: source,
+          amount: String(intent.amount),
+          reason: "requested_by_customer",
+          "metadata[vector_owner_operation]": operation.id,
+          "metadata[vector_owner_attempt]": String(attempt),
+        }),
+      },
+      fetcher,
+    )
+  }
+  if (refund) {
+    if (
+      typeof refund.id !== "string" ||
+      !/^re_[A-Za-z0-9]+$/.test(refund.id) ||
+      stripeObjectId(refund.charge) !== source ||
+      refund.currency !== "usd" ||
+      !Number.isSafeInteger(refund.amount) ||
+      Number(refund.amount) <= 0 ||
+      Number(refund.amount) > operation.refundCents ||
+      (intent && refund.amount !== intent.amount) ||
+      !["succeeded", "pending", "requires_action", "failed", "canceled"].includes(String(refund.status))
+    )
+      throw ownerOperationInvalid()
+    await persist({ amount: Number(refund.amount), id: refund.id, status: String(refund.status) })
+    if (refund.status !== "succeeded")
+      throw new ApiError(
+        503,
+        refund.status === "failed" || refund.status === "canceled" ? "CODIUM_REFUND_FAILED" : "CODIUM_REFUND_PENDING",
+        refund.status === "failed" || refund.status === "canceled"
+          ? "Stripe did not complete the refund. Review the payment before confirming another attempt."
+          : "Stripe is still processing the refund. Access stays stopped while it settles.",
+      )
+  }
+  const settled = await listStripe("refunds", [["charge", source]], {}, fetcher)
+  const refreshed = await modelPlanStripe(`charges/${encodeURIComponent(source)}`, {}, fetcher)
+  const returned = settled.data.reduce(
+    (sum, value) =>
+      sum +
+      (stripeObjectId(value.charge) === source &&
+      value.status === "succeeded" &&
+      value.currency === "usd" &&
+      Number.isSafeInteger(value.amount) &&
+      Number(value.amount) > 0
+        ? Number(value.amount)
+        : 0),
+    0,
+  )
+  if (
+    !settled.complete ||
+    !Number.isSafeInteger(returned) ||
+    returned < Number(charge.amount) ||
+    !Number.isSafeInteger(refreshed.amount_refunded) ||
+    Number(refreshed.amount_refunded) < Number(charge.amount)
+  )
+    throw new ApiError(
+      503,
+      "CODIUM_REFUND_PENDING",
+      "The full refund has not settled yet. Access stays stopped while it settles.",
+    )
+}
+function ownerOperationInvalid() {
+  return new ApiError(503, "CODIUM_OWNER_OPERATION_INVALID", "The saved owner operation could not be verified.")
+}
+
+/** Clearing a hold acknowledges exact terminal signals, never an open dispute or a replacement payment. */
+export async function clearModelPlanRisk(id: string, fetcher: typeof fetch = fetch, now = Date.now()) {
+  await withCodiumLease(
+    id,
+    async (verify) => {
+      const account = await readModelPlanAccount(id, fetcher)
+      if (!account || account.closing || (account.ownerEnd && !account.ownerEnd.done))
+        throw new ApiError(409, "CODIUM_ACCOUNT_UNAVAILABLE", "This Codium account cannot be changed.")
+      const charges = await listStripe("charges", [["customer", account.customer]], {}, fetcher)
+      if (!charges.complete)
+        throw new ApiError(503, "MODEL_PLAN_RISK_UNAVAILABLE", "Payment history could not be verified.")
+      const acknowledged = [...(account.riskCleared?.disputes ?? [])]
+      for (const charge of charges.data) {
+        if (
+          !validChargeId(charge.id) ||
+          charge.disputed !== true ||
+          !(await codiumChargeOwned(id, account.customer, charge.id, fetcher, charge))
+        )
+          continue
+        const listed = await listStripe("disputes", [["charge", charge.id]], {}, fetcher)
+        if (
+          !listed.complete ||
+          !listed.data.length ||
+          listed.data.some(
+            (dispute) =>
+              dispute.charge !== charge.id ||
+              typeof dispute.id !== "string" ||
+              (!WON_DISPUTE.has(String(dispute.status)) && !LOST_DISPUTE.has(String(dispute.status))),
+          )
+        )
+          throw new ApiError(409, "CODIUM_DISPUTE_OPEN", "Close the payment dispute before clearing this hold.")
+        for (const dispute of listed.data)
+          if (
+            dispute.status === "lost" &&
+            !acknowledged.some((entry) => entry.id === dispute.id && entry.charge === charge.id)
+          )
+            acknowledged.push({ id: String(dispute.id), charge: charge.id, status: "lost" })
+      }
+      // Also verify known open charges absent from an inconsistent charge listing; absence is not proof of a closed dispute.
+      for (const charge of Object.keys(account.risk?.openDisputes ?? {})) {
+        const outcome = await disputeOutcome(charge, fetcher, acknowledged)
+        if (outcome.kind === "open")
+          throw new ApiError(409, "CODIUM_DISPUTE_OPEN", "Close the payment dispute before clearing this hold.")
+      }
+      const updated = {
+        ...account,
+        riskCleared: {
+          warnings: [
+            ...new Set([...(account.riskCleared?.warnings ?? []), ...Object.keys(account.risk?.efwWarnings ?? {})]),
+          ],
+          disputes: acknowledged,
+        },
+        risk: { ...NO_RISK, paused: account.risk?.paused, pauseTokens: account.risk?.pauseTokens },
+      }
+      await verify()
+      await saveAccountAndReconcile(id, updated, fetcher, now)
+    },
+    fetcher,
+  )
+  return reconcileModelPlanAccount(id, fetcher, now, { source: "owner" })
 }
 
 export async function cancelModelPlanAccount(id: string, fetcher: typeof fetch = fetch) {

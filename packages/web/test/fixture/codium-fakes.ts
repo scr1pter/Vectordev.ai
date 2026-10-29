@@ -3,7 +3,9 @@ import { fileURLToPath } from "node:url"
 import { FUNDING_SCRIPTS } from "../../../../api/_lib/codium-funding"
 import { RAMP_SCRIPTS } from "../../../../api/_lib/codium-ramp"
 import { POOL_SCRIPTS } from "../../../../api/_lib/codium-pool"
-import { OUTBOX_SCRIPTS } from "../../../../api/_lib/codium-provision"
+import { ACCOUNT_RECONCILE_SCRIPT, OUTBOX_SCRIPTS } from "../../../../api/_lib/codium-provision"
+import { OWNER_AUDIT_SCRIPT } from "../../../../api/_lib/codium-owner"
+import { ABUSE_RATE_LIMIT_SCRIPT } from "../../../../api/_lib/abuse"
 import { SWITCH_SCRIPTS } from "../../../../api/_lib/codium-switches"
 import { SNAPSHOT_SCRIPTS } from "../../../../api/_lib/codium-snapshot"
 
@@ -119,6 +121,11 @@ export class FakeStore {
         return args.reduce((count, key) => count + (this.remove(key) ? 1 : 0), 0)
       case "PTTL":
         return this.pttl(args[0]!)
+      case "SCAN": {
+        const pattern = args[args.indexOf("MATCH") + 1] ?? "*"
+        const prefix = pattern.endsWith("*") ? pattern.slice(0, -1) : pattern
+        return ["0", this.keys().filter((key) => key.startsWith(prefix))]
+      }
       case "SMEMBERS":
         return [...this.members(args[0]!)]
       case "SADD": {
@@ -165,6 +172,13 @@ export class FakeStore {
         this.prune(args[0]!)
         return score === undefined ? null : String(score)
       }
+      case "ZCARD":
+        return this.zset(args[0]!).size
+      case "ZREVRANGE":
+        return this.ordered(this.zset(args[0]!))
+          .reverse()
+          .slice(Number(args[1]), Number(args[2]) < 0 ? undefined : Number(args[2]) + 1)
+          .map(([member]) => member)
       case "ZRANGE": {
         const members = this.ordered(this.zset(args[0]!)).map(([member]) => member)
         this.prune(args[0]!)
@@ -290,6 +304,33 @@ export class FakeStore {
           if (Number(argv[5]) < required) return 0
           this.hash(key!).set(argv[1]!, `${argv[4]}:${argv[3]}`)
           return 1
+        },
+      ],
+      [
+        ABUSE_RATE_LIMIT_SCRIPT,
+        ([key], [seconds]) => {
+          const count = Number(this.get(key!) ?? 0) + 1
+          const expiry = this.expires.get(key!)
+          this.set(key!, String(count))
+          this.expires.set(key!, count === 1 ? this.clock.now + Number(seconds) * 1000 : expiry!)
+          return [count, Math.ceil(this.pttl(key!) / 1000)]
+        },
+      ],
+      [
+        OWNER_AUDIT_SCRIPT,
+        ([key], [at, raw, before, ttl]) => {
+          const entries = this.zset(key!)
+          entries.set(raw!, Number(at))
+          for (const [member, score] of entries) if (score <= Number(before)) entries.delete(member)
+          this.expires.set(key!, this.clock.now + Number(ttl))
+          return 1
+        },
+      ],
+      [
+        ACCOUNT_RECONCILE_SCRIPT,
+        (keys, argv) => {
+          this.set(keys[3]!, argv[4]!)
+          return this.scripts.get(OUTBOX_SCRIPTS.ENQUEUE)!(keys.slice(0, 3), argv.slice(0, 4))
         },
       ],
       [
@@ -605,6 +646,7 @@ export class FakeStripe {
   fail?: (call: RecordedCall) => Response | undefined
   /** Invoices whose payment the card declines: `pay` counts the attempt and answers 402, as Stripe does. */
   readonly declines = new Set<string>()
+  refundStatus = "succeeded"
 
   /** Adds objects as Stripe stores them (deep copies, so a fixture is never changed). */
   load(objects: StripeObjects) {
@@ -705,6 +747,8 @@ export class FakeStripe {
         id: `cs_fixture${this.objects.checkout_sessions.size + 1}`,
         url: "https://checkout.stripe.com/c/fixture",
         status: "open",
+        mode: call.form?.get("mode"),
+        client_reference_id: call.form?.get("client_reference_id"),
         customer: call.form?.get("customer"),
         expires_at: Number(call.form?.get("expires_at")),
         metadata: {},
@@ -788,20 +832,40 @@ export class FakeStripe {
     if (resource === "invoices" && id && call.method === "GET")
       return found(this.expandOrUndefined(this.objects.invoices.get(id), expand))
     if (resource === "invoices" && id && call.method === "POST") return this.invoiceAction(id, action, call)
+    if (resource === "refunds" && !id && call.method === "GET")
+      return list(
+        [...this.objects.refunds.values()].filter(
+          (refund) => !call.query.get("charge") || refund.charge === call.query.get("charge"),
+        ),
+      )
+    if (resource === "charges" && !id && call.method === "GET")
+      return list(
+        [...this.objects.charges.values()].filter(
+          (charge) => !call.query.get("customer") || charge.customer === call.query.get("customer"),
+        ),
+      )
     if (resource === "refunds" && !id && call.method === "POST") {
       const charge = this.objects.charges.get(call.form?.get("charge") ?? "")
       if (!charge || charge.paid !== true || charge.refunded === true)
         return stripeError(400, "Charge cannot be refunded.")
-      const amount = Number(charge.amount) - Number(charge.amount_refunded ?? 0)
+      const remaining = Number(charge.amount) - Number(charge.amount_refunded ?? 0)
+      const amount = call.form?.has("amount") ? Number(call.form.get("amount")) : remaining
+      if (!Number.isSafeInteger(amount) || amount <= 0 || amount > remaining)
+        return stripeError(400, "Invalid refund amount.")
       const refund = {
         id: `re_fraud${this.objects.refunds.size + 1}`,
         charge: charge.id,
         amount,
-        status: "succeeded",
+        currency: charge.currency ?? "usd",
+        status: this.refundStatus,
         reason: call.form?.get("reason"),
+        metadata: {},
       }
-      charge.amount_refunded = charge.amount
-      charge.refunded = true
+      setMetadata(refund, call.form ?? new URLSearchParams())
+      if (!["failed", "canceled"].includes(this.refundStatus)) {
+        charge.amount_refunded = Number(charge.amount_refunded ?? 0) + amount
+        charge.refunded = charge.amount_refunded === charge.amount
+      }
       this.objects.refunds.set(refund.id, refund)
       return ok(refund)
     }
