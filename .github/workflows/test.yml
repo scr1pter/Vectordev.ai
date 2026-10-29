@@ -138,6 +138,10 @@ jobs:
       - name: Setup Bun
         uses: ./.github/actions/setup-bun
 
+      - name: Check SSE deadline cleanup under Node
+        working-directory: packages/engine
+        run: node --experimental-strip-types --test script/smoke-response-stall.mjs
+
       - name: Build the desktop engine bundle
         working-directory: packages/engine
         run: |

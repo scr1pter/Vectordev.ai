@@ -28,6 +28,19 @@ pass. App and engine typechecks pass. The required production navigation baselin
 and the subsequent comparison are recorded in
 [`docs/benchmarks/vector-title-2026-10`](../../benchmarks/vector-title-2026-10/README.md).
 
+When an explicitly configured SSE inactivity deadline fires, rejection of the
+stream's cleanup cancellation is now observed without replacing the primary
+`ProviderResponseStreamError`. The existing wrapper moved to
+`packages/engine/src/provider/response-stall.ts`; `ProviderError` re-exports the
+same error class. Existing durations, timeout defaults, and retry policy remain
+unchanged. A direct native Node 24.19 regression failed on the old cancellation
+line with the rejected cleanup error and passed after the catch. The actual
+Provider/SDK configured-cloud case passes (one test, nine assertions), including
+one request and error identity; the existing local/cloud deadline case passes
+(one test, 13 assertions). Engine typecheck passes. General CI now runs the native
+Node regression before its existing bundle build and fake-provider smoke; no
+heavy bundle build was run locally.
+
 ## Remaining evidence and decisions
 
 | Audit recommendation | Current state and next gate |
@@ -37,7 +50,7 @@ and the subsequent comparison are recorded in
 | Shorter task descriptions and reduced narration | The audit requires a live behavior check before further prompt trimming. Preserve the current delegation and completion rules until that check has a result. |
 | API-key WebSocket rollout and incremental tool definitions | Production remains on its existing transport default. Validate provider compatibility, reconnection, complete tool availability, and release-path behavior before changing it. Upload-byte savings alone do not establish model-cost savings. |
 | Desktop session titles | The primary composer supplies the first useful line for new work sessions; the offline engine regression confirms no separate title request for that path. Both production navigation jobs passed all nine results with zero blank/unknown samples; raw records and their limited comparison are preserved in the linked evidence. Greeting-first work may still use the existing model-generated title. |
-| Node startup preconnection and stream stalls | Node-compatible connection warming and bounded cloud-stream inactivity handling still need transport-level design and tests. Do not introduce duplicate provider requests or retry partially completed tool work. |
+| Node startup preconnection and stream stalls | Cleanup rejection after an explicit SSE deadline is handled and tested. Cloud HTTP already accepts configured header/chunk timeouts, and OpenAI headers default to 10 seconds; a default cloud chunk deadline remains a policy/design task. Native Node fetch has no preconnect hook: a reusable dispatcher/connector must share the SDK's real pool and preserve proxy and Vector Local policy. Opening an unrelated raw socket would not warm that pool. Do not add a speculative HTTP request or retry partially completed work. |
 | Memory | Profile the current desktop/release build. Old offline measurements are not a baseline for this build. |
 | Default effort, cheaper subagent models, reasoning retention | Keep existing behavior pending matched quality/cost measurements and the separate multi-agent work. The audit does not establish that lower effort is cheaper. |
 | Published CLI | Publishing remains an owner action; a source change cannot update the installed CLI. |
