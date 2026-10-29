@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
+import { Hands } from "@vectordevai/schema/hands"
 import type { Prompt } from "@/context/prompt"
 
 let createPromptSubmit: typeof import("./submit").createPromptSubmit
@@ -628,7 +629,7 @@ describe("prompt submit worktree selection", () => {
 
 describe("follow-up optimistic echo", () => {
   type SendInput = Parameters<typeof import("./submit").sendFollowupDraft>[0]
-  type SentPart = { id: string; type: string; synthetic?: boolean; text?: string }
+  type SentPart = { id: string; type: string; synthetic?: boolean; text?: string; metadata?: Record<string, unknown> }
   type Step = {
     kind: "echo" | "request"
     parts: SentPart[]
@@ -846,6 +847,58 @@ describe("follow-up optimistic echo", () => {
 
   test("keeps the echoed ids when the desktop adds task context", async () => {
     expectOneEchoBeforeRequest(await withDesktopContext(() => send()), 1)
+  })
+
+  test("a queued normal send preserves computer pill markers and their optimistic IDs around desktop context", async () => {
+    const content = `@${Hands.MENTION}`
+    const steps = await withDesktopContext(() =>
+      send({
+        executionMode: "normal",
+        prompt: [
+          { type: "text", content: `${text} `, start: 0, end: text.length + 1 },
+          { type: "computer", content, start: text.length + 1, end: text.length + content.length + 1 },
+          {
+            type: "text",
+            content: " ",
+            start: text.length + content.length + 1,
+            end: text.length + content.length + 2,
+          },
+          {
+            type: "computer",
+            content: "@Notes",
+            start: text.length + content.length + 2,
+            end: text.length + content.length + 8,
+            app: { key: "app:macos:com.apple.notes", name: "Notes" },
+          },
+          pasted,
+        ],
+      }),
+    )
+    expect(steps.map((step) => step.kind)).toEqual(["echo", "request"])
+    const [echo, request] = steps.map((step) => step.parts)
+    const markers = echo.filter((part) => part.metadata?.[Hands.MARKER])
+    expect(
+      markers.map((part) => ({ type: part.type, text: part.text, synthetic: part.synthetic, metadata: part.metadata })),
+    ).toEqual([
+      { type: "text", text: "", synthetic: true, metadata: { [Hands.MARKER]: { kind: "feature" } } },
+      {
+        type: "text",
+        text: "",
+        synthetic: true,
+        metadata: { [Hands.MARKER]: { kind: "app", key: "app:macos:com.apple.notes", name: "Notes" } },
+      },
+    ])
+    expect(
+      request.filter((part) => part.metadata?.[Hands.MARKER]).map((part) => ({ id: part.id, metadata: part.metadata })),
+    ).toEqual(markers.map((part) => ({ id: part.id, metadata: part.metadata })))
+    const echoedIDs = new Set(echo.map((part) => part.id))
+    const added = request.filter((part) => !echoedIDs.has(part.id))
+    expect(added).toHaveLength(1)
+    expect(added[0]).toMatchObject({ type: "text", synthetic: true })
+    expect(added[0].text).toContain("Context note from the desktop bridge.")
+    expect(request.map((part) => part.id)).toEqual([echo[0].id, added[0].id, ...echo.slice(1).map((part) => part.id)])
+    expect(request.map((part) => part.id)).toEqual(request.map((part) => part.id).sort())
+    expect(files(request).map((part) => part.id)).toEqual(files(echo).map((part) => part.id))
   })
 
   test("sends the judge setting, and the policy an older engine needs to run the judge at all", async () => {

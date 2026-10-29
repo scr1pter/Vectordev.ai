@@ -17,16 +17,7 @@ import {
 import { createStore, type SetStoreFunction, type Store } from "solid-js/store"
 import type { useLocal } from "@/context/local"
 import { selectionFromLines, type SelectedLineRange, useFile } from "@/context/file"
-import {
-  ContentPart,
-  DEFAULT_PROMPT,
-  isPromptEqual,
-  Prompt,
-  usePrompt,
-  ImageAttachmentPart,
-  AgentPart,
-  FileAttachmentPart,
-} from "@/context/prompt"
+import { ContentPart, DEFAULT_PROMPT, isPromptEqual, Prompt, usePrompt, ImageAttachmentPart } from "@/context/prompt"
 import { useLayout } from "@/context/layout"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
@@ -51,7 +42,15 @@ import { useSettings } from "@/context/settings"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { createSessionTabs } from "@/pages/session/helpers"
-import { createTextFragment, getCursorPosition, setCursorPosition, setRangeEdge } from "./prompt-input/editor-dom"
+import {
+  createPill,
+  createTextFragment,
+  getCursorPosition,
+  isNormalizedEditor,
+  parsePromptFromDOM,
+  setCursorPosition,
+  setRangeEdge,
+} from "./prompt-input/editor-dom"
 import { createPromptAttachments } from "./prompt-input/attachments"
 import { ACCEPTED_FILE_TYPES, pickAttachmentFiles } from "./prompt-input/files"
 import {
@@ -1115,47 +1114,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     onSelect: handleSlashSelect,
   })
 
-  const createPill = (part: FileAttachmentPart | AgentPart) => {
-    const pill = document.createElement("span")
-    pill.textContent = part.content
-    pill.setAttribute("data-type", part.type)
-    if (part.type === "file") {
-      pill.setAttribute("data-path", part.path)
-      if (part.mime) pill.setAttribute("data-mime", part.mime)
-      if (part.filename) pill.setAttribute("data-filename", part.filename)
-      if (part.url) pill.setAttribute("data-url", part.url)
-      if (part.source?.type === "resource") {
-        pill.setAttribute("data-source-type", part.source.type)
-        pill.setAttribute("data-source-client-name", part.source.clientName)
-        pill.setAttribute("data-source-uri", part.source.uri)
-      }
-    }
-    if (part.type === "agent") pill.setAttribute("data-name", part.name)
-    pill.setAttribute("contenteditable", "false")
-    pill.style.userSelect = "text"
-    pill.style.cursor = "default"
-    return pill
-  }
-
-  const isNormalizedEditor = () =>
-    Array.from(editorRef.childNodes).every((node) => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        const text = node.textContent ?? ""
-        if (!text.includes("\u200B")) return true
-        if (text !== "\u200B") return false
-
-        const prev = node.previousSibling
-        const next = node.nextSibling
-        const prevIsBr = prev?.nodeType === Node.ELEMENT_NODE && (prev as HTMLElement).tagName === "BR"
-        return !!prevIsBr && !next
-      }
-      if (node.nodeType !== Node.ELEMENT_NODE) return false
-      const el = node as HTMLElement
-      if (el.dataset.type === "file") return true
-      if (el.dataset.type === "agent") return true
-      return el.tagName === "BR"
-    })
-
   const renderEditor = (parts: Prompt) => {
     clearEditor()
     for (const part of parts) {
@@ -1163,7 +1121,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         editorRef.appendChild(createTextFragment(part.content))
         continue
       }
-      if (part.type === "file" || part.type === "agent") {
+      if (part.type === "file" || part.type === "agent" || part.type === "computer") {
         editorRef.appendChild(createPill(part))
       }
     }
@@ -1205,14 +1163,14 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const reconcile = (input: Prompt) => {
     if (mirror.input) {
       mirror.input = false
-      if (isNormalizedEditor()) return
+      if (isNormalizedEditor(editorRef)) return
 
       renderEditorWithCursor(input)
       return
     }
 
-    const dom = parseFromDOM()
-    if (isNormalizedEditor() && isPromptEqual(input, dom)) return
+    const dom = parsePromptFromDOM(editorRef)
+    if (isNormalizedEditor(editorRef) && isPromptEqual(input, dom)) return
 
     renderEditorWithCursor(input)
   }
@@ -1227,107 +1185,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     ),
   )
 
-  const parseFromDOM = (): Prompt => {
-    const parts: Prompt = []
-    let position = 0
-    let buffer = ""
-
-    const flushText = () => {
-      let content = buffer
-      if (content.includes("\r")) content = content.replace(/\r\n?/g, "\n")
-      if (content.includes("\u200B")) content = content.replace(/\u200B/g, "")
-      buffer = ""
-      if (!content) return
-      parts.push({ type: "text", content, start: position, end: position + content.length })
-      position += content.length
-    }
-
-    const pushFile = (file: HTMLElement) => {
-      const content = file.textContent ?? ""
-      const source =
-        file.dataset.sourceType === "resource" && file.dataset.sourceClientName && file.dataset.sourceUri
-          ? {
-              type: "resource" as const,
-              text: {
-                value: content,
-                start: position,
-                end: position + content.length,
-              },
-              clientName: file.dataset.sourceClientName,
-              uri: file.dataset.sourceUri,
-            }
-          : undefined
-      parts.push({
-        type: "file",
-        path: file.dataset.path!,
-        content,
-        start: position,
-        end: position + content.length,
-        ...(file.dataset.mime ? { mime: file.dataset.mime } : {}),
-        ...(file.dataset.filename ? { filename: file.dataset.filename } : {}),
-        ...(file.dataset.url ? { url: file.dataset.url } : {}),
-        ...(source ? { source } : {}),
-      })
-      position += content.length
-    }
-
-    const pushAgent = (agent: HTMLElement) => {
-      const content = agent.textContent ?? ""
-      parts.push({
-        type: "agent",
-        name: agent.dataset.name!,
-        content,
-        start: position,
-        end: position + content.length,
-      })
-      position += content.length
-    }
-
-    const visit = (node: Node) => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        buffer += node.textContent ?? ""
-        return
-      }
-      if (node.nodeType !== Node.ELEMENT_NODE) return
-
-      const el = node as HTMLElement
-      if (el.dataset.type === "file") {
-        flushText()
-        pushFile(el)
-        return
-      }
-      if (el.dataset.type === "agent") {
-        flushText()
-        pushAgent(el)
-        return
-      }
-      if (el.tagName === "BR") {
-        buffer += "\n"
-        return
-      }
-
-      for (const child of Array.from(el.childNodes)) {
-        visit(child)
-      }
-    }
-
-    const children = Array.from(editorRef.childNodes)
-    children.forEach((child, index) => {
-      const isBlock = child.nodeType === Node.ELEMENT_NODE && ["DIV", "P"].includes((child as HTMLElement).tagName)
-      visit(child)
-      if (isBlock && index < children.length - 1) {
-        buffer += "\n"
-      }
-    })
-
-    flushText()
-
-    if (parts.length === 0) parts.push(...DEFAULT_PROMPT)
-    return parts
-  }
-
   const handleInput = () => {
-    const rawParts = parseFromDOM()
+    const rawParts = parsePromptFromDOM(editorRef)
     const images = imageAttachments()
     const cursorPosition = getCursorPosition(editorRef)
     const rawText =
@@ -1392,7 +1251,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     const range = selection.getRangeAt(0)
     if (!editorRef.contains(range.startContainer)) return false
 
-    if (part.type === "file" || part.type === "agent") {
+    if (part.type === "file" || part.type === "agent" || part.type === "computer") {
       const cursorPosition = getCursorPosition(editorRef)
       const rawText = prompt
         .current()
@@ -2138,6 +1997,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                       "min-h-[52px] w-full px-4 pt-4 pb-2 focus:outline-none whitespace-pre-wrap leading-5 text-[15px] font-normal text-v2-text-text-base": true,
                       "[&_[data-type=file]]:text-syntax-property": true,
                       "[&_[data-type=agent]]:text-syntax-type": true,
+                      "[&_[data-type=computer]]:text-[#a78bfa]": true,
                       "font-mono!": store.mode === "shell",
                     }}
                   />
@@ -2556,6 +2416,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     "w-full pl-3 pr-2 pt-2 text-14-regular text-text-strong focus:outline-none whitespace-pre-wrap": true,
                     "[&_[data-type=file]]:text-syntax-property": true,
                     "[&_[data-type=agent]]:text-syntax-type": true,
+                    "[&_[data-type=computer]]:text-[#a78bfa]": true,
                     "font-mono!": store.mode === "shell",
                   }}
                   style={{ "padding-bottom": space }}
