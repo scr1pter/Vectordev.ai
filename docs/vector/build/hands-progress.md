@@ -4,12 +4,12 @@ The build contract is [hands-build-spec.md](./hands-build-spec.md). Read [hands-
 
 ## Completed and current work
 
-The first 22 work packages, through D5a, are implemented and pushed. D6a is implemented in `3bb67725` with passing local model/controller/copy tests and app/browser-fixture typechecks; its browser execution is pending. Do not mark D6a complete or begin D5b until that CI result is reviewed.
+The first 23 work packages, through D6a, are implemented and pushed. D6a in `3bb67725` has passing local model/controller/copy tests, app/browser-fixture typechecks and Linux/Windows browser tests. D5b is next.
 
 - D4: `2772e1f1`; Linux/Windows browser run [40812108743](https://github.com/scr1pter/claudeondfsfdaf/actions/runs/40812108743) passed. Production comparison is committed under `docs/benchmarks/vector-hands-1.99.112/`; both runs have 12 successful measurements and zero blank samples. CPU models differ, so timing deltas are observational. Production JavaScript contains no fake-platform markers.
 - Database cleanup fix: `a227c869`. The Bun adapter now owns and finalizes a bounded prepared-statement cache. A strict-close regression failed before the fix and passes afterward. Both OS unit jobs passed all three new regressions; Windows passed all five screenshot-pruning cases with immediate cleanup.
 - D5a: `ba845338`; six focused files passed 114 tests and app typecheck passed. Pure mention options, actual editor pills, history identity and request markers are implemented.
-- D6a: `3bb67725`; 10 model tests, 13 controller tests and the English dictionary checks passed, as did app and browser-fixture typechecks. [Focused browser run 40816142340](https://github.com/scr1pter/claudeondfsfdaf/actions/runs/40816142340) is the next result to inspect.
+- D6a: `3bb67725`; 10 model tests, 13 controller tests and the English dictionary checks passed, as did app and browser-fixture typechecks. [Focused browser run 40816142340](https://github.com/scr1pter/claudeondfsfdaf/actions/runs/40816142340) passed all fifteen Hands scenarios on both operating systems.
 
 ## Outstanding validation
 
@@ -20,7 +20,7 @@ Full run [40813327379](https://github.com/scr1pter/claudeondfsfdaf/actions/runs/
 
 ## Next work
 
-After D6a's browser checks pass: D5b, D6b, D7, D8, D9, D10, D11, D12, then the remaining phases in Section 0. The desktop controller and native helpers are still unimplemented; this checkpoint is not a releasable Hands feature.
+Next: D5b, D6b, D7, D8, D9, D10, D11, D12, then the remaining phases in Section 0. The desktop controller and native helpers are still unimplemented; this checkpoint is not a releasable Hands feature.
 
 D5b integration details discovered during D5a review:
 
