@@ -34,6 +34,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { McpCatalog } from "./catalog"
+import { McpComputerPolicy } from "./computer-policy"
 import { McpEvent } from "@vectordevai/schema/mcp-event"
 import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
 
@@ -470,6 +471,9 @@ const layer = Layer.effect(
         : undefined
       const bridge = yield* EffectBridge.make()
       const sdk = yield* loadSdk
+      const refusal = McpComputerPolicy.refusal([cmd, ...args], (yield* cfgSvc.get()).computer)
+      if (refusal)
+        return { client: undefined as MCPClient | undefined, status: { status: "failed" as const, error: refusal } }
       const transport = new sdk.StdioClientTransport({
         stderr: "pipe",
         command: cmd,
