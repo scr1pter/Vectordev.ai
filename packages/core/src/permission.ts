@@ -90,10 +90,9 @@ export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Per
 export type Error = DeniedError | RejectedError | CorrectedError
 
 export function evaluate(action: string, resource: string, ...rulesets: Permission.Ruleset[]): Permission.Rule {
+  const pattern = PermissionPolicy.commandPattern(action, resource)
   const effective = rulesets.flatMap((rules) => {
-    const rule = rules.findLast(
-      (rule) => Wildcard.match(action, rule.action) && Wildcard.match(resource, rule.resource),
-    )
+    const rule = rules.findLast((rule) => Wildcard.match(action, rule.action) && Wildcard.match(pattern, rule.resource))
     return rule ? [rule] : []
   })
   return (

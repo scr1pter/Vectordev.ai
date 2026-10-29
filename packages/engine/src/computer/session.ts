@@ -42,6 +42,15 @@ export type State = {
 }
 
 export interface Interface {
+  /** Nonblocking observation of the root's active or draining desktop lease; never creates a task. */
+  readonly held: (rootSessionID: SessionID) => Effect.Effect<boolean>
+  /** Called after a computer tool result is durably completed, including observation and refusal outputs. */
+  readonly markCompleted: (rootSessionID: SessionID, userMessageID: MessageID) => Effect.Effect<void>
+  /** Current user-turn completion, with stored root history as the restart fallback. */
+  readonly completedThisTurn: (
+    rootSessionID: SessionID,
+    history: readonly SessionV1.WithParts[],
+  ) => Effect.Effect<boolean>
   readonly serialized: <A, E, R>(
     input: Input,
     use: (state: State) => Effect.Effect<A, E, R>,
@@ -90,6 +99,8 @@ type Root = {
   denyMentions: Map<string, MessageID>
   task?: Task
   closing?: Deferred.Deferred<void>
+  closingTask?: Task
+  unconfirmedUntil?: number
 }
 
 /** Zoom images never enter this full-frame ring. A stopped generation cannot install a late frame. */
@@ -160,6 +171,51 @@ export const layer = Layer.effect(
     const roots = new Map<SessionID, Root>()
     const retired = new Set<SessionID>()
     const tasks = new WeakMap<State, Task>()
+    const completed = new Map<SessionID, MessageID>()
+    const closed = new Map<SessionID, MessageID>()
+    const idle = new Set<SessionID>()
+
+    const held = Effect.fn("ComputerSession.held")(function* (rootSessionID: SessionID) {
+      const root = roots.get(rootSessionID)
+      if (root?.task?.state.lease !== undefined || root?.closingTask?.state.lease !== undefined) return true
+      if (root?.unconfirmedUntil === undefined) return false
+      return (yield* Clock.currentTimeMillis) < root.unconfirmedUntil
+    })
+
+    const markCompleted = Effect.fn("ComputerSession.markCompleted")(
+      (rootSessionID: SessionID, userMessageID: MessageID) =>
+        Effect.sync(() => {
+          // A completion draining after idle or deletion belongs to the turn that already ended.
+          if (retired.has(rootSessionID) || idle.has(rootSessionID)) return
+          completed.set(rootSessionID, userMessageID)
+          closed.delete(rootSessionID)
+        }),
+    )
+
+    const completedThisTurn = Effect.fn("ComputerSession.completedThisTurn")(
+      (rootSessionID: SessionID, history: readonly SessionV1.WithParts[]) =>
+        Effect.sync(() => {
+          if (retired.has(rootSessionID) || idle.has(rootSessionID)) return false
+          const user = history.findLast(
+            (message) => message.info.sessionID === rootSessionID && message.info.role === "user",
+          )
+          if (!user) return completed.has(rootSessionID)
+          if (completed.get(rootSessionID) === user.info.id) return true
+          completed.delete(rootSessionID)
+          if (closed.get(rootSessionID) === user.info.id) return false
+          const found = history.some(
+            (message) =>
+              message.info.sessionID === rootSessionID &&
+              message.info.role === "assistant" &&
+              message.info.parentID === user.info.id &&
+              message.parts.some(
+                (part) => part.type === "tool" && part.tool === "computer" && part.state.status === "completed",
+              ),
+          )
+          if (found) completed.set(rootSessionID, user.info.id)
+          return found
+        }),
+    )
 
     const finish = Effect.fn("ComputerSession.finish")(function* (root: Root, task: Task) {
       if (task.closing) return yield* Deferred.await(task.closing)
@@ -167,6 +223,7 @@ export const layer = Layer.effect(
       const closing = yield* Deferred.make<void>()
       task.closing = closing
       root.closing = closing
+      root.closingTask = task
       root.task = undefined
       for (const signal of task.signals) signal.removeEventListener("abort", task.abort)
       task.signals.clear()
@@ -202,7 +259,12 @@ export const layer = Layer.effect(
         Effect.gen(function* () {
           const lease = task.state.lease
           // An acquire can settle with a lease during interruption. Clean that lease after its worker has joined.
-          if (!released || lease !== immediateLease) yield* cleanup(lease)
+          const confirmed = !released || lease !== immediateLease ? yield* cleanup(lease) : true
+          // A disconnected release can leave the desktop holding input until its engine-silence watchdog fires.
+          // Keep UI shell commands gated through that window without delaying cleanup or ordinary shell commands.
+          if (lease !== undefined && !confirmed)
+            root.unconfirmedUntil = (yield* Clock.currentTimeMillis) + Computer.LIMITS.engineSilenceMs
+          if (confirmed) root.unconfirmedUntil = undefined
           // Input is released first. An unavailable audit disk must never strand the desktop lease.
           // A retired conversation is being deleted; do not append after its deletion barrier.
           if (!retired.has(task.input.rootSessionID))
@@ -235,6 +297,7 @@ export const layer = Layer.effect(
         Effect.ensuring(
           Effect.sync(() => {
             root.closing = undefined
+            root.closingTask = undefined
             Deferred.doneUnsafe(closing, Effect.void)
           }),
         ),
@@ -250,6 +313,9 @@ export const layer = Layer.effect(
 
     const retire = Effect.fn("ComputerSession.retire")(function* (rootSessionID: SessionID) {
       retired.add(rootSessionID)
+      completed.delete(rootSessionID)
+      closed.delete(rootSessionID)
+      idle.delete(rootSessionID)
       yield* release(rootSessionID)
     })
 
@@ -517,12 +583,21 @@ export const layer = Layer.effect(
         !("status" in data) ||
         typeof data.status !== "object" ||
         data.status === null ||
-        !("type" in data.status) ||
-        data.status.type !== "idle"
+        !("type" in data.status)
       )
         return Effect.void
       if (!("sessionID" in data) || typeof data.sessionID !== "string") return Effect.void
-      return release(data.sessionID as SessionID)
+      const sessionID = data.sessionID as SessionID
+      if (data.status.type === "busy") {
+        idle.delete(sessionID)
+        return Effect.void
+      }
+      if (data.status.type !== "idle") return Effect.void
+      idle.add(sessionID)
+      const userMessageID = completed.get(sessionID)
+      if (userMessageID) closed.set(sessionID, userMessageID)
+      completed.delete(sessionID)
+      return release(sessionID)
     })
     yield* Effect.addFinalizer(() => unsubscribe)
     yield* Effect.addFinalizer(() =>
@@ -532,7 +607,18 @@ export const layer = Layer.effect(
         { discard: true },
       ),
     )
-    return Service.of({ serialized, invalidate: invalidateRoot, start, report, stop, release, retire })
+    return Service.of({
+      held,
+      markCompleted,
+      completedThisTurn,
+      serialized,
+      invalidate: invalidateRoot,
+      start,
+      report,
+      stop,
+      release,
+      retire,
+    })
   }),
 )
 

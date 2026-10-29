@@ -398,6 +398,8 @@ const layer = Layer.effect(
             attachments: output.attachments,
           },
         })
+        if (match.part.tool === "computer")
+          yield* computerSessions.markCompleted(ctx.sessionID, ctx.assistantMessage.parentID)
         yield* settleToolCall(toolCallID)
       })
 

@@ -19,7 +19,7 @@ import { Plugin } from "@/plugin"
 import { Provider } from "@/provider/provider"
 import { LLM } from "@/session/llm"
 import { SessionProcessor } from "@/session/processor"
-import { MessageID, PartID } from "@/session/schema"
+import { MessageID, PartID, SessionID } from "@/session/schema"
 import { Session } from "@/session/session"
 import { SessionSummary } from "@/session/summary"
 import { Snapshot } from "@/snapshot"
@@ -34,6 +34,7 @@ class Fixture extends Context.Service<
     asks: string[]
     images: SessionV1.FilePart[]
     invalidated: string[]
+    completed: { sessionID: SessionID; userMessageID: MessageID }[]
     image: "same" | "resize" | "unavailable"
     reject: boolean
   }
@@ -71,6 +72,7 @@ const fixture = Layer.sync(Fixture, () => ({
   asks: [],
   images: [],
   invalidated: [],
+  completed: [],
   image: "same" as const,
   reject: false,
 }))
@@ -87,6 +89,10 @@ const it = testEffect(
             invalidate: (sessionID) =>
               Effect.sync(() => {
                 state.invalidated.push(sessionID)
+              }),
+            markCompleted: (sessionID, userMessageID) =>
+              Effect.sync(() => {
+                state.completed.push({ sessionID, userMessageID })
               }),
           }),
         ),
@@ -141,6 +147,7 @@ const it = testEffect(
 
 type Call = {
   action: string
+  code?: string
   hash?: string | null
   x?: number
   point?: boolean
@@ -220,6 +227,7 @@ const run = Effect.fn("test.computerSteps")(function* (steps: Call[][]) {
                 output: `Screenshot ${sequence}`,
                 metadata: {
                   action: call.action,
+                  code: call.code,
                   app: { key: "app:macos:com.apple.Safari", name: "Safari" },
                   target: { role: "button", name: "Save" },
                   point: call.point === false ? undefined : { x: call.x ?? 100, y: 200 },
@@ -262,9 +270,12 @@ const run = Effect.fn("test.computerSteps")(function* (steps: Call[][]) {
     })
     yield* processor.settle(chat.id)
   }
+  if (!parent) throw new Error("Expected at least one assistant step")
   const messages = yield* session.messages({ sessionID: chat.id })
   return {
     state,
+    sessionID: chat.id,
+    userMessageID: parent.id,
     budget: yield* guard.snapshot(chat.id),
     tools: messages.flatMap((message) => message.parts.filter((part) => part.type === "tool")),
   }
@@ -280,12 +291,31 @@ for (const action of ["screenshot", "zoom", "cursor_position", "wait", "scroll",
           const result = yield* run(separate ? calls.map((call) => [call]) : [calls])
           expect(result.tools).toHaveLength(3)
           expect(result.tools.every((part) => part.state.status === "completed")).toBe(true)
+          expect(result.state.completed).toEqual(
+            calls.map(() => ({
+              sessionID: result.sessionID,
+              userMessageID: result.userMessageID,
+            })),
+          )
           expect(result.state.asks).toEqual([])
           expect(result.budget?.stopped).toBeUndefined()
         }),
     )
   }
 }
+
+it.instance("a refused computer output marks its user turn but another tool does not", () =>
+  Effect.gen(function* () {
+    const result = yield* run([
+      [
+        { action: "read_ui", code: "denied", hash: null },
+        { name: "lookup", action: "read" },
+      ],
+    ])
+    expect(result.tools.every((part) => part.state.status === "completed")).toBe(true)
+    expect(result.state.completed).toEqual([{ sessionID: result.sessionID, userMessageID: result.userMessageID }])
+  }),
+)
 
 for (const separate of [false, true]) {
   it.instance(`three identical clicks trip both loop guards ${separate ? "across messages" : "in one message"}`, () =>
@@ -439,6 +469,7 @@ for (const image of ["same", "resize", "unavailable"] as const) {
         const part = result.tools[0]
         if (image === "same") {
           expect(state.invalidated).toEqual([])
+          expect(state.completed).toEqual([{ sessionID: result.sessionID, userMessageID: result.userMessageID }])
           expect(part.state.status).toBe("completed")
           if (part.state.status !== "completed") throw new Error("Missing computer result")
           expect(part.state.attachments).toEqual(state.images)
@@ -446,6 +477,7 @@ for (const image of ["same", "resize", "unavailable"] as const) {
           return
         }
         expect(part.state.status).toBe("error")
+        expect(state.completed).toEqual([])
         expect(state.invalidated).toEqual([part.sessionID])
         if (part.state.status !== "error") throw new Error("Unsafe screenshot was accepted")
         expect(part.state.error).toContain("Capture a fresh screenshot")

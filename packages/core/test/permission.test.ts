@@ -104,6 +104,57 @@ function waitForRequest() {
 }
 
 describe("PermissionV2", () => {
+  test("after-screen shell markers require a fresh answer without Always or auto-accept", () => {
+    for (const action of ["bash", "shell", "terminal", "pwsh", "powershell", "cmd"]) {
+      const patterns = [`${PermissionPolicy.AFTER_SCREEN_COMMAND_PREFIX}git status`]
+      expect(PermissionPolicy.requiresApproval(action, ["*"], patterns)).toBe(true)
+      expect(PermissionPolicy.canAutoApprove(action, ["*"], patterns)).toBe(false)
+      expect(PermissionPolicy.canAlwaysApprove(action, ["*"], patterns)).toBe(false)
+      expect(PermissionPolicy.commandPattern(action, patterns[0])).toBe("git status")
+    }
+    expect(PermissionPolicy.requiresApproval("bash", [], ["git status"])).toBe(false)
+    expect(PermissionPolicy.requiresApproval("bash", [], ["after-screen dangerous"])).toBe(false)
+    expect(PermissionPolicy.commandPattern("read", "after-screen file.txt")).toBe("after-screen file.txt")
+    expect(PermissionPolicy.requiresApproval("read", [], ["after-screen file.txt"])).toBe(false)
+  })
+
+  test("after-screen markers preserve ordinary command allowlists and deny ceilings", () => {
+    const rules: PermissionV2.Ruleset = [
+      { action: "bash", resource: "*", effect: "deny" },
+      { action: "bash", resource: "git status*", effect: "allow" },
+    ]
+    expect(PermissionV2.evaluate("bash", "#after-screen git status", rules).effect).toBe("allow")
+    expect(PermissionV2.evaluate("bash", "#after-screen rm report.txt", rules).effect).toBe("deny")
+    expect(
+      PermissionV2.evaluate("bash", "after-screen dangerous", [
+        { action: "bash", resource: "after-screen *", effect: "deny" },
+      ]).effect,
+    ).toBe("deny")
+    expect(
+      PermissionV2.evaluate("bash", "#after-screen git status", rules, [
+        { action: "bash", resource: "git *", effect: "deny" },
+      ]).effect,
+    ).toBe("deny")
+  })
+
+  it.effect("after-screen shell approval ignores configured and saved allows and never saves the reply", () =>
+    Effect.gen(function* () {
+      yield* setup([{ action: "*", resource: "*", effect: "allow" }])
+      const service = yield* PermissionV2.Service
+      const saved = yield* PermissionSaved.Service
+      yield* saved.add({ projectID: Project.ID.global, action: "bash", resources: ["*"] })
+      const before = yield* saved.list({ projectID: Project.ID.global })
+      const input = assertion({ action: "bash", resources: ["#after-screen git status"], save: ["*"] })
+      expect(yield* service.ask(input)).toMatchObject({ effect: "ask" })
+      yield* service.reply({ requestID: input.id, reply: "always" })
+      expect(yield* saved.list({ projectID: Project.ID.global })).toEqual(before)
+      expect(yield* service.ask(input)).toMatchObject({ effect: "ask" })
+      yield* service.reply({ requestID: input.id, reply: "once" })
+      yield* setRules([{ action: "bash", resource: "git *", effect: "deny" }])
+      expect(yield* service.ask(input)).toMatchObject({ effect: "deny" })
+    }),
+  )
+
   test("preserves deny ceilings across trust tiers without changing ordered rules within a tier", () => {
     const deny: PermissionV2.Ruleset = [{ action: "bash", resource: "*", effect: "deny" }]
     const allow: PermissionV2.Ruleset = [{ action: "bash", resource: "pwd", effect: "allow" }]

@@ -4,11 +4,14 @@ import { TestClock } from "effect/testing"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { EventV2 } from "@vectordevai/core/event"
 import { Computer } from "@vectordevai/schema/computer"
+import { SessionV1 } from "@vectordevai/schema/session-v1"
 import { SessionStatusEvent } from "@vectordevai/schema/session-status-event"
+import { ModelV2 } from "@vectordevai/core/model"
+import { ProviderV2 } from "@vectordevai/core/provider"
 import { ComputerSession } from "@/computer/session"
 import { ComputerLog } from "@/computer/log"
 import { ComputerTransport } from "@/computer/transport"
-import { MessageID, SessionID } from "@/session/schema"
+import { MessageID, PartID, SessionID } from "@/session/schema"
 import { testEffect } from "../lib/effect"
 
 const it = testEffect(LayerNode.compile(EventV2.node))
@@ -49,6 +52,7 @@ function fixture<A, E, R>(
   ) => Effect.Effect<A, E, R>,
   heartbeat?: (lease: number) => Effect.Effect<Computer.ComputerState, ComputerTransport.ComputerError>,
   append?: ComputerLog.Interface["append"],
+  cleanup?: (command: "cancel" | "release") => Effect.Effect<void, ComputerTransport.ComputerError>,
 ) {
   return Effect.scoped(
     Effect.gen(function* () {
@@ -64,6 +68,7 @@ function fixture<A, E, R>(
             }
             if (request.command !== "cancel" && request.command !== "release")
               throw new Error("Unexpected session cleanup command")
+            if (cleanup) yield* cleanup(request.command)
             return { ok: true } as ComputerTransport.Response<Q["command"]>
           }),
       })
@@ -88,6 +93,212 @@ function fixture<A, E, R>(
     }),
   )
 }
+
+function turn(id: string): SessionV1.WithParts {
+  return {
+    info: {
+      id: MessageID.make(id),
+      sessionID: input.rootSessionID,
+      role: "user",
+      time: { created: 1 },
+      agent: "build",
+      model: { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("test") },
+    },
+    parts: [],
+  }
+}
+
+function computerResult(user: SessionV1.WithParts, code?: string): SessionV1.WithParts {
+  const messageID = MessageID.make(`${user.info.id}_assistant`)
+  return {
+    info: {
+      id: messageID,
+      parentID: user.info.id,
+      sessionID: input.rootSessionID,
+      role: "assistant",
+      time: { created: 2 },
+      agent: "build",
+      mode: "build",
+      providerID: ProviderV2.ID.make("test"),
+      modelID: ModelV2.ID.make("test"),
+      path: { cwd: input.directory, root: input.directory },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    },
+    parts: [
+      {
+        id: PartID.make("prt_computer_completion"),
+        sessionID: input.rootSessionID,
+        messageID,
+        type: "tool",
+        tool: "computer",
+        callID: "computer_completion",
+        state: {
+          status: "completed",
+          input: { action: "read_ui" },
+          output: code ? "This app is unavailable." : "The approved app contains a table.",
+          title: "Computer result",
+          metadata: code ? { code } : {},
+          time: { start: 2, end: 3 },
+        },
+      },
+    ],
+  }
+}
+
+it.effect("lease observation never queues behind computer work and remains held during idle cleanup", () =>
+  Effect.gen(function* () {
+    const releasing = yield* Deferred.make<void>()
+    const released = yield* Deferred.make<void>()
+    return yield* fixture(
+      (sessions, calls) =>
+        Effect.gen(function* () {
+          const events = yield* EventV2.Service
+          const user = turn("msg_before")
+          expect(yield* sessions.held(input.rootSessionID)).toBe(false)
+          expect(yield* sessions.completedThisTurn(input.rootSessionID, [user])).toBe(false)
+          expect(calls).toHaveLength(0)
+          const entered = yield* Deferred.make<void>()
+          const active = yield* sessions
+            .serialized(input, (state) =>
+              Effect.gen(function* () {
+                state.lease = 81
+                yield* Deferred.succeed(entered, undefined)
+                return yield* Effect.never
+              }),
+            )
+            .pipe(Effect.result, Effect.forkChild)
+          yield* Deferred.await(entered)
+          expect(yield* sessions.held(input.rootSessionID)).toBe(true)
+          yield* sessions.markCompleted(input.rootSessionID, user.info.id)
+          const closing = yield* events
+            .publish(SessionStatusEvent.Status, {
+              sessionID: input.rootSessionID,
+              status: { type: "idle" },
+            })
+            .pipe(Effect.forkChild)
+          yield* Deferred.await(releasing)
+          expect(yield* sessions.held(input.rootSessionID)).toBe(true)
+          expect(yield* sessions.completedThisTurn(input.rootSessionID, [user])).toBe(false)
+          expect(calls.map((call) => call.command)).toEqual(["cancel", "release"])
+          yield* Deferred.succeed(released, undefined)
+          yield* Fiber.join(closing)
+          expect(Result.isFailure(yield* Fiber.join(active))).toBe(true)
+          expect(yield* sessions.held(input.rootSessionID)).toBe(false)
+        }),
+      undefined,
+      undefined,
+      (command) =>
+        command === "release"
+          ? Deferred.succeed(releasing, undefined).pipe(Effect.andThen(Deferred.await(released)))
+          : Effect.void,
+    )
+  }),
+)
+
+it.effect("a completed computer result survives Stop and resets only at idle or a new user turn", () =>
+  fixture((sessions, calls) =>
+    Effect.gen(function* () {
+      const events = yield* EventV2.Service
+      const user = turn("msg_completed_turn")
+      const history = [user, computerResult(user)]
+      const state = yield* sessions.serialized(input, (state) =>
+        Effect.sync(() => {
+          state.lease = 83
+          return state
+        }),
+      )
+      expect(yield* sessions.completedThisTurn(input.rootSessionID, [user])).toBe(false)
+      yield* sessions.markCompleted(input.rootSessionID, user.info.id)
+      expect(yield* sessions.completedThisTurn(input.rootSessionID, [user])).toBe(true)
+      yield* sessions.stop(state)
+      yield* sessions.release(input.rootSessionID)
+      expect(yield* sessions.held(input.rootSessionID)).toBe(false)
+      expect(yield* sessions.completedThisTurn(input.rootSessionID, history)).toBe(true)
+      yield* events.publish(SessionStatusEvent.Status, { sessionID: input.rootSessionID, status: { type: "idle" } })
+      expect(yield* sessions.completedThisTurn(input.rootSessionID, history)).toBe(false)
+      yield* sessions.markCompleted(input.rootSessionID, user.info.id)
+      expect(yield* sessions.completedThisTurn(input.rootSessionID, history)).toBe(false)
+      yield* events.publish(SessionStatusEvent.Status, { sessionID: input.rootSessionID, status: { type: "busy" } })
+      expect(yield* sessions.completedThisTurn(input.rootSessionID, history)).toBe(false)
+      const next = turn("msg_next_turn")
+      expect(yield* sessions.completedThisTurn(input.rootSessionID, [...history, next])).toBe(false)
+      yield* sessions.markCompleted(input.rootSessionID, next.info.id)
+      expect(yield* sessions.completedThisTurn(input.rootSessionID, [...history, next])).toBe(true)
+      const steered = turn("msg_steered_turn")
+      expect(yield* sessions.completedThisTurn(input.rootSessionID, [...history, next, steered])).toBe(false)
+      expect(calls.map((call) => call.command)).toEqual(["cancel", "release"])
+    }),
+  ),
+)
+
+it.effect("an unconfirmed release keeps the lease observed through the desktop engine-silence window", () =>
+  fixture(
+    (sessions, calls) =>
+      Effect.gen(function* () {
+        yield* sessions.serialized(input, (state) =>
+          Effect.sync(() => {
+            state.lease = 85
+          }),
+        )
+        yield* sessions.release(input.rootSessionID)
+        expect(calls.map((call) => call.command)).toEqual(["cancel", "release", "cancel", "release"])
+        expect(yield* sessions.held(input.rootSessionID)).toBe(true)
+        yield* TestClock.adjust(Computer.LIMITS.engineSilenceMs - 1)
+        expect(yield* sessions.held(input.rootSessionID)).toBe(true)
+        yield* TestClock.adjust(1)
+        expect(yield* sessions.held(input.rootSessionID)).toBe(false)
+      }),
+    undefined,
+    undefined,
+    () => new ComputerTransport.ComputerError({ code: "unavailable", message: "Desktop disconnected" }),
+  ),
+)
+
+it.effect("stored completed observations and refusals restore the current root turn without acquiring a lease", () =>
+  fixture((sessions, calls) =>
+    Effect.gen(function* () {
+      for (const code of [undefined, "denied"]) {
+        const user = turn(`msg_history_${code ?? "observed"}`)
+        expect(yield* sessions.completedThisTurn(input.rootSessionID, [user, computerResult(user, code)])).toBe(true)
+        expect(yield* sessions.held(input.rootSessionID)).toBe(false)
+      }
+      const current = turn("msg_history_new")
+      const completed = computerResult(current)
+      const part = completed.parts[0]
+      if (part.type !== "tool") throw new Error("Expected tool fixture")
+      for (const state of [
+        { status: "running", input: {}, time: { start: 2 } },
+        { status: "error", input: {}, error: "Interrupted", time: { start: 2, end: 3 } },
+      ] as const) {
+        expect(
+          yield* sessions.completedThisTurn(input.rootSessionID, [
+            current,
+            {
+              ...completed,
+              parts: [{ ...part, state }],
+            },
+          ]),
+        ).toBe(false)
+      }
+      expect(
+        yield* sessions.completedThisTurn(input.rootSessionID, [
+          current,
+          {
+            ...completed,
+            parts: [{ ...part, tool: "read" }],
+          },
+        ]),
+      ).toBe(false)
+      const other = SessionID.make("ses_other_completion")
+      expect(yield* sessions.completedThisTurn(other, [current, completed])).toBe(false)
+      yield* sessions.retire(input.rootSessionID)
+      yield* sessions.markCompleted(input.rootSessionID, current.info.id)
+      expect(yield* sessions.completedThisTurn(input.rootSessionID, [current, completed])).toBe(false)
+      expect(calls).toHaveLength(0)
+    }),
+  ),
+)
 
 it.effect("a root keeps task state until idle, preserving conversation denials for the next task", () =>
   fixture((sessions, calls) =>

@@ -13,6 +13,7 @@ import { testEffect } from "../lib/effect"
 import { MessageID, SessionID } from "../../src/session/schema"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
+import { UNREAD } from "@/tool/shell/unread"
 
 const noopBootstrap = Layer.succeed(InstanceBootstrap.Service, InstanceBootstrap.Service.of({ run: Effect.void }))
 const env = AppNodeBuilder.build(
@@ -20,6 +21,61 @@ const env = AppNodeBuilder.build(
   [[InstanceStore.bootstrapNode, noopBootstrap]],
 )
 const it = testEffect(env)
+
+test("after-screen command markers preserve shell allowlists, denials and unread-command rules", () => {
+  const rules: PermissionV1.Ruleset = [
+    { permission: "bash", pattern: "*", action: "deny" },
+    { permission: "bash", pattern: "git status*", action: "allow" },
+  ]
+  expect(Permission.evaluate("bash", "#after-screen git status", rules).action).toBe("allow")
+  expect(Permission.evaluate("bash", "#after-screen rm report.txt", rules).action).toBe("deny")
+  expect(
+    Permission.evaluate("bash", "after-screen dangerous", [
+      { permission: "bash", pattern: "after-screen *", action: "deny" },
+    ]).action,
+  ).toBe("deny")
+  expect(
+    Permission.evaluate("bash", `#after-screen ${UNREAD}incomplete`, [
+      { permission: "bash", pattern: "*", action: "allow" },
+    ]).action,
+  ).toBe("ask")
+})
+
+it.instance("after-screen shell asks remain fresh under saved and configured allows", () =>
+  Effect.gen(function* () {
+    yield* approve("bash", ["*"])
+    const permission = yield* Permission.Service
+    const before = yield* permission.approved()
+    for (const index of [0, 1]) {
+      const pending = yield* permission
+        .ask({
+          sessionID: SessionID.make("ses_after_screen"),
+          permission: "bash",
+          patterns: ["git status", "#after-screen git status"],
+          always: [],
+          metadata: { command: "git status" },
+          ruleset: [{ permission: "bash", pattern: "*", action: "allow" }],
+        })
+        .pipe(Effect.forkScoped)
+      const [request] = yield* waitForPending(1)
+      expect(request.always).toEqual([])
+      yield* permission.reply({ requestID: request.id, reply: index === 0 ? "always" : "once" })
+      expect(yield* Fiber.join(pending)).toBe("once")
+      expect(yield* permission.approved()).toEqual(before)
+    }
+    const denied = yield* permission
+      .ask({
+        sessionID: SessionID.make("ses_after_screen"),
+        permission: "bash",
+        patterns: ["#after-screen git status"],
+        always: [],
+        metadata: {},
+        ruleset: [{ permission: "bash", pattern: "git *", action: "deny" }],
+      })
+      .pipe(Effect.flip)
+    expect(denied).toBeInstanceOf(PermissionV1.DeniedError)
+  }),
+)
 
 const rejectAll = (message?: string) =>
   Effect.gen(function* () {

@@ -28,6 +28,10 @@ import { BashArity } from "@/permission/arity"
 import { Egress } from "@vectordevai/core/local-mode/egress"
 import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 import { LocalCommand } from "@vectordevai/core/local-mode/command"
+import { ComputerCommand } from "@vectordevai/core/util/computer-command"
+import { Hands } from "@vectordevai/schema/hands"
+import { ComputerSession } from "@/computer/session"
+import { Session } from "@/session/session"
 
 export { Parameters } from "./shell/prompt"
 
@@ -685,7 +689,20 @@ const cloudRequests = Effect.fn("ShellTool.cloudRequests")(function* (
   return nested.flat()
 })
 
-const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan, input: { command: string }) {
+function afterScreenPatterns(patterns: readonly string[], command: string) {
+  return [
+    ...patterns,
+    ...(patterns.length ? patterns : [command]).map(
+      (pattern) => PermissionPolicy.AFTER_SCREEN_COMMAND_PREFIX + pattern,
+    ),
+  ]
+}
+
+const ask = Effect.fn("ShellTool.ask")(function* (
+  ctx: Tool.Context,
+  scan: Scan,
+  input: { command: string; afterScreen: Effect.Effect<boolean> },
+) {
   if (scan.dirs.size > 0) {
     const directories = Array.from(scan.dirs)
     const globs = directories.map((dir) => {
@@ -717,15 +734,20 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan,
     })
   }
 
-  if (scan.patterns.size > 0) {
-    yield* ctx.ask({
+  const afterScreen = yield* input.afterScreen
+  if (scan.patterns.size > 0 || afterScreen) {
+    const patterns = Array.from(scan.patterns)
+    const answer = yield* ctx.ask({
       permission: ShellID.ToolID,
-      patterns: Array.from(scan.patterns),
-      always: Array.from(scan.always),
+      patterns: afterScreen ? afterScreenPatterns(patterns, input.command) : patterns,
+      always: afterScreen ? [] : Array.from(scan.always),
       metadata: {
         command: input.command,
+        ...(afterScreen ? { reason: PermissionPolicy.AFTER_SCREEN_COMMAND_REASON } : {}),
       },
     })
+    if (afterScreen && answer !== "once")
+      return yield* Effect.die(new Error("This shell command needs a fresh Allow once answer after computer use."))
   }
 
   // With Vector Local on, a command that may reach the network asks first, with the command shown: one whose output is
@@ -762,7 +784,7 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan,
     })
   }
 
-  if (scan.patterns.size === 0) return
+  if (scan.patterns.size === 0) return afterScreen
   // After the shell's own permission, so a session that may not run the command
   // is refused without a cloud prompt. These ask every time, as vector_cloud's
   // own actions do: auto-accept and allow rules never answer them.
@@ -780,6 +802,7 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan,
       },
     })
   }
+  return afterScreen
 })
 
 // Whether Vector Local is on with Web access None, which it also is while the policy is still being resolved.
@@ -910,6 +933,8 @@ export const ShellTool = Tool.define(
     const trunc = yield* Truncate.Service
     const plugin = yield* Plugin.Service
     const flags = yield* RuntimeFlags.Service
+    const computer = yield* ComputerSession.Service
+    const sessions = yield* Session.Service
     const defaultTimeoutMs = flags.bashDefaultTimeoutMs ?? 2 * 60 * 1000
 
     const cygpath = Effect.fn("ShellTool.cygpath")(function* (shell: string, text: string) {
@@ -1268,6 +1293,7 @@ export const ShellTool = Tool.define(
         workspaceRoot: string
       },
       ctx: Tool.Context,
+      beforeSpawn: Effect.Effect<void>,
     ) {
       const limits = shellBudget(yield* config.get(), yield* trunc.limits())
       const keep = limits.maxBytes * 2
@@ -1325,9 +1351,18 @@ export const ShellTool = Tool.define(
       const code: number | null = yield* Effect.scoped(
         Effect.gen(function* () {
           yield* Effect.addFinalizer(closeSink)
-          const handle = yield* spawner.spawn(
-            yield* cmd(input.shell, input.command, input.cwd, input.env, input.workspaceRoot, ctx, offline),
+          const command = yield* cmd(
+            input.shell,
+            input.command,
+            input.cwd,
+            input.env,
+            input.workspaceRoot,
+            ctx,
+            offline,
           )
+          // Permission and environment hooks can wait while computer activity changes. Check after those waits.
+          yield* beforeSpawn
+          const handle = yield* spawner.spawn(command)
 
           const output = yield* Effect.forkScoped(
             Stream.runForEach(Stream.decodeText(handle.all), (chunk) => {
@@ -1482,6 +1517,39 @@ export const ShellTool = Tool.define(
           parameters: prompt.parameters,
           execute: (params: Parameters, ctx: Tool.Context) =>
             Effect.gen(function* () {
+              const rootID = yield* Effect.gen(function* () {
+                const session = yield* sessions
+                  .get(ctx.sessionID)
+                  .pipe(Effect.catchTag("NotFoundError", () => Effect.succeed(undefined)))
+                let rootID = ctx.sessionID
+                let parentID = session ? session.parentID : ctx.parentID
+                const seen = new Set([rootID])
+                while (parentID) {
+                  if (seen.has(parentID) || seen.size >= 64)
+                    return yield* Effect.die(new Error("The shell's conversation ancestry could not be verified."))
+                  seen.add(parentID)
+                  const parent = yield* sessions.get(parentID).pipe(Effect.orDie)
+                  rootID = parent.id
+                  parentID = parent.parentID
+                }
+                return rootID
+              })
+              const history = () =>
+                rootID === ctx.sessionID
+                  ? ctx.history
+                    ? ctx.history()
+                    : Effect.succeed(ctx.messages)
+                  : sessions.messages({ sessionID: rootID }).pipe(Effect.orDie)
+              let controlsDesktop = ComputerCommand.controls(params.command)
+              const checkComputer = Effect.gen(function* () {
+                if (controlsDesktop && (yield* computer.held(rootID)))
+                  return yield* Effect.die(
+                    new Error(
+                      `Use the computer tool for desktop input and screenshots while ${Hands.NAME} holds the computer.`,
+                    ),
+                  )
+              })
+              yield* checkComputer
               const instanceCtx = yield* InstanceState.context
               const cwd = params.workdir
                 ? yield* resolvePath(params.workdir, instanceCtx.directory, shell)
@@ -1495,14 +1563,24 @@ export const ShellTool = Tool.define(
               const refused = webNone() ? Sandbox.offlineRefusal() : undefined
               if (refused) return yield* Effect.die(new Error(refused))
               const ps = Shell.ps(shell)
-              yield* Effect.scoped(
+              const approval = yield* Effect.scoped(
                 Effect.gen(function* () {
                   const tree = yield* Effect.acquireRelease(parse(params.command, ps), (tree) =>
                     Effect.sync(() => tree.delete()),
                   )
+                  controlsDesktop ||= commands(tree.rootNode).some((node) =>
+                    ComputerCommand.controlsTokens(parts(node).map((item) => item.text)),
+                  )
+                  yield* checkComputer
                   const scan = yield* collect(tree.rootNode, cwd, ps, shell, instanceCtx)
                   if (!containsPath(cwd, instanceCtx)) scan.dirs.add(cwd)
-                  yield* ask(ctx, scan, params)
+                  const confirmed = yield* ask(ctx, scan, {
+                    command: params.command,
+                    afterScreen: history().pipe(
+                      Effect.flatMap((messages) => computer.completedThisTurn(rootID, messages)),
+                    ),
+                  })
+                  return { confirmed, patterns: Array.from(scan.patterns) }
                 }),
               )
 
@@ -1519,6 +1597,22 @@ export const ShellTool = Tool.define(
                   workspaceRoot: instanceCtx.worktree,
                 },
                 ctx,
+                Effect.gen(function* () {
+                  yield* checkComputer
+                  if (!approval.confirmed && (yield* computer.completedThisTurn(rootID, yield* history()))) {
+                    const answer = yield* ctx.ask({
+                      permission: ShellID.ToolID,
+                      patterns: afterScreenPatterns(approval.patterns, params.command),
+                      always: [],
+                      metadata: { command: params.command, reason: PermissionPolicy.AFTER_SCREEN_COMMAND_REASON },
+                    })
+                    if (answer !== "once")
+                      return yield* Effect.die(
+                        new Error("This shell command needs a fresh Allow once answer after computer use."),
+                      )
+                  }
+                  yield* checkComputer
+                }),
               )
             }),
         }

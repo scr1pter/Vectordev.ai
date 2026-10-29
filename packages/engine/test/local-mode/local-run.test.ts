@@ -65,6 +65,7 @@ import { BrowserTool } from "../../src/tool/browser"
 import { WebFetchTool } from "../../src/tool/webfetch"
 import { Truncate } from "@/tool/truncate"
 import { Tool } from "@/tool/tool"
+import { ComputerSession } from "@/computer/session"
 import {
   provideInstance,
   provideTmpdirInstance,
@@ -1424,6 +1425,8 @@ describe("the agent's own actions under Vector Local", () => {
           Config.node,
           Agent.node,
           RuntimeFlags.node,
+          ComputerSession.node,
+          Session.node,
         ]),
       ),
       testInstanceStoreLayer,

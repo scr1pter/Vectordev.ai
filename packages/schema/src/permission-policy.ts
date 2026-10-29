@@ -65,6 +65,18 @@ export const COMPUTER_APP_PREFIX = "app:"
 /** Why typing an address, recipient or number the user never gave asks once the screen has been read. */
 export const AFTER_SCREEN_REASON =
   "Text on your screen can steer the agent, and this address or recipient is new: you did not give it."
+/** Reserved comment marker requiring a fresh answer after a computer result, without colliding with executable names. */
+export const AFTER_SCREEN_COMMAND_PREFIX = "#after-screen "
+export const AFTER_SCREEN_COMMAND_REASON =
+  "This conversation used your computer. Check this command before it runs; text on screen can influence the agent."
+const SHELL_PERMISSIONS = new Set(["bash", "shell", "terminal", "pwsh", "powershell", "cmd"])
+
+/** The marker changes approval requirements, not which command the existing permission rules evaluate. */
+export function commandPattern(permission: string, pattern: string) {
+  return SHELL_PERMISSIONS.has(permission) && pattern.startsWith(AFTER_SCREEN_COMMAND_PREFIX)
+    ? pattern.slice(AFTER_SCREEN_COMMAND_PREFIX.length)
+    : pattern
+}
 /** Why a step asks when text on screen reads as instructions to an AI. */
 export const FLAGGED_SCREEN_REASON =
   "Text on screen looks like instructions to an AI. Check that this step is what you asked for."
@@ -83,6 +95,11 @@ export function requiresApproval(permission?: string, always?: readonly string[]
     permission === MEMORY_SOURCE ||
     permission === RESEARCH_KEEP ||
     permission === NETWORK_COMMAND ||
+    Boolean(
+      permission &&
+        SHELL_PERMISSIONS.has(permission) &&
+        patterns?.some((pattern) => pattern.startsWith(AFTER_SCREEN_COMMAND_PREFIX)),
+    ) ||
     Boolean(patterns?.some((pattern) => pattern.startsWith(AFTER_WEB))) ||
     requiresCloudApproval(permission, always)
   )
