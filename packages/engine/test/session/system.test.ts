@@ -16,6 +16,7 @@ import {
   VECTOR_CLOUD_POLICY,
 } from "../../src/session/system"
 import { MCP } from "../../src/mcp"
+import { Hands } from "@vectordevai/schema/hands"
 import { testEffect } from "../lib/effect"
 
 const skills: Skill.Info[] = [
@@ -194,7 +195,9 @@ describe("session.system", () => {
         reason: "disabled",
         permitted: ["docs-writer"],
       })
-      expect(custom).toContain("choose the narrowest one in the task tool's list. Otherwise do that part yourself, as you do small fixes")
+      expect(custom).toContain(
+        "choose the narrowest one in the task tool's list. Otherwise do that part yourself, as you do small fixes",
+      )
       // General with no specialist at all.
       const lone = subagentPolicy({ general: true, specialists: false, permitted: [] })
       expect(lone).toContain("No Subagent specialists are available to you")
@@ -333,6 +336,36 @@ describe("session.system", () => {
       for (const id of ["claude-sonnet-4-5", "trinity-large", "model"]) {
         const model = { api: { id }, providerID: "provider" } as unknown as Provider.Model
         expect(SystemPrompt.provider(model)[0]).toContain('subagent_type "explore"')
+      }
+    }),
+  )
+
+  it.instance("computer policy appears only when the computer tool is explicitly offered", () =>
+    Effect.gen(function* () {
+      const prompt = yield* SystemPrompt.Service
+      const model = { api: { id: "model" }, providerID: "provider" } as unknown as Provider.Model
+      const computer = (yield* prompt.environment(model, { tools: ["edit", "computer"] })).stable.join("\n")
+      const policy = computer.match(/<computer_policy>([\s\S]*?)<\/computer_policy>/)?.[1]
+      expect(policy).toContain(Hands.NAME)
+      for (const requirement of [
+        "connected plugin or MCP tool",
+        "Vector's shell and edit tools",
+        "built-in browser",
+        "xcrun simctl",
+        "list_apps or read_ui",
+        "untrusted content",
+        "Never type passwords",
+        "administrator/security/privacy prompts",
+        "terminals, Vector itself",
+        "handoff",
+        "payments, sending, deleting, account, legal and system-setting changes",
+        "under 12 words",
+        '"The agent:"',
+      ])
+        expect(policy).toContain(requirement)
+      for (const tools of [undefined, [], ["edit", "browser"], ["computer_app"]]) {
+        const absent = yield* prompt.environment(model, { tools })
+        expect([...absent.stable, ...absent.session].join("\n")).not.toContain("<computer_policy>")
       }
     }),
   )
