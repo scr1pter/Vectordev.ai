@@ -10,7 +10,7 @@ import "../../src/vector-premium.css"
 
 // Settings > Account against a stand-in for the desktop's account bridge. The query picks the account: ?account=
 // signed-out, signed-in (no photo), photo, broken (a photo that will not decode) or email (no name and no photo),
-// ?codium= coming-soon, plan, low, ended, none (on sale, never bought) or
+// ?codium= coming-soon, plan, exhausted, low, ended, none (on sale, never bought) or
 // error, and ?billing= how the
 // billing window ends (completed, cancelled, closed, website, busy or failed; pending keeps it open until
 // accountFixture.finish() closes it). Links the page opens, billing requests and account actions it takes are kept on
@@ -33,8 +33,17 @@ const codium = {
     enabled: true,
     access: true,
     plan: { id: "vector-50", name: "Pro", left: 0.64, renewsAt, cancelAtPeriodEnd: false },
-    purchased: { bought: true, state: "available" },
+    purchased: { bought: false },
     empty: false,
+    low: false,
+  },
+  exhausted: {
+    signedIn: true,
+    enabled: true,
+    access: true,
+    plan: { id: "vector-50", name: "Pro", left: 0, renewsAt, cancelAtPeriodEnd: false },
+    purchased: { bought: false },
+    empty: true,
     low: false,
   },
   low: {
@@ -92,12 +101,13 @@ const initial =
     email: { authenticated: true, pending: false, email: "ana.diaz@example.com", expiresAt: signedIn.expiresAt },
   }[query.get("account") ?? ""] ?? signedIn
 
-// What /api/model-plans/config lists, by name and price; nothing is available while Codium is coming soon.
+// The desktop's normalized monthly offers; its decoder supplies topups:[] for the monthly-only API response.
+// Nothing is available while Codium is coming soon. This fixture never offers or completes a top-up.
 const sale = codium.enabled
 const offers = {
   enabled: sale,
   plans: CodiumPlan.PLANS.map((plan) => ({ id: plan.id, name: plan.name, price: plan.price, available: sale })),
-  topups: CodiumPlan.TOPUPS.map((pack) => ({ id: pack.id, name: pack.name, price: pack.price, available: sale })),
+  topups: [],
 }
 const outcome = query.get("billing") ?? "completed"
 
@@ -146,6 +156,18 @@ const platform = {
     offers: async () => offers,
     billing: async (request) => {
       state.billing.push(request)
+      if (request.kind === "topup") throw new Error("Unexpected top-up billing request: Codium is monthly-only.")
+      if (request.kind === "checkout" && (!sale || !CodiumPlan.PLANS.some((plan) => plan.id === request.plan)))
+        throw new Error("Unexpected monthly checkout request.")
+      // A09 replaced Stripe portal plan changes with Vector's /change flow. The current client still sends this
+      // legacy request; the real API refuses it rather than discarding carry or pretending an upgrade succeeded.
+      if (request.kind === "portal" && request.flow === "change")
+        return { outcome: "failed", message: "Change plans on vectordev.ai/account." }
+      if (
+        request.kind !== "checkout" &&
+        !(request.kind === "portal" && (request.flow === undefined || request.flow === "cancel"))
+      )
+        throw new Error("Unexpected billing action.")
       if (outcome === "pending") {
         await new Promise((resolve) => open.push(resolve))
         return { outcome: "closed" }
