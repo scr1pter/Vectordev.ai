@@ -51,3 +51,21 @@ Its capture-phase listener starts on the actual button click, preserving click
 latency. Other callers retain the matching-anchor behavior. There is no route
 fallback, changed deadline, or relaxed navigation/blank assertion. A fresh run
 with the repaired instrumentation is required before the desktop-title change.
+
+The fresh baseline at source `05ff5903d02c38564f10130ed20671fa32c2e906`,
+[run 40790468497, job 123174150755](https://github.com/scr1pter/claudeondfsfdaf/actions/runs/40790468497/job/123174150755),
+passed all nine initial results without retries. `before-valid.json` preserves
+every raw BENCHMARK record and sample. All three repeats of all three scenarios
+had zero blank or unknown samples. First destination observations, in repeat
+order, were:
+
+| Scenario | Repeat 1 (ms) | Repeat 2 (ms) | Repeat 3 (ms) |
+| --- | ---: | ---: | ---: |
+| Unvisited task | 115.7 | 123.8 | 124.9 |
+| New session page | 151.0 | 136.4 | 135.3 |
+| Child session | 80.2 | 84.3 | 78.9 |
+
+This is the complete production navigation baseline for the initial-title
+change. The earlier failed and cancelled runs remain preserved above. The app's
+session-creation code was unchanged through this baseline. These fixture timings
+are navigation observations on one CI runner, not title-cost or speed savings.
