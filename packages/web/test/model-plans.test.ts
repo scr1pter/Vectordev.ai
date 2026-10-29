@@ -169,7 +169,7 @@ describe("subscription configuration", () => {
   })
   test("configured paid models require bounded positive pricing and valid context", () => {
     process.env.MODEL_PLAN_MODELS_JSON = JSON.stringify([model])
-    expect(configuredPlanModels()).toEqual([model])
+    expect(configuredPlanModels()).toEqual([{ ...model, minPlan: "vector-10", weight: (0.1 + 0.3) / 1.5 }])
     for (const invalid of [
       { ...model, inputPrice: 0 },
       { ...model, id: "fixture/coder:free" },

@@ -2,7 +2,7 @@ import { Option, Schema } from "effect"
 import { ENTITLEMENTS } from "../../packages/schema/src/codium-entitlements.js"
 import { CodiumPlan } from "../../packages/schema/src/codium-plan.js"
 import { ApiError } from "./http.js"
-import { CODIUM_CATALOG_UPDATED, CODIUM_MODELS } from "./codium-catalog.js"
+import { CODIUM_RUNTIME_CATALOG_UPDATED, CODIUM_MODELS, CODIUM_TIER_MODELS } from "./codium-catalog.js"
 import { codiumLimitProblems, testCreditCapUsd } from "./codium-limits.js"
 import { stripeMode, stripeModeProblems, requireStripeMode, type StripeMode } from "./model-plan-stripe.js"
 
@@ -30,7 +30,16 @@ export const ModelPlanModel = Schema.Struct({
   category: Schema.optional(Schema.Literals(["everyday", "advanced"])),
   description: Schema.optional(Schema.String),
   quantizations: Schema.optional(Schema.Array(Schema.Literals(["fp8", "bf16", "mxfp4"]))),
-  reasoningEffort: Schema.optional(Schema.Literals(["high"])),
+  reasoningEffort: Schema.optional(Schema.Literals(["high", "xhigh", "max"])),
+  upstream: Schema.optional(Schema.String),
+  minPlan: Schema.optional(Schema.Literals(["vector-10", "vector-50", "vector-100", "vector-200"])),
+  previewUntil: Schema.optional(Schema.Number),
+  providerOnly: Schema.optional(Schema.Array(Schema.String)),
+  tierContext: Schema.optional(Schema.Record(Schema.String, Schema.Number)),
+  inFlightGroup: Schema.optional(Schema.Literals(["astra"])),
+  manualOnly: Schema.optional(Schema.Boolean),
+  lab: Schema.optional(Schema.Literals(["deepseek", "anthropic", "openai", "moonshot", "google"])),
+  weight: Schema.optional(Schema.Number),
   explicitCache: Schema.optional(Schema.Boolean),
   cacheStyle: Schema.optional(Schema.Literals(["openai"])),
   autoToolChoice: Schema.optional(Schema.Literals(["forced", "named"])),
@@ -46,8 +55,39 @@ export type ModelPlanModel = typeof ModelPlanModel.Type
  * and never from the request, so a refusal says only that the credits available are below this one public amount. Sized
  * from the request instead, a client could vary max_tokens and read back exactly how much is left.
  */
-export function modelPlanRequestCredits(model: ModelPlanModel) {
-  return (model.contextLength * model.inputPrice + model.maxOutputTokens * model.outputPrice) / 1_000_000
+export function modelPlanRequestCredits(model: ModelPlanModel, plan?: CodiumPlan.PlanId) {
+  const context =
+    plan === undefined
+      ? Math.max(model.contextLength, ...Object.values(model.tierContext ?? {}))
+      : effectiveModel(model, plan).contextLength
+  return (context * model.inputPrice + model.maxOutputTokens * model.outputPrice) / 1_000_000
+}
+
+/** Pure staged tier projection. Admission checks modelAccess separately before using this routing shape. */
+export function effectiveModel(model: ModelPlanModel, plan: CodiumPlan.PlanId): ModelPlanModel {
+  if (!CodiumPlan.isPlanId(plan)) throw configurationError()
+  const context = Math.min(model.tierContext?.[plan] ?? model.contextLength, ENTITLEMENTS[plan].contextMax)
+  if (
+    !Number.isSafeInteger(context) ||
+    !Number.isSafeInteger(model.maxOutputTokens) ||
+    model.maxOutputTokens < 1 ||
+    context < model.maxOutputTokens
+  )
+    throw configurationError()
+  return {
+    ...model,
+    contextLength: context,
+  }
+}
+
+/** A future preview window admits Ultra only; its expiry restores the model's ordinary minimum tier. */
+export function modelAccess(model: ModelPlanModel, plan: CodiumPlan.PlanId, now = Date.now()) {
+  if (!CodiumPlan.isPlanId(plan) || !CodiumPlan.isPlanId(model.minPlan ?? "vector-10") || !Number.isFinite(now))
+    return false
+  if (model.previewUntil !== undefined && (!Number.isSafeInteger(model.previewUntil) || model.previewUntil < 0))
+    return false
+  if (model.previewUntil !== undefined && now < model.previewUntil) return plan === "vector-200"
+  return CodiumPlan.rank(plan) >= CodiumPlan.rank(model.minPlan ?? "vector-10")
 }
 
 // Names come from CodiumPlan, shared with the app and the website; ids and environment names stay keyed by price.
@@ -106,17 +146,25 @@ export function modelPlansEnabled() {
   return process.env.MODEL_PLANS_ENABLED === "true"
 }
 
-export function configuredPlanModels() {
+/** Tiered definitions are an internal opt-in until A17/A18 enforce their routing and admission fields. */
+export function configuredPlanModels(options: { tiered?: boolean } = {}) {
   const decoded = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(ModelPlanModel)))(
-    process.env.MODEL_PLAN_MODELS_JSON?.trim() || JSON.stringify(CODIUM_MODELS),
+    process.env.MODEL_PLAN_MODELS_JSON?.trim() || JSON.stringify(options.tiered ? CODIUM_TIER_MODELS : CODIUM_MODELS),
   )
   if (Option.isNone(decoded)) throw configurationError()
-  const models = decoded.value
+  const models = decoded.value.map((model) => ({
+    ...model,
+    minPlan: model.minPlan ?? ("vector-10" as const),
+    weight: model.weight ?? (model.inputPrice + model.outputPrice) / 1.5,
+  }))
   if (
     models.length > 30 ||
     new Set(models.map((model) => model.id)).size !== models.length ||
-    models.some(
-      (model) =>
+    models.some((model) => {
+      const contexts = Object.entries(model.tierContext ?? {})
+      const eligible = CodiumPlan.PLANS.filter((plan) => CodiumPlan.rank(plan.id) >= CodiumPlan.rank(model.minPlan))
+      const effective = eligible.map((plan) => model.tierContext?.[plan.id] ?? model.contextLength)
+      return (
         !/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.:-]+$/.test(model.id) ||
         model.id.endsWith(":free") ||
         !model.name.trim() ||
@@ -130,8 +178,43 @@ export function configuredPlanModels() {
         !Number.isFinite(model.inputPrice) ||
         model.inputPrice <= 0 ||
         !Number.isFinite(model.outputPrice) ||
-        model.outputPrice <= 0,
-    )
+        model.outputPrice <= 0 ||
+        !Number.isFinite(model.weight) ||
+        model.weight <= 0 ||
+        (model.id.includes(":") && !model.upstream) ||
+        (model.upstream !== undefined &&
+          (!/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.:-]+$/.test(model.upstream) || model.upstream.endsWith(":free"))) ||
+        (model.previewUntil !== undefined && (!Number.isSafeInteger(model.previewUntil) || model.previewUntil < 0)) ||
+        (model.providerOnly !== undefined &&
+          (!model.providerOnly.length ||
+            new Set(model.providerOnly).size !== model.providerOnly.length ||
+            model.providerOnly.some((tag) => !/^[a-zA-Z0-9][a-zA-Z0-9._/-]*$/.test(tag)))) ||
+        contexts.some(
+          ([plan, context]) =>
+            !CodiumPlan.isPlanId(plan) ||
+            CodiumPlan.rank(plan) < CodiumPlan.rank(model.minPlan) ||
+            !Number.isSafeInteger(context) ||
+            context < model.maxOutputTokens ||
+            context > ENTITLEMENTS[plan].contextMax,
+        ) ||
+        (options.tiered &&
+          effective.some(
+            (context, index) =>
+              context > ENTITLEMENTS[eligible[index]!.id].contextMax || (index > 0 && context < effective[index - 1]!),
+          )) ||
+        (model.inFlightGroup !== undefined && eligible.some((plan) => !ENTITLEMENTS[plan.id].groups.astra)) ||
+        // The current gateway sends ids directly and has no tier/preview/provider-pin enforcement yet.
+        (!options.tiered &&
+          (model.upstream !== undefined ||
+            model.minPlan !== "vector-10" ||
+            model.previewUntil !== undefined ||
+            model.providerOnly !== undefined ||
+            model.tierContext !== undefined ||
+            model.inFlightGroup !== undefined ||
+            model.manualOnly === true ||
+            (model.reasoningEffort !== undefined && model.reasoningEffort !== "high")))
+      )
+    })
   )
     throw configurationError()
   return models
@@ -293,7 +376,7 @@ export function publicModelPlans() {
     enabled,
     currency: "usd",
     interval: "month",
-    catalogUpdated: CODIUM_CATALOG_UPDATED,
+    catalogUpdated: CODIUM_RUNTIME_CATALOG_UPDATED,
     models: models.map((model) => ({
       id: model.id,
       name: model.name,

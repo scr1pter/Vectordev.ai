@@ -36,7 +36,7 @@ export function modelPlanBalance(status: Awaited<ReturnType<typeof modelPlanStat
   const remaining = status.active ? status.remaining : 0
   // The gateway refuses a request unless the credits available cover the model's largest request, so below the
   // cheapest such amount in the catalog every request is refused.
-  const requests = configuredPlanModels().map(modelPlanRequestCredits)
+  const requests = configuredPlanModels().map((model) => modelPlanRequestCredits(model))
   const cheapest = requests.length ? Math.min(...requests) : 0
   const empty = remaining !== undefined && (remaining <= 0 || remaining < cheapest)
   return {
