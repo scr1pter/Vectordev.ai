@@ -50,6 +50,35 @@ afterEach(async () => {
 })
 
 describe("IsolationCopy project listing and hashing", () => {
+  test("link inventories normalize copied internal targets and omit generated directories without following links", async () => {
+    const { root, source, target } = await scratch()
+    await mkdir(path.join(source, "real"))
+    await mkdir(path.join(source, "node_modules"))
+    await mkdir(path.join(root, "outside"))
+    await symlink(path.join(source, "real"), path.join(source, "inside"), junction)
+    await symlink(path.join(source, "real"), path.join(source, "__proto__"), junction)
+    await symlink(path.join(root, "outside"), path.join(source, "outside"), junction)
+    await symlink(path.join(root, "outside"), path.join(source, "node_modules", "ignored"), junction)
+    const links = await IsolationCopy.projectLinks(source)
+    expect(links.inside).toBe("internal:real")
+    expect(links.outside).toBe(`external:${path.join(root, "outside")}`)
+    expect(Object.keys(links).sort()).toEqual(["__proto__", "inside", "outside"])
+    await IsolationCopy.copyProject(source, target)
+    expect(await IsolationCopy.projectLinks(target)).toEqual({
+      inside: "internal:real",
+      ["__proto__"]: "internal:real",
+    })
+  })
+
+  test("hashes files named after prototype properties as ordinary own entries", async () => {
+    const { source } = await scratch()
+    for (const file of ["__proto__", "constructor", "toString"]) await put(source, file, file)
+    const hashes = await IsolationCopy.hashProject(source)
+    expect(Object.keys(hashes).sort()).toEqual(["__proto__", "constructor", "toString"])
+    for (const file of Object.keys(hashes))
+      expect(hashes[file]).toBe(await IsolationCopy.hashFile(path.join(source, file)))
+  })
+
   test("keeps sorted regular files and the existing exclusions and five-MiB diff cap", async () => {
     const { source } = await scratch()
     for (const file of [

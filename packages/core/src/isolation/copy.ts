@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { createReadStream } from "node:fs"
-import { cp, lstat, mkdir, readdir, realpath, stat, symlink, unlink } from "node:fs/promises"
+import { cp, lstat, mkdir, readdir, readlink, realpath, stat, symlink, unlink } from "node:fs/promises"
 import path from "node:path"
 
 const EXCLUDED_DIRS = new Set([
@@ -79,6 +79,29 @@ export async function listProjectFiles(
   return output.sort()
 }
 
+/** Compare link identities without following them, using the same project exclusions as file capture. */
+export async function projectLinks(root: string) {
+  const boundary = path.resolve(root)
+  const links: Record<string, string> = Object.create(null)
+  const scan = async (directory: string): Promise<void> => {
+    const current = await lstat(directory)
+    if (!current.isDirectory() || current.isSymbolicLink()) throw new Error("A project scan directory became a link.")
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if (entry.name === ".DS_Store" || EXCLUDED_DIRS.has(entry.name)) continue
+      const file = path.join(directory, entry.name)
+      const info = await lstat(file)
+      if (info.isSymbolicLink()) {
+        const target = path.resolve(path.dirname(file), await readlink(file))
+        links[path.relative(boundary, file)] = inside(boundary, target)
+          ? `internal:${path.relative(boundary, target)}`
+          : `external:${target}`
+      } else if (info.isDirectory()) await scan(file)
+    }
+  }
+  await scan(boundary)
+  return links
+}
+
 export async function hashFile(file: string) {
   const info = await stat(file)
   if (!info.isFile()) throw new Error(`Cannot hash a non-file path: ${file}`)
@@ -94,7 +117,7 @@ export async function hashFile(file: string) {
 
 export async function hashProject(root: string, maxFileBytes = 5 * 1024 * 1024) {
   const files = await listProjectFiles(root, root, [], maxFileBytes)
-  const hashes: Record<string, string> = {}
+  const hashes: Record<string, string> = Object.create(null)
   for (const file of files) hashes[file] = await hashFile(path.join(root, file)).catch(() => "missing")
   return hashes
 }

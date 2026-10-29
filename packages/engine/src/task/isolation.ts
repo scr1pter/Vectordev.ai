@@ -88,6 +88,10 @@ export const Record = Schema.Struct({
   settledAttempt: Schema.optional(Schema.Number),
   links: Schema.Array(Schema.String),
   skipped: Schema.Array(Schema.String),
+  initialSkipped: Schema.optional(Schema.Array(Schema.String)),
+  largeBaseline: Schema.optional(
+    Schema.Record(Schema.String, Schema.Struct({ blob: Schema.String, hash: Schema.String })),
+  ),
   stacked: Schema.Array(Schema.String),
   merged: Schema.Array(Schema.String),
   files: Schema.Array(Change),
@@ -255,6 +259,12 @@ async function readRecord(ctx: InstanceContext, taskID: string): Promise<Record>
       FileLock.key(ctx.worktree === path.parse(ctx.worktree).root ? ctx.directory : ctx.worktree) ||
     !record.files.every((file) => relative(file.path)) ||
     !record.links.every(relative) ||
+    (record.initialSkipped !== undefined && !record.initialSkipped.every(relative)) ||
+    (record.largeBaseline !== undefined &&
+      Object.entries(record.largeBaseline).some(
+        ([file, value]) =>
+          !relative(file) || !/^[a-f0-9]{40,64}$/.test(value.blob) || !/^[a-f0-9]{64}$/.test(value.hash),
+      )) ||
     !record.merged.every(relative) ||
     !record.stacked.every(safeID) ||
     [record.seed, record.tip, record.reviewBase, record.patchBase, record.unstackedSeed].some(
@@ -288,7 +298,8 @@ const baselineHashes = (record: Record) =>
       !Object.entries(value).every(([file, hash]) => relative(file) && /^[a-f0-9]{64}$/.test(hash))
     )
       throw err("registry", "Invalid copy baseline hashes.")
-    return value
+    const hashes: typeof value = Object.create(null)
+    return Object.assign(hashes, value)
   })
 
 /** Call-time resolution avoids introducing Worktree/InstanceStore bootstrap cycles. Tests can provide real services. */
@@ -478,6 +489,181 @@ export const make = Effect.gen(function* () {
         : {}),
     }
   })
+  const clearIndexFlags = Effect.fn("TaskIsolation.clearIndexFlags")(function* (cwd: string, index: string) {
+    const files = yield* command(cwd, ["ls-files", "-z", "--cached"], { env: { GIT_INDEX_FILE: index } })
+    if (!files.length) return
+    for (const flag of ["--no-assume-unchanged", "--no-skip-worktree"])
+      yield* command(cwd, ["update-index", flag, "-z", "--stdin"], {
+        env: { GIT_INDEX_FILE: index },
+        stdin: Stream.make(files),
+      })
+  })
+  const blobAt = Effect.fn("TaskIsolation.blobAt")(function* (record: Record, file: string) {
+    const base = record.reviewBase ?? record.seed
+    if (!base) return undefined
+    const entry = yield* text(record.directory, ["--literal-pathspecs", "ls-tree", "-z", base, "--", file])
+    const blob = entry.slice(0, entry.indexOf("\t")).split(" ")[2]
+    return blob && /^[a-f0-9]{40,64}$/.test(blob) ? blob : undefined
+  })
+  const captureLargeBaseline = Effect.fn("TaskIsolation.captureLargeBaseline")(function* (record: Record) {
+    const limits = yield* Limits
+    const baseline: { [file: string]: { blob: string; hash: string } } = Object.create(null)
+    const files = nuls(yield* command(record.directory, ["ls-files", "-z", "--cached"]))
+    for (const file of files) {
+      if (!relative(file)) return yield* err("path", "Git returned an unsafe baseline path.")
+      const full = path.join(record.directory, file)
+      const info = yield* io(() => lstat(full))
+      if (!info.isFile() || info.size <= limits.fileBytes) continue
+      if (!FSUtil.writableInside(record.directory, full))
+        return yield* err("path", "An oversized baseline has an unsafe ancestor.")
+      const blob = yield* blobAt(record, file)
+      if (!blob) return yield* err("git", "An oversized baseline has no saved Git identity.")
+      baseline[file] = { blob, hash: yield* io(() => IsolationCopy.hashFile(full)) }
+    }
+    return baseline
+  })
+  const unsupported = Effect.fn("TaskIsolation.unsupported")(function* (record: Record) {
+    const limits = yield* Limits
+    const files =
+      record.mode === "copy"
+        ? yield* io(() =>
+            IsolationCopy.listProjectFiles(record.directory, record.directory, [], Number.MAX_SAFE_INTEGER),
+          )
+        : nuls(yield* command(record.directory, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]))
+    const output = new Set<string>()
+    for (const file of new Set(files)) {
+      if (!relative(file)) return yield* err("path", "An unsupported output has an unsafe path.")
+      if (record.links.some((link) => file === link || file.startsWith(`${link}/`))) continue
+      const current = yield* io(() =>
+        lstat(path.join(record.directory, file)).catch((cause) => {
+          if (missing(cause)) return undefined
+          throw cause
+        }),
+      )
+      if (!current?.isFile() || current.size <= limits.fileBytes) continue
+      if (record.mode === "worktree") {
+        const blob = yield* blobAt(record, file)
+        if (!blob || !FSUtil.writableInside(record.directory, path.join(record.directory, file))) {
+          output.add(file)
+          continue
+        }
+        const baseline = record.largeBaseline?.[file]
+        if (baseline?.blob === blob) {
+          if ((yield* io(() => IsolationCopy.hashFile(path.join(record.directory, file)))) !== baseline.hash)
+            output.add(file)
+        } else if ((yield* text(record.directory, ["hash-object", "--no-filters", "--", file])) !== blob)
+          output.add(file)
+        continue
+      }
+      const baseline = path.join(baselinePaths(record).directory, file)
+      const before = yield* io(() =>
+        lstat(baseline).catch((cause) => {
+          if (missing(cause)) return undefined
+          throw cause
+        }),
+      )
+      if (
+        !before?.isFile() ||
+        before.size !== current.size ||
+        !FSUtil.writableInside(record.directory, path.join(record.directory, file)) ||
+        !FSUtil.writableInside(baselinePaths(record).directory, baseline)
+      ) {
+        output.add(file)
+        continue
+      }
+      if (
+        (yield* io(() => IsolationCopy.hashFile(path.join(record.directory, file)))) !==
+        (yield* io(() => IsolationCopy.hashFile(baseline)))
+      )
+        output.add(file)
+    }
+    if (record.mode === "copy") {
+      const original = path.join(paths(record.projectID, record.taskID).registry, "baseline")
+      const beforeLinks = yield* io(() => IsolationCopy.projectLinks(original))
+      const currentLinks = yield* io(() => IsolationCopy.projectLinks(record.directory))
+      for (const file of new Set([...Object.keys(beforeLinks), ...Object.keys(currentLinks)]))
+        if (beforeLinks[file] !== currentLinks[file]) output.add(file)
+      const root = baselinePaths(record).directory
+      const files = yield* io(() => IsolationCopy.listProjectFiles(root, root, [], Number.MAX_SAFE_INTEGER))
+      for (const file of files) {
+        const before = yield* io(() => lstat(path.join(root, file)))
+        if (before.size <= limits.fileBytes) continue
+        const current = yield* io(() =>
+          lstat(path.join(record.directory, file)).catch((cause) => {
+            if (missing(cause)) return undefined
+            throw cause
+          }),
+        )
+        // Oversized baseline deletions and size reductions are also uncaptured changes.
+        if (!current?.isFile() || current.size <= limits.fileBytes) output.add(file)
+      }
+      const baseline = yield* baselineHashes(record)
+      const captured = yield* io(() => IsolationCopy.hashProject(record.directory, limits.fileBytes))
+      for (const file of Object.keys(baseline).filter((file) => captured[file] === undefined)) {
+        const present = yield* io(() =>
+          lstat(path.join(record.directory, file)).catch((cause) => {
+            if (missing(cause)) return undefined
+            throw cause
+          }),
+        )
+        if (present && !present.isDirectory()) output.add(file)
+      }
+    }
+    return [...output].sort()
+  })
+  const retained = (record: Record, files: readonly string[], attempt = record.attempt) => ({
+    ...record,
+    state: "failed",
+    settledAttempt: attempt,
+    skipped: [...new Set([...(record.initialSkipped ?? []), ...files])],
+    error: `${files.length} nonignored output${files.length === 1 ? " exceeds" : "s exceed"} the capture limit or cannot be captured. The checkout and its bytes have been retained; resume and reduce or move these outputs before merging or discarding.`,
+  })
+  const assertCaptured = Effect.fn("TaskIsolation.assertCaptured")(function* (record: Record) {
+    yield* verify(record)
+    const omitted = yield* unsupported(record)
+    if (omitted.length) {
+      const failed = retained(record, omitted)
+      yield* save(failed)
+      return yield* err("unsupported", failed.error)
+    }
+    if (!record.tip) return yield* err("unsaved", "The checkout has no saved snapshot and has been retained.")
+    if (record.mode === "copy") {
+      const limits = yield* Limits
+      if (hash(stable(yield* io(() => IsolationCopy.hashProject(record.directory, limits.fileBytes)))) !== record.tip)
+        return yield* err("unsaved", "The copy changed after it was saved; it has been retained.")
+      return
+    }
+    const index = path.join(paths(record.projectID, record.taskID).registry, `inspect-index-${randomUUID()}`)
+    const status = yield* Effect.acquireUseRelease(
+      Effect.gen(function* () {
+        const source = path.resolve(
+          record.directory,
+          yield* text(record.directory, ["rev-parse", "--git-path", "index"]),
+        )
+        yield* io(() => copyFile(source, index))
+        return index
+      }),
+      (index) =>
+        Effect.gen(function* () {
+          yield* clearIndexFlags(record.directory, index)
+          return nuls(
+            yield* command(
+              record.directory,
+              ["status", "--porcelain=v1", "--no-renames", "-z", "--untracked-files=all"],
+              { env: { GIT_INDEX_FILE: index } },
+            ),
+          )
+        }),
+      (index) => io(() => rm(index, { force: true })).pipe(Effect.orDie),
+    )
+    if (
+      (yield* text(record.directory, ["rev-parse", "HEAD"])) !== record.tip ||
+      status.some(
+        (line) => !record.links.some((file) => line.slice(3) === file || line.slice(3).startsWith(`${file}/`)),
+      )
+    )
+      return yield* err("unsaved", "The checkout changed after it was saved; it has been retained.")
+  })
   const protect = Effect.fn("TaskIsolation.protect")(function* (record: Record) {
     yield* verify(record)
     const gitDirectory =
@@ -582,6 +768,7 @@ export const make = Effect.gen(function* () {
           ...(admitted.mode === "worktree" ? { branch: location.branch } : {}),
           links: [],
           skipped: [],
+          initialSkipped: [],
           stacked: [...(input.dependsOn ?? [])],
           merged: [],
           files: [],
@@ -601,7 +788,7 @@ export const make = Effect.gen(function* () {
     )
   })
 
-  /** Stage against a private index using NUL literal pathspecs; the checkout's real index is never touched. */
+  /** Parent staging uses a private index; settlement owns the task's index. Paths remain NUL literal pathspecs. */
   const stage = Effect.fn("TaskIsolation.stage")(function* (
     record: Record,
     cwd: string,
@@ -609,6 +796,12 @@ export const make = Effect.gen(function* () {
     initial: boolean,
   ) {
     const limits = yield* Limits
+    const sparse = new Set(
+      nuls(yield* command(cwd, ["ls-files", "-v", "-z"], { env: { GIT_INDEX_FILE: index } }))
+        .filter((entry) => entry[0]?.toLowerCase() === "s")
+        .map((entry) => entry.slice(2)),
+    )
+    yield* clearIndexFlags(cwd, index)
     const listed = nuls(yield* command(cwd, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]))
     const tracked = initial ? new Set(nuls(yield* command(cwd, ["ls-files", "-z", "--cached"]))) : undefined
     const eligible: string[] = [],
@@ -622,6 +815,8 @@ export const make = Effect.gen(function* () {
           throw cause
         }),
       )
+      // Missing sparse entries are not authority to manufacture a deletion in the captured tree.
+      if (!info && sparse.has(file)) continue
       if (info && info.size > limits.fileBytes && (!initial || !tracked?.has(file))) {
         skipped.push(file)
         continue
@@ -714,7 +909,7 @@ export const make = Effect.gen(function* () {
                   ],
                   { env: yield* identity(record.parentDirectory) },
                 )
-          return { seed: commit, skipped, ...(record.stacked.length ? { unstackedSeed } : {}) }
+          return { seed: commit, skipped, initialSkipped: skipped, ...(record.stacked.length ? { unstackedSeed } : {}) }
         }),
       (index) => io(() => rm(index, { force: true })).pipe(Effect.orDie),
     )
@@ -745,7 +940,7 @@ export const make = Effect.gen(function* () {
                   )
                 )
                   return yield* err("exists", "The reserved copy directory already exists; it has not been changed.")
-                yield* io(() =>
+                const copied = yield* io(() =>
                   IsolationCopy.copyProject(record.parentDirectory, record.directory, {
                     maxFiles: limits.copyFiles,
                     maxBytes: limits.copyBytes,
@@ -763,7 +958,12 @@ export const make = Effect.gen(function* () {
                   ),
                 )
                 yield* io(() => privateTree(path.join(paths(record.projectID, taskID).registry, "baseline")))
-                return yield* stackCopy({ ...record, state: "preparing" })
+                return yield* stackCopy({
+                  ...record,
+                  state: "preparing",
+                  skipped: copied.skipped,
+                  initialSkipped: copied.skipped,
+                })
               }
               const seeded = yield* seed(record)
               const next = { ...record, ...seeded, state: "preparing" }
@@ -809,7 +1009,11 @@ export const make = Effect.gen(function* () {
             })
             links.push(link)
           }
-          const linked = { ...created, links }
+          const linked = {
+            ...created,
+            links,
+            ...(created.mode === "worktree" ? { largeBaseline: yield* captureLargeBaseline(created) } : {}),
+          }
           yield* save(linked)
           const loaded = yield* loadWork(linked, ctx)
           const work = loaded.work
@@ -881,6 +1085,7 @@ export const make = Effect.gen(function* () {
     })
   const remove = Effect.fn("TaskIsolation.remove")(function* (record: Record) {
     const valid = yield* verify(record)
+    yield* assertCaptured(valid)
     yield* unlinkLinks(valid)
     if (valid.mode === "worktree") {
       const service = yield* worktrees()
@@ -897,12 +1102,22 @@ export const make = Effect.gen(function* () {
     if (record.mode === "copy") {
       const baseline = yield* baselineHashes(record)
       const current = yield* io(() => IsolationCopy.hashProject(record.directory, limits.fileBytes))
-      return yield* Effect.forEach(
+      const differences = yield* Effect.forEach(
         [...new Set([...Object.keys(baseline), ...Object.keys(current)])]
           .filter((file) => baseline[file] !== current[file])
           .sort(),
         (file) =>
           Effect.gen(function* () {
+            if (baseline[file] && current[file] === undefined) {
+              const present = yield* io(() =>
+                lstat(path.join(record.directory, file)).catch((cause) => {
+                  if (missing(cause)) return undefined
+                  throw cause
+                }),
+              )
+              // An omitted existing file is unsupported, not a deletion. Settlement retains it before capture.
+              if (present && !present.isDirectory()) return undefined
+            }
             const before = baseline[file]
               ? yield* io(() => readFile(path.join(baselinePaths(record).directory, file)))
               : Buffer.alloc(0)
@@ -918,6 +1133,7 @@ export const make = Effect.gen(function* () {
             }
           }),
       )
+      return differences.filter((file) => file !== undefined)
     }
     if (!record.seed || !record.tip) return []
     const names = nuls(
@@ -969,11 +1185,19 @@ export const make = Effect.gen(function* () {
         const work = placed && FileLock.key(placed.directory) === FileLock.key(record.directory) ? placed : undefined
         // The running parent's own finalizer calls settle; only descendants are stopped here.
         if (work) yield* quiesce(record.taskID, work)
+        const omitted = yield* unsupported(record)
+        if (omitted.length) {
+          const failed = retained(record, omitted, input.attempt)
+          yield* save(failed)
+          yield* retire(failed)
+          return failed
+        }
         const saved =
           record.mode === "copy"
             ? {
                 ...record,
                 files: yield* stats(record),
+                skipped: record.initialSkipped ?? [],
                 tip: hash(stable(yield* io(() => IsolationCopy.hashProject(record.directory, limits.fileBytes)))),
               }
             : yield* Effect.gen(function* () {
@@ -1012,7 +1236,7 @@ export const make = Effect.gen(function* () {
                     { env: yield* identity(record.directory) },
                   )
                 const tip = yield* text(record.directory, ["rev-parse", "HEAD"])
-                const next = { ...record, tip, skipped: [...new Set([...record.skipped, ...skipped])] }
+                const next = { ...record, tip, skipped: [...new Set([...(record.initialSkipped ?? []), ...skipped])] }
                 return { ...next, files: yield* stats(next) }
               })
         const diverged =
@@ -1024,6 +1248,7 @@ export const make = Effect.gen(function* () {
           ...saved,
           state: diverged ? "diverged" : saved.files.length ? "changed" : "unchanged",
           settledAttempt: input.attempt,
+          error: undefined,
         }
         yield* save(final)
         yield* retire(final)
@@ -1215,6 +1440,8 @@ export const make = Effect.gen(function* () {
   ) {
     const limits = yield* Limits
     if (record.mode === "copy") {
+      const omitted = yield* unsupported(record)
+      if (omitted.length) return yield* err("unsupported", retained(record, omitted).error)
       const baseline = yield* baselineHashes(record)
       const parent = yield* io(() => IsolationCopy.hashProject(record.parentDirectory, limits.fileBytes))
       const child = yield* io(() => IsolationCopy.hashProject(record.directory, limits.fileBytes))
@@ -1524,6 +1751,7 @@ export const make = Effect.gen(function* () {
         if (["preparing", "running", "settling"].includes(original.state) || active.has(input.taskID))
           return yield* err("running", "The isolated task is still running or saving its changes.")
         if (original.state !== "changed") return yield* err("state", "Only a changed isolated task can be merged.")
+        yield* assertCaptured(original)
         if (input.by.kind !== "owner" && (input.force || input.includeStacked))
           return yield* err("forbidden", "Only the owner can force a collision or include stacked changes.")
         if (input.by.kind === "agent" && input.by.sessionID !== original.parentSessionID)
@@ -1767,34 +1995,7 @@ export const make = Effect.gen(function* () {
         return yield* FileLock.forTree(record.parentDirectory)(
           Effect.gen(function* () {
             yield* verify(record)
-            if (record.mode === "copy") {
-              const limits = yield* Limits
-              if (
-                hash(stable(yield* io(() => IsolationCopy.hashProject(record.directory, limits.fileBytes)))) !==
-                record.tip
-              )
-                return yield* err("unsaved", "The copy changed after it was saved; it has been retained.")
-            } else {
-              const status = nuls(
-                yield* command(record.directory, [
-                  "status",
-                  "--porcelain=v1",
-                  "--no-renames",
-                  "-z",
-                  "--untracked-files=all",
-                ]),
-              )
-              if (
-                (yield* text(record.directory, ["rev-parse", "HEAD"])) !== record.tip ||
-                status.some(
-                  (line) =>
-                    ![...record.skipped, ...record.links].some(
-                      (file) => line.slice(3) === file || line.slice(3).startsWith(`${file}/`),
-                    ),
-                )
-              )
-                return yield* err("unsaved", "The checkout changed after it was saved; it has been retained.")
-            }
+            yield* assertCaptured(record)
             const saved = yield* savePatch(record, "discarded")
             const pending = { ...record, state: "discarding", savedPatch: saved }
             yield* save(pending)
@@ -1850,6 +2051,7 @@ export const make = Effect.gen(function* () {
               mergeCompleted: undefined,
               mergeKey: undefined,
               mergeable: undefined,
+              error: undefined,
             }
             yield* save(running)
             loaded.transferred = true
@@ -1877,6 +2079,8 @@ export const make = Effect.gen(function* () {
           files: [],
           links: [],
           skipped: [],
+          initialSkipped: [],
+          largeBaseline: undefined,
           tip: undefined,
           seed: undefined,
           reviewBase: undefined,

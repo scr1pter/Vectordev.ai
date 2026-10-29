@@ -117,6 +117,338 @@ const fixture = Effect.gen(function* () {
   return { home, sessions, isolation, parent, child, agent, recordPath, workPath, reserve, start, settle }
 })
 
+const smallCapture = {
+  fileBytes: 100,
+  minFreeBytes: 0,
+  copyBytes: 1024 * 1024,
+  copyFiles: 20_000,
+  patchBytes: 256 * 1024,
+}
+
+for (const flag of ["--assume-unchanged", "--skip-worktree"]) {
+  it.instance(
+    `Git ${flag} cannot hide supported capture or a later unsaved write`,
+    () =>
+      Effect.gen(function* () {
+        const f = yield* fixture
+        yield* write(f.home.directory, "flagged.txt", "original\n")
+        yield* git(f.home.directory, ["add", "flagged.txt"])
+        yield* git(f.home.directory, ["commit", "-m", "flag baseline"])
+        yield* f.start
+        yield* git(f.workPath, ["update-index", flag, "flagged.txt"])
+        yield* write(f.workPath, "flagged.txt", "captured\n")
+        const saved = yield* f.settle()
+        expect(saved.state).toBe("changed")
+        expect(yield* git(f.workPath, ["show", `${saved.tip}:flagged.txt`])).toBe("captured")
+        yield* git(f.workPath, ["update-index", flag, "flagged.txt"])
+        yield* write(f.workPath, "flagged.txt", "late write\n")
+        yield* failure(f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" } }), "unsaved")
+        yield* failure(f.isolation.discard({ taskID: f.child.id, by: { kind: "owner" } }), "unsaved")
+        expect(yield* contents(f.workPath, "flagged.txt")).toBe("late write\n")
+        expect(yield* contents(f.home.directory, "flagged.txt")).toBe("original\n")
+      }).pipe(Effect.provideService(TaskIsolation.Limits, smallCapture)),
+    { git: true },
+  )
+
+  it.instance(
+    `Git ${flag} cannot hide changed oversized baseline bytes`,
+    () =>
+      Effect.gen(function* () {
+        const f = yield* fixture
+        yield* write(f.home.directory, "flagged.txt", "x".repeat(101))
+        yield* git(f.home.directory, ["add", "flagged.txt"])
+        yield* git(f.home.directory, ["commit", "-m", "large flag baseline"])
+        yield* f.start
+        yield* git(f.workPath, ["update-index", flag, "flagged.txt"])
+        yield* write(f.workPath, "flagged.txt", "y".repeat(101))
+        expect((yield* f.settle()).state).toBe("failed")
+        expect(yield* contents(f.workPath, "flagged.txt")).toBe("y".repeat(101))
+        expect(yield* contents(f.home.directory, "flagged.txt")).toBe("x".repeat(101))
+      }).pipe(Effect.provideService(TaskIsolation.Limits, smallCapture)),
+    { git: true },
+  )
+
+  it.instance(
+    `Git seed captures ${flag} parent bytes without changing the parent index`,
+    () =>
+      Effect.gen(function* () {
+        const f = yield* fixture
+        yield* write(f.home.directory, "flagged.txt", "original\n")
+        yield* git(f.home.directory, ["add", "flagged.txt"])
+        yield* git(f.home.directory, ["commit", "-m", "parent flag baseline"])
+        yield* git(f.home.directory, ["update-index", flag, "flagged.txt"])
+        yield* write(f.home.directory, "flagged.txt", "parent WIP\n")
+        const index = path.resolve(f.home.directory, yield* git(f.home.directory, ["rev-parse", "--git-path", "index"]))
+        const before = yield* Effect.promise(() => fs.readFile(index))
+        yield* f.start
+        expect(yield* contents(f.workPath, "flagged.txt")).toBe("parent WIP\n")
+        expect(yield* Effect.promise(() => fs.readFile(index))).toEqual(before)
+      }),
+    { git: true },
+  )
+}
+
+it.instance(
+  "Git seed preserves absent sparse entries without changing the parent index",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      yield* write(f.home.directory, "sparse.txt", "tracked baseline\n")
+      yield* git(f.home.directory, ["add", "sparse.txt"])
+      yield* git(f.home.directory, ["commit", "-m", "sparse baseline"])
+      yield* git(f.home.directory, ["update-index", "--skip-worktree", "sparse.txt"])
+      yield* Effect.promise(() => fs.unlink(path.join(f.home.directory, "sparse.txt")))
+      const index = path.resolve(f.home.directory, yield* git(f.home.directory, ["rev-parse", "--git-path", "index"]))
+      const before = yield* Effect.promise(() => fs.readFile(index))
+      yield* f.start
+      expect(yield* contents(f.workPath, "sparse.txt")).toBe("tracked baseline\n")
+      expect(yield* Effect.promise(() => fs.readFile(index))).toEqual(before)
+      expect((yield* f.settle()).state).toBe("unchanged")
+    }),
+  { git: true },
+)
+
+for (const file of ["normalized.txt", "__proto__"])
+  it.instance(
+    `Git unchanged oversized CRLF ${file} bytes preserve their raw baseline through Git normalization`,
+    () =>
+      Effect.gen(function* () {
+        const f = yield* fixture
+        yield* write(f.home.directory, ".gitattributes", `${file} text eol=crlf\n`)
+        yield* write(f.home.directory, file, "line\r\n".repeat(20))
+        yield* git(f.home.directory, ["add", ".gitattributes", file])
+        yield* git(f.home.directory, ["commit", "-m", "CRLF baseline"])
+        yield* f.start
+        expect(yield* contents(f.workPath, file)).toBe("line\r\n".repeat(20))
+        expect((yield* f.settle()).state).toBe("unchanged")
+        expect(yield* exists(f.workPath)).toBe(false)
+      }).pipe(Effect.provideService(TaskIsolation.Limits, smallCapture)),
+    { git: true },
+  )
+
+it.instance("copy files named __proto__, constructor and toString can be captured and merged", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture
+    yield* f.start
+    for (const file of ["__proto__", "constructor", "toString"]) yield* write(f.workPath, file, "captured\n")
+    expect((yield* f.settle()).state).toBe("changed")
+    yield* f.isolation.merge({ taskID: f.child.id, files: ["__proto__"], by: { kind: "owner" } })
+    yield* f.isolation.resume({ taskID: f.child.id, attempt: 2, agent: f.agent })
+    yield* write(f.workPath, "__proto__", "follow-up\n")
+    expect((yield* f.isolation.settle({ taskID: f.child.id, attempt: 2 })).state).toBe("changed")
+    yield* f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" } })
+    expect(yield* contents(f.home.directory, "__proto__")).toBe("follow-up\n")
+    expect(yield* contents(f.home.directory, "constructor")).toBe("captured\n")
+    expect(yield* contents(f.home.directory, "toString")).toBe("captured\n")
+  }),
+)
+
+for (const change of ["delete", "shrink"]) {
+  it.instance(`copy oversized baseline ${change} retains the original recoverable bytes`, () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      yield* write(f.home.directory, "large.txt", "x".repeat(101))
+      yield* f.start
+      if (change === "delete") yield* Effect.promise(() => fs.unlink(path.join(f.workPath, "large.txt")))
+      else yield* write(f.workPath, "large.txt", "smaller\n")
+      expect((yield* f.settle()).state).toBe("failed")
+      expect(yield* exists(f.workPath)).toBe(true)
+      expect(yield* contents(f.home.directory, "large.txt")).toBe("x".repeat(101))
+      expect(yield* contents(path.dirname(f.recordPath), "baseline/large.txt")).toBe("x".repeat(101))
+    }).pipe(Effect.provideService(TaskIsolation.Limits, smallCapture)),
+  )
+}
+
+if (process.platform !== "win32") {
+  it.instance("copy new __proto__ symlink output is retained instead of silently excluded", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      yield* f.start
+      yield* Effect.promise(() => fs.symlink("missing-target", path.join(f.workPath, "__proto__")))
+      expect((yield* f.settle()).state).toBe("failed")
+      expect(yield* Effect.promise(() => fs.readlink(path.join(f.workPath, "__proto__")))).toBe("missing-target")
+      yield* f.isolation.enqueue(f.child.id)
+      expect(yield* f.isolation.sweep({ force: true })).toEqual([])
+    }),
+  )
+
+  for (const change of ["new", "changed", "deleted"]) {
+    it.instance(`copy ${change} symlink output is retained instead of silently excluded`, () =>
+      Effect.gen(function* () {
+        const f = yield* fixture
+        yield* write(f.home.directory, "target.txt", "target\n")
+        if (change !== "new")
+          yield* Effect.promise(() => fs.symlink("target.txt", path.join(f.home.directory, "link.txt")))
+        yield* f.start
+        if (change !== "new") yield* Effect.promise(() => fs.unlink(path.join(f.workPath, "link.txt")))
+        if (change !== "deleted")
+          yield* Effect.promise(() =>
+            fs.symlink(change === "new" ? "target.txt" : "other.txt", path.join(f.workPath, "link.txt")),
+          )
+        expect((yield* f.settle()).state).toBe("failed")
+        expect(yield* exists(f.workPath)).toBe(true)
+        yield* failure(f.isolation.discard({ taskID: f.child.id, by: { kind: "owner" } }), "unsaved")
+        if (change !== "deleted")
+          expect(yield* Effect.promise(() => fs.readlink(path.join(f.workPath, "link.txt")))).toBe(
+            change === "new" ? "target.txt" : "other.txt",
+          )
+      }),
+    )
+  }
+
+  it.instance("copy unchanged inherited links remain allowed after partial merge and resume", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      yield* write(f.home.directory, "target.txt", "target\n")
+      yield* Effect.promise(() => fs.symlink("target.txt", path.join(f.home.directory, "link.txt")))
+      yield* f.start
+      yield* write(f.workPath, "one.txt", "one\n")
+      yield* write(f.workPath, "two.txt", "two\n")
+      yield* f.settle()
+      yield* f.isolation.merge({ taskID: f.child.id, files: ["one.txt"], by: { kind: "owner" } })
+      yield* f.isolation.resume({ taskID: f.child.id, attempt: 2, agent: f.agent })
+      const result = yield* f.isolation.settle({ taskID: f.child.id, attempt: 2 })
+      expect(result.state).toBe("changed")
+      yield* f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" } })
+      expect(yield* contents(f.home.directory, "two.txt")).toBe("two\n")
+      expect(yield* Effect.promise(() => fs.readlink(path.join(f.home.directory, "link.txt")))).toBe("target.txt")
+    }),
+  )
+}
+
+for (const gitProject of [true, false]) {
+  it.instance(
+    `${gitProject ? "Git" : "copy"} unchanged pre-existing oversized bytes allow intentional unchanged cleanup`,
+    () =>
+      Effect.gen(function* () {
+        const f = yield* fixture
+        yield* write(f.home.directory, "large-baseline.bin", "x".repeat(101))
+        if (gitProject) {
+          yield* git(f.home.directory, ["add", "large-baseline.bin"])
+          yield* git(f.home.directory, ["commit", "-m", "large baseline"])
+        }
+        yield* f.start
+        expect((yield* f.settle()).state).toBe("unchanged")
+        expect(yield* exists(f.workPath)).toBe(false)
+        expect(yield* contents(f.home.directory, "large-baseline.bin")).toBe("x".repeat(101))
+      }).pipe(Effect.provideService(TaskIsolation.Limits, smallCapture)),
+    { git: gitProject },
+  )
+
+  it.instance(
+    `${gitProject ? "Git" : "copy"} changed pre-existing oversized bytes are retained even when their size stays equal`,
+    () =>
+      Effect.gen(function* () {
+        const f = yield* fixture
+        yield* write(f.home.directory, "large-baseline.bin", "x".repeat(101))
+        if (gitProject) {
+          yield* git(f.home.directory, ["add", "large-baseline.bin"])
+          yield* git(f.home.directory, ["commit", "-m", "large baseline"])
+        }
+        yield* f.start
+        yield* write(f.workPath, "large-baseline.bin", "y".repeat(101))
+        expect((yield* f.settle()).state).toBe("failed")
+        expect(yield* contents(f.workPath, "large-baseline.bin")).toBe("y".repeat(101))
+        expect(yield* contents(f.home.directory, "large-baseline.bin")).toBe("x".repeat(101))
+      }).pipe(Effect.provideService(TaskIsolation.Limits, smallCapture)),
+    { git: gitProject },
+  )
+
+  it.instance(
+    `${gitProject ? "Git" : "copy"} late oversized output blocks full merge, discard and sweep before any parent write`,
+    () =>
+      Effect.gen(function* () {
+        const f = yield* fixture
+        yield* f.start
+        yield* write(f.workPath, "supported.txt", "supported\n")
+        expect((yield* f.settle()).state).toBe("changed")
+        yield* write(f.workPath, "late.bin", "x".repeat(101))
+        yield* failure(f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" } }), "unsupported")
+        expect(yield* exists(path.join(f.home.directory, "supported.txt"))).toBe(false)
+        yield* failure(f.isolation.discard({ taskID: f.child.id, by: { kind: "owner" } }), "unsaved")
+        yield* f.isolation.enqueue(f.child.id)
+        expect(yield* f.isolation.sweep({ force: true })).toEqual([])
+        expect(yield* contents(f.workPath, "late.bin")).toBe("x".repeat(101))
+        expect(yield* contents(f.workPath, "supported.txt")).toBe("supported\n")
+      }).pipe(Effect.provideService(TaskIsolation.Limits, smallCapture)),
+    { git: gitProject },
+  )
+}
+
+it.instance(
+  "initial ignored oversized inputs remain intentionally excluded from the Git checkout",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      yield* write(f.home.directory, ".gitignore", "ignored.bin\n")
+      yield* write(f.home.directory, "ignored.bin", "x".repeat(101))
+      yield* f.start
+      expect(yield* exists(path.join(f.workPath, "ignored.bin"))).toBe(false)
+      expect((yield* f.settle()).state).toBe("unchanged")
+      expect(yield* contents(f.home.directory, "ignored.bin")).toBe("x".repeat(101))
+    }).pipe(Effect.provideService(TaskIsolation.Limits, smallCapture)),
+  { git: true },
+)
+
+it.instance(
+  "normal settlement disables root post-commit hooks while actually saving supported files",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      yield* f.start
+      yield* write(f.workPath, "post-commit", "#!/bin/sh\ntouch hook-ran\n")
+      yield* Effect.promise(() => fs.chmod(path.join(f.workPath, "post-commit"), 0o755))
+      yield* git(f.workPath, ["config", "core.hooksPath", "."])
+      yield* write(f.workPath, "normal.txt", "normal\n")
+      const result = yield* f.settle()
+      expect(result.state).toBe("changed")
+      expect(result.tip).not.toBe(result.seed)
+      expect(yield* exists(path.join(f.workPath, "hook-ran"))).toBe(false)
+    }),
+  { git: true },
+)
+
+it.instance("retains an oversized copy replacement instead of deleting the parent's small baseline file", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture
+    yield* write(f.home.directory, "existing.txt", "small baseline\n")
+    yield* f.start
+    yield* write(f.workPath, "existing.txt", "x".repeat(101))
+    const saved = yield* f.settle()
+    if (saved.state === "changed") yield* f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" } })
+    expect(yield* contents(f.home.directory, "existing.txt")).toBe("small baseline\n")
+    expect(saved.state).toBe("failed")
+    expect(yield* contents(f.workPath, "existing.txt")).toBe("x".repeat(101))
+    expect(saved.error).toContain("retained")
+    yield* write(f.workPath, "existing.txt", "recovered\n")
+    const recovered = yield* f.isolation.reconcile(f.child.id)
+    expect(recovered.state).toBe("changed")
+    expect(recovered.error).toBeUndefined()
+    yield* f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" } })
+    expect(yield* contents(f.home.directory, "existing.txt")).toBe("recovered\n")
+  }).pipe(Effect.provideService(TaskIsolation.Limits, smallCapture)),
+)
+
+it.instance(
+  "retains an only oversized Git output instead of removing it as unchanged",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      yield* f.start
+      yield* write(f.workPath, "only-output.bin", "x".repeat(101))
+      const saved = yield* f.settle()
+      expect(yield* exists(f.workPath)).toBe(true)
+      expect(saved.state).toBe("failed")
+      expect(yield* contents(f.workPath, "only-output.bin")).toBe("x".repeat(101))
+      expect(saved.error).toContain("retained")
+      yield* write(f.workPath, "only-output.bin", "recovered\n")
+      expect((yield* f.isolation.reconcile(f.child.id)).state).toBe("changed")
+      yield* f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" } })
+      expect(yield* contents(f.home.directory, "only-output.bin")).toBe("recovered\n")
+    }).pipe(Effect.provideService(TaskIsolation.Limits, smallCapture)),
+  { git: true },
+)
+
 it.instance(
   "seed captures staged, unstaged and untracked files without touching the real index",
   () =>
@@ -574,21 +906,21 @@ it.instance(
 )
 
 it.instance(
-  "settle disables root post-commit hooks and excludes oversized blobs already added by the child",
+  "settle retains oversized blobs already added by the child together with supported output",
   () =>
     Effect.gen(function* () {
       const f = yield* fixture
       const started = yield* f.start
-      yield* write(started.work.directory, "post-commit", "#!/bin/sh\ntouch hook-ran\n")
-      yield* Effect.promise(() => fs.chmod(path.join(f.workPath, "post-commit"), 0o755))
       yield* write(started.work.directory, "oversized.txt", "x".repeat(101))
       yield* git(f.workPath, ["add", "oversized.txt"])
       yield* write(started.work.directory, "normal.txt", "normal\n")
       const result = yield* f.settle()
-      expect(result.state).toBe("changed")
+      expect(result.state).toBe("failed")
       expect(result.skipped).toContain("oversized.txt")
       expect(result.files.map((file) => file.path)).not.toContain("oversized.txt")
-      expect(yield* exists(path.join(f.workPath, "hook-ran"))).toBe(false)
+      expect(yield* contents(f.workPath, "oversized.txt")).toBe("x".repeat(101))
+      expect(yield* contents(f.workPath, "normal.txt")).toBe("normal\n")
+      expect(result.error).toContain("retained")
     }).pipe(
       Effect.provideService(TaskIsolation.Limits, {
         fileBytes: 100,
