@@ -3,6 +3,7 @@ import { createHash } from "node:crypto"
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { Image } from "@/image/image"
 import { ComputerSession } from "@/computer/session"
+import { ComputerNativeActions } from "@/computer/native-actions"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { Cause, Deferred, Effect, Exit, Fiber, Layer, Context, Scope, Schema } from "effect"
 import * as Stream from "effect/Stream"
@@ -58,7 +59,25 @@ const COMPUTER_OBSERVATIONS = new Set([
 
 // Screenshot labels, capture IDs and encoded pixels change even when the desktop does not. Both loop guards
 // compare the action's actual target and perceptual frame hash instead. Observations always count as new work.
-function computerSignature(id: string, input: Record<string, unknown>, metadata: Record<string, unknown>) {
+function computerSignature(
+  id: string,
+  input: Record<string, unknown>,
+  metadata: Record<string, unknown>,
+  providerMetadata?: Record<string, unknown>,
+) {
+  // Native calls retain their wire spelling in history. Use the executor's canonical actions for both guards,
+  // without treating a generic tool argument named "member" as trusted provider metadata.
+  if (
+    isRecord(providerMetadata?.anthropic) &&
+    providerMetadata.anthropic.toolset_name === "computer" &&
+    typeof input.member === "string"
+  ) {
+    try {
+      input = { ...ComputerNativeActions.input(input, process.platform === "win32" ? "win32" : "darwin") }
+    } catch {
+      // Refused or historical unsupported inputs still settle normally and retain their original member below.
+    }
+  }
   const actions = Array.isArray(input.actions) && input.actions.length ? input.actions.filter(isRecord) : [input]
   const frame = isRecord(metadata.frame) ? metadata.frame.hash : undefined
   const repeat =
@@ -72,6 +91,7 @@ function computerSignature(id: string, input: Record<string, unknown>, metadata:
   const signature = JSON.stringify(
     actions.map((action) => ({
       action: action.action,
+      member: action.member,
       app: actions.length === 1 ? (app ?? action.app) : action.app,
       window: action.window,
       display: actions.length === 1 ? (metadata.display ?? action.display) : action.display,
@@ -374,7 +394,7 @@ const layer = Layer.effect(
         // a new answer.
         const signature =
           match.part.tool === "computer"
-            ? computerSignature(match.part.id, match.part.state.input, output.metadata)
+            ? computerSignature(match.part.id, match.part.state.input, output.metadata, match.part.metadata)
             : {
                 input: JSON.stringify(match.part.state.input),
                 output: createHash("sha256")
@@ -382,9 +402,7 @@ const layer = Layer.effect(
                   .digest("hex"),
               }
         ctx.stepTools = ctx.stepTools.map((item) =>
-          item.callID === toolCallID
-            ? { ...item, input: signature.input, output: signature.output }
-            : item,
+          item.callID === toolCallID ? { ...item, input: signature.input, output: signature.output } : item,
         )
         yield* session.updatePart({
           ...match.part,
@@ -410,7 +428,7 @@ const layer = Layer.effect(
         metadata: Record<string, unknown>,
       ) {
         if (part.state.status !== "running") return
-        const signature = computerSignature(part.id, part.state.input, metadata)
+        const signature = computerSignature(part.id, part.state.input, metadata, part.metadata)
         if (!signature.repeat) return
         const recent: SessionV1.ToolPart[] = []
         let before: string | undefined
@@ -435,7 +453,7 @@ const layer = Layer.effect(
           recent.length !== DOOM_LOOP_THRESHOLD ||
           !recent.every((item) => {
             if (item.tool !== "computer" || item.state.status !== "completed") return false
-            const other = computerSignature(item.id, item.state.input, item.state.metadata)
+            const other = computerSignature(item.id, item.state.input, item.state.metadata, item.metadata)
             return other.input === signature.input && other.output === signature.output
           })
         )

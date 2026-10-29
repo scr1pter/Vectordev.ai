@@ -277,13 +277,24 @@ function launcher(inspect: Computer.InspectResult, ctx: Context) {
 }
 
 function shellText(text: string) {
+  // Launcher fields must refuse a protected command whether it is named directly or by a quoted executable path.
+  const first = /^\s*(?:"([^"]+)"|'([^']+)'|(\S+))/.exec(text)
+  const token = first?.[1] ?? first?.[2] ?? first?.[3] ?? ""
+  const executable = /^[a-z][a-z\d+.-]*:\/\//i.test(token)
+    ? ""
+    : (token
+        .replaceAll("\\", "/")
+        .split("/")
+        .at(-1)
+        ?.replace(/\.(?:exe|com|cmd|bat)$/i, "") ?? "")
   return (
-    /^\s*(?:sudo|doas|bash|zsh|sh|fish|cmd(?:\.exe)?|powershell(?:\.exe)?|pwsh|osascript|python\d*|node|ruby|perl|curl|wget|echo|printf|rm|chmod|open|start|exec)\b/i.test(
-      text,
+    /^(?:sudo|doas|bash|zsh|sh|fish|cmd|powershell|pwsh|osascript|python\d*(?:\.\d+)*|node|ruby|perl|curl|wget|echo|printf|rm|chmod|open|start|exec)$/i.test(
+      executable,
     ) ||
-    /^\s*(?:git|npm|npx|pnpm|yarn|bun|deno|cargo|go|make|cmake|gradle|mvn|dotnet|ls|cat|cd|mkdir|rmdir|mv|cp|del|dir|env|export|source|eval|kill)\s+\S/i.test(
-      text,
-    ) ||
+    (/^(?:git|npm|npx|pnpm|yarn|bun|deno|cargo|go|make|cmake|gradle|mvn|dotnet|ls|cat|cd|mkdir|rmdir|mv|cp|del|dir|env|export|source|eval|kill)$/i.test(
+      executable,
+    ) &&
+      /^\s+\S/.test(text.slice(first?.[0].length ?? 0))) ||
     /^\s*(?:javascript|vbscript|shell|ms-settings):/i.test(text) ||
     (/(?:&&|\|\||;\s*\S|\$\(|`|\|\s*\S)/.test(text) && !/^https?:\/\/\S+$/i.test(text.trim()))
   )

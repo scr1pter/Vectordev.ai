@@ -156,6 +156,7 @@ type Call = {
   name?: string
   query?: string
   actions?: Record<string, unknown>[]
+  native?: Record<string, unknown> & { member: string }
 }
 
 const run = Effect.fn("test.computerSteps")(function* (steps: Call[][]) {
@@ -205,7 +206,10 @@ const run = Effect.fn("test.computerSteps")(function* (steps: Call[][]) {
             id,
             name,
             providerExecuted: true,
-            input: {
+            ...(call.native
+              ? { providerMetadata: { anthropic: { toolset_name: "computer", member: call.native.member } } }
+              : {}),
+            input: call.native ?? {
               action: call.action,
               app: "app:macos:com.apple.Safari",
               x: call.x ?? 100,
@@ -303,6 +307,74 @@ for (const action of ["screenshot", "zoom", "cursor_position", "wait", "scroll",
     )
   }
 }
+
+for (const native of [
+  { member: "screenshot" },
+  { member: "wait", duration: 1 },
+  { member: "scroll", scroll_direction: "down", scroll_amount: 1 },
+]) {
+  for (const separate of [false, true]) {
+    it.instance(
+      `three native ${native.member} calls do not trip either loop guard ${separate ? "across messages" : "in one message"}`,
+      () =>
+        Effect.gen(function* () {
+          const calls = Array.from({ length: 3 }, () => ({ action: native.member, native }))
+          const result = yield* run(separate ? calls.map((call) => [call]) : [calls])
+          expect(result.tools).toHaveLength(3)
+          expect(result.tools.every((part) => part.state.status === "completed")).toBe(true)
+          expect(result.tools.map((part) => part.state.input)).toEqual(calls.map(() => native))
+          expect(result.state.asks).toEqual([])
+          expect(result.budget?.stopped).toBeUndefined()
+        }),
+    )
+  }
+}
+
+it.instance("different native interaction members do not trip either loop guard", () =>
+  Effect.gen(function* () {
+    const result = yield* run(
+      ["left_click", "right_click", "middle_click"].map((member) => [
+        { action: member === "left_click" ? "click" : member, native: { member, coordinate: [100, 200] } },
+      ]),
+    )
+    expect(result.tools).toHaveLength(3)
+    expect(result.state.asks).toEqual([])
+    expect(result.budget?.stopped).toBeUndefined()
+  }),
+)
+
+it.instance("equivalent native click spellings still trip both loop guards", () =>
+  Effect.gen(function* () {
+    const result = yield* run([
+      [{ action: "click", native: { member: "left_click", coordinate: [100, 200] } }],
+      [{ action: "click", native: { member: "click", x: 100, y: 200 } }],
+      [{ action: "click", native: { member: "click", button: "left", coordinate: [100, 200] } }],
+    ])
+    expect(result.tools).toHaveLength(3)
+    expect(result.state.asks).toEqual(["doom_loop"])
+    expect(result.budget?.stopped?.reason).toBe("loop")
+  }),
+)
+
+it.instance("different native drag paths do not trip either loop guard", () =>
+  Effect.gen(function* () {
+    const result = yield* run(
+      Array.from({ length: 3 }, (_, index) => [
+        {
+          action: "drag",
+          native: {
+            member: "left_click_drag",
+            start_coordinate: [index * 10, 0],
+            coordinate: [100, 200],
+          },
+        },
+      ]),
+    )
+    expect(result.tools).toHaveLength(3)
+    expect(result.state.asks).toEqual([])
+    expect(result.budget?.stopped).toBeUndefined()
+  }),
+)
 
 it.instance("a refused computer output marks its user turn but another tool does not", () =>
   Effect.gen(function* () {

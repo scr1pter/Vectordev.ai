@@ -1019,6 +1019,46 @@ toolTests.instance("zoom leaves the last full frame as the coordinate reference"
   ),
 )
 
+for (const flags of [
+  { name: "step false overrides outer true", screenshot: true, step: false, expected: false },
+  { name: "step true overrides outer false", screenshot: false, step: true, expected: true },
+  { name: "an omitted step flag inherits outer false", screenshot: false, step: undefined, expected: false },
+  { name: "omitted flags include the image", screenshot: undefined, step: undefined, expected: true },
+]) {
+  toolTests.instance(`batch zoom screenshot flags: ${flags.name}`, () =>
+    toolCase(({ execute, bridge }) =>
+      Effect.gen(function* () {
+        const result = yield* execute({
+          action: "zoom",
+          ...(flags.screenshot === undefined ? {} : { screenshot: flags.screenshot }),
+          actions: [
+            { action: "screenshot", app: "Notes", screenshot: false },
+            {
+              action: "zoom",
+              region: { x0: 100, y0: 50, x1: 200, y1: 150 },
+              ...(flags.step === undefined ? {} : { screenshot: flags.step }),
+            },
+          ],
+        })
+        expect(result.metadata.code).toBeUndefined()
+        expect(result.metadata.screenshot).toBe(flags.expected)
+        expect(result.attachments ?? []).toHaveLength(flags.expected ? 1 : 0)
+        if (flags.expected) expect(result.attachments?.[0].url).toBe(imageData)
+        expect(result.metadata.frame).toMatchObject({
+          id: "frame-1",
+          width: 1440,
+          height: 900,
+          hash: observedFrame.hash,
+        })
+        expect(bridge.commands().filter((command) => command === "screenshot" || command === "zoom")).toEqual([
+          "screenshot",
+          "zoom",
+        ])
+      }),
+    ),
+  )
+}
+
 toolTests.instance("read_ui then a referenced click uses one app ask in a build task", () =>
   toolCase(({ desktop, execute, bridge }) =>
     Effect.gen(function* () {

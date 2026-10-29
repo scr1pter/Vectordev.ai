@@ -357,6 +357,41 @@ describe("computer sensitive steps", () => {
     })
   }
 
+  test("launcher fields refuse protected executable paths for typed and pasted input (INV-S11)", () => {
+    const target = { ...address, category: "files" as const }
+    for (const text of [
+      "C:\\Windows\\System32\\cmd.exe /c dir",
+      '"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command Get-Date',
+      "C:/Windows/System32/WindowsPowerShell/v1.0/PowerShell.EXE -Command Get-Date",
+      "C:\\Tools\\npm.cmd run build",
+      "/bin/sh -c pwd",
+      '"/bin/zsh"',
+      "'/opt/Command Tools/python3.12' task.py",
+      "/usr/bin/git status",
+    ]) {
+      expect(ComputerSensitive.classify(type(text), target)).toMatchObject({ kind: "refuse", code: "blocked" })
+      expect(
+        ComputerSensitive.classify(key("Control", "v"), target, { ...windows, clipboardText: text }),
+      ).toMatchObject({ kind: "refuse", code: "blocked" })
+    }
+  })
+
+  test("launcher fields retain ordinary text, document paths and web addresses", () => {
+    for (const text of [
+      "Quarterly planning notes",
+      "C:\\Users\\test\\Documents\\commands.txt",
+      '"C:\\Users\\test\\Documents\\cmd-notes.txt"',
+      '"/Users/test/Documents/bash-notes.txt"',
+      "https://example.com/sh",
+      "https://example.com/pwsh.exe",
+    ]) {
+      expect(ComputerSensitive.classify(type(text), address)).toBeUndefined()
+      expect(
+        ComputerSensitive.classify(key("Control", "v"), address, { ...windows, clipboardText: text }),
+      ).toBeUndefined()
+    }
+  })
+
   for (const step of [
     type("source code"),
     key("a"),
