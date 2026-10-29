@@ -82,10 +82,10 @@ export async function handleModelPlanPortal(request: ApiRequest, response: ApiRe
       windowSeconds: 3600,
       requirePersistent: true,
     })
-    // The website sends no body and opens the portal's home; Vector can ask for the plan change or cancel step.
+    // Home and payment/cancellation flows remain reachable while sales are paused; old change requests get 409.
     const flow = (await readJson<{ flow?: unknown } | null>(request, 4096))?.flow
-    if (flow !== undefined && flow !== "change" && flow !== "cancel")
-      throw new ApiError(400, "BILLING_FLOW_INVALID", "Choose plan changes or cancellation.")
+    if (flow !== undefined && flow !== "change" && flow !== "cancel" && flow !== "payment_method_update")
+      throw new ApiError(400, "BILLING_FLOW_INVALID", "Choose payment-method updates or cancellation.")
     json(response, 200, await modelPlanPortal(account.id, fetcher, { flow }))
   } catch (error) {
     handleApiError(response, error)

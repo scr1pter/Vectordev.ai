@@ -7,7 +7,7 @@ import { notifyOwner } from "./codium-owner.js"
 import { decodeSnapshot } from "./codium-snapshot.js"
 import { readDisabledSet, readSwitchState, SWITCH_NAMES } from "./codium-switches.js"
 import { decodeModelPlanAccount, ownerRefundQuote, subscriptionStanding } from "./model-plan-account.js"
-import { modelPlans, modelPlansEnabled } from "./model-plan-config.js"
+import { modelPlans, modelPlansEnabled, requireModelPlans } from "./model-plan-config.js"
 import { listStripe, modelPlanStripe, stripeMode, stripeModeProblems, stripeRecord } from "./model-plan-stripe.js"
 import { persistentStore } from "./persistent-store.js"
 
@@ -59,7 +59,14 @@ export async function readOwnerCodiumDashboard(
   const sales = switches.find((value) => value.name === "sales")
   const fundingFresh =
     funding !== undefined && now - funding.checkedAt >= 0 && now - funding.checkedAt < CODIUM_FUNDING_MAX_AGE_MS
-  const billingConfigured = configured && modelPlans().every((plan) => Boolean(plan.priceID))
+  const billingConfigured = (() => {
+    try {
+      requireModelPlans()
+      return true
+    } catch {
+      return false
+    }
+  })()
   const enabled =
     modelPlansEnabled() && billingConfigured && sales?.value === "on" && fundingFresh && funding?.status === "open"
   const plans = modelPlans().flatMap((plan) =>
@@ -106,7 +113,7 @@ export async function readOwnerCodiumDashboard(
       reason: !modelPlansEnabled()
         ? "Codium is disabled by deployment configuration."
         : !billingConfigured
-          ? "Stripe billing configuration is incomplete."
+          ? "Codium billing configuration is incomplete."
           : sales?.value !== "on"
             ? "The runtime sales switch is off or unavailable."
             : !funding || !fundingFresh

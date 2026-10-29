@@ -36,6 +36,8 @@ beforeEach(() => {
     VECTOR_ADMIN_EMAILS: owner,
     SUPABASE_URL: authURL,
     SUPABASE_PUBLISHABLE_KEY: "public-owner-fixture",
+    STRIPE_MODEL_PLAN_WEBHOOK_SECRET: "whsec_owner_fixture",
+    STRIPE_MODEL_PLAN_PORTAL_CONFIG_ID: "bpc_owner_fixture",
     MODEL_PLAN_MODELS_JSON: JSON.stringify([
       {
         id: "fixture/model",
@@ -221,6 +223,19 @@ describe("A12 private dashboard", () => {
     expect(answer.body.accounts).toMatchObject([{ account: id, refundCents: 1000, refundCharge: "ch_active" }])
     expect(answer.headers["x-robots-tag"]).toContain("noindex")
   })
+  test("sales readiness uses the canonical configuration guard when provider management is missing", async () => {
+    const fakes = seed()
+    funded(fakes)
+    expect((await call(fakes, "dashboard")).body.sales).toMatchObject({ enabled: true })
+    delete process.env.OPENROUTER_MANAGEMENT_KEY
+    const answer = await call(fakes, "dashboard")
+    expect(answer.status).toBe(200)
+    expect(answer.body.sales).toMatchObject({ enabled: false, reason: "Codium billing configuration is incomplete." })
+    expect(
+      (answer.body.subscriptions as Record<string, unknown>[]).find((plan) => plan.plan === "vector-10"),
+    ).toMatchObject({ count: 1 })
+    expect(answer.raw).not.toContain("OPENROUTER_MANAGEMENT_KEY")
+  })
   test("future or old funding is never projected as current sales authorization", async () => {
     for (const checkedAt of [now + 1, now - 15 * 60_000]) {
       const fakes = seed()
@@ -229,7 +244,10 @@ describe("A12 private dashboard", () => {
       fakes.store.set(codiumKey("funding"), JSON.stringify({ ...value, checkedAt }))
       const answer = await call(fakes, "dashboard")
       expect(answer.status).toBe(200)
-      expect(answer.body.sales).toMatchObject({ enabled: false, reason: "No current verified funding reading is available." })
+      expect(answer.body.sales).toMatchObject({
+        enabled: false,
+        reason: "No current verified funding reading is available.",
+      })
     }
   })
   test("future replay checkpoints cannot claim current webhook health", async () => {

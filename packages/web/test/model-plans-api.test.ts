@@ -752,6 +752,44 @@ describe("Codium portal compatibility and cancellation", () => {
     await expect(modelPlanPortal(user.id, fetcher, { flow: "change" })).rejects.toMatchObject({ statusCode: 409 })
   })
 
+  test("payment_method_update opens directly over HTTP without a paid plan or service sales", async () => {
+    process.env.MODEL_PLANS_ENABLED = "false"
+    delete process.env.OPENROUTER_MANAGEMENT_KEY
+    process.env.STRIPE_MODEL_PLAN_CHANGE_PORTAL_CONFIG_ID = "bpc_changes"
+    await redis([
+      "SET",
+      accountKey,
+      JSON.stringify({ customer: "cus_fixture", downgrade: { plan: "vector-10", token: "keep-schedule" } }),
+    ])
+    await redis(["SET", "vector:codium:test:switch:sales", "off"])
+    await redis(["SET", "vector:codium:test:switch:codium", "off"])
+    for (const pastDue of [false, true]) {
+      state.subscriptions = pastDue ? [{ ...subscription(), status: "past_due" }] : []
+      expect(
+        await billing("portal", { flow: "payment_method_update" }, pastDue ? "browser-session" : undefined),
+      ).toEqual({
+        status: 200,
+        body: { url: "https://billing.stripe.com/p/session/fixture" },
+      })
+      expect(portalSession()).toMatchObject({
+        customer: "cus_fixture",
+        configuration: "bpc_fixture",
+        "flow_data[type]": "payment_method_update",
+        "flow_data[after_completion][type]": "redirect",
+        "flow_data[after_completion][redirect][return_url]": "https://vectordev.ai/account?model_plan=updated",
+      })
+      expect(portalSession()).not.toHaveProperty("flow_data[subscription_cancel][subscription]")
+      expect(portalSession()).not.toHaveProperty("flow_data[payment_method_update][subscription]")
+    }
+    expect(
+      calls.some((call) => call.path === "/v1/subscriptions" || call.path.startsWith("/v1/subscription_schedules")),
+    ).toBe(false)
+    expect(JSON.parse(String(await redis(["GET", accountKey]))).downgrade).toEqual({
+      plan: "vector-10",
+      token: "keep-schedule",
+    })
+  })
+
   test("Vector opens the portal straight at changing or cancelling the paid plan", async () => {
     process.env.STRIPE_MODEL_PLAN_CHANGE_PORTAL_CONFIG_ID = "bpc_changes"
     await redis(["SET", accountKey, JSON.stringify({ customer: "cus_fixture" })])

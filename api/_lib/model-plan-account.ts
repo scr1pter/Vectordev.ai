@@ -2922,16 +2922,11 @@ export async function modelPlanCheckout(
   )
 }
 
-/**
- * A Stripe customer portal session: the portal's home, or straight to changing or cancelling the subscription. Changing
- * plans sells credits, so the portal that offers it (STRIPE_MODEL_PLAN_CHANGE_PORTAL_CONFIG_ID) opens only while Codium
- * is on sale and Vector's OpenRouter balance can pay for them, as for a checkout; otherwise the portal without plan
- * changes keeps the card, invoices and cancellation reachable.
- */
+/** The no-change portal's home, cancellation step or payment-method update, including for an unpaid customer. */
 export async function modelPlanPortal(
   id: string,
   fetcher: typeof fetch = fetch,
-  options: { flow?: "change" | "cancel"; now?: number } = {},
+  options: { flow?: "change" | "cancel" | "payment_method_update"; now?: number } = {},
 ) {
   if (options.flow === "change") throw changeUnavailable()
   const account = await readModelPlanAccount(id, fetcher)
@@ -2939,19 +2934,16 @@ export async function modelPlanPortal(
   const configuration = process.env.STRIPE_MODEL_PLAN_PORTAL_CONFIG_ID?.trim()
   if (!configuration)
     throw new ApiError(503, "BILLING_PORTAL_UNAVAILABLE", "Subscription management is temporarily unavailable.")
-  const subscription = options.flow
-    ? (await subscriptions(account.customer, fetcher)).flatMap((value) => {
-        const paid = paidModelPlan(value, id, options.now)
-        // A smaller plan chosen in the portal waits for the renewal date in a subscription schedule.
-        return paid ? [{ ...paid, scheduled: stripeRecord(value) && Boolean(value.schedule) }] : []
-      })
-    : []
-  if (options.flow && subscription.length !== 1)
-    throw new ApiError(
-      404,
-      "MODEL_PLAN_MISSING",
-      `There is no paid Codium plan to ${options.flow === "cancel" ? "cancel" : "change"}.`,
-    )
+  const subscription =
+    options.flow === "cancel"
+      ? (await subscriptions(account.customer, fetcher)).flatMap((value) => {
+          const paid = paidModelPlan(value, id, options.now)
+          // A smaller plan chosen in the portal waits for the renewal date in a subscription schedule.
+          return paid ? [{ ...paid, scheduled: stripeRecord(value) && Boolean(value.schedule) }] : []
+        })
+      : []
+  if (options.flow === "cancel" && subscription.length !== 1)
+    throw new ApiError(404, "MODEL_PLAN_MISSING", "There is no paid Codium plan to cancel.")
   // Stripe does not change a subscription that is cancelling or already has a change waiting, so say why here rather
   // than open a portal step that fails.
   if (options.flow === "cancel" && subscription[0]!.cancelAtPeriodEnd)
@@ -2970,18 +2962,20 @@ export async function modelPlanPortal(
       fetcher,
     )
   }
-  const flow = "subscription_cancel"
+  const flow = options.flow === "cancel" ? "subscription_cancel" : options.flow
   const body = new URLSearchParams({
     customer: account.customer,
     configuration,
     return_url: `${modelPlanOrigin()}/account`,
-    // A finished change or cancellation returns to the account page, which Vector's billing window watches for.
-    ...(options.flow
+    // The account return is also recognized by Vector's billing window.
+    ...(flow
       ? {
           "flow_data[type]": flow,
-          [`flow_data[${flow}][subscription]`]: subscription[0]!.id,
+          ...(flow === "subscription_cancel"
+            ? { "flow_data[subscription_cancel][subscription]": subscription[0]!.id }
+            : {}),
           "flow_data[after_completion][type]": "redirect",
-          "flow_data[after_completion][redirect][return_url]": `${modelPlanOrigin()}/account?model_plan=ending`,
+          "flow_data[after_completion][redirect][return_url]": `${modelPlanOrigin()}/account?model_plan=${flow === "subscription_cancel" ? "ending" : "updated"}`,
         }
       : {}),
   })

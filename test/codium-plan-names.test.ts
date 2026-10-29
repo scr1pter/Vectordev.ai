@@ -16,6 +16,37 @@ const retired = [
   /Codium \$\{(?:[\w.]*price|amount)\}/,
   /\bCodium \S+ top-up\b/,
 ]
+const historicalNames = [
+  {
+    file: "packages/web/scripts/model-plan-setup.ts",
+    line: "[`Vector Codium ${plan.price}`, `Vector Codium ${plan.name}`].includes(String(product.name))",
+    reason: "Recognize the exact historical monthly product before migrating its name and metadata.",
+  },
+  {
+    file: "packages/web/scripts/model-plan-setup.ts",
+    line: "![`Vector Codium ${amount} top-up`, `Vector Codium $${amount} credit top-up`].includes(String(product.name)) ||",
+    reason: "Verify the historical top-up product identity before archiving its one-time price.",
+  },
+  {
+    file: "packages/web/test/model-plan-setup.test.ts",
+    line: "name: `Vector Codium ${plan.price}`,",
+    reason: "Seed the old monthly product so migration tests exercise the actual historical identity.",
+  },
+  {
+    file: "packages/web/test/model-plan-setup.test.ts",
+    line: "fake.products.push({ id: `prod_topup${amount}`, active: true, name: `Vector Codium ${amount} top-up`, metadata: {} })",
+    reason: "Seed the old top-up product so cleanup tests verify its strict ownership comparison.",
+  },
+] as const
+
+function retiredNameViolation(file: string, line: string) {
+  return (
+    retired.some((pattern) => pattern.test(line)) &&
+    // A line that describes this check (the build plans do) quotes the names it rejects.
+    !line.includes(path.basename(self)) &&
+    !historicalNames.some((entry) => entry.file === file && entry.line === line.trim())
+  )
+}
 
 test("the plans keep their ids and prices and take their new names", () => {
   expect(CodiumPlan.PLANS.map((plan) => [plan.id, plan.price, plan.name])).toEqual([
@@ -50,12 +81,9 @@ test("nothing in the repository calls a plan or a top-up by its old numbered nam
   const found = (
     await Promise.all(
       files.map(async (file) =>
-        (await Bun.file(path.join(root, file)).text()).split("\n").flatMap((line, index) =>
-          // A line that describes this check (the build plans do) quotes the names it rejects.
-          retired.some((pattern) => pattern.test(line)) && !line.includes(path.basename(self))
-            ? [`${file}:${index + 1}: ${line.trim()}`]
-            : [],
-        ),
+        (await Bun.file(path.join(root, file)).text())
+          .split("\n")
+          .flatMap((line, index) => (retiredNameViolation(file, line) ? [`${file}:${index + 1}: ${line.trim()}`] : [])),
       ),
     )
   ).flat()
@@ -63,6 +91,32 @@ test("nothing in the repository calls a plan or a top-up by its old numbered nam
   expect(files).toContain("packages/web/src/components/marketing/codium/CodiumPricing.tsx")
   expect(files.length).toBeGreaterThan(3000)
   expect(found).toEqual([])
+})
+
+test("each documented historical name exception matches exactly one line in its exact file", async () => {
+  for (const entry of historicalNames) {
+    expect(entry.reason.length).toBeGreaterThan(0)
+    const lines = (await Bun.file(path.join(root, entry.file)).text()).split("\n")
+    expect(lines.filter((line) => line.trim() === entry.line)).toHaveLength(1)
+    expect(retired.some((pattern) => pattern.test(entry.line))).toBe(true)
+    expect(retiredNameViolation(entry.file, `  ${entry.line}  `)).toBe(false)
+  }
+})
+
+test("historical exceptions never permit numbered current product creation or names in other paths", () => {
+  for (const line of [
+    "name: `Vector Codium ${plan.price}`,",
+    "name: `Vector Codium ${amount} top-up`,",
+    'name: "Vector Codium 100",',
+  ])
+    expect(retiredNameViolation("packages/web/scripts/model-plan-setup.ts", line)).toBe(true)
+  for (const entry of historicalNames) {
+    expect(retiredNameViolation("packages/web/scripts/current-products.ts", entry.line)).toBe(true)
+    expect(retiredNameViolation("packages/web/src/components/marketing/codium/CodiumPricing.tsx", entry.line)).toBe(
+      true,
+    )
+    expect(retiredNameViolation(entry.file, `${entry.line} // another use`)).toBe(true)
+  }
 })
 
 test("the check catches the old names and leaves the new ones alone", () => {
