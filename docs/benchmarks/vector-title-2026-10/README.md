@@ -84,5 +84,30 @@ sent one main request and one title request. Both cases use a fake provider,
 not live inference or measured costs. Composer tests also passed (59 tests,
 219 assertions), including mention-first input, attachment-only labels, and an
 emoji greeting; title-helper tests passed (three tests, seven assertions).
-App and engine typechecks passed. The identical production navigation workload
-must now be run on the title implementation and compared with `before-valid.json`.
+App and engine typechecks passed; the required pre-push check also passed all
+23 packages.
+
+The after-change production benchmark at source
+`5fd08374f72731e93a4bafbbf249738ff0a5a653`,
+[run 40792332930, job 123180412102](https://github.com/scr1pter/claudeondfsfdaf/actions/runs/40792332930/job/123180412102),
+passed all nine initial results without retries. `after.json` preserves every raw
+record and sample. The benchmark workflow, production configuration, fixture,
+probe, command, worker count, and three-repeat inputs were unchanged from the
+valid before run. Neither run used live providers or a local browser benchmark.
+
+| Scenario | First destination median, before / after (ms) | Stable destination median, before / after (ms) | Blank / unknown samples, before and after |
+| --- | ---: | ---: | ---: |
+| Unvisited task | 123.8 / 118.1 | 140.3 / 148.7 | 0 / 0 |
+| New session page | 136.4 / 158.3 | 230.3 / 234.0 | 0 / 0 |
+| Child session | 80.2 / 88.8 | 141.6 / 143.5 | 0 / 0 |
+
+Navigation assertions passed on both revisions. These are three repeats from
+one CI job per revision, with mixed timing differences; they do not establish a
+latency improvement or a statistically bounded performance change. The fixture
+navigates to seeded sessions and the new-session page; it does not submit a
+first work prompt. The separate fake-provider regression establishes the title
+request-count behavior. Neither measurement proves live token, cost, quality,
+or cache-hit savings. These conclusions concern the completed benchmark jobs,
+not the status of every other job in their general CI runs. Earlier failed and
+cancelled measurement attempts are retained as instrumentation history, not
+current product failures.
