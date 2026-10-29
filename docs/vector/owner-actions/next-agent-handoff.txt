@@ -1066,6 +1066,8 @@ A16 scoped fixed:
   https://github.com/scr1pter/claudeondfsfdaf/actions/runs/40818236335
   SUCCESS exact14bc7d42.
 
+Checkpoint PR15 note: its prose/snapshot pushes require the full local pre-push check, not a new feature-suite claim. Redundant automatic docs-only CI may be canceled for the pause. An older PR15 general test run at57d71c8f reported failure and was not investigated during checkpointing; do not label PR15 full general CI green. Before an eventual owner-approved merge, integrate current main and assess the exact resulting checks.
+
 Draft PR15:
   https://github.com/scr1pter/claudeondfsfdaf/pull/15
   Setup/status/checkpoint docs; attached to task.

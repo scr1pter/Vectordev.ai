@@ -1,0 +1,796 @@
+$ bun turbo typecheck "--concurrency=1"
+• turbo 2.8.13
+• Packages in scope: @vector/cloud, @vectordevai/app, @vectordevai/cli-dev, @vectordevai/client, @vectordevai/core, @vectordevai/effect-drizzle-sqlite, @vectordevai/effect-sqlite-node, @vectordevai/engine, @vectordevai/http-recorder, @vectordevai/httpapi-codegen, @vectordevai/llm, @vectordevai/plugin, @vectordevai/protocol, @vectordevai/schema, @vectordevai/script, @vectordevai/sdk, @vectordevai/sdk-next, @vectordevai/server, @vectordevai/session-ui, @vectordevai/tui, @vectordevai/ui, @vectordevai/web, vector-desktop
+• Running typecheck in 23 packages
+• Remote caching disabled
+@vectordevai/effect-drizzle-sqlite:typecheck: cache hit, replaying logs e62f0d47720d0d67
+@vectordevai/effect-drizzle-sqlite:typecheck: $ tsgo --noEmit
+@vectordevai/app:typecheck: cache hit, replaying logs a9d8cdc85a219cd2
+@vectordevai/app:typecheck: $ tsgo -b
+@vectordevai/cli-dev:typecheck: cache hit, replaying logs 4e1eb519c6505813
+@vectordevai/cli-dev:typecheck: $ tsgo --noEmit
+@vectordevai/session-ui:typecheck: cache hit, replaying logs ec6d117d34e514a1
+@vectordevai/session-ui:typecheck: $ tsgo --noEmit
+@vectordevai/ui:typecheck: cache hit, replaying logs ff4331fec95422dd
+@vectordevai/ui:typecheck: $ tsgo --noEmit
+@vectordevai/sdk-next:typecheck: cache hit, replaying logs 1e5b34862e1ef1dd
+@vectordevai/sdk-next:typecheck: $ tsgo --noEmit
+@vectordevai/protocol:typecheck: cache hit, replaying logs 0aa3c3fbf350e8fc
+@vectordevai/protocol:typecheck: $ tsgo --noEmit
+@vectordevai/plugin:typecheck: cache hit, replaying logs fbc0f8749314e149
+@vectordevai/plugin:typecheck: $ tsgo --noEmit
+@vectordevai/engine:typecheck: cache hit, replaying logs 2391c816cf0292a2
+@vectordevai/engine:typecheck: $ tsgo --noEmit
+@vectordevai/client:typecheck: cache hit, replaying logs 8ca720246304d6dd
+@vectordevai/client:typecheck: $ tsgo --noEmit
+@vectordevai/script:typecheck: cache hit, replaying logs 0ee2c902f902e6b6
+@vectordevai/script:typecheck: $ tsgo --noEmit
+@vectordevai/tui:typecheck: cache hit, replaying logs ac01549fabc35bb8
+@vectordevai/tui:typecheck: $ tsgo --noEmit
+@vectordevai/http-recorder:typecheck: cache hit, replaying logs 2fb890e9c4341c08
+@vectordevai/http-recorder:typecheck: $ tsgo --noEmit
+@vectordevai/httpapi-codegen:typecheck: cache hit, replaying logs 70f58afd9dcd251f
+@vectordevai/httpapi-codegen:typecheck: $ tsgo --noEmit
+@vector/cloud:typecheck: cache hit, replaying logs abb919ae158945f0
+@vector/cloud:typecheck: $ tsgo --noEmit
+@vectordevai/core:typecheck: cache hit, replaying logs a457d178cb495988
+@vectordevai/core:typecheck: $ tsgo --noEmit
+@vectordevai/llm:typecheck: cache hit, replaying logs 644f4de116027482
+@vectordevai/llm:typecheck: $ tsgo --noEmit
+@vectordevai/schema:typecheck: cache hit, replaying logs 1f64aa687543f6cc
+@vectordevai/schema:typecheck: $ tsgo --noEmit
+@vectordevai/web:typecheck: cache hit, replaying logs c2d2285be963f7a5
+@vectordevai/web:typecheck: $ astro check
+@vectordevai/web:typecheck: 03:31:18 [@astrojs/cloudflare] Enabling sessions with Cloudflare KV with the "SESSION" KV binding.
+@vectordevai/web:typecheck: 03:31:18 [@astrojs/cloudflare] If you see the error "Invalid binding `SESSION`" in your build output, you need to add the binding to your wrangler config file.
+@vectordevai/web:typecheck: 03:31:19 [content] Syncing content
+@vectordevai/web:typecheck: 03:31:19 [content] Synced content
+@vectordevai/web:typecheck: 03:31:19 [types] Generated 638ms
+@vectordevai/web:typecheck: 03:31:19 [check] Getting diagnostics for Astro files in /workspace/vector-codium-next/packages/web...
+@vectordevai/web:typecheck: [96msrc/components/marketing/owner/CodiumOwner.test.ts[0m:[93m330[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m330[0m     await expect(
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m331[0m       mutateCodiumOwner("reconcile", "fixture-session", { account: ACCOUNT }, (async (_input: RequestInfo | URL) =>
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m332[0m         Response.json({ accepted: false })) as typeof fetch),
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m333[0m     ).rejects.toMatchObject({ code: "OWNER_RESPONSE_INVALID" })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96msrc/components/marketing/owner/CodiumOwner.test.ts[0m:[93m326[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m326[0m     await expect(
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m327[0m       mutateCodiumOwner("clear-risk", "fixture-session", { account: ACCOUNT }, (async (_input: RequestInfo | URL) =>
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m328[0m         Response.json({ error: { code: "RECENT_SIGN_IN_REQUIRED" } }, { status: 403 })) as typeof fetch),
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m329[0m     ).rejects.toMatchObject({ code: "RECENT_SIGN_IN_REQUIRED" })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96msrc/components/marketing/owner/CodiumOwner.test.ts[0m:[93m322[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m322[0m     await expect(
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m323[0m       mutateCodiumOwner("refund-end", "fixture-session", { account: ACCOUNT }, (async (_input: RequestInfo | URL) =>
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m324[0m         Response.json({ error: { code: "CODIUM_REFUND_CHANGED" } }, { status: 409 })) as typeof fetch),
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m325[0m     ).rejects.toMatchObject({ code: "CODIUM_REFUND_CHANGED" })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96msrc/components/marketing/owner/CodiumOwner.test.ts[0m:[93m186[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m186[0m     await expect(
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m187[0m       readCodiumOwner("fixture-session", (async (_input: RequestInfo | URL) =>
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m188[0m         Response.json({ generatedAt: NOW, sales: summary.sales })) as typeof fetch),
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m189[0m     ).rejects.toMatchObject({ code: "OWNER_RESPONSE_INVALID" })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96msrc/components/marketing/owner/CodiumOwner.test.ts[0m:[93m157[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m157[0m     await expect(
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m158[0m       readCodiumOwner("", (async (input: unknown) => {
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m...[0m 
+@vectordevai/web:typecheck: [7m161[0m       }) as typeof fetch),
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m162[0m     ).rejects.toMatchObject({ code: "SIGN_IN_REQUIRED" })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [96msrc/components/marketing/owner/CodiumOwner.tsx[0m:[93m402[0m:[93m26[0m - [93mwarning[0m[90m ts(6385): [0m'FormEvent' is deprecated.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m402[0m   const replay = (event: FormEvent<HTMLFormElement>) => {
+@vectordevai/web:typecheck: [7m   [0m [93m                         ~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96msrc/components/marketing/owner/CodiumOwner.tsx[0m:[93m4[0m:[93m39[0m - [93mwarning[0m[90m ts(6385): [0m'FormEvent' is deprecated.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m4[0m import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react"
+@vectordevai/web:typecheck: [7m [0m [93m                                      ~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [96msrc/components/marketing/usage/UsageDashboard.tsx[0m:[93m1079[0m:[93m26[0m - [93mwarning[0m[90m ts(6385): [0m'FormEvent' is deprecated.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m1079[0m   const create = (event: FormEvent) => {
+@vectordevai/web:typecheck: [7m    [0m [93m                         ~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96msrc/components/marketing/usage/UsageDashboard.tsx[0m:[93m175[0m:[93m10[0m - [93mwarning[0m[90m ts(80006): [0mThis may be converted to an async function.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m175[0m function accessToken() {
+@vectordevai/web:typecheck: [7m   [0m [93m         ~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96msrc/components/marketing/usage/UsageDashboard.tsx[0m:[93m5[0m:[93m39[0m - [93mwarning[0m[90m ts(6385): [0m'FormEvent' is deprecated.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m5[0m import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react"
+@vectordevai/web:typecheck: [7m [0m [93m                                      ~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [96msrc/theme/Header.astro[0m:[93m3[0m:[93m15[0m - [93mwarning[0m[90m ts(6385): [0m'Props' is deprecated.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m3[0m import type { Props } from "@astrojs/starlight/props";
+@vectordevai/web:typecheck: [7m [0m [93m              ~~~~~[0m
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [96msrc/theme/PageTitle.astro[0m:[93m2[0m:[93m15[0m - [93mwarning[0m[90m ts(6385): [0m'Props' is deprecated.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m2[0m import type { Props } from "@astrojs/starlight/props";
+@vectordevai/web:typecheck: [7m [0m [93m              ~~~~~[0m
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [96mtest/cli-release-api.test.ts[0m:[93m101[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m101[0m     await expect(readCliManifest(new Response(body).body!, url!, version!)).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m102[0m       statusCode: 503,
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m103[0m       code: "CLI_RELEASE_INVALID",
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m104[0m     })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~[0m
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [96mtest/codium-payments.test.ts[0m:[93m858[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m858[0m     await expect(checkCodiumFunding(fetcher)).rejects.toMatchObject({ code: "CODIUM_FUNDING_CONFIGURATION" })
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/codium-payments.test.ts[0m:[93m841[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m841[0m     await expect(modelPlanCheckout(user, "vector-10", fetcher)).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m842[0m       code: "CODIUM_SALES_PAUSED",
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m843[0m     })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/codium-payments.test.ts[0m:[93m840[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m840[0m     await expect(checkCodiumFunding(fetcher)).rejects.toMatchObject({ code: "CODIUM_FUNDING_UNAVAILABLE" })
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/codium-payments.test.ts[0m:[93m821[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m821[0m     await expect(checkCodiumFunding(fetcher, minute + 600_000)).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m822[0m       code: "CODIUM_FUNDING_UNAVAILABLE",
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m823[0m     })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/codium-payments.test.ts[0m:[93m813[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m813[0m     await expect(modelPlanCheckout(user, "vector-10", fetcher, minute)).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m814[0m       code: "CODIUM_SALES_PAUSED",
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m815[0m     })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/codium-payments.test.ts[0m:[93m812[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m812[0m     await expect(requireCodiumSales(fetcher, minute)).rejects.toMatchObject({ code: "CODIUM_SALES_PAUSED" })
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/codium-payments.test.ts[0m:[93m811[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m811[0m     await expect(checkCodiumFunding(fetcher, minute)).rejects.toMatchObject({ code: "CODIUM_FUNDING_UNAVAILABLE" })
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/codium-payments.test.ts[0m:[93m792[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m792[0m     await expect(modelPlanCheckout(user, "vector-50", fetcher, later)).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m793[0m       code: "CODIUM_SALES_PAUSED",
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m794[0m     })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/codium-payments.test.ts[0m:[93m772[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m772[0m     await expect(modelPlanCheckout(user, "vector-10", fetcher)).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m773[0m       code: "CODIUM_SALES_PAUSED",
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m774[0m     })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/codium-payments.test.ts[0m:[93m672[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m672[0m     await expect(modelPlanCheckout(user, "vector-10", fetcher)).rejects.toMatchObject(paused)
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/codium-payments.test.ts[0m:[93m560[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m560[0m     await expect(modelPlanCredential(user.id, fetcher)).rejects.toMatchObject({ code: "MODEL_PLAN_PAYMENT_REQUIRED" })
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [96mtest/deployed-schemas.test.ts[0m:[93m17[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m17[0m     await expect(verifyDeployedSchemas(server.url.toString())).rejects.toThrow()
+@vectordevai/web:typecheck: [7m  [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [96mtest/free-models-api.test.ts[0m:[93m612[0m:[93m3[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m612[0m   await expect(
+@vectordevai/web:typecheck: [7m   [0m [93m  ~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m613[0m     consumeDesktopCode({ ...grant, verifier: randomBytes(32).toString("base64url") }, fetcher),
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m614[0m   ).rejects.toThrow("expired or was already used")
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/free-models-api.test.ts[0m:[93m539[0m:[93m7[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m539[0m       await expect(refreshFreeModelCatalog(fetcher, fixture.capturedAt)).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m   [0m [93m      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m540[0m         statusCode: 503,
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m541[0m         code: "FREE_MODELS_CATALOG_UNAVAILABLE",
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m542[0m       })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~[0m
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [96mtest/github-app-api.test.ts[0m:[93m285[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m285[0m     await expect(consumeGithubOidc({ ...identity, expiresAt: Math.floor(Date.now() / 1000) })).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m286[0m       code: "OIDC_INVALID",
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m287[0m     })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~[0m
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [96mtest/github-app.test.ts[0m:[93m136[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m136[0m     await expect(fixture.app.token(await fixture.identity(), "task", undefined, async () => {})).rejects.toBeDefined()
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/github-app.test.ts[0m:[93m120[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m120[0m     await expect(fixture.app.token(await fixture.identity(), "task", undefined, async () => {})).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m121[0m       code: "GITHUB_UNAVAILABLE",
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m122[0m     })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/github-app.test.ts[0m:[93m107[0m:[93m3[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m107[0m   await expect(
+@vectordevai/web:typecheck: [7m   [0m [93m  ~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m108[0m     fixture.app.token(await fixture.identity(), "task", mode === "fork-pr" ? 17 : undefined, async () => {}),
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m109[0m   ).rejects.toBeDefined()
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/github-app.test.ts[0m:[93m58[0m:[93m3[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m58[0m   await expect(fixture.app.installation(await fixture.identity())).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m  [0m [93m  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m59[0m     code: "GITHUB_APP_NOT_CONFIGURED",
+@vectordevai/web:typecheck: [7m  [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m60[0m   })
+@vectordevai/web:typecheck: [7m  [0m [93m~~~~[0m
+@vectordevai/web:typecheck: [96mtest/github-app.test.ts[0m:[93m52[0m:[93m3[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m52[0m   await expect(fixture.app.token(await fixture.identity(), "task", undefined, async () => {})).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m  [0m [93m  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m53[0m     code: "APP_NOT_INSTALLED",
+@vectordevai/web:typecheck: [7m  [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m54[0m   })
+@vectordevai/web:typecheck: [7m  [0m [93m~~~~[0m
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [96mtest/github-oidc.test.ts[0m:[93m173[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m173[0m     await expect(verifier()(await token(), "token")).rejects.toMatchObject({ code: "GITHUB_UNAVAILABLE" })
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/github-oidc.test.ts[0m:[93m170[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m170[0m     await expect(verifier()(await token(), "token")).rejects.toMatchObject({ code: "GITHUB_UNAVAILABLE" })
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/github-oidc.test.ts[0m:[93m167[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m167[0m     await expect(verifier()(await token(), "token")).rejects.toMatchObject({ code: "GITHUB_UNAVAILABLE" })
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/github-oidc.test.ts[0m:[93m161[0m:[93m3[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m161[0m   await expect(verifier()("a".repeat(16_385), "token")).rejects.toMatchObject({ code: "OIDC_INVALID" })
+@vectordevai/web:typecheck: [7m   [0m [93m  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/github-oidc.test.ts[0m:[93m160[0m:[93m3[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m160[0m   await expect(verifier()(symmetric, "token")).rejects.toMatchObject({ code: "OIDC_INVALID" })
+@vectordevai/web:typecheck: [7m   [0m [93m  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/github-oidc.test.ts[0m:[93m156[0m:[93m3[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m156[0m   await expect(verifier()(wrong, "token")).rejects.toMatchObject({ code: "OIDC_INVALID" })
+@vectordevai/web:typecheck: [7m   [0m [93m  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/github-oidc.test.ts[0m:[93m151[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m151[0m     await expect(verifier()(await token({}, header), "token")).rejects.toMatchObject({ code: "OIDC_INVALID" })
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/github-oidc.test.ts[0m:[93m139[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m139[0m     await expect(verifier()(await token(change), "token")).rejects.toMatchObject({ code: "WORKFLOW_NOT_TRUSTED" })
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/github-oidc.test.ts[0m:[93m132[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m132[0m     await expect(verifier()(await token(change), "token")).rejects.toMatchObject({ code: "OIDC_INVALID" })
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/github-oidc.test.ts[0m:[93m117[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m117[0m     await expect(verifier()(await token({ event_name: event }), "token")).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m118[0m       code: "EVENT_NOT_ALLOWED",
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m119[0m     })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/github-oidc.test.ts[0m:[93m111[0m:[93m3[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m111[0m   await expect(verifier()(await token(change), "token")).rejects.toMatchObject({ code: "OIDC_INVALID" })
+@vectordevai/web:typecheck: [7m   [0m [93m  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [96mtest/model-plan-caller.test.ts[0m:[93m360[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m360[0m     await expect(requireModelPlanCaller(bearer("vht_fixture.signature"), fetcher, now, valid)).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m361[0m       statusCode: 503,
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m362[0m     })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plan-caller.test.ts[0m:[93m356[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m356[0m     await expect(requireModelPlanCaller(bearer("vht_fixture.signature"), fetcher, now, valid)).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m357[0m       statusCode: 401,
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m358[0m     })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plan-caller.test.ts[0m:[93m343[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m343[0m     await expect(requireModelPlanCaller(bearer("vht_fixture.signature"), fetcher, now, registry)).rejects.toMatchObject(
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m344[0m       { code: "MODEL_PLAN_RUN_EXPIRED" },
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m345[0m     )
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plan-caller.test.ts[0m:[93m336[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m336[0m     await expect(requireModelPlanCaller(bearer("vrt_fixture.signature"), fetcher, now, registry)).rejects.toMatchObject(
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m337[0m       { code: "MODEL_PLAN_RUN_EXPIRED" },
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m338[0m     )
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plan-caller.test.ts[0m:[93m317[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m317[0m     await expect(
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m318[0m       requireModelPlanCaller(bearer("unknown_fixture.signature"), fetcher, now, registry),
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m319[0m     ).rejects.toMatchObject({ code: "CODIUM_SIGN_IN_REQUIRED" })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plan-caller.test.ts[0m:[93m300[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m300[0m     await expect(requireModelPlanCaller(bearer("vrt_fixture.signature"), fetcher, now, registry)).rejects.toMatchObject(
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m301[0m       { code: "MODEL_PLAN_RUN_EXPIRED" },
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m302[0m     )
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plan-caller.test.ts[0m:[93m252[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m252[0m     await expect(requireModelPlanCaller(bearer(first.token), fetcher, now)).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m253[0m       code: "CODIUM_SIGN_IN_REQUIRED",
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m254[0m     })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plan-caller.test.ts[0m:[93m240[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m240[0m     await expect(requireModelPlanCaller(bearer(token, modern), fetcher, now)).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m241[0m       code: "CODIUM_SIGN_IN_REQUIRED",
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m242[0m     })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~[0m
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [96mtest/model-plan-catalog.test.ts[0m:[93m490[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m490[0m     await expect(auditModelPlanCatalogCommand(argv)).rejects.toThrow("Usage:")
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plan-catalog.test.ts[0m:[93m478[0m:[93m7[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m478[0m       await expect(auditModelPlanCatalogCommand(["--snapshot", filename])).rejects.toThrow("sibling JSON")
+@vectordevai/web:typecheck: [7m   [0m [93m      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plan-catalog.test.ts[0m:[93m476[0m:[93m7[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m476[0m       await expect(auditModelPlanCatalogCommand(["--snapshot", filename])).rejects.toThrow("capture date")
+@vectordevai/web:typecheck: [7m   [0m [93m      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plan-catalog.test.ts[0m:[93m474[0m:[93m7[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m474[0m       await expect(auditModelPlanCatalogCommand(["--snapshot", filename])).rejects.toThrow("SHA-256")
+@vectordevai/web:typecheck: [7m   [0m [93m      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [96mtest/model-plan-context.test.ts[0m:[93m179[0m:[93m3[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m179[0m   await expect(
+@vectordevai/web:typecheck: [7m   [0m [93m  ~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m180[0m     streamModelPlanResponse(
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m...[0m 
+@vectordevai/web:typecheck: [7m187[0m     message: "This model is temporarily unavailable.",
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m188[0m   })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~[0m
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [96mtest/model-plan-setup.test.ts[0m:[93m541[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m541[0m     await expect(modelPlanWebhook(webhook, fake.fetcher)).rejects.toThrow("read completely")
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plan-setup.test.ts[0m:[93m536[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m536[0m     await expect(modelPlanWebhook(webhook, fake.fetcher)).rejects.toThrow("did not confirm")
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plan-setup.test.ts[0m:[93m512[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m512[0m     await expect(modelPlanWebhook(webhook, fake.fetcher)).rejects.toThrow("More than one webhook")
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plan-setup.test.ts[0m:[93m505[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m505[0m     await expect(modelPlanWebhook(webhook, fake.fetcher)).rejects.toThrow("immutable API version")
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plan-setup.test.ts[0m:[93m464[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m464[0m     await expect(modelPlanPortalConfiguration(fake.fetcher)).rejects.toThrow("More than one active Codium")
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plan-setup.test.ts[0m:[93m421[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m421[0m     await expect(archiveModelPlanTopups(fake.fetcher)).rejects.toThrow("not archived")
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plan-setup.test.ts[0m:[93m406[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m406[0m     await expect(modelPlanMonthlyPrices(fake.fetcher)).rejects.toThrow("not its owned Codium monthly product")
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plan-setup.test.ts[0m:[93m399[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m399[0m     await expect(modelPlanMonthlyPrices(fake.fetcher)).rejects.toThrow("More than one Codium product")
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plan-setup.test.ts[0m:[93m384[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m384[0m     await expect(modelPlanMonthlyPrices(fetcher)).rejects.toMatchObject({ code: "BILLING_UPSTREAM" })
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plan-setup.test.ts[0m:[93m366[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m366[0m     await expect(modelPlanMonthlyPrices(fake.fetcher)).rejects.toThrow("own Codium product")
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plan-setup.test.ts[0m:[93m359[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m359[0m     await expect(modelPlanMonthlyPrices(fake.fetcher)).rejects.toThrow("not its owned Codium")
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plan-setup.test.ts[0m:[93m350[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m350[0m     await expect(modelPlanMonthlyPrices(fake.fetcher)).rejects.toThrow(
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m351[0m       tax === "inclusive" ? "immutable inclusive" : "exclusive tax",
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m352[0m     )
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plan-setup.test.ts[0m:[93m289[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m289[0m     await expect(setupModelPlans({ apply: true, fetcher: fake.fetcher, log: () => {} })).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m290[0m       code: "MODEL_PLANS_CONFIGURATION",
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m291[0m     })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plan-setup.test.ts[0m:[93m282[0m:[93m7[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m282[0m       await expect(call()).rejects.toThrow("setup key")
+@vectordevai/web:typecheck: [7m   [0m [93m      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [96mtest/model-plans-api.test.ts[0m:[93m1115[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m1115[0m     await expect(modelPlanCredential(user.id, fetcher)).rejects.toMatchObject({ code: "MODEL_PLAN_KEY_INVALID" })
+@vectordevai/web:typecheck: [7m    [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plans-api.test.ts[0m:[93m1110[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m1110[0m     await expect(modelPlanCredential(user.id, fetcher)).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m    [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m1111[0m       code: "MODEL_PLAN_EXHAUSTED",
+@vectordevai/web:typecheck: [7m    [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m1112[0m       statusCode: 402,
+@vectordevai/web:typecheck: [7m    [0m [93m~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m1113[0m     })
+@vectordevai/web:typecheck: [7m    [0m [93m~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plans-api.test.ts[0m:[93m1102[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m1102[0m     await expect(modelPlanCredential(user.id, fetcher)).rejects.toMatchObject({ code: "MODEL_PLAN_PAYMENT_REQUIRED" })
+@vectordevai/web:typecheck: [7m    [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plans-api.test.ts[0m:[93m1098[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m1098[0m     await expect(modelPlanCredential(user.id, fetcher)).rejects.toMatchObject({ code: "MODEL_PLAN_PAYMENT_REQUIRED" })
+@vectordevai/web:typecheck: [7m    [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plans-api.test.ts[0m:[93m1093[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m1093[0m     await expect(modelPlanCredential(user.id, fetcher)).rejects.toMatchObject({ code: "MODEL_PLAN_PAYMENT_REQUIRED" })
+@vectordevai/web:typecheck: [7m    [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plans-api.test.ts[0m:[93m1012[0m:[93m7[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m1012[0m       await expect(cancelModelPlanAccount(user.id, fetcher)).rejects.toMatchObject({ code: "MODEL_PLAN_CLEANUP" })
+@vectordevai/web:typecheck: [7m    [0m [93m      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plans-api.test.ts[0m:[93m994[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m994[0m     await expect(cancelModelPlanAccount(user.id, fetcher)).rejects.toMatchObject({ code: "BILLING_UPSTREAM" })
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plans-api.test.ts[0m:[93m983[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m983[0m     await expect(modelPlanCredential(user.id, fetcher)).rejects.toMatchObject({ code: "MODEL_PLAN_ACCOUNT_CLOSING" })
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plans-api.test.ts[0m:[93m977[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m977[0m     await expect(cancelModelPlanAccount(user.id, fetcher)).rejects.toMatchObject({ code: "BILLING_UPSTREAM" })
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plans-api.test.ts[0m:[93m969[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m969[0m     await expect(cancelModelPlanAccount(user.id, fetcher)).rejects.toMatchObject({ statusCode: 503 })
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plans-api.test.ts[0m:[93m961[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m961[0m     await expect(cancelModelPlanAccount(user.id, fetcher)).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m962[0m       code: "BILLING_UNAVAILABLE",
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m963[0m       statusCode: 503,
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m964[0m     })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plans-api.test.ts[0m:[93m943[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m943[0m     await expect(cancelModelPlanAccount(user.id, fetcher)).rejects.toMatchObject({ statusCode: 503 })
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plans-api.test.ts[0m:[93m930[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m930[0m     await expect(modelPlanCheckout(user, "vector-10", fetcher)).rejects.toMatchObject({ code: "BILLING_UPSTREAM" })
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plans-api.test.ts[0m:[93m919[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m919[0m     await expect(modelPlanCredential(user.id, fetcher)).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m920[0m       code: "MODEL_PLAN_ACCOUNT_CLOSING",
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m921[0m       statusCode: 409,
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m922[0m     })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plans-api.test.ts[0m:[93m915[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m915[0m     await expect(modelPlanCheckout(user, "vector-50", fetcher)).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m916[0m       code: "MODEL_PLAN_ACCOUNT_CLOSING",
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m917[0m       statusCode: 409,
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m918[0m     })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plans-api.test.ts[0m:[93m807[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m807[0m     await expect(modelPlanPortal(user.id, fetcher, { flow: "cancel" })).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m808[0m       statusCode: 404,
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m...[0m 
+@vectordevai/web:typecheck: [7m810[0m       message: "There is no paid Codium plan to cancel.",
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m811[0m     })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plans-api.test.ts[0m:[93m802[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m802[0m     await expect(modelPlanPortal(user.id, fetcher, { flow: "change" })).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m803[0m       statusCode: 409,
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m...[0m 
+@vectordevai/web:typecheck: [7m805[0m       message: "Change plans on vectordev.ai/account.",
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m806[0m     })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plans-api.test.ts[0m:[93m758[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m758[0m     await expect(modelPlanPortal(user.id, fetcher, { flow: "change" })).rejects.toMatchObject({ statusCode: 409 })
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plans-api.test.ts[0m:[93m729[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m729[0m     await expect(modelPlanPortal(user.id, fetcher, { flow: "change" })).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m730[0m       statusCode: 409,
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m731[0m       code: "MODEL_PLAN_CHANGE_UNAVAILABLE",
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m732[0m     })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plans-api.test.ts[0m:[93m565[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m565[0m     await expect(modelPlanCheckout(user, "vector-50", fetcher)).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m566[0m       code: "MODEL_PLAN_EXISTS",
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m567[0m       statusCode: 409,
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m568[0m     })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plans-api.test.ts[0m:[93m561[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m561[0m     await expect(modelPlanCheckout(user, "vector-10", fetcher)).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m562[0m       code: "MODEL_PLAN_EXISTS",
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m563[0m       statusCode: 409,
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m564[0m     })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plans-api.test.ts[0m:[93m552[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m552[0m     await expect(modelPlanCheckout(user, "vector-10", fetcher)).rejects.toMatchObject({
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m553[0m       code: "MODEL_PLAN_PRICE_MISMATCH",
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m554[0m     })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plans-api.test.ts[0m:[93m549[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m549[0m     await expect(modelPlanCheckout(user, "vector-50", fetcher)).rejects.toMatchObject({ code: "MODEL_PLAN_EXISTS" })
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/model-plans-api.test.ts[0m:[93m537[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m537[0m     await expect(modelPlanCheckout(user, "vector-10", fetcher, now)).rejects.toMatchObject({ code: "BILLING_UPSTREAM" })
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [96mtest/model-plans.test.ts[0m:[93m404[0m:[93m7[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m404[0m       await expect(
+@vectordevai/web:typecheck: [7m   [0m [93m      ~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m405[0m         streamModelPlanResponse(
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m...[0m 
+@vectordevai/web:typecheck: [7m411[0m         ),
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m412[0m       ).rejects.toMatchObject({ statusCode: status })
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [96mtest/public-share-viewer.test.ts[0m:[93m63[0m:[93m3[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m63[0m   await expect(readSnapshot(id, signal(), async () => new Response(null, { status: 503 }))).rejects.toThrow()
+@vectordevai/web:typecheck: [7m  [0m [93m  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/public-share-viewer.test.ts[0m:[93m54[0m:[93m3[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m54[0m   await expect(
+@vectordevai/web:typecheck: [7m  [0m [93m  ~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m55[0m     readSnapshot(id, signal(), async () => new Response(" ".repeat(PublicSession.MAX_RESPONSE_BYTES + 1))),
+@vectordevai/web:typecheck: [7m  [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m56[0m   ).rejects.toThrow("size")
+@vectordevai/web:typecheck: [7m  [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/public-share-viewer.test.ts[0m:[93m53[0m:[93m3[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m53[0m   await expect(readSnapshot(id, signal(), async () => new Response("{"))).rejects.toThrow()
+@vectordevai/web:typecheck: [7m  [0m [93m  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/public-share-viewer.test.ts[0m:[93m52[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m52[0m     await expect(readSnapshot(id, signal(), async () => Response.json(value))).rejects.toThrow()
+@vectordevai/web:typecheck: [7m  [0m [93m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [96mtest/social-card.test.ts[0m:[93m38[0m:[93m3[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m38[0m   await expect(renderSocialCard("🚀")).rejects.toThrow("Invalid social card title")
+@vectordevai/web:typecheck: [7m  [0m [93m  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [96mtest/teams-api.test.ts[0m:[93m475[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m475[0m     await expect(
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m476[0m       Promise.resolve(
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m...[0m 
+@vectordevai/web:typecheck: [7m478[0m       ),
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m479[0m     ).rejects.toBeDefined()
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/teams-api.test.ts[0m:[93m340[0m:[93m7[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m340[0m       await expect(
+@vectordevai/web:typecheck: [7m   [0m [93m      ~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m341[0m         Promise.resolve(
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m...[0m 
+@vectordevai/web:typecheck: [7m343[0m         ),
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m344[0m       ).rejects.toBeDefined()
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/teams-api.test.ts[0m:[93m327[0m:[93m7[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m327[0m       await expect(
+@vectordevai/web:typecheck: [7m   [0m [93m      ~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m328[0m         database.begin(async (transaction) => {
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m...[0m 
+@vectordevai/web:typecheck: [7m331[0m         }),
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m332[0m       ).rejects.toBeDefined()
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/teams-api.test.ts[0m:[93m321[0m:[93m7[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m321[0m       await expect(
+@vectordevai/web:typecheck: [7m   [0m [93m      ~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m322[0m         database.begin(async (transaction) => {
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m...[0m 
+@vectordevai/web:typecheck: [7m325[0m         }),
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m326[0m       ).rejects.toBeDefined()
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/teams-api.test.ts[0m:[93m315[0m:[93m7[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m315[0m       await expect(
+@vectordevai/web:typecheck: [7m   [0m [93m      ~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m316[0m         database.begin(async (transaction) => {
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m...[0m 
+@vectordevai/web:typecheck: [7m319[0m         }),
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m320[0m       ).rejects.toBeDefined()
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/teams-api.test.ts[0m:[93m306[0m:[93m5[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m306[0m     await expect(
+@vectordevai/web:typecheck: [7m   [0m [93m    ~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m307[0m       Promise.resolve(
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m...[0m 
+@vectordevai/web:typecheck: [7m309[0m       ),
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~[0m
+@vectordevai/web:typecheck: [7m310[0m     ).rejects.toBeDefined()
+@vectordevai/web:typecheck: [7m   [0m [93m~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [96mtest/usage-page.test.ts[0m:[93m183[0m:[93m3[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m183[0m   await expect(readShared(TOKEN, malformed)).rejects.toThrow("Usage could not load.")
+@vectordevai/web:typecheck: [7m   [0m [93m  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/usage-page.test.ts[0m:[93m177[0m:[93m3[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m177[0m   await expect(readShared(TOKEN, down)).rejects.toThrow("Usage counts are not available right now.")
+@vectordevai/web:typecheck: [7m   [0m [93m  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [96mtest/usage-sql.test.ts[0m:[93m401[0m:[93m3[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m401[0m   await expect(revokeShare(randomUUID())).rejects.toMatchObject({ code: "SHARE_NOT_FOUND" })
+@vectordevai/web:typecheck: [7m   [0m [93m  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/usage-sql.test.ts[0m:[93m400[0m:[93m3[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m400[0m   await expect(openShare(other.token)).rejects.toMatchObject({ code: "SHARE_REVOKED" })
+@vectordevai/web:typecheck: [7m   [0m [93m  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/usage-sql.test.ts[0m:[93m396[0m:[93m3[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m396[0m   await expect(openShare(created.token)).rejects.toMatchObject({ code: "SHARE_EXPIRED" })
+@vectordevai/web:typecheck: [7m   [0m [93m  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: [96mtest/usage-sql.test.ts[0m:[93m393[0m:[93m3[0m - [93mwarning[0m[90m ts(80007): [0m'await' has no effect on the type of this expression.
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: [7m393[0m   await expect(openShare("A".repeat(43))).rejects.toMatchObject({ code: "SHARE_NOT_FOUND" })
+@vectordevai/web:typecheck: [7m   [0m [93m  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+@vectordevai/web:typecheck: 
+@vectordevai/web:typecheck: Result (189 files): 
+@vectordevai/web:typecheck: - 0 errors
+@vectordevai/web:typecheck: - 0 warnings
+@vectordevai/web:typecheck: - 113 hints
+@vectordevai/web:typecheck: 
+@vectordevai/server:typecheck: cache hit, replaying logs 58b99a5ae44833fb
+@vectordevai/server:typecheck: $ tsgo --noEmit
+@vectordevai/sdk:typecheck: cache hit, replaying logs c9c2ce9204837829
+@vectordevai/sdk:typecheck: $ tsgo --noEmit && tsgo --noEmit -p test/tsconfig.json
+vector-desktop:typecheck: cache hit, replaying logs e9b0f5233c7374a1
+vector-desktop:typecheck: $ tsgo -b
+@vectordevai/effect-sqlite-node:typecheck: cache hit, replaying logs 55e9d41fd3a1cf9a
+@vectordevai/effect-sqlite-node:typecheck: $ tsgo --noEmit
+
+ Tasks:    23 successful, 23 total
+Cached:    23 cached, 23 total
+  Time:    1.256s >>> FULL TURBO
+
+To https://github.com/scr1pter/claudeondfsfdaf.git
+   071dfe37..14bc7d42  codium -> codium
+   4539d83b..14bc7d42  codium-integration -> codium-integration
