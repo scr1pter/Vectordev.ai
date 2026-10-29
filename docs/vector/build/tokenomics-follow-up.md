@@ -32,7 +32,7 @@ and the subsequent comparison are recorded in
 
 | Audit recommendation | Current state and next gate |
 | --- | --- |
-| First-request cache reuse | The API-key path already puts stable prompt parts first in one system block (`packages/engine/src/session/llm/request.ts`). Check a release build's first-request cached-token counts across two sessions before changing serialization. Offline estimates cannot establish real cache hits. |
+| First-request cache reuse | The API-key path already puts stable prompt parts first in one system block (`packages/engine/src/session/llm/request.ts`). The [two-session release check proposal](../owner-actions/first-request-cache-check.md) defines API-key HTTP, exact artifact/model/effort, and a hard spending prerequisite before any paid run. Its driver/gate is not yet implemented or approved for live execution. Offline estimates cannot establish real cache hits. |
 | Paid cache warm-up and 24-hour retention | Neither is enabled by this follow-up. Warm-up adds a model request; retention depends on provider/model support and changes the caching policy. Define supported models and the intended opt-in/configuration behavior before implementation. Do not silently add spend. |
 | Shorter task descriptions and reduced narration | The audit requires a live behavior check before further prompt trimming. Preserve the current delegation and completion rules until that check has a result. |
 | API-key WebSocket rollout and incremental tool definitions | Production remains on its existing transport default. Validate provider compatibility, reconnection, complete tool availability, and release-path behavior before changing it. Upload-byte savings alone do not establish model-cost savings. |
