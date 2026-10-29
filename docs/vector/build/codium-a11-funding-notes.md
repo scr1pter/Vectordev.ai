@@ -33,6 +33,13 @@ measurements fail closed through the existing unavailable-funding pause. They do
 not become a zero-spend or zero-liability reading. No telemetry code skips the
 A10 liability-version check or changes the financial reservation scripts.
 
+Sales and early renewal charges accept cached readings only when their timestamp
+is no later than the decision time and their age is below fifteen minutes. A clock
+rollback therefore triggers a fresh check. A busy checker returning the old
+future-dated reading cannot authorize either operation. The funding clock rollback
+follow-up in [the A11 record](codium-a11-notes.md) documents the reproduced cases
+and verification.
+
 ## Alerts
 
 - Low water warns while sales remain funded at or below 1.25 times `required`.

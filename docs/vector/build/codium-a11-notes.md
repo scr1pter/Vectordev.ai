@@ -1,6 +1,6 @@
 # A11 runtime switches and collection ownership
 
-A11 is implemented locally on `codium-next`; validation below has passed. Independent final billing review is complete; the canonical source push and GitHub CI remain pending. No provider configuration, live payment, deployment or sales enablement was performed.
+A11 is committed and pushed on `codium`; its complete GitHub CI passed in [run 40786941008](https://github.com/scr1pter/claudeondfsfdaf/actions/runs/40786941008) at `72e6e9c1`. Independent final billing review is complete. No provider configuration, live payment, deployment or sales enablement was performed.
 
 ## Runtime controls
 
@@ -34,4 +34,10 @@ Files ran individually from `packages/web` with a 30-second per-test timeout. HT
 - `test/codium-topups-removed.test.ts`: 10 passing, including the canonical A10 CI fixture correction.
 - HTTP integration: `packages/web/test/model-plans-api.test.ts` 43 passing and `packages/web/test/codium-payments.test.ts` 22 passing against real Valkey/local HTTP fakes.
 
-Total: **327 unique passing tests across 13 files**, including **9 real Valkey cases**, and a passing API typecheck. No unresolved test failures remain. Independent billing review rechecked the held-renewal repairs, pause ownership/generation guards, funding liability/reservations and telemetry/alert privacy, and found no remaining confirmed financial, security or cost-correctness blockers. The canonical pre-push hook and GitHub CI must still complete before calling this package accepted.
+Total: **327 unique passing tests across 13 files**, including **9 real Valkey cases**, and a passing API typecheck. No unresolved test failures remain. Independent billing review rechecked the held-renewal repairs, pause ownership/generation guards, funding liability/reservations and telemetry/alert privacy, and found no remaining confirmed financial, security or cost-correctness blockers. The canonical pre-push hook and complete GitHub CI subsequently passed.
+
+### Funding clock rollback follow-up
+
+A later review reproduced four cases in which a future-dated cached funding reading admitted a sale or early renewal charge. Both admission paths now refresh such a reading and reject it if a busy funding checker returns the same future-dated fallback. Current readings and readings just below the existing fifteen-minute age limit remain usable. A failed refresh refuses the new sale or early charge; it does not pause purchased service or claim ownership of Stripe's collection schedule.
+
+All four new admission cases failed against the prior source. The initial targeted renewal run also hit the default five-second fixture hook timeout; the complete verification used the required thirty-second per-test timeout. After the repair, `test/codium-funding.test.ts` passed **25 tests**, `test/codium-renewal.test.ts` passed **32 tests**, and the API typecheck passed. The six added cases use isolated fake providers and stores. Independent review approved the four runtime guards and their boundary coverage. This follow-up's canonical push and complete CI are recorded separately from the earlier A11 run above.

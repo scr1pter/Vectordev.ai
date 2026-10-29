@@ -212,18 +212,20 @@ async function refusal(input: {
 /**
  * Whether Vector's OpenRouter balance covers what customers are owed now plus this renewal's credits, by a funding
  * reading from the last CODIUM_FUNDING_MAX_AGE_MS (one is taken when the saved one is older). No reading, or one that
- * cannot be read, counts as short: the early charge is skipped and Stripe collects on its own schedule.
+ * cannot be read or is dated after `now`, counts as short: the early charge is skipped and Stripe collects on its
+ * own schedule. A clock rollback must not extend the life of a saved funding reading.
  */
 async function renewalFunded(credits: number | undefined, fetcher: typeof fetch, now: number) {
   if (credits === undefined || !Number.isFinite(credits) || credits <= 0) return false
   const saved = await readCodiumFunding(fetcher).catch(() => undefined)
   const funding =
-    saved && now - saved.checkedAt < CODIUM_FUNDING_MAX_AGE_MS
+    saved && saved.checkedAt <= now && now - saved.checkedAt < CODIUM_FUNDING_MAX_AGE_MS
       ? saved
       : await checkCodiumFunding(fetcher, now).catch(() => undefined)
   if (
     !funding ||
     typeof funding.checkedAt !== "number" ||
+    funding.checkedAt > now ||
     now - funding.checkedAt >= CODIUM_FUNDING_MAX_AGE_MS ||
     typeof funding.balance !== "number" ||
     typeof funding.owed !== "number"

@@ -382,17 +382,19 @@ async function fundingAlerts(funding: CodiumFunding, fetcher: typeof fetch) {
  * New subscriptions need a check from the last CODIUM_FUNDING_MAX_AGE_MS that found the balance covering
  * what is owed. A failed check is saved as a pause, and a sale that finds the reading stale runs a check first and
  * refuses unless it succeeds: selling credits Vector may not be able to pay for is the failure to avoid. Credits
- * already bought keep working either way. Returns the reading reserveCodiumSale measures the purchase against.
+ * already bought keep working either way. A reading from after `now` must be refreshed after a clock rollback.
+ * Returns the reading reserveCodiumSale measures the purchase against.
  */
 export async function requireCodiumSales(fetcher: typeof fetch = fetch, now = Date.now()) {
   const saved = await readCodiumFunding(fetcher)
   const funding =
-    saved && now - saved.checkedAt < CODIUM_FUNDING_MAX_AGE_MS
+    saved && saved.checkedAt <= now && now - saved.checkedAt < CODIUM_FUNDING_MAX_AGE_MS
       ? saved
       : await checkCodiumFunding(fetcher, now).catch(() => undefined)
   if (
     funding?.status !== "open" ||
     funding.checkedAt === undefined ||
+    funding.checkedAt > now ||
     now - funding.checkedAt >= CODIUM_FUNDING_MAX_AGE_MS ||
     typeof funding.balance !== "number" ||
     typeof funding.owed !== "number"

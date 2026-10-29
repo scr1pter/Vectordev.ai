@@ -959,6 +959,32 @@ describe("M7: no renewal charge Vector should not take", () => {
     )
   })
 
+  test("a future-dated funded reading is refreshed before an unfunded renewal can be charged", async () => {
+    const { fakes, at } = renewal()
+    funding(fakes, at + HOUR)
+    fakes.openRouter.credits.total_credits = 0
+    expect(await finalizeRenewal("in_renewal", fakes.fetcher, at)).toMatchObject({
+      outcome: "refused",
+      reason: "unfunded",
+      paused: false,
+    })
+    expect(writes(fakes)).toEqual([])
+    expect(fakes.openRouter.calls.some((call) => call.path === "credits")).toBe(true)
+  })
+
+  test("a future-dated reading from a busy funding checker cannot authorize a renewal", async () => {
+    const { fakes, at } = renewal()
+    funding(fakes, at + HOUR)
+    fakes.store.set(codiumKey("funding", "lock"), "another-checker")
+    expect(await finalizeRenewal("in_renewal", fakes.fetcher, at)).toMatchObject({
+      outcome: "refused",
+      reason: "unfunded",
+      paused: false,
+    })
+    expect(writes(fakes)).toEqual([])
+    expect(fakes.openRouter.calls).toEqual([])
+  })
+
   test("each refusal is one of the contract's, and only the ones Vector must not take pause collection", () => {
     expect([...RENEWAL_REFUSALS]).toEqual([
       "codium-off",
