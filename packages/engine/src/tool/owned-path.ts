@@ -69,12 +69,20 @@ export const assertWritable = Effect.fn("OwnedPath.assertWritable")(function* (
     ]),
   ]
   for (const file of files) {
-    const protectedTree = TaskClaims.protectedConflict(context.sessionID, file)
+    const protectedTree = TaskClaims.protectedConflict(
+      context.sessionID,
+      file,
+      input.recursive?.some((target) => FileLock.key(target) === FileLock.key(file)),
+    )
     if (protectedTree)
       return yield* Effect.die(
         new Error(`${file} is protected for subagent ${protectedTree.taskID}. It was not changed.`),
       )
-    const destination = TaskClaims.parentTarget(context.sessionID, file)
+    const destination = TaskClaims.parentTarget(
+      context.sessionID,
+      file,
+      input.recursive?.some((target) => FileLock.key(target) === FileLock.key(file)),
+    )
     if (destination)
       return yield* Effect.die(
         new Error(

@@ -247,12 +247,17 @@ export type Protection = {
   workDirectory?: string
   branch?: string
   gitDirectory?: string
+  /** Authority files are never model-writable, including by the task that owns the worktree. */
+  privateDirectories?: readonly string[]
+  immutableFiles?: readonly string[]
 }
 const protections = new Map<string, Protection>()
 
 export function protect(input: Protection) {
   protections.set(input.taskID, {
     ...input,
+    privateDirectories: input.privateDirectories?.map((directory) => FileLock.key(directory)),
+    immutableFiles: input.immutableFiles?.map((file) => FileLock.key(file)),
     directories: [
       ...new Set(
         [...input.directories, ...(input.gitDirectory ? [input.gitDirectory] : [])].map((directory) =>
@@ -282,22 +287,34 @@ export function gitDirectories() {
   )
 }
 
-export function protectedConflict(sessionID: string, file: string) {
+export function protectedConflict(sessionID: string, file: string, recursive = false) {
   const ancestors = lineage(sessionID)
   const destination = FileLock.key(file)
   return protectedTrees().find(
-    (entry) => !ancestors.has(entry.taskID) && entry.directories.some((directory) => inside(directory, destination)),
+    (entry) =>
+      entry.privateDirectories?.some(
+        (directory) => inside(directory, destination) || (recursive && inside(destination, directory)),
+      ) ||
+      entry.immutableFiles?.some((file) => file === destination || (recursive && inside(destination, file))) ||
+      (!ancestors.has(entry.taskID) &&
+        entry.directories.some(
+          (directory) => inside(directory, destination) || (recursive && inside(destination, directory)),
+        )),
   )
 }
 
-export function parentTarget(sessionID: string, file: string) {
+export function parentTarget(sessionID: string, file: string, recursive = false) {
   const ancestors = lineage(sessionID)
   const destination = FileLock.key(file)
   const entry = protectedTrees().find(
     (entry) =>
-      ancestors.has(entry.taskID) && entry.parentDirectory && inside(FileLock.key(entry.parentDirectory), destination),
+      ancestors.has(entry.taskID) &&
+      entry.parentDirectory &&
+      (inside(FileLock.key(entry.parentDirectory), destination) ||
+        (recursive && inside(destination, FileLock.key(entry.parentDirectory)))),
   )
   if (!entry?.parentDirectory || !entry.workDirectory) return undefined
+  if (!inside(FileLock.key(entry.parentDirectory), destination)) return entry.workDirectory
   return path.join(entry.workDirectory, path.relative(entry.parentDirectory, file))
 }
 

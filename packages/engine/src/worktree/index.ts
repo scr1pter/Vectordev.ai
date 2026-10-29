@@ -19,6 +19,7 @@ import { AppProcess } from "@vectordevai/core/process"
 import { InstanceState } from "@/effect/instance-state"
 import { FileLock } from "@/tool/file-lock"
 import { WorktreeEvent } from "@vectordevai/schema/worktree-event"
+import os from "node:os"
 
 export const Event = WorktreeEvent
 
@@ -129,6 +130,8 @@ export interface Interface {
   ) => Effect.Effect<Info, Error>
   readonly list: () => Effect.Effect<(Omit<Info, "branch"> & { branch?: string })[], Error>
   readonly remove: (input: RemoveInput) => Effect.Effect<boolean, Error>
+  /** Isolation removal may delete only the reserved branch its registry validated. */
+  readonly removeForTask: (info: Info & { branch: string }) => Effect.Effect<boolean, Error>
   readonly reset: (input: ResetInput) => Effect.Effect<boolean, Error>
 }
 
@@ -331,6 +334,8 @@ const layer: Layer.Layer<
       const args = [
         "-c",
         "core.fsmonitor=false",
+        "-c",
+        `core.hooksPath=${os.devNull}`,
         ...(process.platform === "win32" ? ["-c", "core.longpaths=true"] : []),
       ]
       const env = { ...options.env, GIT_LFS_SKIP_SMUDGE: "1" }
@@ -448,10 +453,23 @@ const layer: Layer.Layer<
       ).pipe(Effect.map((items) => items.filter((item) => item !== undefined)))
     })
 
-    function stopFsmonitor(target: string) {
+    function stopFsmonitor(target: string, task = false) {
       return fs.exists(target).pipe(
         Effect.orDie,
-        Effect.flatMap((exists) => (exists ? git(["fsmonitor--daemon", "stop"], { cwd: target }) : Effect.void)),
+        Effect.flatMap((exists) =>
+          exists
+            ? git(
+                [
+                  ...(task
+                    ? ["-c", "core.fsmonitor=false", "-c", "core.longpaths=true", "-c", `core.hooksPath=${os.devNull}`]
+                    : []),
+                  "fsmonitor--daemon",
+                  "stop",
+                ],
+                { cwd: target, ...(task ? { env: { GIT_LFS_SKIP_SMUDGE: "1" } } : {}) },
+              )
+            : Effect.void,
+        ),
       )
     }
 
@@ -475,8 +493,15 @@ const layer: Layer.Layer<
       })
     }
 
-    const remove = Effect.fn("Worktree.remove")(function* (input: RemoveInput) {
+    const remove = Effect.fn("Worktree.remove")(function* (input: RemoveInput, expectedBranch?: string) {
       const ctx = yield* InstanceState.context
+      const removeGit = (args: string[], options: { cwd: string }) =>
+        git(
+          expectedBranch
+            ? ["-c", "core.fsmonitor=false", "-c", "core.longpaths=true", "-c", `core.hooksPath=${os.devNull}`, ...args]
+            : args,
+          { ...options, ...(expectedBranch ? { env: { GIT_LFS_SKIP_SMUDGE: "1" } } : {}) },
+        )
       if (ctx.project.vcs !== "git") {
         return yield* new NotGitError({ message: "Worktrees are only supported for Git repositories" })
       }
@@ -486,7 +511,7 @@ const layer: Layer.Layer<
       // Preserve the loaded path casing for the store cache; `directory` is lowercased on Windows.
       if (directory !== (yield* canonical(ctx.worktree))) yield* store.disposeDirectory(input.directory)
 
-      const list = yield* git(["worktree", "list", "--porcelain"], { cwd: ctx.worktree })
+      const list = yield* removeGit(["worktree", "list", "--porcelain"], { cwd: ctx.worktree })
       if (list.code !== 0) {
         return yield* new RemoveFailedError({ message: list.stderr || list.text || "Failed to read git worktrees" })
       }
@@ -494,10 +519,15 @@ const layer: Layer.Layer<
       const entries = parseWorktreeList(list.text)
       const entry = yield* locateWorktree(entries, directory)
 
+      if (expectedBranch && (!entry?.path || entry.branch !== `refs/heads/${expectedBranch}`))
+        return yield* new RemoveFailedError({
+          message: "The registered task worktree no longer checks out its reserved branch.",
+        })
+
       if (!entry?.path) {
         const directoryExists = yield* fs.exists(directory).pipe(Effect.orDie)
         if (directoryExists) {
-          yield* stopFsmonitor(directory)
+          yield* stopFsmonitor(directory, expectedBranch !== undefined)
           yield* cleanDirectory(directory)
         }
         return true
@@ -505,10 +535,10 @@ const layer: Layer.Layer<
 
       // Git may return the original casing when a caller supplied a normalized Windows path.
       yield* store.disposeDirectory(entry.path)
-      yield* stopFsmonitor(entry.path)
-      const removed = yield* git(["worktree", "remove", "--force", entry.path], { cwd: ctx.worktree })
+      yield* stopFsmonitor(entry.path, expectedBranch !== undefined)
+      const removed = yield* removeGit(["worktree", "remove", "--force", entry.path], { cwd: ctx.worktree })
       if (removed.code !== 0) {
-        const next = yield* git(["worktree", "list", "--porcelain"], { cwd: ctx.worktree })
+        const next = yield* removeGit(["worktree", "list", "--porcelain"], { cwd: ctx.worktree })
         if (next.code !== 0) {
           return yield* new RemoveFailedError({
             message: removed.stderr || removed.text || next.stderr || next.text || "Failed to remove git worktree",
@@ -525,9 +555,9 @@ const layer: Layer.Layer<
 
       yield* cleanDirectory(entry.path)
 
-      const branch = entry.branch?.replace(/^refs\/heads\//, "")
+      const branch = expectedBranch ?? entry.branch?.replace(/^refs\/heads\//, "")
       if (branch) {
-        const deleted = yield* git(["branch", "-D", branch], { cwd: ctx.worktree })
+        const deleted = yield* removeGit(["branch", "-D", branch], { cwd: ctx.worktree })
         if (deleted.code !== 0) {
           return yield* new RemoveFailedError({
             message: deleted.stderr || deleted.text || "Failed to delete worktree branch",
@@ -536,6 +566,17 @@ const layer: Layer.Layer<
       }
 
       return true
+    })
+    const removeForTask = Effect.fn("Worktree.removeForTask")(function* (info: Info & { branch: string }) {
+      const ctx = yield* InstanceState.context
+      const expected = pathSvc.join(Global.Path.data, "task-worktree", ctx.project.id, info.name)
+      if (
+        !/^[a-zA-Z0-9_-]+$/.test(info.name) ||
+        info.branch !== `vector/subagent/${info.name}` ||
+        info.directory !== expected
+      )
+        return yield* new RemoveFailedError({ message: "Task worktree removal requires its reserved path and branch." })
+      return yield* remove({ directory: info.directory }, info.branch)
     })
 
     const gitExpect = Effect.fnUntraced(function* (
@@ -700,7 +741,7 @@ const layer: Layer.Layer<
       return true
     })
 
-    return Service.of({ makeWorktreeInfo, createFromInfo, create, createForTask, list, remove, reset })
+    return Service.of({ makeWorktreeInfo, createFromInfo, create, createForTask, list, remove, removeForTask, reset })
   }),
 )
 

@@ -736,3 +736,106 @@ it.instance(
     }),
   { git: true },
 )
+
+if (process.platform !== "win32") {
+  it.instance(
+    "detected recursive shell ancestors cannot remove private registries or an owning task's .git",
+    () =>
+      withShell(
+        "/bin/bash",
+        Effect.gen(function* () {
+          const instance = yield* InstanceState.context
+          const registryProject = yield* tmpdirScoped()
+          const registry = path.join(registryProject, "child")
+          yield* Effect.promise(async () => {
+            await fs.mkdir(registry)
+            await fs.writeFile(path.join(registry, "record.json"), "keep")
+          })
+          yield* claim("ses_private", "Private", [], true)
+          TaskClaims.protect({
+            taskID: "ses_private",
+            directories: [instance.directory, registry],
+            workDirectory: instance.directory,
+            privateDirectories: [registry],
+            immutableFiles: [path.join(instance.directory, ".git")],
+          })
+          const tool = yield* ShellTool
+          const definition = yield* tool.init()
+          const asks: string[] = []
+          for (const item of [
+            { command: `rm -rf -- '${registryProject}'`, ctx: base },
+            { command: "rm -rf -- .", ctx: context("ses_private") },
+          ]) {
+            const ctx = {
+              ...item.ctx,
+              ask: (input: { permission: string }) =>
+                Effect.sync(() => {
+                  asks.push(input.permission)
+                }),
+            }
+            expect(
+              yield* error(
+                definition.execute(
+                  { command: item.command },
+                  { ...ctx, assertWritable: (input) => assertWritable(ctx, input) },
+                ),
+              ),
+            ).toContain("protected")
+          }
+          expect(asks).toEqual([])
+          expect(yield* Effect.promise(() => fs.readFile(path.join(registry, "record.json"), "utf8"))).toBe("keep")
+          expect(
+            yield* Effect.promise(() =>
+              fs.stat(path.join(instance.directory, ".git")).then((info) => info.isDirectory()),
+            ),
+          ).toBe(true)
+        }),
+      ),
+    { git: true },
+  )
+
+  it.instance(
+    "a recursive ancestor of the parent checkout is refused with data and work roots elsewhere",
+    () =>
+      withShell(
+        "/bin/bash",
+        Effect.gen(function* () {
+          const instance = yield* InstanceState.context
+          const ancestor = yield* tmpdirScoped()
+          const parent = path.join(ancestor, "repo")
+          yield* Effect.promise(async () => {
+            await fs.mkdir(parent)
+            await fs.writeFile(path.join(parent, "keep.txt"), "keep")
+          })
+          yield* claim("ses_parent_boundary", "Parent boundary", [], true)
+          TaskClaims.protect({
+            taskID: "ses_parent_boundary",
+            directories: [instance.directory],
+            workDirectory: instance.directory,
+            parentDirectory: parent,
+          })
+          const tool = yield* ShellTool
+          const definition = yield* tool.init()
+          const asks: string[] = []
+          const ctx = {
+            ...context("ses_parent_boundary"),
+            ask: (input: { permission: string }) =>
+              Effect.sync(() => {
+                asks.push(input.permission)
+              }),
+          }
+          expect(
+            yield* error(
+              definition.execute(
+                { command: `rm -rf -- '${ancestor}'` },
+                { ...ctx, assertWritable: (input) => assertWritable(ctx, input) },
+              ),
+            ),
+          ).toContain("parent's working tree")
+          expect(asks).toEqual([])
+          expect(yield* Effect.promise(() => fs.readFile(path.join(parent, "keep.txt"), "utf8"))).toBe("keep")
+        }),
+      ),
+    { git: true },
+  )
+}

@@ -36,6 +36,8 @@ export class InvalidArgumentsError extends Schema.TaggedErrorClass<InvalidArgume
 
 export type WritableInput = {
   files: readonly string[]
+  /** Detected shell targets that may replace/remove a directory and everything beneath it. */
+  recursive?: readonly string[]
   git?: readonly GitMutation.Result[]
   via?: "shell" | "file"
 }

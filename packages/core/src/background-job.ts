@@ -81,6 +81,8 @@ type Active = {
   info: Info
   done: Deferred.Deferred<Info>
   scope: Scope.Closeable
+  drained: Deferred.Deferred<void>
+  fibers: number
   token: object
   pending: number
   next: number
@@ -102,6 +104,7 @@ type State = {
 type FinishResult = {
   info?: Info
   done?: Deferred.Deferred<Info>
+  drained?: Deferred.Deferred<void>
   scope?: Scope.Closeable
   durable?: Writes
 }
@@ -113,7 +116,10 @@ type PromoteResult = {
   durable?: Writes
 }
 
-type StartResult = { info: Info } | { info: Info; scope: Scope.Closeable; token: object; durable?: Writes }
+type StartResult =
+  | { info: Info }
+  | { info: Info; scope: Scope.Closeable; token: object; durable?: Writes }
+  | { closing: Deferred.Deferred<Info> }
 
 type ExtendResult =
   | { extended: false }
@@ -202,6 +208,26 @@ export const makeWith = Effect.fnUntraced(function* (o: {
     scope: yield* Scope.Scope,
   }
   const stopped = (): "cancelled" | "interrupted" => (o.disposing?.() ? "interrupted" : "cancelled")
+  yield* Effect.addFinalizer(() =>
+    Effect.gen(function* () {
+      const jobs = [...(yield* SynchronizedRef.get(state.jobs)).values()]
+      yield* Effect.forEach(
+        jobs,
+        (job) =>
+          Scope.close(job.scope, Exit.void).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("background job cleanup failed", { id: job.info.id, cause }),
+            ),
+          ),
+        { concurrency: "unbounded", discard: true },
+      )
+      yield* Effect.forEach(jobs, (job) => Deferred.await(job.drained), { concurrency: "unbounded", discard: true })
+      yield* Effect.forEach(jobs, (job) => (job.durable?.tail ? Deferred.await(job.durable.tail) : Effect.void), {
+        concurrency: "unbounded",
+        discard: true,
+      })
+    }),
+  )
 
   // Queues a row write behind the job's earlier ones; the caller runs it, or forks it so nothing waits on the store.
   const write = (writes: Writes, id: string, call: (store: Store) => Effect.Effect<void, unknown>) => {
@@ -290,19 +316,32 @@ export const makeWith = Effect.fnUntraced(function* (o: {
           ...(status === "error" && Exit.isFailure(final) ? { error: errorText(Cause.squash(final.cause)) } : {}),
         },
       }
+      return [{ info: snapshot(next), scope: job.scope, durable: job.durable }, new Map(jobs).set(id, next)]
+    })
+    if (result.scope && result.scope.state._tag !== "Closed") {
+      // A run cannot join its own closing scope. The registry finalizer above joins the drain even when disposal
+      // races this closer, so it is safe to launch the close outside a possibly already closing registry scope.
+      yield* detach(Scope.close(result.scope, Exit.void))
+    }
+    // Row writes never block job completion. The registry finalizer joins their bounded tails on disposal.
+    if (result.info && result.durable) yield* detach(settled(result.durable, result.info))
+    return result.info
+  })
+
+  // Scope.close marks its scope Closed before its fibers finish finalizers. Completion has its own barrier,
+  // reached only after every run's full onExit, so another canceller cannot mistake that marker for a join.
+  const finished = Effect.fn("BackgroundJob.finished")(function* (id: string, token: object) {
+    const result = yield* SynchronizedRef.modify(state.jobs, (jobs): readonly [FinishResult, Map<string, Active>] => {
+      const job = jobs.get(id)
+      if (!job || job.token !== token) return [{}, jobs]
+      const next = { ...job, fibers: job.fibers - 1 }
       return [
-        { info: snapshot(next), done: job.done, scope: job.scope, durable: job.durable },
+        next.fibers === 0 ? { info: snapshot(next), done: next.done, drained: next.drained } : {},
         new Map(jobs).set(id, next),
       ]
     })
-    if (result.info && result.done) yield* Deferred.succeed(result.done, result.info).pipe(Effect.ignore)
-    if (result.scope) {
-      yield* Scope.close(result.scope, Exit.void).pipe(Effect.forkIn(state.scope, { startImmediately: true }))
-    }
-    // Awaited in the run's exit, after its waiters were told: closing the registry, as disposing an instance does,
-    // ends only once the job's row says how it stopped.
-    if (result.info && result.durable) yield* settled(result.durable, result.info)
-    return result.info
+    if (result.info && result.done) yield* Deferred.succeed(result.done, result.info)
+    if (result.drained) yield* Deferred.succeed(result.drained, undefined)
   })
 
   const fork = Effect.fn("BackgroundJob.fork")(function* (
@@ -314,8 +353,10 @@ export const makeWith = Effect.fnUntraced(function* (o: {
   ) {
     // onExit, not a match on the result: closing the job's scope from outside, as disposing the instance does,
     // interrupts this fiber, and only a finalizer still settles the job, completes its waiters and records how it ended.
-    return yield* run.pipe(
-      Effect.onExit((exit) => settle(id, token, sequence, exit)),
+    return yield* Effect.suspend(() =>
+      scope.state._tag === "Closed" || state.scope.state._tag === "Closed" ? Effect.interrupt : run,
+    ).pipe(
+      Effect.onExit((exit) => settle(id, token, sequence, exit).pipe(Effect.ensuring(finished(id, token)))),
       Effect.ignore,
       Effect.forkIn(scope, { startImmediately: true }),
     )
@@ -336,6 +377,7 @@ export const makeWith = Effect.fnUntraced(function* (o: {
   const start: Interface["start"] = Effect.fn("BackgroundJob.start")(function* (input) {
     return yield* Effect.uninterruptibleMask((restore) =>
       Effect.gen(function* () {
+        if (state.scope.state._tag === "Closed") return yield* Effect.interrupt
         const id = input.id ?? Identifier.ascending("job")
         const started_at = yield* Clock.currentTimeMillis
         const done = yield* Deferred.make<Info>()
@@ -356,12 +398,17 @@ export const makeWith = Effect.fnUntraced(function* (o: {
         const result = yield* SynchronizedRef.modifyEffect(
           state.jobs,
           Effect.fnUntraced(function* (jobs) {
+            if (state.scope.state._tag === "Closed") return yield* Effect.interrupt
             const existing = jobs.get(id)
             if (existing?.info.status === "running") {
               return [{ info: snapshot(existing) }, jobs] as readonly [StartResult, Map<string, Active>]
             }
+            if (existing && !Deferred.isDoneUnsafe(existing.done))
+              return [{ closing: existing.done }, jobs] as readonly [StartResult, Map<string, Active>]
             const scope = yield* Scope.fork(state.scope, "parallel")
+            if (scope.state._tag === "Closed") return yield* Effect.interrupt
             const token = {}
+            const drained = yield* Deferred.make<void>()
             const job = {
               info: {
                 id,
@@ -374,6 +421,8 @@ export const makeWith = Effect.fnUntraced(function* (o: {
               },
               done,
               scope,
+              drained,
+              fibers: 1,
               token,
               pending: 1,
               next: 1,
@@ -393,6 +442,10 @@ export const makeWith = Effect.fnUntraced(function* (o: {
             ] as readonly [StartResult, Map<string, Active>]
           }),
         )
+        if ("closing" in result) {
+          yield* restore(Deferred.await(result.closing))
+          return yield* start(input)
+        }
         // Queued before the run starts, so the row exists before any settlement of it is written.
         if ("scope" in result && row && result.durable)
           yield* detach(write(result.durable, id, (store) => store.started(row)))
@@ -417,12 +470,19 @@ export const makeWith = Effect.fnUntraced(function* (o: {
           state.jobs,
           (jobs): readonly [ExtendResult, Map<string, Active>] => {
             const job = jobs.get(input.id)
-            if (!job || job.info.status !== "running") return [{ extended: false }, jobs]
+            if (
+              !job ||
+              job.info.status !== "running" ||
+              job.scope.state._tag === "Closed" ||
+              state.scope.state._tag === "Closed"
+            )
+              return [{ extended: false }, jobs]
             return [
               { extended: true, previous: job.tail, scope: job.scope, tail, token: job.token, sequence: job.next },
               new Map(jobs).set(input.id, {
                 ...job,
                 pending: job.pending + 1,
+                fibers: job.fibers + 1,
                 next: job.next + 1,
                 // A concurrent run leaves the queue as it is, so a run queued later waits only on the queued ones.
                 tail: input.concurrent ? job.tail : tail,
@@ -451,7 +511,7 @@ export const makeWith = Effect.fnUntraced(function* (o: {
   const wait: Interface["wait"] = Effect.fn("BackgroundJob.wait")(function* (input) {
     const job = (yield* SynchronizedRef.get(state.jobs)).get(input.id)
     if (!job) return { timedOut: false }
-    if (job.info.status !== "running") return { info: snapshot(job), timedOut: false }
+    if (yield* Deferred.isDone(job.done)) return { info: snapshot(job), timedOut: false }
     if (input.timeout === undefined) return { info: yield* Deferred.await(job.done), timedOut: false }
     if (input.timeout <= 0) return { info: snapshot(job), timedOut: true }
     const info = yield* Deferred.await(job.done).pipe(Effect.timeoutOption(input.timeout))
@@ -501,7 +561,7 @@ export const makeWith = Effect.fnUntraced(function* (o: {
     const result = yield* SynchronizedRef.modify(state.jobs, (jobs): readonly [FinishResult, Map<string, Active>] => {
       const job = jobs.get(id)
       if (!job) return [{}, jobs]
-      if (job.info.status !== "running") return [{ info: snapshot(job) }, jobs]
+      if (job.info.status !== "running") return [{ info: snapshot(job), drained: job.drained }, jobs]
       const next = {
         ...job,
         onPromote: undefined,
@@ -513,15 +573,15 @@ export const makeWith = Effect.fnUntraced(function* (o: {
         },
       }
       return [
-        { info: snapshot(next), done: job.done, scope: job.scope, durable: job.durable },
+        { info: snapshot(next), drained: job.drained, scope: job.scope, durable: job.durable },
         new Map(jobs).set(id, next),
       ]
     })
-    if (result.info && result.done) yield* Deferred.succeed(result.done, result.info).pipe(Effect.ignore)
     if (result.info && result.durable) yield* detach(settled(result.durable, result.info))
     if (result.scope) yield* Scope.close(result.scope, Exit.void)
+    if (result.drained) yield* Deferred.await(result.drained)
     return result.info
-  })
+  }, Effect.uninterruptible)
 
   const lease: Interface["lease"] = () => Effect.succeed(o.owner)
 

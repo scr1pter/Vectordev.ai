@@ -119,6 +119,7 @@ type Scan = {
   /** Resolved ownership targets; permission patterns above retain their existing spelling. */
   written: Set<string>
   mutates: Set<string>
+  recursive: Set<string>
   git: GitMutation.Result[]
   /** Files a command reads that the read tool's rules apply to, relative to the worktree. */
   reads: Set<string>
@@ -1036,7 +1037,12 @@ const cloudRequests = Effect.fn("ShellTool.cloudRequests")(function* (
 })
 
 const assertOwnership = (ctx: Tool.Context, scan: Scan) =>
-  ctx.assertWritable?.({ files: [...scan.written, ...scan.mutates], git: scan.git, via: "shell" }) ?? Effect.void
+  ctx.assertWritable?.({
+    files: [...scan.written, ...scan.mutates],
+    recursive: [...scan.written, ...scan.recursive],
+    git: scan.git,
+    via: "shell",
+  }) ?? Effect.void
 
 const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan, input: { command: string }) {
   yield* assertOwnership(ctx, scan)
@@ -1360,6 +1366,7 @@ export const ShellTool = Tool.define(
         writes: new Set<string>(),
         written: new Set<string>(),
         mutates: new Set<string>(),
+        recursive: new Set<string>(),
         git: [],
         reads: new Set<string>(),
         cloud: new Map(),
@@ -1543,7 +1550,10 @@ export const ShellTool = Tool.define(
               : mutationTargets(mutationCommand, tokens.slice(1))
           for (const target of mutates) {
             const resolved = yield* targetPath(target, cwd, ps, shell)
-            if (resolved) scan.mutates.add(resolved)
+            if (resolved) {
+              scan.mutates.add(resolved)
+              scan.recursive.add(resolved)
+            }
           }
         }
         const leading = item.node.children

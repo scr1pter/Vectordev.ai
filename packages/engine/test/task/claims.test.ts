@@ -152,11 +152,23 @@ describe("TaskClaims", () => {
       directories: [work, registry],
       parentDirectory: tree,
       workDirectory: work,
+      privateDirectories: [registry],
+      immutableFiles: [path.join(work, ".git")],
     })
     expect(TaskClaims.protectedConflict("ses_root", path.join(work, "file.ts"))?.taskID).toBe("ses_isolated")
     expect(TaskClaims.protectedConflict("ses_root", path.join(registry, "record.json"))?.taskID).toBe("ses_isolated")
     expect(TaskClaims.protectedConflict("ses_nested", path.join(work, "file.ts"))).toBeUndefined()
+    expect(TaskClaims.protectedConflict("ses_isolated", path.join(registry, "record.json"))?.taskID).toBe(
+      "ses_isolated",
+    )
+    expect(
+      TaskClaims.protectedConflict("ses_nested", path.join(registry, "checkpoints", "manifest.json"))?.taskID,
+    ).toBe("ses_isolated")
+    expect(TaskClaims.protectedConflict("ses_isolated", path.join(work, ".git"))?.taskID).toBe("ses_isolated")
     expect(TaskClaims.parentTarget("ses_nested", path.join(tree, "src/file.ts"))).toBe(path.join(work, "src/file.ts"))
+    expect(TaskClaims.parentTarget("ses_nested", path.dirname(tree), true)).toBe(work)
+    expect(TaskClaims.protectedConflict("ses_nested", work, true)?.taskID).toBe("ses_isolated")
+    expect(TaskClaims.protectedConflict("ses_root", path.dirname(registry), true)?.taskID).toBe("ses_isolated")
   })
 })
 

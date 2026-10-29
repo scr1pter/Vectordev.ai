@@ -8,6 +8,141 @@ import { it } from "./lib/effect"
 const jobsLayer = LayerNode.compile(BackgroundJob.node)
 
 describe("BackgroundJob", () => {
+  it.live("duplicate cancellation and wait join final writes before releasing the job", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const closed = yield* Deferred.make<void>()
+      const duplicateDone = yield* Deferred.make<void>()
+      const waiterDone = yield* Deferred.make<void>()
+      yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+      const job = yield* jobs.start({
+        type: "test",
+        run: Effect.never.pipe(
+          Effect.ensuring(
+            Deferred.succeed(entered, undefined).pipe(
+              Effect.andThen(Deferred.await(release)),
+              Effect.andThen(Deferred.succeed(closed, undefined)),
+              Effect.uninterruptible,
+            ),
+          ),
+        ),
+      })
+      const first = yield* jobs.cancel(job.id).pipe(Effect.forkScoped)
+      yield* Deferred.await(entered)
+      const duplicate = yield* jobs.cancel(job.id).pipe(
+        Effect.tap(() => Deferred.succeed(duplicateDone, undefined)),
+        Effect.forkScoped,
+      )
+      const waiter = yield* jobs.wait({ id: job.id }).pipe(
+        Effect.tap(() => Deferred.succeed(waiterDone, undefined)),
+        Effect.forkScoped,
+      )
+      yield* Effect.yieldNow
+      expect(yield* Deferred.isDone(duplicateDone)).toBe(false)
+      expect(yield* Deferred.isDone(waiterDone)).toBe(false)
+      expect((yield* jobs.wait({ id: job.id, timeout: 0 })).timedOut).toBe(true)
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(first)
+      yield* Fiber.join(duplicate)
+      expect((yield* Fiber.join(waiter)).info?.status).toBe("cancelled")
+      expect(yield* Deferred.isDone(closed)).toBe(true)
+    }).pipe(Effect.provide(jobsLayer)),
+  )
+
+  it.live("reusing a cancelled id waits for the previous run's closing scope", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const nextStarted = yield* Deferred.make<void>()
+      yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+      const first = yield* jobs.start({
+        id: "closing-reuse",
+        type: "test",
+        run: Effect.never.pipe(
+          Effect.ensuring(
+            Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)), Effect.uninterruptible),
+          ),
+        ),
+      })
+      const cancel = yield* jobs.cancel(first.id).pipe(Effect.forkScoped)
+      yield* Deferred.await(entered)
+      const next = yield* jobs
+        .start({ id: first.id, type: "test", run: Deferred.succeed(nextStarted, undefined).pipe(Effect.as("next")) })
+        .pipe(Effect.forkScoped)
+      yield* Effect.yieldNow
+      expect(yield* Deferred.isDone(nextStarted)).toBe(false)
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(cancel)
+      yield* Fiber.join(next)
+      expect((yield* jobs.wait({ id: first.id })).info?.output).toBe("next")
+    }).pipe(Effect.provide(jobsLayer)),
+  )
+
+  it.live("a failing finalizer does not strand completion waiters or a duplicate cancellation", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const ready = yield* Deferred.make<void>()
+      const job = yield* jobs.start({
+        type: "test",
+        run: Deferred.succeed(ready, undefined).pipe(
+          Effect.andThen(Effect.never),
+          Effect.ensuring(Effect.die("fixture finalizer")),
+        ),
+      })
+      yield* Deferred.await(ready)
+      yield* jobs.cancel(job.id).pipe(Effect.exit)
+      expect((yield* jobs.wait({ id: job.id })).timedOut).toBe(false)
+      yield* jobs.cancel(job.id).pipe(Effect.exit)
+    }).pipe(Effect.provide(jobsLayer)),
+  )
+
+  it.live("interrupting a canceller cannot abandon its closing job or strand another waiter", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+      const job = yield* jobs.start({
+        type: "test",
+        run: Effect.never.pipe(
+          Effect.ensuring(
+            Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)), Effect.uninterruptible),
+          ),
+        ),
+      })
+      const cancel = yield* jobs.cancel(job.id).pipe(Effect.forkScoped)
+      yield* Deferred.await(entered)
+      const interrupt = yield* Fiber.interrupt(cancel).pipe(Effect.forkScoped)
+      expect((yield* jobs.wait({ id: job.id, timeout: 0 })).timedOut).toBe(true)
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(interrupt)
+      expect((yield* jobs.wait({ id: job.id })).info?.status).toBe("cancelled")
+      expect((yield* jobs.cancel(job.id))?.status).toBe("cancelled")
+    }).pipe(Effect.provide(jobsLayer)),
+  )
+
+  it.live("a closing registry refuses extensions before executing any new work", () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make()
+      const jobs = yield* BackgroundJob.make.pipe(Scope.provide(scope))
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const started = yield* Deferred.make<void>()
+      yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+      const job = yield* jobs.start({ type: "test", run: Effect.never.pipe(Effect.ensuring(Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)), Effect.uninterruptible))) })
+      const closing = yield* Scope.close(scope, Exit.void).pipe(Effect.forkScoped)
+      yield* Deferred.await(entered)
+      expect(yield* jobs.extend({ id: job.id, run: Deferred.succeed(started, undefined).pipe(Effect.as("must not run")) })).toBe(false)
+      expect(yield* Deferred.isDone(started)).toBe(false)
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(closing)
+      expect((yield* jobs.wait({ id: job.id })).timedOut).toBe(false)
+    }),
+  )
+
   it.live("refuses promotion without changing a foreground-only job and preserves default promotion", () =>
     Effect.gen(function* () {
       const jobs = yield* BackgroundJob.Service

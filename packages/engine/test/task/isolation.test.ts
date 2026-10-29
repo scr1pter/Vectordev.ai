@@ -1,0 +1,1094 @@
+import { afterEach, expect } from "bun:test"
+import fs from "node:fs/promises"
+import path from "node:path"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
+import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
+import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
+import { LayerNode } from "@vectordevai/core/effect/layer-node"
+import { Global } from "@vectordevai/core/global"
+import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
+import { Auth } from "@/auth"
+import { Agent } from "@/agent/agent"
+import { BackgroundJob } from "@/background/job"
+import { Config } from "@/config/config"
+import { InstanceRef } from "@/effect/instance-ref"
+import { InstanceState } from "@/effect/instance-state"
+import { Git } from "@/git"
+import { InstanceBootstrap } from "@/project/bootstrap-service"
+import { InstanceStore } from "@/project/instance-store"
+import { Session } from "@/session/session"
+import { SessionRunState } from "@/session/run-state"
+import { TaskClaims } from "@/task/claims"
+import { TaskIsolation } from "@/task/isolation"
+import { TaskPlace } from "@/task/place"
+import { Worktree } from "@/worktree"
+import { Npm } from "@vectordevai/core/npm"
+import { AuthTest } from "../fake/auth"
+import { NpmTest } from "../fake/npm"
+import { disposeAllInstances, tmpdirScoped } from "../fixture/fixture"
+import { testEffect } from "../lib/effect"
+
+// Bootstrap is independently covered by the real LSP/MCP/snapshot isolation files. These tests use real Git,
+// instances, sessions, agents and jobs, and never invoke a model or a package installation.
+const bootstrap = Layer.succeed(InstanceBootstrap.Service, { run: Effect.void })
+const layer = AppNodeBuilder.build(
+  LayerNode.group([
+    TaskIsolation.node,
+    Worktree.node,
+    InstanceStore.node,
+    Session.node,
+    SessionRunState.node,
+    BackgroundJob.node,
+    Git.node,
+    Agent.node,
+    Config.node,
+    CrossSpawnSpawner.node,
+  ]),
+  [
+    [InstanceStore.bootstrapNode, bootstrap],
+    [Auth.node, AuthTest.empty],
+    [Npm.node, NpmTest.noop],
+  ],
+)
+const it = testEffect(layer)
+afterEach(() => disposeAllInstances())
+
+const git = Effect.fn("IsolationTest.git")(function* (cwd: string, args: string[]) {
+  const service = yield* Git.Service
+  const result = yield* service.run(args, { cwd })
+  if (result.exitCode !== 0) throw new Error(result.stderr.toString())
+  return result.text().trim()
+})
+const write = (directory: string, file: string, text: string) =>
+  Effect.promise(async () => {
+    await fs.mkdir(path.dirname(path.join(directory, file)), { recursive: true })
+    await fs.writeFile(path.join(directory, file), text)
+  })
+const contents = (directory: string, file: string) =>
+  Effect.promise(() => fs.readFile(path.join(directory, file), "utf8"))
+const exists = (file: string | undefined) =>
+  Effect.promise(() =>
+    file
+      ? fs.access(file).then(
+          () => true,
+          () => false,
+        )
+      : Promise.resolve(false),
+  )
+const failure = <A, E, R>(effect: Effect.Effect<A, E, R>, code: string) =>
+  Effect.gen(function* () {
+    const exit = yield* effect.pipe(Effect.exit)
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toMatchObject({ code })
+  })
+
+const fixture = Effect.gen(function* () {
+  const home = yield* InstanceState.context
+  const sessions = yield* Session.Service
+  const isolation = yield* TaskIsolation.Service
+  const agents = yield* Agent.Service
+  const parent = yield* sessions.create({})
+  const child = yield* sessions.create({ parentID: parent.id })
+  const agent = yield* agents.get("general")
+  const recordPath = path.join(Global.Path.data, "task-isolation", home.project.id, child.id, "record.json")
+  const workPath = path.join(Global.Path.data, "task-worktree", home.project.id, child.id)
+  yield* Effect.addFinalizer(() =>
+    Effect.gen(function* () {
+      const store = yield* InstanceStore.Service
+      yield* store.disposeDirectory(workPath)
+      const service = yield* Git.Service
+      yield* service.run(["worktree", "remove", "--force", workPath], { cwd: home.directory })
+      yield* service.run(["branch", "-D", `vector/subagent/${child.id}`], { cwd: home.directory })
+      yield* Effect.promise(async () => {
+        await fs.rm(workPath, { recursive: true, force: true })
+        await fs.rm(path.dirname(recordPath), { recursive: true, force: true })
+      })
+      TaskClaims.unprotect(child.id)
+      TaskPlace.drop(child.id)
+      TaskPlace.drop(parent.id)
+    }).pipe(Effect.orDie),
+  )
+  const reserve = () => isolation.reserve({ taskID: child.id, parentSessionID: parent.id, title: "Fixture", agent })
+  const start = Effect.gen(function* () {
+    yield* reserve()
+    return yield* isolation.start(child.id)
+  })
+  const settle = () => isolation.settle({ taskID: child.id, attempt: 1 })
+  return { home, sessions, isolation, parent, child, agent, recordPath, workPath, reserve, start, settle }
+})
+
+it.instance(
+  "seed captures staged, unstaged and untracked files without touching the real index",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      yield* write(f.home.directory, "staged.txt", "staged\n")
+      yield* git(f.home.directory, ["add", "staged.txt"])
+      yield* write(f.home.directory, "staged.txt", "unstaged on top\n")
+      yield* write(f.home.directory, "untracked.txt", "new\n")
+      yield* write(f.home.directory, ".gitignore", "ignored.txt\n")
+      yield* write(f.home.directory, "ignored.txt", "ignored\n")
+      yield* write(f.home.directory, "too-large", "x".repeat(101))
+      const index = path.resolve(f.home.directory, yield* git(f.home.directory, ["rev-parse", "--git-path", "index"]))
+      const before = yield* Effect.promise(() => fs.readFile(index))
+      const started = yield* f.start
+      expect(yield* contents(started.work.directory, "staged.txt")).toBe("unstaged on top\n")
+      expect(yield* contents(started.work.directory, "untracked.txt")).toBe("new\n")
+      expect(yield* exists(path.join(started.work.directory, "ignored.txt"))).toBe(false)
+      expect(yield* exists(path.join(started.work.directory, "too-large"))).toBe(false)
+      expect(started.record.skipped).toContain("too-large")
+      expect(yield* Effect.promise(() => fs.readFile(index))).toEqual(before)
+      expect(TaskClaims.gitDirectories()).not.toEqual({})
+      expect((yield* f.settle()).state).toBe("unchanged")
+    }).pipe(
+      Effect.provideService(TaskIsolation.Limits, {
+        fileBytes: 100,
+        minFreeBytes: 0,
+        copyBytes: 1024 ** 3,
+        copyFiles: 20_000,
+        patchBytes: 256 * 1024,
+      }),
+    ),
+  { git: true },
+)
+
+it.instance(
+  "unchanged removes the checkout, reserved branch and inherited trust",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      const trust = yield* Effect.promise(() => WorkspaceTrust.snapshot(started.work.directory, []))
+      expect((yield* Effect.promise(() => WorkspaceTrust.status(Global.Path.state, trust))).trusted).toBe(true)
+      const result = yield* f.settle()
+      expect(result.state).toBe("unchanged")
+      expect(yield* exists(started.work.directory)).toBe(false)
+      expect(yield* git(f.home.directory, ["branch", "--list", result.branch!])).toBe("")
+      expect((yield* Effect.promise(() => WorkspaceTrust.status(Global.Path.state, trust))).trusted).toBe(false)
+      expect((yield* f.settle()).state).toBe("unchanged")
+    }),
+  { git: true, trusted: true },
+)
+
+it.instance(
+  "changed saves despite failing hooks and signing configuration, with bounded private diffs",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      yield* write(started.work.directory, "result.txt", "result\n".repeat(100))
+      yield* git(started.work.directory, ["config", "commit.gpgsign", "true"])
+      const hooks = path.join(f.home.directory, ".git", "hooks", "pre-commit")
+      yield* Effect.promise(async () => {
+        await fs.writeFile(hooks, "#!/bin/sh\nexit 1\n")
+        await fs.chmod(hooks, 0o755)
+      })
+      const result = yield* f.settle()
+      expect(result.state).toBe("changed")
+      expect(result.files).toEqual([
+        { path: "result.txt", status: "added", additions: 100, deletions: 0, binary: false },
+      ])
+      yield* failure(f.isolation.changes({ taskID: f.child.id, diff: true }), "forbidden")
+      const changes = yield* f.isolation.changes({ taskID: f.child.id, diff: true, control: true })
+      expect(changes.truncated).toBe(true)
+      expect(Buffer.byteLength(changes.patch ?? "")).toBeLessThanOrEqual(128)
+    }).pipe(
+      Effect.provideService(TaskIsolation.Limits, {
+        fileBytes: 50 * 1024 * 1024,
+        minFreeBytes: 0,
+        copyBytes: 1024 ** 3,
+        copyFiles: 20_000,
+        patchBytes: 128,
+      }),
+    ),
+  { git: true },
+)
+
+it.instance(
+  "clean merge writes only selected blobs, leaves the index intact and creates a checkpoint",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      yield* write(f.home.directory, "parent.txt", "parent staged\n")
+      yield* git(f.home.directory, ["add", "parent.txt"])
+      const started = yield* f.start
+      yield* write(started.work.directory, "one.txt", "one\n")
+      yield* write(started.work.directory, "two.txt", "two\n")
+      yield* f.settle()
+      const index = path.resolve(f.home.directory, yield* git(f.home.directory, ["rev-parse", "--git-path", "index"]))
+      const before = yield* Effect.promise(() => fs.readFile(index))
+      const partial = yield* f.isolation.merge({ taskID: f.child.id, files: ["one.txt"], by: { kind: "owner" } })
+      expect(partial.record.state).toBe("changed")
+      expect(partial.remaining).toEqual(["two.txt"])
+      expect(yield* exists(path.join(partial.checkpoint!, "manifest.json"))).toBe(true)
+      expect(yield* contents(f.home.directory, "one.txt")).toBe("one\n")
+      expect(yield* exists(path.join(f.home.directory, "two.txt"))).toBe(false)
+      const rest = yield* f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" } })
+      expect(rest.record.state).toBe("merged")
+      expect(yield* contents(f.home.directory, "two.txt")).toBe("two\n")
+      expect(yield* Effect.promise(() => fs.readFile(index))).toEqual(before)
+      expect(yield* exists(f.workPath)).toBe(false)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "a conflicting merge refuses without changing parent files or its index",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      yield* write(f.home.directory, "same.txt", "base\n")
+      yield* git(f.home.directory, ["add", "same.txt"])
+      yield* git(f.home.directory, ["commit", "-m", "base"])
+      const started = yield* f.start
+      yield* write(started.work.directory, "same.txt", "child\n")
+      yield* f.settle()
+      yield* write(f.home.directory, "same.txt", "parent\n")
+      const index = path.join(f.home.directory, ".git", "index")
+      const before = yield* Effect.promise(() => fs.readFile(index))
+      yield* failure(f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" } }), "conflict")
+      expect(yield* contents(f.home.directory, "same.txt")).toBe("parent\n")
+      expect(yield* Effect.promise(() => fs.readFile(index))).toEqual(before)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "an owner may back up and replace an untracked collision; an agent cannot force it",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      yield* write(started.work.directory, "new.txt", "child\n")
+      yield* f.settle()
+      yield* write(f.home.directory, "new.txt", "parent untracked\n")
+      yield* failure(f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" } }), "conflict")
+      const merged = yield* f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" }, force: true })
+      expect(yield* contents(f.home.directory, "new.txt")).toBe("child\n")
+      expect(yield* contents(merged.checkpoint!, "overwritten/new.txt")).toBe("parent untracked\n")
+    }),
+  { git: true },
+)
+
+it.instance(
+  "discard retains a patch, and resume recreates a removed checkout from current files",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      yield* write(started.work.directory, "changed.txt", "saved\n")
+      yield* f.settle()
+      const discarded = yield* f.isolation.discard({ taskID: f.child.id, by: { kind: "owner" } })
+      expect(yield* exists(discarded.saved)).toBe(true)
+      expect(yield* exists(f.workPath)).toBe(false)
+      yield* write(f.home.directory, "current.txt", "current\n")
+      const resumed = yield* f.isolation.resume({ taskID: f.child.id, attempt: 2, agent: f.agent })
+      expect(resumed.record.state).toBe("running")
+      expect(yield* contents(f.workPath, "current.txt")).toBe("current\n")
+      expect((yield* f.isolation.settle({ taskID: f.child.id, attempt: 2 })).state).toBe("unchanged")
+    }),
+  { git: true },
+)
+
+it.instance(
+  "a child that drops the seed is recorded as diverged",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      yield* write(f.home.directory, "parent-wip.txt", "seed\n")
+      const started = yield* f.start
+      yield* git(f.workPath, ["reset", "--hard", "HEAD~1"])
+      const result = yield* f.settle()
+      expect(result.state).toBe("diverged")
+    }),
+  { git: true },
+)
+
+it.instance(
+  "sparse checkouts and read-only agents are refused before reserving anything",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      yield* git(f.home.directory, ["config", "core.sparseCheckout", "true"])
+      yield* failure(f.reserve(), "sparse")
+      expect(yield* exists(f.recordPath)).toBe(false)
+      yield* git(f.home.directory, ["config", "core.sparseCheckout", "false"])
+      yield* failure(
+        f.isolation.check({ parentSessionID: f.parent.id, agent: { ...f.agent, name: "review" } }),
+        "readonly",
+      )
+    }),
+  { git: true },
+)
+
+it.instance(
+  "agent resolution is checked in the work instance before returning execution context",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      yield* f.isolation.reserve({
+        taskID: f.child.id,
+        parentSessionID: f.parent.id,
+        title: "Mismatch",
+        agent: { ...f.agent, permission: [] },
+      })
+      yield* failure(f.isolation.start(f.child.id), "agent")
+      expect((yield* f.isolation.get(f.child.id)).state).toBe("failed")
+      expect(TaskPlace.get(f.child.id)?.work.directory).not.toBe(f.workPath)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "registered ignored links are excluded and their targets survive settle/removal",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      yield* write(f.home.directory, ".gitignore", "node_modules\n")
+      yield* write(f.home.directory, "node_modules/keep.txt", "keep\n")
+      const config = yield* Effect.promise(() => import("@/config/config"))
+      const original = yield* config.Config.Service
+      const isolation = yield* TaskIsolation.make.pipe(
+        Effect.provideService(config.Config.Service, {
+          ...original,
+          get: () => Effect.succeed({ sizing: { subagents: { isolation: { link: ["node_modules"] } } } }),
+        }),
+      )
+      yield* isolation.reserve({ taskID: f.child.id, parentSessionID: f.parent.id, title: "Links", agent: f.agent })
+      yield* isolation.start(f.child.id)
+      expect(yield* contents(f.workPath, "node_modules/keep.txt")).toBe("keep\n")
+      expect((yield* isolation.settle({ taskID: f.child.id, attempt: 1 })).state).toBe("unchanged")
+      expect(yield* contents(f.home.directory, "node_modules/keep.txt")).toBe("keep\n")
+    }),
+  { git: true },
+)
+
+it.instance(
+  "forged registry directories cannot redirect discard or sweep to another folder",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      yield* write(started.work.directory, "saved.txt", "child\n")
+      const record = yield* f.settle()
+      const outside = yield* tmpdirScoped()
+      yield* write(outside, "keep.txt", "keep\n")
+      yield* Effect.promise(() =>
+        fs.writeFile(f.recordPath, JSON.stringify({ ...record, directory: outside, deleted: true })),
+      )
+      yield* failure(f.isolation.discard({ taskID: f.child.id, by: { kind: "owner" } }), "registry")
+      expect(yield* f.isolation.sweep({ force: true })).toEqual([])
+      expect(yield* contents(outside, "keep.txt")).toBe("keep\n")
+    }),
+  { git: true },
+)
+
+it.instance(
+  "a merge through a symlinked target directory is refused",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      yield* write(started.work.directory, "directory/new.txt", "child\n")
+      yield* f.settle()
+      const outside = yield* tmpdirScoped()
+      yield* Effect.promise(() =>
+        fs.symlink(
+          outside,
+          path.join(f.home.directory, "directory"),
+          process.platform === "win32" ? "junction" : "dir",
+        ),
+      )
+      yield* failure(f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" } }), "path")
+      expect(yield* exists(path.join(outside, "new.txt"))).toBe(false)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "settle joins an active shared grandchild before saving and retiring its work context",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      const jobs = yield* BackgroundJob.Service
+      const grandchild = yield* TaskPlace.within(f.child.id)(f.sessions.create({ parentID: f.child.id }))
+      yield* Effect.addFinalizer(() => Effect.sync(() => TaskPlace.drop(grandchild.id)))
+      const ready = yield* Deferred.make<void>()
+      yield* TaskPlace.within(f.child.id)(
+        jobs.start({
+          id: grandchild.id,
+          type: "task",
+          run: Deferred.succeed(ready, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.ensuring(write(started.work.directory, "grandchild-finally.txt", "joined before snapshot\n")),
+          ),
+        }),
+      )
+      yield* Deferred.await(ready)
+      const result = yield* f.settle()
+      expect(result.state).toBe("changed")
+      expect(result.files.map((file) => file.path)).toContain("grandchild-finally.txt")
+      expect(TaskPlace.get(grandchild.id)?.work.directory).toBe(f.home.directory)
+      yield* failure(f.isolation.admit(grandchild.id), "retired")
+      const resumed = yield* f.isolation.resume({ taskID: f.child.id, attempt: 2, agent: f.agent })
+      expect(TaskPlace.get(grandchild.id)?.work.directory).toBe(resumed.work.directory)
+      yield* f.isolation.admit(grandchild.id)
+      yield* f.isolation.settle({ taskID: f.child.id, attempt: 2 })
+    }),
+  { git: true },
+)
+
+it.instance("copy mode uses baseline conflicts and supports merge without creating Git metadata", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture
+    yield* write(f.home.directory, "copy.txt", "base\n")
+    const started = yield* f.start
+    expect(started.record.mode).toBe("copy")
+    expect(yield* exists(path.join(f.workPath, ".git"))).toBe(false)
+    yield* write(f.workPath, "copy.txt", "child\n")
+    yield* f.settle()
+    const result = yield* f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" } })
+    expect(result.record.state).toBe("merged")
+    expect(yield* contents(f.home.directory, "copy.txt")).toBe("child\n")
+    const archived = yield* f.isolation.changes({ taskID: f.child.id, diff: true, control: true })
+    expect(archived.patch).toContain("vector-isolation-copy-v1")
+  }),
+)
+
+it.instance("copy admission counts files larger than the hash limit before any checkout write", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture
+    yield* write(f.home.directory, "large.bin", "x".repeat(5 * 1024 * 1024 + 1))
+    yield* failure(f.reserve(), "copy_limit")
+    expect(yield* exists(f.recordPath)).toBe(false)
+    expect(yield* exists(f.workPath)).toBe(false)
+  }).pipe(
+    Effect.provideService(TaskIsolation.Limits, {
+      fileBytes: 100,
+      minFreeBytes: 0,
+      copyBytes: 1024,
+      copyFiles: 20_000,
+      patchBytes: 256 * 1024,
+    }),
+  ),
+)
+
+it.instance(
+  "stale settlement cannot retire a resumed attempt or lose rebuilt protections",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const first = yield* f.start
+      yield* write(first.work.directory, "changed.txt", "changed\n")
+      yield* f.settle()
+      TaskClaims.unprotect(f.child.id)
+      const resumed = yield* f.isolation.resume({ taskID: f.child.id, attempt: 2, agent: f.agent })
+      expect(TaskClaims.protectedTrees().some((entry) => entry.taskID === f.child.id && !!entry.gitDirectory)).toBe(
+        true,
+      )
+      expect((yield* f.isolation.settle({ taskID: f.child.id, attempt: 1 })).attempt).toBe(2)
+      expect((yield* f.isolation.get(f.child.id)).state).toBe("running")
+      expect(TaskPlace.get(f.child.id)?.work.directory).toBe(resumed.work.directory)
+      yield* f.isolation.settle({ taskID: f.child.id, attempt: 2 })
+    }),
+  { git: true },
+)
+
+it.instance(
+  "redirecting a child's .git cannot change the parent's index or HEAD during settlement",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      yield* f.start
+      yield* write(f.workPath, "child.txt", "child\n")
+      const before = yield* Effect.promise(() => fs.readFile(path.join(f.home.directory, ".git", "index")))
+      const head = yield* git(f.home.directory, ["rev-parse", "HEAD"])
+      const pointer = yield* contents(f.workPath, ".git")
+      yield* write(f.workPath, ".git", `gitdir: ${path.join(f.home.directory, ".git")}\n`)
+      expect((yield* f.settle()).state).toBe("failed")
+      expect(yield* git(f.home.directory, ["rev-parse", "HEAD"])).toBe(head)
+      expect(yield* Effect.promise(() => fs.readFile(path.join(f.home.directory, ".git", "index")))).toEqual(before)
+      yield* write(f.workPath, ".git", pointer)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "corrupt retired registries refuse direct child and descendant admission",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      yield* f.start
+      const grandchild = yield* TaskPlace.within(f.child.id)(f.sessions.create({ parentID: f.child.id }))
+      yield* Effect.addFinalizer(() => Effect.sync(() => TaskPlace.drop(grandchild.id)))
+      yield* f.settle()
+      yield* Effect.promise(() => fs.writeFile(f.recordPath, "not json"))
+      expect(Exit.isFailure(yield* f.isolation.admit(f.child.id).pipe(Effect.exit))).toBe(true)
+      expect(Exit.isFailure(yield* f.isolation.admit(grandchild.id).pipe(Effect.exit))).toBe(true)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "settle waits for an already-cancelling grandchild's gated final write",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      const jobs = yield* BackgroundJob.Service
+      const grandchild = yield* TaskPlace.within(f.child.id)(f.sessions.create({ parentID: f.child.id }))
+      yield* Effect.addFinalizer(() => Effect.sync(() => TaskPlace.drop(grandchild.id)))
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const settled = yield* Deferred.make<void>()
+      yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+      yield* TaskPlace.within(f.child.id)(
+        jobs.start({
+          id: grandchild.id,
+          type: "task",
+          run: Effect.never.pipe(
+            Effect.ensuring(
+              Deferred.succeed(entered, undefined).pipe(
+                Effect.andThen(Deferred.await(release)),
+                Effect.andThen(write(started.work.directory, "closing.txt", "included\n")),
+                Effect.uninterruptible,
+              ),
+            ),
+          ),
+        }),
+      )
+      const cancelling = yield* TaskPlace.within(f.child.id)(jobs.cancel(grandchild.id)).pipe(Effect.forkScoped)
+      yield* Deferred.await(entered)
+      const saving = yield* f.settle().pipe(
+        Effect.tap(() => Deferred.succeed(settled, undefined)),
+        Effect.forkScoped,
+      )
+      yield* Effect.yieldNow
+      expect(yield* Deferred.isDone(settled)).toBe(false)
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(cancelling)
+      expect((yield* Fiber.join(saving)).files.map((file) => file.path)).toContain("closing.txt")
+    }),
+  { git: true },
+)
+
+it.instance(
+  "settle disables root post-commit hooks and excludes oversized blobs already added by the child",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      yield* write(started.work.directory, "post-commit", "#!/bin/sh\ntouch hook-ran\n")
+      yield* Effect.promise(() => fs.chmod(path.join(f.workPath, "post-commit"), 0o755))
+      yield* write(started.work.directory, "oversized.txt", "x".repeat(101))
+      yield* git(f.workPath, ["add", "oversized.txt"])
+      yield* write(started.work.directory, "normal.txt", "normal\n")
+      const result = yield* f.settle()
+      expect(result.state).toBe("changed")
+      expect(result.skipped).toContain("oversized.txt")
+      expect(result.files.map((file) => file.path)).not.toContain("oversized.txt")
+      expect(yield* exists(path.join(f.workPath, "hook-ran"))).toBe(false)
+    }).pipe(
+      Effect.provideService(TaskIsolation.Limits, {
+        fileBytes: 100,
+        minFreeBytes: 0,
+        copyBytes: 1024 ** 3,
+        copyFiles: 20_000,
+        patchBytes: 256 * 1024,
+      }),
+    ),
+  { git: true },
+)
+
+it.instance(
+  "stacked changes require their dependency to merge first",
+  () =>
+    Effect.gen(function* () {
+      const dependency = yield* fixture
+      const started = yield* dependency.start
+      yield* write(started.work.directory, "dep.txt", "dependency\n")
+      yield* dependency.settle()
+      const f = yield* fixture
+      yield* f.isolation.reserve({
+        taskID: f.child.id,
+        parentSessionID: f.parent.id,
+        title: "Stack",
+        agent: f.agent,
+        dependsOn: [dependency.child.id],
+      })
+      yield* f.isolation.start(f.child.id)
+      expect(yield* contents(f.workPath, "dep.txt")).toBe("dependency\n")
+      yield* write(f.workPath, "result.txt", "result\n")
+      yield* f.settle()
+      yield* failure(f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" } }), "stacked")
+      yield* dependency.isolation.merge({ taskID: dependency.child.id, by: { kind: "owner" } })
+      expect((yield* f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" } })).record.state).toBe("merged")
+    }),
+  { git: true },
+)
+
+it.instance(
+  "sweep removes only queued registered tasks and retains their recovery patches",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      yield* write(started.work.directory, "result.txt", "result\n")
+      yield* f.settle()
+      yield* f.isolation.enqueue(f.child.id)
+      expect(yield* f.isolation.sweep({ force: true })).toContain(f.child.id)
+      expect((yield* f.isolation.get(f.child.id)).state).toBe("discarded")
+      expect(yield* exists(f.workPath)).toBe(false)
+      expect(yield* Effect.promise(() => fs.readdir(path.join(path.dirname(f.recordPath), "patches")))).toHaveLength(1)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "reconcile restores a real checkpoint from an interrupted merge",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      yield* write(started.work.directory, "one.txt", "one\n")
+      yield* write(started.work.directory, "two.txt", "two\n")
+      yield* f.settle()
+      const partial = yield* f.isolation.merge({ taskID: f.child.id, files: ["one.txt"], by: { kind: "owner" } })
+      const pending = { ...partial.record, mergeCompleted: false, merged: [] }
+      yield* Effect.promise(() => fs.writeFile(f.recordPath, JSON.stringify(pending)))
+      expect(yield* contents(f.home.directory, "one.txt")).toBe("one\n")
+      const restored = yield* f.isolation.reconcile(f.child.id)
+      expect(yield* exists(path.join(f.home.directory, "one.txt"))).toBe(false)
+      expect(restored.state).toBe("changed")
+      expect(restored.mergeStartedAt).toBeUndefined()
+    }),
+  { git: true },
+)
+
+it.instance(
+  "autocrlf merges use checkout bytes while preserving the parent's existing index",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      yield* git(f.home.directory, ["config", "core.autocrlf", "true"])
+      yield* write(f.home.directory, "crlf.txt", "base\r\n")
+      yield* git(f.home.directory, ["add", "crlf.txt"])
+      yield* git(f.home.directory, ["commit", "-m", "CRLF"])
+      const started = yield* f.start
+      yield* write(started.work.directory, "crlf.txt", "changed\r\n")
+      yield* f.settle()
+      const index = yield* Effect.promise(() => fs.readFile(path.join(f.home.directory, ".git", "index")))
+      yield* f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" } })
+      expect(yield* contents(f.home.directory, "crlf.txt")).toBe("changed\r\n")
+      expect(yield* Effect.promise(() => fs.readFile(path.join(f.home.directory, ".git", "index")))).toEqual(index)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "metadata cannot authorize cleanup outside the reserved registry checkout",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      yield* write(started.work.directory, "saved.txt", "saved\n")
+      yield* f.settle()
+      const outside = yield* tmpdirScoped()
+      yield* write(outside, "keep.txt", "keep\n")
+      yield* f.sessions.setMetadata({
+        sessionID: f.child.id,
+        metadata: { subagent: { isolation: { directory: outside, branch: "main", state: "changed" } } },
+      })
+      yield* f.isolation.discard({ taskID: f.child.id, by: { kind: "owner" } })
+      expect(yield* contents(outside, "keep.txt")).toBe("keep\n")
+      expect(yield* exists(f.workPath)).toBe(false)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "an expected-branch removal refuses branch drift between outer verification and removal",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      yield* write(started.work.directory, "saved.txt", "saved\n")
+      yield* f.settle()
+      const worktrees = yield* Worktree.Service
+      const changing = {
+        ...worktrees,
+        removeForTask: (info: Worktree.Info & { branch: string }) =>
+          git(info.directory, ["switch", "-c", "unrelated-owner-branch"]).pipe(
+            Effect.andThen(worktrees.removeForTask(info)),
+          ),
+      }
+      expect(
+        Exit.isFailure(
+          yield* f.isolation
+            .discard({ taskID: f.child.id, by: { kind: "owner" } })
+            .pipe(Effect.provideService(Worktree.Service, changing), Effect.exit),
+        ),
+      ).toBe(true)
+      expect(yield* git(f.home.directory, ["branch", "--list", "unrelated-owner-branch"])).toContain(
+        "unrelated-owner-branch",
+      )
+      expect(yield* exists(f.workPath)).toBe(true)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "an escaping added symlink is refused before any parent write",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      const outside = yield* tmpdirScoped()
+      yield* Effect.promise(() =>
+        fs.symlink(
+          outside,
+          path.join(started.work.directory, "escape"),
+          process.platform === "win32" ? "junction" : "dir",
+        ),
+      )
+      yield* f.settle()
+      yield* failure(f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" } }), "path")
+      expect(yield* exists(path.join(f.home.directory, "escape"))).toBe(false)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "reconcile saves an orphaned running attempt without cancelling the home registry",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      yield* write(started.work.directory, "saved.txt", "saved\n")
+      const saved = yield* f.settle()
+      yield* write(f.workPath, "after-restart.txt", "recover\n")
+      yield* Effect.promise(() =>
+        fs.writeFile(f.recordPath, JSON.stringify({ ...saved, state: "running", settledAttempt: undefined })),
+      )
+      const jobs = yield* BackgroundJob.Service
+      const unrelated = yield* jobs.start({ type: "unrelated", run: Effect.never })
+      const recovered = yield* f.isolation.reconcile(f.child.id)
+      expect(recovered.state).toBe("changed")
+      expect(recovered.files.map((file) => file.path)).toContain("after-restart.txt")
+      expect((yield* jobs.get(unrelated.id))?.status).toBe("running")
+      yield* jobs.cancel(unrelated.id)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "failed settlement retains actual edits through discard and sweep until a real snapshot is saved",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      yield* write(f.workPath, "unsaved.txt", "precious partial changes\n")
+      const lock = path.join(started.record.gitDirectory!, "index.lock")
+      yield* Effect.promise(() => fs.writeFile(lock, "fixture lock"))
+      expect((yield* f.settle()).state).toBe("failed")
+      yield* failure(f.isolation.discard({ taskID: f.child.id, by: { kind: "owner" } }), "unsaved")
+      yield* f.isolation.enqueue(f.child.id)
+      expect(yield* f.isolation.sweep({ force: true })).toEqual([])
+      expect(yield* contents(f.workPath, "unsaved.txt")).toBe("precious partial changes\n")
+      yield* Effect.promise(() => fs.rm(lock, { force: true }))
+      expect((yield* f.isolation.reconcile(f.child.id)).state).toBe("changed")
+      const discarded = yield* f.isolation.discard({ taskID: f.child.id, by: { kind: "owner" } })
+      expect(yield* Effect.promise(() => fs.readFile(discarded.saved!, "utf8"))).toContain("precious partial changes")
+      expect(yield* exists(f.workPath)).toBe(false)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "recovery binds a genuine checkout interrupted between raw creation and its metadata save",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const worktrees = yield* Worktree.Service
+      const interrupted = {
+        ...worktrees,
+        createForTask: (info: Worktree.Info, options: { from: string; env?: Record<string, string | undefined> }) =>
+          worktrees
+            .createForTask(info, options)
+            .pipe(
+              Effect.andThen(
+                Effect.fail(new Worktree.CreateFailedError({ message: "fixture crash after raw creation" })),
+              ),
+            ),
+      }
+      expect(
+        Exit.isFailure(yield* f.start.pipe(Effect.provideService(Worktree.Service, interrupted), Effect.exit)),
+      ).toBe(true)
+      const retained = yield* f.isolation.get(f.child.id)
+      expect(retained.gitDirectory).toBeUndefined()
+      expect(yield* exists(f.workPath)).toBe(true)
+      expect((yield* f.isolation.reconcile(f.child.id)).state).toBe("unchanged")
+      expect(yield* exists(f.workPath)).toBe(false)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "a failed running-record save after resume releases its loaded instance and work placement",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      yield* write(started.work.directory, "saved.txt", "saved\n")
+      yield* f.settle()
+      const store = yield* InstanceStore.Service
+      const backup = `${f.recordPath}.fixture-backup`
+      const damaged = {
+        ...store,
+        load: (input: Parameters<InstanceStore.Interface["load"]>[0]) =>
+          store.load(input).pipe(
+            Effect.tap(() =>
+              input.directory !== f.workPath
+                ? Effect.void
+                : Effect.promise(async () => {
+                    await fs.rename(f.recordPath, backup)
+                    await fs.mkdir(f.recordPath)
+                  }),
+            ),
+          ),
+      }
+      const result = yield* f.isolation
+        .resume({ taskID: f.child.id, attempt: 2, agent: f.agent })
+        .pipe(Effect.provideService(InstanceStore.Service, damaged), Effect.exit)
+      expect(Exit.isFailure(result)).toBe(true)
+      expect(TaskPlace.get(f.child.id)?.work.directory).toBe(f.home.directory)
+      expect((yield* store.loaded()).some((entry) => entry.directory === f.workPath)).toBe(false)
+      yield* Effect.promise(async () => {
+        await fs.rmdir(f.recordPath)
+        await fs.rename(backup, f.recordPath)
+      })
+      expect((yield* f.isolation.discard({ taskID: f.child.id, by: { kind: "owner" } })).record.state).toBe("discarded")
+    }),
+  { git: true },
+)
+
+it.instance(
+  "sweep retires a deleted reservation without inventing a worktree to remove",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      yield* f.reserve()
+      yield* f.isolation.enqueue(f.child.id)
+      expect(yield* f.isolation.sweep({ force: true })).toContain(f.child.id)
+      expect((yield* f.isolation.get(f.child.id)).state).toBe("unchanged")
+      expect(yield* exists(f.workPath)).toBe(false)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "replacing a configured link's ancestor cannot unlink anything outside the checkout",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      yield* write(f.home.directory, ".gitignore", "deps/node_modules\n")
+      yield* write(f.home.directory, "deps/node_modules/keep.txt", "original\n")
+      const config = yield* Config.Service
+      const isolation = yield* TaskIsolation.make.pipe(
+        Effect.provideService(Config.Service, {
+          ...config,
+          get: () => Effect.succeed({ sizing: { subagents: { isolation: { link: ["deps/node_modules"] } } } }),
+        }),
+      )
+      yield* isolation.reserve({
+        taskID: f.child.id,
+        parentSessionID: f.parent.id,
+        title: "Nested link",
+        agent: f.agent,
+      })
+      yield* isolation.start(f.child.id)
+      const outside = yield* tmpdirScoped()
+      const target = yield* tmpdirScoped()
+      yield* write(target, "keep.txt", "outside\n")
+      yield* Effect.promise(async () => {
+        await fs.symlink(target, path.join(outside, "node_modules"), process.platform === "win32" ? "junction" : "dir")
+        await fs.rm(path.join(f.workPath, "deps"), { recursive: true })
+        await fs.symlink(outside, path.join(f.workPath, "deps"), process.platform === "win32" ? "junction" : "dir")
+      })
+      yield* isolation.settle({ taskID: f.child.id, attempt: 1 })
+      expect(
+        Exit.isFailure(yield* isolation.discard({ taskID: f.child.id, by: { kind: "owner" } }).pipe(Effect.exit)),
+      ).toBe(true)
+      expect(yield* exists(path.join(outside, "node_modules"))).toBe(true)
+      expect(yield* contents(target, "keep.txt")).toBe("outside\n")
+    }),
+  { git: true },
+)
+
+if (process.platform !== "win32")
+  it.instance(
+    "oversized literal wildcard names are not mistaken for tracked pathspec matches",
+    () =>
+      Effect.gen(function* () {
+        const f = yield* fixture
+        yield* write(f.home.directory, "tracked.txt", "tracked\n")
+        yield* git(f.home.directory, ["add", "tracked.txt"])
+        yield* write(f.home.directory, "*", "x".repeat(101))
+        const started = yield* f.start
+        expect(started.record.skipped).toContain("*")
+        expect(yield* exists(path.join(f.workPath, "*"))).toBe(false)
+        yield* f.settle()
+      }).pipe(
+        Effect.provideService(TaskIsolation.Limits, {
+          fileBytes: 100,
+          minFreeBytes: 0,
+          copyBytes: 1024 ** 3,
+          copyFiles: 20_000,
+          patchBytes: 256 * 1024,
+        }),
+      ),
+    { git: true },
+  )
+
+for (const gitProject of [true, false])
+  it.instance(
+    `${gitProject ? "Git" : "copy"} follow-ups can delete an already merged addition after a partial merge`,
+    () =>
+      Effect.gen(function* () {
+        const f = yield* fixture
+        const started = yield* f.start
+        yield* write(started.work.directory, "one.txt", "first\n")
+        yield* write(started.work.directory, "two.txt", "remaining\n")
+        yield* f.settle()
+        yield* f.isolation.merge({ taskID: f.child.id, files: ["one.txt"], by: { kind: "owner" } })
+        const resumed = yield* f.isolation.resume({ taskID: f.child.id, attempt: 2, agent: f.agent })
+        yield* Effect.promise(() => fs.unlink(path.join(resumed.work.directory, "one.txt")))
+        yield* write(resumed.work.directory, "two.txt", "updated remaining\n")
+        const saved = yield* f.isolation.settle({ taskID: f.child.id, attempt: 2 })
+        expect(saved.state).toBe("changed")
+        expect(saved.files).toContainEqual(expect.objectContaining({ path: "one.txt", status: "deleted" }))
+        expect(saved.merged).toEqual([])
+        yield* f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" } })
+        expect(yield* exists(path.join(f.home.directory, "one.txt"))).toBe(false)
+        expect(yield* contents(f.home.directory, "two.txt")).toBe("updated remaining\n")
+      }),
+    { git: gitProject },
+  )
+
+for (const gitProject of [true, false])
+  it.instance(
+    `${gitProject ? "Git" : "copy"} owner includeStacked applies dependency changes as well as the child's own delta`,
+    () =>
+      Effect.gen(function* () {
+        const dependency = yield* fixture
+        const started = yield* dependency.start
+        yield* write(started.work.directory, "dependency.txt", "dependency\n")
+        yield* dependency.settle()
+        const f = yield* fixture
+        yield* f.isolation.reserve({
+          taskID: f.child.id,
+          parentSessionID: f.parent.id,
+          title: "Included stack",
+          agent: f.agent,
+          dependsOn: [dependency.child.id],
+        })
+        yield* f.isolation.start(f.child.id)
+        expect(yield* contents(f.workPath, "dependency.txt")).toBe("dependency\n")
+        yield* write(f.workPath, "result.txt", "result\n")
+        yield* f.settle()
+        yield* failure(f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" } }), "stacked")
+        const merged = yield* f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" }, includeStacked: true })
+        expect(merged.merged.sort()).toEqual(["dependency.txt", "result.txt"])
+        expect(yield* contents(f.home.directory, "dependency.txt")).toBe("dependency\n")
+        expect(yield* contents(f.home.directory, "result.txt")).toBe("result\n")
+      }),
+    { git: gitProject },
+  )
+
+it.instance(
+  "a redirected per-worktree core.worktree cannot stage the parent's working files",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      const index = path.join(f.home.directory, ".git", "index")
+      const before = yield* Effect.promise(() => fs.readFile(index))
+      const head = yield* git(f.home.directory, ["rev-parse", "HEAD"])
+      yield* git(f.home.directory, ["config", "extensions.worktreeConfig", "true"])
+      yield* git(f.workPath, ["config", "--worktree", "core.worktree", f.home.directory])
+      yield* write(f.home.directory, "parent-wip.txt", "must not be staged by child\n")
+      expect((yield* f.settle()).state).toBe("failed")
+      expect(yield* Effect.promise(() => fs.readFile(index))).toEqual(before)
+      expect(yield* git(f.home.directory, ["rev-parse", "HEAD"])).toBe(head)
+      expect(yield* contents(f.home.directory, "parent-wip.txt")).toBe("must not be staged by child\n")
+    }),
+  { git: true },
+)
+
+it.instance(
+  "duplicate start or active resume cannot retire the current attempt or rewrite a settled result",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      yield* failure(f.isolation.start(f.child.id), "state")
+      yield* failure(f.isolation.resume({ taskID: f.child.id, attempt: 2, agent: f.agent }), "running")
+      expect((yield* f.isolation.get(f.child.id)).state).toBe("running")
+      expect(TaskPlace.get(f.child.id)?.work.directory).toBe(started.work.directory)
+      yield* write(started.work.directory, "still-running.txt", "kept\n")
+      expect((yield* f.settle()).state).toBe("changed")
+      yield* failure(f.isolation.start(f.child.id), "state")
+      expect((yield* f.isolation.get(f.child.id)).state).toBe("changed")
+      expect(yield* contents(f.workPath, "still-running.txt")).toBe("kept\n")
+    }),
+  { git: true },
+)
+
+for (const gitProject of [true, false])
+  for (const action of ["edit", "delete"])
+    it.instance(
+      `${gitProject ? "Git" : "copy"} includeStacked preserves its partial base through resume and ${action}`,
+      () =>
+        Effect.gen(function* () {
+          const dependency = yield* fixture
+          const dep = yield* dependency.start
+          yield* write(dep.work.directory, "dependency.txt", "dependency\n")
+          yield* dependency.settle()
+          const f = yield* fixture
+          yield* f.isolation.reserve({
+            taskID: f.child.id,
+            parentSessionID: f.parent.id,
+            title: "Partial stack",
+            agent: f.agent,
+            dependsOn: [dependency.child.id],
+          })
+          yield* f.isolation.start(f.child.id)
+          yield* write(f.workPath, "own.txt", "one\n")
+          yield* f.settle()
+          yield* f.isolation.merge({
+            taskID: f.child.id,
+            files: ["own.txt"],
+            by: { kind: "owner" },
+            includeStacked: true,
+          })
+          yield* f.isolation.resume({ taskID: f.child.id, attempt: 2, agent: f.agent })
+          if (action === "edit") yield* write(f.workPath, "own.txt", "two\n")
+          else yield* Effect.promise(() => fs.unlink(path.join(f.workPath, "own.txt")))
+          yield* f.isolation.settle({ taskID: f.child.id, attempt: 2 })
+          const by = {
+            kind: "agent" as const,
+            sessionID: f.parent.id,
+            ask: () => Effect.void,
+            assertWritable: () => Effect.void,
+            assertExternalDirectory: () => Effect.void,
+          }
+          yield* failure(f.isolation.merge({ taskID: f.child.id, by, includeStacked: true }), "forbidden")
+          yield* failure(f.isolation.merge({ taskID: f.child.id, by }), "stacked")
+          yield* f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" }, includeStacked: true })
+          expect(yield* contents(f.home.directory, "dependency.txt")).toBe("dependency\n")
+          if (action === "edit") expect(yield* contents(f.home.directory, "own.txt")).toBe("two\n")
+          else expect(yield* exists(path.join(f.home.directory, "own.txt"))).toBe(false)
+        }),
+      { git: gitProject },
+    )

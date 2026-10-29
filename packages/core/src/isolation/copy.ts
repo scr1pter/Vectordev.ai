@@ -49,7 +49,12 @@ function skipped(root: string, file: string) {
 }
 
 /** Project diffs keep their existing five-MiB per-file limit and omit symlinks and generated directories. */
-export async function listProjectFiles(root: string, current = root, output: string[] = []): Promise<string[]> {
+export async function listProjectFiles(
+  root: string,
+  current = root,
+  output: string[] = [],
+  maxFileBytes = 5 * 1024 * 1024,
+): Promise<string[]> {
   if (!inside(path.resolve(root), path.resolve(current))) throw new Error("The project scan cannot leave its root.")
   const place = await realpath(current).catch((error) => {
     if (missing(error)) return undefined
@@ -62,13 +67,13 @@ export async function listProjectFiles(root: string, current = root, output: str
     if (entry.name === ".DS_Store") continue
     if (entry.isDirectory()) {
       if (EXCLUDED_DIRS.has(entry.name)) continue
-      await listProjectFiles(root, path.join(current, entry.name), output)
+      await listProjectFiles(root, path.join(current, entry.name), output, maxFileBytes)
       continue
     }
     if (!entry.isFile()) continue
     const fullPath = path.join(current, entry.name)
     const info = await stat(fullPath).catch(() => undefined)
-    if (!info || info.size > 5 * 1024 * 1024) continue
+    if (!info || info.size > maxFileBytes) continue
     output.push(path.relative(root, fullPath))
   }
   return output.sort()
@@ -87,8 +92,8 @@ export async function hashFile(file: string) {
   return hash.digest("hex")
 }
 
-export async function hashProject(root: string) {
-  const files = await listProjectFiles(root)
+export async function hashProject(root: string, maxFileBytes = 5 * 1024 * 1024) {
+  const files = await listProjectFiles(root, root, [], maxFileBytes)
   const hashes: Record<string, string> = {}
   for (const file of files) hashes[file] = await hashFile(path.join(root, file)).catch(() => "missing")
   return hashes
@@ -126,6 +131,34 @@ async function writable(root: string, file: string) {
 }
 
 type Link = { source: string; target: string; directory: boolean }
+
+/** Count the same entries as a project copy, including files above the diff/hash limit. */
+export async function measureProject(sourcePath: string) {
+  const root = await realpath(sourcePath)
+  const total = { files: 0, bytes: 0 }
+  const scan = async (directory: string): Promise<void> => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const file = path.join(directory, entry.name)
+      if (skipped(root, file)) continue
+      if (entry.isDirectory()) {
+        await scan(file)
+        continue
+      }
+      const info = await lstat(file)
+      if (info.isSymbolicLink()) {
+        const target = await realpath(file).catch((error) => {
+          if (missing(error) || (error as NodeJS.ErrnoException)?.code === "ELOOP") return undefined
+          throw error
+        })
+        if (!target || !inside(root, target) || skipped(root, target)) continue
+      }
+      total.files++
+      total.bytes += info.size
+    }
+  }
+  await scan(root)
+  return total
+}
 
 /** Copies a project with optional admission limits; safe internal links point into the copied tree. */
 export async function copyProject(sourcePath: string, targetPath: string, limits: Limits = {}) {
