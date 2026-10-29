@@ -2103,24 +2103,28 @@ describe("Vector's own git and the V2 runner under Vector Local", () => {
       // With Vector Local off, the first model that has a route is the automatic choice.
       expect((yield* automatic).providerID).toBe(ProviderV2.ID.make("anthropic"))
 
-      Egress.configure(LocalPolicy.resolve({ global: { enabled: true, endpoints: ["http://127.0.0.1:9"] } }))
-      const refused = yield* refusal(cloud)
-      expect(refused.message).toBe(
-        "anthropic/claude: off in Vector Local. https://api.anthropic.com is a cloud AI service, not a server you host. Your company's policy can list it, or turn Vector Local off to use it.",
+      // Resolver setup can refresh policy asynchronously; keep its persisted source consistent with the fixture.
+      yield* withLocal({ enabled: true, endpoints: ["http://127.0.0.1:9"] }, () =>
+        Effect.gen(function* () {
+          const refused = yield* refusal(cloud)
+          expect(refused.message).toBe(
+            "anthropic/claude: off in Vector Local. https://api.anthropic.com is a cloud AI service, not a server you host. Your company's policy can list it, or turn Vector Local off to use it.",
+          )
+          expect(yield* refusal(free)).toMatchObject({
+            _tag: "SessionRunnerModel.OffInLocalError",
+            reason:
+              "Free models provided by Vector and Vector Codium send your prompts through vectordev.ai to the services that run them, outside the servers you listed. Turn Vector Local off to use them.",
+          })
+          expect(yield* refusal(unlisted)).toMatchObject({
+            _tag: "SessionRunnerModel.OffInLocalError",
+            reason:
+              "Its server is not on your list of model servers. Add the server to the list, or turn Vector Local off to use it.",
+          })
+          // The automatic choice skips every model Vector Local keeps off.
+          expect(yield* automatic).toMatchObject({ providerID: "box", id: "qwen" })
+          expect(guard.outside()).toEqual([])
+        }),
       )
-      expect(yield* refusal(free)).toMatchObject({
-        _tag: "SessionRunnerModel.OffInLocalError",
-        reason:
-          "Free models provided by Vector and Vector Codium send your prompts through vectordev.ai to the services that run them, outside the servers you listed. Turn Vector Local off to use them.",
-      })
-      expect(yield* refusal(unlisted)).toMatchObject({
-        _tag: "SessionRunnerModel.OffInLocalError",
-        reason:
-          "Its server is not on your list of model servers. Add the server to the list, or turn Vector Local off to use it.",
-      })
-      // The automatic choice skips every model Vector Local keeps off.
-      expect(yield* automatic).toMatchObject({ providerID: "box", id: "qwen" })
-      expect(guard.outside()).toEqual([])
     }),
   )
 })
