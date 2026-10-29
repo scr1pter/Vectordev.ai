@@ -797,6 +797,9 @@ export const dict = {
   "terminal.title": "Terminal",
   "terminal.title.numbered": "Terminal {{number}}",
   "terminal.close": "Close terminal",
+  "terminal.agent": "Opened by an agent",
+  "terminal.exited": "exited {{code}}",
+  "terminal.ended": "ended",
   "terminal.connectionLost.title": "Connection Lost",
   "terminal.connectionLost.abnormalClose": "WebSocket closed abnormally: {{code}}",
   "terminal.connectionLost.description":
@@ -1103,6 +1106,18 @@ export const dict = {
   "settings.permissions.tool.external_directory.description": "Access files outside the repository",
   "settings.permissions.tool.doom_loop.title": "Doom Loop",
   "settings.permissions.tool.doom_loop.description": "Detect repeated tool calls with identical input",
+  "settings.permissions.tool.terminal.description":
+    "Read, wait on, resize or close a terminal the agent did not open: yours, or another session's",
+  "settings.permissions.tool.terminal_input.description":
+    "Type text or press keys in a terminal. A line this submits is also checked as the shell command it is",
+  "session.permission.terminal.name": "Terminal",
+  "session.permission.terminal.action.read": "Read its output",
+  "session.permission.terminal.action.wait": "Wait for its output",
+  "session.permission.terminal.action.resize": "Resize it",
+  "session.permission.terminal.action.close": "Close it and end its process",
+  "session.permission.terminal.text": "Text to type",
+  "session.permission.terminal.enter": "Then presses Enter",
+  "session.permission.terminal.keys": "Keys to press",
   "settings.permissions.tool.research_keep.description":
     "Keep this research in the repository's brain, so later requests can recall its report. It was written from web pages, so keep only research you trust",
   "settings.permissions.tool.memory_source.description":

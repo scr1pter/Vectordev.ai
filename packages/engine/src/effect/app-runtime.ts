@@ -60,6 +60,7 @@ import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainEmbed } from "@vectordevai/core/brain/embed"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
+import { ResearchStore } from "@vectordevai/core/research/store"
 
 export const AppLayer = AppNodeBuilderV1.build(
   LayerNode.group([
@@ -98,6 +99,8 @@ export const AppLayer = AppNodeBuilderV1.build(
     Brain.node,
     BrainKnowledge.node,
     BrainEmbed.node,
+    // `vector memory erase` forgets research with the memory it erases.
+    ResearchStore.node,
     Instruction.node,
     LLM.node,
     LSP.node,

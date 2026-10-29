@@ -64,6 +64,7 @@ export async function mockVectorServer(page: Page, config: MockServerConfig) {
     "/session/status",
     "/file",
     "/file/content",
+    "/pty",
   ]
   // A serializable matcher lets Playwright bypass the test worker for Vite's asset graph.
   // URL predicates and catchalls would dispatch hundreds of unnecessary route/fallback RPCs.
@@ -103,6 +104,9 @@ export async function mockVectorServer(page: Page, config: MockServerConfig) {
     const todoMatch = path.match(/^\/session\/([^/]+)\/todo$/)
     if (todoMatch) return json(route, config.todos?.(todoMatch[1]!) ?? [])
     if (/^\/session\/[^/]+\/(children|diff)$/.test(path)) return json(route, [])
+    // The location's terminals, which the server lists as an array: none here. A spec that opens one answers its own
+    // /pty routes, ahead of these.
+    if (path === "/pty" && route.request().method() === "GET") return json(route, [])
 
     const messagesMatch = path.match(/^\/session\/([^/]+)\/message$/)
     if (messagesMatch) {

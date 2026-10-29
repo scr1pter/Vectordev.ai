@@ -8,8 +8,10 @@ import { sql } from "drizzle-orm"
 import { getTableConfig, SQLiteColumn, type SQLiteTable } from "drizzle-orm/sqlite-core"
 import { Effect, Layer } from "effect"
 import type { Research } from "@vectordevai/schema/research"
+import type { Brain } from "../../src/brain/brain"
 import { BrainDatabase } from "../../src/brain/database"
 import { BrainEmbed } from "../../src/brain/embed"
+import { BrainErase } from "../../src/brain/erase"
 import { BrainKnowledge } from "../../src/brain/knowledge"
 import first from "../../src/brain/migration/20261018000000_brain"
 import knowledgeMigration from "../../src/brain/migration/20261101000000_knowledge"
@@ -894,6 +896,123 @@ describe("ResearchStore guests", () => {
     expect(result.swept).toBe(1)
     expect(result.old).toBeUndefined()
     expect(result.after).toBeUndefined()
+  })
+})
+
+// Erasing memory takes the research of what it erases (BrainErase), as Settings > Memory, the learned chip and
+// `vector memory erase` ask for it.
+describe("ResearchStore and erasing memory", () => {
+  // What Vector learned in a repository, from one session.
+  const learned = (setup: Setup, sessionID: string) =>
+    setup.brain.propose(setup.place, {
+      kind: "preference",
+      text: "Run the payments tests with bun before committing",
+      scope: "repository",
+      origin: "agent",
+      evidence: { type: "message", quote: "I always run the payments tests with bun before committing", verified: true },
+      sessionID,
+      pending: "review",
+    })
+  const elsewhere = (setup: Setup): Brain.Place => ({ ...setup.place, repository: "repo-2" })
+
+  test("forgetting a session's runs takes the ones it started, kept or in memory, and leaves every other", async () => {
+    const result = await withStore((setup) =>
+      Effect.gen(function* () {
+        const mine = (yield* reported(setup, { sessionID: "ses_erase" })).run
+        const kept = yield* setup.store.keep(setup.place, mine.id)
+        const guest = yield* setup.store.start(setup.place, { ...RUN, sessionID: "ses_erase", guest: true })
+        const other = (yield* reported(setup, { sessionID: "ses_other" })).run
+        const away = yield* setup.store.start(elsewhere(setup), { ...RUN, sessionID: "ses_erase" })
+        const forgot = yield* setup.store.forgetAll(setup.place, { session: "ses_erase" })
+        // As Forget does, it leaves tombstones: a later run does not keep the page again on its own.
+        const later = yield* setup.store.start(setup.place, { ...RUN, sessionID: "ses_later" })
+        const again = yield* setup.store.addSource(setup.place, later.id, page("homes", STUDY))
+        return {
+          kept,
+          forgot,
+          again,
+          mine: yield* setup.store.get(setup.place, mine.id),
+          guest: yield* setup.store.get(setup.place, guest.id),
+          other: yield* setup.store.get(setup.place, other.id),
+          away: yield* setup.store.get(elsewhere(setup), away.id),
+        }
+      }),
+    )
+    expect(result.kept).toMatchObject({ type: "kept" })
+    expect(result.forgot).toBe(2)
+    expect(result.mine).toBeUndefined()
+    expect(result.guest).toBeUndefined()
+    expect(result.other).toMatchObject({ run: { session_id: "ses_other" }, sources: [{ id: "S1" }] })
+    // A session belongs to one repository: only the repository it is erased in is searched.
+    expect(result.away).toMatchObject({ run: { session_id: "ses_erase" } })
+    expect(result.again).toMatchObject({ type: "added", source: { status: "failed", reason: ResearchStore.FORGOTTEN } })
+  })
+
+  test("erasing a repository's memory, or all of it, forgets its research; erasing what Vector learned about you keeps it", async () => {
+    const result = await withStore((setup) =>
+      Effect.gen(function* () {
+        const stores = { brain: setup.brain, research: setup.store, place: setup.place }
+        const ids = (place: Brain.Place) =>
+          setup.store.list(place).pipe(Effect.map((runs) => runs.map((item) => item.run.id)))
+        const run = (yield* reported(setup)).run
+        const away = yield* setup.store.start(elsewhere(setup), RUN)
+        const personal = yield* BrainErase.erase({ ...stores, scope: "personal" })
+        const afterPersonal = yield* ids(setup.place)
+        yield* learned(setup, "ses_root")
+        const repository = yield* BrainErase.erase({ ...stores, scope: "repository" })
+        const afterRepository = { here: yield* ids(setup.place), away: yield* ids(elsewhere(setup)) }
+        // The brain's erase clears the tombstones Forget left, so the same page can be read again.
+        const fresh = (yield* reported(setup, { sessionID: "ses_fresh" })).added
+        const all = yield* BrainErase.erase({ ...stores, scope: "all" })
+        return {
+          run: run.id,
+          away: away.id,
+          personal,
+          afterPersonal,
+          repository,
+          afterRepository,
+          fresh,
+          all,
+          afterAll: { here: yield* ids(setup.place), away: yield* ids(elsewhere(setup)) },
+          stored: yield* counts(setup),
+        }
+      }),
+    )
+    expect(result.personal).toEqual({ entries: 0, runs: 0 })
+    expect(result.afterPersonal).toEqual([result.run])
+    expect(result.repository).toEqual({ entries: 1, runs: 1 })
+    expect(result.afterRepository).toEqual({ here: [], away: [result.away] })
+    expect(result.fresh).toMatchObject({ type: "added", source: { status: "read" } })
+    expect(result.all).toEqual({ entries: 0, runs: 2 })
+    expect(result.afterAll).toEqual({ here: [], away: [] })
+    expect(result.stored).toMatchObject({ runs: 0, sources: 0, notes: 0, documents: 0, passages: 0, postings: 0 })
+  })
+
+  test("erasing what Vector learned in a session forgets the runs that session started", async () => {
+    const result = await withStore((setup) =>
+      Effect.gen(function* () {
+        const stores = { brain: setup.brain, research: setup.store, place: setup.place }
+        const mine = (yield* reported(setup, { sessionID: "ses_erase" })).run
+        const other = (yield* reported(setup, { sessionID: "ses_other" })).run
+        const taught = yield* learned(setup, "ses_erase")
+        const erased = yield* BrainErase.session({ ...stores, sessionID: "ses_erase" })
+        const none = yield* BrainErase.session({ ...stores, sessionID: "ses_none" })
+        return {
+          taught,
+          erased,
+          none,
+          mine: yield* setup.store.get(setup.place, mine.id),
+          other: yield* setup.store.get(setup.place, other.id),
+          entries: yield* setup.brain.list(setup.place, { filter: "all", scope: "repository" }),
+        }
+      }),
+    )
+    expect(result.taught).toMatchObject({ type: "added" })
+    expect(result.erased).toEqual({ entries: 1, runs: 1 })
+    expect(result.none).toEqual({ entries: 0, runs: 0 })
+    expect(result.mine).toBeUndefined()
+    expect(result.other).toMatchObject({ run: { session_id: "ses_other" } })
+    expect(result.entries).toEqual([])
   })
 })
 

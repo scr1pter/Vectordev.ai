@@ -662,7 +662,7 @@ export const MemoryApi = HttpApi.make("memory")
             identifier: "memory.erase",
             summary: "Erase learned memory",
             description:
-              "Erase what Vector learned for this repository, for the user, or everywhere. Files people wrote are left alone.",
+              "Erase what Vector learned for this repository, for the user, or everywhere. The repository's Deep research runs go with its memory, and every run with everything; erasing what Vector learned about the user keeps them. Files people wrote are left alone.",
           }),
         ),
         HttpApiEndpoint.delete("eraseSession", `${root}/sessions/:sessionID`, {
@@ -674,7 +674,7 @@ export const MemoryApi = HttpApi.make("memory")
             identifier: "memory.eraseSession",
             summary: "Erase what Vector learned in a session",
             description:
-              "Forget every entry Vector learned whose only evidence is this session, so it is not learned again. What you wrote and what other sessions also taught stay. The session keeps its messages until you delete them.",
+              "Forget every entry Vector learned whose only evidence is this session, so it is not learned again. The Deep research runs the session started are forgotten too. What you wrote and what other sessions also taught stay. The session keeps its messages until you delete them.",
           }),
         ),
         HttpApiEndpoint.get("export", `${root}/export`, {

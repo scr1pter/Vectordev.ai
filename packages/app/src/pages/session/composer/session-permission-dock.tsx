@@ -6,6 +6,7 @@ import { Icon } from "@vectordevai/ui/icon"
 import { useLanguage } from "@/context/language"
 import { cloudPermissionScope, permissionStatements } from "./cloud-permission-scope"
 import { canAlwaysAllowPermission } from "@/context/permission-policy"
+import { terminalPermissionScope } from "./terminal-permission-scope"
 
 export function SessionPermissionDock(props: {
   request: PermissionRequest
@@ -22,6 +23,7 @@ export function SessionPermissionDock(props: {
   }
   const cloudScope = () => cloudPermissionScope(props.request)
   const statements = () => permissionStatements(props.request)
+  const terminalScope = () => terminalPermissionScope(props.request)
 
   return (
     <DockPrompt
@@ -85,6 +87,59 @@ export function SessionPermissionDock(props: {
                       </code>
                     )}
                   </For>
+                </div>
+              </div>
+            </Show>
+          </>
+        )}
+      </Show>
+
+      <Show when={terminalScope()}>
+        {(scope) => (
+          <>
+            <Show when={scope().terminal || scope().action}>
+              <div data-slot="permission-row">
+                <span data-slot="permission-spacer" aria-hidden="true" />
+                <div data-slot="permission-patterns">
+                  <Show when={scope().terminal}>
+                    {(terminal) => (
+                      <code class="text-12-regular text-text-base break-all">
+                        {language.t("session.permission.terminal.name")}: {terminal()}
+                      </code>
+                    )}
+                  </Show>
+                  <Show when={scope().action}>
+                    {(action) => (
+                      <div data-slot="permission-hint">
+                        {language.t(`session.permission.terminal.action.${action()}`)}
+                      </div>
+                    )}
+                  </Show>
+                </div>
+              </div>
+            </Show>
+            <Show when={scope().text !== undefined}>
+              <div data-slot="permission-row">
+                <span data-slot="permission-spacer" aria-hidden="true" />
+                <div data-slot="permission-statement">
+                  <div class="text-12-medium text-text-base">{language.t("session.permission.terminal.text")}</div>
+                  <pre class="text-12-regular text-text-base max-h-48 overflow-auto whitespace-pre-wrap break-words">
+                    {scope().text}
+                  </pre>
+                  <Show when={scope().enter}>
+                    <div data-slot="permission-hint">{language.t("session.permission.terminal.enter")}</div>
+                  </Show>
+                </div>
+              </div>
+            </Show>
+            <Show when={scope().keys.length > 0}>
+              <div data-slot="permission-row">
+                <span data-slot="permission-spacer" aria-hidden="true" />
+                <div data-slot="permission-statement">
+                  <div class="text-12-medium text-text-base">{language.t("session.permission.terminal.keys")}</div>
+                  <pre class="text-12-regular text-text-base whitespace-pre-wrap break-words">
+                    {scope().keys.join(" ")}
+                  </pre>
                 </div>
               </div>
             </Show>

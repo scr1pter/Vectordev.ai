@@ -300,6 +300,7 @@
       },
       "devDependencies": {
         "@actions/artifact": "4.0.0",
+        "@happy-dom/global-registrator": "20.0.11",
         "@sentry/solid": "catalog:",
         "@sentry/vite-plugin": "catalog:",
         "@solid-primitives/i18n": "2.2.1",
