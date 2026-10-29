@@ -1,0 +1,524 @@
+{
+  "created_at_utc": "2026-10-29T04:46:01.852318+00:00",
+  "created_at_client": "2026-10-28T21:46:01.852318-07:00",
+  "purpose": "Paused, unaccepted work-in-progress snapshots; not compiled product code or a release.",
+  "snapshots": [
+    {
+      "name": "multiagent-wp28",
+      "source_worktree": "/workspace/vector-evolve-next",
+      "source_branch": "multiagent-next",
+      "base_commit": "59242ac0cf1e95398c8888a8b2d86c0202b15661",
+      "snapshot_tree": "4203f0de186f538bbe55c94050731f998a053def",
+      "patch": "multiagent-wp28.patch",
+      "patch_bytes": 345976,
+      "patch_sha256": "2d659889b6e47573e594353a2cd280eeee40d544860f57ca3a4079f35dc6482e",
+      "file_count": 59,
+      "verification": "Applied to a separate temporary index seeded at base_commit; full tree matches. Original worktree status and real index unchanged.",
+      "files": [
+        {
+          "path": "docs/vector/build/multiagent-parity-spec.md",
+          "exists": true,
+          "bytes": 267598,
+          "sha256": "c94f606841c00bdd1559b01090550b01e70b5345d7c92054ade061d70d293e58"
+        },
+        {
+          "path": "packages/core/schema.json",
+          "exists": true,
+          "bytes": 63453,
+          "sha256": "d935510ab614eb2ab226c7a15c8b705c35820d59789eb8fb78cc4a161425b033"
+        },
+        {
+          "path": "packages/core/src/background-job.ts",
+          "exists": true,
+          "bytes": 25033,
+          "sha256": "96999a1187a3bd29b4887b683860ca258ae85cd26adf1dd5b0f36fd4ad8846cd"
+        },
+        {
+          "path": "packages/core/src/database/migration.gen.ts",
+          "exists": true,
+          "bytes": 3129,
+          "sha256": "c36a7acf07c7fec551731681cb1f6e4c9c8ee921774e40ca09cda3465fa7b918"
+        },
+        {
+          "path": "packages/core/src/database/migration/20261029032955_session_audience.ts",
+          "exists": true,
+          "bytes": 1524,
+          "sha256": "aca19bff34ec16d0171baeabe1636bce7aa270c9f19dab3e1b955a857e08c67b"
+        },
+        {
+          "path": "packages/core/src/database/schema.gen.ts",
+          "exists": true,
+          "bytes": 15203,
+          "sha256": "bba5959fc5861824ecd0a450b47786f70bfe4b293378e3fec67a80416b0250b6"
+        },
+        {
+          "path": "packages/core/src/event.ts",
+          "exists": true,
+          "bytes": 29951,
+          "sha256": "2e6bc83fa4e0d039cd98210f1d50fd8dfa8e282b03b87af5c54f924b4c2aff89"
+        },
+        {
+          "path": "packages/core/src/free-model-guests.ts",
+          "exists": true,
+          "bytes": 5195,
+          "sha256": "885580b92ee9271ace7de6ce7fa8c6f466947347c167c82ad2deccc0de1e60fc"
+        },
+        {
+          "path": "packages/core/src/public-session-share.ts",
+          "exists": true,
+          "bytes": 20937,
+          "sha256": "9ddec5bd0e612a1663670f1f9d5662e954b82f82fa7510c5acbdd989b5107d2f"
+        },
+        {
+          "path": "packages/core/src/session.ts",
+          "exists": true,
+          "bytes": 24212,
+          "sha256": "d130b6edf4407608128381a8f6af18d9bd331467ae2e5125f3dc4bef2167bec5"
+        },
+        {
+          "path": "packages/core/src/session/audience.sql.ts",
+          "exists": true,
+          "bytes": 975,
+          "sha256": "cbc149d49672970fe5a17d79255ee095eb69d63f4a695ffa659a82e395ceddef"
+        },
+        {
+          "path": "packages/core/src/session/audience.ts",
+          "exists": true,
+          "bytes": 11007,
+          "sha256": "0e244bbe0018a14966597593bc37d3e95900d14862961833795031ebf047ef07"
+        },
+        {
+          "path": "packages/core/src/share/archive.ts",
+          "exists": true,
+          "bytes": 27793,
+          "sha256": "0aaca68710aa4b24ea7fbc0133a51b2131985a22114a51475e562abef52a16c0"
+        },
+        {
+          "path": "packages/core/test/background-job.test.ts",
+          "exists": true,
+          "bytes": 29524,
+          "sha256": "377b23c0119a3d3a96df6b6ac31c93569911e3f64eac908331dada95b38322f3"
+        },
+        {
+          "path": "packages/core/test/free-model-guests.test.ts",
+          "exists": true,
+          "bytes": 4639,
+          "sha256": "fd7fcb1530285119ccbdb76201d99b4f705f1ea4315c7f6dd32eafe1b84c4e4a"
+        },
+        {
+          "path": "packages/core/test/public-session-share.test.ts",
+          "exists": true,
+          "bytes": 44044,
+          "sha256": "dcfc2c61caf71e257c065a1d395dab2e19a482b327be4e46b830b9e2ac351495"
+        },
+        {
+          "path": "packages/core/test/session/audience.test.ts",
+          "exists": true,
+          "bytes": 18890,
+          "sha256": "a75a8e0519dd9ac2a70fd45f1a659864fc7f989ae0cb6a6dc816a759d501cbd1"
+        },
+        {
+          "path": "packages/engine/src/control-plane/workspace.ts",
+          "exists": true,
+          "bytes": 36642,
+          "sha256": "8e26e28adf549cf8ad388e8ff0cd0048123620c7c9c13035fea5cb8229f11785"
+        },
+        {
+          "path": "packages/engine/src/server/routes/instance/httpapi/handlers/event.ts",
+          "exists": true,
+          "bytes": 7776,
+          "sha256": "c5f626b54d900cdcfd19a9b952424e3f7f584b0d88fc1bb467697b0f8a9f0b8a"
+        },
+        {
+          "path": "packages/engine/src/server/routes/instance/httpapi/handlers/file.ts",
+          "exists": true,
+          "bytes": 9593,
+          "sha256": "82401d7c5a9a2c3b18c2b56c79aed0d0ed2d8aa1ffe9512717a6487765ffde55"
+        },
+        {
+          "path": "packages/engine/src/server/routes/instance/httpapi/handlers/global.ts",
+          "exists": true,
+          "bytes": 8697,
+          "sha256": "dc13c945b357f5ed5a77823f305977627b10e90b07c2a6840f2200142edc8826"
+        },
+        {
+          "path": "packages/engine/src/server/routes/instance/httpapi/handlers/question.ts",
+          "exists": true,
+          "bytes": 4067,
+          "sha256": "7923a2f35e79cb247b477b73c2036d458a8b7ec948527f4ba557e38bad40fc3b"
+        },
+        {
+          "path": "packages/engine/src/server/routes/instance/httpapi/handlers/session-access.ts",
+          "exists": true,
+          "bytes": 1559,
+          "sha256": "8cda97348e14b1d918b5626b318b10e7df9dfc83e7d98187797e8037029c597e"
+        },
+        {
+          "path": "packages/engine/src/server/routes/instance/httpapi/handlers/session-errors.ts",
+          "exists": true,
+          "bytes": 2110,
+          "sha256": "e9001a4a9538acbf9f45d2c08b5a21c09a035738ab800d3e9f4af7af5ed1ed6b"
+        },
+        {
+          "path": "packages/engine/src/server/routes/instance/httpapi/handlers/session.ts",
+          "exists": true,
+          "bytes": 26759,
+          "sha256": "df5207539f27512847973860c98d53dbfb5abe2dedbbf26e21994396f1ad9cdc"
+        },
+        {
+          "path": "packages/engine/src/server/routes/instance/httpapi/handlers/sync.ts",
+          "exists": true,
+          "bytes": 7459,
+          "sha256": "4ee3b071514033ede5785597a4114d02ed7b63b501a2fd7ee484e8ceb84d2f2d"
+        },
+        {
+          "path": "packages/engine/src/server/routes/instance/httpapi/middleware/authorization.ts",
+          "exists": true,
+          "bytes": 10221,
+          "sha256": "5d8a3ce78d065021ad0d707b594530d28eb3957d314c95f76024bbb9eebc3d4e"
+        },
+        {
+          "path": "packages/engine/src/server/routes/instance/httpapi/middleware/workspace-routing.ts",
+          "exists": true,
+          "bytes": 20810,
+          "sha256": "e464449de81a9338b888368085b4e11490199cf279264e602e367ca1cbd375d9"
+        },
+        {
+          "path": "packages/engine/src/server/routes/instance/httpapi/server.ts",
+          "exists": true,
+          "bytes": 14658,
+          "sha256": "e9ab05d88d4ae9cca45cb32ef27774a3f779490e3b08f9586935d5f38349e8cd"
+        },
+        {
+          "path": "packages/engine/src/session/prompt.ts",
+          "exists": true,
+          "bytes": 233001,
+          "sha256": "eba6baa013e72846520ef1bff5189a59f8686105d2928b5e2f8e81e81e9b6413"
+        },
+        {
+          "path": "packages/engine/src/session/revert.ts",
+          "exists": true,
+          "bytes": 10205,
+          "sha256": "6fd88dba475cba38d16eefbea214e9e0e2061718acb75991063c7795ecdc7768"
+        },
+        {
+          "path": "packages/engine/src/session/session.ts",
+          "exists": true,
+          "bytes": 62947,
+          "sha256": "e024db9e83cbcdcc70a442bd9df8fa7fd2bc11c62077a0fa18bd2c781cbce2da"
+        },
+        {
+          "path": "packages/engine/src/session/tools.ts",
+          "exists": true,
+          "bytes": 35249,
+          "sha256": "57f013dad822748fc65d5fd46ab9710ba3ea584c9ca849272ed7026cc333c59d"
+        },
+        {
+          "path": "packages/engine/src/share/session.ts",
+          "exists": true,
+          "bytes": 3030,
+          "sha256": "2e415123fabe4de9b656ecef3b6ffde9ad4b2b2748f0677eec7ddaaa718c3cd3"
+        },
+        {
+          "path": "packages/engine/src/task/isolation.ts",
+          "exists": true,
+          "bytes": 107569,
+          "sha256": "e0295cf3f36ab90aa7d813dd9f1c8082991aa5bb9fe4303772a9df4adf83d85b"
+        },
+        {
+          "path": "packages/engine/src/task/manager.ts",
+          "exists": true,
+          "bytes": 84518,
+          "sha256": "3b35e3da27b8af546adb433943e044ecfa925219d4315aa14fc3529079df876a"
+        },
+        {
+          "path": "packages/engine/src/task/notify.ts",
+          "exists": true,
+          "bytes": 30559,
+          "sha256": "c3ef1663b98e89795ea7736809d3cf20f46b69f512171f9bb7fa1da35389c673"
+        },
+        {
+          "path": "packages/engine/src/task/recovery.ts",
+          "exists": true,
+          "bytes": 17720,
+          "sha256": "6492c81a9022a371e5f62b5e35408499738d02a96284619cda21e69611403f73"
+        },
+        {
+          "path": "packages/engine/src/tool/private-access.ts",
+          "exists": true,
+          "bytes": 7849,
+          "sha256": "898313890d04f324b40f7a11ac59774d3ec28b2012d94339cfc1abd5c80c6b16"
+        },
+        {
+          "path": "packages/engine/src/tool/read.ts",
+          "exists": true,
+          "bytes": 18150,
+          "sha256": "c3d7df5c73b65f61e694338cb3cdcdbea2d38b306d461d36a481da9a8361d06e"
+        },
+        {
+          "path": "packages/engine/src/tool/task-manage.ts",
+          "exists": true,
+          "bytes": 8724,
+          "sha256": "dba3360d07f1af8347a646da5cafa24422ea2a1d629aa37403523a8699e7c983"
+        },
+        {
+          "path": "packages/engine/src/tool/task.ts",
+          "exists": true,
+          "bytes": 110285,
+          "sha256": "6d26d73e958af76007a66a9df4417f33031a4531ff1829f2fc2230c595b9eb5f"
+        },
+        {
+          "path": "packages/engine/src/tool/tool.ts",
+          "exists": true,
+          "bytes": 7649,
+          "sha256": "7a764449638aa49ac0d80f8476550e12249d429c72d34867560f00eb837f2c9f"
+        },
+        {
+          "path": "packages/engine/test/control-plane/workspace.test.ts",
+          "exists": true,
+          "bytes": 73694,
+          "sha256": "1d36a78191e2b2fe650498a32e3597610ebf59da3e69bb29436ed251ae72ee84"
+        },
+        {
+          "path": "packages/engine/test/server/session-audience.test.ts",
+          "exists": true,
+          "bytes": 21842,
+          "sha256": "e25014e558eb67da18bb3dad3031f7fd7aa731ca86e4902f89bf2e22ddc0cb91"
+        },
+        {
+          "path": "packages/engine/test/session/audience-lineage.test.ts",
+          "exists": true,
+          "bytes": 4491,
+          "sha256": "1b6115a4e93e3fc83db04eb48566f347b437ee95c0768b2966b70e7c69de9d31"
+        },
+        {
+          "path": "packages/engine/test/tool/private-access.test.ts",
+          "exists": true,
+          "bytes": 9607,
+          "sha256": "d055a10d0d80b2738c126dac480fb5e410299593c58729ea0d497c2d71ca1bd3"
+        },
+        {
+          "path": "packages/schema/src/task.ts",
+          "exists": true,
+          "bytes": 12792,
+          "sha256": "e80d399e9fceb8a7be2d5d6db0c3bd43c689a31c9892a77b42c72ea10c5d7caf"
+        },
+        {
+          "path": "packages/server/src/fs-access.ts",
+          "exists": true,
+          "bytes": 2921,
+          "sha256": "a3fddb9e9129bddf24b15940aa97ba42506d2ba04f8867cca03099c6ee9b806c"
+        },
+        {
+          "path": "packages/server/src/handlers/event.ts",
+          "exists": true,
+          "bytes": 3174,
+          "sha256": "b1e88d0057b96f70952147c57ab56f0b2c21d433284f8fa017464b96549fcb45"
+        },
+        {
+          "path": "packages/server/src/handlers/fs.ts",
+          "exists": true,
+          "bytes": 2618,
+          "sha256": "69fd0b467042775c8d058ee7060a79e4348f6003b6bfe348d66c7c8e1c4f4fa6"
+        },
+        {
+          "path": "packages/server/src/handlers/session.ts",
+          "exists": true,
+          "bytes": 26792,
+          "sha256": "81b275822aa029be23e34a72f0949fca7398ab8778bf2e8f3930548e61bf3b2d"
+        },
+        {
+          "path": "packages/server/src/location.ts",
+          "exists": true,
+          "bytes": 5827,
+          "sha256": "5a2ab28e32ab67d380fbbb18e1450d2fb18d26271c37ddac1c3ea23b93700ae7"
+        },
+        {
+          "path": "packages/server/src/middleware/authorization.test.ts",
+          "exists": true,
+          "bytes": 5143,
+          "sha256": "29de8a9ee4ac3b895a9d64662fe0fa7214da1b9b58674c9c4fb3011b04fc896a"
+        },
+        {
+          "path": "packages/server/src/middleware/authorization.ts",
+          "exists": true,
+          "bytes": 4477,
+          "sha256": "df3fad499b24d5c6f138a017c9989801b36dc4eaf8cd844481b184a2cc372aa3"
+        },
+        {
+          "path": "packages/server/src/middleware/session-location.ts",
+          "exists": true,
+          "bytes": 4708,
+          "sha256": "2595584f8bc52c6432ff0800dd0610dfaa7754dcf6109d0f84c641b3c855ab76"
+        },
+        {
+          "path": "packages/server/src/request-owner.ts",
+          "exists": true,
+          "bytes": 2944,
+          "sha256": "4a8f7282b9e74dcb955f8a890b5916d7f41e92ed5a59309aa0afe29d12363eb9"
+        },
+        {
+          "path": "packages/server/src/routes.ts",
+          "exists": true,
+          "bytes": 3514,
+          "sha256": "218f12926def43ac27c98f2e5efdc43f7ef5b221d359ac33d6cc4d6516f3db17"
+        },
+        {
+          "path": "packages/server/src/session-audience.ts",
+          "exists": true,
+          "bytes": 14611,
+          "sha256": "fb553dd052bbf03206e82935575335f81c6368d2ced93c5ab324aa5506c25c9a"
+        }
+      ]
+    },
+    {
+      "name": "codium-a17",
+      "source_worktree": "/workspace/vector-codium-next",
+      "source_branch": "codium-next",
+      "base_commit": "14bc7d4283b176dd962dbdf1d0c44b3101aa3607",
+      "snapshot_tree": "a3e417196baad1469860734586b535c87cbda117",
+      "patch": "codium-a17.patch",
+      "patch_bytes": 157767,
+      "patch_sha256": "fece4d5429300dab6787f3d2a5bf1a2d9e71f12f86d6465f23ec6766c6fa767e",
+      "file_count": 18,
+      "verification": "Applied to a separate temporary index seeded at base_commit; full tree matches. Original worktree status and real index unchanged.",
+      "files": [
+        {
+          "path": "api/_lib/codium-pool.ts",
+          "exists": true,
+          "bytes": 25131,
+          "sha256": "3c0dbe1dc9fb57e76abcc3ac60bfba72dc88de163be1f46a204bbdee36096954"
+        },
+        {
+          "path": "api/_lib/codium-reservations.ts",
+          "exists": true,
+          "bytes": 3054,
+          "sha256": "9ba78a0c1fb6a457f7a071d3b90d3daaf3816b2ca16b81877c7d01966d4a5df7"
+        },
+        {
+          "path": "api/_lib/codium-spend-ledger.ts",
+          "exists": true,
+          "bytes": 13839,
+          "sha256": "f3b19f416fb3eff9d130420f6c522ec180d8a50c7f1f5ec6a87c51291fda725c"
+        },
+        {
+          "path": "api/_lib/model-plan-account.ts",
+          "exists": true,
+          "bytes": 160822,
+          "sha256": "f49498404556ab22c74467aa1293fcfed4963995f01f0000e75c08121dd2a5a3"
+        },
+        {
+          "path": "api/_lib/model-plan-admit.ts",
+          "exists": true,
+          "bytes": 20586,
+          "sha256": "b1896e7d703b728d00ad253231b609ea08a7623f370aa6469f805719c37e4c74"
+        },
+        {
+          "path": "api/_lib/model-plan-catalog-policy.ts",
+          "exists": true,
+          "bytes": 3057,
+          "sha256": "f315979730188082db04bbb09650d73189954f72471d35ea0b74e643e6375756"
+        },
+        {
+          "path": "api/_lib/model-plan-chat.ts",
+          "exists": true,
+          "bytes": 29124,
+          "sha256": "cd899198d023320417d83ab0d3ba8ff1b6add7cd3b60ea56b15992192851e8ee"
+        },
+        {
+          "path": "api/_lib/model-plan-config.ts",
+          "exists": true,
+          "bytes": 19887,
+          "sha256": "76d76b389ff63fc944150436f00553bc499543927d36e9b6096bfc64b26d25e8"
+        },
+        {
+          "path": "api/_lib/model-plan-gateway-hooks.ts",
+          "exists": true,
+          "bytes": 3155,
+          "sha256": "0f31977746aea91743b779c7c313181f2ed18a41d71767fdd8685aefd14f3950"
+        },
+        {
+          "path": "api/_lib/model-plan-status.ts",
+          "exists": true,
+          "bytes": 3647,
+          "sha256": "de7137ec3ee18e4bff594423fdca162cad4d59ad078de1449999071fa9a19c0d"
+        },
+        {
+          "path": "docs/vector/build/codium-a17-context-decision.md",
+          "exists": true,
+          "bytes": 6144,
+          "sha256": "698cbac3402d9ad3aa44c22c365079bd0775dca09c34c8689b77baba278d4580"
+        },
+        {
+          "path": "packages/web/test/model-plan-admit.test.ts",
+          "exists": true,
+          "bytes": 34213,
+          "sha256": "41c47b759580a154a95dcc4c0cc43f31f91458e7cd5be04627c0506cd9bd7de9"
+        },
+        {
+          "path": "packages/web/test/model-plan-catalog-policy.test.ts",
+          "exists": true,
+          "bytes": 1902,
+          "sha256": "43ecd5d09c8544a159e9279f7a850a67d9f7937d3e1e8d634024fb3f5d1abe96"
+        },
+        {
+          "path": "packages/web/test/model-plan-entitlements.test.ts",
+          "exists": true,
+          "bytes": 14238,
+          "sha256": "55433b0321c8a4fca0ee892425fcabd1c0ac08d6673536abc229021231fc5628"
+        },
+        {
+          "path": "packages/web/test/model-plan-gateway-hooks.test.ts",
+          "exists": true,
+          "bytes": 4727,
+          "sha256": "99c4406ea8af17874bee754975d2a7eb6b2582f5458c0606ff2f2c965a5f6dd2"
+        },
+        {
+          "path": "packages/web/test/model-plan-reservations.test.ts",
+          "exists": true,
+          "bytes": 4124,
+          "sha256": "747574884fe8df574d20d041262095123b64963812c0115f655760116c744f54"
+        },
+        {
+          "path": "packages/web/test/model-plans-api.test.ts",
+          "exists": true,
+          "bytes": 70561,
+          "sha256": "70cc355f893193e941464c1e6691620064f7a965f6ae74f8a1ea385fb8bfd782"
+        },
+        {
+          "path": "packages/web/test/model-plans.test.ts",
+          "exists": true,
+          "bytes": 20618,
+          "sha256": "e004326afcc271d103df857a3098d6cdeacb3976260cddd4e6964f07782b0f02"
+        }
+      ]
+    }
+  ],
+  "logs": [
+    {
+      "file": "logs/vector-wp28-audience-next.txt",
+      "bytes": 1529,
+      "sha256": "a729b9fc68b54d3c424480f266b62b2c25ff6e63818f05323f6deac86e8075ca"
+    },
+    {
+      "file": "logs/vector-wp28-sharing-roundtrip.txt",
+      "bytes": 358,
+      "sha256": "cdc06d987f2f14b749832cd3e43b88754372f6dd0e06310e4886eec55c2263ff"
+    },
+    {
+      "file": "logs/vector-wp27-push.txt",
+      "bytes": 64304,
+      "sha256": "0b755c1472ffabe4b7d3b9c29736662ed2d794c1b861b33973970753a9fd26a8"
+    },
+    {
+      "file": "logs/codium-a16-push.txt",
+      "bytes": 77738,
+      "sha256": "33f1ac06532c3fd302825664a8984cd3a4c2d0abaa21175dc95b85464b22291e"
+    },
+    {
+      "file": "logs/codium-sql-ci-push.txt",
+      "bytes": 77809,
+      "sha256": "bdcd7829bab1affbe29d4f40708ac23e104b159a4ec15db7c18cd5c301b13efc"
+    }
+  ]
+}

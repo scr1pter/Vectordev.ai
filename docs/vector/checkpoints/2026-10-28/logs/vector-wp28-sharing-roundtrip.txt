@@ -1,0 +1,11 @@
+bun test v1.3.14 (0d9b296a)
+
+test/public-session-share.test.ts:
+(pass) v1 local exports preserve private history through known and unknown-source imports [351.67ms]
+(pass) v2 local exports preserve private history through known and unknown-source imports [171.65ms]
+
+ 2 pass
+ 22 filtered out
+ 0 fail
+ 18 expect() calls
+Ran 2 tests across 1 file. [1475.00ms]

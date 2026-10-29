@@ -1,0 +1,22 @@
+bun test v1.3.14 (0d9b296a)
+
+test/session/audience.test.ts:
+(pass) a private descendant fences its connected ancestors, siblings and future children [112.55ms]
+(pass) preflight does not privatize, verified guests cannot isolate, and later guest input is refused [29.07ms]
+(pass) guest input anywhere permanently prevents isolation throughout the family [26.85ms]
+(pass) legacy live lineage is captured before an intermediate session is deleted [43.95ms]
+(pass) joining a guest-bearing family to a private family is refused atomically [21.67ms]
+(pass) a racing guest admission and owner fence cannot both succeed [17.44ms]
+(pass) private directory identity survives deletion and denies canonical aliases and subpaths [53.40ms]
+(pass) lineage, owner-only fences and directory guards survive a database restart and deleted history [44.66ms]
+(pass) versioned replay pre-scans later isolation hints before the first Created notification [73.57ms]
+(pass) live undefined isolation stays public while serialized null and false hints only restrict [50.80ms]
+(pass) malformed owner replay identities are rejected before any batch projector or listener [39.53ms]
+(pass) new guest creation atomically links and admits before publication, without entering a private parent [21.77ms]
+(pass) public work is refused after the durable fence before its callback runs [17.71ms]
+(pass) historical guest marks use the actual session ID decoder and become durable [28.29ms]
+
+ 14 pass
+ 0 fail
+ 92 expect() calls
+Ran 14 tests across 1 file. [1319.00ms]

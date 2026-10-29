@@ -1,0 +1,3111 @@
+diff --git a/api/_lib/codium-pool.ts b/api/_lib/codium-pool.ts
+index 0c6527b37e970da7f524ae13ad76e286c5f8c97f..8d82671ac689432c3095b68d274e41250e3760c7 100644
+--- a/api/_lib/codium-pool.ts
++++ b/api/_lib/codium-pool.ts
+@@ -3,6 +3,7 @@ import { Option, Schema } from "effect"
+ import { codiumKey } from "./codium-keys.js"
+ import { ApiError } from "./http.js"
+ import { persistentStore } from "./persistent-store.js"
++import { MODEL_SPEND_LUA, modelSpendKeys, modelSpendUnavailable, runPoolKey } from "./codium-spend-ledger.js"
+ 
+ /*
+  * A Codium account's pool: the month's model spend its OpenRouter key may make, counted in integer micro-dollars
+@@ -196,11 +197,6 @@ export type PoolDebit = typeof Debit.Type & { ref: string }
+ 
+ // ── Scripts ────────────────────────────────────────────────────────────────────────────────────────────────────────
+ 
+-// The sum of the held set's members (KEYS[1]), each one's amount being its last field.
+-const HELD_SUM =
+-  "local held = 0 for _, member in ipairs(redis.call('ZRANGE', KEYS[1], 0, -1)) do held = held + (tonumber(string.match(member, ':(%d+)$')) or 0) end "
+-// The sum of the debits (KEYS[2]) already applied to the key's limit.
+-const APPLIED_SUM = `local applied = 0 local debits = redis.call('HGETALL', KEYS[2]) for i = 2, #debits, 2 do if string.find(debits[i], '"applied":true', 1, true) then applied = applied + (tonumber(string.match(debits[i], '"micro":(%d+)')) or 0) end end `
+ // A set's lifetime only ever grows: a short hold never cuts short a longer one already in it.
+ const growTtl = (key: string, ms: string) =>
+   `if redis.call('PTTL', ${key}) < tonumber(${ms}) then redis.call('PEXPIRE', ${key}, ${ms}) end `
+@@ -210,7 +206,34 @@ const growTtl = (key: string, ms: string) =>
+  * credits + carry − usage) less the applied debits and every live hold covers it (ARGV[3]), in one step, so requests
+  * and charges made at the same moment cannot each pass against the same balance. The set lives at least ARGV[6] ms.
+  */
+-const HOLD = `redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1]) ${HELD_SUM}${APPLIED_SUM}if tonumber(ARGV[2]) - applied - held < tonumber(ARGV[3]) then return 0 end redis.call('ZADD', KEYS[1], ARGV[4], ARGV[5]) ${growTtl("KEYS[1]", "ARGV[6]")}return 1`
++const HOLD =
++  MODEL_SPEND_LUA +
++  `
++local now, base, required, deadline, ttl, total = integer(ARGV[1]), integer(ARGV[2], true), integer(ARGV[3]), integer(ARGV[4]), integer(ARGV[6]), integer(ARGV[7])
++if not now or not base or not required or required <= 0 or not deadline or deadline <= now or not ttl or not total then return -1 end
++local observed = integer(total - base)
++local spend = model_spend_read(KEYS[3], KEYS[4], KEYS[1], KEYS[2], now, ARGV[8], ARGV[9])
++if not observed or not spend then return -1 end
++local raw = redis.call('GET', KEYS[6])
++if raw ~= ARGV[11] then return -1 end
++local account = object(raw)
++local key = account and account.key
++local risk = account and account.risk
++if not key or account.closing or account.upgrade or account.keyCreation or (account.ownerEnd and not account.ownerEnd.done) or key.provisioning or key.revoked or key.hash ~= ARGV[9] or key.subscription ~= spend.genesis.subscription or key.start ~= spend.genesis.start or not key.spendGenesis or key.spendGenesis.state ~= 'ready' or key.spendGenesis.nonce ~= spend.genesis.creation or (risk and (type(risk) ~= 'table' or risk.blocked ~= false or type(risk.openDisputes) ~= 'table' or next(risk.openDisputes) ~= nil or type(risk.efw) ~= 'table' or next(risk.efw) ~= nil)) then return -1 end
++if ARGV[10] ~= '' and not model_run_pool(KEYS[5], ARGV[9]) then return -2 end
++local burden = plus(plus(plus(math.max(observed, spend.committed), spend.reserved), spend.nonmodelHeld), spend.applied)
++if not burden then return -1 end
++if total - burden < required then return 0 end
++local parsed = member(ARGV[5])
++if not parsed or parsed.micro ~= required or parsed.run ~= (ARGV[10] ~= '' and ARGV[10] or '-') then return -1 end
++model_spend_compact(spend, KEYS[3], KEYS[4])
++redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now)
++local fresh = redis.call('EXISTS', KEYS[1]) == 0
++redis.call('ZADD', KEYS[1], deadline, ARGV[5])
++if fresh then redis.call('PEXPIREAT', KEYS[1], now + ttl) else grow(KEYS[1], now + ttl, now) end
++if ARGV[10] ~= '' then model_bind_run_pool(KEYS[5], ARGV[9], now + 259200000, now) end
++return 1
++`
+ 
+ /** SETTLE. A finished model request's hold (ARGV[1]) becomes its charge (ARGV[3], lapsing at ARGV[2]). */
+ const SETTLE = `redis.call('ZREM', KEYS[1], ARGV[1]) redis.call('ZADD', KEYS[1], ARGV[2], ARGV[3]) ${growTtl("KEYS[1]", "ARGV[4]")}return 1`
+@@ -232,7 +255,18 @@ const DEBIT = `local recorded = redis.call('HGET', KEYS[2], ARGV[2]) if recorded
+ const APPLY = `for i = 3, #ARGV, 2 do local debit = redis.call('HGET', KEYS[1], ARGV[i]) if debit then redis.call('HSET', KEYS[1], ARGV[i], (string.gsub(debit, '"applied":false', '"applied":true', 1))) end redis.call('ZREM', KEYS[2], ARGV[i + 1]) end if ARGV[1] ~= '' then redis.call('SET', KEYS[3], ARGV[1]) end local pending = 0 for _, debit in ipairs(redis.call('HVALS', KEYS[1])) do if string.find(debit, '"applied":false', 1, true) then pending = pending + 1 end end if pending == 0 then redis.call('ZREM', KEYS[4], ARGV[2]) end return pending`
+ 
+ /** READ. The live holds (lapsing after ARGV[1]) and the applied and pending debits, without changing anything. */
+-const READ = `local held = 0 for _, member in ipairs(redis.call('ZRANGEBYSCORE', KEYS[1], '(' .. ARGV[1], '+inf')) do held = held + (tonumber(string.match(member, ':(%d+)$')) or 0) end local applied, pending = 0, 0 local debits = redis.call('HGETALL', KEYS[2]) for i = 2, #debits, 2 do local micro = tonumber(string.match(debits[i], '"micro":(%d+)')) or 0 if string.find(debits[i], '"applied":true', 1, true) then applied = applied + micro else pending = pending + micro end end return {held, applied, pending}`
++const READ =
++  MODEL_SPEND_LUA +
++  `
++local now = integer(ARGV[1])
++if not now then return {-1} end
++local spend = model_spend_read(KEYS[3], KEYS[4], KEYS[1], KEYS[2], now, ARGV[2], ARGV[3])
++if not spend then return {-1} end
++local held = plus(spend.nonmodelHeld, spend.reserved)
++if not held then return {-1} end
++model_spend_compact(spend, KEYS[3], KEYS[4])
++return {held,spend.applied,spend.pending}
++`
+ 
+ /** DEBITS. One key's debits as a flat list of ref, record, … whatever protocol the store speaks. */
+ const DEBITS = "return redis.call('HGETALL', KEYS[1])"
+@@ -262,6 +296,8 @@ export async function placeHold(
+     account: string
+     pool: string
+     baseMicro: number
++    totalMicro: number
++    accountRecord: string
+     requiredMicro: number
+     purpose: PoolPurpose
+     run?: string
+@@ -272,6 +308,8 @@ export async function placeHold(
+ ): Promise<PoolTicket | undefined> {
+   if (
+     !Number.isSafeInteger(input.baseMicro) ||
++    !Number.isSafeInteger(input.totalMicro) ||
++    input.totalMicro < 0 ||
+     !Number.isSafeInteger(input.requiredMicro) ||
+     input.requiredMicro <= 0 ||
+     !Number.isSafeInteger(input.ttlMs) ||
+@@ -285,19 +323,31 @@ export async function placeHold(
+     [
+       "EVAL",
+       HOLD,
+-      2,
++      6,
+       heldKey(input.pool),
+       debitsKey(input.account, input.pool),
++      modelSpendKeys(input.pool).ledger,
++      modelSpendKeys(input.pool).reservations,
++      runPoolKey(input.run ?? "-"),
++      codiumKey("account", input.account),
+       input.now,
+       input.baseMicro,
+       input.requiredMicro,
+       input.now + input.ttlMs,
+       member,
+       input.ttlMs,
++      input.totalMicro,
++      input.account,
++      input.pool,
++      input.run ?? "",
++      input.accountRecord,
+     ],
+     fetcher,
+   )
+-  if (held !== 1) return undefined
++  if (held === -2)
++    throw new ApiError(401, "MODEL_PLAN_RUN_EXPIRED", "This run must start again for the new Codium period.")
++  if (held !== 0 && held !== 1) throw modelSpendUnavailable()
++  if (held === 0) return undefined
+   return {
+     account: input.account,
+     pool: input.pool,
+@@ -399,7 +449,21 @@ export async function readPoolLedger(
+   now: number,
+   fetcher: typeof fetch = fetch,
+ ): Promise<PoolLedger> {
+-  const result = await persistentStore(["EVAL", READ, 2, heldKey(keyHash), debitsKey(account, keyHash), now], fetcher)
++  const result = await persistentStore(
++    [
++      "EVAL",
++      READ,
++      4,
++      heldKey(keyHash),
++      debitsKey(account, keyHash),
++      modelSpendKeys(keyHash).ledger,
++      modelSpendKeys(keyHash).reservations,
++      now,
++      account,
++      keyHash,
++    ],
++    fetcher,
++  )
+   const values = Array.isArray(result) ? result.map(Number) : []
+   if (values.length !== 3 || values.some((value) => !Number.isSafeInteger(value) || value < 0))
+     throw ledgerUnavailable()
+diff --git a/api/_lib/codium-reservations.ts b/api/_lib/codium-reservations.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..d37f337f2847311aee4341fc8761239f41a6e2a8
+--- /dev/null
++++ b/api/_lib/codium-reservations.ts
+@@ -0,0 +1,97 @@
++import type { ModelPlanModel } from "./model-plan-config.js"
++
++/** Historical bounds only: exact bytes are pinned by the A15 manifest. They do not certify live route acceptance. */
++export const RESERVATION_CAPTURE = {
++  date: "2026-10-23",
++  sha256: "3c37e89169bc4ccb0a4792f5bbb65ce97340731fcf1dcf6018ee95d7805889e0",
++} as const
++export const CAPTURED_RESERVATIONS: Readonly<
++  Record<
++    string,
++    {
++      tag: string
++      contextLength: number
++      maxOutputTokens: number
++      inputPrice: number
++      outputPrice: number
++    }
++  >
++> = {
++  "deepseek/deepseek-v4.1-flash-1017": {
++    tag: "nebius/fp8",
++    contextLength: 1048576,
++    maxOutputTokens: 943718,
++    inputPrice: 0.3,
++    outputPrice: 1.2,
++  },
++  "anthropic/claude-haiku-5.5": {
++    tag: "amazon-bedrock",
++    contextLength: 1000000,
++    maxOutputTokens: 128000,
++    inputPrice: 1,
++    outputPrice: 2.5,
++  },
++  "openai/gpt-6-luna": {
++    tag: "azure",
++    contextLength: 1050000,
++    maxOutputTokens: 128000,
++    inputPrice: 0.25,
++    outputPrice: 0.75,
++  },
++  "moonshotai/kimi-k3.1-pro": {
++    tag: "moonshotai/mxfp4",
++    contextLength: 1048576,
++    maxOutputTokens: 943718,
++    inputPrice: 2,
++    outputPrice: 10,
++  },
++  "google/gemini-4-argon": {
++    tag: "google-vertex/global",
++    contextLength: 1048576,
++    maxOutputTokens: 943718,
++    inputPrice: 2,
++    outputPrice: 10,
++  },
++}
++
++/**
++ * Full native input window plus the configured maximum reply, at the maximum of every captured base/override/cache
++ * rate. Counting the full context as input deliberately leaves the reply inside that context uncredited. This avoids
++ * deriving a money bound from the gateway's approximate token/framing estimate. Round up to whole micro-dollars.
++ */
++export function capturedReservationMicro(model: ModelPlanModel) {
++  const captured = CAPTURED_RESERVATIONS[model.upstream ?? model.id]
++  if (
++    !captured ||
++    !Number.isFinite(model.inputPrice) ||
++    model.inputPrice <= 0 ||
++    !Number.isFinite(model.outputPrice) ||
++    model.outputPrice <= 0 ||
++    (model.providerOnly && (model.providerOnly.length !== 1 || model.providerOnly[0] !== captured.tag)) ||
++    !Number.isSafeInteger(model.maxOutputTokens) ||
++    model.maxOutputTokens < 1 ||
++    model.maxOutputTokens > captured.maxOutputTokens
++  )
++    return undefined
++  const micro = Math.ceil(
++    captured.contextLength * Math.max(captured.inputPrice, model.inputPrice) +
++      model.maxOutputTokens * Math.max(captured.outputPrice, model.outputPrice),
++  )
++  return Number.isSafeInteger(micro) && micro > 0 ? micro : undefined
++}
++
++/**
++ * Deliberately empty until an approved external acceptance artifact establishes every premise. Neither environment
++ * configuration nor historical metadata can insert an acceptance. No provider call was made to populate this list.
++ */
++export const ROUTE_ACCEPTANCES: readonly {
++  model: string
++  tag: string
++  captureSha256: string
++  source: string
++  acceptedAt: number
++  nativeWindowEnforced: true
++  outputIncludesReasoning: true
++  exactTagWithZdr: true
++  capturedRatesBoundCharges: true
++}[] = []
+diff --git a/api/_lib/codium-spend-ledger.ts b/api/_lib/codium-spend-ledger.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..a7b214adb120b68ff6417c318d6ae1883f06c07e
+--- /dev/null
++++ b/api/_lib/codium-spend-ledger.ts
+@@ -0,0 +1,264 @@
++import { codiumKey } from "./codium-keys.js"
++import { ApiError } from "./http.js"
++import { persistentStore } from "./persistent-store.js"
++
++/** A genesis belongs to one newly created, never exposed provider key. Times are seconds. */
++export type ModelSpendGenesis = {
++  account: string
++  pool: string
++  subscription: string
++  start: number
++  end: number
++  creation: string
++}
++
++export const modelSpendKeys = (pool: string) => ({
++  ledger: codiumKey("model-spend", pool),
++  reservations: codiumKey("model-reservations", pool),
++})
++
++/** A run cannot silently reset its budget by changing the monthly key underneath it. */
++export const runPoolKey = (run: string) => codiumKey("run-pool", run)
++
++/** Shared Lua is used by both atomic model admission and nonmodel pool HOLD/READ. */
++export const MODEL_SPEND_LUA = `
++local SAFE = 9007199254740991
++local function integer(value, signed)
++  local n = tonumber(value)
++  if not n or n ~= n or n > SAFE or n < (signed and -SAFE or 0) or n ~= math.floor(n) then return nil end
++  return n
++end
++local function plus(a, b)
++  if not a or not b or a > SAFE - b then return nil end
++  return a + b
++end
++local function object(raw)
++  if type(raw) ~= 'string' then return nil end
++  local ok, value = pcall(cjson.decode, raw)
++  if not ok or type(value) ~= 'table' then return nil end
++  return value
++end
++local function typed(key, expected)
++  local t = redis.call('TYPE', key)
++  if type(t) == 'table' then t = t.ok end
++  return t == 'none' or t == expected
++end
++local function grow(key, at, now)
++  local ttl = redis.call('PTTL', key)
++  if ttl ~= -1 and ttl < at - now then redis.call('PEXPIREAT', key, at) end
++end
++-- Called before any write. A mismatching existing binding is an expired run, never a fresh budget.
++local function model_run_pool(key, pool)
++  if not typed(key, 'string') then return false end
++  local previous = redis.call('GET', key)
++  return not previous or previous == pool
++end
++local function model_bind_run_pool(key, pool, untilAt, now)
++  local fresh = redis.call('EXISTS', key) == 0
++  redis.call('SET', key, pool, 'KEEPTTL')
++  if fresh then redis.call('PEXPIREAT', key, untilAt) else grow(key, untilAt, now) end
++end
++local purposes = {chat=true,title=true,brain=true,review=true,judge=true,race=true,playbook=true,task=true,['cloud-agents']=true,hosted=true}
++local function member(raw)
++  if type(raw) ~= 'string' then return nil end
++  local ticket, purpose, run, amount = string.match(raw, '^([%w-]+):([a-z][a-z0-9-]*):([%w_.-]+):(%d+)$')
++  local micro = integer(amount)
++  if not ticket or #ticket > 64 or not purposes[purpose] or #run > 128 or not micro then return nil end
++  return {ticket=ticket,purpose=purpose,run=run,micro=micro}
++end
++local recordNumbers = {'micro','deadline','admittedAt','periodEnd','runUntil','version','charge','gcAt'}
++local function model_record_encode(record)
++  local stored = {}
++  for key, value in pairs(record) do stored[key] = value end
++  -- Redis cjson emits at most 14 significant digits. Decimal strings preserve every accepted safe integer.
++  for _, key in ipairs(recordNumbers) do
++    if stored[key] ~= nil then stored[key] = string.format('%.0f', stored[key]) end
++  end
++  return cjson.encode(stored)
++end
++-- No mutation occurs here. Both HOLD and ADMIT must use this SAME floor, including abandoned model reservations.
++-- Committed is a provider-usage floor, not a provider-key limit reduction. Open reservations are additional holds.
++local function model_spend_read(ledgerKey, reservationsKey, heldKey, debitsKey, now, account, pool)
++  if not typed(ledgerKey, 'hash') or not typed(reservationsKey, 'hash') or not typed(heldKey, 'zset') or not typed(debitsKey, 'hash') then return nil end
++  local genesis = object(redis.call('HGET', ledgerKey, 'genesis'))
++  local committed = integer(redis.call('HGET', ledgerKey, 'committed'))
++  local compacted = integer(redis.call('HGET', ledgerKey, 'compacted'))
++  local expectedReserved = integer(redis.call('HGET', ledgerKey, 'reserved'))
++  local expectedOpen = integer(redis.call('HGET', ledgerKey, 'openCount'))
++  if not genesis or genesis.v ~= 1 or genesis.account ~= account or genesis.pool ~= pool or type(genesis.creation) ~= 'string' or type(genesis.subscription) ~= 'string' or not integer(genesis.start) or not integer(genesis['end']) or genesis['end'] <= genesis.start or not committed or not compacted or not expectedReserved or not expectedOpen then return nil end
++  local records, reserved, done, openCount, gc, gcMicro = {}, 0, compacted, 0, {}, 0
++  local rawRecords = redis.call('HGETALL', reservationsKey)
++  for i = 1, #rawRecords, 2 do
++    local record = object(rawRecords[i + 1])
++    if record then
++      for _, key in ipairs(recordNumbers) do
++        if record[key] ~= nil then
++          local value = integer(record[key])
++          if not value then return nil end
++          record[key] = value
++        end
++      end
++    end
++    local held = record and member(record.member)
++    if not record or not held or record.ticket ~= rawRecords[i] or held.ticket ~= record.ticket or record.account ~= account or record.pool ~= pool or not integer(record.micro) or held.micro ~= record.micro or held.purpose ~= record.purpose or held.run ~= (record.run or '-') or type(record.day) ~= 'string' or not string.match(record.day, '^%d%d%d%d%-%d%d%-%d%d$') or not integer(record.deadline) or not integer(record.admittedAt) or not integer(record.periodEnd) or not integer(record.runUntil) or type(record.epoch) ~= 'string' or not integer(record.version) or (record.group ~= nil and record.group ~= 'astra') then return nil end
++    if record.state == 'open' then
++      reserved = plus(reserved, record.micro)
++      openCount = openCount + 1
++      if not reserved then return nil end
++    elseif record.state == 'done' and integer(record.charge) and integer(record.gcAt) and record.gcAt >= record.deadline and (record.kind == 'cancel' or record.kind == 'complete' or record.kind == 'broken') then
++      done = plus(done, record.charge)
++      if not done then return nil end
++      if record.gcAt <= now then
++        table.insert(gc, record.ticket)
++        gcMicro = plus(gcMicro, record.charge)
++        if not gcMicro then return nil end
++      end
++    else return nil end
++    records[record.ticket] = record
++  end
++  -- A missing or corrupt reservation cannot silently lower the committed floor.
++  if done ~= committed or reserved ~= expectedReserved or openCount ~= expectedOpen then return nil end
++  local applied, pending, debits, debitHolds = 0, 0, {}, {}
++  local rawDebits = redis.call('HGETALL', debitsKey)
++  for i = 1, #rawDebits, 2 do
++    local debit = object(rawDebits[i + 1])
++    local held = debit and member(debit.hold)
++    if not debit or not held or not integer(debit.micro) or type(debit.applied) ~= 'boolean' or not integer(debit.at) or not purposes[debit.purpose] or (debit.run ~= nil and (type(debit.run) ~= 'string' or #debit.run > 128 or not string.match(debit.run, '^[%w_.-]+$') or debit.run == '-')) or held.micro ~= debit.micro or held.purpose ~= debit.purpose or held.run ~= (debit.run or '-') then return nil end
++    if debit.applied then applied = plus(applied, debit.micro) else pending = plus(pending, debit.micro) end
++    if not applied or not pending then return nil end
++    debitHolds[debit.hold] = true
++    table.insert(debits, debit)
++  end
++  local nonmodelHeld, heldRecords = 0, {}
++  local rawHeld = redis.call('ZRANGE', heldKey, 0, -1, 'WITHSCORES')
++  for i = 1, #rawHeld, 2 do
++    local held, score = member(rawHeld[i]), integer(rawHeld[i + 1])
++    if not held or not score then return nil end
++    local record = records[held.ticket]
++    if record then
++      if held.purpose ~= record.purpose or held.run ~= (record.run or '-') or (rawHeld[i] ~= record.member and (record.state ~= 'done' or held.micro ~= record.charge)) then return nil end
++    elseif score > now then
++      nonmodelHeld = plus(nonmodelHeld, held.micro)
++      if not nonmodelHeld then return nil end
++      if not debitHolds[rawHeld[i]] then table.insert(heldRecords, held) end
++    end
++  end
++  for _, debit in ipairs(debits) do
++    if not debit.applied then
++      local score = integer(redis.call('ZSCORE', heldKey, debit.hold))
++      local parsed = member(debit.hold)
++      if not score or score <= now or records[parsed.ticket] then return nil end
++    end
++  end
++  return {genesis=genesis,committed=committed,compacted=compacted,reserved=reserved,openCount=openCount,nonmodelHeld=nonmodelHeld,applied=applied,pending=pending,records=records,debits=debits,holds=heldRecords,gc=gc,gcMicro=gcMicro}
++end
++-- Compaction is invoked only after all read/validation gates pass. Counter integrity preserves a missing open
++-- reservation as an error; expired completed identities can safely disappear without ever reopening their spend.
++local function model_spend_compact(value, ledgerKey, reservationsKey)
++  if #value.gc == 0 then return end
++  for _, ticket in ipairs(value.gc) do redis.call('HDEL', reservationsKey, ticket) end
++  redis.call('HSET', ledgerKey, 'compacted', string.format('%.0f', value.compacted + value.gcMicro))
++end
++`
++
++export async function initializeFreshModelPool(input: ModelSpendGenesis, fetcher: typeof fetch = fetch) {
++  if (
++    !Number.isSafeInteger(input.start) ||
++    input.start < 0 ||
++    !Number.isSafeInteger(input.end) ||
++    input.end <= input.start ||
++    !Number.isSafeInteger(input.end * 1000 + 40 * 86_400_000) ||
++    !/^[A-Za-z0-9-]{1,64}$/.test(input.creation)
++  )
++    throw modelSpendUnavailable()
++  const result = await persistentStore(
++    [
++      "EVAL",
++      MODEL_SPEND_SCRIPTS.GENESIS,
++      3,
++      codiumKey("account", input.account),
++      modelSpendKeys(input.pool).ledger,
++      modelSpendKeys(input.pool).reservations,
++      JSON.stringify({ v: 1, ...input }),
++    ],
++    fetcher,
++  )
++  if (result !== 1) throw modelSpendUnavailable()
++}
++
++export async function readModelSpendLedger(account: string, pool: string, now: number, fetcher: typeof fetch = fetch) {
++  if (!Number.isSafeInteger(now) || now < 0) throw modelSpendUnavailable()
++  const result = await persistentStore(
++    [
++      "EVAL",
++      MODEL_SPEND_SCRIPTS.READ,
++      4,
++      modelSpendKeys(pool).ledger,
++      modelSpendKeys(pool).reservations,
++      codiumKey("held", pool),
++      codiumKey("debits", account, pool),
++      now,
++      account,
++      pool,
++    ],
++    fetcher,
++  )
++  if (
++    !Array.isArray(result) ||
++    result.length !== 5 ||
++    result.some((value) => !Number.isSafeInteger(value) || Number(value) < 0)
++  )
++    throw modelSpendUnavailable()
++  return {
++    committedMicro: Number(result[0]),
++    reservedMicro: Number(result[1]),
++    nonmodelHeldMicro: Number(result[2]),
++    appliedMicro: Number(result[3]),
++    pendingMicro: Number(result[4]),
++  }
++}
++
++const GENESIS =
++  MODEL_SPEND_LUA +
++  `
++local input = object(ARGV[1])
++if not input or input.v ~= 1 or type(input.account) ~= 'string' or type(input.pool) ~= 'string' or type(input.subscription) ~= 'string' or type(input.creation) ~= 'string' or #input.creation > 64 or not string.match(input.creation, '^[%w-]+$') or not integer(input.start) or not integer(input['end']) or not integer(input['end'] * 1000 + 3456000000) or input['end'] <= input.start or not typed(KEYS[1], 'string') or not typed(KEYS[2], 'hash') or not typed(KEYS[3], 'hash') then return 0 end
++local accountRaw = redis.call('GET', KEYS[1])
++local account = object(accountRaw)
++local key = account and account.key
++local proof = key and key.spendGenesis
++if not key or not proof or proof.nonce ~= input.creation or key.hash ~= input.pool or key.subscription ~= input.subscription or key.start ~= input.start or key['end'] ~= input['end'] then return 0 end
++local existing = redis.call('HGET', KEYS[2], 'genesis')
++if existing then
++  local old = object(existing)
++  if proof.state == 'ready' and old and old.v == 1 and old.account == input.account and old.pool == input.pool and old.creation == input.creation and old.subscription == input.subscription and old.start == input.start and old['end'] == input['end'] and integer(redis.call('HGET', KEYS[2], 'committed')) and integer(redis.call('HGET', KEYS[2], 'compacted')) and integer(redis.call('HGET', KEYS[2], 'reserved')) and integer(redis.call('HGET', KEYS[2], 'openCount')) then return 1 end
++  return 0
++end
++-- A legacy published key CANNOT acquire a zero baseline from a usage observation. Only the private publication
++-- barrier proves this provider key has never been exposed. The creator is the only caller of this initializer.
++if proof.state ~= 'pending' or key.provisioning ~= true or key.revoked or redis.call('EXISTS', KEYS[2]) ~= 0 or redis.call('EXISTS', KEYS[3]) ~= 0 then return 0 end
++local needle = '"spendGenesis":{"nonce":"' .. input.creation .. '","state":"pending"}'
++local first, last = string.find(accountRaw, needle, 1, true)
++if not first or string.find(accountRaw, needle, last + 1, true) then return 0 end
++local ready = '"spendGenesis":{"nonce":"' .. input.creation .. '","state":"ready"}'
++redis.call('HSET', KEYS[2], 'genesis', ARGV[1], 'committed', '0', 'compacted', '0', 'reserved', '0', 'openCount', '0')
++redis.call('PEXPIREAT', KEYS[2], input['end'] * 1000 + 3456000000)
++-- Splice the verified marker. cjson.encode(account) would turn empty JSON arrays into objects.
++redis.call('SET', KEYS[1], string.sub(accountRaw, 1, first - 1) .. ready .. string.sub(accountRaw, last + 1))
++return 1
++`
++
++const READ =
++  MODEL_SPEND_LUA +
++  `
++local value = model_spend_read(KEYS[1], KEYS[2], KEYS[3], KEYS[4], tonumber(ARGV[1]), ARGV[2], ARGV[3])
++if not value then return {-1} end
++model_spend_compact(value, KEYS[1], KEYS[2])
++return {value.committed,value.reserved,value.nonmodelHeld,value.applied,value.pending}
++`
++
++export const MODEL_SPEND_SCRIPTS = Object.freeze({ GENESIS, READ })
++
++export function modelSpendUnavailable() {
++  return new ApiError(503, "MODEL_PLAN_POOL_UNAVAILABLE", "Your Codium usage could not be verified.")
++}
+diff --git a/api/_lib/model-plan-account.ts b/api/_lib/model-plan-account.ts
+index d5ae3b316077fd4ef5fcf609b78b71af97fcead2..195fadc9ed08a6fec61d54c7884713732bc076dd 100644
+--- a/api/_lib/model-plan-account.ts
++++ b/api/_lib/model-plan-account.ts
+@@ -11,6 +11,7 @@ import type { AccountUser } from "./account.js"
+ import { withBillingMutation } from "./billing-lock.js"
+ import { requireCodiumSales, reserveCodiumSale } from "./codium-funding.js"
+ import { writeRampOwed } from "./codium-ramp.js"
++import { initializeFreshModelPool, readModelSpendLedger } from "./codium-spend-ledger.js"
+ import { readSwitch } from "./codium-switches.js"
+ import { syncCodiumCollection } from "./codium-collection.js"
+ import {
+@@ -182,6 +183,17 @@ const Account = Schema.Struct({
+       confirmationSent: Schema.optional(Schema.Boolean),
+     }),
+   ),
++  // Persisted before creating an A17 pool; the nonce cannot refer to a pre-A17/exposed key.
++  keyCreation: Schema.optional(
++    Schema.Struct({
++      nonce: Schema.String,
++      subscription: Schema.String,
++      start: Schema.Number,
++      end: Schema.Number,
++      limitMicro: Micro,
++      expiresAt: Schema.String,
++    }),
++  ),
+   // Persisted before disabling the old key or creating its replacement: a retry keeps exactly the same carry.
+   upgrade: Schema.optional(
+     Schema.Struct({
+@@ -207,6 +219,9 @@ const Account = Schema.Struct({
+     Schema.Struct({
+       hash: Schema.String,
+       provisioning: Schema.optional(Schema.Boolean),
++      spendGenesis: Schema.optional(
++        Schema.Struct({ nonce: Schema.String, state: Schema.Literals(["pending", "ready"]) }),
++      ),
+       encrypted: Schema.String,
+       subscription: Schema.String,
+       start: Schema.Number,
+@@ -1545,7 +1560,7 @@ export async function modelPlanCredential(
+   const required = requiredCredits > 0 ? usdToMicroCeil(requiredCredits) : 0
+   return holdCredits(
+     id,
+-    await monthlyCredential(id, fetcher, now, required),
++    await validatedPoolCredential(id, fetcher, now, required),
+     required,
+     now,
+     fetcher,
+@@ -1554,6 +1569,49 @@ export async function modelPlanCredential(
+   )
+ }
+ 
++/**
++ * A17 retrieves and validates the private funding credential without placing the legacy model hold. The admission
++ * transaction owns that hold together with the concurrency and per-period budgets. Its exact account-record fence
++ * prevents a billing/risk intent written after this observation from spending against the old observation.
++ */
++export async function modelPlanAdmissionCredential(id: string, fetcher: typeof fetch = fetch, now = Date.now()) {
++  if ((await readSwitch("codium", fetcher, { now })) !== "on")
++    throw new ApiError(503, "MODEL_PLANS_DISABLED", "Vector Codium is temporarily unavailable.")
++  return validatedPoolCredential(id, fetcher, now, 0, true)
++}
++
++async function validatedPoolCredential(
++  id: string,
++  fetcher: typeof fetch,
++  now: number,
++  requiredMicro: number,
++  admission = false,
++) {
++  const funding = await monthlyCredential(id, fetcher, now, requiredMicro, admission)
++  const raw = await persistentStore(["GET", accountKey(id)], fetcher)
++  const account = decodeModelPlanAccount(raw)
++  if (account.closing)
++    throw new ApiError(409, "MODEL_PLAN_ACCOUNT_CLOSING", "This account is being deleted. Model access is closed.")
++  const held = riskState(account)
++  if (held) throw riskRefusal(held)
++  if (
++    !account.key ||
++    account.upgrade !== undefined ||
++    account.keyCreation !== undefined ||
++    account.key.provisioning ||
++    account.key.revoked !== undefined ||
++    account.key.spendGenesis?.state !== "ready" ||
++    account.key.hash !== funding.pool ||
++    account.key.subscription !== funding.subscription ||
++    account.key.start !== funding.start ||
++    keyPool(account.key).creditsMicro + keyPool(account.key).carryMicro !== funding.totalMicro
++  )
++    throw new ApiError(503, "MODEL_PLAN_RENEWING", "Your Codium access is updating. Try again shortly.", {
++      retryAfterSeconds: 1,
++    })
++  return { ...funding, accountRecord: String(raw) }
++}
++
+ // A pool that is used up, too small for the model's largest request, or held by requests still running gets one
+ // answer. A different answer for each would tell a client which side of a threshold its balance is on, and with the
+ // share of a plan it has used, the allowance and so the markup. Codium sells monthly plans only, so the answer offers
+@@ -1574,7 +1632,7 @@ function monthlyShortfall() {
+  */
+ async function holdCredits(
+   id: string,
+-  funding: { key: string; pool: string; baseMicro: number },
++  funding: { key: string; pool: string; baseMicro: number; totalMicro: number; accountRecord: string },
+   requiredMicro: number,
+   now: number,
+   fetcher: typeof fetch,
+@@ -1588,6 +1646,8 @@ async function holdCredits(
+       account: id,
+       pool: funding.pool,
+       baseMicro: funding.baseMicro,
++      totalMicro: funding.totalMicro,
++      accountRecord: funding.accountRecord,
+       requiredMicro,
+       purpose: hold.purpose,
+       run: hold.run,
+@@ -1673,7 +1733,13 @@ async function monthlyStatus(id: string, fetcher: typeof fetch = fetch, now = Da
+  * the hold takes the applied debits and the live holds. Normal parallel requests only read the account and the key;
+  * provisioning, repairs and debits are serialized on the account's lease.
+  */
+-async function monthlyCredential(id: string, fetcher: typeof fetch, now: number, requiredMicro: number) {
++async function monthlyCredential(
++  id: string,
++  fetcher: typeof fetch,
++  now: number,
++  requiredMicro: number,
++  admission = false,
++) {
+   // Normal parallel agent turns only read the existing entitlement/key. Serialize
+   // provisioning and repairs, not every model request for the same account.
+   const existing = await readModelPlanAccount(id, fetcher)
+@@ -1689,7 +1755,7 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
+     // A renewal still being collected keeps the month that just ended, and its key, serving (M11).
+     const renewing = paid ? undefined : renewingPeriod(id, existing, listed, now)
+     if (renewing) {
+-      const ready = await readyKey(id, renewing.key, renewing.governing.end, requiredMicro, fetcher)
++      const ready = await readyKey(id, renewing.key, renewing.governing.end, requiredMicro, fetcher, admission)
+       if (ready) return ready
+     } else {
+       if (!paid && !existing.key)
+@@ -1708,7 +1774,7 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
+           )
+       }
+       if (paid && existing.key?.subscription === paid.id && existing.key.start === paid.start) {
+-        const ready = await readyKey(id, existing.key, paid.end, requiredMicro, fetcher)
++        const ready = await readyKey(id, existing.key, paid.end, requiredMicro, fetcher, admission)
+         if (ready) return ready
+       }
+     }
+@@ -1731,11 +1797,14 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
+         const converged = await convergeKey(id, account, renewing.key, verify, fetcher, {
+           expiresAt: keyExpiresAt(end),
+         })
+-        requireMonthlyCredits(converged.limitMicro - converged.usageMicro, requiredMicro)
++        if (!admission) requireMonthlyCredits(converged.limitMicro - converged.usageMicro, requiredMicro)
+         return {
+           key: revealModelPlanKey(renewing.key.encrypted, `${id}:${renewing.key.subscription}:${renewing.key.start}`),
+           pool: renewing.key.hash,
+           baseMicro: converged.creditsMicro + converged.carryMicro - converged.usageMicro,
++          totalMicro: converged.creditsMicro + converged.carryMicro,
++          subscription: renewing.key.subscription,
++          start: renewing.key.start,
+           end,
+         }
+       }
+@@ -1754,13 +1823,16 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
+       const most = current
+         ? keyPool(current)
+         : { creditsMicro: usdToMicro(codiumKeyLimitUsd(paid.plan.credits)), carryMicro: 0 }
+-      if (most.creditsMicro + most.carryMicro < requiredMicro) throw monthlyShortfall()
++      if (!admission && most.creditsMicro + most.carryMicro < requiredMicro) throw monthlyShortfall()
+       const funding = await provisionMonthlyKey(id, account, paid, fetcher, verify, now)
+-      requireMonthlyCredits(funding.limitMicro - funding.usageMicro, requiredMicro)
++      if (!admission) requireMonthlyCredits(funding.limitMicro - funding.usageMicro, requiredMicro)
+       return {
+         key: funding.key,
+         pool: funding.pool,
+         baseMicro: funding.creditsMicro + funding.carryMicro - funding.usageMicro,
++        totalMicro: funding.creditsMicro + funding.carryMicro,
++        subscription: paid.id,
++        start: paid.start,
+         end: paid.end,
+       }
+     },
+@@ -1773,7 +1845,14 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
+  * cent), never resetting, counting the buyer's own keys, and expiring at the period's end plus the grace. Undefined when
+  * anything there differs, which the lease's path repairs. Throws the shortfall when the pool cannot pay for the request.
+  */
+-async function readyKey(id: string, key: AccountKey, end: number, requiredMicro: number, fetcher: typeof fetch) {
++async function readyKey(
++  id: string,
++  key: AccountKey,
++  end: number,
++  requiredMicro: number,
++  fetcher: typeof fetch,
++  admission = false,
++) {
+   if (key.provisioning) return undefined
+   const data = (await openRouterManagement(`/${encodeURIComponent(key.hash)}`, undefined, fetcher)).data
+   const pool = keyPool(key)
+@@ -1790,11 +1869,14 @@ async function readyKey(id: string, key: AccountKey, end: number, requiredMicro:
+   )
+     return undefined
+   const usage = usdToMicro(data.usage)
+-  requireMonthlyCredits(pool.limitMicro - usage, requiredMicro)
++  if (!admission) requireMonthlyCredits(pool.limitMicro - usage, requiredMicro)
+   return {
+     key: revealModelPlanKey(key.encrypted, `${id}:${key.subscription}:${key.start}`),
+     pool: key.hash,
+     baseMicro: pool.creditsMicro + pool.carryMicro - usage,
++    totalMicro: pool.creditsMicro + pool.carryMicro,
++    subscription: key.subscription,
++    start: key.start,
+     end,
+   }
+ }
+@@ -1827,6 +1909,7 @@ async function provisionMonthlyKey(
+   // M11: the key outlives its period by the renewal grace; a paid renewal replaces it, anything else switches it off.
+   const expires = keyExpiresAt(paid.end)
+   if (account.key?.subscription === paid.id && account.key.start === paid.start) {
++    account = await initializePendingSpend(id, account, verify, fetcher)
+     account = await refreshCarry(id, account, fetcher, verify)
+     await finishUpgrade(id, account, paid, fetcher, verify, now)
+     const desiredCredits = monthlyCreditsMicro(account, paid, now)
+@@ -1887,18 +1970,29 @@ async function provisionMonthlyKey(
+     fetcher,
+     "raise",
+   )
++  const creation =
++    account.keyCreation?.subscription === paid.id &&
++    account.keyCreation.start === paid.start &&
++    account.keyCreation.end === paid.end
++      ? account.keyCreation
++      : { nonce: randomUUID(), subscription: paid.id, start: paid.start, end: paid.end, limitMicro, expiresAt: expires }
++  if (account.keyCreation !== creation) {
++    account = { ...account, keyCreation: creation }
++    await verify()
++    await saveAccount(id, account, fetcher)
++  }
+   const result = await openRouterManagement(
+     "",
+     {
+       name: openRouterKeyName([id, paid.id, paid.start]),
+-      limit: limitUsd(limitMicro),
++      limit: limitUsd(creation.limitMicro),
+       limit_reset: null,
+       include_byok_in_limit: true,
+-      expires_at: expires,
++      expires_at: creation.expiresAt,
+     },
+     fetcher,
+     "POST",
+-    `vector-codium-key-${stripeMode()}-${digest(context)}`,
++    `vector-codium-pool-v1-${stripeMode()}-${creation.nonce}`,
+   )
+   if (
+     !stripeRecord(result.data) ||
+@@ -1910,10 +2004,12 @@ async function provisionMonthlyKey(
+   const updated = {
+     ...account,
+     upgrade: undefined,
++    keyCreation: undefined,
+     key: {
+       hash: result.data.hash,
+       // The fast credential path must wait for the lease until carry has been revalidated and its limit converged.
+       provisioning: true,
++      spendGenesis: { nonce: creation.nonce, state: "pending" as const },
+       encrypted: protectModelPlanKey(result.key, context),
+       subscription: paid.id,
+       start: paid.start,
+@@ -1922,11 +2018,12 @@ async function provisionMonthlyKey(
+       creditsMicro,
+       fullCreditsMicro,
+       ...(carried ? { carry: carried } : {}),
+-      limitMicro,
++      limitMicro: creation.limitMicro,
+     },
+   }
+   await saveAccount(id, updated, fetcher)
+-  const checked = await refreshCarry(id, updated, fetcher, verify)
++  const initialized = await initializePendingSpend(id, updated, verify, fetcher)
++  const checked = await refreshCarry(id, initialized, fetcher, verify)
+   const converged = await convergeKey(id, checked, checked.key!, verify, fetcher)
+   await finishUpgrade(id, converged.account, paid, fetcher, verify, now)
+   const published = await publishKey(id, converged.account, verify, fetcher)
+@@ -1941,6 +2038,38 @@ async function provisionMonthlyKey(
+   }
+ }
+ 
++/** Only a nonce from the fresh creation path may establish zero spend; lost/corrupt ready ledgers never reset. */
++async function initializePendingSpend(
++  id: string,
++  account: Account,
++  verify: () => Promise<void>,
++  fetcher: typeof fetch,
++) {
++  const key = account.key
++  if (!key || key.spendGenesis?.state !== "pending") return account
++  await verify()
++  await initializeFreshModelPool(
++    {
++      account: id,
++      pool: key.hash,
++      subscription: key.subscription,
++      start: key.start,
++      end: key.end,
++      creation: key.spendGenesis.nonce,
++    },
++    fetcher,
++  )
++  await verify()
++  const initialized = await readModelPlanAccount(id, fetcher)
++  if (
++    initialized?.key?.hash !== key.hash ||
++    initialized.key.spendGenesis?.state !== "ready" ||
++    initialized.key.spendGenesis.nonce !== key.spendGenesis.nonce
++  )
++    throw new ApiError(503, "MODEL_PLAN_POOL_UNAVAILABLE", "Your model allowance could not be verified.")
++  return initialized
++}
++
+ /** Only a fully checked key is visible to concurrent model admissions. */
+ async function publishKey(id: string, account: Account, verify: () => Promise<void>, fetcher: typeof fetch) {
+   const key = account.key
+@@ -2140,12 +2269,14 @@ export async function holdPool(
+   const fetcher = options.fetcher ?? fetch
+   const now = options.now ?? Date.now()
+   const required = usdToMicroCeil(usd)
+-  const funding = await monthlyCredential(account, fetcher, now, required)
++  const funding = await validatedPoolCredential(account, fetcher, now, required)
+   const ticket = await placeHold(
+     {
+       account,
+       pool: funding.pool,
+       baseMicro: funding.baseMicro,
++      totalMicro: funding.totalMicro,
++      accountRecord: funding.accountRecord,
+       requiredMicro: required,
+       purpose,
+       run: options.runId,
+@@ -3128,7 +3259,11 @@ export async function refundEndModelPlanAccount(
+           (key) => expected[key as keyof OwnerRefundQuote] !== confirmed[key as keyof OwnerRefundQuote],
+         )
+       )
+-        throw new ApiError(409, "CODIUM_REFUND_CHANGED", "The current payment changed. Refresh and confirm the updated payment.")
++        throw new ApiError(
++          409,
++          "CODIUM_REFUND_CHANGED",
++          "The current payment changed. Refresh and confirm the updated payment.",
++        )
+       const intent = {
+         id: randomUUID(),
+         at: now,
+diff --git a/api/_lib/model-plan-admit.ts b/api/_lib/model-plan-admit.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..8b7541e64da45b1dc2a7082beb188affc250862d
+--- /dev/null
++++ b/api/_lib/model-plan-admit.ts
+@@ -0,0 +1,380 @@
++import type { EntitlementSnapshot } from "../../packages/schema/src/codium-entitlements.js"
++import { randomUUID } from "node:crypto"
++import { codiumKey } from "./codium-keys.js"
++import { renewalGraceMinutes } from "./codium-limits.js"
++import { holdMember, isPoolPurpose, MODEL_HOLD_MS, validRunId, type PoolPurpose } from "./codium-pool.js"
++import { MODEL_SPEND_LUA, modelSpendKeys, modelSpendUnavailable, runPoolKey } from "./codium-spend-ledger.js"
++import { ApiError } from "./http.js"
++import { stripeMode } from "./model-plan-stripe.js"
++import { persistentStore } from "./persistent-store.js"
++
++export type AdmissionTicket = {
++  account: string
++  pool: string
++  ticket: string
++  member: string
++  purpose: PoolPurpose
++  run?: string
++  micro: number
++  day: string
++  epoch: string
++  version: number
++  deadline: number
++  periodEnd: number
++  group?: "astra"
++  admittedAt: number
++  runUntil: number
++}
++
++export type ModelPlanAdmission = {
++  snapshot: EntitlementSnapshot
++  funding: {
++    pool: string
++    baseMicro: number
++    totalMicro: number
++    subscription: string
++    start: number
++    end: number
++    accountRecord: string
++  }
++  requiredMicro: number
++  purpose: PoolPurpose
++  group?: "astra"
++  run?: { id: string; deadline: number; ceilingShare?: number }
++  globalLimit?: number
++  priorityReserve?: number
++}
++
++export async function admitModelPlan(
++  input: ModelPlanAdmission,
++  fetcher: typeof fetch = fetch,
++  now = Date.now(),
++): Promise<AdmissionTicket> {
++  if (
++    !Number.isSafeInteger(now) ||
++    now < 0 ||
++    now > 8_640_000_000_000_000 - 3 * 86_400_000 ||
++    !Number.isSafeInteger(input.funding.baseMicro) ||
++    !safeAmount(input.funding.totalMicro) ||
++    !safeAmount(input.requiredMicro) ||
++    input.requiredMicro === 0 ||
++    !Number.isSafeInteger(input.funding.start) ||
++    input.funding.start < 0 ||
++    !Number.isSafeInteger(input.funding.end) ||
++    input.funding.end <= input.funding.start ||
++    !safeAmount(input.funding.start * 1000) ||
++    !safeAmount(input.funding.end * 1000 + 40 * 86_400_000) ||
++    !isPoolPurpose(input.purpose) ||
++    (input.group !== undefined && input.group !== "astra") ||
++    (input.globalLimit !== undefined && (!safeAmount(input.globalLimit) || input.globalLimit === 0)) ||
++    (input.priorityReserve !== undefined && !share(input.priorityReserve))
++  )
++    throw modelSpendUnavailable()
++  if (
++    input.run &&
++    (!validRunId(input.run.id) ||
++      !Number.isSafeInteger(input.run.deadline) ||
++      input.run.deadline <= now ||
++      input.run.deadline > now + 3 * 86_400_000 ||
++      (input.run.ceilingShare !== undefined && (!share(input.run.ceilingShare) || input.run.ceilingShare === 0)))
++  )
++    throw new ApiError(
++      401,
++      "MODEL_PLAN_RUN_EXPIRED",
++      "This run is no longer authorized. Save your work and start a new run.",
++    )
++  const ticket = randomUUID()
++  const admission: AdmissionTicket = {
++    account: input.snapshot.account,
++    pool: input.funding.pool,
++    ticket,
++    member: holdMember(ticket, input.purpose, input.run?.id, input.requiredMicro),
++    purpose: input.purpose,
++    ...(input.run ? { run: input.run.id } : {}),
++    micro: input.requiredMicro,
++    day: new Date(now).toISOString().slice(0, 10),
++    epoch: input.snapshot.meterEpoch,
++    version: input.snapshot.version,
++    deadline: now + MODEL_HOLD_MS,
++    periodEnd: input.funding.end * 1000,
++    ...(input.group ? { group: input.group } : {}),
++    admittedAt: now,
++    runUntil: now + 3 * 86_400_000,
++  }
++  const result = await persistentStore(
++    [
++      "EVAL",
++      ADMISSION_SCRIPTS.ADMIT,
++      13,
++      ...admissionKeys(admission),
++      JSON.stringify({
++        ...admission,
++        funding: input.funding,
++        subscription: input.snapshot.subscription,
++        periodStart: input.snapshot.periodStart,
++        snapshotEnd: input.snapshot.periodEnd,
++        livemode: stripeMode() === "live",
++        runShare: input.run?.ceilingShare,
++        runDeadline: input.run?.deadline,
++        globalLimit: input.globalLimit,
++        priorityReserve: input.priorityReserve ?? 0,
++        graceMs: renewalGraceMinutes() * 60_000,
++      }),
++    ],
++    fetcher,
++  )
++  if (result === "ok") return admission
++  if (typeof result === "string" && result in REFUSALS) {
++    const refusal = REFUSALS[result as keyof typeof REFUSALS]
++    throw new ApiError(refusal.status, refusal.code, refusal.message, {
++      ...(result === "daily" ? { retryAfterSeconds: Math.ceil((86_400_000 - (now % 86_400_000)) / 1000) } : {}),
++      ...(result === "run" ? { detail: { limit: "ceiling" } } : {}),
++    })
++  }
++  throw modelSpendUnavailable()
++}
++
++export async function settleModelPlan(
++  ticket: AdmissionTicket,
++  outcome: { kind: "cancel" | "complete" | "broken"; chargeMicro?: number },
++  fetcher: typeof fetch = fetch,
++  now = Date.now(),
++) {
++  if (
++    !Number.isSafeInteger(now) ||
++    now < 0 ||
++    !safeAmount(now + 30_000) ||
++    !["cancel", "complete", "broken"].includes(outcome.kind) ||
++    (outcome.chargeMicro !== undefined && !safeAmount(outcome.chargeMicro))
++  )
++    throw modelSpendUnavailable()
++  const charge = outcome.kind === "cancel" ? 0 : (outcome.chargeMicro ?? ticket.micro)
++  if (outcome.kind === "broken" && charge > ticket.micro) throw modelSpendUnavailable()
++  const result = await persistentStore(
++    ["EVAL", ADMISSION_SCRIPTS.SETTLE, 13, ...admissionKeys(ticket), JSON.stringify(ticket), outcome.kind, charge, now],
++    fetcher,
++  )
++  if (result !== "ok" && result !== "done" && result !== "missing") throw modelSpendUnavailable()
++  return result
++}
++
++const admissionKeys = (ticket: AdmissionTicket) => [
++  codiumKey("account", ticket.account),
++  codiumKey("ent", ticket.account),
++  codiumKey("held", ticket.pool),
++  codiumKey("debits", ticket.account, ticket.pool),
++  modelSpendKeys(ticket.pool).ledger,
++  modelSpendKeys(ticket.pool).reservations,
++  codiumKey("inflight", ticket.account),
++  codiumKey("inflight", ticket.account, "astra"),
++  codiumKey("inflight", "global"),
++  codiumKey("day", ticket.pool, ticket.day),
++  codiumKey("purpose", ticket.pool),
++  codiumKey("run", ticket.run ?? `no-run-${ticket.account}`),
++  runPoolKey(ticket.run ?? `no-run-${ticket.account}`),
++]
++
++const safeAmount = (value: number) => Number.isSafeInteger(value) && value >= 0
++const share = (value: number) => Number.isFinite(value) && value >= 0 && value <= 1
++
++const REFUSALS = {
++  concurrency: {
++    status: 429,
++    code: "MODEL_PLAN_CONCURRENCY",
++    message: "Your Codium requests are busy. Wait for a request to finish and try again.",
++  },
++  busy: { status: 429, code: "MODEL_PLAN_BUSY", message: "Vector Codium is busy. Try again shortly." },
++  monthly: {
++    status: 402,
++    code: "MODEL_PLAN_EXHAUSTED",
++    message: "Your Codium month is used up or busy with requests. Try again later or choose a larger plan.",
++  },
++  daily: {
++    status: 429,
++    code: "MODEL_PLAN_DAILY_LIMIT",
++    message: "Your Codium daily limit has been reached. Try again tomorrow.",
++  },
++  brain: { status: 429, code: "MODEL_PLAN_BRAIN_SHARE", message: "Codium Brain has reached its share for this month." },
++  run: {
++    status: 429,
++    code: "MODEL_PLAN_RUN_LIMIT",
++    message: "This run has reached its Codium limit. Save your work and finish the run.",
++  },
++  runexpired: {
++    status: 401,
++    code: "MODEL_PLAN_RUN_EXPIRED",
++    message: "This run is no longer authorized. Save your work and start a new run.",
++  },
++} as const
++
++const ADMIT =
++  MODEL_SPEND_LUA +
++  `
++local p = object(ARGV[1])
++if not p or not integer(p.admittedAt) or not integer(p.deadline) or p.deadline ~= p.admittedAt + 660000 or not integer(p.micro) or p.micro == 0 or not typed(KEYS[1], 'string') or not typed(KEYS[2], 'string') then return 'unavailable' end
++local funding = p.funding
++if not funding or not integer(funding.baseMicro, true) or not integer(funding.totalMicro) or not integer(funding.start) or not integer(funding['end']) or funding['end'] <= funding.start or type(funding.accountRecord) ~= 'string' then return 'unavailable' end
++if redis.call('GET', KEYS[1]) ~= funding.accountRecord then return 'unavailable' end
++local account = object(funding.accountRecord)
++local privateKey = account and account.key
++local risk = account and account.risk
++if not privateKey or account.closing or account.upgrade or account.keyCreation or (account.ownerEnd and not account.ownerEnd.done) or (risk and (type(risk) ~= 'table' or risk.blocked ~= false or type(risk.openDisputes) ~= 'table' or next(risk.openDisputes) ~= nil or type(risk.efw) ~= 'table' or next(risk.efw) ~= nil)) or privateKey.provisioning or privateKey.revoked or privateKey.hash ~= p.pool or privateKey.subscription ~= funding.subscription or privateKey.start ~= funding.start or privateKey['end'] ~= funding['end'] or not privateKey.spendGenesis or privateKey.spendGenesis.state ~= 'ready' then return 'unavailable' end
++local snapshot = object(redis.call('GET', KEYS[2]))
++if not snapshot or snapshot.v ~= 1 or snapshot.account ~= p.account or snapshot.livemode ~= p.livemode or snapshot.version ~= p.version or snapshot.meterEpoch ~= p.epoch or snapshot.subscription ~= p.subscription or snapshot.subscription ~= funding.subscription or snapshot.periodStart ~= p.periodStart or snapshot.periodStart ~= funding.start * 1000 or snapshot.periodEnd ~= p.snapshotEnd or snapshot.periodEnd ~= funding['end'] * 1000 or snapshot.meterEpoch ~= funding.subscription .. ':' .. string.format('%.0f', snapshot.periodStart) or (snapshot.state ~= 'active' and snapshot.state ~= 'renewing') or (snapshot.state == 'active' and p.admittedAt >= snapshot.periodEnd) or (snapshot.state == 'renewing' and p.admittedAt >= snapshot.periodEnd + p.graceMs) or p.admittedAt < snapshot.periodStart then return 'unavailable' end
++local caps = snapshot.caps
++local function fraction(value) return type(value) == 'number' and value >= 0 and value <= 1 end
++if not caps or not integer(caps.rank) or caps.rank < 1 or caps.rank > 4 or not integer(caps.inFlight) or caps.inFlight < 1 or type(caps.groups) ~= 'table' or (caps.dailyShare ~= cjson.null and not fraction(caps.dailyShare)) or type(caps.purposeShare) ~= 'table' or not fraction(caps.purposeShare.brain) or type(caps.cloudAgents) ~= 'table' or not fraction(caps.cloudAgents.runCeilingShare) or not purposes[p.purpose] or (p.group ~= nil and p.group ~= 'astra') then return 'unavailable' end
++for i = 7, 9 do if not typed(KEYS[i], 'zset') then return 'unavailable' end end
++if not typed(KEYS[10], 'hash') or not typed(KEYS[11], 'hash') or not typed(KEYS[12], 'string') then return 'unavailable' end
++local spend = model_spend_read(KEYS[5], KEYS[6], KEYS[3], KEYS[4], p.admittedAt, p.account, p.pool)
++if not spend or spend.genesis.subscription ~= funding.subscription or spend.genesis.start ~= funding.start or spend.genesis['end'] ~= funding['end'] or spend.genesis.creation ~= privateKey.spendGenesis.nonce or spend.records[p.ticket] then return 'unavailable' end
++if p.run and not model_run_pool(KEYS[13], p.pool) then return 'runexpired' end
++local function live_count(key)
++  local count = 0
++  local rows = redis.call('ZRANGE', key, 0, -1, 'WITHSCORES')
++  for i = 1, #rows, 2 do
++    local at = integer(rows[i + 1])
++    if not at then return nil end
++    if at > p.admittedAt then count = count + 1 end
++  end
++  return count
++end
++local active, grouped, global = live_count(KEYS[7]), live_count(KEYS[8]), live_count(KEYS[9])
++if not active or not grouped or not global then return 'unavailable' end
++-- Refusal precedence is contractual: account, group, global, month, day, period Brain, run.
++if active >= caps.inFlight then return 'concurrency' end
++if p.group then
++  local limit = integer(caps.groups[p.group])
++  if not limit or grouped >= limit then return 'concurrency' end
++end
++if p.globalLimit ~= nil then
++  if not integer(p.globalLimit) or p.globalLimit < 1 or not fraction(p.priorityReserve) then return 'unavailable' end
++  local limit = caps.rank >= 3 and p.globalLimit or p.globalLimit - math.ceil(p.globalLimit * p.priorityReserve)
++  if global >= limit then return 'busy' end
++end
++local observed = funding.totalMicro - funding.baseMicro
++if not integer(observed) then return 'unavailable' end
++local burden = plus(plus(plus(math.max(observed, spend.committed), spend.reserved), spend.nonmodelHeld), spend.applied)
++if not burden then return 'unavailable' end
++if funding.totalMicro - burden < p.micro then return 'monthly' end
++local daily = integer(redis.call('HGET', KEYS[10], 'total') or '0')
++local brain = integer(redis.call('HGET', KEYS[11], 'brain') or '0')
++local run = integer(redis.call('GET', KEYS[12]) or '0')
++if not daily or not brain or not run then return 'unavailable' end
++for _, record in pairs(spend.records) do
++  if record.state == 'open' then
++    if record.day == p.day then daily = plus(daily, record.micro) end
++    if record.purpose == 'brain' then brain = plus(brain, record.micro) end
++    if p.run and record.run == p.run and record.runUntil > p.admittedAt then run = plus(run, record.micro) end
++    if not daily or not brain or not run then return 'unavailable' end
++  end
++end
++-- Existing nonmodel holds have no admission date. Counting each live unknown-day hold today is conservative.
++for _, held in ipairs(spend.holds) do
++  daily = plus(daily, held.micro)
++  if held.purpose == 'brain' then brain = plus(brain, held.micro) end
++  if p.run and held.run == p.run then run = plus(run, held.micro) end
++  if not daily or not brain or not run then return 'unavailable' end
++end
++local dayStart = p.admittedAt - (p.admittedAt % 86400000)
++for _, debit in ipairs(spend.debits) do
++  if debit.at >= dayStart and debit.at < dayStart + 86400000 then daily = plus(daily, debit.micro) end
++  if debit.purpose == 'brain' then brain = plus(brain, debit.micro) end
++  if p.run and debit.run == p.run then run = plus(run, debit.micro) end
++  if not daily or not brain or not run then return 'unavailable' end
++end
++local dailyNext, brainNext, runNext = plus(daily, p.micro), plus(brain, p.micro), plus(run, p.micro)
++if not dailyNext or not brainNext or not runNext then return 'unavailable' end
++if caps.dailyShare ~= cjson.null and dailyNext > math.floor(funding.totalMicro * caps.dailyShare) then return 'daily' end
++if p.purpose == 'brain' and brainNext > math.floor(funding.totalMicro * caps.purposeShare.brain) then return 'brain' end
++if p.run then
++  if type(p.run) ~= 'string' or #p.run > 128 or p.run == '-' or not string.match(p.run, '^[%w_.-]+$') or not integer(p.runDeadline) or p.runDeadline <= p.admittedAt or (p.runShare ~= nil and not fraction(p.runShare)) then return 'unavailable' end
++  local ceiling = math.min(p.runShare or 1, caps.cloudAgents.runCeilingShare, caps.dailyShare ~= cjson.null and caps.dailyShare or 1)
++  if runNext > math.floor(funding.totalMicro * ceiling) then return 'run' end
++end
++local record = {account=p.account,pool=p.pool,ticket=p.ticket,member=p.member,purpose=p.purpose,run=p.run,micro=p.micro,day=p.day,epoch=p.epoch,version=p.version,deadline=p.deadline,periodEnd=p.periodEnd,group=p.group,admittedAt=p.admittedAt,runUntil=p.runUntil,state='open'}
++local parsed = member(record.member)
++if not parsed or parsed.ticket ~= record.ticket or parsed.purpose ~= record.purpose or parsed.run ~= (record.run or '-') or parsed.micro ~= record.micro then return 'unavailable' end
++local keep = math.max(p.periodEnd + 3456000000, p.runUntil, p.deadline + 30000)
++local nextReserved, nextOpen = plus(spend.reserved, p.micro), plus(spend.openCount, 1)
++if not nextReserved or not nextOpen then return 'unavailable' end
++model_spend_compact(spend, KEYS[5], KEYS[6])
++local reservationsNew = redis.call('EXISTS', KEYS[6]) == 0
++redis.call('HSET', KEYS[6], p.ticket, model_record_encode(record))
++redis.call('HSET', KEYS[5], 'reserved', string.format('%.0f', nextReserved), 'openCount', string.format('%.0f', nextOpen))
++if p.run then model_bind_run_pool(KEYS[13], p.pool, p.runUntil, p.admittedAt) end
++if reservationsNew then redis.call('PEXPIREAT', KEYS[6], keep) else grow(KEYS[6], keep, p.admittedAt) end
++redis.call('ZREMRANGEBYSCORE', KEYS[3], '-inf', p.admittedAt)
++local heldNew = redis.call('EXISTS', KEYS[3]) == 0
++redis.call('ZADD', KEYS[3], p.deadline, p.member)
++for i = 7, 9 do
++  if i ~= 8 or p.group then
++    redis.call('ZREMRANGEBYSCORE', KEYS[i], '-inf', p.admittedAt)
++    local fresh = redis.call('EXISTS', KEYS[i]) == 0
++    redis.call('ZADD', KEYS[i], p.deadline, p.account .. ':' .. p.ticket)
++    -- A later short request may never shorten an earlier live reservation.
++    if fresh then redis.call('PEXPIREAT', KEYS[i], p.deadline) else grow(KEYS[i], p.deadline, p.admittedAt) end
++  end
++end
++if heldNew then redis.call('PEXPIREAT', KEYS[3], p.deadline) else grow(KEYS[3], p.deadline, p.admittedAt) end
++return 'ok'
++`
++
++const SETTLE =
++  MODEL_SPEND_LUA +
++  `
++local p, kind, charge, now = object(ARGV[1]), ARGV[2], integer(ARGV[3]), integer(ARGV[4])
++if not p or not charge or not now or (kind ~= 'cancel' and kind ~= 'complete' and kind ~= 'broken') then return 'unavailable' end
++local spend = model_spend_read(KEYS[5], KEYS[6], KEYS[3], KEYS[4], now, p.account, p.pool)
++if not spend then return 'unavailable' end
++local record = spend.records[p.ticket]
++if not record then return 'missing' end
++for _, field in ipairs({'account','pool','ticket','member','purpose','run','micro','day','epoch','version','deadline','periodEnd','group','admittedAt','runUntil'}) do
++  if record[field] ~= p[field] then return 'unavailable' end
++end
++if record.state == 'done' then return 'done' end
++if (kind == 'cancel' and charge ~= 0) or (kind == 'broken' and charge > record.micro) then return 'unavailable' end
++for i = 7, 9 do if not typed(KEYS[i], 'zset') then return 'unavailable' end end
++if not typed(KEYS[10], 'hash') or not typed(KEYS[11], 'hash') or not typed(KEYS[12], 'string') then return 'unavailable' end
++local daily = integer(redis.call('HGET', KEYS[10], 'total') or '0')
++local dailyBrain = integer(redis.call('HGET', KEYS[10], 'brain') or '0')
++local brain = integer(redis.call('HGET', KEYS[11], 'brain') or '0')
++local run = integer(redis.call('GET', KEYS[12]) or '0')
++local committed = plus(spend.committed, charge)
++local nextDaily = plus(daily, charge)
++local nextDailyBrain = plus(dailyBrain, record.purpose == 'brain' and charge or 0)
++local nextBrain = plus(brain, record.purpose == 'brain' and charge or 0)
++local nextRun = plus(run, record.run and charge or 0)
++if not committed or not nextDaily or not nextDailyBrain or not nextBrain or not nextRun then return 'unavailable' end
++local dayNew, purposeNew, runNew = redis.call('EXISTS', KEYS[10]) == 0, redis.call('EXISTS', KEYS[11]) == 0, redis.call('EXISTS', KEYS[12]) == 0
++record.state, record.charge, record.kind = 'done', charge, kind
++record.gcAt = math.max(record.deadline, now + 30000)
++model_spend_compact(spend, KEYS[5], KEYS[6])
++redis.call('HSET', KEYS[6], p.ticket, model_record_encode(record))
++redis.call('HSET', KEYS[5], 'committed', string.format('%.0f', committed), 'reserved', string.format('%.0f', spend.reserved - record.micro), 'openCount', string.format('%.0f', spend.openCount - 1))
++-- Immutable original budget keys are used even after an upgrade or UTC midnight.
++local keep = record.periodEnd + 3456000000
++if now < keep then
++  redis.call('HSET', KEYS[10], 'total', string.format('%.0f', nextDaily), 'brain', string.format('%.0f', nextDailyBrain))
++  redis.call('HSET', KEYS[11], 'brain', string.format('%.0f', nextBrain))
++  if dayNew then redis.call('PEXPIREAT', KEYS[10], keep) else grow(KEYS[10], keep, now) end
++  if purposeNew then redis.call('PEXPIREAT', KEYS[11], keep) else grow(KEYS[11], keep, now) end
++end
++if record.run and now < record.runUntil then
++  redis.call('SET', KEYS[12], string.format('%.0f', nextRun), 'KEEPTTL')
++  if runNew then redis.call('PEXPIREAT', KEYS[12], record.runUntil) else grow(KEYS[12], record.runUntil, now) end
++end
++for i = 7, 9 do redis.call('ZREM', KEYS[i], p.account .. ':' .. p.ticket) end
++-- Expiry cannot resurrect a monthly hold. The durable floor above still records late actual/unknown charges.
++local wasHeld = redis.call('ZSCORE', KEYS[3], record.member)
++if kind ~= 'broken' then redis.call('ZREM', KEYS[3], record.member) end
++if kind == 'complete' and wasHeld and tonumber(wasHeld) > now and now < record.deadline and charge > 0 then
++  local bridge = record.ticket .. ':' .. record.purpose .. ':' .. (record.run or '-') .. ':' .. string.format('%.0f', charge)
++  local fresh = redis.call('EXISTS', KEYS[3]) == 0
++  redis.call('ZADD', KEYS[3], now + 30000, bridge)
++  if fresh then redis.call('PEXPIREAT', KEYS[3], now + 30000) else grow(KEYS[3], now + 30000, now) end
++end
++return 'ok'
++`
++
++export const ADMISSION_SCRIPTS = Object.freeze({ ADMIT, SETTLE })
+diff --git a/api/_lib/model-plan-catalog-policy.ts b/api/_lib/model-plan-catalog-policy.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..e0b769abea9ec3f280814e2ac5182fec755f4848
+--- /dev/null
++++ b/api/_lib/model-plan-catalog-policy.ts
+@@ -0,0 +1,76 @@
++import { CodiumPlan } from "../../packages/schema/src/codium-plan.js"
++import { CODIUM_MODELS, CODIUM_TIER_MODELS } from "./codium-catalog.js"
++import { configuredPlanModels, type ModelPlanModel } from "./model-plan-config.js"
++import { CAPTURED_RESERVATIONS, RESERVATION_CAPTURE, ROUTE_ACCEPTANCES } from "./codium-reservations.js"
++
++/** Apply approved access tiers to the verified active catalog without activating the staged routes or larger windows. */
++export function gatewayPlanModels(): readonly ModelPlanModel[] {
++  return configuredPlanModels().map((model) => {
++    const policy = CODIUM_TIER_MODELS.find((candidate) => candidate.id === model.id)
++    return {
++      ...model,
++      minPlan:
++        policy && CodiumPlan.rank(policy.minPlan) > CodiumPlan.rank(model.minPlan) ? policy.minPlan : model.minPlan,
++      ...(policy ? { lab: policy.lab } : {}),
++      ...(CAPTURED_RESERVATIONS[model.id] ? { providerOnly: [CAPTURED_RESERVATIONS[model.id]!.tag] } : {}),
++    }
++  })
++}
++
++/**
++ * Only the unchanged captured five-model routing policy is qualified for production today. New variants, pins,
++ * effort values or larger windows need provider evidence before this boundary can authorize them. Local HTTP fakes
++ * inject their own explicit qualification; no environment flag can qualify a route.
++ */
++export function capturedGatewayModel(model: ModelPlanModel) {
++  const reviewed: ModelPlanModel | undefined = CODIUM_MODELS.find((candidate) => candidate.id === model.id)
++  const bounds = CAPTURED_RESERVATIONS[model.id]
++  if (
++    !reviewed ||
++    !bounds ||
++    model.upstream !== undefined ||
++    model.providerOnly?.length !== 1 ||
++    model.providerOnly[0] !== bounds.tag ||
++    model.tierContext !== undefined ||
++    model.inFlightGroup !== undefined ||
++    !Number.isSafeInteger(model.contextLength) ||
++    !Number.isSafeInteger(model.maxOutputTokens) ||
++    model.contextLength < model.maxOutputTokens ||
++    model.maxOutputTokens < 1 ||
++    model.contextLength > reviewed.contextLength ||
++    model.maxOutputTokens > reviewed.maxOutputTokens
++  )
++    return false
++  return (
++    [
++      "inputPrice",
++      "outputPrice",
++      "quantizations",
++      "reasoningEffort",
++      "explicitCache",
++      "cacheStyle",
++      "autoToolChoice",
++      "outputTokenParameter",
++      "promptTokenLimit",
++      "options",
++    ] as const
++  ).every((field) => JSON.stringify(model[field]) === JSON.stringify(reviewed[field]))
++}
++
++export function verifiedGatewayModel(model: ModelPlanModel) {
++  if (!capturedGatewayModel(model)) return false
++  return ROUTE_ACCEPTANCES.some(
++    (accepted) =>
++      accepted.model === model.id &&
++      accepted.tag === model.providerOnly?.[0] &&
++      accepted.captureSha256 === RESERVATION_CAPTURE.sha256 &&
++      accepted.source.trim() &&
++      Number.isSafeInteger(accepted.acceptedAt) &&
++      accepted.acceptedAt > 0 &&
++      accepted.acceptedAt <= Date.now() &&
++      accepted.nativeWindowEnforced &&
++      accepted.outputIncludesReasoning &&
++      accepted.exactTagWithZdr &&
++      accepted.capturedRatesBoundCharges,
++  )
++}
+diff --git a/api/_lib/model-plan-chat.ts b/api/_lib/model-plan-chat.ts
+index f9a7659cdde07c5e494a007810fa161c98882a04..bb72a9853e2530f9cf93e5ce0e3b56f64d8bea27 100644
+--- a/api/_lib/model-plan-chat.ts
++++ b/api/_lib/model-plan-chat.ts
+@@ -1,11 +1,21 @@
+-import { createHash } from "node:crypto"
++import { createHash, randomInt } from "node:crypto"
+ import { once } from "node:events"
+ import { Option, Schema } from "effect"
+ import { enforceRateLimit, requireTrustedJsonRequest } from "./abuse.js"
+-import { requireModelPlanCaller, requireModelPlanClient } from "./model-plan-caller.js"
+-import { modelPlanCredential } from "./model-plan-account.js"
++import { CodiumPlan } from "../../packages/schema/src/codium-plan.js"
++import type { EntitlementSnapshot } from "../../packages/schema/src/codium-entitlements.js"
++import { requireModelPlanCaller, requireModelPlanClient, type ModelPlanCaller } from "./model-plan-caller.js"
++import { modelPlanAdmissionCredential, readModelPlanAccount } from "./model-plan-account.js"
++import { admitModelPlan, settleModelPlan, type AdmissionTicket } from "./model-plan-admit.js"
++import { gatewayPlanModels, verifiedGatewayModel } from "./model-plan-catalog-policy.js"
++import { beforeAdmit, afterSettle, type GatewayHookOptions } from "./model-plan-gateway-hooks.js"
++import { requireEntitlement, reconcileOnDemand } from "./codium-entitlements.js"
++import { readDisabledSet } from "./codium-switches.js"
++import { CODIUM_TIER_MODELS } from "./codium-catalog.js"
++import { usdToMicroCeil } from "./codium-pool.js"
+ import {
+-  configuredPlanModels,
++  effectiveModel,
++  modelAccess,
+   MODEL_PLAN_OPTIONS,
+   MODEL_PLAN_ROOT,
+   modelPlanRequestCredits,
+@@ -122,7 +132,7 @@ export function modelPlanRequest(body: unknown, models: readonly ModelPlanModel[
+           ),
+         }
+       : {}),
+-    model: model.id,
++    model: model.upstream ?? model.id,
+     messages: model.explicitCache ? cacheBreakpoints(messages, model.cacheStyle) : messages,
+     ...(model.explicitCache && model.cacheStyle === "openai"
+       ? { prompt_cache_options: { mode: "explicit", ttl: "30m" } }
+@@ -147,6 +157,7 @@ export function modelPlanRequest(body: unknown, models: readonly ModelPlanModel[
+       data_collection: "deny",
+       zdr: true,
+       require_parameters: true,
++      ...(model.providerOnly ? { only: [...model.providerOnly], allow_fallbacks: false } : {}),
+       ...(model.quantizations ? { quantizations: model.quantizations } : {}),
+       // Media and native add-ons are rejected above. An image-price filter would also remove Gemini's text route.
+       max_price: { prompt: model.inputPrice, completion: model.outputPrice, request: 0 },
+@@ -232,7 +243,7 @@ function promptBound(text: string, bytes: number, escapes: number) {
+  * Streams the provider's answer to Vector. Once the answer finishes it returns what the provider said it charged; when
+  * Vector goes away first it returns nothing, since the provider may still be producing, and billing, the answer.
+  */
+-export async function streamModelPlanResponse(upstream: Response, response: ApiResponse) {
++export async function streamModelPlanResponse(upstream: Response, response: ApiResponse, onByte?: () => void) {
+   if (upstream.status === 402 || upstream.status === 429) {
+     const retry = upstream.headers.get("retry-after")
+     if (retry && /^\d+$/.test(retry) && Number(retry) > 0)
+@@ -270,6 +281,7 @@ export async function streamModelPlanResponse(upstream: Response, response: ApiR
+   try {
+     while (!response.destroyed) {
+       const part = await reader.read()
++      if (part.value?.byteLength) onByte?.()
+       state.pending += decoder.decode(part.value, { stream: !part.done })
+       if (state.pending.length > 1_000_000)
+         throw new ApiError(503, "MODEL_PLAN_STREAM", "The model returned an invalid response stream.")
+@@ -351,15 +363,35 @@ function contextRefused(body: string) {
+   return /context[ _-]?(length|window)|maximum context|too many tokens|prompt is too long/i.test(body.slice(0, 8_192))
+ }
+ 
+-export async function handleModelPlanChat(request: ApiRequest, response: ApiResponse, fetcher: typeof fetch = fetch) {
++export type ModelPlanGatewayOptions = GatewayHookOptions & {
++  /** Explicit trusted dependencies for local fakes; production uses the captured active catalog and qualification. */
++  models?: readonly ModelPlanModel[]
++  qualify?: (model: ModelPlanModel) => boolean
++  reservation?: typeof modelPlanRequestCredits
++  runVerifiers?: Parameters<typeof requireModelPlanCaller>[3]
++}
++
++export async function handleModelPlanChat(
++  request: ApiRequest,
++  response: ApiResponse,
++  fetcher: typeof fetch = fetch,
++  options: ModelPlanGatewayOptions = {},
++) {
+   const controller = new AbortController()
+   const close = () => controller.abort()
+-  // The credits held for this request until it settles, and how its answer went: whether the provider began one, and
+-  // what it charged once the answer finished.
+-  const hold = {
+-    release: async (_charge?: number) => {},
++  const startedAt = Date.now()
++  const state = {
++    caller: undefined as ModelPlanCaller | undefined,
++    snapshot: undefined as EntitlementSnapshot | undefined,
++    model: undefined as ModelPlanModel | undefined,
++    ticket: undefined as AdmissionTicket | undefined,
+     required: 0,
+     streamed: false,
++    dispatched: false,
++    dispatchedAttempts: 0,
++    attemptMicro: 0,
++    uncertainAttempts: 0,
++    settled: false,
+     finished: undefined as { charge?: number } | undefined,
+   }
+   response.once("close", close)
+@@ -368,40 +400,122 @@ export async function handleModelPlanChat(request: ApiRequest, response: ApiResp
+     requireTrustedJsonRequest(request, MAX_BYTES)
+     requireModelPlans()
+     requireModelPlanClient(request)
+-    const caller = await requireModelPlanCaller(request, fetcher)
+-    const account = caller.account
+-    const body = modelPlanRequest(await readJson(request, MAX_BYTES), configuredPlanModels())
++    const caller = await requireModelPlanCaller(request, fetcher, Date.now(), options.runVerifiers)
++    state.caller = caller
++    const catalog = options.models ?? gatewayPlanModels()
++    const raw = await readJson<unknown>(request, MAX_BYTES)
++    const selected = stripeRecord(raw) && typeof raw.model === "string" ? raw.model : ""
++    const model = catalog.find((model) => model.id === selected)
++    const disabled = await readDisabledSet("models-off", fetcher)
++    if (
++      disabled.has(selected) ||
++      (model?.upstream && disabled.has(model.upstream)) ||
++      (!model && CODIUM_TIER_MODELS.some((candidate) => candidate.id === selected))
++    )
++      throw modelUnavailable()
++    const body = modelPlanRequest(raw, catalog)
++    if (!model) throw modelUnavailable()
++    state.model = model
++    const snapshot = await requireEntitlement(caller.account.id, "codium", fetcher)
++    state.snapshot = snapshot
++    if (!snapshot.plan || !CodiumPlan.isPlanId(snapshot.plan))
++      throw new ApiError(402, "MODEL_PLAN_REQUIRED", "Choose a Vector Codium plan to use this model.")
+     await enforceRateLimit(request, response, {
+       scope: "model-plan-minute",
+-      identifier: account.id,
+-      limit: 30,
++      identifier: caller.account.id,
++      limit: snapshot.caps.perMinute,
+       windowSeconds: 60,
+       requirePersistent: true,
+     })
+-    const model = configuredPlanModels().find((model) => model.id === body.model)!
+-    // Check the context, tool schemas included, before reserving provider credit.
+-    requireModelPlanContext(body, model)
+-    hold.required = modelPlanRequestCredits(model)
+-    const funding = await modelPlanCredential(account.id, fetcher, Date.now(), hold.required)
+-    hold.release = funding.release
+-    const upstream = await fetcher(`${MODEL_PLAN_ROOT}/chat/completions`, {
+-      method: "POST",
+-      redirect: "error",
+-      signal: AbortSignal.any([controller.signal, AbortSignal.timeout(600_000)]),
+-      headers: {
+-        authorization: `Bearer ${funding.key}`,
+-        "content-type": "application/json",
+-        "HTTP-Referer": "https://vectordev.ai/",
+-        "X-OpenRouter-Title": "Vector",
++    const current = await refreshLockedModel(caller, snapshot, model, fetcher)
++    state.snapshot = current
++    if (!current.plan || !CodiumPlan.isPlanId(current.plan))
++      throw new ApiError(402, "MODEL_PLAN_REQUIRED", "Choose a Vector Codium plan to use this model.")
++    if (!modelAccess(model, current.plan)) throw modelUpgradeRequired(model)
++    if (!(options.qualify ?? verifiedGatewayModel)(model)) throw modelUnavailable()
++    const effective = effectiveModel(model, current.plan)
++    state.model = effective
++    requireModelPlanContext(body, effective)
++    const toolNames =
++      stripeRecord(raw) && Array.isArray(raw.tools)
++        ? raw.tools.flatMap((tool: unknown) =>
++            stripeRecord(tool)
++              ? [tool.type, stripeRecord(tool.function) ? tool.function.name : undefined].filter(
++                  (name): name is string => typeof name === "string",
++                )
++              : [],
++          )
++        : []
++    await beforeAdmit(caller, { snapshot: current, model: effective, toolNames }, options)
++    if (controller.signal.aborted) throw new ApiError(499, "MODEL_PLAN_CANCELLED", "The request was cancelled.")
++    const funding = await modelPlanAdmissionCredential(caller.account.id, fetcher)
++    const admittedAt = Date.now()
++    if (caller.run && caller.run.deadline <= admittedAt)
++      throw new ApiError(
++        401,
++        "MODEL_PLAN_RUN_EXPIRED",
++        "This run is no longer authorized. Save your work and finish the run.",
++      )
++    if (controller.signal.aborted) throw new ApiError(499, "MODEL_PLAN_CANCELLED", "The request was cancelled.")
++    state.required = (options.reservation ?? modelPlanRequestCredits)(effective, current.plan)
++    state.attemptMicro = Math.ceil(usdToMicroCeil(state.required) / (CodiumPlan.rank(current.plan) >= 3 ? 2 : 1))
++    state.ticket = await admitModelPlan(
++      {
++        snapshot: current,
++        funding: {
++          pool: funding.pool,
++          baseMicro: funding.baseMicro,
++          totalMicro: funding.totalMicro,
++          subscription: funding.subscription,
++          start: funding.start,
++          end: funding.end,
++          accountRecord: funding.accountRecord,
++        },
++        requiredMicro: usdToMicroCeil(state.required),
++        purpose: caller.purpose,
++        group: effective.inFlightGroup,
++        run: caller.run,
++        ...globalAdmissionLimits(),
+       },
+-      body: JSON.stringify({ ...body, user: createHash("sha256").update(account.id).digest("hex") }),
++      fetcher,
++      admittedAt,
++    )
++    const deadline = Math.min(admittedAt + 600_000, caller.run?.deadline ?? Infinity)
++    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(Math.max(1, deadline - Date.now()))])
++    const send = async () => {
++      if (signal.aborted || Date.now() >= deadline)
++        throw new ApiError(503, "MODEL_PLAN_UNAVAILABLE", "This model request timed out. Try again shortly.")
++      state.dispatched = true
++      state.dispatchedAttempts++
++      return fetcher(`${MODEL_PLAN_ROOT}/chat/completions`, {
++        method: "POST",
++        redirect: "error",
++        signal,
++        headers: {
++          authorization: `Bearer ${funding.key}`,
++          "content-type": "application/json",
++          "HTTP-Referer": "https://vectordev.ai/",
++          "X-OpenRouter-Title": "Vector",
++        },
++        body: JSON.stringify({ ...body, user: createHash("sha256").update(caller.account.id).digest("hex") }),
++      })
++    }
++    const first = await send()
++    const retry = CodiumPlan.rank(current.plan) >= 3 && (first.status === 429 || first.status === 503)
++    if (retry) {
++      state.uncertainAttempts++
++      await first.body?.cancel().catch(() => undefined)
++    }
++    const upstream = retry ? await send() : first
++    // A refusal or transport failure after dispatch can still have cost. The fixed reserve covers both possible attempts.
++    state.finished = await streamModelPlanResponse(upstream, response, () => {
++      state.streamed = true
+     })
+-    hold.streamed = upstream.ok
+-    hold.finished = await streamModelPlanResponse(upstream, response)
+   } catch (error) {
+     if (response.destroyed) return
+     const payload = {
+       error: {
++        ...(error instanceof ApiError ? error.detail : {}),
+         code: error instanceof ApiError ? error.code : "MODEL_PLAN_UNAVAILABLE",
+         message: error instanceof ApiError ? error.message : "Model access is temporarily unavailable.",
+       },
+@@ -415,15 +529,89 @@ export async function handleModelPlanChat(request: ApiRequest, response: ApiResp
+       json(response, 429, payload)
+       return
+     }
++    if (error instanceof ApiError && error.retryAfterSeconds !== undefined)
++      response.setHeader("retry-after", String(Math.max(1, Math.ceil(error.retryAfterSeconds))))
++    if (error instanceof ApiError && error.code === "MODEL_PLAN_CONCURRENCY")
++      response.setHeader("retry-after-ms", String(randomInt(1500, 4001)))
+     json(response, error instanceof ApiError ? error.statusCode : 503, payload)
+   } finally {
+     request.resume()
+     response.off("close", close)
+     controller.abort()
+-    // A request the provider never answered frees its hold at once, and one whose answer finished keeps only its charge,
+-    // or its largest cost when the provider named none, until the key's usage shows it. An answer that broke off or
+-    // that Vector cancelled may still be billed when the provider finishes, so its hold stays until it lapses.
+-    if (!hold.streamed || hold.finished)
+-      await hold.release(hold.finished ? (hold.finished.charge ?? hold.required) : undefined).catch(() => undefined)
++    if (state.ticket) {
++      const outcome = state.finished
++        ? {
++            kind: "complete" as const,
++            chargeMicro:
++              (state.finished.charge === undefined ? state.attemptMicro : usdToMicroCeil(state.finished.charge)) +
++              state.uncertainAttempts * state.attemptMicro,
++          }
++        : state.dispatched
++          ? { kind: "broken" as const, chargeMicro: state.dispatchedAttempts * state.attemptMicro }
++          : { kind: "cancel" as const }
++      // Settlement is idempotent. A lost response gets one retry without releasing or charging a second ticket.
++      state.settled = await settleModelPlan(state.ticket, outcome, fetcher)
++        .catch(() => settleModelPlan(state.ticket!, outcome, fetcher))
++        .then(() => true)
++        .catch(() => false)
++    }
++    if (state.settled && state.caller && state.snapshot && state.model)
++      await afterSettle(
++        state.caller,
++        {
++          snapshot: state.snapshot,
++          model: state.model,
++          charge: state.finished?.charge,
++          startedAt,
++          endedAt: Date.now(),
++          streamed: state.streamed,
++        },
++        options,
++      ).catch(() => undefined)
+   }
+ }
++
++function modelUnavailable() {
++  return new ApiError(
++    503,
++    "MODEL_PLAN_MODEL_UNAVAILABLE",
++    "This model is temporarily unavailable. Choose another included model.",
++  )
++}
++function modelUpgradeRequired(model: ModelPlanModel) {
++  const plan =
++    model.previewUntil !== undefined && Date.now() < model.previewUntil ? "vector-200" : (model.minPlan ?? "vector-10")
++  return new ApiError(403, "MODEL_PLAN_UPGRADE_REQUIRED", "Change your Codium plan to use this model.", {
++    detail: {
++      plan,
++      planName: CodiumPlan.name(plan),
++      ...(model.previewUntil ? { previewUntil: model.previewUntil } : {}),
++    },
++  })
++}
++async function refreshLockedModel(
++  caller: ModelPlanCaller,
++  snapshot: EntitlementSnapshot,
++  model: ModelPlanModel,
++  fetcher: typeof fetch,
++) {
++  if (!snapshot.plan || modelAccess(model, snapshot.plan)) return snapshot
++  const account = await readModelPlanAccount(caller.account.id, fetcher)
++  const checkout = account?.checkout
++  if (!checkout || checkout.expires - 30 * 60_000 < Date.now() - 60 * 60_000) return snapshot
++  return (await reconcileOnDemand(caller.account.id, fetcher)) ?? snapshot
++}
++function globalAdmissionLimits() {
++  const configured = process.env.MODEL_PLAN_GLOBAL_INFLIGHT?.trim()
++  const reserve = process.env.MODEL_PLAN_PRIORITY_RESERVE?.trim()
++  const globalLimit = configured ? Number(configured) : undefined
++  const priorityReserve = reserve ? Number(reserve) : 0.2
++  if (
++    (globalLimit !== undefined && (!Number.isSafeInteger(globalLimit) || globalLimit < 1 || globalLimit > 100000)) ||
++    !Number.isFinite(priorityReserve) ||
++    priorityReserve < 0 ||
++    priorityReserve >= 1
++  )
++    throw new ApiError(503, "MODEL_PLANS_CONFIGURATION", "Vector Codium is temporarily unavailable.")
++  return { globalLimit, priorityReserve }
++}
+diff --git a/api/_lib/model-plan-config.ts b/api/_lib/model-plan-config.ts
+index cae892f3a9b89cd8f3424800f76a117efe28f0f2..5f7c4fa8b7cbeab1fed54da38a744c721f1055b0 100644
+--- a/api/_lib/model-plan-config.ts
++++ b/api/_lib/model-plan-config.ts
+@@ -3,6 +3,7 @@ import { ENTITLEMENTS } from "../../packages/schema/src/codium-entitlements.js"
+ import { CodiumPlan } from "../../packages/schema/src/codium-plan.js"
+ import { ApiError } from "./http.js"
+ import { CODIUM_RUNTIME_CATALOG_UPDATED, CODIUM_MODELS, CODIUM_TIER_MODELS } from "./codium-catalog.js"
++import { capturedReservationMicro } from "./codium-reservations.js"
+ import { codiumLimitProblems, testCreditCapUsd } from "./codium-limits.js"
+ import { stripeMode, stripeModeProblems, requireStripeMode, type StripeMode } from "./model-plan-stripe.js"
+ 
+@@ -50,12 +51,23 @@ export const ModelPlanModel = Schema.Struct({
+ export type ModelPlanModel = typeof ModelPlanModel.Type
+ 
+ /**
+- * The credits a request to this model must find available, and holds until it settles: its whole context at the input
+- * price plus its longest reply at the output price, the most one request can cost. It comes from the public catalog
++ * The fixed reservation a request must find available. Captured models use the entire native provider window and
++ * all captured price tiers, plus their maximum reply, after the owner's A17 reservation decision. It comes from the catalog
+  * and never from the request, so a refusal says only that the credits available are below this one public amount. Sized
+  * from the request instead, a client could vary max_tokens and read back exactly how much is left.
+  */
+ export function modelPlanRequestCredits(model: ModelPlanModel, plan?: CodiumPlan.PlanId) {
++  if (plan !== undefined && !CodiumPlan.isPlanId(plan)) throw configurationError()
++  const captured = capturedReservationMicro(model)
++  if (captured === undefined)
++    throw new ApiError(503, "MODEL_PLAN_MODEL_UNAVAILABLE", "A reservation for this model could not be verified.")
++  // A 429/503 response is not proof that the first attempt cost nothing. Higher tiers can dispatch two attempts.
++  return (captured * (plan === undefined || CodiumPlan.rank(plan) >= 3 ? 2 : 1)) / 1_000_000
++}
++
++/** Unqualified planning/status estimate only. This function never authorizes a real hold or provider route. */
++export function nominalModelPlanRequestCredits(model: ModelPlanModel, plan?: CodiumPlan.PlanId) {
++  if (plan !== undefined && !CodiumPlan.isPlanId(plan)) throw configurationError()
+   const context =
+     plan === undefined
+       ? Math.max(model.contextLength, ...Object.values(model.tierContext ?? {}))
+diff --git a/api/_lib/model-plan-gateway-hooks.ts b/api/_lib/model-plan-gateway-hooks.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..d44f12e0b9bd35434a0f6fc07fe40827a860548c
+--- /dev/null
++++ b/api/_lib/model-plan-gateway-hooks.ts
+@@ -0,0 +1,74 @@
++import type { EntitlementSnapshot } from "../../packages/schema/src/codium-entitlements.js"
++import { ApiError } from "./http.js"
++import type { ModelPlanCaller } from "./model-plan-caller.js"
++import type { ModelPlanModel } from "./model-plan-config.js"
++
++export type BeforeAdmitContext = { snapshot: EntitlementSnapshot; model: ModelPlanModel; toolNames: readonly string[] }
++export type AfterSettleContext = {
++  snapshot: EntitlementSnapshot
++  model: ModelPlanModel
++  charge?: number
++  startedAt: number
++  endedAt: number
++  streamed: boolean
++}
++export type GatewayHook = {
++  id: string
++  beforeAdmit?(caller: ModelPlanCaller, context: BeforeAdmitContext): Promise<void>
++  afterSettle?(caller: ModelPlanCaller, context: AfterSettleContext): Promise<void>
++}
++export type GatewayHookOptions = {
++  hooks?: readonly GatewayHook[]
++  assertHostedSessionLive?: (sessionId: string) => Promise<boolean>
++}
++const hooks = new Map<string, GatewayHook>()
++export function createHostedSessionVerifierRegistry() {
++  const verifiers = new Map<"live", (sessionId: string) => Promise<boolean>>()
++  return {
++    register(verify: (sessionId: string) => Promise<boolean>) {
++      if (typeof verify !== "function" || verifiers.has("live"))
++        throw new Error("The Codium hosted session has exactly one verifier.")
++      verifiers.set("live", verify)
++    },
++    get: () => verifiers.get("live"),
++  }
++}
++const hosted = createHostedSessionVerifierRegistry()
++
++/** Static service imports register once. Tests inject scoped hooks rather than replacing production handlers. */
++export function registerGatewayHook(hook: GatewayHook) {
++  if (!/^[a-z][a-z0-9-]{0,63}$/.test(hook.id) || hooks.has(hook.id))
++    throw new Error("A Codium gateway hook must have one unique id.")
++  hooks.set(hook.id, hook)
++}
++export function registerHostedSessionVerifier(verify: (sessionId: string) => Promise<boolean>) {
++  hosted.register(verify)
++}
++
++export async function beforeAdmit(
++  caller: ModelPlanCaller,
++  context: BeforeAdmitContext,
++  options: GatewayHookOptions = {},
++) {
++  if (caller.kind === "run") {
++    // Purpose comes from the signed verifier, and may be review. Service, not purpose, owns these restrictions.
++    if (caller.run?.service === "cloud-agents" && context.toolNames.some((name) => /^computer(?:$|[_-])/i.test(name)))
++      throw new ApiError(403, "MODEL_PLAN_BLOCKED", "Computer-use tools are not available to this run.")
++    if (caller.run?.service === "hosted") {
++      const verify = options.assertHostedSessionLive ?? hosted.get()
++      if (!verify || !caller.run.sessionId)
++        throw new ApiError(503, "HOSTED_UNAVAILABLE", "The hosted session could not be verified.")
++      if (!(await verify(caller.run.sessionId)))
++        throw new ApiError(409, "HOSTED_SESSION_PAUSED", "The hosted session is paused while you have control.")
++    }
++  }
++  for (const hook of options.hooks ?? hooks.values()) await hook.beforeAdmit?.(caller, context)
++}
++
++export async function afterSettle(
++  caller: ModelPlanCaller,
++  context: AfterSettleContext,
++  options: GatewayHookOptions = {},
++) {
++  for (const hook of options.hooks ?? hooks.values()) await hook.afterSettle?.(caller, context)
++}
+diff --git a/api/_lib/model-plan-status.ts b/api/_lib/model-plan-status.ts
+index f0ce051e8c6fc7417e14cb67cef1445095c4d6be..e97fc8f7abb6628dc19ba1d993fc0480b92fa732 100644
+--- a/api/_lib/model-plan-status.ts
++++ b/api/_lib/model-plan-status.ts
+@@ -1,6 +1,14 @@
+ import { modelPlanStatus } from "./model-plan-account.js"
+ import { requireBillingUser } from "./model-plan-billing.js"
+-import { configuredPlanModels, modelPlanRequestCredits, modelPlans, modelPlansEnabled } from "./model-plan-config.js"
++import {
++  configuredPlanModels,
++  modelPlanRequestCredits,
++  nominalModelPlanRequestCredits,
++  modelPlans,
++  modelPlansEnabled,
++} from "./model-plan-config.js"
++import { capturedReservationMicro } from "./codium-reservations.js"
++import { CodiumPlan } from "../../packages/schema/src/codium-plan.js"
+ import { handleApiError, json, requireMethod, type ApiRequest, type ApiResponse } from "./http.js"
+ 
+ export async function handleModelPlanStatus(request: ApiRequest, response: ApiResponse, fetcher: typeof fetch = fetch) {
+@@ -36,7 +44,13 @@ export function modelPlanBalance(status: Awaited<ReturnType<typeof modelPlanStat
+   const remaining = status.active ? status.remaining : 0
+   // The gateway refuses a request unless the credits available cover the model's largest request, so below the
+   // cheapest such amount in the catalog every request is refused.
+-  const requests = configuredPlanModels().map((model) => modelPlanRequestCredits(model))
++  const plan = status.active && CodiumPlan.isPlanId(status.plan) ? status.plan : undefined
++  // An unqualified custom catalog can retain a read-only legacy status; its nominal estimate grants no admission.
++  const requests = configuredPlanModels().map((model) =>
++    capturedReservationMicro(model) === undefined
++      ? nominalModelPlanRequestCredits(model, plan)
++      : modelPlanRequestCredits(model, plan),
++  )
+   const cheapest = requests.length ? Math.min(...requests) : 0
+   const empty = remaining !== undefined && (remaining <= 0 || remaining < cheapest)
+   return {
+diff --git a/docs/vector/build/codium-a17-context-decision.md b/docs/vector/build/codium-a17-context-decision.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..991000a7509743d675f32540c1692050a3a69712
+--- /dev/null
++++ b/docs/vector/build/codium-a17-context-decision.md
+@@ -0,0 +1,32 @@
++# A17 context and reservation policy decision
++
++The owner selected: **"Use larger fixed reservations to preserve context windows; requests may require more available balance."** This authorizes a larger fixed reservation derivation and updates to the prior hold table while preserving the current context windows. It does not authorize provider calls, settings changes or new route qualification. The concrete derivation is under review; a token estimate alone is still not a hard provider-cost proof. No real model or metadata request was made for this investigation.
++
++## What the repository proves
++
++`requireModelPlanContext` in `api/_lib/model-plan-chat.ts` estimates input tokens as `ceil((JSON bytes - escape overhead) / 4)`. It admits that estimate plus the requested output within the configured window. This is an estimate, not a tokenizer or provider-enforced prompt cap.
++
++For entries with `promptTokenLimit`, the separate `promptBound` counts ASCII at half a token per character, non-ASCII at a token per byte, and adds 2,000 for framing. Its existing comment explicitly acknowledges that dense random hashes can tokenize more densely. Neither this bound nor the context estimate proves the fixed per-step hold is the largest possible provider charge.
++
++The unchanged October 23 capture records a 1,048,576-token native ZDR endpoint window for Kimi, Argon and DeepSeek. The active Kimi/Argon configured window is 128,000, with an 8,192-token reply and a fixed public reservation of 0.337920 at the configured $2/$10 per million ceilings. A roughly 450,000-byte ASCII request can pass the local four-byte estimate. The provider-native million-token window does not enforce the smaller configured 128,000 window. The exact model-token count and actual bill for that synthetic input have **not** been measured and are not asserted here.
++
++The algebra permits up to `4 × (configured window - output budget)` decoded JSON bytes under the context estimate. At 128,000/8,192 that is 479,232 bytes. This illustrates why charging only 128,000 input tokens is not established by the local check; it does not assert that every byte is a token for any particular model.
++
++There is a related historical pricing gate: the capture contains Haiku's higher-price tier at 100,000 actual prompt tokens and Luna's at 272,000. An approximate ASCII prompt bound cannot certify those actual-token thresholds. A larger fixed reservation policy must consider reachable captured price tiers and cache-write prices too. Changing only the token multiplier while retaining an unproven low-price tier would not establish a hard amount.
++
++## Policy choices reviewed with the owner
++
++| Choice                                                   | Concrete behavior                                                                                                                                                                                                   | Tradeoff                                                                                                                                                                                                              |
++| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
++| Larger fixed reservations, preserving windows (selected) | Derive one conservative per-model amount from all locally admissible input, reply and reachable price tiers; reserve the same public amount regardless of request size. Preserve the advertised compaction windows. | More of the month is temporarily reserved; fewer expensive parallel steps may fit. The approved hold table changes. Derivation still needs explicit framing/tokenizer assumptions and provider evidence where absent. |
++| Strict admission, preserving reservations                | Reject/compact earlier whenever a conservative token/framing bound cannot fit the existing window/price tier and reservation. Keep the approved fixed hold amounts.                                                 | Typical usable conversations can be shorter than today's client estimate and advertised compaction behavior. The window policy and existing context tests change.                                                     |
++| Explicitly soft per-step budgets                         | Retain the current estimates and fixed table, record actual reported costs, and describe daily/run caps as admission limits on reservations rather than guaranteed maximum provider spend.                          | A step may exceed its reservation; the daily/run dollar ceilings are not hard guarantees. The account's provider key limit remains the independent monthly backstop.                                                  |
++
++These choices are distinct from the store's atomic mechanics. Tests can prove that concurrent reservations cannot pass the same stored balance, that counters and ticket settlement are idempotent, and that account/group/global concurrency is enforced. They cannot turn an approximate token estimate into a hard provider-cost proof.
++
++## Gates retained during the decision
++
++- Active model access floors must still follow the owner policy: Kimi and Argon require Pro even while the larger catalog is staged.
++- The 18-candidate catalog is not activated. Unknown model/route/effort/provider-pin facts remain unqualified and answer unavailable.
++- No provider call, live metadata probe, credit purchase, deployment or account-setting change is authorized by this decision note.
++- The selected larger-reservation policy must have a reviewed concrete derivation and corresponding tests before A17's affected policy can be accepted. The answer does not qualify missing provider facts or authorize a claim stronger than the available evidence.
+diff --git a/packages/web/test/model-plan-admit.test.ts b/packages/web/test/model-plan-admit.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..ca52a31f5175fa08b235b4b3d08b634e8bc0a312
+--- /dev/null
++++ b/packages/web/test/model-plan-admit.test.ts
+@@ -0,0 +1,703 @@
++import { afterEach, beforeEach, describe, expect, test } from "bun:test"
++import { RedisClient } from "bun"
++import { randomUUID } from "node:crypto"
++import { codiumKey } from "../../../api/_lib/codium-keys"
++import { holdMember } from "../../../api/_lib/codium-pool"
++import { buildSnapshot } from "../../../api/_lib/codium-snapshot"
++import { initializeFreshModelPool, modelSpendKeys, readModelSpendLedger } from "../../../api/_lib/codium-spend-ledger"
++import { admitModelPlan, settleModelPlan, type ModelPlanAdmission } from "../../../api/_lib/model-plan-admit"
++
++// Admission arithmetic is tested by running the actual Lua on local Valkey, never by a second TypeScript ledger.
++// No provider boundary is used. The non-Valkey cases only test the HTTP adapter and invalid-input boundary.
++const names = ["KV_REST_API_URL", "KV_REST_API_TOKEN", "CODIUM_STRIPE_MODE", "STRIPE_SECRET_KEY", "VERCEL_ENV"]
++const original = new Map(names.map((name) => [name, process.env[name]]))
++beforeEach(() => {
++  process.env.KV_REST_API_URL = "https://kv.admission-fixture.invalid"
++  process.env.KV_REST_API_TOKEN = "admission-fixture-token"
++  process.env.CODIUM_STRIPE_MODE = "test"
++  process.env.STRIPE_SECRET_KEY = "sk_test_admission_fixture"
++  process.env.VERCEL_ENV = "preview"
++})
++afterEach(() => {
++  for (const name of names) {
++    const value = original.get(name)
++    if (value === undefined) delete process.env[name]
++    else process.env[name] = value
++  }
++})
++
++function data() {
++  const now = Math.floor(Date.now() / 1000) * 1000
++  const account = randomUUID()
++  const pool = `admission-${randomUUID()}`
++  const start = now / 1000 - 3600
++  const end = start + 30 * 86_400
++  const genesis = { account, pool, subscription: `sub_${randomUUID()}`, start, end, creation: randomUUID() }
++  const snapshot = buildSnapshot(
++    {
++      account,
++      state: "active",
++      plan: "vector-10",
++      subscription: genesis.subscription,
++      periodStart: start * 1000,
++      periodEnd: end * 1000,
++      cancelAtPeriodEnd: false,
++      source: "request",
++    },
++    undefined,
++    now,
++  )
++  const key = {
++    hash: pool,
++    provisioning: true,
++    subscription: genesis.subscription,
++    start,
++    end,
++    spendGenesis: { nonce: genesis.creation, state: "pending" },
++  }
++  const accountRecord = JSON.stringify({ customer: "cus_fixture", key })
++  const input: ModelPlanAdmission = {
++    snapshot,
++    funding: {
++      pool,
++      baseMicro: 1_000_000,
++      totalMicro: 1_000_000,
++      subscription: genesis.subscription,
++      start,
++      end,
++      accountRecord,
++    },
++    requiredMicro: 10_000,
++    purpose: "chat",
++  }
++  return { now, genesis, input, key }
++}
++
++function responses(result: unknown) {
++  const commands: (string | number)[][] = []
++  const fetcher: typeof fetch = Object.assign(
++    async (_url: string | URL | Request, init?: RequestInit) => {
++      commands.push(JSON.parse(String(init?.body)) as (string | number)[])
++      return Response.json({ result })
++    },
++    { preconnect: () => {} },
++  )
++  return { commands, fetcher }
++}
++
++describe("A17 admission adapter", () => {
++  test("one admission is one store roundtrip and contains no plaintext provider credential", async () => {
++    const fixture = data()
++    const store = responses("ok")
++    const ticket = await admitModelPlan(fixture.input, store.fetcher, fixture.now)
++    expect(store.commands).toHaveLength(1)
++    expect(store.commands[0]![0]).toBe("EVAL")
++    expect(store.commands[0]![2]).toBe(13)
++    expect(ticket.deadline).toBe(fixture.now + 660_000)
++    expect(ticket.member).toBe(holdMember(ticket.ticket, "chat", undefined, fixture.input.requiredMicro))
++    expect(JSON.stringify(store.commands)).not.toContain("Bearer")
++    expect(JSON.stringify(store.commands)).not.toContain("OPENROUTER_MANAGEMENT_KEY")
++  })
++
++  test.each([
++    ["concurrency", "MODEL_PLAN_CONCURRENCY"],
++    ["busy", "MODEL_PLAN_BUSY"],
++    ["monthly", "MODEL_PLAN_EXHAUSTED"],
++    ["daily", "MODEL_PLAN_DAILY_LIMIT"],
++    ["brain", "MODEL_PLAN_BRAIN_SHARE"],
++    ["run", "MODEL_PLAN_RUN_LIMIT"],
++    ["runexpired", "MODEL_PLAN_RUN_EXPIRED"],
++    ["unavailable", "MODEL_PLAN_POOL_UNAVAILABLE"],
++  ])("maps the %s refusal without private money figures", async (result, code) => {
++    const fixture = data()
++    await expect(admitModelPlan(fixture.input, responses(result).fetcher, fixture.now)).rejects.toMatchObject({ code })
++  })
++
++  test("busy/daily/run responses preserve retry and limit contracts", async () => {
++    const fixture = data()
++    await expect(admitModelPlan(fixture.input, responses("busy").fetcher, fixture.now)).rejects.toMatchObject({
++      statusCode: 429,
++    })
++    await expect(admitModelPlan(fixture.input, responses("daily").fetcher, fixture.now)).rejects.toMatchObject({
++      retryAfterSeconds: Math.ceil((86_400_000 - (fixture.now % 86_400_000)) / 1000),
++    })
++    await expect(admitModelPlan(fixture.input, responses("run").fetcher, fixture.now)).rejects.toMatchObject({
++      detail: { limit: "ceiling" },
++    })
++  })
++
++  test.each([NaN, Infinity, -1, 0, 0.5, Number.MAX_SAFE_INTEGER + 1])(
++    "rejects invalid required amount %s before storage",
++    async (requiredMicro) => {
++      const fixture = data()
++      const store = responses("ok")
++      await expect(
++        admitModelPlan({ ...fixture.input, requiredMicro }, store.fetcher, fixture.now),
++      ).rejects.toMatchObject({ code: "MODEL_PLAN_POOL_UNAVAILABLE" })
++      expect(store.commands).toHaveLength(0)
++    },
++  )
++
++  test("negative safe base is not a format error; the transaction makes the monthly refusal", async () => {
++    const fixture = data()
++    const store = responses("monthly")
++    await expect(
++      admitModelPlan(
++        { ...fixture.input, funding: { ...fixture.input.funding, baseMicro: -100 } },
++        store.fetcher,
++        fixture.now,
++      ),
++    ).rejects.toMatchObject({ code: "MODEL_PLAN_EXHAUSTED" })
++    expect(store.commands).toHaveLength(1)
++  })
++
++  test.each(["with:colon", "x".repeat(129), "-"])(
++    "rejects incompatible run ID %s instead of dropping it",
++    async (id) => {
++      const fixture = data()
++      const store = responses("ok")
++      await expect(
++        admitModelPlan({ ...fixture.input, run: { id, deadline: fixture.now + 1000 } }, store.fetcher, fixture.now),
++      ).rejects.toMatchObject({ code: "MODEL_PLAN_RUN_EXPIRED", statusCode: 401 })
++      expect(store.commands).toHaveLength(0)
++    },
++  )
++
++  test.each([0, -1, 3 * 86_400_000 + 1, NaN, Infinity])(
++    "rejects invalid run deadline delta %s as expired authorization",
++    async (delta) => {
++      const fixture = data()
++      const store = responses("ok")
++      await expect(
++        admitModelPlan(
++          { ...fixture.input, run: { id: "valid-run", deadline: fixture.now + delta } },
++          store.fetcher,
++          fixture.now,
++        ),
++      ).rejects.toMatchObject({ code: "MODEL_PLAN_RUN_EXPIRED", statusCode: 401 })
++      expect(store.commands).toHaveLength(0)
++    },
++  )
++
++  test("unsafe period or timestamp arithmetic fails before storage", async () => {
++    const fixture = data()
++    const store = responses("ok")
++    await expect(
++      admitModelPlan(
++        { ...fixture.input, funding: { ...fixture.input.funding, end: Number.MAX_SAFE_INTEGER } },
++        store.fetcher,
++        fixture.now,
++      ),
++    ).rejects.toMatchObject({ code: "MODEL_PLAN_POOL_UNAVAILABLE" })
++    await expect(admitModelPlan(fixture.input, store.fetcher, Number.MAX_SAFE_INTEGER)).rejects.toMatchObject({
++      code: "MODEL_PLAN_POOL_UNAVAILABLE",
++    })
++    expect(store.commands).toHaveLength(0)
++  })
++})
++
++const valkeyURL = process.env.VECTOR_TEST_REDIS_URL
++describe.skipIf(!valkeyURL)("A17 actual admission/settlement Lua on Valkey", () => {
++  async function database(run: (fixture: Awaited<ReturnType<typeof setup>>) => Promise<void>) {
++    const redis = new RedisClient(valkeyURL!, { autoReconnect: false })
++    const keys = new Set<string>()
++    const globalMembers = new Set<string>()
++    const command = async (values: readonly (string | number)[]) => {
++      if (values[0] === "EVAL") {
++        values.slice(3, 3 + Number(values[2])).forEach((key) => keys.add(String(key)))
++        const raw = values[3 + Number(values[2])]
++        if (typeof raw === "string" && raw.startsWith("{")) {
++          const input = JSON.parse(raw)
++          if (typeof input.account === "string" && typeof input.ticket === "string")
++            globalMembers.add(`${input.account}:${input.ticket}`)
++        }
++      } else if (values[1]) keys.add(String(values[1]))
++      return redis.send(String(values[0]), values.slice(1).map(String))
++    }
++    const fetcher: typeof fetch = Object.assign(
++      async (_url: string | URL | Request, init?: RequestInit) => {
++        const result = await command(JSON.parse(String(init?.body)) as (string | number)[])
++        return Response.json({ result })
++      },
++      { preconnect: () => {} },
++    )
++    try {
++      await run(await setup(command, fetcher))
++    } finally {
++      for (const key of keys) {
++        if (key === codiumKey("inflight", "global")) {
++          for (const member of globalMembers) await redis.send("ZREM", [key, member])
++        } else await redis.send("DEL", [key])
++      }
++      redis.close()
++    }
++  }
++
++  async function setup(command: (values: readonly (string | number)[]) => Promise<unknown>, fetcher: typeof fetch) {
++    const fixture = data()
++    await command(["SET", codiumKey("account", fixture.genesis.account), fixture.input.funding.accountRecord])
++    await initializeFreshModelPool(fixture.genesis, fetcher)
++    const ready = JSON.parse(String(await command(["GET", codiumKey("account", fixture.genesis.account)])))
++    ready.key.provisioning = false
++    fixture.input.funding.accountRecord = JSON.stringify(ready)
++    await command(["SET", codiumKey("account", fixture.genesis.account), fixture.input.funding.accountRecord])
++    await command(["SET", codiumKey("ent", fixture.genesis.account), JSON.stringify(fixture.input.snapshot)])
++    const snapshot = async (caps: Partial<ModelPlanAdmission["snapshot"]["caps"]>) => {
++      fixture.input.snapshot = { ...fixture.input.snapshot, caps: { ...fixture.input.snapshot.caps, ...caps } }
++      await command(["SET", codiumKey("ent", fixture.genesis.account), JSON.stringify(fixture.input.snapshot)])
++    }
++    return {
++      ...fixture,
++      command,
++      fetcher,
++      snapshot,
++      admit: (overrides: Partial<ModelPlanAdmission> = {}, now = fixture.now) =>
++        admitModelPlan({ ...fixture.input, ...overrides }, fetcher, now),
++    }
++  }
++
++  test("genesis preserves empty arrays, is idempotent, and cannot reset a ready/missing ledger", () =>
++    database(async (f) => {
++      const fresh = data()
++      const raw = JSON.stringify({ key: fresh.key, risk: { blocked: false, openDisputes: {}, efw: [] }, warnings: [] })
++      await f.command(["SET", codiumKey("account", fresh.genesis.account), raw])
++      await initializeFreshModelPool(fresh.genesis, f.fetcher)
++      const ready = String(await f.command(["GET", codiumKey("account", fresh.genesis.account)]))
++      expect(ready).toBe(raw.replace('"state":"pending"', '"state":"ready"'))
++      await f.command(["HSET", modelSpendKeys(fresh.genesis.pool).ledger, "committed", "123", "compacted", "123"])
++      await initializeFreshModelPool(fresh.genesis, f.fetcher)
++      expect(await f.command(["HGET", modelSpendKeys(fresh.genesis.pool).ledger, "committed"])).toBe("123")
++      await f.command(["DEL", modelSpendKeys(fresh.genesis.pool).ledger])
++      await expect(initializeFreshModelPool(fresh.genesis, f.fetcher)).rejects.toMatchObject({
++        code: "MODEL_PLAN_POOL_UNAVAILABLE",
++      })
++    }))
++
++  test("legacy provisioning without a fresh creation nonce cannot seed zero", () =>
++    database(async (f) => {
++      const fresh = data()
++      await f.command([
++        "SET",
++        codiumKey("account", fresh.genesis.account),
++        JSON.stringify({ key: { ...fresh.key, spendGenesis: undefined } }),
++      ])
++      await expect(initializeFreshModelPool(fresh.genesis, f.fetcher)).rejects.toThrow()
++      expect(await f.command(["EXISTS", modelSpendKeys(fresh.genesis.pool).ledger])).toBe(0)
++    }))
++
++  test("parallel admissions cannot exceed account concurrency; refusal precedes monthly exhaustion", () =>
++    database(async (f) => {
++      await f.snapshot({ inFlight: 2, dailyShare: null })
++      const results = await Promise.allSettled(Array.from({ length: 12 }, () => f.admit()))
++      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(2)
++      expect(
++        results
++          .filter((result) => result.status === "rejected")
++          .every((result) => result.status === "rejected" && result.reason.code === "MODEL_PLAN_CONCURRENCY"),
++      ).toBe(true)
++      await expect(f.admit({ funding: { ...f.input.funding, baseMicro: -1 } })).rejects.toMatchObject({
++        code: "MODEL_PLAN_CONCURRENCY",
++      })
++    }))
++
++  test("group cap precedes global cap and global reserve admits priority", () =>
++    database(async (f) => {
++      await f.snapshot({ inFlight: 10, groups: { astra: 1 }, dailyShare: null })
++      const ticket = await f.admit({ group: "astra", globalLimit: 2, priorityReserve: 0.5 })
++      await expect(f.admit({ group: "astra", globalLimit: 1 })).rejects.toMatchObject({
++        code: "MODEL_PLAN_CONCURRENCY",
++      })
++      await expect(f.admit({ globalLimit: 2, priorityReserve: 0.5 })).rejects.toMatchObject({ code: "MODEL_PLAN_BUSY" })
++      await f.snapshot({ rank: 3 })
++      await f.admit({ globalLimit: 2, priorityReserve: 0.5 })
++      await settleModelPlan(ticket, { kind: "cancel" }, f.fetcher, f.now + 1)
++      expect(await f.command(["ZCARD", codiumKey("inflight", f.genesis.account, "astra")])).toBe(0)
++    }))
++
++  test("parallel monthly reservations are atomic and negative base refuses", () =>
++    database(async (f) => {
++      await f.snapshot({ inFlight: 20, dailyShare: null })
++      const results = await Promise.allSettled(Array.from({ length: 8 }, () => f.admit({ requiredMicro: 300_000 })))
++      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(3)
++      expect(
++        results
++          .filter((result) => result.status === "rejected")
++          .every((result) => result.status === "rejected" && result.reason.code === "MODEL_PLAN_EXHAUSTED"),
++      ).toBe(true)
++      expect((await readModelSpendLedger(f.genesis.account, f.genesis.pool, f.now, f.fetcher)).reservedMicro).toBe(
++        900_000,
++      )
++      await expect(f.admit({ funding: { ...f.input.funding, baseMicro: -1 } })).rejects.toMatchObject({
++        code: "MODEL_PLAN_EXHAUSTED",
++      })
++    }))
++
++  test("settled floor survives bridge expiry and a stale provider observation", () =>
++    database(async (f) => {
++      await f.snapshot({ inFlight: 20, dailyShare: null })
++      const b = await f.admit({ requiredMicro: 700_000 })
++      await settleModelPlan(b, { kind: "complete", chargeMicro: 700_000 }, f.fetcher, f.now + 1000)
++      // A fetched a base that still omitted B. Once B's bridge expires, its durable committed floor remains.
++      await expect(f.admit({ requiredMicro: 400_000 }, f.now + 32_000)).rejects.toMatchObject({
++        code: "MODEL_PLAN_EXHAUSTED",
++      })
++      const ledger = await readModelSpendLedger(f.genesis.account, f.genesis.pool, f.now + 32_000, f.fetcher)
++      expect(ledger).toMatchObject({ committedMicro: 700_000, reservedMicro: 0, nonmodelHeldMicro: 0 })
++      await f.admit({ requiredMicro: 300_000 }, f.now + 32_000)
++    }))
++
++  test("crashed requests release concurrency at 660s but retain monthly/day/run reservations", () =>
++    database(async (f) => {
++      await f.snapshot({
++        inFlight: 1,
++        dailyShare: 0.25,
++        cloudAgents: { ...f.input.snapshot.caps.cloudAgents, runCeilingShare: 0.1 },
++      })
++      const run = { id: `run-${randomUUID()}`, deadline: f.now + 3_600_000, ceilingShare: 1 }
++      await f.admit({ requiredMicro: 100_000, run })
++      await expect(f.admit({ run }, f.now + 660_001)).rejects.toMatchObject({ code: "MODEL_PLAN_RUN_LIMIT" })
++      await expect(f.admit({ requiredMicro: 160_000 }, f.now + 660_001)).rejects.toMatchObject({
++        code: "MODEL_PLAN_DAILY_LIMIT",
++      })
++      await expect(f.admit({ requiredMicro: 910_000 }, f.now + 660_001)).rejects.toMatchObject({
++        code: "MODEL_PLAN_EXHAUSTED",
++      })
++    }))
++
++  test("Brain is a period share across UTC days, with live and abandoned reservations", () =>
++    database(async (f) => {
++      await f.snapshot({ inFlight: 20, dailyShare: null })
++      const brain = await f.admit({ purpose: "brain", requiredMicro: 60_000 })
++      await settleModelPlan(brain, { kind: "complete", chargeMicro: 60_000 }, f.fetcher, f.now + 1)
++      await f.admit({ purpose: "brain", requiredMicro: 40_000 }, f.now + 86_400_000)
++      await expect(f.admit({ purpose: "brain", requiredMicro: 1 }, f.now + 86_400_001)).rejects.toMatchObject({
++        code: "MODEL_PLAN_BRAIN_SHARE",
++      })
++      expect(await f.command(["HGET", codiumKey("purpose", f.genesis.pool), "brain"])).toBe("60000")
++    }))
++
++  test("daily refusal precedes Brain and run and clamps verifier run share to server daily policy", () =>
++    database(async (f) => {
++      await f.snapshot({
++        inFlight: 20,
++        dailyShare: 0.05,
++        purposeShare: { brain: 0.01 },
++        cloudAgents: { ...f.input.snapshot.caps.cloudAgents, runCeilingShare: 0.1 },
++      })
++      await expect(
++        f.admit({
++          purpose: "brain",
++          requiredMicro: 60_000,
++          run: { id: "safe-run", deadline: f.now + 1000, ceilingShare: 1 },
++        }),
++      ).rejects.toMatchObject({ code: "MODEL_PLAN_DAILY_LIMIT" })
++      await f.snapshot({ dailyShare: null })
++      await expect(
++        f.admit({ requiredMicro: 110_000, run: { id: "safe-run", deadline: f.now + 1000, ceilingShare: 1 } }),
++      ).rejects.toMatchObject({ code: "MODEL_PLAN_RUN_LIMIT" })
++    }))
++
++  test("settlement is one-shot, meters actual above reserve, releases every concurrency index", () =>
++    database(async (f) => {
++      await f.snapshot({ inFlight: 20, groups: { astra: 4 }, dailyShare: null })
++      const run = { id: `run-${randomUUID()}`, deadline: f.now + 1000 }
++      const ticket = await f.admit({ group: "astra", run, requiredMicro: 20_000 })
++      expect(await settleModelPlan(ticket, { kind: "complete", chargeMicro: 30_000 }, f.fetcher, f.now + 1)).toBe("ok")
++      expect(await settleModelPlan(ticket, { kind: "complete", chargeMicro: 30_000 }, f.fetcher, f.now + 2)).toBe(
++        "done",
++      )
++      expect(await settleModelPlan(ticket, { kind: "cancel" }, f.fetcher, f.now + 3)).toBe("done")
++      const ledger = await readModelSpendLedger(f.genesis.account, f.genesis.pool, f.now + 3, f.fetcher)
++      expect(ledger).toMatchObject({ committedMicro: 30_000, reservedMicro: 0, nonmodelHeldMicro: 0 })
++      expect(await f.command(["HGET", codiumKey("day", f.genesis.pool, ticket.day), "total"])).toBe("30000")
++      expect(await f.command(["GET", codiumKey("run", run.id)])).toBe("30000")
++      for (const key of [
++        codiumKey("inflight", f.genesis.account),
++        codiumKey("inflight", f.genesis.account, "astra"),
++        codiumKey("inflight", "global"),
++      ])
++        expect(await f.command(["ZSCORE", key, `${ticket.account}:${ticket.ticket}`])).toBeNull()
++    }))
++
++  test("broken retry charges actual dispatched bound, keeps original hold, and duplicate settlement cannot alter it", () =>
++    database(async (f) => {
++      await f.snapshot({ dailyShare: null })
++      const ticket = await f.admit({ requiredMicro: 60_000 })
++      await settleModelPlan(ticket, { kind: "broken", chargeMicro: 30_000 }, f.fetcher, f.now + 1)
++      await settleModelPlan(ticket, { kind: "complete", chargeMicro: 1 }, f.fetcher, f.now + 2)
++      expect(Number(await f.command(["ZSCORE", codiumKey("held", ticket.pool), ticket.member]))).toBe(ticket.deadline)
++      expect((await readModelSpendLedger(ticket.account, ticket.pool, f.now + 2, f.fetcher)).committedMicro).toBe(
++        30_000,
++      )
++    }))
++
++  test("a lost settlement response retries without charging or releasing twice", () =>
++    database(async (f) => {
++      const ticket = await f.admit()
++      const lost: typeof fetch = Object.assign(
++        async (url: string | URL | Request, init?: RequestInit) => {
++          await f.fetcher(url, init)
++          throw new Error("simulated lost store response")
++        },
++        { preconnect: () => {} },
++      )
++      await expect(settleModelPlan(ticket, { kind: "complete", chargeMicro: 7000 }, lost, f.now + 1)).rejects.toThrow()
++      expect(await settleModelPlan(ticket, { kind: "complete", chargeMicro: 7000 }, f.fetcher, f.now + 2)).toBe("done")
++      expect((await readModelSpendLedger(ticket.account, ticket.pool, f.now + 2, f.fetcher)).committedMicro).toBe(7000)
++      expect(await f.command(["HGET", codiumKey("day", ticket.pool, ticket.day), "total"])).toBe("7000")
++    }))
++
++  test("all accepted safe-integer charges retain exact micro values", () =>
++    database(async (f) => {
++      await f.snapshot({ dailyShare: null })
++      const ticket = await f.admit()
++      await settleModelPlan(ticket, { kind: "complete", chargeMicro: Number.MAX_SAFE_INTEGER }, f.fetcher, f.now + 1)
++      expect((await readModelSpendLedger(ticket.account, ticket.pool, f.now + 2, f.fetcher)).committedMicro).toBe(
++        Number.MAX_SAFE_INTEGER,
++      )
++      expect(await f.command(["HGET", codiumKey("day", ticket.pool, ticket.day), "total"])).toBe(
++        String(Number.MAX_SAFE_INTEGER),
++      )
++      await expect(f.admit()).rejects.toMatchObject({ code: "MODEL_PLAN_EXHAUSTED" })
++    }))
++
++  test("cancel removes reservations; expired or deleted held members are never recreated by late settlement", () =>
++    database(async (f) => {
++      await f.snapshot({ dailyShare: null })
++      const cancelled = await f.admit()
++      await settleModelPlan(cancelled, { kind: "cancel" }, f.fetcher, f.now + 1)
++      expect((await readModelSpendLedger(cancelled.account, cancelled.pool, f.now + 2, f.fetcher)).reservedMicro).toBe(
++        0,
++      )
++      const late = await f.admit()
++      await f.command(["ZREM", codiumKey("held", late.pool), late.member])
++      await settleModelPlan(late, { kind: "complete", chargeMicro: 5000 }, f.fetcher, late.deadline + 1)
++      expect(await f.command(["ZCARD", codiumKey("held", late.pool)])).toBe(0)
++      expect((await readModelSpendLedger(late.account, late.pool, late.deadline + 1, f.fetcher)).committedMicro).toBe(
++        5000,
++      )
++    }))
++
++  test("compacted completed tickets keep their floor and cannot settle again", () =>
++    database(async (f) => {
++      const ticket = await f.admit()
++      await settleModelPlan(ticket, { kind: "complete", chargeMicro: 5000 }, f.fetcher, f.now + 1)
++      await readModelSpendLedger(ticket.account, ticket.pool, ticket.deadline + 1, f.fetcher)
++      expect(await f.command(["HLEN", modelSpendKeys(ticket.pool).reservations])).toBe(0)
++      expect(await f.command(["HGET", modelSpendKeys(ticket.pool).ledger, "compacted"])).toBe("5000")
++      expect(
++        await settleModelPlan(ticket, { kind: "complete", chargeMicro: 9000 }, f.fetcher, ticket.deadline + 2),
++      ).toBe("missing")
++      expect(await f.command(["HGET", modelSpendKeys(ticket.pool).ledger, "committed"])).toBe("5000")
++    }))
++
++  test("missing open records fail closed rather than lose an abandoned reservation", () =>
++    database(async (f) => {
++      const ticket = await f.admit()
++      await f.command(["HDEL", modelSpendKeys(ticket.pool).reservations, ticket.ticket])
++      await expect(readModelSpendLedger(ticket.account, ticket.pool, f.now, f.fetcher)).rejects.toThrow()
++      await expect(f.admit()).rejects.toThrow()
++      await expect(settleModelPlan(ticket, { kind: "cancel" }, f.fetcher, f.now + 1)).rejects.toThrow()
++      expect(await f.command(["HGET", modelSpendKeys(ticket.pool).ledger, "reserved"])).toBe(String(ticket.micro))
++    }))
++
++  test("one run cannot reset its reservation by moving to a new pool after upgrade", () =>
++    database(async (f) => {
++      await f.snapshot({ dailyShare: null })
++      const run = { id: `run-${randomUUID()}`, deadline: f.now + 3_600_000 }
++      const old = await f.admit({ run, requiredMicro: 100_000 })
++      const replacement = `replacement-${randomUUID()}`
++      const creation = randomUUID()
++      const nextGenesis = { ...f.genesis, pool: replacement, creation }
++      const account = JSON.parse(f.input.funding.accountRecord)
++      account.key = {
++        ...account.key,
++        hash: replacement,
++        provisioning: true,
++        spendGenesis: { nonce: creation, state: "pending" },
++      }
++      await f.command(["SET", codiumKey("account", f.genesis.account), JSON.stringify(account)])
++      await initializeFreshModelPool(nextGenesis, f.fetcher)
++      const ready = JSON.parse(String(await f.command(["GET", codiumKey("account", f.genesis.account)])))
++      ready.key.provisioning = false
++      const raw = JSON.stringify(ready)
++      await f.command(["SET", codiumKey("account", f.genesis.account), raw])
++      const funding = { ...f.input.funding, pool: replacement, accountRecord: raw }
++      await expect(f.admit({ run, funding })).rejects.toMatchObject({ code: "MODEL_PLAN_RUN_EXPIRED", statusCode: 401 })
++      // Refreshing a token for the same runID cannot reset the binding; a new runID has a new budget.
++      await expect(f.admit({ run: { ...run, deadline: run.deadline + 1000 }, funding })).rejects.toMatchObject({
++        code: "MODEL_PLAN_RUN_EXPIRED",
++      })
++      await f.admit({ run: { ...run, id: `new-${randomUUID()}` }, funding })
++      await settleModelPlan(old, { kind: "broken" }, f.fetcher, f.now + 1)
++      expect((await readModelSpendLedger(old.account, old.pool, f.now + 2, f.fetcher)).committedMicro).toBe(100_000)
++    }))
++
++  test("settlement retains immutable old pool/day/run after upgrade and UTC midnight", () =>
++    database(async (f) => {
++      await f.snapshot({ dailyShare: null })
++      const beforeMidnight = Math.floor(f.now / 86_400_000) * 86_400_000 + 86_399_000
++      const ticket = await f.admit({ purpose: "brain" }, beforeMidnight)
++      await f.command([
++        "SET",
++        codiumKey("account", ticket.account),
++        JSON.stringify({ key: { hash: "replacement-key" } }),
++      ])
++      await f.command([
++        "SET",
++        codiumKey("ent", ticket.account),
++        JSON.stringify({ ...f.input.snapshot, version: 2, meterEpoch: "next" }),
++      ])
++      await settleModelPlan(ticket, { kind: "complete", chargeMicro: 7000 }, f.fetcher, beforeMidnight + 2000)
++      expect(await f.command(["HGET", codiumKey("day", ticket.pool, ticket.day), "total"])).toBe("7000")
++      expect(await f.command(["HGET", codiumKey("purpose", ticket.pool), "brain"])).toBe("7000")
++      expect(
++        await f.command([
++          "EXISTS",
++          codiumKey("day", ticket.pool, new Date(beforeMidnight + 2000).toISOString().slice(0, 10)),
++        ]),
++      ).toBe(0)
++    }))
++
++  test("exact raw account fence rejects risk intent, provisioning and changed epoch", () =>
++    database(async (f) => {
++      const raw = f.input.funding.accountRecord
++      const account = JSON.parse(raw)
++      await f.command([
++        "SET",
++        codiumKey("account", f.genesis.account),
++        JSON.stringify({
++          ...account,
++          risk: { blocked: false, openDisputes: { dispute: { at: f.now, status: "needs_response" } }, efw: [] },
++        }),
++      ])
++      await expect(f.admit()).rejects.toMatchObject({ code: "MODEL_PLAN_POOL_UNAVAILABLE" })
++      f.input.funding.accountRecord = String(await f.command(["GET", codiumKey("account", f.genesis.account)]))
++      await expect(f.admit()).rejects.toMatchObject({ code: "MODEL_PLAN_POOL_UNAVAILABLE" })
++      f.input.funding.accountRecord = JSON.stringify({ ...account, key: { ...account.key, provisioning: true } })
++      await f.command(["SET", codiumKey("account", f.genesis.account), f.input.funding.accountRecord])
++      await expect(f.admit()).rejects.toThrow()
++      f.input.funding.accountRecord = raw
++      await f.command(["SET", codiumKey("account", f.genesis.account), raw])
++      await f.command([
++        "SET",
++        codiumKey("ent", f.genesis.account),
++        JSON.stringify({ ...f.input.snapshot, meterEpoch: "other", version: 2 }),
++      ])
++      await expect(f.admit()).rejects.toThrow()
++      expect(await f.command(["HLEN", modelSpendKeys(f.genesis.pool).reservations])).toBe(0)
++    }))
++
++  test.each(["paused", "frozen", "ended", "none"])("unusable %s snapshot fails closed", (state) =>
++    database(async (f) => {
++      await f.command(["SET", codiumKey("ent", f.genesis.account), JSON.stringify({ ...f.input.snapshot, state })])
++      await expect(f.admit()).rejects.toMatchObject({ code: "MODEL_PLAN_POOL_UNAVAILABLE" })
++    }),
++  )
++
++  test.each(["upgrade", "keyCreation", "closing", "ownerEnd"])(
++    "observed private %s intent blocks old-pool admission",
++    (intent) =>
++      database(async (f) => {
++        const account = JSON.parse(f.input.funding.accountRecord)
++        account[intent] = intent === "closing" ? true : intent === "ownerEnd" ? { done: false } : { pending: true }
++        f.input.funding.accountRecord = JSON.stringify(account)
++        await f.command(["SET", codiumKey("account", f.genesis.account), f.input.funding.accountRecord])
++        await expect(f.admit()).rejects.toMatchObject({ code: "MODEL_PLAN_POOL_UNAVAILABLE" })
++        expect(await f.command(["HGET", modelSpendKeys(f.genesis.pool).ledger, "reserved"])).toBe("0")
++      }),
++  )
++
++  test("shared monthly debits count once; unknown holds and debit dates also constrain budgets", () =>
++    database(async (f) => {
++      await f.snapshot({ inFlight: 20, dailyShare: 0.25 })
++      const held = holdMember("external-hold", "hosted", "external-run", 40_000)
++      const pending = holdMember("debit-pending", "hosted", "external-run", 60_000)
++      await f.command([
++        "ZADD",
++        codiumKey("held", f.genesis.pool),
++        f.now + 86_400_000,
++        held,
++        f.now + 86_400_000,
++        pending,
++      ])
++      await f.command([
++        "HSET",
++        codiumKey("debits", f.genesis.account, f.genesis.pool),
++        "pending",
++        JSON.stringify({
++          micro: 60_000,
++          applied: false,
++          hold: pending,
++          purpose: "hosted",
++          run: "external-run",
++          at: f.now,
++        }),
++      ])
++      const applied = holdMember("debit-applied", "hosted", undefined, 100_000)
++      await f.command([
++        "HSET",
++        codiumKey("debits", f.genesis.account, f.genesis.pool),
++        "applied",
++        JSON.stringify({ micro: 100_000, applied: true, hold: applied, purpose: "hosted", at: f.now - 86_400_000 }),
++      ])
++      const ledger = await readModelSpendLedger(f.genesis.account, f.genesis.pool, f.now, f.fetcher)
++      expect(ledger).toMatchObject({ nonmodelHeldMicro: 100_000, appliedMicro: 100_000, pendingMicro: 60_000 })
++      // Today's external charges are 100k, not 160k: pending debit's held member is not a second budget charge.
++      await f.admit({ requiredMicro: 150_000 })
++      await expect(f.admit({ requiredMicro: 1 })).rejects.toMatchObject({ code: "MODEL_PLAN_DAILY_LIMIT" })
++      await f.snapshot({ dailyShare: null })
++      await expect(f.admit({ requiredMicro: 650_001 })).rejects.toMatchObject({ code: "MODEL_PLAN_EXHAUSTED" })
++    }))
++
++  test("a settled 30s model bridge is not counted again against the daily budget", () =>
++    database(async (f) => {
++      await f.snapshot({ inFlight: 20, dailyShare: 0.25 })
++      const first = await f.admit({ requiredMicro: 150_000 })
++      await settleModelPlan(first, { kind: "complete", chargeMicro: 150_000 }, f.fetcher, f.now + 1)
++      await f.admit({ requiredMicro: 100_000 }, f.now + 2)
++      await expect(f.admit({ requiredMicro: 1 }, f.now + 3)).rejects.toMatchObject({ code: "MODEL_PLAN_DAILY_LIMIT" })
++    }))
++
++  test("corrupt ledger/member/debit/counter and integer overflow fail before changing admission state", () =>
++    database(async (f) => {
++      await f.snapshot({ dailyShare: null })
++      const heldKey = codiumKey("held", f.genesis.pool)
++      await f.command(["ZADD", heldKey, f.now + 1000, "malformed"])
++      await expect(f.admit()).rejects.toThrow()
++      await f.command(["DEL", heldKey])
++      await f.command(["HSET", codiumKey("debits", f.genesis.account, f.genesis.pool), "bad", "{}"])
++      await expect(f.admit()).rejects.toThrow()
++      await f.command(["DEL", codiumKey("debits", f.genesis.account, f.genesis.pool)])
++      await f.command([
++        "HSET",
++        codiumKey("day", f.genesis.pool, new Date(f.now).toISOString().slice(0, 10)),
++        "total",
++        "9007199254740991",
++      ])
++      await expect(f.admit()).rejects.toThrow()
++      expect(await f.command(["HLEN", modelSpendKeys(f.genesis.pool).reservations])).toBe(0)
++      await f.command(["HSET", modelSpendKeys(f.genesis.pool).ledger, "committed", "not-a-number"])
++      await expect(f.admit()).rejects.toThrow()
++    }))
++
++  test("reservation/counter lifetimes are bounded; shorter requests cannot shorten existing TTLs", () =>
++    database(async (f) => {
++      const held = codiumKey("held", f.genesis.pool)
++      const external = holdMember("long-external", "hosted", undefined, 1)
++      await f.command(["ZADD", held, f.now + 86_400_000, external])
++      await f.command(["PEXPIRE", held, 86_400_000])
++      const ticket = await f.admit({ run: { id: "ttl-run", deadline: f.now + 1000 } })
++      expect(Number(await f.command(["PTTL", held]))).toBeGreaterThan(86_300_000)
++      const reservationTTL = Number(await f.command(["PTTL", modelSpendKeys(ticket.pool).reservations]))
++      expect(reservationTTL).toBeGreaterThan(0)
++      expect(reservationTTL).toBeLessThanOrEqual(70 * 86_400_000)
++      await settleModelPlan(ticket, { kind: "complete", chargeMicro: 100 }, f.fetcher, f.now + 1)
++      const runTTL = Number(await f.command(["PTTL", codiumKey("run", "ttl-run")]))
++      expect(runTTL).toBeGreaterThan(2.99 * 86_400_000)
++      expect(runTTL).toBeLessThanOrEqual(3 * 86_400_000)
++      expect(Number(await f.command(["PTTL", codiumKey("day", ticket.pool, ticket.day)]))).toBeGreaterThan(
++        39 * 86_400_000,
++      )
++    }))
++})
+diff --git a/packages/web/test/model-plan-catalog-policy.test.ts b/packages/web/test/model-plan-catalog-policy.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..cf5cf9399864557fe29b3eca23ce858d021a164d
+--- /dev/null
++++ b/packages/web/test/model-plan-catalog-policy.test.ts
+@@ -0,0 +1,47 @@
++import { afterEach, beforeEach, expect, test } from "bun:test"
++import {
++  capturedGatewayModel,
++  gatewayPlanModels,
++  verifiedGatewayModel,
++} from "../../../api/_lib/model-plan-catalog-policy"
++import { configuredPlanModels, modelAccess } from "../../../api/_lib/model-plan-config"
++
++const previous = process.env.MODEL_PLAN_MODELS_JSON
++beforeEach(() => delete process.env.MODEL_PLAN_MODELS_JSON)
++afterEach(() => {
++  delete process.env.MODEL_PLAN_MODELS_JSON
++  if (previous !== undefined) process.env.MODEL_PLAN_MODELS_JSON = previous
++})
++
++test("real active models inherit the owner's Pro access policy without activating the eighteen candidates", () => {
++  const active = gatewayPlanModels()
++  expect(active).toHaveLength(5)
++  expect(active.map((model) => model.id)).toEqual(configuredPlanModels().map((model) => model.id))
++  expect(active.every(capturedGatewayModel)).toBe(true)
++  expect(active.some(verifiedGatewayModel)).toBe(false)
++  expect(active[2]!.contextLength).toBe(128000)
++  for (const model of active) {
++    const premium = model.id.startsWith("moonshotai/") || model.id.startsWith("google/")
++    expect(modelAccess(model, "vector-10")).toBe(!premium)
++    expect(modelAccess(model, "vector-50")).toBe(true)
++    expect(model.minPlan).toBe(premium ? "vector-50" : "vector-10")
++  }
++})
++
++test("unverified staged routes and altered runtime routing policies never acquire qualification from an ID", () => {
++  expect(
++    configuredPlanModels({ tiered: true })
++      .filter(verifiedGatewayModel)
++      .map((model) => model.id),
++  ).toEqual([])
++  const model = gatewayPlanModels()[0]!
++  for (const change of [
++    { id: "fixture/unverified" },
++    { upstream: model.id },
++    { providerOnly: ["unqualified/new-route"] },
++    { contextLength: 512000 },
++    { inputPrice: 0.01 },
++    { reasoningEffort: "xhigh" as const },
++  ])
++    expect(capturedGatewayModel({ ...model, ...change })).toBe(false)
++})
+diff --git a/packages/web/test/model-plan-entitlements.test.ts b/packages/web/test/model-plan-entitlements.test.ts
+index d10126557409b60afcb5acb76804a466f29133c2..531167d5d120a8347fd31d2124f114dd1bb37e13 100644
+--- a/packages/web/test/model-plan-entitlements.test.ts
++++ b/packages/web/test/model-plan-entitlements.test.ts
+@@ -13,9 +13,11 @@ import {
+   effectiveModel,
+   modelAccess,
+   modelPlanRequestCredits,
++  nominalModelPlanRequestCredits,
+   publicModelPlans,
+   type ModelPlanModel,
+ } from "../../../api/_lib/model-plan-config"
++import { capturedReservationMicro } from "../../../api/_lib/codium-reservations"
+ import { ENTITLEMENTS } from "../../schema/src/codium-entitlements"
+ import { CodiumPlan } from "../../schema/src/codium-plan"
+ 
+@@ -171,18 +173,18 @@ describe("tier access and windows", () => {
+   })
+ })
+ 
+-describe("public per-request holds", () => {
++describe("captured reservations and unqualified nominal estimates", () => {
+   test.each([
+-    { id: ids.luna, plan: "vector-10", hold: "0.040" },
++    { id: ids.luna, plan: "vector-10", hold: "0.269" },
+     { id: ids.terra, plan: "vector-10", hold: "0.241" },
+     { id: ids.sol, plan: "vector-50", hold: "0.442" },
+     ...[ids.kimi, ids.argon].flatMap((id) => [
+-      { id: `${id}:long`, plan: "vector-50", hold: "0.594" },
+-      { id: `${id}:long`, plan: "vector-100", hold: "1.106" },
+-      { id: `${id}:long`, plan: "vector-200", hold: "1.618" },
++      { id: `${id}:long`, plan: "vector-50", hold: "2.179" },
++      { id: `${id}:long`, plan: "vector-100", hold: "4.358" },
++      { id: `${id}:long`, plan: "vector-200", hold: "4.358" },
+     ]),
+-    { id: `${ids.deepseek}:long`, plan: "vector-100", hold: "0.173" },
+-    { id: `${ids.deepseek}:long`, plan: "vector-200", hold: "0.250" },
++    { id: `${ids.deepseek}:long`, plan: "vector-100", hold: "0.668" },
++    { id: `${ids.deepseek}:long`, plan: "vector-200", hold: "0.668" },
+     { id: ids.sonnet, plan: "vector-100", hold: "0.730" },
+     { id: `${ids.sol}:deep`, plan: "vector-100", hold: "0.532" },
+     { id: ids.astra, plan: "vector-100", hold: "2.661" },
+@@ -191,9 +193,17 @@ describe("public per-request holds", () => {
+     { id: ids.opus, plan: "vector-200", hold: "1.821" },
+     { id: `${ids.sol}:deepest`, plan: "vector-200", hold: "1.064" },
+     { id: `${ids.astra}:long`, plan: "vector-200", hold: "5.322" },
+-  ])("$id on $plan reserves $hold at the contract ceilings", ({ id, plan, hold }) => {
+-    expect(modelPlanRequestCredits(candidate(id), plan as CodiumPlan.PlanId).toFixed(3)).toBe(hold)
+-  })
++  ])(
++    "$id on $plan reports $hold; unqualified entries remain nominal and cannot authorize a request",
++    ({ id, plan, hold }) => {
++      const model = candidate(id)
++      const credits =
++        capturedReservationMicro(model) === undefined
++          ? nominalModelPlanRequestCredits(model, plan as CodiumPlan.PlanId)
++          : modelPlanRequestCredits(model, plan as CodiumPlan.PlanId)
++      expect(credits.toFixed(3)).toBe(hold)
++    },
++  )
+ 
+   test("weights compare public prices rather than context or private monthly pools", () => {
+     const models = configuredPlanModels({ tiered: true })
+diff --git a/packages/web/test/model-plan-gateway-hooks.test.ts b/packages/web/test/model-plan-gateway-hooks.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..5b8b39a86731e69f50c97f60d89c0dd5efedc21f
+--- /dev/null
++++ b/packages/web/test/model-plan-gateway-hooks.test.ts
+@@ -0,0 +1,132 @@
++import { expect, test } from "bun:test"
++import { ENTITLEMENTS, type EntitlementSnapshot } from "../../schema/src/codium-entitlements"
++import { CODIUM_MODELS, CODIUM_TIER_MODELS } from "../../../api/_lib/codium-catalog"
++import {
++  beforeAdmit,
++  afterSettle,
++  registerGatewayHook,
++  createHostedSessionVerifierRegistry,
++} from "../../../api/_lib/model-plan-gateway-hooks"
++import { modelPlanRequest } from "../../../api/_lib/model-plan-chat"
++import type { ModelPlanCaller } from "../../../api/_lib/model-plan-caller"
++
++const snapshot: EntitlementSnapshot = {
++  v: 1,
++  version: 1,
++  livemode: false,
++  account: "22222222-2222-4222-8222-222222222222",
++  state: "active",
++  plan: "vector-100",
++  subscription: "sub_fixture",
++  periodStart: 1793232000000,
++  periodEnd: 1795824000000,
++  meterEpoch: "sub_fixture:1793232000000",
++  cancelAtPeriodEnd: false,
++  ramp: { hostedUntil: 0, browserFrom: 0 },
++  caps: ENTITLEMENTS["vector-100"],
++  updatedAt: 1793232000000,
++  checkedAt: 1793232000000,
++  source: "request",
++}
++const caller: ModelPlanCaller = {
++  account: { id: snapshot.account },
++  kind: "run",
++  purpose: "review",
++  run: { id: "run_fixture", source: "github-comment", deadline: Date.now() + 3600000, service: "cloud-agents" },
++}
++const context = { snapshot, model: CODIUM_MODELS[0], toolNames: [] as string[] }
++
++test.each(["computer", "computer_use", "computer_click", "computer-use", "COMPUTER_SCREENSHOT"])(
++  "a cloud-agent run's verified review purpose cannot evade the computer tool restriction: %s",
++  async (name) => {
++    await expect(beforeAdmit(caller, { ...context, toolNames: [name] })).rejects.toMatchObject({
++      code: "MODEL_PLAN_BLOCKED",
++      statusCode: 403,
++    })
++  },
++)
++
++test("ordinary local tools remain allowed and desktop callers do not inherit run-only tool restrictions", async () => {
++  await beforeAdmit(caller, { ...context, toolNames: ["read", "edit", "bash"] })
++  await beforeAdmit(
++    { account: caller.account, kind: "desktop", purpose: "chat" },
++    { ...context, toolNames: ["computer_use"] },
++  )
++})
++
++test("hosted runs require an available live session verifier even when their signed purpose is review", async () => {
++  const hosted: ModelPlanCaller = {
++    ...caller,
++    run: { ...caller.run!, service: "hosted", sessionId: "session_fixture" },
++  }
++  await expect(beforeAdmit(hosted, context)).rejects.toMatchObject({ code: "HOSTED_UNAVAILABLE", statusCode: 503 })
++  const checked: string[] = []
++  await expect(
++    beforeAdmit(hosted, context, {
++      assertHostedSessionLive: async (id) => {
++        checked.push(id)
++        return false
++      },
++    }),
++  ).rejects.toMatchObject({ code: "HOSTED_SESSION_PAUSED", statusCode: 409 })
++  await beforeAdmit(hosted, context, {
++    assertHostedSessionLive: async (id) => {
++      checked.push(id)
++      return true
++    },
++  })
++  expect(checked).toEqual(["session_fixture", "session_fixture"])
++})
++
++test("scoped hooks receive immutable caller/model identity and settlement observations without replacing production hooks", async () => {
++  const observed: string[] = []
++  const options = {
++    hooks: [
++      {
++        id: "fixture",
++        beforeAdmit: async () => {
++          observed.push("before")
++        },
++        afterSettle: async () => {
++          observed.push("after")
++        },
++      },
++    ],
++  }
++  await beforeAdmit(caller, context, options)
++  await afterSettle(caller, { snapshot, model: context.model, startedAt: 1, endedAt: 2, streamed: false }, options)
++  expect(observed).toEqual(["before", "after"])
++  const hook = { id: "fixture-registration" }
++  registerGatewayHook(hook)
++  expect(() => registerGatewayHook(hook)).toThrow("unique")
++  const verifier = async () => true
++  const registry = createHostedSessionVerifierRegistry()
++  registry.register(verifier)
++  expect(() => registry.register(verifier)).toThrow("one verifier")
++})
++
++test.each([
++  "openai/gpt-6.1-sol:deep",
++  "openai/gpt-6.1-sol:deepest",
++  "moonshotai/kimi-k3.1-pro:fast",
++  "google/gemini-4-argon:fast",
++])("synthetic planned routing pins upstream and exact providers for %s without implying qualification", (id) => {
++  const model = CODIUM_TIER_MODELS.find((model) => model.id === id)!
++  const body = modelPlanRequest(
++    {
++      model: id,
++      messages: [{ role: "user", content: "fixture" }],
++      provider: { only: ["unreviewed"], allow_fallbacks: true },
++      reasoning: { effort: "low" },
++    },
++    [model],
++  )
++  expect(body.model).toBe("upstream" in model ? model.upstream : model.id)
++  expect(body.provider).toMatchObject({
++    only: "providerOnly" in model ? [...model.providerOnly] : [],
++    allow_fallbacks: false,
++    zdr: true,
++    data_collection: "deny",
++  })
++  expect(body.reasoning).toEqual({ effort: model.reasoningEffort })
++})
+diff --git a/packages/web/test/model-plan-reservations.test.ts b/packages/web/test/model-plan-reservations.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..7261ef4e88ea29e237cdfa04cc68c3e28cd15e78
+--- /dev/null
++++ b/packages/web/test/model-plan-reservations.test.ts
+@@ -0,0 +1,80 @@
++import { createHash } from "node:crypto"
++import { expect, test } from "bun:test"
++import { CODIUM_MODELS, CODIUM_TIER_MODELS } from "../../../api/_lib/codium-catalog"
++import {
++  CAPTURED_RESERVATIONS,
++  RESERVATION_CAPTURE,
++  ROUTE_ACCEPTANCES,
++  capturedReservationMicro,
++} from "../../../api/_lib/codium-reservations"
++import { modelPlanRequestCredits, nominalModelPlanRequestCredits } from "../../../api/_lib/model-plan-config"
++import { gatewayPlanModels, verifiedGatewayModel } from "../../../api/_lib/model-plan-catalog-policy"
++import snapshot from "./fixtures/codium-endpoints-2026-10-23.json"
++
++test("reservation bounds match the pinned historical bytes and every captured native limit/rate tier", async () => {
++  const bytes = await Bun.file(new URL("./fixtures/codium-endpoints-2026-10-23.json", import.meta.url)).arrayBuffer()
++  expect(createHash("sha256").update(new Uint8Array(bytes)).digest("hex")).toBe(RESERVATION_CAPTURE.sha256)
++  for (const [id, bound] of Object.entries(CAPTURED_RESERVATIONS)) {
++    const model = snapshot.models.find((model) => model.id === id)!
++    const endpoint = snapshot.endpoints.find((endpoint) => endpoint.model_id === id && endpoint.tag === bound.tag)!
++    expect(bound.contextLength).toBe(Math.min(model.context_length, endpoint.context_length))
++    expect(bound.maxOutputTokens).toBe(endpoint.max_completion_tokens)
++    const pricing: Record<string, unknown> = endpoint.pricing
++    const tiers: Record<string, unknown>[] = [pricing, ...(Array.isArray(pricing.overrides) ? pricing.overrides : [])]
++    const input = tiers.flatMap((tier) =>
++      Object.entries(tier)
++        .filter(([key]) => key === "prompt" || key.startsWith("input_cache_"))
++        .map(([, price]) => Number(price) * 1_000_000),
++    )
++    const output = tiers.flatMap((tier) =>
++      Object.entries(tier)
++        .filter(([key]) => key === "completion" || key === "internal_reasoning")
++        .map(([, price]) => Number(price) * 1_000_000),
++    )
++    expect(bound.inputPrice).toBe(Math.max(...input))
++    expect(bound.outputPrice).toBe(Math.max(...output))
++  }
++})
++
++test.each([
++  { index: 0, micro: 334234 },
++  { index: 1, micro: 1040000 },
++  { index: 2, micro: 268644 },
++  { index: 3, micro: 2179072 },
++  { index: 4, micro: 2179072 },
++])("active model $index uses one larger fixed reservation rounded up to $micro micro-dollars", ({ index, micro }) => {
++  const model = CODIUM_MODELS[index]!
++  expect(capturedReservationMicro(model)).toBe(micro)
++  for (const plan of ["vector-10", "vector-50", "vector-100", "vector-200"] as const)
++    expect(modelPlanRequestCredits(model, plan)).toBe(
++      (micro * (plan === "vector-100" || plan === "vector-200" ? 2 : 1)) / 1_000_000,
++    )
++  expect(modelPlanRequestCredits(model)).toBe((micro * 2) / 1_000_000)
++})
++
++test("historical bounds never fabricate acceptance or a native bound for absent models and fast routes", () => {
++  expect(ROUTE_ACCEPTANCES).toEqual([])
++  expect(gatewayPlanModels().some(verifiedGatewayModel)).toBe(false)
++  for (const id of [
++    "openai/gpt-6.1-terra",
++    "openai/gpt-6.1-sol:deep",
++    "openai/gpt-6-astra",
++    "moonshotai/kimi-k3.1-pro:fast",
++    "google/gemini-4-argon:fast",
++  ])
++    expect(capturedReservationMicro(CODIUM_TIER_MODELS.find((model) => model.id === id)!)).toBeUndefined()
++})
++
++test("the approximate prompt cap does not discard the higher Haiku/Luna captured pricing tiers", () => {
++  expect(CAPTURED_RESERVATIONS["anthropic/claude-haiku-5.5"]!.inputPrice).toBe(1)
++  expect(CAPTURED_RESERVATIONS["anthropic/claude-haiku-5.5"]!.outputPrice).toBe(2.5)
++  expect(CAPTURED_RESERVATIONS["openai/gpt-6-luna"]!.inputPrice).toBe(0.25)
++  expect(CAPTURED_RESERVATIONS["openai/gpt-6-luna"]!.outputPrice).toBe(0.75)
++})
++
++test("missing native facts cannot masquerade as a real hold through the explicitly nominal planning helper", () => {
++  const model = { ...CODIUM_MODELS[0], id: "fixture/unverified" }
++  expect(() => modelPlanRequestCredits(model, "vector-10")).toThrow("could not be verified")
++  expect(nominalModelPlanRequestCredits(model, "vector-10")).toBeGreaterThan(0)
++  expect(verifiedGatewayModel(model)).toBe(false)
++})
+diff --git a/packages/web/test/model-plans-api.test.ts b/packages/web/test/model-plans-api.test.ts
+index d4f263f46383587c86d5df9edd6ea97740fa7120..4754446ed6407aba7c6f856bdf1c07f2f5ec1821 100644
+--- a/packages/web/test/model-plans-api.test.ts
++++ b/packages/web/test/model-plans-api.test.ts
+@@ -23,6 +23,13 @@ import {
+   handleModelTopupRemoved,
+ } from "../../../api/_lib/model-plan-billing"
+ import { handleModelPlanChat } from "../../../api/_lib/model-plan-chat"
++import { verifiedGatewayModel } from "../../../api/_lib/model-plan-catalog-policy"
++import { CODIUM_TIER_MODELS } from "../../../api/_lib/codium-catalog"
++import {
++  modelPlanRequestCredits,
++  nominalModelPlanRequestCredits,
++  type ModelPlanModel,
++} from "../../../api/_lib/model-plan-config"
+ import { handleModelPlanModels } from "../../../api/_lib/model-plan-models"
+ import { handleModelPlanStatus, modelPlanBalance } from "../../../api/_lib/model-plan-status"
+ import { ModelPlans } from "@vectordevai/core/model-plans"
+@@ -85,6 +92,8 @@ const environment = [
+   "CODIUM_3DS_MIN_USD",
+   "VECTOR_ADMIN_EMAILS",
+   "MODEL_PLANS_MIN_CLIENT",
++  "MODEL_PLAN_GLOBAL_INFLIGHT",
++  "MODEL_PLAN_PRIORITY_RESERVE",
+   "MODEL_PLANS_ENABLED",
+   "MODEL_PLAN_MODELS_JSON",
+   "MODEL_PLAN_KEY_ENCRYPTION_SECRET",
+@@ -106,7 +115,7 @@ const environment = [
+ ]
+ const previousEnvironment = new Map(environment.map((key) => [key, process.env[key]]))
+ 
+-function subscription(start = Math.floor(Date.now() / 1000) - 3600, end = start + 7200) {
++function subscription(start = Math.floor(Date.now() / 1000) - 3600, end = start + 7200, price = 10) {
+   return {
+     id: "sub_fixture",
+     status: "active",
+@@ -119,10 +128,10 @@ function subscription(start = Math.floor(Date.now() / 1000) - 3600, end = start
+           current_period_start: start,
+           current_period_end: end,
+           price: {
+-            id: "price_fixture10",
++            id: `price_fixture${price}`,
+             active: true,
+             currency: "usd",
+-            unit_amount: 1000,
++            unit_amount: price * 100,
+             recurring: { interval: "month", interval_count: 1 },
+           },
+         },
+@@ -132,9 +141,15 @@ function subscription(start = Math.floor(Date.now() / 1000) - 3600, end = start
+       id: "in_fixture",
+       paid: true,
+       status: "paid",
+-      amount_paid: 1000,
+-      charge: { paid: true, refunded: false, disputed: false, amount_refunded: 0 },
+-      lines: { data: [{ price: { id: "price_fixture10" }, period: { start, end }, proration: false }] },
++      amount_paid: price * 100,
++      charge: {
++        paid: true,
++        refunded: false,
++        disputed: false,
++        amount_refunded: 0,
++        payment_method_details: { card: { three_d_secure: { result: "authenticated" } } },
++      },
++      lines: { data: [{ price: { id: `price_fixture${price}` }, period: { start, end }, proration: false }] },
+     },
+   }
+ }
+@@ -153,6 +168,10 @@ const state = {
+   charge: 0,
+   keyReadDelay: 0,
+   chatDelay: 0,
++  gatewayModels: undefined as readonly ModelPlanModel[] | undefined,
++  upstreamStatuses: [] as number[],
++  throwTransport: false,
++  dispatches: 0,
+   subscriptions: [] as (ReturnType<typeof subscription> & { schedule?: string })[],
+ }
+ const calls: { path: string; method: string; headers: Headers; body: Record<string, unknown> }[] = []
+@@ -284,8 +303,8 @@ const upstream = Bun.serve({
+     }
+     if (url.pathname === "/api/v1/chat/completions") {
+       expect(request.headers.get("authorization")).toBe(`Bearer ${keys.values().next().value?.secret}`)
+-      if (state.upstreamStatus !== 200)
+-        return Response.json({ error: { message: "PRIVATE fixture-paid-secret-1" } }, { status: state.upstreamStatus })
++      const status = state.upstreamStatuses.shift() ?? state.upstreamStatus
++      if (status !== 200) return Response.json({ error: { message: "PRIVATE fixture-paid-secret-1" } }, { status })
+       // The provider bills a request, and the key's usage grows, only once it finishes.
+       if (state.chatDelay) await Bun.sleep(state.chatDelay)
+       const charged = keys.values().next().value
+@@ -326,6 +345,10 @@ const upstream = Bun.serve({
+ const fetcher: typeof fetch = Object.assign(
+   (input: string | URL | Request, init?: RequestInit) => {
+     const url = new URL(input instanceof Request ? input.url : input)
++    if (url.pathname === "/api/v1/chat/completions") {
++      state.dispatches++
++      if (state.throwTransport) throw new Error("Fixture transport lost after dispatch")
++    }
+     if (url.origin === "https://api.stripe.com" || url.origin === "https://openrouter.ai")
+       return fetch(new URL(url.pathname + url.search, upstream.url), init)
+     if (url.origin === upstream.url.origin) return fetch(input, init)
+@@ -341,7 +364,19 @@ const server = createServer((request, response) => {
+   if (request.url === "/api/model-plans/checkout") return void handleModelPlanCheckout(request, response, fetcher)
+   if (request.url === "/api/model-plans/topup") return void handleModelTopupRemoved(request, response)
+   if (request.url === "/api/model-plans/portal") return void handleModelPlanPortal(request, response, fetcher)
+-  void handleModelPlanChat(request, response, fetcher)
++  // Only this local upstream implements the invented fixture model. Planned catalogs must be explicitly supplied by
++  // a test; ordinary active-model requests retain the production qualification guard.
++  void handleModelPlanChat(request, response, fetcher, {
++    models: state.gatewayModels,
++    qualify: (selected) =>
++      state.gatewayModels
++        ? state.gatewayModels.some((model) => model.id === selected.id)
++        : selected.id === model.id || verifiedGatewayModel(selected),
++    reservation: (selected, plan) =>
++      state.gatewayModels || selected.id === model.id
++        ? nominalModelPlanRequestCredits(selected, plan) * (plan === "vector-100" || plan === "vector-200" ? 2 : 1)
++        : modelPlanRequestCredits(selected, plan),
++  })
+ })
+ 
+ beforeAll(async () => {
+@@ -394,6 +429,8 @@ beforeEach(async () => {
+   delete process.env.CODIUM_3DS_MIN_USD
+   delete process.env.VERCEL_ENV
+   delete process.env.MODEL_PLANS_MIN_CLIENT
++  delete process.env.MODEL_PLAN_GLOBAL_INFLIGHT
++  delete process.env.MODEL_PLAN_PRIORITY_RESERVE
+   delete process.env.STRIPE_MODEL_PLAN_CHANGE_PORTAL_CONFIG_ID
+   delete process.env.UPSTASH_REDIS_REST_URL
+   delete process.env.UPSTASH_REDIS_REST_TOKEN
+@@ -420,6 +457,10 @@ beforeEach(async () => {
+     charge: 0,
+     keyReadDelay: 0,
+     chatDelay: 0,
++    gatewayModels: undefined,
++    upstreamStatuses: [],
++    throwTransport: false,
++    dispatches: 0,
+     subscriptions: [],
+   })
+   calls.length = 0
+@@ -1186,10 +1227,11 @@ describe("model plan HTTP inference", () => {
+     expect(await modelPlanStatus(user.id, fetcher)).toMatchObject({ active: true, used: 0, remaining: 5 })
+   })
+ 
+-  test("enforces the real atomic per-user minute cap under concurrent requests", async () => {
++  test("the thirty-first Plus request reaches the per-minute refusal independently of concurrency", async () => {
+     await paid()
+     await modelPlanCredential(user.id, fetcher)
+-    const responses = await Promise.all(Array.from({ length: 34 }, () => chat()))
++    const responses: Response[] = []
++    for (let index = 0; index < 34; index++) responses.push(await chat())
+     expect(responses.filter((response) => response.status === 200)).toHaveLength(30)
+     expect(responses.filter((response) => response.status === 429)).toHaveLength(4)
+     expect(chats()).toHaveLength(30)
+diff --git a/packages/web/test/model-plans.test.ts b/packages/web/test/model-plans.test.ts
+index 6d9a4f12efab96024f0bf72cff70430525c9383d..df99f418b2085ce94232d36b529d927c6007ee0d 100644
+--- a/packages/web/test/model-plans.test.ts
++++ b/packages/web/test/model-plans.test.ts
+@@ -134,11 +134,12 @@ describe("subscription configuration", () => {
+       [5, 50],
+     ])
+   })
+-  test("premium models reserve their full context and reply at the reviewed prices", () => {
++  test("captured premium models reserve their native window and reply at every captured rate tier", () => {
+     delete process.env.MODEL_PLAN_MODELS_JSON
+     for (const id of ["moonshotai/kimi-k3.1-pro", "google/gemini-4-argon"]) {
+       const model = configuredPlanModels().find((model) => model.id === id)!
+-      expect(modelPlanRequestCredits(model)).toBeCloseTo(0.33792, 8)
++      expect(modelPlanRequestCredits(model, "vector-50")).toBe(2.179072)
++      expect(modelPlanRequestCredits(model, "vector-100")).toBe(4.358144)
+       expect(model.description).toContain("Uses credits faster")
+     }
+   })

@@ -1,7 +1,7 @@
 {
   "$schema": "https://v2-8-13.turborepo.dev/schema.json",
   "globalEnv": ["CI"],
-  "globalPassThroughEnv": ["CI"],
+  "globalPassThroughEnv": ["CI", "ASTRO_TELEMETRY_DISABLED", "XDG_CONFIG_HOME"],
   "tasks": {
     "typecheck": {},
     "build": {
