@@ -77,13 +77,13 @@ jobs:
       postgres:
         image: postgres:17.11-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
         env:
-          POSTGRES_DB: vector_codium_test
+          POSTGRES_DB: vector_shares_test
           POSTGRES_USER: vector_fixture
           POSTGRES_PASSWORD: fixture-only
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U vector_fixture -d vector_codium_test"
+          --health-cmd "pg_isready -U vector_fixture -d vector_shares_test"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
@@ -124,6 +124,11 @@ jobs:
           git config --global user.email "bot@vectordev.ai"
           git config --global user.name "Vector"
 
+      - name: Prepare isolated SQL fixtures
+        env:
+          VECTOR_TEST_PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: docker exec "$VECTOR_TEST_PG_CONTAINER" createdb --username=vector_fixture --maintenance-db=postgres vector_teams_test
+
       - name: Build test dependencies
         timeout-minutes: 20
         run: >-
@@ -136,7 +141,8 @@ jobs:
         timeout-minutes: 40
         env:
           VECTOR_TEST_REDIS_URL: redis://127.0.0.1:6379
-          VECTOR_TEST_POSTGRES_URL: postgres://vector_fixture:fixture-only@127.0.0.1:5432/vector_codium_test
+          VECTOR_TEST_POSTGRES_URL: postgres://vector_fixture:fixture-only@127.0.0.1:5432/vector_shares_test
+          VECTOR_TEST_TEAMS_POSTGRES_URL: postgres://vector_fixture:fixture-only@127.0.0.1:5432/vector_teams_test
           VECTOR_EXPERIMENTAL_DISABLE_FILEWATCHER: "false"
         run: GITHUB_ACTIONS=false bun packages/cloud/src/codium-ci-tests.ts
 
