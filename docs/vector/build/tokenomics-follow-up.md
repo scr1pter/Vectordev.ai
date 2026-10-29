@@ -42,7 +42,7 @@ and the subsequent comparison are recorded in
 | Default effort, cheaper subagent models, reasoning retention | Keep existing behavior pending matched quality/cost measurements and the separate multi-agent work. The audit does not establish that lower effort is cheaper. |
 | Published CLI | Publishing remains an owner action; a source change cannot update the installed CLI. |
 
-The cheapest next evidence is a scoped offline request-footprint run, followed by owner-budgeted live cache and behavior checks. Preserve the API, release channel, task size, model, and effort in each report. Do not present an offline replay as a live quality or performance result.
+The scoped offline request-footprint run is now recorded below. Owner-budgeted live cache and behavior checks still require their separate evidence. Preserve the API, release channel, task size, model, and effort in each report. Do not present an offline replay as a live quality or performance result.
 
 The optional `offline_footprint` input on the `test` workflow prepares that scoped
 capture: Vector on Messages and Responses, Standard and Thorough, two sessions
@@ -54,6 +54,14 @@ The focused controls file passes three tests (19 assertions), covering omitted,
 supported, invalid, missing, and duplicate values without starting the harness.
 Each fixture retains its isolated home, clean child environment, synthetic key,
 and local fake-provider URL. Reports and raw payloads are CI artifacts, and each
-report is also written to job logs for durable evidence capture. No result has
-been recorded for this matrix yet; it will estimate request footprint, not live
-cache hits, model quality, or token-cost savings.
+report is also written to job logs for durable evidence capture.
+
+All four jobs passed on `09cf9fa0`: all eight sessions completed the fixed script
+and passed fixture verification, with five parent requests per session. The
+[complete reports and request-control evidence](../../benchmarks/vector-footprint-2026-10/README.md)
+preserve API, source revision, size, model, and observed effort. Standard and
+Thorough retain their existing different reasoning settings; no effort default
+changed. The report compares request bytes and offline token estimates within
+each API. Cache and dollar fields remain synthetic estimates, not measured live
+cache hits, model quality, or token-cost savings. Live cache/behavior checks and
+release memory profiling remain separate work.
