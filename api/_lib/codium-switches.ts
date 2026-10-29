@@ -48,7 +48,18 @@ const DISABLE = [
   "local changed = 0 if ARGV[2] == '1' then changed = redis.call('SADD', KEYS[1], ARGV[1]) else changed = redis.call('SREM', KEYS[1], ARGV[1]) end",
   "if changed == 1 then redis.call('ZADD', KEYS[2], ARGV[4], ARGV[3]) redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', ARGV[5]) redis.call('PEXPIRE', KEYS[2], ARGV[6]) end return changed",
 ].join(" ")
-export const SWITCH_SCRIPTS = { WRITE, DISABLE } as const
+const ESCALATE_HOSTED = [
+  "local raw = redis.call('GET', KEYS[1]) local previous = 'on' local old = nil",
+  "if raw then local ok, parsed = pcall(cjson.decode, raw) if ok and type(parsed) == 'table' then old = parsed previous = parsed.value else previous = string.gsub(string.gsub(raw, '^%s+', ''), '%s+$', '') end end",
+  "local ranks = {on = 0, ['no-new'] = 1, stop = 2} local rank = ranks[previous] local nextRank = ranks[ARGV[1]]",
+  "if not rank or not nextRank then return {'', -1} end",
+  "if old then for _, field in ipairs({'changedAt', 'offSince'}) do local at = old[field] if at ~= nil and (type(at) ~= 'number' or at < 0 or at > 9007199254740991 or at ~= math.floor(at)) then return {'', -1} end end if old.generation ~= nil and (type(old.generation) ~= 'string' or old.generation == '') then return {'', -1} end end",
+  "if rank >= nextRank then return {raw, 0} end",
+  "local record = cjson.decode(ARGV[2]) local audit = cjson.decode(ARGV[3]) audit.previous = previous",
+  "local saved = cjson.encode(record) redis.call('SET', KEYS[1], saved) redis.call('ZADD', KEYS[2], ARGV[4], cjson.encode(audit))",
+  "redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', ARGV[5]) redis.call('PEXPIRE', KEYS[2], ARGV[6]) return {saved, 1}",
+].join(" ")
+export const SWITCH_SCRIPTS = { WRITE, DISABLE, ESCALATE_HOSTED } as const
 
 /** A missing switch is on. Corrupt configuration fails closed; financial mutations bypass the 30-second cache. */
 export async function readSwitchState(
@@ -116,6 +127,46 @@ export async function writeSwitch(
     throw unavailable()
   const saved = decode(name, result[0])
   remember(fetcher, switchKey(name), saved, now)
+  return { ...saved, changed: Number(result[1]) === 1 }
+}
+
+/** Signed spend callbacks may only strengthen the actual hosted guard; the comparison and audit share one script. */
+export async function escalateHostedSwitch(
+  value: "no-new" | "stop",
+  actor: string,
+  fetcher: typeof fetch = fetch,
+  now = Date.now(),
+) {
+  if (!["no-new", "stop"].includes(value) || !validActor(actor) || !Number.isSafeInteger(now) || now < 0)
+    throw new ApiError(400, "CODIUM_SWITCH_INVALID", "Choose an available Codium setting.")
+  const generation = randomUUID()
+  const state: SwitchState = { value, changedAt: now, generation }
+  const result = await persistentStore(
+    [
+      "EVAL",
+      ESCALATE_HOSTED,
+      2,
+      switchKey("hosted"),
+      switchAuditKey(),
+      value,
+      JSON.stringify(state),
+      JSON.stringify({ id: generation, at: now, actor, name: "hosted", value }),
+      now,
+      now - AUDIT_KEEP_MS,
+      AUDIT_KEEP_MS,
+    ],
+    fetcher,
+  )
+  if (
+    !Array.isArray(result) ||
+    result.length !== 2 ||
+    typeof result[0] !== "string" ||
+    ![0, 1].includes(Number(result[1]))
+  )
+    throw unavailable()
+  const saved = decode("hosted", result[0])
+  // An earlier Lua response can arrive after a stronger concurrent write. Never cache its older state.
+  cache.get(fetcher)?.delete(switchKey("hosted"))
   return { ...saved, changed: Number(result[1]) === 1 }
 }
 

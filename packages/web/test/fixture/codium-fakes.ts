@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
+import { Option, Schema } from "effect"
 import { FUNDING_SCRIPTS } from "../../../../api/_lib/codium-funding"
 import { RAMP_SCRIPTS } from "../../../../api/_lib/codium-ramp"
 import { POOL_SCRIPTS } from "../../../../api/_lib/codium-pool"
@@ -349,6 +350,35 @@ export class FakeStore {
           entries.set(JSON.stringify({ ...JSON.parse(event!), previous }), Number(now))
           this.expires.set(audit!, this.clock.now + Number(ttl))
           return [rawSaved, 1]
+        },
+      ],
+      [
+        SWITCH_SCRIPTS.ESCALATE_HOSTED,
+        ([key, audit], [value, record, event, now, before, ttl]) => {
+          const raw = this.get(key!)
+          const parsed = raw
+            ? Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))(raw))
+            : undefined
+          const old = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : undefined
+          const previous = old ? old.value : (raw?.trim() ?? "on")
+          const rank = (item: unknown) => ["on", "no-new", "stop"].findIndex((value) => value === item)
+          if (
+            rank(previous) < 0 ||
+            rank(value) < 0 ||
+            (old &&
+              ([old.changedAt, old.offSince].some(
+                (at) => at !== undefined && (!Number.isSafeInteger(at) || Number(at) < 0),
+              ) ||
+                (old.generation !== undefined && (typeof old.generation !== "string" || !old.generation))))
+          )
+            return ["", -1]
+          if (rank(previous) >= rank(value)) return [raw, 0]
+          this.set(key!, record!)
+          const entries = this.zset(audit!)
+          for (const [member, score] of entries) if (score <= Number(before)) entries.delete(member)
+          entries.set(JSON.stringify({ ...JSON.parse(event!), previous }), Number(now))
+          this.expires.set(audit!, this.clock.now + Number(ttl))
+          return [record, 1]
         },
       ],
       [
