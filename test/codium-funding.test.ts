@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { IncomingMessage, ServerResponse } from "node:http"
 import { Socket } from "node:net"
 import {
+  CODIUM_FUNDING_MAX_AGE_MS,
   checkCodiumFunding,
   readCodiumFunding,
   readCodiumFundingHistory,
@@ -35,6 +36,44 @@ beforeEach(() => {
 afterEach(() => restore())
 
 const check = (fakes: CodiumFakes) => checkCodiumFunding(fakes.fetcher, fakes.clock.now)
+
+describe("funding snapshot time bounds", () => {
+  test("a future-dated open reading is refreshed before it can reserve an unfunded sale", async () => {
+    const fakes = codiumFakes({ now: NOW })
+    await checkCodiumFunding(fakes.fetcher, NOW + HOUR)
+    fakes.openRouter.credits.total_credits = 0
+    const before = fakes.openRouter.calls.length
+    await expect(
+      requireCodiumSales(fakes.fetcher, NOW).then((reading) =>
+        reserveCodiumSale(reading, { id: "clock-rollback", credits: 10, closes: NOW + HOUR }, fakes.fetcher, NOW),
+      ),
+    ).rejects.toMatchObject({ code: "CODIUM_SALES_PAUSED" })
+    expect(fakes.openRouter.calls.length).toBeGreaterThan(before)
+    expect(await readCodiumFunding(fakes.fetcher)).toMatchObject({ status: "paused", checkedAt: NOW, balance: 0 })
+    expect(fakes.store.command(["HSCAN", codiumKey("funding", "reserved"), "0"])).toEqual(["0", []])
+    expect(fakes.stripe.calls).toEqual([])
+  })
+
+  test("a future-dated reading returned by a busy checker still cannot admit a sale", async () => {
+    const fakes = codiumFakes({ now: NOW })
+    await checkCodiumFunding(fakes.fetcher, NOW + HOUR)
+    fakes.store.set(codiumKey("funding", "lock"), "another-checker")
+    const before = fakes.openRouter.calls.length
+    await expect(requireCodiumSales(fakes.fetcher, NOW)).rejects.toMatchObject({ code: "CODIUM_SALES_PAUSED" })
+    expect(fakes.openRouter.calls).toHaveLength(before)
+    expect(fakes.store.command(["HSCAN", codiumKey("funding", "reserved"), "0"])).toEqual(["0", []])
+  })
+
+  for (const age of [0, CODIUM_FUNDING_MAX_AGE_MS - 1])
+    test(`a current funded reading aged ${age}ms remains usable while another checker holds the lock`, async () => {
+      const fakes = codiumFakes({ now: NOW })
+      await checkCodiumFunding(fakes.fetcher, NOW - age)
+      fakes.store.set(codiumKey("funding", "lock"), "another-checker")
+      const before = fakes.openRouter.calls.length
+      expect(await requireCodiumSales(fakes.fetcher, NOW)).toEqual({ balance: 100000, owed: 0 })
+      expect(fakes.openRouter.calls).toHaveLength(before)
+    })
+})
 
 describe("A11 private funding observations", () => {
   test("retains seven days of bounded history and measures actual usage rather than balance changes", async () => {
