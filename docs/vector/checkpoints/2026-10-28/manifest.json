@@ -496,27 +496,27 @@
   ],
   "logs": [
     {
-      "file": "logs/vector-wp28-audience-next.log",
+      "file": "logs/vector-wp28-audience-next.txt",
       "bytes": 1529,
       "sha256": "a729b9fc68b54d3c424480f266b62b2c25ff6e63818f05323f6deac86e8075ca"
     },
     {
-      "file": "logs/vector-wp28-sharing-roundtrip.log",
+      "file": "logs/vector-wp28-sharing-roundtrip.txt",
       "bytes": 358,
       "sha256": "cdc06d987f2f14b749832cd3e43b88754372f6dd0e06310e4886eec55c2263ff"
     },
     {
-      "file": "logs/vector-wp27-push.log",
+      "file": "logs/vector-wp27-push.txt",
       "bytes": 64304,
       "sha256": "0b755c1472ffabe4b7d3b9c29736662ed2d794c1b861b33973970753a9fd26a8"
     },
     {
-      "file": "logs/codium-a16-push.log",
+      "file": "logs/codium-a16-push.txt",
       "bytes": 77738,
       "sha256": "33f1ac06532c3fd302825664a8984cd3a4c2d0abaa21175dc95b85464b22291e"
     },
     {
-      "file": "logs/codium-sql-ci-push.log",
+      "file": "logs/codium-sql-ci-push.txt",
       "bytes": 77809,
       "sha256": "bdcd7829bab1affbe29d4f40708ac23e104b159a4ec15db7c18cd5c301b13efc"
     }
