@@ -1,3 +1,4 @@
+import { ComputerPrivacy } from "@vectordevai/server/computer-privacy"
 import { Workspace } from "@/control-plane/workspace"
 import * as InstanceState from "@/effect/instance-state"
 import { Session } from "@/session/session"
@@ -35,13 +36,16 @@ export const syncHandlers = HttpApiBuilder.group(InstanceHttpApi, "sync", (handl
     })
 
     const replay = Effect.fn("SyncHttpApi.replay")(function* (ctx: { payload: typeof ReplayPayload.Type }) {
-      const payload: EventV2.SerializedEvent[] = ctx.payload.events.map((event) => ({
-        id: event.id,
-        aggregateID: event.aggregateID,
-        seq: event.seq,
-        type: event.type,
-        data: { ...event.data },
-      }))
+      const payload: EventV2.SerializedEvent[] = yield* ComputerPrivacy.payload(
+        ctx.payload.events.map((event) => ({
+          id: event.id,
+          aggregateID: event.aggregateID,
+          seq: event.seq,
+          type: event.type,
+          data: { ...event.data },
+        })),
+        { db },
+      )
       const source = payload[0].aggregateID
       yield* Effect.logInfo("sync replay requested", {
         sessionID: source,
@@ -88,7 +92,10 @@ export const syncHandlers = HttpApiBuilder.group(InstanceHttpApi, "sync", (handl
         )
         .orderBy(asc(EventTable.seq))
         .all()
-        .pipe(Effect.orDie)
+        .pipe(
+          Effect.flatMap((rows) => ComputerPrivacy.payload(rows, { db })),
+          Effect.orDie,
+        )
     })
 
     return handlers.handle("start", start).handle("replay", replay).handle("steal", steal).handle("history", history)

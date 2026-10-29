@@ -25,6 +25,9 @@ import type {
   AuthSetResponses,
   CommandListErrors,
   CommandListResponses,
+  ComputerPruneInput,
+  ComputerPruneScreenshotsErrors,
+  ComputerPruneScreenshotsResponses,
   Config as Config3,
   ConfigGetErrors,
   ConfigGetResponses,
@@ -2043,6 +2046,49 @@ export class Event extends HeyApiClient {
       url: "/event",
       ...options,
       ...params,
+    })
+  }
+}
+
+export class Computer extends HeyApiClient {
+  /**
+   * Delete stored computer screenshots
+   *
+   * Delete computer screenshots before a time or in a session. Use all: true to delete every screenshot and reclaim database pages. Only the server owner can delete screenshots.
+   */
+  public pruneScreenshots<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      computerPruneInput?: ComputerPruneInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "computerPruneInput", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      ComputerPruneScreenshotsResponses,
+      ComputerPruneScreenshotsErrors,
+      ThrowOnError
+    >({
+      url: "/computer/screenshots/prune",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 }
@@ -7516,6 +7562,7 @@ export class Session2 extends HeyApiClient {
       sessionID: string
       directory?: string
       workspace?: string
+      includeScreenshots?: "true" | "false"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -7527,6 +7574,7 @@ export class Session2 extends HeyApiClient {
             { in: "path", key: "sessionID" },
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
+            { in: "query", key: "includeScreenshots" },
           ],
         },
       ],
@@ -10774,10 +10822,21 @@ export class Session4 extends HeyApiClient {
   public sharePreview<ThrowOnError extends boolean = false>(
     parameters: {
       sessionID: string
+      includeScreenshots?: "true" | "false"
     },
     options?: Options<never, ThrowOnError>,
   ) {
-    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "includeScreenshots" },
+          ],
+        },
+      ],
+    )
     return (options?.client ?? this.client).get<
       ServerSessionSessionSharePreviewResponses,
       ServerSessionSessionSharePreviewErrors,
@@ -10853,6 +10912,11 @@ export class VectorClient extends HeyApiClient {
   private _event?: Event
   get event(): Event {
     return (this._event ??= new Event({ client: this.client }))
+  }
+
+  private _computer?: Computer
+  get computer(): Computer {
+    return (this._computer ??= new Computer({ client: this.client }))
   }
 
   private _config?: Config2

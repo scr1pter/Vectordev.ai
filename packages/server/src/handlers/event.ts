@@ -1,3 +1,4 @@
+import { ComputerPrivacy } from "../computer-privacy"
 import { EventV2 } from "@vectordevai/core/event"
 import { VectorEvent } from "@vectordevai/protocol/groups/event"
 import { Effect, Schema, Stream } from "effect"
@@ -28,6 +29,7 @@ export const EventHandler = HttpApiBuilder.group(Api, "server.event", (handlers)
     return handlers.handleRaw("event.subscribe", () =>
       Effect.gen(function* () {
         const principal = yield* RequestPrincipal
+        const project = yield* ComputerPrivacy.projector
         const connected = {
           id: EventV2.ID.create(),
           type: "server.connected",
@@ -50,7 +52,11 @@ export const EventHandler = HttpApiBuilder.group(Api, "server.event", (handlers)
               ),
             )
           }),
-        ).pipe(Stream.map(eventData), Stream.pipeThroughChannel(Sse.encode()))
+        ).pipe(
+          Stream.mapEffect((event) => (principal.kind === "owner" ? Effect.succeed(event) : project(event))),
+          Stream.map(eventData),
+          Stream.pipeThroughChannel(Sse.encode()),
+        )
         const heartbeat = Stream.tick("15 seconds").pipe(Stream.map(() => ": heartbeat\n\n"))
         return HttpServerResponse.stream(
           output.pipe(Stream.merge(heartbeat, { haltStrategy: "left" }), Stream.encodeText),

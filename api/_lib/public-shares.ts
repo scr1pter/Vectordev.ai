@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import { Option, Schema } from "effect"
 import { PublicSession } from "../../packages/schema/src/public-session.js"
+import { ComputerScreenshots } from "../../packages/core/src/util/computer-screenshots.js"
 import { enforceRateLimit, requireTrustedJsonRequest } from "./abuse.js"
 import { verifyCliToken } from "./cli-token.js"
 import { ApiError, json, readJson, type ApiRequest, type ApiResponse } from "./http.js"
@@ -76,7 +77,7 @@ export async function publicShares(request: ApiRequest, response: ApiResponse, i
       id: input.id,
       owner: user.id,
       secret: digest(input.secret),
-      archive: input.archive,
+      archive: input.includeScreenshots === true ? input.archive : ComputerScreenshots.stripPublic(input.archive),
       expiresAt: input.expiresAt,
       updates: input.consent.updates,
       consentVersion: input.consent.version,
@@ -93,7 +94,8 @@ export async function publicShares(request: ApiRequest, response: ApiResponse, i
       id,
       owner: user.id,
       secret: digest(input.secret),
-      archive: input.archive,
+      // Live updates never extend the one-time screenshot choice on the initial manual publication.
+      archive: ComputerScreenshots.stripPublic(input.archive),
       revision: input.revision,
     })
     json(response, 200, info(row.info, id))

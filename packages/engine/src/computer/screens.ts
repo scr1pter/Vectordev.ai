@@ -1,5 +1,18 @@
 import type { SessionV1 } from "@vectordevai/core/v1/session"
+import { ComputerScreenshots } from "@vectordevai/core/util/computer-screenshots"
+import type { Provider } from "@/provider/provider"
 import type { ComputerScale } from "./scale"
+
+/** A frame is for the chosen model, never a helper or a model whose training policy permits using it. */
+export function replay(
+  messages: readonly SessionV1.WithParts[],
+  model: Pick<Provider.Model, "freeModel">,
+  options?: { helper?: boolean },
+): SessionV1.WithParts[] {
+  return options?.helper || (model.freeModel && model.freeModel.dataPolicy !== "no-training")
+    ? ComputerScreenshots.stripHistory(messages)
+    : [...messages]
+}
 
 /** Return parts to prune without rewriting stored history. Batch boundaries keep a cached prefix stable between cuts. */
 export function keep(

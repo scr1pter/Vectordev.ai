@@ -1091,6 +1091,96 @@
         ]
       }
     },
+    "/computer/screenshots/prune": {
+      "post": {
+        "tags": ["computer"],
+        "operationId": "computer.pruneScreenshots",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ComputerPrune.Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComputerPruneResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "UnknownError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnknownError1"
+                }
+              }
+            }
+          }
+        },
+        "description": "Delete computer screenshots before a time or in a session. Use all: true to delete every screenshot and reclaim database pages. Only the server owner can delete screenshots.",
+        "summary": "Delete stored computer screenshots",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComputerPruneInput"
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.computer.pruneScreenshots({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/config": {
       "get": {
         "tags": ["config"],
@@ -15294,6 +15384,15 @@
               "type": "string"
             },
             "required": false
+          },
+          {
+            "name": "includeScreenshots",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false"]
+            },
+            "required": false
           }
         ],
         "responses": {
@@ -19115,6 +19214,15 @@
               "pattern": "^ses"
             },
             "required": true
+          },
+          {
+            "name": "includeScreenshots",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false"]
+            },
+            "required": false
           }
         ],
         "security": [],
@@ -19945,7 +20053,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UnknownError1"
+                  "$ref": "#/components/schemas/UnknownError2"
                 }
               }
             }
@@ -20471,7 +20579,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UnknownError1"
+                  "$ref": "#/components/schemas/UnknownError2"
                 }
               }
             }
@@ -20580,7 +20688,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UnknownError1"
+                  "$ref": "#/components/schemas/UnknownError2"
                 }
               }
             }
@@ -20761,7 +20869,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UnknownError1"
+                  "$ref": "#/components/schemas/UnknownError2"
                 }
               }
             }
@@ -21339,7 +21447,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UnknownError1"
+                  "$ref": "#/components/schemas/UnknownError2"
                 }
               }
             }
@@ -33574,6 +33682,23 @@
         "required": ["name", "data"],
         "additionalProperties": false
       },
+      "UnknownError1": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["UnknownError"]
+          },
+          "message": {
+            "type": "string"
+          },
+          "ref": {
+            "type": "string"
+          }
+        },
+        "required": ["_tag", "message"],
+        "additionalProperties": false
+      },
       "ProjectTrustStatus": {
         "type": "object",
         "properties": {
@@ -41304,7 +41429,7 @@
         "required": ["_tag", "sessionID", "message"],
         "additionalProperties": false
       },
-      "UnknownError1": {
+      "UnknownError2": {
         "type": "object",
         "properties": {
           "_tag": {
@@ -46283,6 +46408,34 @@
         "type": "string",
         "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$"
       },
+      "ComputerPruneInput": {
+        "type": "object",
+        "properties": {
+          "before": {
+            "type": "number",
+            "minimum": 0
+          },
+          "sessionID": {
+            "type": "string",
+            "pattern": "^ses"
+          },
+          "all": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ComputerPruneResult": {
+        "type": "object",
+        "properties": {
+          "removed": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": ["removed"],
+        "additionalProperties": false
+      },
       "TaskStatus": {
         "type": "string",
         "enum": ["queued", "running", "waiting_on_user", "completed", "failed", "stopped"]
@@ -46819,10 +46972,77 @@
           },
           "remember": {
             "type": "boolean"
+          },
+          "includeScreenshots": {
+            "type": "boolean"
           }
         },
         "required": ["consent", "expiresAt"],
         "additionalProperties": false
+      },
+      "PublicSessionScreenshot": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "maxLength": 512
+              },
+              "mediaType": {
+                "type": "string",
+                "enum": ["image/png"]
+              },
+              "url": {
+                "type": "string",
+                "maxLength": 4000000,
+                "pattern": "^data:image\\/png;base64,[A-Za-z0-9+/]+={0,2}$"
+              }
+            },
+            "required": ["name", "mediaType", "url"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "maxLength": 512
+              },
+              "mediaType": {
+                "type": "string",
+                "enum": ["image/jpeg"]
+              },
+              "url": {
+                "type": "string",
+                "maxLength": 4000000,
+                "pattern": "^data:image\\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$"
+              }
+            },
+            "required": ["name", "mediaType", "url"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "maxLength": 512
+              },
+              "mediaType": {
+                "type": "string",
+                "enum": ["image/webp"]
+              },
+              "url": {
+                "type": "string",
+                "maxLength": 4000000,
+                "pattern": "^data:image\\/webp;base64,[A-Za-z0-9+/]+={0,2}$"
+              }
+            },
+            "required": ["name", "mediaType", "url"],
+            "additionalProperties": false
+          }
+        ]
       },
       "PublicSessionPart": {
         "anyOf": [
@@ -46882,6 +47102,51 @@
               "output": {
                 "type": "string",
                 "maxLength": 2000000
+              },
+              "screenshots": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PublicSessionScreenshot"
+                },
+                "maxItems": 0
+              }
+            },
+            "required": ["type", "name", "callID", "status", "input", "output"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["tool"]
+              },
+              "name": {
+                "type": "string",
+                "enum": ["computer"]
+              },
+              "callID": {
+                "type": "string",
+                "maxLength": 512
+              },
+              "status": {
+                "type": "string",
+                "enum": ["completed"]
+              },
+              "input": {
+                "type": "string",
+                "maxLength": 2000000
+              },
+              "output": {
+                "type": "string",
+                "maxLength": 2000000
+              },
+              "screenshots": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PublicSessionScreenshot"
+                },
+                "maxItems": 100
               }
             },
             "required": ["type", "name", "callID", "status", "input", "output"],
@@ -57477,6 +57742,9 @@
     {
       "name": "event",
       "description": "Instance event stream route."
+    },
+    {
+      "name": "computer"
     },
     {
       "name": "config",

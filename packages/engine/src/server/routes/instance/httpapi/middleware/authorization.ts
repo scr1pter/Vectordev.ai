@@ -1,4 +1,5 @@
 import { ServerAuth } from "@/server/auth"
+import { ComputerPrivacy } from "@vectordevai/server/computer-privacy"
 import { Effect, Encoding, Layer, Redacted, Schema } from "effect"
 import { HttpEffect, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
@@ -54,7 +55,12 @@ function validateCredential<A, E, R>(
     }
     if (identity === "guest" && (yield* ServerAuth.ownerOnlyRequest))
       return yield* new ForbiddenError({ message: "This operation requires the server owner" })
-    return yield* effect.pipe(Effect.provideService(RequestPrincipal, ServerAuth.principal(identity, config)))
+    return yield* effect.pipe(
+      Effect.provideService(RequestPrincipal, ServerAuth.principal(identity, config)),
+      Effect.flatMap((response) =>
+        identity === "guest" ? ComputerPrivacy.response(response) : Effect.succeed(response),
+      ),
+    )
   })
 }
 
@@ -104,7 +110,12 @@ function validateRawCredential<A, E, R>(
         { _tag: "ForbiddenError", message: "This operation requires the server owner" },
         { status: FORBIDDEN },
       )
-    return yield* effect.pipe(Effect.provideService(RequestPrincipal, ServerAuth.principal(identity, config)))
+    return yield* effect.pipe(
+      Effect.provideService(RequestPrincipal, ServerAuth.principal(identity, config)),
+      Effect.flatMap((response) =>
+        identity === "guest" ? ComputerPrivacy.response(response) : Effect.succeed(response),
+      ),
+    )
   })
 }
 

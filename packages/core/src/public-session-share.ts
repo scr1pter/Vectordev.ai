@@ -14,6 +14,7 @@ import { SessionTable } from "./session/sql"
 import { PublicSessionShareTable, PublicSessionConsentTable } from "./share/public.sql"
 import { SessionArchive } from "./share/archive"
 import { accountOwner, encodedBody, makeShareTransport, shareID } from "./share/transport"
+import { ComputerScreenshots } from "./util/computer-screenshots"
 
 export { shareID }
 export interface Interface extends SessionArchive.Interface {
@@ -104,7 +105,7 @@ export const layerWith = (options?: { fetch?: typeof fetch }) =>
                 .update(PublicSessionShareTable)
                 .set({
                   dirty:
-                    row.updates && createHash("sha256").update(encodedBody(latest)).digest("hex") !== row.content_hash,
+                    row.updates && createHash("sha256").update(encodedBody(latest)).digest("hex") !== liveBaseline(row),
                 })
                 .where(
                   and(
@@ -120,34 +121,54 @@ export const layerWith = (options?: { fetch?: typeof fetch }) =>
           .pipe(Effect.mapError(unavailable))
       const persist = (row: typeof PublicSessionShareTable.$inferSelect, value: PublicSession.Info, hash: string) =>
         db
-          .transaction(() =>
-            Effect.gen(function* () {
-              const updated = yield* db
-                .update(PublicSessionShareTable)
-                .set({
-                  state: "active",
-                  initial_archive: null,
-                  content_hash: hash,
-                  expires_at: value.expiresAt,
-                  updated_at: value.updatedAt,
-                  revision: value.revision,
-                  updates: value.updates,
-                })
-                .where(
-                  and(
-                    same(row),
-                    eq(PublicSessionShareTable.state, row.state),
-                    eq(PublicSessionShareTable.revision, row.revision),
-                  ),
-                )
-                .returning()
-                .get()
-                .pipe(Effect.orDie)
-              if (!updated) return yield* conflict()
-              yield* changed(SessionSchema.ID.make(row.session_id), value)
-              yield* refreshDirty(updated)
-              return updated
-            }),
+          .transaction(
+            () =>
+              Effect.gen(function* () {
+                const current = yield* db
+                  .select()
+                  .from(PublicSessionShareTable)
+                  .where(
+                    and(
+                      same(row),
+                      eq(PublicSessionShareTable.state, row.state),
+                      eq(PublicSessionShareTable.revision, row.revision),
+                    ),
+                  )
+                  .get()
+                  .pipe(Effect.orDie)
+                if (!current) return yield* conflict()
+                const updated = yield* db
+                  .update(PublicSessionShareTable)
+                  .set({
+                    state: "active",
+                    // A prune may have removed screenshots while the remote request was pending. Preserve only the
+                    // current stored snapshot, never the copy captured before that request.
+                    initial_archive:
+                      current.state === "creating" && current.updates && hasScreenshots(current.initial_archive)
+                        ? current.initial_archive
+                        : null,
+                    content_hash: hash,
+                    expires_at: value.expiresAt,
+                    updated_at: value.updatedAt,
+                    revision: value.revision,
+                    updates: value.updates,
+                  })
+                  .where(
+                    and(
+                      same(row),
+                      eq(PublicSessionShareTable.state, row.state),
+                      eq(PublicSessionShareTable.revision, row.revision),
+                    ),
+                  )
+                  .returning()
+                  .get()
+                  .pipe(Effect.orDie)
+                if (!updated) return yield* conflict()
+                yield* changed(SessionSchema.ID.make(row.session_id), value)
+                yield* refreshDirty(updated)
+                return updated
+              }),
+            { behavior: "immediate" },
           )
           .pipe(Effect.mapError(unavailable))
       const write = Effect.fn("PublicSessionShare.write")(function* (
@@ -176,7 +197,7 @@ export const layerWith = (options?: { fetch?: typeof fetch }) =>
         })
         const hash = createHash("sha256").update(encodedBody(snapshot)).digest("hex")
         touched.add(SessionSchema.ID.make(row.session_id))
-        if (row.state === "active" && row.content_hash === hash) {
+        if (row.state === "active" && liveBaseline(row) === hash) {
           yield* refreshDirty(row)
           return info(row)
         }
@@ -191,6 +212,7 @@ export const layerWith = (options?: { fetch?: typeof fetch }) =>
                   consent: { version: 1, public: true, updates: row.updates },
                   expiresAt: row.expires_at,
                   archive: initial,
+                  includeScreenshots: hasScreenshots(initial),
                 })
               : remote.update(row.id, { secret: row.secret, revision: row.revision, archive: snapshot }),
           catch: unavailable,
@@ -203,7 +225,10 @@ export const layerWith = (options?: { fetch?: typeof fetch }) =>
         const initialHash =
           row.state === "creating" ? createHash("sha256").update(encodedBody(initial)).digest("hex") : hash
         const saved = yield* persist(row, response, initialHash)
-        if (row.state === "creating" && row.updates && initialHash !== hash) {
+        const reviewedHash = createHash("sha256")
+          .update(encodedBody(ComputerScreenshots.stripPublic(initial)))
+          .digest("hex")
+        if (row.state === "creating" && row.updates && reviewedHash !== hash) {
           const latest = yield* Effect.tryPromise({
             try: () => remote.update(row.id, { secret: row.secret, revision: response.revision, archive: snapshot }),
             catch: unavailable,
@@ -241,36 +266,47 @@ export const layerWith = (options?: { fetch?: typeof fetch }) =>
             const auth = yield* token
             const prior = yield* stored(input.sessionID)
             if (prior) return yield* write(prior, auth)
-            const snapshot = yield* archive.preview(input)
-            yield* Effect.try({ try: () => encodedBody(snapshot), catch: unavailable })
-            if (
-              !input.consent.updates &&
-              createHash("sha256").update(JSON.stringify(snapshot)).digest("hex") !== input.previewHash
-            )
-              return yield* new PublicSession.Error({
-                code: "CONFLICT",
-                message: "The conversation changed after the preview. Review the updated transcript before sharing.",
-              })
             const row = yield* db
-              .insert(PublicSessionShareTable)
-              .values({
-                session_id: input.sessionID,
-                id: randomBytes(16).toString("hex"),
-                secret: randomBytes(32).toString("hex"),
-                owner: auth.owner,
-                engine: snapshot.engine,
-                expires_at: input.expiresAt,
-                updated_at: Date.now(),
-                revision: 0,
-                content_hash: "",
-                initial_archive: snapshot,
-                updates: input.consent.updates,
-                state: "creating",
-              })
-              .onConflictDoNothing()
-              .returning()
-              .get()
-              .pipe(Effect.orDie)
+              .transaction(
+                () =>
+                  Effect.gen(function* () {
+                    // Serialize capture and storage against screenshot pruning, including other processes. No
+                    // network work runs while this transaction holds the writer reservation.
+                    const snapshot = yield* archive.preview(input)
+                    yield* Effect.try({ try: () => encodedBody(snapshot), catch: unavailable })
+                    if (
+                      !input.consent.updates &&
+                      createHash("sha256").update(JSON.stringify(snapshot)).digest("hex") !== input.previewHash
+                    )
+                      return yield* new PublicSession.Error({
+                        code: "CONFLICT",
+                        message:
+                          "The conversation changed after the preview. Review the updated transcript before sharing.",
+                      })
+                    return yield* db
+                      .insert(PublicSessionShareTable)
+                      .values({
+                        session_id: input.sessionID,
+                        id: randomBytes(16).toString("hex"),
+                        secret: randomBytes(32).toString("hex"),
+                        owner: auth.owner,
+                        engine: snapshot.engine,
+                        expires_at: input.expiresAt,
+                        updated_at: Date.now(),
+                        revision: 0,
+                        content_hash: "",
+                        initial_archive: snapshot,
+                        updates: input.consent.updates,
+                        state: "creating",
+                      })
+                      .onConflictDoNothing()
+                      .returning()
+                      .get()
+                      .pipe(Effect.orDie)
+                  }),
+                { behavior: "immediate" },
+              )
+              .pipe(Effect.mapError(unavailable))
             if (!row) return yield* conflict()
             const result = yield* write(row, auth)
             if (input.remember)
@@ -433,6 +469,7 @@ export const layerWith = (options?: { fetch?: typeof fetch }) =>
             if (consent?.version !== PublicSession.CONSENT_VERSION || !consent.updates) return
             return yield* publish({
               ...input,
+              includeScreenshots: false,
               consent: { version: 1, public: true, updates: consent.updates },
               expiresAt: Date.now() + PublicSession.MAX_AGE_MS,
             })
@@ -457,3 +494,18 @@ export const node = makeGlobalNode({
   layer: layerWith(),
   deps: [Database.node, SessionArchive.node, EventV2.node, FreeModels.credentialsNode],
 })
+
+function liveBaseline(row: typeof PublicSessionShareTable.$inferSelect) {
+  // A manual snapshot may contain screenshots, but live updates compare only the screenshot-free transcript.
+  return row.initial_archive
+    ? createHash("sha256")
+        .update(encodedBody(ComputerScreenshots.stripPublic(row.initial_archive)))
+        .digest("hex")
+    : row.content_hash
+}
+
+function hasScreenshots(archive: PublicSession.Archive | null) {
+  return Boolean(
+    archive?.messages.some((message) => message.parts.some((part) => part.type === "tool" && part.screenshots?.length)),
+  )
+}

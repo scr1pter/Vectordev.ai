@@ -24,6 +24,9 @@ import type {
   CommandListData,
   CommandListErrors,
   CommandListResponses,
+  ComputerPruneScreenshotsData,
+  ComputerPruneScreenshotsErrors,
+  ComputerPruneScreenshotsResponses,
   ConfigGetData,
   ConfigGetErrors,
   ConfigGetResponses,
@@ -1565,6 +1568,30 @@ export class Event extends HeyApiClient {
     return (options?.client ?? this.client).sse.get<EventSubscribeResponses, EventSubscribeErrors, ThrowOnError>({
       url: "/event",
       ...options,
+    })
+  }
+}
+
+export class Computer extends HeyApiClient {
+  /**
+   * Delete stored computer screenshots
+   *
+   * Delete computer screenshots before a time or in a session. Use all: true to delete every screenshot and reclaim database pages. Only the server owner can delete screenshots.
+   */
+  public pruneScreenshots<ThrowOnError extends boolean = false>(
+    options?: Options<ComputerPruneScreenshotsData, ThrowOnError>,
+  ) {
+    return (options?.client ?? this.client).post<
+      ComputerPruneScreenshotsResponses,
+      ComputerPruneScreenshotsErrors,
+      ThrowOnError
+    >({
+      url: "/computer/screenshots/prune",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
     })
   }
 }
@@ -5308,6 +5335,11 @@ export class VectorClient extends HeyApiClient {
   private _event?: Event
   get event(): Event {
     return (this._event ??= new Event({ client: this.client }))
+  }
+
+  private _computer?: Computer
+  get computer(): Computer {
+    return (this._computer ??= new Computer({ client: this.client }))
   }
 
   private _config?: Config2

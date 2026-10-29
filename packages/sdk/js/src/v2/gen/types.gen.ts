@@ -2629,6 +2629,12 @@ export type TeamsError = {
   }
 }
 
+export type UnknownError1 = {
+  _tag: "UnknownError"
+  message: string
+  ref?: string
+}
+
 export type ProjectTrustStatus = {
   workspace: string
   trusted: boolean
@@ -5143,7 +5149,7 @@ export type SessionNotFoundError = {
   message: string
 }
 
-export type UnknownError1 = {
+export type UnknownError2 = {
   _tag: "UnknownError"
   message: string
   ref?: string
@@ -6790,6 +6796,16 @@ export type ConfigV2ExperimentalPolicy = {
 
 export type TeamsId = string
 
+export type ComputerPruneInput = {
+  before?: number
+  sessionID?: string
+  all?: boolean
+}
+
+export type ComputerPruneResult = {
+  removed: number
+}
+
 export type TaskStatus = "queued" | "running" | "waiting_on_user" | "completed" | "failed" | "stopped"
 
 export type TaskUsage = {
@@ -6954,7 +6970,25 @@ export type PublicSessionPublish = {
   expiresAt: number
   previewHash?: string
   remember?: boolean
+  includeScreenshots?: boolean
 }
+
+export type PublicSessionScreenshot =
+  | {
+      name: string
+      mediaType: "image/png"
+      url: string
+    }
+  | {
+      name: string
+      mediaType: "image/jpeg"
+      url: string
+    }
+  | {
+      name: string
+      mediaType: "image/webp"
+      url: string
+    }
 
 export type PublicSessionPart =
   | {
@@ -6972,6 +7006,16 @@ export type PublicSessionPart =
       status: "completed" | "error" | "interrupted"
       input: string
       output: string
+      screenshots?: Array<PublicSessionScreenshot>
+    }
+  | {
+      type: "tool"
+      name: "computer"
+      callID: string
+      status: "completed"
+      input: string
+      output: string
+      screenshots?: Array<PublicSessionScreenshot>
     }
   | {
       type: "attachment"
@@ -10981,6 +11025,43 @@ export type EventSubscribeResponses = {
 }
 
 export type EventSubscribeResponse = EventSubscribeResponses[keyof EventSubscribeResponses]
+
+export type ComputerPruneScreenshotsData = {
+  body?: ComputerPruneInput
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/computer/screenshots/prune"
+}
+
+export type ComputerPruneScreenshotsErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type ComputerPruneScreenshotsError = ComputerPruneScreenshotsErrors[keyof ComputerPruneScreenshotsErrors]
+
+export type ComputerPruneScreenshotsResponses = {
+  /**
+   * ComputerPrune.Result
+   */
+  200: ComputerPruneResult
+}
+
+export type ComputerPruneScreenshotsResponse =
+  ComputerPruneScreenshotsResponses[keyof ComputerPruneScreenshotsResponses]
 
 export type ConfigGetData = {
   body?: never
@@ -16892,6 +16973,7 @@ export type SessionSharePreviewData = {
   query?: {
     directory?: string
     workspace?: string
+    includeScreenshots?: "true" | "false"
   }
   url: "/session/{sessionID}/share/preview"
 }
@@ -18466,7 +18548,9 @@ export type ServerSessionSessionSharePreviewData = {
   path: {
     sessionID: string
   }
-  query?: never
+  query?: {
+    includeScreenshots?: "true" | "false"
+  }
   url: "/api/session/{sessionID}/share/preview"
 }
 
@@ -18823,7 +18907,7 @@ export type V2SessionResumeFreeModelsErrors = {
   /**
    * UnknownError
    */
-  500: UnknownError1
+  500: UnknownError2
 }
 
 export type V2SessionResumeFreeModelsError = V2SessionResumeFreeModelsErrors[keyof V2SessionResumeFreeModelsErrors]
@@ -19048,7 +19132,7 @@ export type V2SessionRevertStageErrors = {
   /**
    * UnknownError
    */
-  500: UnknownError1
+  500: UnknownError2
 }
 
 export type V2SessionRevertStageError = V2SessionRevertStageErrors[keyof V2SessionRevertStageErrors]
@@ -19093,7 +19177,7 @@ export type V2SessionRevertClearErrors = {
   /**
    * UnknownError
    */
-  500: UnknownError1
+  500: UnknownError2
 }
 
 export type V2SessionRevertClearError = V2SessionRevertClearErrors[keyof V2SessionRevertClearErrors]
@@ -19175,7 +19259,7 @@ export type V2SessionContextErrors = {
   /**
    * UnknownError
    */
-  500: UnknownError1
+  500: UnknownError2
 }
 
 export type V2SessionContextError = V2SessionContextErrors[keyof V2SessionContextErrors]
@@ -19395,7 +19479,7 @@ export type V2SessionMessagesErrors = {
   /**
    * UnknownError
    */
-  500: UnknownError1
+  500: UnknownError2
 }
 
 export type V2SessionMessagesError = V2SessionMessagesErrors[keyof V2SessionMessagesErrors]

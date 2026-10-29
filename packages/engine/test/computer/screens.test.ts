@@ -3,10 +3,37 @@ import { ModelV2 } from "@vectordevai/core/model"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import type { SessionV1 } from "@vectordevai/core/v1/session"
 import { ComputerScreens } from "@/computer/screens"
+import type { Provider } from "@/provider/provider"
+import { MessageV2 } from "@/session/message-v2"
 import { MessageID, PartID, SessionID } from "@/session/schema"
 
 const sessionID = SessionID.make("ses_screens")
 const messageID = MessageID.make("msg_screens")
+
+function model(freeModel?: Provider.Model["freeModel"], npm = "@ai-sdk/openai"): Provider.Model {
+  return {
+    id: ModelV2.ID.make("vision"),
+    providerID: ProviderV2.ID.make("test"),
+    api: { id: "vision", npm, url: "https://example.test" },
+    name: "Chosen vision model",
+    capabilities: {
+      temperature: true,
+      reasoning: false,
+      attachment: true,
+      toolcall: true,
+      input: { text: true, image: true, audio: false, video: false, pdf: false },
+      output: { text: true, image: false, audio: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+    limit: { context: 200_000, output: 8192 },
+    status: "active",
+    options: {},
+    headers: {},
+    release_date: "2026-01-01",
+    ...(freeModel ? { freeModel } : {}),
+  }
+}
 
 function screen(index: number, tool = "computer", mime = "image/png"): SessionV1.ToolPart {
   return {
@@ -60,6 +87,80 @@ function history(parts: SessionV1.Part[]): SessionV1.WithParts[] {
 }
 
 describe("computer screenshot history", () => {
+  test.each(["@ai-sdk/openai", "@ai-sdk/openai-compatible"])(
+    "switching to a may-train model strips earlier screenshots (%s)",
+    async (npm) => {
+      const input = history([screen(0)])
+      const saved = JSON.stringify(input)
+      const selected = await MessageV2.toModelMessages(input, model(undefined, npm))
+      const switched = await MessageV2.toModelMessages(input, model({ source: "shared", dataPolicy: "may-train" }, npm))
+      expect(JSON.stringify(selected)).toContain("c2NyZWVu")
+      expect(JSON.stringify(switched)).not.toContain("c2NyZWVu")
+      expect(JSON.stringify(switched)).toContain("Screenshot 0")
+      expect(JSON.stringify(switched)).toContain("call_0")
+      expect(JSON.stringify(input)).toBe(saved)
+    },
+  )
+
+  test("unreviewed free models lose screenshots while no-training models retain consented vision", async () => {
+    const input = history([screen(0)])
+    for (const freeModel of [
+      { source: "shared" as const },
+      { source: "openrouter" as const, dataPolicy: "unreviewed" as const },
+    ])
+      expect(JSON.stringify(await MessageV2.toModelMessages(input, model(freeModel)))).not.toContain("c2NyZWVu")
+    expect(
+      JSON.stringify(await MessageV2.toModelMessages(input, model({ source: "shared", dataPolicy: "no-training" }))),
+    ).toContain("c2NyZWVu")
+  })
+
+  test("computer privacy preserves other tool attachments and the owner's ordinary image uploads", async () => {
+    const image: SessionV1.FilePart = {
+      id: PartID.make("prt_uploaded"),
+      sessionID,
+      messageID: MessageID.make("msg_user"),
+      type: "file",
+      mime: "image/png",
+      url: "data:image/png;base64,dXNlcg==",
+    }
+    const read = screen(1, "read")
+    if (read.state.status !== "completed") throw new Error("Expected completed fixture")
+    const input: SessionV1.WithParts[] = [
+      {
+        info: {
+          id: image.messageID,
+          sessionID,
+          role: "user",
+          time: { created: 0 },
+          agent: "build",
+          model: { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("vision") },
+        },
+        parts: [image],
+      },
+      ...history([
+        screen(0),
+        { ...read, state: { ...read.state, attachments: [{ ...image, url: "data:image/png;base64,cmVhZA==" }] } },
+      ]),
+    ]
+    const result = JSON.stringify(
+      await MessageV2.toModelMessages(input, model({ source: "shared", dataPolicy: "may-train" })),
+    )
+    expect(result).not.toContain("c2NyZWVu")
+    expect(result).toContain("dXNlcg==")
+    expect(result).toContain("cmVhZA==")
+  })
+
+  test("text-only model helpers and compaction receive no computer screenshot bytes", async () => {
+    const input = history([screen(0)])
+    const saved = JSON.stringify(input)
+    const helper = ComputerScreens.replay(input, model(), { helper: true })
+    expect(JSON.stringify(helper)).not.toContain("c2NyZWVu")
+    const result = await MessageV2.toModelMessages(input, model(), { stripMedia: true })
+    expect(JSON.stringify(result)).not.toContain("c2NyZWVu")
+    expect(JSON.stringify(result)).toContain("Screenshot 0")
+    expect(JSON.stringify(input)).toBe(saved)
+  })
+
   test("keeps the newest three screenshots when each older image can be pruned", () => {
     const input = history(Array.from({ length: 6 }, (_, index) => screen(index)))
     const saved = JSON.stringify(input)

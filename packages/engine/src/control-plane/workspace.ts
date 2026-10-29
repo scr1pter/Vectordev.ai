@@ -1,3 +1,4 @@
+import { ComputerPrivacy } from "@vectordevai/server/computer-privacy"
 import { PublicSession } from "@vectordevai/schema/public-session"
 import { PublicShareRemovalError, publicShareWarning } from "@vectordevai/schema/public-share"
 import { ShareNext } from "@/share/share-next"
@@ -195,9 +196,11 @@ const layer = Layer.effect(
       url: URL | string,
       headers: HeadersInit | undefined,
     ) {
+      const outgoing = new Headers(headers)
+      outgoing.set(ComputerPrivacy.WORKSPACE_SYNC_HEADER, "1")
       const response = yield* http.execute(
         HttpClientRequest.get(route(url, "/global/event"), {
-          headers: new Headers(headers),
+          headers: outgoing,
           accept: "text/event-stream",
         }),
       )
@@ -673,7 +676,8 @@ const layer = Layer.effect(
             sessionID: input.sessionID,
           })
 
-        const batches = Iterable.chunksOf(rows, 10)
+        const projected = yield* ComputerPrivacy.payload(rows, { db })
+        const batches = Iterable.chunksOf(projected, 10)
         const total = Iterable.size(batches)
 
         yield* Effect.forEach(

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { createHash } from "node:crypto"
-import { Context, DateTime, Effect, Exit, Fiber, Layer, Option, Schema } from "effect"
+import { Context, DateTime, Deferred, Effect, Exit, Fiber, Layer, Option, Schema } from "effect"
 import { eq } from "drizzle-orm"
 import { PublicSession } from "@vectordevai/schema/public-session"
 import { AppNodeBuilder } from "../src/effect/app-node-builder"
@@ -25,6 +25,7 @@ import { BrainSchema } from "../src/brain/schema"
 import { AbsolutePath } from "../src/schema"
 import { testEffect } from "./lib/effect"
 import { adjust } from "effect/testing/TestClock"
+import { ComputerScreenshots } from "../src/util/computer-screenshots"
 
 const token = `vct_${Buffer.from(JSON.stringify({ sub: "synthetic-owner" })).toString("base64url")}.synthetic`
 const source: PublicSession.Archive = {
@@ -59,6 +60,8 @@ function remoteFixture() {
     loseCreate: false,
     rejectDelete: false,
     rejectUpdate: false,
+    holdCreate: undefined as Promise<void> | undefined,
+    createStarted: undefined as (() => void) | undefined,
     holdUpdate: undefined as Promise<void> | undefined,
     updateStarted: undefined as (() => void) | undefined,
   }
@@ -91,6 +94,8 @@ function remoteFixture() {
           archive: archive.archive,
         }
         snapshots.set(id, saved)
+        state.createStarted?.()
+        await state.holdCreate
         if (state.loseCreate) {
           state.loseCreate = false
           throw new Error("synthetic lost response")
@@ -170,6 +175,349 @@ const edit = (sessionID: SessionSchema.ID) =>
     })
   })
 
+const screenshot =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="
+const ordinaryAttachment = "data:text/plain;base64,b3JkaW5hcnktYXR0YWNobWVudA=="
+const screenshotSession = Effect.fn("PublicShareTest.screenshotSession")(function* (engine: "v1" | "v2") {
+  const archives = yield* SessionArchive.Service
+  const session = yield* archives.import({
+    archive: source,
+    targetEngine: engine,
+    location: { directory: AbsolutePath.make("/tmp") },
+  })
+  const original = yield* archives.export(session)
+  if ("engine" in original) {
+    const local: SessionArchive.Native = {
+      ...original,
+      messages: original.messages.map((message) =>
+        message.type !== "assistant"
+          ? message
+          : {
+              ...message,
+              content: [
+                ...message.content,
+                ...["computer", "read"].map((name) => {
+                  const file = {
+                    uri: name === "computer" ? screenshot : ordinaryAttachment,
+                    mime: name === "computer" ? "image/png" : "text/plain",
+                    name: name === "computer" ? "screen.png" : "ordinary.txt",
+                  }
+                  return SessionMessage.AssistantTool.make({
+                    type: "tool",
+                    id: `${name}-screenshot-fixture`,
+                    name,
+                    time: { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) },
+                    state: {
+                      status: "completed",
+                      input: { action: "read_ui" },
+                      structured: { action: "read_ui" },
+                      attachments: [file],
+                      content: [
+                        { type: "text", text: `${name} completed` },
+                        { type: "file", ...file },
+                      ],
+                    },
+                  })
+                }),
+              ],
+            },
+      ),
+    }
+    return yield* archives.import({
+      archive: Schema.encodeSync(SessionArchive.Native)(local),
+      location: { directory: AbsolutePath.make("/tmp") },
+    })
+  }
+  const local: SessionArchive.Legacy = {
+    ...original,
+    messages: original.messages.map((message) =>
+      message.info.role !== "assistant"
+        ? message
+        : {
+            ...message,
+            parts: [
+              ...message.parts,
+              ...["computer", "read"].map((tool): SessionV1.ToolPart => {
+                const base = { sessionID: session.sessionID, messageID: message.info.id }
+                return {
+                  ...base,
+                  id: SessionV1.PartID.ascending(),
+                  type: "tool",
+                  tool,
+                  callID: `${tool}-screenshot-fixture`,
+                  state: {
+                    status: "completed",
+                    input: { action: "read_ui" },
+                    output: `${tool} completed`,
+                    title: tool,
+                    metadata: { action: "read_ui" },
+                    time: { start: 1, end: 2 },
+                    attachments: [
+                      {
+                        ...base,
+                        id: SessionV1.PartID.ascending(),
+                        type: "file",
+                        mime: tool === "computer" ? "image/png" : "text/plain",
+                        filename: tool === "computer" ? "screen.png" : "ordinary.txt",
+                        url: tool === "computer" ? screenshot : ordinaryAttachment,
+                      },
+                    ],
+                  },
+                }
+              }),
+            ],
+          },
+    ),
+  }
+  return yield* archives.import({ archive: local, location: { directory: AbsolutePath.make("/tmp") } })
+})
+
+it.effect("default exports remove computer screenshots while retaining ordinary tool attachments", () =>
+  Effect.gen(function* () {
+    const archives = yield* SessionArchive.Service
+    for (const engine of ["v1", "v2"] as const) {
+      const session = yield* screenshotSession(engine)
+      const exported = yield* archives.export(session)
+      expect(JSON.stringify(exported)).not.toContain(screenshot)
+      expect(JSON.stringify(exported)).toContain(ordinaryAttachment)
+      expect(JSON.stringify(exported)).toContain("computer completed")
+      expect(JSON.stringify(exported)).toContain("read_ui")
+      const preview = yield* archives.preview(session)
+      expect(JSON.stringify(preview)).not.toContain(screenshot)
+      expect(JSON.stringify(preview)).not.toContain(ordinaryAttachment)
+      expect(JSON.stringify(preview)).toContain("computer completed")
+    }
+  }),
+)
+
+it.effect("explicit screenshot export and manual publication include only completed computer images", () =>
+  Effect.gen(function* () {
+    const archives = yield* SessionArchive.Service
+    const shares = yield* PublicSessionShare.Service
+    const remote = yield* Remote
+    for (const engine of ["v1", "v2"] as const) {
+      const session = yield* screenshotSession(engine)
+      const exported = yield* archives.export({ ...session, includeScreenshots: true })
+      expect(JSON.stringify(exported)).toContain(screenshot)
+      expect(JSON.stringify(exported)).toContain(ordinaryAttachment)
+      const preview = yield* shares.preview({ ...session, includeScreenshots: true })
+      const computer = preview.messages
+        .flatMap((message) => message.parts)
+        .find((part) => part.type === "tool" && part.name === "computer")
+      expect(computer).toMatchObject({
+        type: "tool",
+        name: "computer",
+        screenshots: [{ name: "screen.png", mediaType: "image/png", url: screenshot }],
+      })
+      if (computer?.type !== "tool") return yield* Effect.die("Missing completed computer tool")
+      expect(computer.screenshots).toHaveLength(1)
+      expect(JSON.stringify(preview)).not.toContain(ordinaryAttachment)
+      const info = yield* shares.publish({
+        ...publish(session.sessionID, false),
+        includeScreenshots: true,
+        previewHash: createHash("sha256").update(JSON.stringify(preview)).digest("hex"),
+      })
+      expect(JSON.stringify(remote.snapshots.get(info.id)?.archive)).toContain(screenshot)
+      expect(remote.requests.filter((request) => request.id === info.id).map((request) => request.method)).toEqual([
+        "POST",
+      ])
+      // Exporting an opted-in copy must not change future defaults or remove the original local screenshot.
+      expect(JSON.stringify(yield* archives.export(session))).not.toContain(screenshot)
+      expect(JSON.stringify(yield* archives.export({ ...session, includeScreenshots: true }))).toContain(screenshot)
+      expect(JSON.stringify(SessionArchive.publicArchive(exported))).not.toContain(screenshot)
+      expect(JSON.stringify(SessionArchive.publicArchive(exported, { includeScreenshots: true }))).toContain(screenshot)
+    }
+  }),
+)
+
+it.effect("manual publication omits computer screenshots unless that share explicitly opts in", () =>
+  Effect.gen(function* () {
+    const shares = yield* PublicSessionShare.Service
+    const remote = yield* Remote
+    for (const engine of ["v1", "v2"] as const) {
+      const session = yield* screenshotSession(engine)
+      const preview = yield* shares.preview(session)
+      const info = yield* shares.publish({
+        ...publish(session.sessionID, false),
+        previewHash: createHash("sha256").update(JSON.stringify(preview)).digest("hex"),
+      })
+      expect(JSON.stringify(remote.snapshots.get(info.id)?.archive)).not.toContain(screenshot)
+      expect(JSON.stringify(remote.requests.filter((request) => request.id === info.id))).not.toContain(screenshot)
+    }
+  }),
+)
+
+it.effect("auto-shares and live updates strip computer screenshots; includeScreenshots is honoured", () =>
+  Effect.gen(function* () {
+    const session = yield* screenshotSession("v2")
+    const shares = yield* PublicSessionShare.Service
+    const remote = yield* Remote
+    const manual = yield* shares.publish({
+      ...publish(session.sessionID),
+      includeScreenshots: true,
+      remember: true,
+    })
+    expect(JSON.stringify(remote.snapshots.get(manual.id)?.archive)).toContain(screenshot)
+    expect(remote.requests.filter((request) => request.id === manual.id).map((request) => request.method)).toEqual([
+      "POST",
+    ])
+    yield* edit(session.sessionID)
+    yield* shares.flush(session.sessionID)
+    expect(JSON.stringify(remote.snapshots.get(manual.id)?.archive)).not.toContain(screenshot)
+    expect(JSON.stringify(remote.snapshots.get(manual.id)?.archive)).toContain("computer completed")
+    const updates = remote.requests.filter((request) => request.id === manual.id && request.method === "PUT")
+    expect(updates).toHaveLength(1)
+    expect(JSON.stringify(updates)).not.toContain(screenshot)
+
+    const next = yield* screenshotSession("v2")
+    const automatic = yield* shares.auto({ ...next, includeScreenshots: true })
+    expect(automatic).toBeDefined()
+    if (!automatic) return yield* Effect.die("Expected remembered automatic share consent")
+    expect(JSON.stringify(remote.snapshots.get(automatic.id)?.archive)).not.toContain(screenshot)
+    expect(JSON.stringify(remote.requests.filter((request) => request.id === automatic.id))).not.toContain(screenshot)
+    // A prior manual selection is neither remembered for a new share nor used by a later live update.
+    const later = yield* screenshotSession("v2")
+    const ordinary = yield* shares.publish(publish(later.sessionID))
+    expect(JSON.stringify(remote.snapshots.get(ordinary.id)?.archive)).not.toContain(screenshot)
+  }),
+)
+
+// These are the two storage changes a prune makes that share publication reads. The engine's prune tests cover
+// tombstones, historical event copies and VACUUM; these races exercise the public share's reservation boundary.
+const pruneShareSnapshot = (sessionID: SessionSchema.ID) =>
+  Effect.gen(function* () {
+    const { db } = yield* Database.Service
+    yield* db.transaction(
+      () =>
+        Effect.gen(function* () {
+          const messages = yield* db
+            .select()
+            .from(SessionMessageTable)
+            .where(eq(SessionMessageTable.session_id, sessionID))
+            .all()
+          for (const message of messages)
+            yield* db
+              .update(SessionMessageTable)
+              .set({ data: ComputerScreenshots.stripPayload(message.data) })
+              .where(eq(SessionMessageTable.id, message.id))
+              .run()
+          const row = yield* db
+            .select()
+            .from(PublicSessionShareTable)
+            .where(eq(PublicSessionShareTable.session_id, sessionID))
+            .get()
+          if (!row?.initial_archive) return
+          const clean = ComputerScreenshots.stripPublic(row.initial_archive)
+          yield* db
+            .update(PublicSessionShareTable)
+            .set({
+              initial_archive: clean,
+              content_hash: createHash("sha256").update(JSON.stringify(clean)).digest("hex"),
+              dirty: true,
+            })
+            .where(eq(PublicSessionShareTable.session_id, sessionID))
+            .run()
+        }),
+      { behavior: "immediate" },
+    )
+  })
+
+it.effect("a delayed share creation does not restore a concurrently pruned local snapshot", () =>
+  Effect.gen(function* () {
+    const session = yield* screenshotSession("v2")
+    const shares = yield* PublicSessionShare.Service
+    const remote = yield* Remote
+    const { db } = yield* Database.Service
+    const started = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    remote.state.createStarted = started.resolve
+    remote.state.holdCreate = release.promise
+    const pending = yield* shares
+      .publish({ ...publish(session.sessionID), includeScreenshots: true })
+      .pipe(Effect.forkChild)
+    yield* Effect.promise(() => started.promise)
+    const before = yield* db.select().from(PublicSessionShareTable).get()
+    expect(JSON.stringify(before?.initial_archive)).toContain(screenshot)
+    yield* pruneShareSnapshot(session.sessionID)
+    release.resolve()
+    yield* Fiber.join(pending)
+    const after = yield* db.select().from(PublicSessionShareTable).get()
+    expect(after?.state).toBe("active")
+    expect(JSON.stringify(after?.initial_archive)).not.toContain(screenshot)
+  }),
+)
+
+it.effect("snapshot capture and storage serialize with a concurrent screenshot prune", () =>
+  Effect.gen(function* () {
+    const session = yield* screenshotSession("v2")
+    const archive = yield* SessionArchive.Service
+    const remote = yield* Remote
+    const { db } = yield* Database.Service
+    const captured = yield* Deferred.make<boolean>()
+    const release = yield* Deferred.make<void>()
+    const pruneRequested = yield* Deferred.make<void>()
+    const shares = Context.get(
+      yield* Layer.build(PublicSessionShare.layerWith({ fetch: remote.fetch })).pipe(
+        Effect.provideService(SessionArchive.Service, {
+          ...archive,
+          preview: (input) =>
+            Effect.gen(function* () {
+              const snapshot = yield* archive.preview(input)
+              if (input.includeScreenshots) {
+                const transaction = yield* Effect.serviceOption(db.$client.transactionService)
+                yield* Deferred.succeed(captured, Option.isSome(transaction))
+                yield* Deferred.await(release)
+              }
+              return snapshot
+            }),
+        }),
+      ),
+      PublicSessionShare.Service,
+    )
+    const pending = yield* shares
+      .publish({ ...publish(session.sessionID), includeScreenshots: true })
+      .pipe(Effect.forkChild)
+    // The captured bytes must remain protected by the same database writer reservation as their later INSERT.
+    expect(yield* Deferred.await(captured)).toBe(true)
+    const pruning = yield* Deferred.succeed(pruneRequested, undefined).pipe(
+      Effect.andThen(pruneShareSnapshot(session.sessionID)),
+      Effect.forkChild,
+    )
+    yield* Deferred.await(pruneRequested)
+    yield* Deferred.succeed(release, undefined)
+    yield* Fiber.join(pruning)
+    yield* Fiber.join(pending)
+    const row = yield* db.select().from(PublicSessionShareTable).get()
+    expect(row?.state).toBe("active")
+    expect(JSON.stringify(row?.initial_archive)).not.toContain(screenshot)
+    expect(JSON.stringify(yield* archive.export({ ...session, includeScreenshots: true }))).not.toContain(screenshot)
+  }),
+)
+
+test("public computer screenshots accept only embedded supported image data", () => {
+  const tool = {
+    type: "tool",
+    name: "computer",
+    callID: "screen",
+    status: "completed",
+    input: "{}",
+    output: "Computer action completed",
+  }
+  const image = { name: "screen.png", mediaType: "image/png", url: screenshot }
+  expect(Schema.is(PublicSession.Part)({ ...tool, screenshots: [image] })).toBe(true)
+  for (const url of [
+    "https://example.com/screen.png",
+    "file:///tmp/screen.png",
+    "data:image/svg+xml;base64,PHN2Zz4=",
+  ]) {
+    expect(Schema.is(PublicSession.Part)({ ...tool, screenshots: [{ ...image, url }] })).toBe(false)
+  }
+  expect(Schema.is(PublicSession.Part)({ ...tool, screenshots: [{ ...image, mediaType: "text/html" }] })).toBe(false)
+  expect(Schema.is(PublicSession.Part)({ ...tool, screenshots: [{ ...image, mediaType: "image/jpeg" }] })).toBe(false)
+  expect(Schema.is(PublicSession.Part)({ ...tool, name: "read", screenshots: [image] })).toBe(false)
+  expect(Schema.is(PublicSession.Part)({ ...tool, status: "error", screenshots: [image] })).toBe(false)
+})
+
 it.effect("native import is passive, remapped, complete, and notifications see the complete commit", () =>
   Effect.gen(function* () {
     const { db } = yield* Database.Service
@@ -216,10 +564,18 @@ it.effect("native import is passive, remapped, complete, and notifications see t
     ).toHaveLength(2)
     // The transcript's "user" is whoever published it, so its text is marked as outside content: memory never takes
     // it as the words of the user who continues the session.
-    const parts = (
-      yield* db.select().from(PartTable).where(eq(PartTable.session_id, converted.sessionID)).all().pipe(Effect.orDie)
-    ).map((row) =>
-      Schema.decodeUnknownSync(SessionV1.Part)({ ...row.data, id: row.id, sessionID: row.session_id, messageID: row.message_id }),
+    const parts = (yield* db
+      .select()
+      .from(PartTable)
+      .where(eq(PartTable.session_id, converted.sessionID))
+      .all()
+      .pipe(Effect.orDie)).map((row) =>
+      Schema.decodeUnknownSync(SessionV1.Part)({
+        ...row.data,
+        id: row.id,
+        sessionID: row.session_id,
+        messageID: row.message_id,
+      }),
     )
     expect(parts.length).toBeGreaterThan(0)
     expect(parts.every((part) => part.type === "text" && part.metadata?.[BrainSchema.OUTSIDE] === "import")).toBe(true)
@@ -557,6 +913,55 @@ it.effect("a delayed writer from another service instance cannot overwrite a rep
       (yield* db.select().from(SessionTable).where(eq(SessionTable.id, session.sessionID)).get().pipe(Effect.orDie))
         ?.share_info?.id,
     ).toBe(fresh.id)
+  }),
+)
+
+restarted.effect("unchanged screenshot opt-ins survive flush, shutdown and startup reconciliation", () =>
+  Effect.gen(function* () {
+    const session = yield* screenshotSession("v2")
+    const remote = yield* Remote
+    const { db } = yield* Database.Service
+    const info = yield* Effect.gen(function* () {
+      const service = Context.get(
+        yield* Layer.build(PublicSessionShare.layerWith({ fetch: remote.fetch })),
+        PublicSessionShare.Service,
+      )
+      const created = yield* service.publish({ ...publish(session.sessionID), includeScreenshots: true })
+      const flushed = yield* service.flush(session.sessionID)
+      expect(flushed.revision).toBe(created.revision)
+      expect(remote.requests.map((request) => request.method)).toEqual(["POST"])
+      expect(JSON.stringify(remote.snapshots.get(created.id)?.archive)).toContain(screenshot)
+      return created
+    }).pipe(Effect.scoped)
+    // Closing the first service runs its final flush against the persisted opted-in snapshot.
+    expect(remote.requests.map((request) => request.method)).toEqual(["POST"])
+    expect(JSON.stringify(remote.snapshots.get(info.id)?.archive)).toContain(screenshot)
+    yield* Effect.gen(function* () {
+      const service = Context.get(
+        yield* Layer.build(PublicSessionShare.layerWith({ fetch: remote.fetch })),
+        PublicSessionShare.Service,
+      )
+      // Startup queues every live share, including clean rows, to recover missing dirty notifications.
+      yield* adjust("1 second")
+      expect((yield* service.flush(session.sessionID)).revision).toBe(info.revision)
+      expect(remote.requests.map((request) => request.method)).toEqual(["POST"])
+      expect(JSON.stringify(remote.snapshots.get(info.id)?.archive)).toContain(screenshot)
+      const row = yield* db.select().from(PublicSessionShareTable).get().pipe(Effect.orDie)
+      expect(row?.revision).toBe(info.revision)
+      expect(row?.dirty).toBe(false)
+      expect(JSON.stringify(row?.initial_archive)).toContain(screenshot)
+
+      // A real transcript change must still publish a live update without the manual snapshot's screenshots.
+      yield* edit(session.sessionID)
+      const updated = yield* service.flush(session.sessionID)
+      expect(updated.revision).toBe(info.revision + 1)
+      expect(remote.requests.map((request) => request.method)).toEqual(["POST", "PUT"])
+      expect(JSON.stringify(remote.requests.filter((request) => request.method === "PUT"))).not.toContain(screenshot)
+      expect(JSON.stringify(remote.snapshots.get(info.id)?.archive)).toContain("New visible question")
+      expect(JSON.stringify(remote.snapshots.get(info.id)?.archive)).not.toContain(screenshot)
+      expect((yield* db.select().from(PublicSessionShareTable).get().pipe(Effect.orDie))?.initial_archive).toBeNull()
+    }).pipe(Effect.scoped)
+    expect(remote.requests.map((request) => request.method)).toEqual(["POST", "PUT"])
   }),
 )
 

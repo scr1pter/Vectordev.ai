@@ -39,6 +39,7 @@ import type { Provider } from "@/provider/provider"
 import { Effect, Option, Schema } from "effect"
 import { ComputerNativeContext } from "@/computer/native-context"
 import { ComputerModels } from "@/computer/models"
+import { ComputerScreens } from "@/computer/screens"
 import { isRecord } from "@/util/record"
 
 /** Error shape thrown by Bun's fetch() when gzip/br decompression fails mid-stream */
@@ -210,7 +211,9 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
     return { type: "json", value: output as never }
   }
 
-  for (const msg of input) {
+  // Re-evaluate on every conversion: a later model choice cannot replay consented screenshots to a training endpoint.
+  // Compaction and other text-only helpers opt out of media independently of the session's selected model.
+  for (const msg of ComputerScreens.replay(input, model, { helper: options?.stripMedia === true })) {
     if (msg.parts.length === 0) continue
 
     if (msg.info.role === "user") {

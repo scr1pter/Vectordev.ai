@@ -1,4 +1,5 @@
 import { ServerAuth } from "../auth"
+import { ComputerPrivacy } from "../computer-privacy"
 import { ForbiddenError, UnauthorizedError } from "@vectordevai/protocol/errors"
 import { Authorization, RequestPrincipal } from "@vectordevai/protocol/middleware/authorization"
 export { Authorization } from "@vectordevai/protocol/middleware/authorization"
@@ -73,7 +74,12 @@ export const authorizationLayer = Layer.effect(
         if (!identity) return yield* unauthorized(credential, config)
         if (identity === "guest" && (yield* ServerAuth.ownerOnlyRequest))
           return yield* new ForbiddenError({ message: "This operation requires the server owner" })
-        return yield* effect.pipe(Effect.provideService(RequestPrincipal, ServerAuth.principal(identity, config)))
+        return yield* effect.pipe(
+          Effect.provideService(RequestPrincipal, ServerAuth.principal(identity, config)),
+          Effect.flatMap((response) =>
+            identity === "guest" ? ComputerPrivacy.response(response) : Effect.succeed(response),
+          ),
+        )
       }),
     )
   }),

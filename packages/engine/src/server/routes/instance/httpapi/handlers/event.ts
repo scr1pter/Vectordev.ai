@@ -1,3 +1,4 @@
+import { ComputerPrivacy } from "@vectordevai/server/computer-privacy"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { GlobalBus } from "@/bus/global"
@@ -61,6 +62,8 @@ function isOwnJoin(event: EventV2.Payload, clientID: string) {
 
 function eventResponse(events: EventV2.Interface, request: HttpServerRequest.HttpServerRequest, self: Presence) {
   return Effect.gen(function* () {
+    const principal = yield* RequestPrincipal
+    const project = yield* ComputerPrivacy.projector
     const instance = yield* InstanceState.context
     const workspaceID = yield* InstanceState.workspaceID
     const hangup = yield* Deferred.make<void>()
@@ -135,6 +138,7 @@ function eventResponse(events: EventV2.Interface, request: HttpServerRequest.Htt
     return HttpServerResponse.stream(
       opening.pipe(
         Stream.concat(output.pipe(Stream.merge(heartbeat, { haltStrategy: "left" }))),
+        Stream.mapEffect((event) => (principal.kind === "owner" ? Effect.succeed(event) : project(event))),
         Stream.map(eventData),
         Stream.pipeThroughChannel(Sse.encode()),
         Stream.encodeText,
