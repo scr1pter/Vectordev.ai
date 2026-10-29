@@ -1950,59 +1950,61 @@ describe("Vector's own git and the V2 runner under Vector Local", () => {
   const git = testEffect(LayerNode.compile(LayerNode.group([Git.node, CrossSpawnSpawner.node])))
 
   git.live("decides a git fetch to github.com before git starts, and blocks it with Web access None", () =>
-    Effect.gen(function* () {
-      const dir = yield* tmpdirScoped({ git: true })
-      const repo = yield* Git.Service
-      const repository = yield* repo.repo.discover(AbsolutePath.make(dir))
-      expect(repository).toBeDefined()
-      Egress.configure(LocalPolicy.resolve({ global: { enabled: true, web: "none" } }))
-      expect(Git.gitEnvironment()).toEqual({ GIT_ALLOW_PROTOCOL: "file" })
-      const fetched = yield* repo.sync
-        .fetchRemotes(repository!, { remoteUrl: "https://github.com/vectordevai/vector.git" })
-        .pipe(Effect.flip)
-      expect(fetched.message).toBe(
-        "Vector Local blocked a git request to github.com. Web access is set to None, so git reaches no internet server.",
-      )
-      // A remote by its name is decided by the URL git would use for it.
-      yield* Effect.promise(() => Bun.$`git -C ${dir} remote add origin git@github.com:vectordevai/vector.git`.quiet())
-      const named = yield* repo.sync.fetchBranch(repository!, { branch: "main" }).pipe(Effect.flip)
-      expect(named.message).toContain("Vector Local blocked a git request to github.com.")
-      expect(Egress.events().filter((event) => event.source === "git-remote")).toEqual([
-        expect.objectContaining({ origin: "https://github.com", decision: "block", rule: "web-none" }),
-        expect.objectContaining({ origin: "https://github.com", decision: "block", rule: "web-none" }),
-      ])
-      // A remote on this computer is never decided.
-      expect(Git.remoteRefusal(path.join(dir, "other.git"))).toBeUndefined()
-      expect(guard.outside()).toEqual([])
-    }),
+    withLocal({ enabled: true, web: "none" }, () =>
+      Effect.gen(function* () {
+        const dir = yield* tmpdirScoped({ git: true })
+        const repo = yield* Git.Service
+        const repository = yield* repo.repo.discover(AbsolutePath.make(dir))
+        expect(repository).toBeDefined()
+        expect(Git.gitEnvironment()).toEqual({ GIT_ALLOW_PROTOCOL: "file" })
+        const fetched = yield* repo.sync
+          .fetchRemotes(repository!, { remoteUrl: "https://github.com/vectordevai/vector.git" })
+          .pipe(Effect.flip)
+        expect(fetched.message).toBe(
+          "Vector Local blocked a git request to github.com. Web access is set to None, so git reaches no internet server.",
+        )
+        // A remote by its name is decided by the URL git would use for it.
+        yield* Effect.promise(() => Bun.$`git -C ${dir} remote add origin git@github.com:vectordevai/vector.git`.quiet())
+        const named = yield* repo.sync.fetchBranch(repository!, { branch: "main" }).pipe(Effect.flip)
+        expect(named.message).toContain("Vector Local blocked a git request to github.com.")
+        expect(Egress.events().filter((event) => event.source === "git-remote")).toEqual([
+          expect.objectContaining({ origin: "https://github.com", decision: "block", rule: "web-none" }),
+          expect.objectContaining({ origin: "https://github.com", decision: "block", rule: "web-none" }),
+        ])
+        // A remote on this computer is never decided.
+        expect(Git.remoteRefusal(path.join(dir, "other.git"))).toBeUndefined()
+        expect(guard.outside()).toEqual([])
+      }),
+    ),
   )
 
   git.live("reads a remote's name, a slash in it or not, and a url.insteadOf alias as the URL git would use", () =>
-    Effect.gen(function* () {
-      const dir = yield* tmpdirScoped({ git: true })
-      const repo = yield* Git.Service
-      const repository = yield* repo.repo.discover(AbsolutePath.make(dir))
-      expect(repository).toBeDefined()
-      // .invalid names never resolve, so nothing could be reached even if a decision were missed.
-      yield* Effect.promise(() => Bun.$`git -C ${dir} remote add team/fork https://git.invalid/team/fork.git`.quiet())
-      yield* Effect.promise(() => Bun.$`git -C ${dir} config url.https://git.invalid/.insteadOf gh:`.quiet())
-      Egress.configure(LocalPolicy.resolve({ global: { enabled: true } }))
-      const named = yield* repo.sync.fetchBranch(repository!, { remote: "team/fork", branch: "main" }).pipe(Effect.flip)
-      expect(named.message).toBe(
-        "Vector Local blocked a git request to git.invalid. Vector Local blocks Vector's own git requests to internet servers unless you allow one.",
-      )
-      // Read as written, gh:org/repo would be a host named gh on the user's network.
-      expect(Git.remoteAddress("gh:org/repo")).toBe("https://gh/")
-      const aliased = yield* repo.repo
-        .clone({ remote: "gh:vectordevai/vector", directory: AbsolutePath.make(path.join(dir, "clone")) })
-        .pipe(Effect.flip)
-      expect(aliased.message).toContain("Vector Local blocked a git request to git.invalid.")
-      expect(Egress.events().filter((event) => event.source === "git-remote")).toEqual([
-        expect.objectContaining({ origin: "https://git.invalid", decision: "block", rule: "not-listed" }),
-        expect.objectContaining({ origin: "https://git.invalid", decision: "block", rule: "not-listed" }),
-      ])
-      expect(guard.outside()).toEqual([])
-    }),
+    withLocal({ enabled: true }, () =>
+      Effect.gen(function* () {
+        const dir = yield* tmpdirScoped({ git: true })
+        const repo = yield* Git.Service
+        const repository = yield* repo.repo.discover(AbsolutePath.make(dir))
+        expect(repository).toBeDefined()
+        // .invalid names never resolve, so nothing could be reached even if a decision were missed.
+        yield* Effect.promise(() => Bun.$`git -C ${dir} remote add team/fork https://git.invalid/team/fork.git`.quiet())
+        yield* Effect.promise(() => Bun.$`git -C ${dir} config url.https://git.invalid/.insteadOf gh:`.quiet())
+        const named = yield* repo.sync.fetchBranch(repository!, { remote: "team/fork", branch: "main" }).pipe(Effect.flip)
+        expect(named.message).toBe(
+          "Vector Local blocked a git request to git.invalid. Vector Local blocks Vector's own git requests to internet servers unless you allow one.",
+        )
+        // Read as written, gh:org/repo would be a host named gh on the user's network.
+        expect(Git.remoteAddress("gh:org/repo")).toBe("https://gh/")
+        const aliased = yield* repo.repo
+          .clone({ remote: "gh:vectordevai/vector", directory: AbsolutePath.make(path.join(dir, "clone")) })
+          .pipe(Effect.flip)
+        expect(aliased.message).toContain("Vector Local blocked a git request to git.invalid.")
+        expect(Egress.events().filter((event) => event.source === "git-remote")).toEqual([
+          expect.objectContaining({ origin: "https://git.invalid", decision: "block", rule: "not-listed" }),
+          expect.objectContaining({ origin: "https://git.invalid", decision: "block", rule: "not-listed" }),
+        ])
+        expect(guard.outside()).toEqual([])
+      }),
+    ),
   )
 
   git.effect("reads where a git remote connects", () =>

@@ -1,4 +1,5 @@
 import { expect } from "bun:test"
+import { rm } from "node:fs/promises"
 import path from "node:path"
 import { NodeFileSystem } from "@effect/platform-node"
 import { eq, sql } from "drizzle-orm"
@@ -22,21 +23,29 @@ import { MessageID, PartID, SessionID } from "@/session/schema"
 import { Session } from "@/session/session"
 import { testEffect } from "../lib/effect"
 
-class Fixture extends Context.Service<Fixture, { file: string; database: Database.Interface }>()("test/ComputerPrune") {}
+class Fixture extends Context.Service<Fixture, { file: string; database: Database.Interface }>()(
+  "test/ComputerPrune",
+) {}
 const fixture = Layer.effect(
   Fixture,
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
-    const directory = yield* fs.makeTempDirectoryScoped({ prefix: "vector-computer-prune-" })
+    const directory = yield* Effect.acquireRelease(
+      fs.makeTempDirectory({ prefix: "vector-computer-prune-" }),
+      // Windows can briefly retain a closed SQLite handle. Retry removal, but still fail teardown if it stays busy.
+      (directory) =>
+        Effect.promise(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })),
+    )
     const file = path.join(directory, "screenshots.db")
     // Own the database inside the directory's scope so Windows releases its file handles before removal.
     const context = yield* Layer.build(Database.layerFromPath(file))
     return { file, database: Context.get(context, Database.Service) }
   }),
 ).pipe(Layer.provide(NodeFileSystem.layer), Layer.orDie)
-const database = Layer.effect(Database.Service, Effect.map(Fixture, (value) => value.database)).pipe(
-  Layer.provide(fixture),
-)
+const database = Layer.effect(
+  Database.Service,
+  Effect.map(Fixture, (value) => value.database),
+).pipe(Layer.provide(fixture))
 const it = testEffect(
   LayerNode.compile(
     LayerNode.group([ComputerPrune.node, Database.node, EventV2.node, SessionProjector.node, Session.node]),
