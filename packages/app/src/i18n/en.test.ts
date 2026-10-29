@@ -37,6 +37,7 @@ const featureNames = [
   "computer.ask.sensitive.rightClick",
   "computer.ask.sensitive.type",
   "computer.ask.sensitive.key",
+  "computer.ask.sensitive.keyUnknown",
   "computer.ask.sensitive.scroll",
   "computer.ask.sensitive.drag",
   "computer.ask.sensitive.useApp",

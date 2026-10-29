@@ -45,6 +45,7 @@ let availableModels: Array<{ id: string; provider: { id: string } }> = []
 let providerReady = true
 let engineAgents = [{ name: "build" }, { name: "research" }]
 let providerLoaded = true
+let planEnabled = false
 // The desktop app's Vector account bridge; the web build has none.
 let vectorAccount: object | undefined = {}
 const toasts: Array<{ title?: string; description?: string }> = []
@@ -160,7 +161,7 @@ beforeAll(async () => {
   }))
 
   mock.module("@/context/plan-mode", () => ({
-    usePlanMode: () => ({ enabled: () => false }),
+    usePlanMode: () => ({ enabled: () => planEnabled }),
   }))
 
   mock.module("@/context/server", () => ({
@@ -308,6 +309,7 @@ beforeEach(() => {
   providerReady = true
   engineAgents = [{ name: "build" }, { name: "research" }]
   providerLoaded = true
+  planEnabled = false
   vectorAccount = {}
   toasts.length = 0
   for (const key of Object.keys(storedSessions)) delete storedSessions[key]
@@ -1135,6 +1137,69 @@ describe("submission agent selection", () => {
 })
 
 describe("queued follow-up submission", () => {
+  test.each([
+    {
+      name: "normal text during a computer ask",
+      plan: false,
+      blocked: true,
+      mode: "normal" as const,
+      queued: 1,
+      sent: 0,
+      shell: 0,
+    },
+    {
+      name: "plan text during a computer ask",
+      plan: true,
+      blocked: true,
+      mode: "normal" as const,
+      queued: 1,
+      sent: 0,
+      shell: 0,
+    },
+    { name: "ordinary plan text", plan: true, blocked: false, mode: "normal" as const, queued: 0, sent: 1, shell: 0 },
+    {
+      name: "an explicit shell command",
+      plan: false,
+      blocked: true,
+      mode: "shell" as const,
+      queued: 0,
+      sent: 0,
+      shell: 1,
+    },
+  ])("preserves the submission destination for $name", async (scenario) => {
+    params = { id: "session-1" }
+    planEnabled = scenario.plan
+    const queued: unknown[] = []
+    const submit = createPromptSubmit({
+      prompt,
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => scenario.mode,
+      working: () => true,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      shouldQueue: () => true,
+      queueWhileBlocked: () => scenario.blocked,
+      onQueue: (draft) => {
+        queued.push(draft)
+      },
+    })
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(queued).toHaveLength(scenario.queued)
+    expect(sentPrompts).toHaveLength(scenario.sent)
+    expect(sentShell).toHaveLength(scenario.shell)
+    if (scenario.plan && scenario.sent) expect(sentPrompts[0]?.input.agent).toBe("plan")
+    if (scenario.plan && scenario.queued) expect(queued[0]).toMatchObject({ agent: "plan" })
+  })
+
   test("keeps the draft intact when the task queue rejects it", async () => {
     params = { id: "session-1" }
     const queued: unknown[] = []

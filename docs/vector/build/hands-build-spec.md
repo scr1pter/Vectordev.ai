@@ -2,7 +2,7 @@
 
 This is the build contract for **Vector Hands**, Vector's consent-based computer-use feature: with the user's permission, Vector sees and operates apps on the user's own Mac or Windows PC to do tasks they asked for. It is product and engineering design for engineer-agents to build from, one work package at a time.
 
-**Target:** the next Vector desktop build. Hands runs in the desktop app on macOS 14+ and Windows 10 2004+ / 11; it is not offered on Linux, the web build, the CLI or the TUI. On ad-hoc-signed macOS builds it is a Preview the user opts into (owner decision O1).
+**Target:** Vector desktop 1.99.112. Hands runs in the desktop app on macOS 14+ and Windows 10 2004+ / 11; it is not offered on Linux, the web build, the CLI or the TUI. On ad-hoc-signed macOS builds it is a Preview the user opts into (owner decision O1).
 
 **Principles every package keeps:**
 - **Transparent:** while Hands acts, every display's edges glow purple and a top banner says "Vector is using your computer" with Stop. There is no hidden or invisible mode.

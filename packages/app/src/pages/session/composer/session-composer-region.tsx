@@ -70,15 +70,15 @@ export function SessionComposerRegion(props: {
           )}
         </Show>
 
-        <Show when={controller.state.permissionRequest()} keyed>
-          {(request) => (
+        <Show when={controller.state.permissionRequest()?.id} keyed>
+          {(requestID) => (
             <div>
               <SessionPermissionDock
-                request={request}
+                request={controller.state.permissionRequest()!}
                 responding={controller.state.permissionResponding()}
                 onDecide={(response) => {
                   controller.onResponseSubmit()
-                  controller.state.decide(response)
+                  return controller.state.decide(response, requestID)
                 }}
               />
             </div>
@@ -167,7 +167,7 @@ export function SessionComposerRegion(props: {
               </Show>
               <Show
                 when={controller.child()}
-                fallback={<Show when={!controller.state.blocked()}>{props.promptInput}</Show>}
+                fallback={<Show when={controller.state.promptAllowed()}>{props.promptInput}</Show>}
               >
                 <div
                   ref={controller.setPromptRef}

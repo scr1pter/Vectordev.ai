@@ -5,7 +5,7 @@ import { Portal, useRenderer, useTerminalDimensions, type JSX } from "@opentui/s
 import type { TextareaRenderable } from "@opentui/core"
 import { useTheme, selectedForeground } from "../../context/theme"
 import type { PermissionRequest } from "@vectordevai/sdk/v2"
-import { canAlwaysAllowPermission, cloudPermissionDetails } from "../../util/permission"
+import { canAlwaysAllowPermission, cloudPermissionDetails, computerPermissionDetails } from "../../util/permission"
 import { useSDK } from "../../context/sdk"
 import { SplitBorder } from "../../ui/border"
 import { useSync } from "../../context/sync"
@@ -150,6 +150,19 @@ function CloudBody(props: { request: PermissionRequest }) {
 }
 
 export function PermissionPrompt(props: { request: PermissionRequest; directory?: string }) {
+  return (
+    <Show when={props.request.id} keyed>
+      {(id) => {
+        // Queue advancement must discard confirmation/editor state and keep every reply bound to the shown ask.
+        const request = { ...props.request, id }
+        const directory = props.directory
+        return <PermissionRequestPrompt request={request} directory={directory} />
+      }}
+    </Show>
+  )
+}
+
+function PermissionRequestPrompt(props: { request: PermissionRequest; directory?: string }) {
   const sdk = useSDK()
   const project = useProject()
   const sync = useSync()
@@ -157,6 +170,10 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
     stage: "permission" as PermissionStage,
   })
   const pathFormatter = usePathFormatter()
+  const computer = createMemo(() => computerPermissionDetails(props.request))
+  const canAlways = createMemo(
+    () => computer()?.canAlways ?? canAlwaysAllowPermission(props.request.permission, props.request.always),
+  )
 
   const session = createMemo(() => sync.data.session.find((s) => s.id === props.request.sessionID))
 
@@ -181,6 +198,7 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
           title="Always allow"
           body={
             <Switch>
+              <Match when={computer()}>{(details) => <TextBody title={details().alwaysDescription} />}</Match>
               <Match when={props.request.always.length === 1 && props.request.always[0] === "*"}>
                 <TextBody title={"This will allow " + props.request.permission + " until Vector is restarted."} />
               </Match>
@@ -205,7 +223,7 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
           escapeKey="cancel"
           onSelect={(option) => {
             setStore("stage", "permission")
-            if (option === "cancel") return
+            if (option === "cancel" || !canAlways()) return
             void sdk.client.permission.reply({
               reply: "always",
               requestID: props.request.id,
@@ -236,6 +254,8 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
           const info = () => {
             const permission = props.request.permission
             const data = input()
+            const details = computer()
+            if (details) return { icon: "✋", title: details.title, body: <TextBody title={details.body} /> }
 
             if (permission.startsWith("vector_cloud_")) {
               return { icon: "☁", title: "Review Cloud action", body: <CloudBody request={props.request} /> }
@@ -448,16 +468,15 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
               header={header()}
               body={current.body}
               options={{
-                once: "Allow once",
-                ...(canAlwaysAllowPermission(props.request.permission, props.request.always)
-                  ? { always: "Allow always" }
-                  : {}),
-                reject: "Reject",
+                ...(computer()?.canApprove === false ? {} : { once: computer()?.primaryLabel ?? "Allow once" }),
+                ...(canAlways() ? { always: computer() ? "Always allow" : "Allow always" } : {}),
+                reject: computer() ? "Deny" : "Reject",
               }}
               escapeKey="reject"
               fullscreen
               onSelect={(option) => {
                 if (option === "always") {
+                  if (!canAlways()) return
                   setStore("stage", "always")
                   return
                 }
@@ -474,6 +493,7 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
                   })
                   return
                 }
+                if (computer()?.canApprove === false) return
                 void sdk.client.permission.reply({
                   reply: "once",
                   requestID: props.request.id,

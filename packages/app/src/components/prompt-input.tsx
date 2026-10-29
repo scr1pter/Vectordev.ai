@@ -205,6 +205,7 @@ export interface PromptInputProps {
   newSessionWorktree?: string
   onNewSessionWorktreeReset?: () => void
   shouldQueue?: () => boolean
+  queueWhileBlocked?: () => boolean
   onQueue?: (draft: FollowupDraft) => boolean | void
   onAbort?: () => void
   onSubmit?: () => void
@@ -1690,6 +1691,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       newSessionWorktree: () => props.newSessionWorktree,
       onNewSessionWorktreeReset: props.onNewSessionWorktreeReset,
       shouldQueue: props.shouldQueue,
+      queueWhileBlocked: props.queueWhileBlocked,
       onQueue: props.onQueue,
       onAbort: props.onAbort,
       onSubmit: props.onSubmit,

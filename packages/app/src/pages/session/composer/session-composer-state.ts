@@ -48,6 +48,10 @@ export function createSessionComposerController(options?: { closeMs?: number | (
     if (!id) return false
     return !!permissionRequest() || !!questionRequest()
   })
+  const computerPending = createMemo(
+    () => !!permissionRequest()?.permission.startsWith("computer_") && !questionRequest(),
+  )
+  const promptAllowed = createMemo(() => !blocked() || computerPending())
 
   const todos = createMemo((): Todo[] => {
     const id = params.id
@@ -64,6 +68,7 @@ export function createSessionComposerController(options?: { closeMs?: number | (
   const [store, setStore] = createStore({
     sessionID: params.id,
     responding: undefined as string | undefined,
+    accepted: undefined as string | undefined,
     dock: todos().length > 0 && !done() && live(),
     closing: false,
     opening: false,
@@ -75,10 +80,36 @@ export function createSessionComposerController(options?: { closeMs?: number | (
     return store.responding === perm.id
   })
 
-  const decide = (response: "once" | "always" | "reject") => {
+  createEffect(
+    on(
+      () => permissionRequest()?.id,
+      () => setStore("accepted", undefined),
+    ),
+  )
+
+  const decide = (response: "once" | "always" | "reject", requestID: string) => {
     const perm = permissionRequest()
-    if (!perm) return
+    if (!perm || perm.id !== requestID) return
     if (store.responding === perm.id) return
+
+    if (perm.permission.startsWith("computer_")) {
+      if (store.accepted === perm.id) return Promise.resolve(true)
+      setStore("responding", perm.id)
+      return sdk()
+        .client.permission.reply({ requestID: perm.id, reply: response }, { throwOnError: true })
+        .then(() => {
+          if (permissionRequest()?.id === perm.id) setStore("accepted", perm.id)
+          return true
+        })
+        .catch((err: unknown) => {
+          const description = err instanceof Error ? err.message : String(err)
+          showToast({ title: language.t("common.requestFailed"), description })
+          return false
+        })
+        .finally(() => {
+          setStore("responding", (id) => (id === perm.id ? undefined : id))
+        })
+    }
 
     setStore("responding", perm.id)
     sdk()
@@ -187,6 +218,8 @@ export function createSessionComposerController(options?: { closeMs?: number | (
 
   return {
     blocked,
+    computerPending,
+    promptAllowed,
     questionRequest,
     permissionRequest,
     permissionResponding,

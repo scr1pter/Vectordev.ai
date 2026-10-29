@@ -1898,7 +1898,7 @@ export default function Page() {
   const queueEnabled = createMemo(() => {
     const id = params.id
     if (!id) return false
-    return busy(id) && !composer.blocked() && !isChildSession()
+    return !isChildSession() && (composer.computerPending() || (busy(id) && !composer.blocked()))
   })
 
   const followupText = (item: FollowupDraft) => {
@@ -2193,6 +2193,7 @@ export default function Page() {
               resumeScroll()
             }}
             shouldQueue={queueEnabled}
+            queueWhileBlocked={() => composer.computerPending() && queueEnabled()}
             onQueue={queueFollowup}
             autoSubmit={handoff()?.session === params.id ? handoff()?.text : undefined}
             onAutoSubmit={() => setHandoff(undefined)}

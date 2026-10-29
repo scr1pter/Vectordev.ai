@@ -833,6 +833,52 @@ toolTests.instance("a company-allowed app still asks the person", () =>
   ),
 )
 
+for (const reason of ["policy", "changed", "unverified", "category"] as const) {
+  toolTests.instance(`the ${reason} saved-approval ceiling carries its explanation into the ask`, () =>
+    toolCase(({ desktop, execute }) =>
+      Effect.gen(function* () {
+        const fixture = yield* ToolFixture
+        // A desktop verdict without an explanation must not hide the engine's own approval ceiling.
+        desktop.verdict = { verdict: "ask", canAlways: true, companyAllowed: false, changed: reason === "changed" }
+        if (reason === "policy") fixture.config = { computer: { allow_always: false } }
+        if (reason === "unverified") desktop.identity = { ...desktop.identity, verified: false, teamId: undefined }
+        if (reason === "category") desktop.category = "browser"
+        yield* execute({ action: "screenshot", app: "Notes" })
+        expect(desktop.requests).toHaveLength(1)
+        expect(desktop.requests[0]).toMatchObject({
+          always: [],
+          metadata: { canAlways: false, alwaysWhyNot: reason },
+        })
+      }),
+    ),
+  )
+}
+
+for (const identity of [
+  { apple: true, verified: true },
+  { apple: false, verified: true },
+  { apple: true, verified: false },
+]) {
+  toolTests.instance(
+    `publisher copy requires a verified Apple identity (${identity.apple}, ${identity.verified})`,
+    () =>
+      toolCase(({ desktop, execute }) =>
+        Effect.gen(function* () {
+          desktop.identity = { ...desktop.identity, ...identity }
+          yield* execute({ action: "screenshot", app: "Notes" })
+          expect(desktop.requests).toHaveLength(1)
+          expect(desktop.requests[0].metadata.target).toMatchObject({
+            appName: "Notes",
+            verified: identity.verified,
+          })
+          expect((desktop.requests[0].metadata.target as Computer.AppAskMetadata["target"]).publisher).toBe(
+            identity.apple && identity.verified ? "Apple Inc." : undefined,
+          )
+        }),
+      ),
+  )
+}
+
 toolTests.instance("an app Vector built still asks and unverified identities do not offer Always", () =>
   toolCase(({ desktop, execute }) =>
     Effect.gen(function* () {

@@ -544,13 +544,19 @@ export const ComputerTool = Tool.define(
                 state.grants.set(key, app.level)
                 return app
               }
-              const canAlways =
-                app.verdict === "ask" &&
-                app.canAlways &&
-                !app.changed &&
-                identity.verified &&
-                !ComputerApps.NO_ALWAYS.has(app.category) &&
-                cfg.computer?.allow_always !== false
+              const alwaysWhyNot: Computer.AppAskMetadata["alwaysWhyNot"] =
+                cfg.computer?.allow_always === false
+                  ? "policy"
+                  : app.verdict === "ask" && app.alwaysWhyNot
+                    ? app.alwaysWhyNot
+                    : app.verdict === "ask" && app.changed
+                      ? "changed"
+                      : !identity.verified
+                        ? "unverified"
+                        : ComputerApps.NO_ALWAYS.has(app.category)
+                          ? "category"
+                          : undefined
+              const canAlways = app.verdict === "ask" && app.canAlways && !alwaysWhyNot
               const requestID = PermissionV1.ID.ascending()
               const ask: Computer.AppAskMetadata = {
                 action: "use_app",
@@ -562,13 +568,15 @@ export const ComputerTool = Tool.define(
                   ...(identity.platform === "macos" && identity.teamId ? { teamId: identity.teamId } : {}),
                   ...(identity.platform === "windows" && identity.publisher
                     ? { publisher: Computer.clean(identity.publisher, 256) }
-                    : {}),
+                    : identity.platform === "macos" && identity.apple && identity.verified
+                      ? { publisher: "Apple Inc." }
+                      : {}),
                   verified: identity.verified,
                   category: app.category,
                   ...(app.verdict === "ask" && app.ownBuild ? { ownBuild: app.ownBuild } : {}),
                 },
                 canAlways,
-                ...(app.verdict === "ask" && app.alwaysWhyNot ? { alwaysWhyNot: app.alwaysWhyNot } : {}),
+                ...(alwaysWhyNot ? { alwaysWhyNot } : {}),
                 ...(app.verdict === "ask" ? { companyAllowed: app.companyAllowed } : {}),
                 ...(mentioned ? { mentioned: true } : {}),
                 ...(Egress.policy().enabled ? { localWarning: true } : {}),

@@ -583,6 +583,7 @@ type PromptSubmitInput = {
   newSessionWorktree?: Accessor<string | undefined>
   onNewSessionWorktreeReset?: () => void
   shouldQueue?: Accessor<boolean>
+  queueWhileBlocked?: Accessor<boolean>
   onQueue?: (draft: FollowupDraft) => boolean | void
   onAbort?: () => void
   onSubmit?: () => void
@@ -1002,7 +1003,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return true
     }
 
-    if (!isPlanMode && !isNewSession && mode === "normal" && input.shouldQueue?.()) {
+    if (!isNewSession && mode === "normal" && (input.queueWhileBlocked?.() || (!isPlanMode && input.shouldQueue?.()))) {
       if (input.onQueue?.(draft) === false) {
         restorePastes(target, text)
         return

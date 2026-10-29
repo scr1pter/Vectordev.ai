@@ -1223,7 +1223,10 @@ export const dict = {
   "computer.mention.setupFirst": "Set up {{name}} first",
 
   "computer.ask.app.title": "Allow {{name}} to use {{app}}?",
-  "computer.ask.app.body": "It can see {{app}}'s windows and click, type and use its menus until this task is done.",
+  "computer.ask.app.body":
+    "It can see the windows of {{app}} and click, type and use its menus until this task is done.",
+  "computer.ask.app.bodyObserve": "It can see the windows of {{app}} until this task is done.",
+  "computer.ask.target.control": "this control",
   "computer.ask.publisher": "From {{publisher}}",
   "computer.ask.unverified": "Not verified: Vector can't confirm who made this app.",
   "computer.ask.mentioned": "You mentioned {{app}} in your message.",
@@ -1248,6 +1251,7 @@ export const dict = {
   "computer.ask.sensitive.rightClick": "{{name}} wants to right-click “{{label}}” in {{app}}",
   "computer.ask.sensitive.type": "{{name}} wants to type in {{app}}",
   "computer.ask.sensitive.key": "{{name}} wants to press {{key}} in {{app}}",
+  "computer.ask.sensitive.keyUnknown": "{{name}} wants to press a key in {{app}}",
   "computer.ask.sensitive.scroll": "{{name}} wants to scroll in {{app}}",
   "computer.ask.sensitive.drag": "{{name}} wants to drag in {{app}}",
   "computer.ask.sensitive.useApp": "{{name}} wants to use {{app}}",
@@ -1263,6 +1267,7 @@ export const dict = {
   "computer.ask.reason.paste": "This pastes what you copied: “{{text}}”.",
   "computer.ask.reason.newDestination": "It's typing an address you didn't give it: {{destination}}.",
   "computer.ask.reason.runCode": "This runs code in {{repo}}.",
+  "computer.ask.reason.runCodeApp": "This runs code in {{app}}.",
   "computer.ask.reason.disruptive": "This quits an app or logs you out.",
   "computer.ask.reason.provider": "{{provider}} flagged this step: {{message}}",
   "computer.ask.reason.sensitiveDomain": "Watch this step closely.",
