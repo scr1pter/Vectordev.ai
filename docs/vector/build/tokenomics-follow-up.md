@@ -43,3 +43,17 @@ and the subsequent comparison are recorded in
 | Published CLI | Publishing remains an owner action; a source change cannot update the installed CLI. |
 
 The cheapest next evidence is a scoped offline request-footprint run, followed by owner-budgeted live cache and behavior checks. Preserve the API, release channel, task size, model, and effort in each report. Do not present an offline replay as a live quality or performance result.
+
+The optional `offline_footprint` input on the `test` workflow prepares that scoped
+capture: Vector on Messages and Responses, Standard and Thorough, two sessions
+of the fixed `solo-fix` script, with the judge explicitly off. It defaults off.
+This job runs the source CLI, not a packaged desktop or published CLI release.
+The new harness `--task-size` and `--judge` controls are optional; omitted values
+keep the existing CLI defaults and appear as null overrides in the report.
+The focused controls file passes three tests (19 assertions), covering omitted,
+supported, invalid, missing, and duplicate values without starting the harness.
+Each fixture retains its isolated home, clean child environment, synthetic key,
+and local fake-provider URL. Reports and raw payloads are CI artifacts, and each
+report is also written to job logs for durable evidence capture. No result has
+been recorded for this matrix yet; it will estimate request footprint, not live
+cache hits, model quality, or token-cost savings.
