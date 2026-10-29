@@ -69,3 +69,20 @@ This is the complete production navigation baseline for the initial-title
 change. The earlier failed and cancelled runs remain preserved above. The app's
 session-creation code was unchanged through this baseline. These fixture timings
 are navigation observations on one CI runner, not title-cost or speed savings.
+
+After recording and committing that valid baseline, the desktop composer was
+changed to send a first-line title when creating a new work session. It uses
+only text parts, with user comments or attachment basenames as fallbacks, and
+leaves social-message titles to the engine. This preserves the engine's existing
+greeting-first retitling policy. No engine title-generation behavior changed.
+
+The new offline engine case, `a client-named session answers without a separate
+title request`, passed (one test, four assertions). It confirms the supplied
+title stays, exactly one main-provider request is sent, no title request is
+sent, and no ancillary title-usage row exists. The earlier untitled baseline
+sent one main request and one title request. Both cases use a fake provider,
+not live inference or measured costs. Composer tests also passed (59 tests,
+219 assertions), including mention-first input, attachment-only labels, and an
+emoji greeting; title-helper tests passed (three tests, seven assertions).
+App and engine typechecks passed. The identical production navigation workload
+must now be run on the title implementation and compared with `before-valid.json`.
