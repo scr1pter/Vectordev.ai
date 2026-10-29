@@ -1,4 +1,4 @@
-import { expect, test, type Page, type TestInfo } from "@playwright/test"
+import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test"
 
 type Fixture = {
   opened: string[]
@@ -16,6 +16,16 @@ const read = (page: Page) =>
 const opened = async (page: Page) => (await read(page)).opened
 const actions = async (page: Page) => (await read(page)).actions
 const billing = async (page: Page) => (await read(page)).billing
+const monthlyOffers = async (offers: Locator) => {
+  await expect(offers.getByRole("heading", { name: "Monthly plans", exact: true })).toBeVisible()
+  for (const name of ["Plus", "Pro", "Max", "Ultra"])
+    await expect(offers.getByText(name, { exact: true })).toBeVisible()
+  await expect(offers.locator("[data-offer]")).toHaveCount(4)
+  await expect(offers.locator("[data-offer^='codium-topup-']")).toHaveCount(0)
+  await expect(offers.getByRole("heading", { name: "Top-ups", exact: true })).toHaveCount(0)
+  await expect(offers.getByRole("button", { name: /^Buy, / })).toHaveCount(0)
+  await expect(offers).not.toContainText(/\$\d+ once|credit top-up|Credits bought once|carry forward/i)
+}
 // The launch screen lifts over the page first, so a capture waits until it has gone.
 const capture = async (page: Page, testInfo: TestInfo, name: string) => {
   await expect(page.locator("#vector-launch")).toHaveCount(0)
@@ -86,14 +96,12 @@ test("Account shows who is signed in and that Codium is coming soon, and nothing
   await settings.getByRole("button", { name: "Buy credits" }).click()
   const offers = settings.locator("[data-component='codium-purchase']")
   await expect(offers.getByText("Nothing can be bought until Vector Codium goes on sale.")).toBeVisible()
-  // Plans by name and top-ups by their amount, never a plan's price as its name.
-  for (const name of ["Plus", "Pro", "Max", "Ultra", "$10 credit top-up", "$200 credit top-up"])
-    await expect(offers.getByText(name, { exact: true })).toBeVisible()
+  await monthlyOffers(offers)
   await expect(offers).not.toContainText(/Codium \d/)
   await expect(offers.getByText("$50 a month")).toBeVisible()
   // Every purchase button says Coming soon and none can be pressed.
   const soon = offers.getByRole("button", { name: /^Coming soon, / })
-  await expect(soon).toHaveCount(8)
+  await expect(soon).toHaveCount(4)
   for (const button of await soon.all()) await expect(button).toBeDisabled()
   await expect(offers.getByRole("button", { name: /^(Subscribe|Buy), / })).toHaveCount(0)
   // Prices only: no credits and no comparison between purchases.
@@ -115,7 +123,8 @@ test("Account shows the plan as a share of this month's credits and manages bill
     "aria-valuenow",
     "64",
   )
-  await expect(settings.getByText("Available", { exact: true })).toBeVisible()
+  const purchased = settings.locator(".settings-account-balance > div").filter({ hasText: "Purchased credits" })
+  await expect(purchased.locator("dd")).toHaveText("None")
   // Only the share and states reach the balance: no credit counts or dollar amounts.
   await expect(settings.locator(".settings-account-balance")).not.toContainText("$")
   await capture(page, testInfo, "account-plan.png")
@@ -130,37 +139,37 @@ test("Account shows the plan as a share of this month's credits and manages bill
   expect(await opened(page)).toEqual([])
 })
 
-test("Buy credits lists plans and top-ups by price, and each opens Stripe in Vector", async ({ page }, testInfo) => {
+test("Buy credits lists monthly plans only, and monthly checkout opens Stripe in Vector", async ({
+  page,
+}, testInfo) => {
   await page.goto("/e2e/fixtures/account-settings.html?account=signed-in&codium=plan")
   const settings = page.locator(".settings-v2-workspace")
   await settings.getByRole("button", { name: "Buy credits" }).click()
   const offers = settings.locator("[data-component='codium-purchase']")
-  // The subscriber's own plan is marked; other plans change through Stripe's portal.
+  await monthlyOffers(offers)
+  // The subscriber's own plan is marked. The legacy client cannot create another subscription here.
   await expect(offers.locator("[data-offer='vector-50']")).toContainText("Current plan")
   await expect(offers.getByRole("button", { name: /^Subscribe, / })).toHaveCount(0)
-  await expect(offers.getByText("$10 once")).toBeVisible()
-  // The terms say top-up credits carry forward; nothing promises they never expire.
-  await expect(
-    offers.getByText("Credits bought once that carry forward, used after your monthly credits."),
-  ).toBeVisible()
-  await expect(offers).not.toContainText(/expire|expiry|expiration/i)
+  await expect(offers.getByText("$10 a month", { exact: true })).toBeVisible()
+  await expect(offers.getByText("$200 a month", { exact: true })).toBeVisible()
   await capture(page, testInfo, "account-buy-credits.png")
 
-  await offers.getByRole("button", { name: "Buy, $10 credit top-up" }).click()
-  await expect(settings.getByText("Your credits are bought. They appear here in a moment.")).toBeVisible()
-  // Before Stripe's confirm page, the button says what a change costs: a bigger plan is charged in full today and
-  // ends what is left of this month's credits.
-  const change = offers.getByRole("button", { name: "Change plan" })
-  await expect(change).toHaveAccessibleDescription(
-    "A bigger plan starts a new month today and is charged in full, and what is left of this month's credits ends then. A smaller plan starts on your renewal date.",
-  )
-  await expect(offers.getByText("A bigger plan starts a new month today and is charged in full")).toBeVisible()
-  await change.click()
-  await expect(settings.getByText("Your plan change is saved.")).toBeVisible()
-  expect(await billing(page)).toEqual([
-    { kind: "topup", pack: "codium-topup-10" },
-    { kind: "portal", flow: "change" },
-  ])
+  // A09 refuses this older client's portal change request. Do not model a successful legacy upgrade or assert its
+  // obsolete carry-loss copy; A20 supplies Vector's desktop plan-change controls.
+  await offers.getByRole("button", { name: "Change plan" }).click()
+  await expect(settings.getByRole("alert")).toHaveText("Change plans on vectordev.ai/account.")
+  await expect(settings.getByText("Your plan change is saved.")).toHaveCount(0)
+  expect(await billing(page)).toEqual([{ kind: "portal", flow: "change" }])
+  expect(await opened(page)).toEqual([])
+
+  await page.goto("/e2e/fixtures/account-settings.html?account=signed-in&codium=none")
+  await settings.getByRole("button", { name: "Buy credits" }).click()
+  await monthlyOffers(offers)
+  await expect(offers.getByRole("button", { name: /^Subscribe, / })).toHaveCount(4)
+  await offers.getByRole("button", { name: "Subscribe, Plus" }).click()
+  await expect(settings.getByText("You are subscribed. Your monthly credits appear here in a moment.")).toBeVisible()
+  expect(await billing(page)).toEqual([{ kind: "checkout", plan: "vector-10" }])
+  expect(await opened(page)).toEqual([])
   // After a purchase the page reads the account again while Stripe's notification arrives.
   await expect.poll(async () => (await read(page)).codiumReads, { timeout: 5_000 }).toBeGreaterThan(3)
 })
@@ -174,6 +183,7 @@ test("someone without a plan subscribes in Vector, and a cancelled or failed che
   await expect(settings.getByRole("button", { name: "Cancel plan" })).toHaveCount(0)
   await settings.getByRole("button", { name: "Buy credits" }).click()
   const offers = settings.locator("[data-component='codium-purchase']")
+  await monthlyOffers(offers)
   await offers.getByRole("button", { name: "Subscribe, Max" }).click()
   await expect(settings.getByText("Checkout was cancelled. Nothing was charged.")).toBeVisible()
   expect(await billing(page)).toEqual([{ kind: "checkout", plan: "vector-100" }])
@@ -220,18 +230,38 @@ test("while the Stripe window is open, the page says how it closes, and a second
   await expect(settings.getByText("Your plan is cancelled.")).toHaveCount(0)
 })
 
-test("Buy credits on a Codium turn that ran out opens the plans in Vector, not the website", async ({
-  page,
-}, testInfo) => {
-  await page.goto("/e2e/fixtures/account-settings.html?account=signed-in&codium=plan&view=codium-error")
+test("Buy credits on a Codium turn opens monthly subscription checkout in Vector", async ({ page }, testInfo) => {
+  await page.goto("/e2e/fixtures/account-settings.html?account=signed-in&codium=none&view=codium-error")
   await page.getByRole("button", { name: "Buy credits" }).click()
   const dialog = page.getByRole("dialog", { name: "Buy Codium credits" })
   await expect(dialog).toBeVisible()
-  await expect(dialog.locator("[data-offer='vector-50']")).toContainText("Current plan")
+  const offers = dialog.locator("[data-component='codium-purchase']")
+  await monthlyOffers(offers)
+  await expect(offers.getByRole("button", { name: /^Subscribe, / })).toHaveCount(4)
   await capture(page, testInfo, "codium-purchase-dialog.png")
-  await dialog.getByRole("button", { name: "Buy, $50 credit top-up" }).click()
-  await expect(dialog.getByText("Your credits are bought. They appear here in a moment.")).toBeVisible()
-  expect(await billing(page)).toEqual([{ kind: "topup", pack: "codium-topup-50" }])
+  await offers.getByRole("button", { name: "Subscribe, Pro" }).click()
+  await expect(dialog.getByText("You are subscribed. Your monthly credits appear here in a moment.")).toBeVisible()
+  expect(await billing(page)).toEqual([{ kind: "checkout", plan: "vector-50" }])
+  expect(await opened(page)).toEqual([])
+})
+
+test("an exhausted subscriber's Codium dialog keeps the current plan and refuses legacy portal changes", async ({
+  page,
+}) => {
+  await page.goto("/e2e/fixtures/account-settings.html?account=signed-in&codium=exhausted&view=codium-error")
+  await page.getByRole("button", { name: "Buy credits" }).click()
+  const dialog = page.getByRole("dialog", { name: "Buy Codium credits" })
+  await expect(dialog).toBeVisible()
+  const offers = dialog.locator("[data-component='codium-purchase']")
+  await monthlyOffers(offers)
+  await expect(offers.locator("[data-offer='vector-50']")).toContainText("Current plan")
+  await expect(offers.getByRole("button", { name: /^Subscribe, / })).toHaveCount(0)
+  await offers.getByRole("button", { name: "Change plan" }).click()
+  await expect(dialog.getByRole("alert")).toHaveText("Change plans on vectordev.ai/account.")
+  await expect(dialog.getByText("Your plan change is saved.")).toHaveCount(0)
+  await expect(dialog.getByText("You are subscribed. Your monthly credits appear here in a moment.")).toHaveCount(0)
+  await expect(dialog.getByText("Your credits are bought. They appear here in a moment.")).toHaveCount(0)
+  expect(await billing(page)).toEqual([{ kind: "portal", flow: "change" }])
   expect(await opened(page)).toEqual([])
 })
 
