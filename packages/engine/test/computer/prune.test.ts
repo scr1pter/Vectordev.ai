@@ -32,9 +32,7 @@ const fixture = Layer.effect(
     const fs = yield* FileSystem.FileSystem
     const directory = yield* Effect.acquireRelease(
       fs.makeTempDirectory({ prefix: "vector-computer-prune-" }),
-      // Windows can briefly retain a closed SQLite handle. Retry removal, but still fail teardown if it stays busy.
-      (directory) =>
-        Effect.promise(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })),
+      (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true })),
     )
     const file = path.join(directory, "screenshots.db")
     // Own the database inside the directory's scope so Windows releases its file handles before removal.
