@@ -1,5 +1,6 @@
 import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
 import { Agent } from "@/agent/agent"
+import { ComputerNativeContext } from "@/computer/native-context"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { Provider } from "@/provider/provider"
 import { ProviderTransform } from "@/provider/transform"
@@ -93,6 +94,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
       outward: input.outward === true,
       invokedAgents: input.invokedAgents,
       promptOps: input.promptOps,
+      ...ComputerNativeContext.executionContext(options.experimental_context),
       ...(input.taskSize ? { taskSize: input.taskSize } : {}),
     },
     ownedPaths: SubagentLifecycle.read(input.session)?.ownedPaths,

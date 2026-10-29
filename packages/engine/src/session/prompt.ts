@@ -34,6 +34,7 @@ import { ToolRegistry } from "@/tool/registry"
 import { ComputerAvailability } from "@/computer/availability"
 import { ComputerScale } from "@/computer/scale"
 import { ComputerScreens } from "@/computer/screens"
+import { ComputerGeneric } from "@/computer/generic"
 import { Computer } from "@vectordevai/schema/computer"
 import { assertExternalDirectoryEffect, readPatterns } from "@/tool/external-directory"
 import type { Tool } from "@/tool/tool"
@@ -2603,7 +2604,9 @@ const layer = Layer.effect(
             quick ? Effect.succeed(undefined) : sys.mcp(agent, session.permission),
             // The quick lane sends this request's own messages; autocomplete only the newest one, below.
             MessageV2.toModelMessagesEffect(history, model, {
-              dropMedia: ComputerScreens.keep(history, ComputerScale.plan(model, yield* config.get())),
+              dropMedia: ComputerGeneric.retainHistory(model)
+                ? undefined
+                : ComputerScreens.keep(history, ComputerScale.plan(model, yield* config.get())),
             }),
           ])
           const instructions = snapshot.instructions
@@ -2651,6 +2654,9 @@ const layer = Layer.effect(
             permission: session.permission,
             sessionID,
             parentSessionID: session.parentID,
+            computerRequested: lastUserMsg?.parts.some(
+              (part) => part.type === "text" && isComputerMention(part.metadata?.[Computer.MENTION_KEY]),
+            ),
             stableSystem: env.stable,
             system,
             messages: [

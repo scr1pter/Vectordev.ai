@@ -39,6 +39,9 @@ import { EgressAttribution } from "@vectordevai/core/local-mode/attribution"
 import type { LocalMode } from "@vectordevai/schema/local-mode"
 import { ToolOrder } from "./llm/tool-order"
 import { REQUEST_ID_HEADER } from "@/plugin/openai/transport"
+import { ComputerNative } from "@/computer/native"
+import { ComputerModels } from "@/computer/models"
+import { ComputerGeneric } from "@/computer/generic"
 
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
 
@@ -46,6 +49,8 @@ export type StreamInput = {
   user: SessionV1.User
   sessionID: string
   parentSessionID?: string
+  // Set only from the user's validated mention marker, not model or screen text.
+  computerRequested?: boolean
   model: Provider.Model
   agent: Agent.Info
   permission?: PermissionV1.Ruleset
@@ -114,6 +119,20 @@ const live: Layer.Layer<
     const flags = yield* RuntimeFlags.Service
     const slots = yield* ModelSlots.Service
     const sessions = yield* Session.Service
+    const computerNative = ComputerNative.make()
+    const computerGeneric = ComputerGeneric.make()
+    const unsubscribeComputer = yield* events.listen((event) => {
+      if (event.type !== SessionV1.Event.Deleted.type) return Effect.void
+      const data = event.data
+      if (typeof data !== "object" || data === null || !("sessionID" in data) || typeof data.sessionID !== "string")
+        return Effect.void
+      const sessionID = data.sessionID
+      return Effect.sync(() => {
+        computerNative.forget(sessionID)
+        computerGeneric.forget(sessionID)
+      })
+    })
+    yield* Effect.addFinalizer(() => unsubscribeComputer)
 
     // The top of a session's parent chain, or the last ancestor that could still be read.
     const rootOf = (session: Session.Info): Effect.Effect<Session.Info> =>
@@ -319,22 +338,54 @@ const live: Layer.Layer<
 
       // Runtime seam: native is an opt-in adapter over @vectordevai/llm. It
       // either returns a ready LLMEvent stream or a concrete fallback reason.
-      if (flags.experimentalNativeLlm) {
+      const nativeComputer = computerNative.wants({
+        sessionID: input.sessionID,
+        model: input.model,
+        provider: item,
+        auth: info,
+        tools: prepared.tools,
+        messages: prepared.messages,
+        config: cfg,
+        requested: input.computerRequested,
+      })
+      const prepareGeneric = () =>
+        computerGeneric.prepare({
+          sessionID: input.sessionID,
+          model: input.model,
+          messages: prepared.messages,
+          tools: prepared.tools,
+          options: prepared.params.options,
+          config: cfg,
+        })
+      // Generic computer tools need the same stable definition and context clearing on either LLM runtime.
+      // A native computer turn must not create a generic snapshot that was never sent to the provider.
+      const genericComputer = nativeComputer ? undefined : prepareGeneric()
+      if (flags.experimentalNativeLlm || nativeComputer) {
         const native = LLMNativeRuntime.stream({
           model: input.model,
           provider: item,
           auth: info,
           llmClient,
-          messages: prepared.messages,
-          tools: prepared.tools,
+          messages: genericComputer?.messages ?? prepared.messages,
+          tools: genericComputer?.tools ?? prepared.tools,
           toolChoice: input.toolChoice,
           temperature: prepared.params.temperature,
           topP: prepared.params.topP,
           topK: prepared.params.topK,
           maxOutputTokens: prepared.params.maxOutputTokens,
-          providerOptions: prepared.params.options,
+          providerOptions:
+            nativeComputer && ComputerModels.native(input.model) === "anthropic"
+              ? ComputerGeneric.clearing({
+                  model: input.model,
+                  messages: prepared.messages,
+                  tools: prepared.tools,
+                  options: prepared.params.options,
+                  config: cfg,
+                })
+              : (genericComputer?.options ?? prepared.params.options),
           headers: prepared.headers,
           abort: input.abort,
+          computer: nativeComputer ? ComputerModels.native(input.model) : undefined,
         })
         if (native.type === "supported") {
           yield* Effect.logInfo("llm runtime selected", {
@@ -379,6 +430,7 @@ const live: Layer.Layer<
         "llm.provider": input.model.providerID,
         "llm.model": input.model.id,
       })
+      const generic = genericComputer ?? prepareGeneric()
       // Default runtime path: AI SDK owns provider execution and tool dispatch;
       // LLMAISDK.toLLMEvents below normalizes fullStream parts for the processor.
       return {
@@ -406,7 +458,7 @@ const live: Layer.Layer<
             input.model.api.npm === "@ai-sdk/google-vertex/anthropic",
           async experimental_repairToolCall(failed) {
             const lower = failed.toolCall.toolName.toLowerCase()
-            if (lower !== failed.toolCall.toolName && prepared.tools[lower]) {
+            if (lower !== failed.toolCall.toolName && generic.tools[lower]) {
               return {
                 ...failed.toolCall,
                 toolName: lower,
@@ -424,17 +476,17 @@ const live: Layer.Layer<
           temperature: prepared.params.temperature,
           topP: prepared.params.topP,
           topK: prepared.params.topK,
-          providerOptions: ProviderTransform.providerOptions(input.model, prepared.params.options),
-          activeTools: Object.keys(prepared.tools).filter((x) => x !== "invalid"),
+          providerOptions: ProviderTransform.providerOptions(input.model, generic.options),
+          activeTools: Object.keys(generic.tools).filter((x) => x !== "invalid"),
           // A workflow model runs its tools inside its own stream, so holding a shell call back to the end would wait
           // on itself.
-          tools: isWorkflow ? prepared.tools : ToolOrder.tools(prepared.tools, input.abort),
+          tools: isWorkflow ? generic.tools : ToolOrder.tools(generic.tools, input.abort),
           toolChoice: input.toolChoice,
           maxOutputTokens: prepared.params.maxOutputTokens,
           abortSignal: input.abort,
           headers: prepared.headers,
           maxRetries: input.retries ?? 0,
-          messages: prepared.messages,
+          messages: generic.messages,
           model: wrapLanguageModel({
             model: language,
             middleware: [

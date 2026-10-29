@@ -808,6 +808,8 @@ export const Step = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("scroll"),
     at: optional(Point),
+    /** Native provider deltas use pixels; omitted means the generic tool's wheel amount. */
+    unit: optional(Schema.Literal("pixel")),
     dx: Schema.Int.check(Schema.isBetween({ minimum: -10_000, maximum: 10_000 })),
     dy: Schema.Int.check(Schema.isBetween({ minimum: -10_000, maximum: 10_000 })),
   }),
@@ -1300,6 +1302,7 @@ export const InputOp = Schema.Union([
   Schema.Struct({
     op: Schema.Literal("input.scroll"),
     captureId: Id,
+    unit: optional(Schema.Literal("pixel")),
     x: Schema.Int,
     y: Schema.Int,
     dx: Schema.Int,

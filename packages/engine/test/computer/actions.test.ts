@@ -149,6 +149,32 @@ describe("computer action translation", () => {
     )
   })
 
+  test("native pixel scroll preserves exact deltas and full-frame coordinate validation", () => {
+    expect(ComputerActions.step({ action: "scroll", x: 100, y: 200 }, frame, "pixels", { dx: -321, dy: 765 })).toEqual({
+      kind: "scroll",
+      at: { x: 100, y: 200 },
+      unit: "pixel",
+      dx: -321,
+      dy: 765,
+    })
+    expect(() => ComputerActions.step({ action: "scroll", x: 1280, y: 0 }, frame, "pixels", { dx: 0, dy: 1 })).toThrow(
+      "outside",
+    )
+    expect(() => ComputerActions.step({ action: "scroll", x: 0, y: 0 }, undefined, "pixels", { dx: 0, dy: 1 })).toThrow(
+      "fresh screenshot",
+    )
+    for (const dy of [NaN, Infinity, 0.5, 10001, -10001])
+      expect(() => ComputerActions.step({ action: "scroll", x: 0, y: 0 }, frame, "pixels", { dx: 0, dy })).toThrow(
+        "invalid fields",
+      )
+    expect(() =>
+      ComputerActions.step({ action: "scroll", x: 0, y: 0, direction: "up" }, frame, "pixels", { dx: 0, dy: 1 }),
+    ).toThrow("cannot mix")
+    expect(() => ComputerActions.step({ action: "click", x: 0, y: 0 }, frame, "pixels", { dx: 0, dy: 1 })).toThrow(
+      "requires a scroll",
+    )
+  })
+
   test("key combinations retain physical key names for the live layout check", () => {
     expect(ComputerActions.step({ action: "key", keys: "Control + KeyQ", repeat: 2 })).toEqual({
       kind: "key",

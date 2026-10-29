@@ -4,6 +4,16 @@ import { Computer } from "@vectordevai/schema/computer"
 
 const strict = (schema: Schema.Decoder<unknown>) => Schema.decodeUnknownSync(schema, { onExcessProperty: "error" })
 
+test("pixel scroll units survive both bridge and helper codecs without changing generic wheel amounts", () => {
+  const step = { kind: "scroll", at: { x: 12, y: 34 }, dx: -123, dy: 456, unit: "pixel" }
+  expect(strict(Computer.Step)(step)).toEqual(step)
+  const helper = { id: 1, op: "input.scroll", captureId: "frame_1", x: 12, y: 34, dx: -123, dy: 456, unit: "pixel" }
+  expect(strict(Computer.helperRequest("input.scroll"))(helper)).toEqual(helper)
+  expect(strict(Computer.Step)({ kind: "scroll", dx: 0, dy: 2 })).not.toHaveProperty("unit")
+  expect(() => strict(Computer.Step)({ ...step, unit: "unknown" })).toThrow()
+  expect(() => strict(Computer.helperRequest("input.scroll"))({ ...helper, unit: "unknown" })).toThrow()
+})
+
 const accepts = (schema: Schema.Decoder<unknown>, value: unknown) => {
   expect(() => strict(schema)(value)).not.toThrow()
 }

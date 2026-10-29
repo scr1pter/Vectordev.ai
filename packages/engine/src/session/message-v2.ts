@@ -37,6 +37,9 @@ import { isMedia } from "@/util/media"
 import type { SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
 import { Effect, Option, Schema } from "effect"
+import { ComputerNativeContext } from "@/computer/native-context"
+import { ComputerModels } from "@/computer/models"
+import { isRecord } from "@/util/record"
 
 /** Error shape thrown by Bun's fetch() when gzip/br decompression fails mid-stream */
 interface FetchDecompressionError extends Error {
@@ -149,6 +152,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
 ) {
   const result: UIMessage[] = []
   const toolNames = new Set<string>()
+  const nativeResults = new Map<string, Record<string, Record<string, unknown>>>()
   // Track media from tool results that need to be injected as user messages
   // for providers that don't support that media type in tool results.
   //
@@ -305,6 +309,72 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
           })
         if (part.type === "tool") {
           toolNames.add(part.tool)
+          // Native computer calls share their protocol across the allowlisted models in one provider family.
+          // Keep their provenance when switching within that family, while other model-owned state stays stripped.
+          const nativeFamily =
+            part.tool !== "computer"
+              ? undefined
+              : part.metadata?.openai?.computerCall
+                ? "openai"
+                : part.metadata?.anthropic?.toolset_name === "computer"
+                  ? "anthropic"
+                  : undefined
+          const replayMetadata: ReturnType<typeof providerMeta> = !differentModel
+            ? providerMeta(part.metadata)
+            : nativeFamily !== undefined && nativeFamily === ComputerModels.native(model)
+              ? nativeFamily === "openai"
+                ? {
+                    openai: {
+                      computerCall: part.metadata!.openai.computerCall,
+                      itemId: part.metadata!.openai.itemId,
+                      callId: part.metadata!.openai.callId,
+                    },
+                  }
+                : {
+                    anthropic: {
+                      toolset_name: "computer",
+                      member: part.metadata!.anthropic.member,
+                      input: part.metadata!.anthropic.input,
+                    },
+                  }
+              : undefined
+          if (part.tool === "computer" && replayMetadata) {
+            const raw = replayMetadata
+            const openai = isRecord(raw?.openai) ? raw.openai : undefined
+            const anthropic = isRecord(raw?.anthropic) ? raw.anthropic : undefined
+            const native =
+              part.state.status === "completed" || part.state.status === "error"
+                ? part.state.metadata?.native
+                : undefined
+            const context = isRecord(native)
+              ? Schema.decodeUnknownOption(ComputerNativeContext.Context)({
+                  provider: native.provider,
+                  safetyChecks: native.acknowledgedSafetyChecks,
+                })
+              : Option.none()
+            // Only an explicit refusal before execution means declined. Stop or a transport error may follow
+            // an executed prefix, so absence of an outcome keeps the call with an unacknowledged placeholder.
+            const declined = isRecord(native) && native.computerDeclined === true
+            if (openai?.computerCall)
+              nativeResults.set(part.callID, {
+                openai: {
+                  ...openai,
+                  computerDeclined: declined,
+                  acknowledgedSafetyChecks:
+                    part.state.status === "completed" && Option.isSome(context) && context.value.provider === "openai"
+                      ? context.value.safetyChecks
+                      : [],
+                },
+              })
+            if (anthropic?.toolset_name === "computer")
+              nativeResults.set(part.callID, {
+                anthropic: {
+                  ...anthropic,
+                  computerDeclined: declined,
+                  computerError: part.state.status !== "completed" || part.state.metadata.code !== undefined,
+                },
+              })
+          }
           if (part.state.status === "completed") {
             const removed = part.tool === "computer" && options?.dropMedia?.has(part.id)
             const text = part.state.time.compacted
@@ -338,7 +408,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
               input: part.state.input,
               output,
               ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
-              ...(differentModel ? {} : { callProviderMetadata: providerMeta(part.metadata) }),
+              ...(replayMetadata ? { callProviderMetadata: replayMetadata } : {}),
             })
           }
           if (part.state.status === "error") {
@@ -351,7 +421,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
                 input: part.state.input,
                 output,
                 ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
-                ...(differentModel ? {} : { callProviderMetadata: providerMeta(part.metadata) }),
+                ...(replayMetadata ? { callProviderMetadata: replayMetadata } : {}),
               })
             } else {
               assistantMessage.parts.push({
@@ -361,7 +431,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
                 input: part.state.input,
                 errorText: part.state.error,
                 ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
-                ...(differentModel ? {} : { callProviderMetadata: providerMeta(part.metadata) }),
+                ...(replayMetadata ? { callProviderMetadata: replayMetadata } : {}),
               })
             }
           }
@@ -375,7 +445,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
               input: part.state.input,
               errorText: "[Tool execution was interrupted]",
               ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
-              ...(differentModel ? {} : { callProviderMetadata: providerMeta(part.metadata) }),
+              ...(replayMetadata ? { callProviderMetadata: replayMetadata } : {}),
             })
         }
         if (part.type === "reasoning") {
@@ -422,7 +492,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
 
   const tools = Object.fromEntries(Array.from(toolNames).map((toolName) => [toolName, { toModelOutput }]))
 
-  return yield* Effect.promise(() =>
+  const converted = yield* Effect.promise(() =>
     convertToModelMessages(
       result.filter((msg) => msg.parts.some((part) => part.type !== "step-start")),
       {
@@ -431,6 +501,19 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
       },
     ),
   )
+  // The SDK copies call metadata onto local results but ignores resultProviderMetadata. Add the engine's
+  // separately persisted outcome after conversion so replay cannot acknowledge an unanswered safety check.
+  return converted.map((message) => {
+    if (!Array.isArray(message.content)) return message
+    return {
+      ...message,
+      content: message.content.map((part) => {
+        if (part.type !== "tool-result") return part
+        const metadata = nativeResults.get(part.toolCallId)
+        return metadata ? { ...part, providerOptions: metadata } : part
+      }),
+    } as ModelMessage
+  })
 })
 
 export function toModelMessages(

@@ -18,6 +18,7 @@ import { SessionV1 } from "@vectordevai/core/v1/session"
 import { Agent } from "@/agent/agent"
 import { ComputerAvailability } from "@/computer/availability"
 import { ComputerLog } from "@/computer/log"
+import { ComputerNativeContext } from "@/computer/native-context"
 import { ComputerSession } from "@/computer/session"
 import { Config } from "@/config/config"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -1151,6 +1152,312 @@ toolTests.instance("a forged always result cannot approve a sensitive click", ()
   ),
 )
 
+const providerChecks: ComputerNativeContext.SafetyCheck[] = [
+  { id: "check-1", code: "irrelevant_domain", message: "Confirm the destination before continuing." },
+  { id: "check-2", code: "sensitive_action", message: "Confirm this proposed action." },
+]
+const nativeExtra = (safetyChecks: readonly ComputerNativeContext.SafetyCheck[] = providerChecks) => ({
+  model: toolModel,
+  computerNative: { provider: "openai", safetyChecks },
+})
+
+toolTests.instance("native provider checks each require a once-only approval before input", () =>
+  toolCase(({ desktop, execute, bridge }) =>
+    Effect.gen(function* () {
+      yield* execute({ action: "screenshot", app: "Notes" })
+      desktop.onAsk = (request) =>
+        Effect.sync(() => {
+          if (request.metadata.why === "provider_check") expect(bridge.commands()).not.toContain("act")
+        })
+      const result = yield* execute({ action: "click", ref: "ui_1" }, { extra: nativeExtra() })
+      expect(result.metadata.code).toBeUndefined()
+      expect(result.metadata.native).toEqual({
+        provider: "openai",
+        acknowledgedSafetyChecks: providerChecks,
+        computerDeclined: false,
+      })
+      const asked = desktop.requests.filter((request) => request.metadata.why === "provider_check")
+      expect(asked).toHaveLength(2)
+      const act = bridge.calls().find((call) => call.body.command === "act")!.body
+      if (act.command !== "act") throw new Error("Expected an act")
+      expect(act.approvals).toEqual(asked.map((request) => ({ index: 0, requestID: request.id })))
+      for (const [index, request] of asked.entries()) {
+        expect(request).toMatchObject({
+          permission: "computer_sensitive",
+          always: [],
+          patterns: [`${appKey}:provider_check`],
+          metadata: {
+            why: "provider_check",
+            stepIndex: 0,
+            stepDigest: ComputerSensitive.digest(act.steps[0]),
+            frame: observedFrame.id,
+            target: { appKey, appName: "Notes" },
+            targetName: "Next",
+            providerCheck: {
+              provider: "openai",
+              code: providerChecks[index].code,
+              message: providerChecks[index].message,
+              ...(index === 0 ? { domain: true } : {}),
+            },
+          },
+        })
+        expect(desktop.replies.get(request.id)).toBe("once")
+      }
+    }),
+  ),
+)
+
+toolTests.instance("native provider approval does not replace the local sensitive action approval", () =>
+  toolCase(({ desktop, execute, bridge }) =>
+    Effect.gen(function* () {
+      desktop.category = "mail"
+      desktop.inspect = {
+        ...desktop.inspect,
+        element: { ...desktop.inspect.element!, label: "Send" },
+      }
+      const result = yield* execute({ action: "click", ref: "ui_1" }, { extra: nativeExtra() })
+      expect(result.metadata.code).toBeUndefined()
+      const asked = desktop.requests.filter((request) => request.permission === "computer_sensitive")
+      expect(asked.map((request) => request.metadata.why)).toEqual(["send", "provider_check", "provider_check"])
+      expect(bridge.calls().find((call) => call.body.command === "act")!.body).toMatchObject({
+        approvals: asked.map((request) => ({ index: 0, requestID: request.id })),
+      })
+    }),
+  ),
+)
+
+toolTests.instance("rejecting a later native provider check executes nothing and acknowledges no checks", () =>
+  toolCase(({ desktop, execute, bridge }) =>
+    Effect.gen(function* () {
+      desktop.answers.push("once", "once", "reject")
+      const result = yield* execute({ action: "click", ref: "ui_1" }, { extra: nativeExtra() })
+      expect(result.metadata.code).toBe("denied")
+      expect(result.metadata.native).toEqual({
+        provider: "openai",
+        acknowledgedSafetyChecks: [],
+        computerDeclined: true,
+      })
+      expect(desktop.requests.filter((request) => request.metadata.why === "provider_check")).toHaveLength(2)
+      expect(bridge.commands()).not.toContain("act")
+    }),
+  ),
+)
+
+toolTests.instance("native provider checks cannot be approved by an Always answer", () =>
+  toolCase(({ execute, bridge }) =>
+    Effect.gen(function* () {
+      yield* execute({ action: "screenshot", app: "Notes" })
+      const result = yield* execute(
+        { action: "click", ref: "ui_1" },
+        { extra: nativeExtra(), ask: () => Effect.succeed("always") },
+      )
+      expect(result.metadata.code).toBe("not_granted")
+      expect(result.metadata.native).toEqual({
+        provider: "openai",
+        acknowledgedSafetyChecks: [],
+        computerDeclined: true,
+      })
+      expect(bridge.commands()).not.toContain("act")
+    }),
+  ),
+)
+
+toolTests.instance("native provider checks are renewed for a changed target with fresh proof IDs", () =>
+  toolCase(({ desktop, execute, bridge }) =>
+    Effect.gen(function* () {
+      const acts: Extract<Computer.BridgeRequest, { command: "act" }>[] = []
+      desktop.handle = ({ body }) => {
+        if (body.command !== "act") return
+        acts.push(body)
+        if (acts.length !== 1) return
+        desktop.inspect = { ...desktop.inspect, element: { ...desktop.inspect.element!, label: "Continue" } }
+        return {
+          done: 0,
+          state: desktop.state,
+          pending: { index: 0, kind: "sensitive", why: "provider_check", inspect: desktop.inspect },
+        }
+      }
+      const result = yield* execute({ action: "click", ref: "ui_1" }, { extra: nativeExtra() })
+      expect(result.metadata.code).toBeUndefined()
+      expect(result.metadata.native.acknowledgedSafetyChecks).toEqual(providerChecks)
+      const asked = desktop.requests.filter((request) => request.metadata.why === "provider_check")
+      expect(asked.map((request) => request.metadata.targetName)).toEqual(["Next", "Next", "Continue", "Continue"])
+      expect(acts).toHaveLength(2)
+      expect(acts[0].approvals).toEqual(asked.slice(0, 2).map((request) => ({ index: 0, requestID: request.id })))
+      expect(acts[1].approvals).toEqual(asked.slice(2).map((request) => ({ index: 0, requestID: request.id })))
+      expect(new Set(asked.map((request) => request.id)).size).toBe(4)
+      expect(bridge.commands().filter((command) => command === "act")).toHaveLength(2)
+    }),
+  ),
+)
+
+toolTests.instance("native checks are not acknowledged when the submitted action has no confirmed outcome", () =>
+  toolCase(({ desktop, execute }) =>
+    Effect.gen(function* () {
+      desktop.handle = ({ body }) =>
+        body.command === "act" ? { ok: false, code: "failed", error: "No confirmed progress." } : undefined
+      const result = yield* execute({ action: "click", ref: "ui_1" }, { extra: nativeExtra() })
+      expect(result.metadata.code).toBe("failed")
+      expect(result.metadata.native).toEqual({
+        provider: "openai",
+        acknowledgedSafetyChecks: [],
+        computerDeclined: false,
+      })
+    }),
+  ),
+)
+
+toolTests.instance("a partially executed native batch keeps its call and acknowledges only confirmed checks", () =>
+  toolCase(({ desktop, execute }) =>
+    Effect.gen(function* () {
+      desktop.answers.push("once", "once", "once", "reject")
+      desktop.handle = ({ body }) => {
+        if (body.command !== "act") return
+        return {
+          done: 1,
+          state: desktop.state,
+          pending: {
+            index: 1,
+            kind: "sensitive",
+            why: "send",
+            inspect: { ...desktop.inspect, element: { ...desktop.inspect.element!, label: "Send" } },
+          },
+        }
+      }
+      const result = yield* execute(
+        {
+          action: "click",
+          actions: [
+            { action: "click", ref: "ui_1" },
+            { action: "click", ref: "ui_2" },
+          ],
+        },
+        { extra: nativeExtra() },
+      )
+      expect(result.metadata.code).toBe("denied")
+      expect(result.metadata.native).toEqual({
+        provider: "openai",
+        acknowledgedSafetyChecks: providerChecks,
+        computerDeclined: false,
+      })
+    }),
+  ),
+)
+
+for (const [name, computerNative] of [
+  ["missing envelope", undefined],
+  ["invalid checks", { provider: "openai", safetyChecks: null }],
+  ["duplicate IDs", { provider: "openai", safetyChecks: [providerChecks[0], providerChecks[0]] }],
+  [
+    "too many checks",
+    {
+      provider: "openai",
+      safetyChecks: Array.from({ length: 4 }, (_, index) => ({ ...providerChecks[0], id: `check-${index}` })),
+    },
+  ],
+  ["oversized message", { provider: "openai", safetyChecks: [{ ...providerChecks[0], message: "x".repeat(1001) }] }],
+] as const) {
+  toolTests.instance(`malformed native safety context refuses before acquiring: ${name}`, () =>
+    toolCase(({ execute, bridge }) =>
+      Effect.gen(function* () {
+        const result = yield* execute({ action: "click", ref: "ui_1" }, { extra: { model: toolModel, computerNative } })
+        expect(result.metadata.code).toBe("failed")
+        expect(bridge.commands()).not.toContain("acquire")
+        expect(bridge.commands()).not.toContain("act")
+      }),
+    ),
+  )
+}
+
+toolTests.instance("flagged native reads refuse without a compatible input approval slot", () =>
+  toolCase(({ execute, bridge }) =>
+    Effect.gen(function* () {
+      const result = yield* execute({ action: "screenshot", app: "Notes" }, { extra: nativeExtra() })
+      expect(result.metadata.code).toBe("unsupported_action")
+      expect(result.metadata.native).toEqual({
+        provider: "openai",
+        acknowledgedSafetyChecks: [],
+        computerDeclined: true,
+      })
+      expect(bridge.commands()).not.toContain("acquire")
+      expect(bridge.commands()).not.toContain("screenshot")
+    }),
+  ),
+)
+
+toolTests.instance("native reads without provider checks keep ordinary app consent", () =>
+  toolCase(({ desktop, execute }) =>
+    Effect.gen(function* () {
+      const result = yield* execute({ action: "screenshot", app: "Notes" }, { extra: nativeExtra([]) })
+      expect(result.metadata.code).toBeUndefined()
+      expect(result.metadata.native).toEqual({
+        provider: "openai",
+        acknowledgedSafetyChecks: [],
+        computerDeclined: false,
+      })
+      expect(desktop.requests.map((request) => request.permission)).toEqual(["computer_app"])
+    }),
+  ),
+)
+
+toolTests.instance("native pixel scroll deltas bind to their exact batch index without changing units", () =>
+  toolCase(({ execute, bridge }) =>
+    Effect.gen(function* () {
+      yield* execute({ action: "screenshot", app: "Notes" })
+      const result = yield* execute(
+        {
+          action: "click",
+          actions: [
+            { action: "click", ref: "ui_1" },
+            { action: "scroll", x: 100, y: 100 },
+          ],
+        },
+        {
+          extra: {
+            model: toolModel,
+            computerNative: { provider: "openai", safetyChecks: [], scrolls: [{ index: 1, dx: -30, dy: 240 }] },
+          },
+        },
+      )
+      expect(result.metadata.code).toBeUndefined()
+      expect(bridge.calls().find((call) => call.body.command === "act")!.body).toMatchObject({
+        steps: [
+          { kind: "click", at: { ref: "ui_1" } },
+          { kind: "scroll", at: { x: 100, y: 100 }, dx: -30, dy: 240, unit: "pixel" },
+        ],
+      })
+    }),
+  ),
+)
+
+for (const [name, input, scrolls] of [
+  ["wrong action", { action: "click", ref: "ui_1" }, [{ index: 0, dx: 0, dy: 100 }]],
+  ["wheel fields", { action: "scroll", direction: "down", amount: 1 }, [{ index: 0, dx: 0, dy: 100 }]],
+  ["missing action index", { action: "scroll" }, [{ index: 1, dx: 0, dy: 100 }]],
+  ["oversized delta", { action: "scroll" }, [{ index: 0, dx: 0, dy: 10001 }]],
+  [
+    "duplicate indices",
+    { action: "scroll" },
+    [
+      { index: 0, dx: 0, dy: 100 },
+      { index: 0, dx: 0, dy: 100 },
+    ],
+  ],
+] as const) {
+  toolTests.instance(`native pixel scroll context refuses ambiguity before acquiring: ${name}`, () =>
+    toolCase(({ execute, bridge }) =>
+      Effect.gen(function* () {
+        const result = yield* execute(input, {
+          extra: { model: toolModel, computerNative: { provider: "openai", safetyChecks: [], scrolls } },
+        })
+        expect(result.metadata.code).toBe("failed")
+        expect(bridge.commands()).not.toContain("acquire")
+        expect(bridge.commands()).not.toContain("act")
+      }),
+    ),
+  )
+}
+
 toolTests.instance("a program path is resolved and approved before launch with its sensitive request ID", () =>
   toolCase(({ desktop, execute, bridge }) =>
     Effect.gen(function* () {
@@ -1626,8 +1933,13 @@ toolTests.instance("Stop at a check-in cancels the task before the next input", 
         }),
       )
       desktop.questionAnswers.push("Stop")
-      const result = yield* execute({ action: "click", ref: "ui_1" })
+      const result = yield* execute({ action: "click", ref: "ui_1" }, { extra: nativeExtra() })
       expect(result.output).toContain("The user stopped Vector Hands.")
+      expect(result.metadata.native).toEqual({
+        provider: "openai",
+        acknowledgedSafetyChecks: [],
+        computerDeclined: true,
+      })
       expect(bridge.commands()).not.toContain("act")
       expect(bridge.commands()).toContain("cancel")
     }),

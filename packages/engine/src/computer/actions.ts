@@ -12,7 +12,10 @@ export function step(
   input: Computer.ToolInput,
   frame?: Computer.Frame,
   coords: "pixels" | "grid1000" = "pixels",
+  pixelScroll?: { readonly dx: number; readonly dy: number },
 ): Computer.Step | undefined {
+  if (pixelScroll && input.action !== "scroll")
+    throw new ActionError({ code: "failed", message: "Pixel scroll data requires a scroll action." })
   const point = (x: number | undefined, y: number | undefined) => {
     if (x === undefined || y === undefined)
       throw new ActionError({ code: "failed", message: "This action requires both x and y coordinates." })
@@ -71,6 +74,17 @@ export function step(
         })
       return { kind: input.action === "mouse_down" ? "down" : "up", button: "left" }
     case "scroll": {
+      if (pixelScroll) {
+        if (input.direction !== undefined || input.amount !== undefined || input.ref !== undefined)
+          throw new ActionError({ code: "failed", message: "Pixel scroll data cannot mix with wheel amounts or refs." })
+        return checked({
+          kind: "scroll",
+          at: point(input.x, input.y),
+          unit: "pixel",
+          dx: pixelScroll.dx,
+          dy: pixelScroll.dy,
+        })
+      }
       if (!input.direction) throw new ActionError({ code: "failed", message: "A scroll requires a direction." })
       if (input.ref !== undefined)
         throw new ActionError({
