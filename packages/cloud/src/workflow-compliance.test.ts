@@ -129,6 +129,174 @@ describe("release workflow supply-chain policy", () => {
   })
 })
 
+// The @vector build's CI lane (vector-at-mention-spec V00). test.yml and typecheck.yml run only on main and on pull
+// requests, so this lane is the only CI the build branch's pushes get, and each work package cites its result.
+describe("@vector CI lane", () => {
+  type Step = {
+    uses?: string
+    run?: string
+    env?: Record<string, string>
+    with?: Record<string, unknown>
+    "working-directory"?: string
+  }
+  type Job = {
+    environment?: unknown
+    permissions?: unknown
+    services?: Record<string, { image?: string; ports?: unknown[] }>
+    steps?: Step[]
+  }
+  type Workflow = {
+    on: Record<string, unknown>
+    concurrency?: { group?: string }
+    permissions?: unknown
+    jobs: Record<string, Job>
+  }
+  const lane = async () => Bun.YAML.parse(await read(".github/workflows/vector-at-mention.yml")) as Workflow
+  const steps = (workflow: Workflow) =>
+    Object.entries(workflow.jobs).flatMap(([job, entry]) => (entry.steps ?? []).map((step) => ({ job, step })))
+
+  test("the lane runs on every push to its branch with read-only access and no secrets", async () => {
+    const workflow = await lane()
+    expect(Object.keys(workflow.on).sort()).toEqual(["pull_request", "push", "workflow_dispatch"])
+    // A path filter or an ignore list here would leave a package's commit with no CI at all.
+    expect(workflow.on.push).toEqual({ branches: ["vector-at-mention"] })
+    // No other workflow runs the web GitHub tests, so every hosted API module they load (http, abuse, persistent-store
+    // as well as github-*), the lockfile that pins jose and the Bun version in package.json start the lane on a pull
+    // request. api/** takes in the contract's four api/ entries.
+    expect((workflow.on.pull_request as { paths?: string[] }).paths).toEqual(
+      expect.arrayContaining([
+        "api/**",
+        "bun.lock",
+        "package.json",
+        "packages/core/src/review/**",
+        "packages/core/src/github-agents.ts",
+        "packages/engine/src/cli/cmd/github*.ts",
+        "packages/desktop/src/main/github-*.ts",
+        ".github/workflows/vector-at-mention.yml",
+      ]),
+    )
+    // GitHub keeps one pending run per concurrency group and drops it when a newer one queues, so a group shared by
+    // pushes would lose the result of a commit pushed while another run was still going.
+    expect(workflow.concurrency?.group).toContain("github.run_id")
+    expect(workflow.permissions).toEqual({ contents: "read" })
+    // Expressions reach a context by index and whole as well as by property (secrets['X'], toJSON(secrets),
+    // github['token'], toJSON(github)), so the check names the context, not one access form, and ignores case. It reads
+    // every key and value of the parsed workflow, which leaves comments free to say what the lane does not hold.
+    const strings = (value: unknown): string[] =>
+      typeof value === "string"
+        ? [value]
+        : typeof value === "object" && value !== null
+          ? Object.entries(value).flatMap(([key, entry]) => [key, ...strings(entry)])
+          : []
+    expect(
+      strings(workflow).filter((value) =>
+        /\bsecrets\b|\bgithub\s*(?:\.\s*token\b|\[)|\btoJSON\s*\(\s*github\s*\)/i.test(value),
+      ),
+    ).toEqual([])
+    for (const [name, job] of Object.entries(workflow.jobs)) {
+      expect({ job: name, environment: job.environment ?? null, permissions: job.permissions ?? null }).toEqual({
+        job: name,
+        environment: null,
+        permissions: null,
+      })
+    }
+    const checkouts = steps(workflow).filter((entry) => entry.step.uses?.startsWith("actions/checkout@"))
+    expect(checkouts.map((entry) => entry.job).sort()).toEqual(Object.keys(workflow.jobs).sort())
+    for (const entry of checkouts) {
+      expect({ job: entry.job, persist: entry.step.with?.["persist-credentials"] }).toEqual({
+        job: entry.job,
+        persist: false,
+      })
+    }
+    const unpinned = steps(workflow).flatMap((entry) =>
+      entry.step.uses && !entry.step.uses.startsWith("./") && !/@[a-f0-9]{40}$/.test(entry.step.uses)
+        ? [{ job: entry.job, uses: entry.step.uses }]
+        : [],
+    )
+    expect(unpinned).toEqual([])
+  })
+
+  test("Valkey is pinned by the free-models integration's digest", async () => {
+    const workflow = await lane()
+    const free = Bun.YAML.parse(await read(".github/workflows/vector-free-models.yml")) as Workflow
+    const image = workflow.jobs.api?.services?.valkey?.image
+    expect(image).toMatch(/@sha256:[a-f0-9]{64}$/)
+    expect(image).toBe(free.jobs.integration?.services?.valkey?.image)
+  })
+
+  test("the lane keeps every check the contract names", async () => {
+    const workflow = await lane()
+    const commands = steps(workflow).flatMap((entry) =>
+      entry.step.run ? [{ directory: entry.step["working-directory"] ?? ".", words: entry.step.run.split(/\s+/) }] : [],
+    )
+    const missing = (
+      [
+        ["packages/engine", "../../tsconfig.json"],
+        ["packages/web", "test/github-oidc.test.ts"],
+        ["packages/web", "test/github-app.test.ts"],
+        ["packages/web", "test/github-app-api.test.ts"],
+        ["packages/engine", "test/cli/github*.test.ts"],
+        ["packages/engine", "test/tool/registry*.test.ts"],
+        ["packages/core", "test/review/*.test.ts"],
+        ["packages/core", "test/child-environment.test.ts"],
+        ["test", "api-module-loading.test.ts"],
+        ["test", "cli-token.test.ts"],
+        ["packages/engine", "script/build-node.ts"],
+        ["packages/engine", "script/smoke-node-bundle.ts"],
+      ] as const
+    ).filter(([directory, word]) =>
+      commands.every((command) => command.directory !== directory || !command.words.includes(word)),
+    )
+    expect(missing).toEqual([])
+  })
+
+  // bun test exits 1 when no filter matches a file, but silently drops a filter that matches nothing while another one
+  // matches, and bash passes an unmatched glob on literally. A mistyped or not-yet-created file would then leave a
+  // green step that never ran it, so every pattern a test step names must match a file in its working directory.
+  test("every test step runs named files that exist, outside Actions mode", async () => {
+    const workflow = await lane()
+    const runs = steps(workflow).flatMap((entry) =>
+      entry.step.run && /\bbun (?:--no-env-file )?test\b/.test(entry.step.run)
+        ? [
+            {
+              job: entry.job,
+              run: entry.step.run,
+              directory: entry.step["working-directory"] ?? ".",
+              patterns: entry.step.run.split(/\s+/).filter((word) => /\.test\.tsx?$/.test(word)),
+            },
+          ]
+        : [],
+    )
+    expect(runs.length).toBeGreaterThan(0)
+    // Several packages switch behaviour when GITHUB_ACTIONS=true, and a test step that names no file runs a whole suite.
+    expect(
+      runs.map((entry) => ({
+        job: entry.job,
+        outside: entry.run.startsWith("GITHUB_ACTIONS=false "),
+        named: entry.patterns.length > 0,
+      })),
+    ).toEqual(runs.map((entry) => ({ job: entry.job, outside: true, named: true })))
+    const unmatched = runs.flatMap((entry) =>
+      entry.patterns.flatMap((pattern) =>
+        new Bun.Glob(pattern).scanSync({ cwd: `${root}/${entry.directory}` }).next().done
+          ? [{ job: entry.job, directory: entry.directory, pattern }]
+          : [],
+      ),
+    )
+    expect(unmatched).toEqual([])
+  })
+
+  // Without VECTOR_TEST_REDIS_URL, github-app-api.test.ts registers one skipped test and the step still passes.
+  test("the GitHub API tests run against the lane's Valkey", async () => {
+    const workflow = await lane()
+    const api = workflow.jobs.api
+    const step = api?.steps?.find((entry) => entry.run?.split(/\s+/).includes("test/github-app-api.test.ts"))
+    expect(step?.["working-directory"]).toBe("packages/web")
+    expect(step?.env?.VECTOR_TEST_REDIS_URL).toBe("redis://127.0.0.1:6379")
+    expect(api?.services?.valkey?.ports).toEqual(["6379:6379"])
+  })
+})
+
 // GitHub moves ubuntu-latest to new Ubuntu releases before tools such as Playwright support them, so a check that
 // passed yesterday fails while installing. Vector's own workflows name the Ubuntu they were checked on.
 test("Vector's workflows pin their Ubuntu runner", async () => {
