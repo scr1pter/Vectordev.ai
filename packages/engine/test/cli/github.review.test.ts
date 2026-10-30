@@ -7,7 +7,7 @@ import { $ } from "bun"
 import { afterAll, describe, expect, test } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
-import { Effect, ManagedRuntime } from "effect"
+import { Effect, Fiber, ManagedRuntime } from "effect"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { buildAnchorIndex, fromGitHubFiles, parseUnifiedDiff, type GitHubPrFile } from "@vectordevai/core/review/diff"
 import {
@@ -1760,8 +1760,8 @@ describe("vector github review: ids, failures and edge cases", () => {
   )
 })
 
-// The workflow's review job as it runs in Actions: the real `vector github review` command, the real reviewer on the
-// fake LLM, and the fake GitHub above.
+// The workflow's review job as it runs in Actions: GitHub starts the real `vector github review` itself, with the step's
+// environment (`vector.actionsStep`), and it runs the real reviewer on the fake LLM against the fake GitHub above.
 describe("vector github review: the workflow's command end to end", () => {
   const actions = (w: World, llmUrl: string, event: { name: string; path: string }) => ({
     GITHUB_ACTIONS: "true",
@@ -1835,7 +1835,7 @@ describe("vector github review: the workflow's command end to end", () => {
       Effect.gen(function* () {
         const { w, runner, event } = yield* setup(home, opened)
         yield* answers(llm)
-        const result = yield* vector.spawn(["github", "review"], {
+        const result = yield* vector.actionsStep(["github", "review"], {
           cwd: runner,
           timeoutMs: 100_000,
           env: actions(w, llm.url, { name: "pull_request", path: event }),
@@ -1869,7 +1869,7 @@ describe("vector github review: the workflow's command end to end", () => {
           }
         })
         yield* answers(llm)
-        const result = yield* vector.spawn(["github", "review"], {
+        const result = yield* vector.actionsStep(["github", "review"], {
           cwd: runner,
           timeoutMs: 100_000,
           env: actions(w, llm.url, { name: "issue_comment", path: event }),
@@ -1889,7 +1889,7 @@ describe("vector github review: the workflow's command end to end", () => {
     ({ llm, vector, home }) =>
       Effect.gen(function* () {
         const { w, runner, event } = yield* setup(home, opened)
-        const result = yield* vector.spawn(["github", "review"], {
+        const result = yield* vector.actionsStep(["github", "review"], {
           cwd: runner,
           timeoutMs: 100_000,
           env: {
@@ -1914,7 +1914,7 @@ describe("vector github review: the workflow's command end to end", () => {
     ({ llm, vector, home }) =>
       Effect.gen(function* () {
         const { w, runner, event } = yield* setup(home, opened)
-        const result = yield* vector.spawn(["github", "review"], {
+        const result = yield* vector.actionsStep(["github", "review"], {
           cwd: runner,
           timeoutMs: 100_000,
           env: {
@@ -1929,6 +1929,125 @@ describe("vector github review: the workflow's command end to end", () => {
         expect(result.stderr).toContain(reason)
         expect(result.stderr).not.toContain("needs DEEPINFRA_API_KEY")
         expect(sticky(w)!.body).toContain(noteCannotStart(reason))
+        expect(yield* llm.hits).toHaveLength(0)
+      }),
+    120_000,
+  )
+
+  // INV-S5 on the path a runner takes: the step's CLI holds the job's credentials, and no credential-named variable
+  // reaches the children it starts. Its git here starts through core's spawner, as the shell tool's commands and
+  // formatters do; MCP and language servers meet the same filter on their own paths. The checkout runs a recorder in
+  // place of upload-pack. git starts it, with git's own environment, for every fetch from origin, and it writes down
+  // which of the probed names it was given: names only, never values. One exception is pinned here rather than left
+  // out: Vector hands its own fetches the step's token as git's auth header in GIT_CONFIG_VALUE_0, by design, and git
+  // clears only GIT_CONFIG_COUNT for a local transport, so the header still reaches what git starts. Keeping it from
+  // what a model can start is V16's sandbox's job.
+  cliIt.live(
+    "no credential-named variable reaches the step's children: the review's git fetches see no GITHUB_TOKEN, ACTIONS_* or listed secret",
+    ({ llm, vector, home }) =>
+      Effect.gen(function* () {
+        const { w, runner, event } = yield* setup(home, opened)
+        yield* answers(llm)
+        const record = path.join(home, "git-environment").replaceAll("\\", "/")
+        const recorder = path.join(home, "upload-pack.sh").replaceAll("\\", "/")
+        const kept = ["GITHUB_ACTIONS", "GITHUB_REPOSITORY", "VECTOR_REVIEW_PR"]
+        const header = "GIT_CONFIG_VALUE_0"
+        const credentials = {
+          ACTIONS_RUNTIME_TOKEN: "test-placeholder",
+          ACTIONS_RESULTS_URL: "test-placeholder",
+          NPM_TOKEN: "test-placeholder",
+          MY_PROVIDER_CREDS: "test-placeholder",
+        }
+        yield* Effect.promise(() =>
+          Bun.write(
+            recorder,
+            [
+              ...[...kept, header, "GITHUB_TOKEN", ...Object.keys(credentials)].map(
+                (name) => `test -n "\${${name}+set}" && echo ${name} >> '${record}'`,
+              ),
+              'exec git-upload-pack "$@"',
+              "",
+            ].join("\n"),
+          ),
+        )
+        yield* Effect.promise(() => git(runner, "config", "remote.origin.uploadpack", `sh '${recorder}'`))
+        const result = yield* vector.actionsStep(["github", "review"], {
+          cwd: runner,
+          timeoutMs: 100_000,
+          env: {
+            ...actions(w, llm.url, { name: "pull_request", path: event }),
+            ...credentials,
+            VECTOR_SECRET_ENV_NAMES: "MY_PROVIDER_CREDS",
+          },
+        })
+        vector.expectExit(result, 0, "the review job")
+        // It reviewed, so the step itself held GITHUB_TOKEN.
+        expect(posts(w, /\/pulls\/7\/reviews$/)).toHaveLength(1)
+        const seen = yield* Effect.promise(() =>
+          Bun.file(record)
+            .text()
+            .catch(() => ""),
+        )
+        expect([...new Set(seen.split(/\s+/).filter(Boolean))].toSorted()).toEqual([...kept, header].toSorted())
+      }),
+    120_000,
+  )
+
+  // How `actionsStep` stops a step that is still running, as GitHub cancels one: the CLI gets SIGTERM first, so its own
+  // finalizers stop the git it started through core's spawner, which runs in a session of its own that no kill of the
+  // CLI's process group reaches. Here origin's upload-pack never answers: it writes a beat every 0.2 s, for a minute at
+  // most, so a process left behind by a broken release ends by itself.
+  cliIt.live(
+    "a step stopped mid-fetch leaves nothing running: the CLI's own finalizers stop the git its group kill cannot reach",
+    ({ llm, vector, home }) =>
+      Effect.gen(function* () {
+        const { w, runner, event } = yield* setup(home, opened)
+        const beat = path.join(home, "upload-pack-beat").replaceAll("\\", "/")
+        const hang = path.join(home, "upload-pack-hang.sh").replaceAll("\\", "/")
+        yield* Effect.promise(() =>
+          Bun.write(
+            hang,
+            ["i=0", `while [ $i -lt 300 ]; do echo $i >> '${beat}'; i=$((i + 1)); sleep 0.2; done`, ""].join("\n"),
+          ),
+        )
+        yield* Effect.promise(() => git(runner, "config", "remote.origin.uploadpack", `sh '${hang}'`))
+        const step = yield* Effect.forkChild(
+          vector.actionsStep(["github", "review"], {
+            cwd: runner,
+            timeoutMs: 100_000,
+            env: actions(w, llm.url, { name: "pull_request", path: event }),
+          }),
+        )
+        // Undefined once git has started upload-pack; a step that ended before that shows its result here.
+        const early = yield* Effect.promise(async () => {
+          while (step.pollUnsafe() === undefined && !(await Bun.file(beat).exists())) await Bun.sleep(100)
+          return step.pollUnsafe()
+        })
+        expect(early).toBeUndefined()
+        yield* Fiber.interrupt(step)
+        // The release has returned, so a beat written from now on comes from a process that outlived the step.
+        const size = Bun.file(beat).size
+        yield* Effect.sleep("1 second")
+        expect(Bun.file(beat).size).toBe(size)
+      }),
+    120_000,
+  )
+
+  // The same step started as a child of Vector, through core's spawner: the GITHUB_TOKEN its caller configures is
+  // withheld, so the job cannot even authenticate. This is why the tests above start it as GitHub does.
+  cliIt.live(
+    "started as a child through Vector's own spawner, the same step gets no GITHUB_TOKEN",
+    ({ llm, vector, home }) =>
+      Effect.gen(function* () {
+        const { w, runner, event } = yield* setup(home, opened)
+        const result = yield* vector.spawn(["github", "review"], {
+          cwd: runner,
+          timeoutMs: 100_000,
+          env: actions(w, llm.url, { name: "pull_request", path: event }),
+        })
+        vector.expectExit(result, 1, "the review job as a child")
+        expect(result.stderr).toContain("GITHUB_TOKEN is not set. Provide the repository Actions token.")
+        expect(w.fake.requests).toEqual([])
         expect(yield* llm.hits).toHaveLength(0)
       }),
     120_000,
