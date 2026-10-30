@@ -304,3 +304,26 @@ describe("computer setup readiness", () => {
     expect(ComputerOnboarding.consented(consentedAt)).toBe(true)
   })
 })
+
+describe("computer probe-only blockers", () => {
+  test("the fresh probe's own situations read in the status order, and a clean probe reads nothing", () => {
+    expect(ComputerOnboarding.probeBlocked(undefined)).toBeUndefined()
+    expect(ComputerOnboarding.probeBlocked(mac)).toBeUndefined()
+    expect(ComputerOnboarding.probeBlocked(windows)).toBeUndefined()
+    expect(ComputerOnboarding.probeBlocked({ ...mac, helperStart: "failed" })).toBe("computer.onboarding.helperFailed")
+    expect(
+      ComputerOnboarding.probeBlocked({
+        ...windows,
+        helperStart: "failed",
+        windows: { captureBlocked: true, elevated: false },
+      }),
+    ).toBe("computer.onboarding.windows.captureBlocked")
+    expect(
+      ComputerOnboarding.probeBlocked({
+        ...windows,
+        helperStart: "failed",
+        windows: { captureBlocked: true, elevated: true },
+      }),
+    ).toBe("computer.availability.elevated")
+  })
+})

@@ -58,6 +58,8 @@ const featureNames = [
   "computer.settings.use",
   "computer.settings.keepAwake.description",
   "computer.settings.stop.description",
+  "computer.settings.readFailed",
+  "computer.settings.saveFailed",
   "computer.settings.company.description",
   "computer.settings.screenshots.confirm.description",
   "computer.settings.docs",

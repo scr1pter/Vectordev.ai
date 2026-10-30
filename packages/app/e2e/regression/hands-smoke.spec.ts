@@ -50,8 +50,32 @@ async function openSettings(page: Page, script?: FakeComputerScript) {
   return settings
 }
 
+const granted: Computer.PermissionsView = {
+  rows: [
+    {
+      id: "screen",
+      status: "granted",
+      pane: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+    },
+    {
+      id: "accessibility",
+      status: "granted",
+      pane: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+    },
+  ],
+  canReset: false,
+  adhoc: false,
+  helperStart: "ok",
+  vectorHoldsGrant: { screen: false, accessibility: false },
+}
+
 test("the development computer fixture reaches Settings and accepts scripted state", async ({ page }) => {
-  const settings = await openSettings(page, {})
+  // Set up and granted, with main's live phase still off: the pill follows the phase main publishes next.
+  const settings = await openSettings(page, {
+    prefs: { enabled: true, consentedAt: 1 },
+    state: { phase: "off" },
+    permissions: granted,
+  })
   const tab = settings.getByRole("tab", { name: Hands.NAME, exact: true })
   await expect(tab).toBeVisible()
   await tab.click()
@@ -86,6 +110,9 @@ test("an unsupported desktop keeps its Settings status visible", async ({ page }
   const settings = await openSettings(page, { supported: false })
   await settings.getByRole("tab", { name: Hands.NAME, exact: true }).click()
   await expect(settings.locator("[data-computer-status]").getByRole("status")).toHaveText("Not available on Linux yet")
+  // No controls without a computer to control.
+  await expect(settings.locator('[data-component="settings-computer"]').getByRole("switch")).toHaveCount(0)
+  await expect(settings.locator('[data-component="settings-computer"]').getByRole("button")).toHaveCount(0)
   expect(await calls(page)).toEqual([])
 })
 

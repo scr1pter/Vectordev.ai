@@ -36,7 +36,7 @@ export type FakeComputerCall =
   | { method: "setPrefs"; prefs: Partial<Computer.ComputerPrefs> }
   | { method: "removeAlways"; key: string }
   | { method: "removeAllAlways" }
-  | { method: "block"; app: Computer.AppIdentity }
+  | { method: "block"; app: { key: string; name: string } }
   | { method: "unblock"; key: string }
   | { method: "openPane"; id: "screen" | "accessibility" | "windows-capture" }
   | { method: "reset"; id: "screen" | "accessibility" }
@@ -217,12 +217,12 @@ export function createFakeComputer(script: FakeComputerScript = {}): FakeCompute
       settings.always = []
     },
     block: async (app) => {
-      log.push({ method: "block", app: structuredClone(app) })
-      const key = Computer.appKey(app)
-      if (settings.locked.includes("blocked")) return
-      if (!settings.prefs.blocked.some((blocked) => blocked.key === key))
-        settings.prefs.blocked.push({ key, name: app.name, addedAt: seed.now ?? 0 })
-      settings.prefs.unblocked = settings.prefs.unblocked.filter((unblocked) => unblocked !== key)
+      log.push({ method: "block", app: { key: app.key, name: app.name } })
+      // Main accepts only app keys here (D6b.1); a DEFAULT_BLOCKED `builtin:` key changes through setPrefs({unblocked}).
+      if (settings.locked.includes("blocked") || !Computer.parseAppKey(app.key)) return
+      if (!settings.prefs.blocked.some((blocked) => blocked.key === app.key))
+        settings.prefs.blocked.push({ key: app.key, name: app.name, addedAt: seed.now ?? 0 })
+      settings.prefs.unblocked = settings.prefs.unblocked.filter((unblocked) => unblocked !== app.key)
     },
     unblock: async (key) => {
       log.push({ method: "unblock", key })

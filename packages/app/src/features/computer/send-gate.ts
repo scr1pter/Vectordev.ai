@@ -86,7 +86,7 @@ export async function readiness(
   const [settings, status, state, permissions] = read
   const view = { settings, status, backend: state.backend, permissions }
   const blocked = options.permissions
-    ? (ComputerOnboarding.setupBlocked(view, true) ?? probeBlocked(permissions))
+    ? (ComputerOnboarding.setupBlocked(view, true) ?? ComputerOnboarding.probeBlocked(permissions))
     : ComputerOnboarding.blocked(view, true)
   if (blocked) return { ready: false, blocked, policy: settings.policy }
   const enabled = settings.prefs.enabled === true
@@ -135,12 +135,4 @@ export async function check(input: {
  */
 export function needsSetup(readiness: Readiness) {
   return !readiness.ready && (!readiness.blocked || SETUP.has(readiness.blocked))
-}
-
-// What only the fresh probe reports, in the order blocked() reads the same situations from status. Onboarding shows
-// these as rows; a send needs the sentence itself.
-function probeBlocked(permissions: Computer.PermissionsView | undefined): ComputerOnboarding.BlockedKey | undefined {
-  if (permissions?.windows?.elevated === true) return "computer.availability.elevated"
-  if (permissions?.windows?.captureBlocked === true) return "computer.onboarding.windows.captureBlocked"
-  if (permissions?.helperStart === "failed") return "computer.onboarding.helperFailed"
 }

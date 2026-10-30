@@ -161,6 +161,16 @@ export function setupBlocked(view: View, supported: boolean): BlockedKey | undef
   if ((view.backend === "local-windows") !== !!view.permissions?.windows) return "computer.onboarding.checkFailed"
 }
 
+/**
+ * What only a fresh permission probe reports, in the order blocked() reads the same situations from status. Onboarding
+ * shows these as rows; a send and the Settings pill need the sentence itself.
+ */
+export function probeBlocked(permissions: Computer.PermissionsView | undefined): BlockedKey | undefined {
+  if (permissions?.windows?.elevated === true) return "computer.availability.elevated"
+  if (permissions?.windows?.captureBlocked === true) return "computer.onboarding.windows.captureBlocked"
+  if (permissions?.helperStart === "failed") return "computer.onboarding.helperFailed"
+}
+
 /** Setup is complete apart from enabling: nothing blocks it, consent is recorded and every grant reads granted. */
 export function setupReady(view: View, supported: boolean): boolean {
   return !setupBlocked(view, supported) && canFinish(view.permissions, view.settings?.prefs.consentedAt)

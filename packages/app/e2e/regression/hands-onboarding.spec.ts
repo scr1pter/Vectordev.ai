@@ -217,12 +217,14 @@ async function openOnboarding(page: Page, script: FakeComputerScript) {
   const settings = page.locator(".settings-v2-workspace")
   await expect(settings).toBeVisible()
   await settings.getByRole("tab", { name: Hands.NAME, exact: true }).click()
-  const setup = settings.locator("[data-computer-status]").getByRole("button", { name: "Set up", exact: true })
-  await expect(setup).toBeEnabled()
+  const use = settings.getByRole("switch", { name: `Use ${Hands.NAME}` })
+  await expect(use).toBeEnabled()
   await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000)
-  await setup.click()
+  await use.click({ force: true })
   const dialog = page.locator('[data-component="computer-onboarding"]')
   await expect(dialog).toBeVisible()
+  // Onboarding replaces Settings (D6b.4), so only onboarding's own checks run from here.
+  await expect(settings).toHaveCount(0)
   await expect(dialog.getByRole("button", { name: `Turn on ${Hands.NAME}`, exact: true })).toBeEnabled()
   return dialog
 }

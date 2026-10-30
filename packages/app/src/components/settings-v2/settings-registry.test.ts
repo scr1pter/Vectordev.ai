@@ -42,6 +42,19 @@ describe("settings registry", () => {
     expect(isSettingsTab("computer")).toBe(true)
   })
 
+  test("gives the desktop app control page its own hands icon and keeps unrelated vocabulary elsewhere", () => {
+    const items = settingsGroups.flatMap((group) => group.items)
+    const computer = items.find((item) => item.value === "computer")!
+    expect(computer.icon).toBe("hands")
+    expect(items.filter((item) => item.icon === "hands").map((item) => item.value)).toEqual(["computer"])
+    for (const query of ["mouse", "screenshots", "use my computer", "accessibility permission"])
+      expect(filterSettingsGroups(query).flatMap((group) => group.items.map((item) => item.value))).toEqual([
+        "computer",
+      ])
+    for (const word of ["keyboard", "terminal", "workflow", "skills", "effort", "web access", "theme", "instructions"])
+      expect(computer.keywords.some((keyword) => keyword.toLocaleLowerCase().includes(word))).toBe(false)
+  })
+
   test("puts Keyboard shortcuts in the Workspace group, found by what people call them", () => {
     const workspace = settingsGroups.find((group) => group.title === "Workspace")
     expect(workspace?.items.find((item) => item.value === "shortcuts")?.label).toBe("Keyboard shortcuts")

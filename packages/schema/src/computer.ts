@@ -1654,7 +1654,12 @@ export interface ComputerPlatform {
   >
   removeAlways(key: string): Promise<void>
   removeAllAlways(): Promise<void>
-  block(app: AppIdentity): Promise<void>
+  /**
+   * Adds a user block for an `apps()` row. The renderer holds no verified identity (`apps()` returns only key, name,
+   * icon, running and rule), so it sends the row's key and name. Main validates the key with `parseAppKey`, cleans
+   * the name with `clean`, and stores `{key, name, addedAt}`. A block only restricts access, so it cannot widen it.
+   */
+  block(app: { key: string; name: string }): Promise<void>
   unblock(key: string): Promise<void>
   deleteScreenshots(): Promise<{ removed: number }>
 }

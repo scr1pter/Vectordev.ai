@@ -16,7 +16,7 @@ import { SettingsUsageV2 } from "./usage"
 import { SettingsAboutV2 } from "./about"
 import { SettingsProjectTrustV2 } from "./project-trust"
 import { SettingsSubagentsV2 } from "./subagents"
-import { SettingsComputerStatus } from "./computer-status"
+import { SettingsComputerV2 } from "./computer"
 import { SettingsSpendLimitsV2 } from "./spend-limits"
 import { SettingsMemoryV2 } from "./memory"
 import { SettingsLocalV2 } from "./local"
@@ -93,7 +93,7 @@ export const SettingsWorkspace: Component<SettingsWorkspaceProps> = (props) => {
       return <SettingsProjectTrustV2 repositoryPath={props.repositoryPath} sessionDirectory={props.sessionDirectory} />
     if (item === "subagents") return <SettingsSubagentsV2 />
     if (item === "computer")
-      return <Show when={platform.computer}>{(computer) => <SettingsComputerStatus computer={computer()} />}</Show>
+      return <Show when={platform.computer}>{(computer) => <SettingsComputerV2 computer={computer()} />}</Show>
     if (item === "memory")
       return <SettingsMemoryV2 repositoryPath={props.repositoryPath} sessionDirectory={props.sessionDirectory} />
     if (item === "local") return <SettingsLocalV2 />

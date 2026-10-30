@@ -25,6 +25,7 @@
     "./regression/hands-asks.spec.ts",
     "./regression/hands-mention.spec.ts",
     "./regression/hands-onboarding.spec.ts",
+    "./regression/hands-settings.spec.ts",
     "./regression/hands-smoke.spec.ts",
     "./regression/mock-server-events.spec.ts",
     "./regression/public-share-consent.spec.ts",

@@ -137,7 +137,7 @@ export const settingsGroups: readonly SettingsGroup[] = [
       {
         value: "computer",
         label: Hands.NAME,
-        icon: "sliders",
+        icon: "hands",
         keywords: [
           Hands.NAME,
           Hands.SHORT,

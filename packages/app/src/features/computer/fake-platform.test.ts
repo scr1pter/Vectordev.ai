@@ -230,8 +230,8 @@ describe("fake computer platform", () => {
     expect((await fake.prefs()).always.map((app) => app.name)).toEqual(["Mail"])
     await fake.removeAllAlways()
     expect((await fake.prefs()).always).toEqual([])
-    await fake.block(notes)
-    await fake.block(notes)
+    await fake.block({ key, name: "Notes" })
+    await fake.block({ key, name: "Notes" })
     expect((await fake.prefs()).prefs.blocked).toEqual([{ key, name: "Notes", addedAt: 123 }])
     expect(await fake.apps("nOt")).toEqual([{ key, name: "Notes", running: true, rule: "blocked" }])
     await fake.unblock(key)
@@ -249,8 +249,8 @@ describe("fake computer platform", () => {
     expect(fake.calls).toEqual([
       { method: "removeAlways", key },
       { method: "removeAllAlways" },
-      { method: "block", app: notes },
-      { method: "block", app: notes },
+      { method: "block", app: { key, name: "Notes" } },
+      { method: "block", app: { key, name: "Notes" } },
       { method: "unblock", key },
       { method: "openPane", id: "screen" },
       { method: "openPane", id: "accessibility" },
@@ -267,10 +267,36 @@ describe("fake computer platform", () => {
         { key: "app:macos:com.apple.mail", name: "Mail", running: true, rule: "company-deny" },
       ],
     })
-    await fake.block(notes)
+    await fake.block({ key, name: "Notes" })
     await fake.unblock(key)
     await fake.unblock("app:macos:com.apple.mail")
     expect((await fake.apps()).map((app) => app.rule)).toEqual(["never", "company-deny"])
+  })
+
+  test("block records a detached copy of the row, stores only app keys main accepts, and honours a blocked lock", async () => {
+    const row = { key, name: "Notes", running: true }
+    const fake = createFakeComputer({ prefs: { unblocked: ["builtin:find-my"] } })
+    await fake.block(row)
+    row.name = "Changed after the call"
+    expect((await fake.prefs()).prefs.blocked).toEqual([{ key, name: "Notes", addedAt: 0 }])
+    // Main validates block keys with parseAppKey (D6b.1), so a removed default is never blocked again this way: only
+    // setPrefs({unblocked}) changes it (D6b.8). The calls are still logged.
+    await fake.block({ key: "builtin:find-my", name: "Find My" })
+    await fake.block({ key: "app:macos:com.Apple.Mail", name: "Mail" })
+    expect(fake.calls).toEqual([
+      { method: "block", app: { key, name: "Notes" } },
+      { method: "block", app: { key: "builtin:find-my", name: "Find My" } },
+      { method: "block", app: { key: "app:macos:com.Apple.Mail", name: "Mail" } },
+    ])
+    expect((await fake.prefs()).prefs).toMatchObject({
+      blocked: [{ key, name: "Notes", addedAt: 0 }],
+      unblocked: ["builtin:find-my"],
+    })
+
+    const locked = createFakeComputer({ locked: ["blocked"] })
+    await locked.block({ key, name: "Notes" })
+    expect(locked.calls).toEqual([{ method: "block", app: { key, name: "Notes" } }])
+    expect((await locked.prefs()).prefs.blocked).toEqual([])
   })
 
   test("held app answers wait for releaseApps, and later lookups answer at once", async () => {
