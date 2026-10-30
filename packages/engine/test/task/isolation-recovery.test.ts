@@ -319,11 +319,16 @@ describe("isolation recovery failures", () => {
         yield* Effect.promise(async () => {
           await fs.mkdir(elsewhere, { recursive: true })
           await fs.mkdir(path.dirname(registry), { recursive: true })
-          await fs.symlink(elsewhere, registry)
+          // A real directory symlink on every platform (hosted Windows runners can create one), so this is the Windows
+          // proof that the guard refuses one; the admission case covers a junction.
+          await fs.symlink(elsewhere, registry, "dir")
         })
         yield* Effect.addFinalizer(() =>
           Effect.promise(async () => {
-            await fs.rm(registry, { force: true })
+            // unlink drops only the link, where Bun's rm fails on a link to a folder on Windows.
+            await fs.unlink(registry).catch((cause) => {
+              if (cause?.code !== "ENOENT") throw cause
+            })
             await fs.rm(elsewhere, { recursive: true, force: true })
           }),
         )

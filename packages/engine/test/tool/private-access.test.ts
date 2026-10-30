@@ -286,8 +286,10 @@ it.instance(
         read.pipe(Effect.match({ onFailure: (error) => error._tag, onSuccess: () => "allowed" }))
       const linux = FileAccess.make({ audience: fixture.audience, process: appProcess, platform: "linux" })
       expect(yield* outcome(linux(object(".git"), false))).toBe("ForbiddenError")
-      // On a case-sensitive file system .GIT is another, absent folder.
-      expect(yield* outcome(linux(object(".GIT"), false))).toBe("allowed")
+      // On a case-sensitive file system .GIT is another, absent folder. On a host that ignores case (Windows here) it
+      // is the shared .git under another spelling, and stays guarded.
+      const distinct = !existsSync(path.join(fixture.instance.directory, ".GIT"))
+      expect(yield* outcome(linux(object(".GIT"), false))).toBe(distinct ? "allowed" : "ForbiddenError")
       yield* Effect.gen(function* () {
         // On a volume that ignores case .GIT is the shared .git, while Git prints its common directory as ".git".
         const audience = SessionAudience.make(yield* Database.Service, "darwin")

@@ -368,9 +368,14 @@ const layer: Layer.Layer<
       )
     })
 
+    // Git lists a worktree under the real path it stored, also once the folder is gone: on Windows that is the long
+    // name, where Node's non-native realpath keeps 8.3 short names such as RUNNER~1. FSUtil.realpath resolves
+    // natively on Windows and resolves the deepest existing ancestor of a missing folder, so both spellings meet.
     const canonical = Effect.fnUntraced(function* (input: string) {
       const abs = pathSvc.resolve(input)
-      const real = yield* fs.realPath(abs).pipe(Effect.catch(() => Effect.succeed(abs)))
+      const real = yield* Effect.try({ try: () => FSUtil.realpath(abs), catch: (error) => error }).pipe(
+        Effect.orElseSucceed(() => abs),
+      )
       const normalized = pathSvc.normalize(real)
       return process.platform === "win32" ? normalized.toLowerCase() : normalized
     })

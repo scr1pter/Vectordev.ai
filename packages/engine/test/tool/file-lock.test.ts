@@ -8,7 +8,9 @@ import { FileLock } from "../../src/tool/file-lock"
 
 const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect)
 
-const tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "vector-file-lock-")))
+// Keys are where a path really lands, so the expected root must be too: on Windows only the native realpath expands
+// 8.3 short names such as RUNNER~1 in the temp folder.
+const tmp = () => fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "vector-file-lock-")))
 
 afterEach(() => FileLock.useProbe())
 

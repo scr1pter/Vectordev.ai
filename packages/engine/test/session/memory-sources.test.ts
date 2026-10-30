@@ -60,6 +60,7 @@ import { SessionArchive } from "@vectordevai/core/share/archive"
 import { ProjectV2 } from "@vectordevai/core/project"
 import { Location } from "@vectordevai/core/location"
 import { AbsolutePath } from "@vectordevai/core/schema"
+import { TaskClaims } from "@/task/claims"
 import { promptContentToParts } from "../../src/acp/content"
 import { commandInput, promptParts } from "../../src/cli/cmd/run"
 
@@ -593,7 +594,8 @@ it.instance(
       const id = call?.state.metadata.id
       const entry = id ? (yield* brain.get(place, id, { personal: true }))?.entry : undefined
       expect(entry?.status).toBe("quarantined")
-      expect(entry?.hold).toBe("web")
+      // A public-format transcript has no trusted owner provenance, so it is imported as guest input.
+      expect(entry?.hold).toBe("guest")
 
       const before = (yield* llm.hits).length
       yield* llm.text("ok")
@@ -770,6 +772,18 @@ it.instance(
         title: "Subagent",
         permission: [{ permission: "*", pattern: "*", action: "allow" }],
       })
+      // Created directly rather than through the task tool, so it gets the unrestricted assignment task admission
+      // would give it; without one a child's writes are refused before any ask.
+      const claim = yield* TaskClaims.provisional({
+        tree: dir,
+        directory: dir,
+        parentSessionID: parent,
+        taskID: child.id,
+        title: "Subagent",
+        paths: [],
+      })
+      TaskClaims.bind(claim, child.id)
+      yield* Effect.addFinalizer(() => Effect.sync(() => TaskClaims.release(claim)))
       yield* seen(child.id, rules)
       yield* llm.tool("write", { filePath: rules, content: "- Prices are floats.\n" })
       yield* llm.text("Done.")

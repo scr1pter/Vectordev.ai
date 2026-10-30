@@ -184,11 +184,11 @@ jobs:
           VECTOR_EXPERIMENTAL_DISABLE_FILEWATCHER: "false"
 
   engine-windows:
-    name: engine (windows, shard ${{ matrix.shard }}/6)
+    name: engine (windows, shard ${{ matrix.shard }}/8)
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     runs-on: windows-latest
     defaults:
       run:
@@ -233,12 +233,14 @@ jobs:
         run: GITHUB_ACTIONS=false bun turbo run build --filter='@vectordevai/engine^...' --log-order=stream
 
       - name: Run Engine shard
-        # Six shards: with four, one shard needed 29 to 31 minutes on loaded hosted runners on 22 Oct, so whichever
-        # test ran last timed out. Each shard now does about two thirds of that.
+        # Eight shards: with four, one shard needed 29 to 31 minutes on loaded hosted runners on 22 Oct, so whichever
+        # test ran last timed out. With six, on 30 Oct the shard holding the isolation tests (12 minutes of them alone)
+        # reached the 30 minutes and two others needed 25. Bun deals files out in sorted order, one per shard in turn;
+        # that run's file times give eight shards at most about 23 minutes each.
         timeout-minutes: 30
         working-directory: packages/engine
         # Whole-file shards retain the configured preloads and per-test deadlines; print passes to locate any stall.
-        run: GITHUB_ACTIONS=false bun test --timeout 30000 --shard=${{ matrix.shard }}/6
+        run: GITHUB_ACTIONS=false bun test --timeout 30000 --shard=${{ matrix.shard }}/8
         env:
           VECTOR_EXPERIMENTAL_DISABLE_FILEWATCHER: "true"
 

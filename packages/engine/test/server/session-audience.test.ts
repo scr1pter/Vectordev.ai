@@ -161,7 +161,9 @@ it.instance(
       })
       expect(replicated.status).toBe(200)
       const text = yield* replicated.text
-      expect(text).not.toContain(work)
+      // The body is JSON, which escapes a Windows path's backslashes.
+      const encoded = JSON.stringify(work).slice(1, -1)
+      expect(text).not.toContain(encoded)
       const aggregates = new Set((JSON.parse(text) as { aggregate_id: string }[]).map((event) => event.aggregate_id))
       expect(aggregates.has(publicSession.id)).toBe(true)
       for (const id of [listing.id, root.id, child.id]) expect(aggregates.has(id)).toBe(false)
@@ -184,7 +186,7 @@ it.instance(
         body: "{}",
       })
       expect(ordinary.status).toBe(200)
-      expect(yield* ordinary.text).toContain(work)
+      expect(yield* ordinary.text).toContain(encoded)
     }),
   options,
 )
@@ -535,9 +537,11 @@ it.instance(
           false,
         ),
       ).toBe(false)
+      // A drive-qualified spelling on Windows, as a fence stores it and a watcher reports it.
+      const placeholder = path.resolve("/private/placeholder")
       for (const metadata of [
         { related: { sessionID: root.id, output: "private nested content" } },
-        { related: { directory: "/private/placeholder" } },
+        { related: { directory: placeholder } },
       ]) {
         if ("directory" in metadata.related)
           yield* audience.fenceIsolation({ sessionID: root.id, actor: "owner", directory: metadata.related.directory })
@@ -562,7 +566,11 @@ it.instance(
       ]
       for (const event of workspace) expect(yield* SessionAudienceHttp.envelope(event, false)).toBe(true)
       for (const event of [
-        { id: "evt_private", type: "file.watcher.updated", data: { file: "/private/placeholder/a.ts", event: "add" } },
+        {
+          id: "evt_private",
+          type: "file.watcher.updated",
+          data: { file: path.join(placeholder, "a.ts"), event: "add" },
+        },
         { id: "evt_nested", type: "project.updated", data: { id: "project", note: { sessionID: root.id } } },
         { id: "evt_toast", type: "tui.toast.show", data: { title: "t", message: "unscoped raw text" } },
       ])

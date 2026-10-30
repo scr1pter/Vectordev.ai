@@ -33,6 +33,7 @@ import { Git } from "@/git"
 import { Global } from "@vectordevai/core/global"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { TaskSize } from "@vectordevai/core/task-size"
+import { FileLock } from "@/tool/file-lock"
 import { Truncate } from "@/tool/truncate"
 import { ToolRegistry } from "@/tool/registry"
 import { Provider } from "@/provider/provider"
@@ -5811,6 +5812,11 @@ describe("task isolation", () => {
 // marks the task settling and returns without waiting on Git; a same-ID resume meanwhile is refused, never let into
 // the checkout being retired.
 describe("task isolation saves", () => {
+  // The deadline of the waits for an isolated start, resume or save: each creates or loads a real Git worktree and its
+  // instance, or commits through Git, which took 1.4 to 2.5 s on the lane machine and more than 5 s on hosted Windows
+  // runners. They still wait on the real record or Deferred, under the 30 s test limit, so a hang still fails. What
+  // these tests prove keeps its own deadline: a Stop returns within 5 s and the control lock is free within 2 s.
+  const ISOLATED = "20 seconds"
   const brief = {
     description: "Edit in isolation",
     prompt: "Change notes.txt and report.",
@@ -5873,6 +5879,7 @@ describe("task isolation saves", () => {
         yield* pollWithTimeout(
           isolation.find(child.id).pipe(Effect.map((record) => (record?.state === "settling" ? true : undefined))),
           "the isolated save never started",
+          ISOLATED,
         )
         // Other task controls are not held behind Git.
         yield* SubagentLifecycle.locked(SubagentLifecycle.controlLock)(Effect.void).pipe(Effect.timeout("2 seconds"))
@@ -5880,6 +5887,7 @@ describe("task isolation saves", () => {
         yield* pollWithTimeout(
           isolation.find(child.id).pipe(Effect.map((record) => (record?.state === "changed" ? true : undefined))),
           "the isolated save never finished",
+          ISOLATED,
         )
         expect(SubagentLifecycle.read(yield* sessions.get(child.id))?.isolation).toMatchObject({ state: "changed" })
       }),
@@ -5921,7 +5929,7 @@ describe("task isolation saves", () => {
         yield* pollWithTimeout(
           statuses.get(child).pipe(Effect.map((status) => (status.type === "busy" ? true : undefined))),
           "the isolated task never started",
-          "5 seconds",
+          ISOLATED,
         )
         const steered = yield* def.execute({ ...brief, prompt: "Also update the summary.", task_id: child }, context)
         expect(steered.output).toContain("Message delivered to the running background task")
@@ -5937,6 +5945,7 @@ describe("task isolation saves", () => {
         yield* pollWithTimeout(
           isolation.find(child).pipe(Effect.map((record) => (record?.state === "changed" ? true : undefined))),
           "the joined run's save never finished",
+          ISOLATED,
         )
         expect((yield* isolation.get(child)).attempt).toBe(1)
       }),
@@ -5971,7 +5980,7 @@ describe("task isolation saves", () => {
           brief,
           taskContext({ sessionID: seeded.chat.id, messageID: seeded.assistant.id, promptOps: ops }),
         )
-        yield* awaitWithTimeout(Deferred.await(running), "the isolated child never ran")
+        yield* awaitWithTimeout(Deferred.await(running), "the isolated child never ran", ISOLATED)
         const child = (yield* sessions.children(seeded.chat.id))[0]
         yield* Effect.addFinalizer(() => cleanup(child.id))
         // Cancelling the job returns although the commit is held: the save was forked, not awaited.
@@ -5991,6 +6000,7 @@ describe("task isolation saves", () => {
         yield* pollWithTimeout(
           isolation.find(child.id).pipe(Effect.map((record) => (record?.state === "changed" ? true : undefined))),
           "the forked save never finished",
+          ISOLATED,
         )
       }),
     { git: true },
@@ -6083,6 +6093,7 @@ describe("task isolation saves", () => {
         yield* pollWithTimeout(
           Effect.sync(() => (placements.length === 1 ? true : undefined)),
           "the isolated task never started",
+          ISOLATED,
         )
         // The message passes its checks while the run is going, then waits on its approval.
         const asking = yield* Deferred.make<void>()
@@ -6102,6 +6113,7 @@ describe("task isolation saves", () => {
         yield* pollWithTimeout(
           isolation.find(child).pipe(Effect.map((record) => (record?.state === "settling" ? true : undefined))),
           "the isolated save never started",
+          ISOLATED,
         )
         yield* Deferred.succeed(proceed, undefined)
         const exit = yield* Fiber.join(late).pipe(Effect.timeout("5 seconds"))
@@ -6113,6 +6125,7 @@ describe("task isolation saves", () => {
         yield* pollWithTimeout(
           isolation.find(child).pipe(Effect.map((record) => (record?.state === "changed" ? true : undefined))),
           "the isolated save never finished",
+          ISOLATED,
         )
         expect((yield* isolation.get(child)).attempt).toBe(1)
       }),
@@ -6300,6 +6313,9 @@ describe("task isolation saves", () => {
     () =>
       Effect.gen(function* () {
         const home = yield* InstanceState.context
+        // Git for Windows defaults to autocrlf=true, so a merge would write CRLF checkout bytes; this compares bytes.
+        const git = yield* Git.Service
+        yield* git.run(["config", "core.autocrlf", "false"], { cwd: home.directory })
         yield* Effect.promise(() => fs.writeFile(path.join(home.directory, "notes.txt"), "base\n"))
         const seeded = yield* seed("Stacked dependencies")
         const jobs = yield* BackgroundJob.Service
@@ -6339,6 +6355,7 @@ describe("task isolation saves", () => {
               pollWithTimeout(
                 isolation.find(id).pipe(Effect.map((record) => (record?.state === state ? true : undefined))),
                 `task ${id} never reached ${state}`,
+                ISOLATED,
               ),
             ),
           )
@@ -6384,6 +6401,9 @@ describe("task isolation saves", () => {
         )
       }),
     { git: true },
+    // Four isolated launches with their saves, a shared one and three merges: a single isolated launch and save took
+    // 5 to 6 s on hosted Windows runners, so this case needs more than the default 30 s there.
+    60_000,
   )
 
   // The app's Resume and task_manage resume go through TaskManager.resume, which runs the same save barrier as the task
@@ -6415,6 +6435,7 @@ describe("task isolation saves", () => {
         yield* pollWithTimeout(
           isolation.find(child).pipe(Effect.map((record) => (record?.state === "changed" ? true : undefined))),
           "the first run's save never finished",
+          ISOLATED,
         )
         const directory = (yield* isolation.get(child)).directory
         // The stubbed run wrote no transcript; a real one starts with its brief.
@@ -6452,7 +6473,8 @@ describe("task isolation saves", () => {
         )
         expect(resumed.tasks.map((task) => task.attempt)).toEqual([2])
         expect((yield* jobs.wait({ id: child })).info?.status).toBe("completed")
-        expect(placements).toEqual([directory])
+        // The work instance's directory is where the checkout really lands (long names on Windows).
+        expect(placements.map((place) => place && FileLock.key(place))).toEqual([FileLock.key(directory)])
         const saved = yield* isolation.get(child)
         expect(saved).toMatchObject({ state: "changed", attempt: 2 })
         expect(saved.files.map((file) => file.path).sort()).toEqual(["notes.txt", "summary.txt"])
@@ -6474,7 +6496,7 @@ describe("task isolation saves", () => {
               }),
           },
         )
-        yield* awaitWithTimeout(Deferred.await(running), "the resumed isolated child never ran")
+        yield* awaitWithTimeout(Deferred.await(running), "the resumed isolated child never ran", ISOLATED)
         const gate = yield* Deferred.make<void>()
         commitGate.current = gate
         yield* jobs.cancel(child).pipe(Effect.timeout("5 seconds"))
@@ -6489,6 +6511,7 @@ describe("task isolation saves", () => {
             Effect.map((record) => (record?.state === "changed" && record.attempt === 3 ? true : undefined)),
           ),
           "the forked save of the stopped resume never finished",
+          ISOLATED,
         )
         expect((yield* isolation.get(child)).files.map((file) => file.path).sort()).toEqual([
           "more.txt",
@@ -6529,6 +6552,7 @@ describe("task isolation saves", () => {
         yield* pollWithTimeout(
           isolation.find(child).pipe(Effect.map((record) => (record?.state === "settling" ? true : undefined))),
           "the isolated save never started",
+          ISOLATED,
         )
         // The parent's Stop interrupts the call. Its release stops the child, which had already ended on its own.
         yield* Fiber.interrupt(call).pipe(Effect.timeout("5 seconds"))
@@ -6536,6 +6560,7 @@ describe("task isolation saves", () => {
         yield* pollWithTimeout(
           isolation.find(child).pipe(Effect.map((record) => (record?.state === "changed" ? true : undefined))),
           "the save never finished after the Stop",
+          ISOLATED,
         )
       }),
     { git: true },
@@ -6573,7 +6598,7 @@ describe("task isolation saves", () => {
         )
         const child = SessionID.make(started.metadata.sessionId)
         yield* Effect.addFinalizer(() => cleanup(child))
-        yield* awaitWithTimeout(Deferred.await(running), "the isolated child never ran")
+        yield* awaitWithTimeout(Deferred.await(running), "the isolated child never ran", ISOLATED)
         // The registry moves behind a link while the child runs (a data folder moved to another disk), so every read of
         // its entry is refused from now on: the save and the note both read it.
         const link = path.join(Global.Path.data, "task-isolation")
@@ -6585,7 +6610,8 @@ describe("task isolation saves", () => {
           }),
           () =>
             Effect.promise(async () => {
-              await fs.rm(link, { force: true })
+              // unlink drops only the link, where Bun's rm fails on a link to a folder on Windows.
+              await fs.unlink(link)
               await fs.rename(moved, link)
             }),
         )

@@ -13,6 +13,7 @@ import { InstanceStore } from "../../src/project/instance-store"
 import { Project } from "../../src/project/project"
 import { GlobalBus } from "../../src/bus/global"
 import { Git } from "../../src/git"
+import { FileLock } from "../../src/tool/file-lock"
 import { Worktree } from "../../src/worktree"
 import { disposeAllInstances, TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
@@ -104,6 +105,8 @@ describe("Worktree.createForTask", () => {
         const store = yield* InstanceStore.Service
         const calls = yield* Calls
         const { info } = yield* taskInfo()
+        // Git for Windows defaults to autocrlf=true, which would check the seed out with CRLF; this compares bytes.
+        yield* git(ctx.directory, ["config", "core.autocrlf", "false"])
         yield* fs.writeWithDirs(path.join(ctx.directory, "tracked.txt"), "seed content\n")
         yield* git(ctx.directory, ["add", "tracked.txt"])
         yield* git(ctx.directory, ["commit", "-m", "seed"])
@@ -148,19 +151,28 @@ describe("Worktree.createForTask", () => {
         const fs = yield* FSUtil.Service
         const service = yield* Worktree.Service
         const { info, record } = yield* taskInfo()
+        // list() names folders by their real path, case-folded on Windows; compare where both land.
+        const listed = () =>
+          service
+            .list()
+            .pipe(
+              Effect.map((items) =>
+                items.some((value) => FileLock.key(value.directory) === FileLock.key(info.directory)),
+              ),
+            )
         yield* service.createForTask(info, { from: "HEAD" })
-        expect((yield* service.list()).some((value) => value.directory === info.directory)).toBe(true)
+        expect(yield* listed()).toBe(true)
         yield* fs.writeWithDirs(record, "not json")
-        expect((yield* service.list()).some((value) => value.directory === info.directory)).toBe(true)
+        expect(yield* listed()).toBe(true)
         yield* fs.writeJson(record, { directory: info.directory, branch: "vector/ordinary" })
-        expect((yield* service.list()).some((value) => value.directory === info.directory)).toBe(true)
+        expect(yield* listed()).toBe(true)
         yield* fs.writeJson(record, { directory: path.dirname(info.directory), branch: info.branch })
-        expect((yield* service.list()).some((value) => value.directory === info.directory)).toBe(true)
+        expect(yield* listed()).toBe(true)
         yield* fs.writeJson(record, { directory: info.directory, branch: info.branch })
-        expect((yield* service.list()).some((value) => value.directory === info.directory)).toBe(false)
+        expect(yield* listed()).toBe(false)
         // Branch drift makes the stale record insufficient to hide a checkout.
         yield* git(info.directory, ["checkout", "--detach"])
-        expect((yield* service.list()).some((value) => value.directory === info.directory)).toBe(true)
+        expect(yield* listed()).toBe(true)
       }),
     { git: true },
   )
@@ -216,7 +228,12 @@ describe("Worktree.createForTask", () => {
         )
         expect(Exit.isFailure(exit)).toBe(true)
         if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBeInstanceOf(Worktree.CreateFailedError)
-        expect(yield* git(root, ["worktree", "list", "--porcelain"])).toContain(info.directory)
+        // Git lists the real path it stored, with forward slashes and long names on Windows.
+        const listed = (yield* git(root, ["worktree", "list", "--porcelain"]))
+          .split("\n")
+          .filter((line) => line.startsWith("worktree "))
+          .map((line) => FileLock.key(line.slice("worktree ".length)))
+        expect(listed).toContain(FileLock.key(info.directory))
         expect(yield* fs.exists(record)).toBe(true)
         expect(yield* git(info.directory, ["symbolic-ref", "--short", "HEAD"])).toBe(info.branch!)
       }),

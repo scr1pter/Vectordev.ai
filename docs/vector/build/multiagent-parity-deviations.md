@@ -434,7 +434,7 @@ Every finding was checked against the code. Two pairs were duplicates (fork/isol
 - Independent static review closed registry/metadata redirection, unsafe link ancestors, failed snapshot retention, preparation/recovery and acquired-instance lifetime, recursive protection, core finalizer draining, duplicate admission and the combined partial-merge/resume/stacked-baseline cases. A further independent review verified the final source hashes and closed cap omission, hidden index flags, raw baseline normalization, absent sparse entries, physical copy-baseline changes, copy links and prototype-named files. The module remains unwired until WP28; the complete Phase 5 review remains pending.
 - WP28 must wire execution admission and lightweight session-deletion enqueueing, including deletion without an ambient instance. Its I19 gate must persist an owner-only conversation-family fence before private briefing/events and cover historic/live events, relay guest markers, descendants and ancestors whose reports contain private data. Live ancestry alone is insufficient after an intermediate session is deleted. No public HTTP schema changed in WP27; public routes and client generation remain WP28 work.
 
-## 2026-10-30 WP28 (isolation wiring and merge surfaces) — status: implemented and committed; review rounds 1–6 fixed; first full CI run red (see Remaining); Phase 5 round 1 committed, further Phase 5 rounds pending
+## 2026-10-30 WP28 (isolation wiring and merge surfaces) — status: implemented and committed; review rounds 1–6 fixed; the first two full CI runs red, every failure diagnosed and fixed in the CI5 entry below (Windows fixes by inference), next full run pending; Phase 5 round 1 committed, further Phase 5 rounds pending
 
 Contract corrections (intent-preserving):
 - Route 4's patch, directory, branch and details go only to the authenticated owner, not "owner or control". A guest in control of a session, and owner credentials carrying the forwarded-guest marker, are guests. Every other viewer with ordinary view scope (a session claim, or the guest workspace directory that holds the session) receives a server-built counts projection: whitelisted identity, status and counts, the constant title "Isolated task", zero timing, no files, `mergeable: "unknown"`, no patch, branch or paths. It reads the registry only, never Git. The projection is recognised from the final bytes on that one route, by exact shape, rather than by response identity, because compression replaces the response object; the final gate now decodes gzip/deflate bodies and refuses any encoding it cannot inspect. No header or query flag widens it. `diff=true` from a non-owner still yields counts.
@@ -542,7 +542,7 @@ Final gate (2026-10-30, before the commit; one file at a time through the lock w
 - Not run here: the CI-only checks listed above.
 
 Remaining:
-- CI: the first full test workflow on the pushed WP28 head (`c4c2f761`, run 41117466991, dispatched 2026-10-30) concluded `failure`. Read from its job logs on 2026-10-30, not yet diagnosed: Linux engine shard 4/4 failed only the two memory-sources cases recorded as standing in the Phase 5 entry below; Linux engine shards 1–3, unit (linux, with the generated-client check, the HttpApi exerciser gates and the hosted API tests), both e2e jobs and the desktop engine bundle under Node passed. On Windows, engine shard 2/6 passed; shard 4/6 failed 45 cases (the 18 names in the retrieved log tail are all isolation-registry cases: sweep, reconcile, autocrlf, partial-merge follow-ups, includeStacked, recovery binding); shard 5/6 hit the 30-minute step timeout inside the task tool file; shard 1/6 failed 10 (replication and open-stream audience cases, retired and orphan refusals, the agent merge/discard cases, a linked isolation folder, two `FileLock.key` cases); shard 3/6 failed 2 (an unreadable registry in the isolation recovery failures, the git-invocation screening case); shard 6/6 failed 1 (the macOS `.GIT` server file guard case); unit (windows) failed 2 core cases (an IsolationCopy symlink refusal, the macOS case-folded private directory case). The CI-only checks above (the Bun-spawning task-manage and recovery cases, `test/cli/import.test.ts`, the exerciser's full modes, Windows and macOS path folding) are therefore not shown green. Locally, `test/session/memory-sources.test.ts` is red, 8/10, the same on the unmodified HEAD source (both failing cases import a public-format transcript), and the task tool file's two 2-second isolated-start waits are crossed on this machine on HEAD's source too (Phase 5 round 1, final gate).
+- CI: the first two full test workflow runs on self-evolving concluded `failure`: run 41117466991 on `c4c2f761` and run 41133403420 on `57f66561` (Phase 5 round 1). Every failing case of both is diagnosed in the CI5 entry below, by root cause, and fixed in product code (one Windows path fix in `Worktree`, one settings-import fix) or in non-portable test fixtures. The Linux side was rerun here and is green, apart from two root-only import-settings variants that fail identically at HEAD. Every Windows item is fixed by inference only, because nothing here runs Windows. The next full run is pending: it needs the push of these fixes and then a `workflow_dispatch` of test.yml on self-evolving, because a push to self-evolving starts no test.yml run. Still CI-only, and not shown green by any run so far: every Windows engine shard (now eight) and unit (windows), the Bun-spawning task-manage and recovery cases, `test/cli/import.test.ts`, the exerciser's full modes, and Windows and macOS path folding. Observed and not changed (CI5 entry): the private-text matcher has no drive-less or MSYS (`/c/...`) spelling of a private root, and string redaction stays defence only (handoff 7.3). The settings import above a non-Git workspace still stops on a broken or schema-failing `*.json`, `*.jsonc` or `*.toml` there, or on config-shaped ones of two families, and imports a single config-shaped family into a `vector.jsonc` it writes there (owner question in the CI5 entry).
 - The Phase 5 review (WP22–WP28 from d4a90679) remains a separate later step, with further independent review rounds of this package (spec/tests, then safety/cost/portability). Rounds 1 to 6 are fixed above; the continuation pass found and fixed the late-message wait under the control lock, the recovery pass skipped by an unlistable registry, and the extra family walk per guard check. Phase 5 round 1 is recorded and committed below; further rounds remain.
 
 ## 2026-10-30 Phase 5 review, round 1 (WP22–WP28 from d4a90679) — status: five findings verified, four source fixes and one record fix; committed
@@ -576,11 +576,177 @@ Final gate (2026-10-30, before the commit; one file at a time through the lock w
 - Timing evidence for that wait (the waits of the stop case and of "a background note still reaches the parent when its isolation record cannot be read" were temporarily widened to 30 s and the delay printed; the test file was restored and its sha256 checked; these runs count as no pass of the file). Delay from the launch returning to the child's first prompt, stop case: full-file runs 2373 ms and 1934 ms on the final source, 1587 ms on HEAD's; alternating runs of the "task isolation saves" block, HEAD's source 1663, 1510 and 2037 ms, final source 1648, 1418 and 2066 ms. Note case, same block runs: HEAD's source 1415, 1742 and 2175 ms, final source 1923, 1722 and 2549 ms; in the first widened full run (stop case widened only) the note case failed at its own 2-second wait. So on this machine today an isolated start crosses these cases' 2-second waits on HEAD's source too, and no line this round changed runs between the launch and the first prompt (the read-only predicate answers the same for `general`). Not changed here: the waits (the sibling "a message joining a running isolated task…" waits 5 s for the same start); the spec/tests review should decide them. CI's Linux shards passed this file on `c4c2f761`.
 - Not run here: memory-sources (standing, below, unchanged since round 1's run); the CI-only checks. The push hook's 23-package typecheck runs on this commit.
 
-Environment note (not a product change). Two earlier full isolation runs passed 62/81. All 19 copy-mode cases failed with "Cannot import settings from /tmp/v03-backup-…". Another lane's mutation script was writing extensionless `mktemp` backups of engine source, which contain `permission:`, into `/tmp`. The settings import walks every parent of a non-Git fixture under `/tmp` up to `/` and refuses such a file. `VECTOR_TEST_HOME` does not stop the walk, because the engine preload sets its own. With TMPDIR under `/var/tmp` the same source passed 81/81. Observed, not changed: a non-Git project under a shared folder can be refused at start by an unrelated extensionless file there that looks like broken settings.
+Environment note (not a product change). Two earlier full isolation runs passed 62/81. All 19 copy-mode cases failed with "Cannot import settings from /tmp/v03-backup-…". Another lane's mutation script was writing extensionless `mktemp` backups of engine source, which contain `permission:`, into `/tmp`. The settings import walks every parent of a non-Git fixture under `/tmp` up to `/` and refuses such a file. `VECTOR_TEST_HOME` does not stop the walk, because the engine preload sets its own. With TMPDIR under `/var/tmp` the same source passed 81/81. Observed, not changed in this round: a non-Git project under a shared folder can be refused at start by an unrelated extensionless file there that looks like broken settings (fixed for extensionless files in the CI5 entry below).
 
-Standing (outside this round's findings; not fixed):
+Standing (outside this round's findings; not fixed here; both resolved in the CI5 entry below):
 - `test/session/memory-sources.test.ts` 8/10, the same on the unmodified HEAD source. The file was run with HEAD's versions of this round's four source files, which were then put back unchanged (hashes checked).
   - "a public transcript imported as passive history is not the user's words, and holds what the agent saves from it" expects the saved memory's `hold` to be `web` and gets `guest`.
   - "a session that took in outside content asks before it changes a file memory is read from, whatever the rules allow" fails because the subagent's write to RULES.md is not asked within the test's deadline.
   - Both import a public-format transcript, which WP28 treats as guest input (handoff 7.2 and 7.3). The spec/tests review must decide whether these expectations or that behaviour change.
   - CI run 41117466991 on `c4c2f761` failed the same two cases on Linux (engine shard 4/4), and nothing else in that shard.
+
+## 2026-10-30 CI5 (Windows portability and standing CI failures) — status: every failure of both full runs diagnosed and fixed (one Windows path fix in `Worktree`, one settings-import fix, the rest in non-portable fixtures); Linux reruns green here, apart from two import-settings variants that fail identically at HEAD because this shell runs as root; Windows fixes by inference only; next full run pending
+
+CI evidence (read from the job logs on 2026-10-30; logs kept outside the repository):
+- Run 41133403420 on `57f66561` (Phase 5 round 1) concluded `failure`. It is the primary evidence.
+  - Green: unit (linux, with the generated-client check, the HttpApi exerciser gates and the hosted API tests), engine linux 1–3, e2e (linux), e2e (windows), the desktop engine bundle under Node, and engine windows 2/6 (25.4 of its 30 minutes).
+  - engine linux 4/4 failed only the memory-sources pair (below).
+  - engine windows 1/6 (15.3 minutes) failed 10 cases.
+    - session-audience: the replication case and the open-stream case.
+    - isolation-admission: the retired, V2-runner, orphan, agent merge/discard and linked-folder cases.
+    - file-lock: "win32 folds case" and "the probe is injectable and runs once per volume".
+    - task-manage: "an agent merges and discards only its direct children, after approving the diff".
+  - engine windows 3/6 failed 2: the isolation-recovery unreadable-registry case and the shell-ownership git-screening case.
+  - engine windows 4/6 was stopped by the 30-minute step limit, during research-browser.test.ts. It had failed 35 cases: 32 in isolation.test.ts, server task-isolation's discard (400 instead of 200), and the memory-sources pair. isolation.test.ts alone took 713.6 s.
+  - engine windows 5/6 (26.1 minutes) failed 13: local-fit 4 (each at its 30 s limit), task.test.ts "task isolation saves" 6, create-for-task 3.
+  - engine windows 6/6 failed 1: the private-access `.GIT` case.
+  - unit (windows) failed 2 core cases: the IsolationCopy symlink refusal and "on macOS private directories match case-folded spellings…".
+- Run 41117466991 on `c4c2f761` (recorded under WP28 Remaining before this entry). It showed the same Windows and Linux failures, plus 12 copy-mode isolation cases ("Copy isolation directory changed identity").
+  - Phase 5 round 1's copy-identity fix is CI-confirmed: none of those 12 failed in run 2.
+  - Correction to the earlier record. Run 1's shard 5/6 timeout was not inside task.test.ts. local-fit.test.ts printed nothing from 19:58:28 to 20:09:56 UTC after its first 30 s timeout. task.test.ts started at 20:16:36 and had passed 35 cases, about 2 s each, when the step limit stopped it at 20:17:49.
+
+Root causes and fixes. Nothing here ran on Windows, so every Windows item is fixed by inference only. Line numbers are HEAD's (run 2's).
+1. Product, `Worktree` path comparison on Windows. `canonical` used Effect's `realPath`, which is Node's non-native realpath and keeps 8.3 short names such as `C:\Users\RUNNER~1`. Git for Windows lists a worktree under the real path it stored: the shard 5 log shows `worktree C:/Users/runneradmin/…` for a checkout created at `C:\Users\RUNNER~1\…`.
+   - So `remove` with an expected branch failed "The registered task worktree no longer checks out its reserved branch". Settle then reported `failed`, and merge, discard, sweep and reconcile failed after it. `list()` also failed to hide registered task worktrees.
+   - The same mismatch hits a checkout that is gone on every platform when the data folder is reached through a link. Git keeps listing the stored real path, while the old fallback kept the caller's spelling. TaskIsolation's resume calls `remove(record)` in exactly that state.
+   - Fix: `canonical` resolves through `FSUtil.realpath`, which is native on Windows and resolves the deepest existing ancestor of a missing folder. It keeps the lowercase fold on Windows and stays Node-compatible.
+   - Cases fixed:
+     - 22 isolation.test.ts cases. Settle reported `failed` instead of `unchanged`; or merge, discard, resume or the reconcile failed with that error; or a sweep then missed the task.
+     - Their titles are at HEAD lines 217 (both files), 325, 383, 437, 492, 593, 610, 683, 998, 1026, 1043, 1205, 1225, 1321, 1344, 1410, 1439, 1557, 1675 and 1726 (both actions).
+     - server task-isolation:258.
+     - isolation-admission: retired, V2 runner, orphan, and "an agent may merge or discard only its direct children".
+     - task.test.ts stacking: "never reached unchanged".
+     - create-for-task:152's hidden case.
+   - Regressions in test/project/worktree-remove.test.ts:
+     - "a task checkout that is gone is removed with its branch when the data folder is reached through a link". It runs on every platform. On the old source it failed with "no longer checks out its reserved branch".
+     - "a task checkout named by its 8.3 short name is removed with its branch". It runs on Windows only and first asserts that the short and long spellings differ. CI-only.
+   - main (`78526052`) has the same `canonical`. Its `remove` has no expected-branch mode, so there a mismatched spelling cleans the folder and leaves Git's entry and branch behind. Not changed on main by this lane; it reaches main with the later integration.
+2. Fixture, line endings. Git for Windows defaults to `core.autocrlf=true`, so the task checkout and a merge's checkout bytes are CRLF, while these tests compare LF bytes.
+   - `core.autocrlf false` is now pinned before any write, following workspace.test.ts's precedent, in:
+     - isolation.test.ts's fixture: 9 cases, which failed at the asserts on lines 188 (both flags), 208, 471, 560, 987, 1112, 1199 and 1598;
+     - create-for-task's seed case: 127;
+     - task.test.ts's stacking case (its merge asserts at 6360–6384);
+     - task-manage's isolated merge/discard case (its 1209 assertion).
+   - The last two would have failed at those assertions once causes 1 and 3 were fixed.
+   - The "autocrlf merges use checkout bytes…" case still sets `true` itself, so that behaviour stays covered. Product behaviour is unchanged: a merge writes checkout bytes under the user's line-ending settings.
+3. Fixture, removing a link to a folder. Bun's `rm` of a link to a folder fails with EFAULT on Windows.
+   - Affected:
+     - isolation-admission's linked-folder finalizer. The junction it left at `task-isolation` then refused task-manage's merge/discard case in the same process ("Isolation data cannot be a symbolic or hard link").
+     - isolation-recovery's registry link.
+     - core copy.test.ts:248.
+     - task.test.ts's unreadable-record release.
+   - All now `unlink` the link, following memory-skills.test.ts's precedent; the two finalizers tolerate only ENOENT, as `rm`'s `force` did.
+   - Only the cleanup changed, and each link keeps its kind, because only its removal failed. In run 2 isolation-recovery's test body passed with its untyped `fs.symlink` (a symbolic link, never a junction) and failed only at the finalizer's `rm` (line 326). Its link now names `"dir"`, so on Windows it is a real directory symlink whatever type an untyped call picks; Linux ignores the type. It stays the Windows case where the registry guard refuses a real directory symlink, while the admission case covers a junction. That the explicit type still passes there is inferred, not yet seen.
+4. Fixture, escaping link. Git for Windows reads an NTFS junction as a directory, so the escaping-link case never produced a Git link for the merge to refuse ("Only a changed isolated task can be merged.").
+   - It now creates a real directory symlink on every platform and first asserts that settle is `changed`.
+   - Hosted Windows runners can create symbolic links: the filesystem ELOOP case already makes real ones there.
+5. Fixture, short temp paths and raw spellings.
+   - file-lock.test.ts built its expected keys from `realpathSync`, which keeps RUNNER~1. It now uses `realpathSync.native`, as `FileLock.key` is the real path, case-folded on Windows (I33).
+   - These now compare `FileLock.key`s instead of raw spellings: create-for-task 152 (list() is case-folded) and 219 (Git prints forward slashes and long names), and task.test.ts's TaskManager.resume placement.
+6. Fixture, simulated case-sensitive platform on a case-insensitive host. Core audience "Exact-Case" and private-access `.GIT` simulate `linux` on a Windows host, where the other spelling names the same folder.
+   - They now take the host's answer (whether the other spelling exists).
+   - Linux assertions are unchanged. On Windows the same folder under another spelling stays private.
+7. Fixture, path spellings in text.
+   - Replication case: it matched a raw Windows path against JSON, which escapes backslashes. It now matches the JSON-encoded spelling, which also makes its `not.toContain` meaningful on Windows.
+   - Open-stream case: the drive-less `/private/placeholder` is now `path.resolve(...)`. The fence stores `D:\private\placeholder`, so the drive-less literal never matched.
+   - Observed and not changed, for the safety review: the private-text matcher covers backslash, forward-slash and JSON spellings, but not drive-less or MSYS (`/c/...`) ones.
+8. Fixture, shell. The git-screening case is bash syntax, but Windows' default shell is PowerShell, where `GIT_DIR=.git git log` is no assignment. Its first screened command was therefore `git worktree list`.
+   - It now runs under bash on every platform (Git Bash on Windows).
+   - It is skipped there only without Git Bash, gated like the file's pwsh/cmd describe. Every assertion is unchanged.
+9. Timing, measured, not loosened. In task.test.ts's "task isolation saves", every wait that spans an isolated start, resume or save now uses `ISOLATED = "20 seconds"`. Each such step creates or loads a real Git worktree and instance, or commits through Git.
+   - Evidence: locally 1.4–2.5 s (Phase 5 round 1). On Windows run 2 the cases failed exactly at these waits, while the cases that passed with one isolated child took 8.1–8.8 s each. Each wait still waits on the real record or Deferred.
+   - Changed, by line and message:
+     - 5875 and 6104 "the isolated save never started";
+     - 5882 and 6115 "the isolated save never finished";
+     - 5923 and 6085 "the isolated task never started" (5923 was 5 s);
+     - 5939 "the joined run's save never finished";
+     - 5974 and 6576 "the isolated child never ran" (2 s);
+     - 5993 "the forked save never finished";
+     - 6341, the `settled` helper's "task … never reached …";
+     - 6417 "the first run's save never finished";
+     - 6477 "the resumed isolated child never ran" (2 s);
+     - 6491 "the forked save of the stopped resume never finished";
+     - 6531 "the isolated save never started";
+     - 6538 "the save never finished after the Stop".
+     All others were 5 s.
+   - Unchanged, because they prove the behaviour or follow no Git work:
+     - the control-lock checks (2 s);
+     - every Stop, join and interrupt timeout (5 s);
+     - "the message never reached the running task";
+     - "the message never reached its approval";
+     - "the stopped task was not marked settling" and "the stopped resume was not marked settling" (the Stop records it before it returns);
+     - "the parent never heard back";
+     - "the isolated child was never created" and "the isolated child never queued".
+   - Per-test limits raised to 60 s, where the work alone approaches the default 30 s on Windows:
+     - task.test.ts's stacking case: four isolated launches with saves, a shared launch and three merges;
+     - isolation.test.ts's four includeStacked-resume cases: the Git ones took 27.4 and 27.6 s in run 2 before their final checkout removal.
+10. local-fit stall. The fixture combined process-wide fake-clock jumps with real TCP and readiness work. It stalled about 11.5 minutes on Windows in run 1 and hit 4 test timeouts in both runs.
+    - main fixed it in `dfc98974` (test only: in-memory fetch responses). This branch's file was identical to the merge base `6eaf445a`, and the provider source differs from main only in transform.ts.
+    - Ported byte-identically: `git diff 6eaf445a dfc98974 -- packages/engine/test/provider/local-fit.test.ts | git apply`. The result equals main's file.
+    - This is a pre-integration port of one test file, not a merge of main; the later integration sees identical content.
+11. Windows shard budget. Bun deals the sorted file list out one per shard in turn; checked against all six run-2 shard logs, 497 files, no mismatch.
+    - With six shards, the shard holding isolation.test.ts ran over the limit and two others needed 25–26 minutes.
+    - Run 2's per-file times give eight shards at most about 23.3 minutes each, after removing the local-fit stall and adding about 60 s for task.test.ts's now-passing waits. Seven, nine and ten shards give 24.7, 24.9 and 28.5.
+    - test.yml: Windows engine shards 6 → 8, with the same 30-minute limit.
+12. memory-sources pair, Linux and Windows.
+    - Case 1: public-format imports are guest input by decision (handoff 7.3). `SessionArchive.import` registers actor `guest` for them, and `SessionMemory.writeHold` ranks guest first, so the saved entry's hold is `guest`, not `web`. The expectation now says `guest`; the entry is still asserted quarantined.
+    - Case 2: the subagent part created a child directly, without the trusted claim that task admission gives. Since WP23, `SessionTools` refuses such a child's write before the `memory_source` ask. A temporary debug run on HEAD's source showed the child's write part failing with "This subagent's trusted file assignment is unavailable. Resume it through the parent before editing or delegating."
+      - The fixture now binds an explicit unrestricted claim, as WP23 did for apply_patch. This is not a regression: production still refuses a child with no trusted assignment.
+13. Settings import (robustness; the Phase 5 environment note). For a non-Git workspace the import walks each folder up to `/` or home, which mirrors the loader, so the walk is right. The match was wrong: it treated every extensionless file in each such folder as possible TOML settings. An unrelated one mentioning `permission:` then stopped startup with "Cannot import settings from … Repair this file".
+    - Fix (core `migration.ts`): the only extensionless candidate is the neutral `config`, the one the importer's own tests and ordering name.
+    - Regressions (import-settings.test.ts):
+      - "an unrelated extensionless file above a non-git workspace neither stops the import nor is imported". On the old source it failed "Cannot import settings from …/v03-backup-x1".
+      - "a broken neutral settings file that names permission still stops the import". This fail-closed path had no test.
+      - "config-shaped files of two families above a non-git workspace stop the import; one alone is imported there". It pins today's behaviour for the owner question below, so that a change of answer has a test to flip; it passes on the old source too.
+    - In "skips unreadable folders…", the locked extensionless file is renamed from `notes` to `config` with the same body, so it is still a candidate. That case still proves an unreadable settings file neither stops loading nor is imported.
+    - main has identical `migration.ts`, so it needs the same fix; it reaches main only with the later integration or a main PR, not through this lane.
+
+Contract corrections (intent-preserving):
+- §7.2's "Engine shards (Linux 4, Windows 6)": Windows is now 8, with the same 30-minute step limit, so that every shard can finish now that the WP27/WP28 isolation tests run to completion on Windows. If a later run shows a Windows shard over about 25 minutes, the next step is more shards, not a longer limit.
+- Settings import: `config` is the only extensionless settings file; any other extensionless file is not read. In each folder above a non-Git workspace, every `*.json`, `*.jsonc` or `*.toml` is still a candidate whatever its name, unless the name is excluded (it starts with `vector`, `tui`, `package`, `auth`, `credential`, `secret`, `license` or `desktop-theme`, followed by `.`, `-` or nothing, or it contains `.local.`) or the file is over 1 MiB. "Config-shaped" below means a candidate whose keys are all ConfigV1 keys, `theme`, `keybinds` or `tui`, that passes the strict decode and sets at least one of them other than `$schema`. Three cases still stop startup there, and all are left as they are:
+  - a candidate (or `config`) that does not parse and mentions `permission` or a `/config.json` schema ("Repair this file before starting Vector");
+  - one that parses but fails the strict decode while its `$schema` names a `/config.json` or it has a top-level `permission` ("Correct this config before starting Vector");
+  - config-shaped candidates of two or more families in the same folder, where a family is a name other than `config`, `config.json` or `config.toml` without its extension ("Multiple settings files found in … Merge them into … before starting Vector"). For example `a.json` = `{"model":"x/y"}` beside `b.json` = `{"theme":"dark"}`, as any two programs could leave in `/tmp`.
+  - Also, config-shaped candidates of one family in such a shared parent are imported into a `vector.jsonc` written in that folder, for example `/tmp/vector.jsonc`; the sources are kept.
+  - The last two are pinned by the new discover test named in cause 13.
+  So the coordinator's requirement that an unrelated file must not stop startup is met for extensionless files only. Owner question below.
+- memory-sources: public-format imports hold memory as `guest`. What users see for a `vector pr` or public-format import:
+  - the memory hold reason reads "an invited guest is in this session", although no guest joined;
+  - document adds are refused ("A session an invited guest is in cannot keep documents");
+  - personal memory is withheld.
+  Meanwhile the `memory_source` ask for the same import still says hold `web` (taint; case 2 asserts it). The test change records the specified behaviour and does not approve that wording. Follow-up for the spec/tests review or the owner: either give imports their own reason text or align the two labels.
+- The memory-sources subagent fixture binds an explicit unrestricted trusted claim (WP23's own fixture rule).
+- Waits and per-test limits as listed in cause 9. The remaining fixture changes (causes 2–8) are portability-only: each still asserts the same files, folders and behaviour.
+
+Runs (2026-10-30; Linux; one file at a time through the lock wrapper, from the package folder, `--timeout 30000`; fresh XDG roots under `/tmp/vector-CI5/xdg`, TMPDIR under `/var/tmp/vector-CI5/<package>`; this shell runs as uid 0):
+- Engine typecheck and core typecheck green. `prettier --check` is clean on every changed file that was clean at HEAD. memory-sources, task-manage and task.test.ts were not prettier-clean at HEAD and are left unreformatted. `git diff --check` is clean.
+- Against the old source first:
+  - worktree-remove's link case failed as described.
+  - The extensionless import case failed "Cannot import settings from …/v03-backup-x1".
+  - memory-sources case 2 alone failed at "the subagent's write to RULES.md did not ask" (19.1 s), with the trusted-assignment refusal shown above.
+- Engine runs with the fixes:
+  - worktree-remove 2/2 (2 Windows-only skips); worktree 14/14; project 37/37; create-for-task 5/5; file-lock 8/8 (1 darwin skip);
+  - isolation 81/81 (full file, 246.4 s); isolation-admission 7/7; isolation-recovery 3/3; server task-isolation 4/4;
+  - task-manage 45/45, with the Bun-spawning case excluded by name;
+  - task tool 150/150 twice (full file, 249.9 s and 231.4 s);
+  - private-access 11/11; shell-ownership 35/35; session-audience 12/12; session-actions 3/3; memory-sources 10/10 (42.6 s); local-fit 17/17 (27.0 s).
+  - import-settings 18/20. The two failures are the `posix` variants of "skips unreadable folders…" and "retries an earlier folder…": `chmod 000` does not stop uid 0. The same two fail on HEAD's test file and source (run here, then both files restored and their sha256 checked). Their `denied` variants pass, and CI's Linux runner is not root.
+- Core: isolation copy 28/28 (1 skip, read denial as uid 0); session audience 20/20.
+- After those runs, `canonical`'s `Effect.try` catch was changed from returning the path to returning the error; the fallback is `orElseSucceed(() => abs)` either way. Engine typecheck, worktree-remove 2/2, create-for-task 5/5 and worktree 14/14 were rerun green after it.
+- Review of this entry (record accuracy and one test's link type): isolation-recovery's link went back to a real directory symlink (cause 3), and the settings-import record and owner question now list the family-ambiguity stop and the import of any config-shaped candidate. Reruns after it:
+  - isolation-recovery 3/3; import-settings 19/21, the same two root-only `posix` failures as above.
+  - The new discover test also passes on HEAD's `migration.ts`, swapped in and then restored with its sha256 checked, while the extensionless case failed there as recorded.
+  - Engine typecheck green. The import-settings test file was prettier-clean at HEAD, so prettier was applied to its new case.
+- Final gate before the commit, rerunning what changed after the last logged pass: isolation-recovery 3/3; import-settings 19/21, the same two root-only `posix` failures; core and engine typecheck green; `git diff --check` clean. The push then goes through the pre-push hook, which typechecks every package.
+- No public Protocol or HttpApi change, so no generator.
+
+Remaining and pending:
+- The next full test workflow run is pending. These fixes go to self-evolving with this entry's commit, and that run then needs a `workflow_dispatch` of test.yml there, because a push to self-evolving starts no test.yml run. Its id and result are not recorded here yet. Until it is read, every Windows item above is fixed by inference only:
+  - the 8.3 regression, junction and directory-symlink unlink, the real symlinks and Git Bash screening;
+  - per-shard durations under eight shards.
+- Further Windows-only layers may surface once removal works, for example handles that delay `git worktree remove` (spec R9).
+- Owner question (settings import). In a shared folder above a non-Git workspace, such as `/tmp`, should a candidate that does not identify itself as Vector's still stop Vector from starting? Today three cases do (contract correction above): it is broken and mentions permission; it fails the strict decode and has a top-level `permission`; or it is config-shaped beside a config-shaped file of another family.
+  - Option A: keep failing closed, as now.
+  - Option B: skip such files with a warning, while schema-identified files, and files in the workspace, home and global folders, still stop startup.
+  - Separately: whether any config-shaped `*.json`, `*.jsonc` or `*.toml` in such a shared parent should be imported at all, writing a `vector.jsonc` into that folder.
+  - Option B, or a no to the import question, flips the discover test named in cause 13; Option A with a yes keeps it.

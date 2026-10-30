@@ -1,4 +1,5 @@
 import { expect } from "bun:test"
+import { existsSync } from "node:fs"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { sql } from "drizzle-orm"
@@ -233,12 +234,14 @@ it.live("on macOS private directories match case-folded spellings, as engine fil
     expect(yield* mac.containsPrivateText(`cat ${folded}`)).toBe(true)
     expect(yield* mac.containsPrivateText(`cat ${path.join(directory, "x").toUpperCase()}`)).toBe(true)
     expect(yield* mac.isPrivateDirectory(path.join(temporary.path, "ordinary").toLowerCase())).toBe(false)
-    // A case-sensitive platform keeps exact spellings.
+    // A case-sensitive platform keeps exact spellings: another spelling is another folder. On a host that ignores case
+    // (Windows here) it names the same folder, whose real path is the private one.
     const exact = path.join(temporary.path, "Exact-Case")
     yield* Effect.promise(() => fs.mkdir(exact))
     yield* linux.fenceIsolation({ sessionID: "ses_exact_case", actor: "owner", directory: exact })
     expect(yield* linux.isPrivateDirectory(path.join(exact, "src"))).toBe(true)
-    expect(yield* linux.isPrivateDirectory(path.join(temporary.path, "EXACT-CASE"))).toBe(false)
+    const distinct = !existsSync(path.join(temporary.path, "EXACT-CASE"))
+    expect(yield* linux.isPrivateDirectory(path.join(temporary.path, "EXACT-CASE"))).toBe(!distinct)
   }),
 )
 

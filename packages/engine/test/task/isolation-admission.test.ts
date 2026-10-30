@@ -269,7 +269,11 @@ it.instance(
         }),
         () =>
           Effect.promise(async () => {
-            await fs.rm(link, { force: true })
+            // unlink drops only the link, where Bun's rm fails on a link to a folder on Windows. A link left behind
+            // would refuse every later isolation test in this process.
+            await fs.unlink(link).catch((cause) => {
+              if (cause?.code !== "ENOENT") throw cause
+            })
             await fs.rm(target, { recursive: true, force: true })
             await fs.rename(aside, link).catch(() => undefined)
           }),

@@ -1162,6 +1162,8 @@ describe("isolated task merge and discard", () => {
 
   isolatedIt.instance("an agent merges and discards only its direct children, after approving the diff", () => Effect.gen(function* () {
     const home = yield* InstanceState.context
+    // Git for Windows defaults to autocrlf=true, so a merge's checkout bytes would be CRLF; this compares exact bytes.
+    yield* git(home.directory, ["config", "core.autocrlf", "false"])
     for (const file of ["merged.txt", "discarded.txt"])
       yield* Effect.promise(() => fs.writeFile(path.join(home.directory, file), "base\n"))
     yield* git(home.directory, ["add", "merged.txt", "discarded.txt"])

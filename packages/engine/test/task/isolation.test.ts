@@ -88,6 +88,9 @@ const failure = <A, E, R>(effect: Effect.Effect<A, E, R>, code: string) =>
 
 const fixture = Effect.gen(function* () {
   const home = yield* InstanceState.context
+  // Git for Windows defaults to autocrlf=true, so the task checkout, and a merge's checkout bytes, would turn LF into
+  // CRLF. These tests compare exact bytes, so pin LF; "autocrlf merges use checkout bytes…" turns it on itself.
+  if (home.project.vcs === "git") yield* git(home.directory, ["config", "core.autocrlf", "false"])
   const sessions = yield* Session.Service
   const isolation = yield* TaskIsolation.Service
   const agents = yield* Agent.Service
@@ -1280,14 +1283,10 @@ it.instance(
       const f = yield* fixture
       const started = yield* f.start
       const outside = yield* tmpdirScoped()
-      yield* Effect.promise(() =>
-        fs.symlink(
-          outside,
-          path.join(started.work.directory, "escape"),
-          process.platform === "win32" ? "junction" : "dir",
-        ),
-      )
-      yield* f.settle()
+      // A real directory link on every platform: Git for Windows reads an NTFS junction as a directory, so a junction
+      // never becomes a Git link for the merge to refuse. Hosted Windows runners may create symbolic links.
+      yield* Effect.promise(() => fs.symlink(outside, path.join(started.work.directory, "escape"), "dir"))
+      expect((yield* f.settle()).state).toBe("changed")
       yield* failure(f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" } }), "path")
       expect(yield* exists(path.join(f.home.directory, "escape"))).toBe(false)
     }),
@@ -1766,4 +1765,7 @@ for (const gitProject of [true, false])
           else expect(yield* exists(path.join(f.home.directory, "own.txt"))).toBe(false)
         }),
       { git: gitProject },
+      // Two isolated starts, a resume, three saves and two stacked merges: the Git cases took 27.5 s on hosted Windows
+      // runners before the final checkout removal, so the default 30 s leaves them no room there.
+      60_000,
     )

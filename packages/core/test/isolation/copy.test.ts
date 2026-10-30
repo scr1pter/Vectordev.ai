@@ -12,6 +12,7 @@ import {
   stat,
   symlink,
   truncate,
+  unlink,
   writeFile,
 } from "node:fs/promises"
 import os from "node:os"
@@ -245,7 +246,8 @@ describe("IsolationCopy project copies", () => {
     await put(source, "src/keep.txt", "replacement")
     await symlink(outside, target, junction)
     await expect(IsolationCopy.copyProject(source, target)).rejects.toThrow("destination is a link")
-    await rm(target)
+    // unlink drops only the link, where Bun's rm fails on a link to a folder on Windows.
+    await unlink(target)
     await mkdir(target)
     await symlink(outside, path.join(target, "src"), junction)
     await expect(IsolationCopy.copyProject(source, target)).rejects.toThrow("destination is a link")
