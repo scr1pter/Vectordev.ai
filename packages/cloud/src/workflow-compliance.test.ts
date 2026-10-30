@@ -237,6 +237,7 @@ describe("@vector CI lane", () => {
         ["packages/web", "test/github-app-api.test.ts"],
         ["packages/engine", "test/cli/github*.test.ts"],
         ["packages/engine", "test/tool/registry*.test.ts"],
+        ["packages/core", "test/github-agents.test.ts"],
         ["packages/core", "test/review/*.test.ts"],
         ["packages/core", "test/child-environment.test.ts"],
         ["test", "api-module-loading.test.ts"],

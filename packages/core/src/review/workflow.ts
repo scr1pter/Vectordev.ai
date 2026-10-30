@@ -7,9 +7,10 @@ import { DEFAULT_MENTIONS, parseReviewCommand } from "./command"
 import { PAUSED_LABEL } from "./skip"
 import { PublicSession } from "@vectordevai/schema/public-session"
 
-export const WORKFLOW_FILE = ".github/workflows/vector.yml"
+export { WORKFLOW_FILE } from "../github-agents"
 export const CLI_PACKAGE = "@vectordevai/cli"
-// Written into every job as VECTOR_WORKFLOW_VERSION; the CLI asks for a reinstall when a workflow's differs.
+// Written into every job as VECTOR_WORKFLOW_VERSION; the CLI asks for a reinstall when a workflow's differs. It stays
+// "2" while the CLI and the desktop install this v2 workflow; GithubAgents.WORKFLOW_VERSION is the v3 builder's.
 export const GITHUB_WORKFLOW_VERSION = "2"
 
 export interface WorkflowOptions {

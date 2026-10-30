@@ -23,6 +23,7 @@ on:
       - packages/web/test/github-*.ts
       - packages/engine/test/cli/github*.ts
       - packages/engine/test/tool/registry*.ts
+      - packages/core/test/github-agents.test.ts
       - packages/core/test/review/**
       - packages/core/test/child-environment.test.ts
       - test/api-module-loading.test.ts
@@ -144,7 +145,7 @@ jobs:
       - name: Run core GitHub tests
         if: ${{ !cancelled() }}
         working-directory: packages/core
-        run: GITHUB_ACTIONS=false bun test --timeout 30000 test/review/*.test.ts test/child-environment.test.ts
+        run: GITHUB_ACTIONS=false bun test --timeout 30000 test/github-agents.test.ts test/review/*.test.ts test/child-environment.test.ts
 
   # The desktop runs the engine's Node bundle in Electron's utility process, while every engine test runs on Bun, so a
   # stray Bun API passes them all and still fails every desktop message. This boots the bundle under Node and sends
