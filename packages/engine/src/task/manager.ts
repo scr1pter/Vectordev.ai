@@ -1629,7 +1629,7 @@ const layer = Layer.effect(
                   taskID: id,
                   title: record.title,
                   paths: record.ownedPaths ?? [],
-                  writes: !["explore", "review", "judge", "security"].includes(record.agent),
+                  writes: !Agent.readOnly(record.agent),
                   isolated: assigned,
                 })
                 const claim = ownership.claim

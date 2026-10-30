@@ -159,7 +159,14 @@ export type MergeInput = {
 }
 type Blob = { mode: string; bytes: Buffer } | undefined
 type Checkpoint = {
-  files: { path: string; existed: boolean; symlink?: string; mode?: number }[]
+  files: {
+    path: string
+    existed: boolean
+    symlink?: string
+    mode?: number
+    /** What the merge writes at the path (a sha256, a link target or nothing), so recovery undoes only its own write. */
+    written?: { hash: string } | { symlink: string } | { absent: true }
+  }[]
   selected: readonly string[]
   phase: "prepared" | "written"
 }
@@ -527,7 +534,11 @@ export const make = Effect.gen(function* () {
     const current = yield* get(record.taskID)
     if (current.mode === "copy") {
       yield* io(() => guarded(current.directory))
-      if ((yield* io(() => realpath(current.directory))) !== current.directory)
+      // The data folder's own path may pass through a link (a linked home, /tmp or /var on macOS, a short or mapped
+      // path on Windows); nothing at or below it may. So the copy must resolve to its reserved names under the data
+      // folder's real path.
+      const [real, root] = yield* io(() => Promise.all([realpath(current.directory), realpath(Global.Path.data)]))
+      if (real !== path.join(root, path.relative(Global.Path.data, current.directory)))
         return yield* err("registry", "Copy isolation directory changed identity.")
       return current
     }
@@ -807,7 +818,7 @@ export const make = Effect.gen(function* () {
     const ctx = yield* home
     if (!(yield* audience.canIsolate(input.parentSessionID, "owner")))
       return yield* err("guest", "Isolation requires an owner conversation without guest input.")
-    if (/^(explore|review|judge|security|research)/i.test(input.agent.name))
+    if (Agent.readOnly(input.agent.name))
       return yield* err("readonly", "Read-only agents cannot run in task isolation.")
     for (
       let id: string | undefined = input.parentSessionID, seen = new Set<string>();
@@ -1777,7 +1788,11 @@ export const make = Effect.gen(function* () {
     return { ...record, copyStacked: true, ...(advanced ? { copyBase: advanced.name } : {}) }
   })
 
-  const checkpoint = Effect.fn("TaskIsolation.checkpoint")(function* (record: Record, selected: readonly string[]) {
+  const checkpoint = Effect.fn("TaskIsolation.checkpoint")(function* (
+    record: Record,
+    selected: readonly string[],
+    blobs: Map<string, Blob>,
+  ) {
     const directory = path.join(
       paths(record.projectID, record.taskID).registry,
       "checkpoints",
@@ -1792,12 +1807,18 @@ export const make = Effect.gen(function* () {
           throw cause
         }),
       )
+      const written = blobs.get(file)
       files.push({
         path: file,
         existed: !!info,
         ...(info
           ? { mode: info.mode, ...(info.isSymbolicLink() ? { symlink: yield* io(() => readlink(source)) } : {}) }
           : {}),
+        written: !written
+          ? { absent: true }
+          : written.mode === "120000"
+            ? { symlink: written.bytes.toString() }
+            : { hash: hash(written.bytes) },
       })
       if (info)
         yield* io(() =>
@@ -1812,19 +1833,54 @@ export const make = Effect.gen(function* () {
     yield* save(next)
     return next
   })
-  const rollback = Effect.fn("TaskIsolation.rollback")(function* (record: Record) {
+  const manifest = Effect.fn("TaskIsolation.manifest")(function* (record: Record) {
     if (
       !record.checkpoint ||
       !inside(path.join(paths(record.projectID, record.taskID).registry, "checkpoints"), record.checkpoint)
     )
       return yield* err("checkpoint", "Isolation checkpoint is not in its registry.")
     yield* io(() => guarded(path.join(record.checkpoint!, "manifest.json")))
-    const manifest = yield* io(() =>
+    const value = yield* io(() =>
       readFile(path.join(record.checkpoint!, "manifest.json"), "utf8").then((value) => JSON.parse(value) as Checkpoint),
     )
-    if (!manifest.files.every((file) => relative(file.path)))
+    if (!value.files.every((file) => relative(file.path)))
       return yield* err("checkpoint", "Isolation checkpoint contains an unsafe path.")
-    for (const file of manifest.files) {
+    return value
+  })
+  /** Whether a merge target still holds exactly what the merge wrote there, or what was there before it. */
+  const untouched = Effect.fnUntraced(function* (record: Record, file: Checkpoint["files"][number]) {
+    const target = path.join(record.parentDirectory, file.path)
+    const info = yield* io(() =>
+      lstat(target).catch((cause) => {
+        if (missing(cause)) return undefined
+        throw cause
+      }),
+    )
+    const now = !info
+      ? { absent: true }
+      : info.isSymbolicLink()
+        ? { symlink: yield* io(() => readlink(target)) }
+        : info.isFile()
+          ? { hash: yield* io(() => IsolationCopy.hashFile(target)) }
+          : undefined
+    if (!now) return false
+    const backup = path.join(record.checkpoint!, "overwritten", file.path)
+    const saved = file.existed && file.symlink === undefined ? yield* io(() => lstat(backup)) : undefined
+    const before = !file.existed
+      ? { absent: true }
+      : file.symlink !== undefined
+        ? { symlink: file.symlink }
+        : saved?.isFile()
+          ? { hash: yield* io(() => IsolationCopy.hashFile(backup)) }
+          : undefined
+    return [file.written, before].some((state) => state !== undefined && stable(state) === stable(now))
+  })
+  const rollback = Effect.fn("TaskIsolation.rollback")(function* (record: Record) {
+    const restore = yield* manifest(record)
+    // Only what the merge left is undone. A path changed again since the merge wrote it (by the user, a tool or a
+    // build, possibly long before a restart finds the interrupted merge) keeps that change and is named for review.
+    const kept: string[] = []
+    for (const file of restore.files) {
       const target = path.join(record.parentDirectory, file.path)
       const info = yield* io(() =>
         lstat(target).catch((cause) => {
@@ -1843,6 +1899,11 @@ export const make = Effect.gen(function* () {
         )
       )
         return yield* err("path", "Cannot restore a checkpoint through an unsafe target.")
+      // A manifest written before merges recorded their writes is restored as it always was.
+      if (file.written && !(yield* untouched(record, file))) {
+        kept.push(file.path)
+        continue
+      }
       if (info?.isSymbolicLink()) yield* io(() => unlink(target))
       if (!file.existed) {
         yield* io(() => rm(target, { force: true }))
@@ -1859,7 +1920,17 @@ export const make = Effect.gen(function* () {
         }
       })
     }
-    yield* save({ ...record, state: "changed", mergeStartedAt: undefined, mergeCompleted: undefined })
+    yield* save({
+      ...record,
+      state: "changed",
+      mergeStartedAt: undefined,
+      mergeCompleted: undefined,
+      ...(kept.length
+        ? {
+            error: `An interrupted merge was undone, except where a file changed again after the merge wrote it. ${kept.length === 1 ? "This file was" : "These files were"} left as ${kept.length === 1 ? "it is" : "they are"}: ${kept.join(", ")}. Review before merging this task again.`,
+          }
+        : {}),
+    })
   })
   const savePatch = Effect.fn("TaskIsolation.savePatch")(function* (record: Record, kind: string) {
     const file = path.join(
@@ -1912,94 +1983,118 @@ export const make = Effect.gen(function* () {
     return file
   })
 
+  /** Everything a merge checks before it writes: the task's state, the selection and each target. */
+  const planMerge = Effect.fn("TaskIsolation.planMerge")(function* (input: MergeInput) {
+    const original = yield* get(input.taskID)
+    if (["preparing", "running", "settling"].includes(original.state) || active.has(input.taskID))
+      return yield* err("running", "The isolated task is still running or saving its changes.")
+    if (original.state !== "changed") return yield* err("state", "Only a changed isolated task can be merged.")
+    yield* assertCaptured(original)
+    if (input.by.kind !== "owner" && (input.force || input.includeStacked))
+      return yield* err("forbidden", "Only the owner can force a collision or include stacked changes.")
+    if (input.by.kind === "agent" && input.by.sessionID !== original.parentSessionID)
+      return yield* err("forbidden", "An agent may merge only its direct children.")
+    const unmerged = yield* Effect.forEach(original.stacked, (id) =>
+      get(id).pipe(Effect.map((record) => record.state !== "merged")),
+    )
+    if (unmerged.some(Boolean) && !input.includeStacked)
+      return yield* err("stacked", "Merge the task's stacked dependencies first.")
+    const included = yield* Effect.gen(function* () {
+      if (!unmerged.some(Boolean) || !input.includeStacked) return original
+      if (original.stackedIncluded) return original
+      const registry = paths(original.projectID, original.taskID).registry
+      if (original.mode === "copy") {
+        if (!original.copyStacked) return yield* err("stacked", "This copy has no saved pre-stack baseline.")
+        const limits = yield* Limits
+        const copyBase = original.merged.length
+          ? (yield* io(() =>
+              IsolationBase.advanceCopy(
+                { registry, directory: original.directory, baselineDirectory: path.join(registry, "baseline") },
+                original.merged,
+                limits.fileBytes,
+              ),
+            )).name
+          : undefined
+        return { ...original, copyBase, stackedIncluded: true }
+      }
+      if (!original.unstackedSeed || !original.tip)
+        return yield* err("stacked", "This result has no saved pre-stack Git baseline.")
+      return {
+        ...original,
+        stackedIncluded: true,
+        patchBase: original.unstackedSeed,
+        reviewBase: yield* IsolationBase.advanceGit(
+          { parentDirectory: original.parentDirectory, registry, seed: original.unstackedSeed, tip: original.tip },
+          original.merged,
+          command,
+        ),
+      }
+    })
+    const record = included === original ? original : { ...included, files: yield* stats(included) }
+    if (
+      TaskClaims.protectedTrees().some(
+        (entry) =>
+          entry.taskID !== (input.by.kind === "agent" ? input.by.sessionID : undefined) &&
+          entry.workDirectory &&
+          FileLock.key(entry.workDirectory) === FileLock.key(record.parentDirectory),
+      )
+    )
+      return yield* err("running", "The merge target belongs to another running isolated task.")
+    const remaining = record.files.filter((file) => !record.merged.includes(file.path)).map((file) => file.path)
+    const selected = [...new Set(input.files ?? remaining)]
+    if (!selected.length || selected.some((file) => !remaining.includes(file) || !relative(file)))
+      return yield* err("files", "The merge selection contains an unknown or previously merged path.")
+    const targets = selected.map((file) => path.join(record.parentDirectory, file))
+    for (const target of targets)
+      if (!FSUtil.writableInside(record.parentDirectory, target))
+        return yield* err("path", "The merge target is a symlink, hard link or leaves the project.")
+    return { record, remaining, selected, targets }
+  })
+
   const merge = Effect.fn("TaskIsolation.merge")(function* (input: MergeInput) {
+    const by = input.by
+    // An agent's merge asks the user, who may take as long as they like. The task's lock is not held across that
+    // prompt (F.1), so the owner can still view, discard or resume the task meanwhile. The approval covers only the
+    // result the prompt showed: under the lock again, the task must be exactly as it was.
+    const shown =
+      by.kind === "agent"
+        ? yield* Effect.gen(function* () {
+            const plan = yield* lock(
+              input.taskID,
+              planMerge(input).pipe(
+                Effect.flatMap((plan) =>
+                  patch(plan.record, plan.selected).pipe(Effect.map((diff) => ({ ...plan, diff: diff.patch }))),
+                ),
+              ),
+            )
+            for (const target of plan.targets) yield* by.assertExternalDirectory(target)
+            yield* by.assertWritable({ files: plan.targets })
+            yield* by.ask({ permission: "edit", patterns: plan.selected, always: ["*"], metadata: { diff: plan.diff } })
+            return plan.record
+          })
+        : undefined
     return yield* lock(
       input.taskID,
       Effect.gen(function* () {
-        const original = yield* get(input.taskID)
-        if (["preparing", "running", "settling"].includes(original.state) || active.has(input.taskID))
-          return yield* err("running", "The isolated task is still running or saving its changes.")
-        if (original.state !== "changed") return yield* err("state", "Only a changed isolated task can be merged.")
-        yield* assertCaptured(original)
-        if (input.by.kind !== "owner" && (input.force || input.includeStacked))
-          return yield* err("forbidden", "Only the owner can force a collision or include stacked changes.")
-        if (input.by.kind === "agent" && input.by.sessionID !== original.parentSessionID)
-          return yield* err("forbidden", "An agent may merge only its direct children.")
-        const unmerged = yield* Effect.forEach(original.stacked, (id) =>
-          get(id).pipe(Effect.map((record) => record.state !== "merged")),
-        )
-        if (unmerged.some(Boolean) && !input.includeStacked)
-          return yield* err("stacked", "Merge the task's stacked dependencies first.")
-        const included = yield* Effect.gen(function* () {
-          if (!unmerged.some(Boolean) || !input.includeStacked) return original
-          if (original.stackedIncluded) return original
-          const registry = paths(original.projectID, original.taskID).registry
-          if (original.mode === "copy") {
-            if (!original.copyStacked) return yield* err("stacked", "This copy has no saved pre-stack baseline.")
-            const limits = yield* Limits
-            const copyBase = original.merged.length
-              ? (yield* io(() =>
-                  IsolationBase.advanceCopy(
-                    { registry, directory: original.directory, baselineDirectory: path.join(registry, "baseline") },
-                    original.merged,
-                    limits.fileBytes,
-                  ),
-                )).name
-              : undefined
-            return { ...original, copyBase, stackedIncluded: true }
-          }
-          if (!original.unstackedSeed || !original.tip)
-            return yield* err("stacked", "This result has no saved pre-stack Git baseline.")
-          return {
-            ...original,
-            stackedIncluded: true,
-            patchBase: original.unstackedSeed,
-            reviewBase: yield* IsolationBase.advanceGit(
-              { parentDirectory: original.parentDirectory, registry, seed: original.unstackedSeed, tip: original.tip },
-              original.merged,
-              command,
-            ),
-          }
-        })
-        const record = included === original ? original : { ...included, files: yield* stats(included) }
+        const plan = yield* planMerge(input)
+        // Viewing the changes meanwhile only caches their merge assessment, which the approval does not depend on.
         if (
-          TaskClaims.protectedTrees().some(
-            (entry) =>
-              entry.taskID !== (input.by.kind === "agent" ? input.by.sessionID : undefined) &&
-              entry.workDirectory &&
-              FileLock.key(entry.workDirectory) === FileLock.key(record.parentDirectory),
-          )
+          shown &&
+          stable({ ...plan.record, mergeKey: undefined, mergeable: undefined }) !==
+            stable({ ...shown, mergeKey: undefined, mergeable: undefined })
         )
-          return yield* err("running", "The merge target belongs to another running isolated task.")
-        const remaining = record.files.filter((file) => !record.merged.includes(file.path)).map((file) => file.path)
-        const selected = [...new Set(input.files ?? remaining)]
-        if (!selected.length || selected.some((file) => !remaining.includes(file) || !relative(file)))
-          return yield* err("files", "The merge selection contains an unknown or previously merged path.")
-        const targets = selected.map((file) => path.join(record.parentDirectory, file))
-        for (const target of targets) {
-          if (!FSUtil.writableInside(record.parentDirectory, target))
-            return yield* err("path", "The merge target is a symlink, hard link or leaves the project.")
-          if (input.by.kind === "agent") yield* input.by.assertExternalDirectory(target)
-        }
-        if (input.by.kind === "agent") {
-          yield* input.by.assertWritable({ files: targets })
-          yield* input.by.ask({
-            permission: "edit",
-            patterns: selected,
-            always: ["*"],
-            metadata: { diff: (yield* patch(record, selected)).patch },
-          })
-        }
+          return yield* err("state", "The isolated task changed while this merge waited for approval; review it again.")
+        const record = plan.record
         return yield* FileLock.forTree(record.parentDirectory)(
-          FileLock.withFiles(targets)(
+          FileLock.withFiles(plan.targets)(
             Effect.gen(function* () {
-              for (const target of targets)
+              for (const target of plan.targets)
                 if (!FSUtil.writableInside(record.parentDirectory, target))
                   return yield* err("path", "The merge target changed after approval.")
-              if (input.by.kind === "agent") yield* input.by.assertWritable({ files: targets })
+              if (by.kind === "agent") yield* by.assertWritable({ files: plan.targets })
               // A new child path colliding with an untracked parent path needs explicit owner force, even when a 3-way merge is possible.
               const collisions: string[] = []
-              for (const file of selected.filter(
+              for (const file of plan.selected.filter(
                 (name) => record.files.find((item) => item.path === name)?.status === "added",
               )) {
                 const existing = yield* io(() =>
@@ -2027,7 +2122,7 @@ export const make = Effect.gen(function* () {
               }
               if (collisions.length && !input.force)
                 return yield* err("conflict", "An untracked parent file would be overwritten.", collisions)
-              const resolved = yield* prepare(record, selected, input.force ? collisions : [])
+              const resolved = yield* prepare(record, plan.selected, input.force ? collisions : [])
               if (resolved.conflicts.length)
                 return yield* err("conflict", "Isolation changes conflict with the parent's current files.", [
                   ...new Set(resolved.conflicts),
@@ -2039,76 +2134,90 @@ export const make = Effect.gen(function* () {
                     return yield* err("path", "An added symbolic link would leave the repository.")
                 }
               }
-              const pending = yield* checkpoint(record, selected)
-              yield* Effect.gen(function* () {
-                for (const [file, value] of resolved.blobs) {
-                  const target = path.join(record.parentDirectory, file)
-                  if (!FSUtil.writableInside(record.parentDirectory, target))
-                    return yield* err("path", "A merge target became unsafe before writing.")
-                  yield* io(async () => {
-                    if (!value) {
-                      await rm(target, { force: true })
-                      return
-                    }
-                    await mkdir(path.dirname(target), { recursive: true })
-                    if (value.mode === "120000") {
-                      await rm(target, { force: true })
-                      await symlink(value.bytes.toString(), target)
-                      return
-                    }
-                    const temp = path.join(path.dirname(target), `.vector-merge-${randomUUID()}`)
-                    await writeFile(temp, value.bytes, { mode: value.mode === "100755" ? 0o755 : 0o644, flag: "wx" })
-                    await rename(temp, target).catch(async (cause) => {
-                      await rm(temp, { force: true })
-                      throw cause
-                    })
-                  })
-                }
-              }).pipe(Effect.onError(() => rollback(pending).pipe(Effect.orDie)))
-              const merged = [...new Set([...record.merged, ...selected])]
+              const merged = [...new Set([...record.merged, ...plan.selected])]
               const complete = record.files.every((file) => merged.includes(file.path))
               const limits = yield* Limits
-              const advanced = complete
-                ? {}
-                : record.mode === "worktree"
-                  ? {
-                      reviewBase: yield* IsolationBase.advanceGit(
-                        {
-                          parentDirectory: record.parentDirectory,
-                          registry: paths(record.projectID, record.taskID).registry,
-                          seed: record.seed!,
-                          tip: record.tip!,
-                          reviewBase: record.reviewBase,
-                        },
-                        selected,
-                        command,
+              const registry = paths(record.projectID, record.taskID).registry
+              // A partial merge's next logical base is built before the first parent write. Once a parent file has
+              // changed, only the record's save remains: a failure up to it is rolled back, and a Stop or a dropped
+              // request waits for it, so no merge is left written but recorded as unfinished.
+              const reviewBase =
+                !complete && record.mode === "worktree"
+                  ? yield* IsolationBase.advanceGit(
+                      {
+                        parentDirectory: record.parentDirectory,
+                        registry,
+                        seed: record.seed!,
+                        tip: record.tip!,
+                        reviewBase: record.reviewBase,
+                      },
+                      plan.selected,
+                      command,
+                    )
+                  : undefined
+              const copyBase =
+                !complete && record.mode === "copy"
+                  ? (yield* io(() =>
+                      IsolationBase.advanceCopy(
+                        { registry, directory: record.directory, baselineDirectory: baselinePaths(record).directory },
+                        plan.selected,
+                        limits.fileBytes,
                       ),
-                    }
-                  : {
-                      copyBase: (yield* io(() =>
-                        IsolationBase.advanceCopy(
-                          {
-                            registry: paths(record.projectID, record.taskID).registry,
-                            directory: record.directory,
-                            baselineDirectory: baselinePaths(record).directory,
-                          },
-                          selected,
-                          limits.fileBytes,
-                        ),
-                      )).name,
-                    }
-              const next = {
-                ...pending,
-                ...advanced,
-                merged,
-                mergeCompleted: true,
-                state: complete ? "merged" : "changed",
-              }
-              yield* save(next)
+                    )).name
+                  : undefined
+              const next = yield* Effect.gen(function* () {
+                const pending = yield* checkpoint(record, plan.selected, resolved.blobs)
+                return yield* Effect.gen(function* () {
+                  for (const [file, value] of resolved.blobs) {
+                    const target = path.join(record.parentDirectory, file)
+                    if (!FSUtil.writableInside(record.parentDirectory, target))
+                      return yield* err("path", "A merge target became unsafe before writing.")
+                    yield* io(async () => {
+                      if (!value) {
+                        await rm(target, { force: true })
+                        return
+                      }
+                      await mkdir(path.dirname(target), { recursive: true })
+                      if (value.mode === "120000") {
+                        await rm(target, { force: true })
+                        await symlink(value.bytes.toString(), target)
+                        return
+                      }
+                      const temp = path.join(path.dirname(target), `.vector-merge-${randomUUID()}`)
+                      await writeFile(temp, value.bytes, {
+                        mode: value.mode === "100755" ? 0o755 : 0o644,
+                        flag: "wx",
+                      })
+                      await rename(temp, target).catch(async (cause) => {
+                        await rm(temp, { force: true })
+                        throw cause
+                      })
+                    })
+                  }
+                  const next = {
+                    ...pending,
+                    ...(reviewBase ? { reviewBase } : {}),
+                    ...(copyBase ? { copyBase } : {}),
+                    merged,
+                    mergeCompleted: true,
+                    state: complete ? "merged" : "changed",
+                  }
+                  yield* save(next)
+                  return next
+                }).pipe(Effect.onError(() => rollback(pending).pipe(Effect.orDie)))
+              }).pipe(
+                Effect.uninterruptible,
+                // A copy base version the record never published is removed with the failed merge.
+                Effect.onError(() =>
+                  copyBase
+                    ? io(() => rm(path.join(registry, copyBase), { recursive: true, force: true })).pipe(Effect.ignore)
+                    : Effect.void,
+                ),
+              )
               const events = yield* Effect.serviceOption(EventV2Bridge.Service)
               const ctx = yield* home
               if (Option.isSome(events))
-                for (const target of targets) {
+                for (const target of plan.targets) {
                   yield* events.value
                     .publish(FileSystem.Event.Edited, {
                       file: target,
@@ -2126,16 +2235,16 @@ export const make = Effect.gen(function* () {
                 yield* remove(archived)
                 return {
                   record: archived,
-                  merged: selected,
-                  remaining: remaining.filter((file) => !selected.includes(file)),
+                  merged: plan.selected,
+                  remaining: plan.remaining.filter((file) => !plan.selected.includes(file)),
                   conflicts: [],
                   checkpoint: next.checkpoint,
                 }
               }
               return {
                 record: next,
-                merged: selected,
-                remaining: remaining.filter((file) => !selected.includes(file)),
+                merged: plan.selected,
+                remaining: plan.remaining.filter((file) => !plan.selected.includes(file)),
                 conflicts: [],
                 checkpoint: next.checkpoint,
               }
@@ -2320,8 +2429,14 @@ export const make = Effect.gen(function* () {
           return discarded
         }
         if (exists) yield* protect(record)
+        // The conversation may already be editing again while recovery runs: the targets' file locks keep each
+        // check of a target and its restore together.
         if (record.mergeStartedAt && !record.mergeCompleted)
-          yield* FileLock.forTree(record.parentDirectory)(rollback(record))
+          yield* FileLock.forTree(record.parentDirectory)(
+            FileLock.withFiles(
+              (yield* manifest(record)).files.map((file) => path.join(record.parentDirectory, file.path)),
+            )(rollback(record)),
+          )
         if (record.mergeCompleted && record.state === "merged") {
           const exists = yield* io(() =>
             lstat(record.directory)

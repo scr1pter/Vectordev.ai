@@ -745,8 +745,7 @@ export const TaskTool = Tool.define(
           title,
           paths: ownedPaths,
           isolated,
-          writes:
-            !researchAgents.has(subagentType) && !["explore", "review", "judge", "security"].includes(subagentType),
+          writes: !Agent.readOnly(subagentType),
         })
       const watchOwnership = (jobID: string) => {
         const held = [...reserved]

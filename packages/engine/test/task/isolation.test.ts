@@ -649,10 +649,14 @@ it.instance(
       yield* failure(f.reserve(), "sparse")
       expect(yield* exists(f.recordPath)).toBe(false)
       yield* git(f.home.directory, ["config", "core.sparseCheckout", "false"])
-      yield* failure(
-        f.isolation.check({ parentSessionID: f.parent.id, agent: { ...f.agent, name: "review" } }),
-        "readonly",
-      )
+      for (const name of ["review", "explore", "judge", "security", "research", "researcher", "research-judge"])
+        yield* failure(f.isolation.check({ parentSessionID: f.parent.id, agent: { ...f.agent, name } }), "readonly")
+      // Read-only agents are named exactly, as task claims name them: a user's editing agent whose name only starts
+      // with one of those words is a writer, and may work in isolation.
+      for (const name of ["reviewer-fix", "Security-hardening", "explorer"])
+        expect((yield* f.isolation.check({ parentSessionID: f.parent.id, agent: { ...f.agent, name } })).mode).toBe(
+          "worktree",
+        )
     }),
   { git: true },
 )
@@ -789,6 +793,32 @@ it.instance("copy mode uses baseline conflicts and supports merge without creati
     expect(yield* contents(f.home.directory, "copy.txt")).toBe("child\n")
     const archived = yield* f.isolation.changes({ taskID: f.child.id, diff: true, control: true })
     expect(archived.patch).toContain("vector-isolation-copy-v1")
+  }),
+)
+
+it.instance("copy mode starts, saves and merges when the data folder is reached through a link", () =>
+  Effect.gen(function* () {
+    // The data folder's own path may pass through a link (a linked home or ~/.local, /tmp and /var on macOS, a short
+    // or mapped path on Windows). Only links at or below the data folder are refused.
+    const original = Global.Path.data
+    const linked = path.join(yield* tmpdirScoped(), "linked-share")
+    yield* Effect.promise(() =>
+      fs.symlink(path.dirname(original), linked, process.platform === "win32" ? "junction" : "dir"),
+    )
+    Global.Path.data = path.join(linked, path.basename(original))
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        Global.Path.data = original
+      }),
+    )
+    const f = yield* fixture
+    yield* write(f.home.directory, "copy.txt", "base\n")
+    const started = yield* f.start
+    expect(started.record.mode).toBe("copy")
+    yield* write(f.workPath, "copy.txt", "child\n")
+    expect((yield* f.settle()).state).toBe("changed")
+    expect((yield* f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" } })).record.state).toBe("merged")
+    expect(yield* contents(f.home.directory, "copy.txt")).toBe("child\n")
   }),
 )
 
@@ -1084,6 +1114,89 @@ it.instance(
       expect(yield* exists(path.join(f.home.directory, "one.txt"))).toBe(false)
       expect(restored.state).toBe("changed")
       expect(restored.mergeStartedAt).toBeUndefined()
+    }),
+  { git: true },
+)
+
+it.instance(
+  "recovery undoes only what an interrupted merge left and keeps files changed since",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      yield* write(f.home.directory, "edited.txt", "parent\n")
+      yield* git(f.home.directory, ["add", "edited.txt"])
+      yield* git(f.home.directory, ["commit", "-m", "edited baseline"])
+      const started = yield* f.start
+      yield* write(started.work.directory, "one.txt", "one\n")
+      yield* write(started.work.directory, "two.txt", "two\n")
+      yield* write(started.work.directory, "edited.txt", "child\n")
+      yield* write(started.work.directory, "later.txt", "later\n")
+      yield* f.settle()
+      const selected = ["one.txt", "two.txt", "edited.txt"]
+      const partial = yield* f.isolation.merge({ taskID: f.child.id, files: selected, by: { kind: "owner" } })
+      // A crash after the writes and before the record says the merge finished; the user then kept working.
+      yield* Effect.promise(() =>
+        fs.writeFile(f.recordPath, JSON.stringify({ ...partial.record, mergeCompleted: false, merged: [] })),
+      )
+      yield* write(f.home.directory, "two.txt", "two\nmine\n")
+      yield* write(f.home.directory, "edited.txt", "child\nmine\n")
+      const restored = yield* f.isolation.reconcile(f.child.id)
+      // What the merge wrote and nobody changed is undone; what changed since is left as it is.
+      expect(yield* exists(path.join(f.home.directory, "one.txt"))).toBe(false)
+      expect(yield* contents(f.home.directory, "two.txt")).toBe("two\nmine\n")
+      expect(yield* contents(f.home.directory, "edited.txt")).toBe("child\nmine\n")
+      expect(restored).toMatchObject({ state: "changed", merged: [] })
+      expect(restored.mergeStartedAt).toBeUndefined()
+      expect(restored.error).toContain("edited.txt")
+      expect(restored.error).toContain("two.txt")
+      expect(restored.error).not.toContain("one.txt")
+    }),
+  { git: true },
+)
+
+it.instance(
+  "a partial merge stopped while its next base is built has written nothing, so recovery cannot undo later edits",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      yield* write(started.work.directory, "one.txt", "one\n")
+      yield* write(started.work.directory, "two.txt", "two\n")
+      yield* f.settle()
+      const real = yield* Git.Service
+      const reached = yield* Deferred.make<void>()
+      const held = yield* Deferred.make<void>()
+      yield* Effect.addFinalizer(() => Deferred.succeed(held, undefined))
+      // The same registry and per-task lock, with the commit of a partial merge's next logical base held.
+      const merging = yield* TaskIsolation.make.pipe(
+        Effect.provideService(Git.Service, {
+          ...real,
+          run: (args, options) =>
+            args.includes("Vector: logical merge base after a partial task merge")
+              ? Deferred.succeed(reached, undefined).pipe(
+                  Effect.andThen(Deferred.await(held)),
+                  Effect.andThen(real.run(args, options)),
+                )
+              : real.run(args, options),
+        }),
+      )
+      const fiber = yield* merging
+        .merge({ taskID: f.child.id, files: ["one.txt"], by: { kind: "owner" } })
+        .pipe(Effect.forkScoped({ startImmediately: true }))
+      yield* Deferred.await(reached).pipe(Effect.timeout("10 seconds"))
+      // The request is dropped there (a closed window, a Stop of the calling turn).
+      yield* Fiber.interrupt(fiber)
+      expect(yield* exists(path.join(f.home.directory, "one.txt"))).toBe(false)
+      const record = yield* f.isolation.get(f.child.id)
+      expect(record).toMatchObject({ state: "changed", merged: [] })
+      expect(record.mergeCompleted).not.toBe(false)
+      // The user writes that path in the parent later; the next start's recovery leaves it alone.
+      yield* write(f.home.directory, "one.txt", "mine\n")
+      yield* f.isolation.reconcile(f.child.id)
+      expect(yield* contents(f.home.directory, "one.txt")).toBe("mine\n")
+      const merged = yield* f.isolation.merge({ taskID: f.child.id, files: ["two.txt"], by: { kind: "owner" } })
+      expect(merged.remaining).toEqual(["one.txt"])
+      expect(yield* contents(f.home.directory, "two.txt")).toBe("two\n")
     }),
   { git: true },
 )
@@ -1529,6 +1642,80 @@ it.instance(
       yield* failure(f.isolation.start(f.child.id), "state")
       expect((yield* f.isolation.get(f.child.id)).state).toBe("changed")
       expect(yield* contents(f.workPath, "still-running.txt")).toBe("kept\n")
+    }),
+  { git: true },
+)
+
+/** A parent agent's merge whose edit prompt waits until the test answers it. */
+const promptedMerge = Effect.fn("IsolationTest.promptedMerge")(function* (
+  isolation: TaskIsolation.Interface,
+  taskID: string,
+  parentID: string,
+) {
+  const asked = yield* Deferred.make<string>()
+  const answer = yield* Deferred.make<void>()
+  yield* Effect.addFinalizer(() => Deferred.succeed(answer, undefined))
+  const fiber = yield* isolation
+    .merge({
+      taskID,
+      by: {
+        kind: "agent",
+        sessionID: parentID,
+        ask: (input) => Deferred.succeed(asked, input.metadata.diff).pipe(Effect.andThen(Deferred.await(answer))),
+        assertWritable: () => Effect.void,
+        assertExternalDirectory: () => Effect.void,
+      },
+    })
+    .pipe(Effect.exit, Effect.forkScoped({ startImmediately: true }))
+  const diff = yield* Deferred.await(asked).pipe(Effect.timeout("10 seconds"))
+  return { diff, approve: Deferred.succeed(answer, undefined).pipe(Effect.andThen(Fiber.join(fiber))) }
+})
+
+it.instance(
+  "an agent's merge prompt holds no task lock: the owner reviews and discards meanwhile, and the late approval writes nothing",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      yield* write(started.work.directory, "one.txt", "one\n")
+      yield* f.settle()
+      const prompt = yield* promptedMerge(f.isolation, f.child.id, f.parent.id)
+      expect(prompt.diff).toContain("one.txt")
+      // While the user has not answered, the owner opens the same changes, then discards the task.
+      const view = yield* f.isolation
+        .changes({ taskID: f.child.id, diff: true, control: true, review: true })
+        .pipe(Effect.timeout("10 seconds"))
+      expect(view).toMatchObject({ mergeable: "clean" })
+      expect(view.patch).toContain("one.txt")
+      yield* f.isolation.discard({ taskID: f.child.id, by: { kind: "owner" } }).pipe(Effect.timeout("10 seconds"))
+      const exit = yield* prompt.approve
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toMatchObject({ code: "state" })
+      expect(yield* exists(path.join(f.home.directory, "one.txt"))).toBe(false)
+      expect((yield* f.isolation.get(f.child.id)).state).toBe("discarded")
+    }),
+  { git: true },
+)
+
+it.instance(
+  "an approval of a result that was resumed and saved again while it waited is refused and writes nothing",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      yield* write(started.work.directory, "one.txt", "one\n")
+      yield* f.settle()
+      const prompt = yield* promptedMerge(f.isolation, f.child.id, f.parent.id)
+      expect(prompt.diff).toContain("+one")
+      yield* f.isolation.resume({ taskID: f.child.id, attempt: 2, agent: f.agent }).pipe(Effect.timeout("10 seconds"))
+      yield* write(f.workPath, "one.txt", "rewritten\n")
+      expect((yield* f.isolation.settle({ taskID: f.child.id, attempt: 2 })).state).toBe("changed")
+      // The user approved the diff they saw, which is no longer the task's result.
+      const exit = yield* prompt.approve
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toMatchObject({ code: "state" })
+      expect(yield* exists(path.join(f.home.directory, "one.txt"))).toBe(false)
+      expect((yield* f.isolation.get(f.child.id)).merged).toEqual([])
     }),
   { git: true },
 )

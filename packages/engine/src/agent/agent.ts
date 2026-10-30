@@ -114,6 +114,12 @@ const RESEARCH_AGENTS: Record<string, { readonly tools: readonly string[]; reado
   // The judge gets the cited passages in its brief and answers in plain lines.
   [RESEARCH_JUDGE]: { tools: [], subagents: [] },
 }
+// The built-in agents that never edit files (5.F.4): refused task isolation, and never writers in task claims. Names
+// match exactly; a user's own agent is never read-only because its name starts with one of these.
+const READ_ONLY = new Set(["explore", "review", "judge", "security", RESEARCH, RESEARCHER, RESEARCH_JUDGE])
+export function readOnly(agent: string) {
+  return READ_ONLY.has(agent)
+}
 /** The tools a research agent may be offered at all, whatever any rule allows; nothing for any other agent. */
 export function researchTools(agent: string): readonly string[] | undefined {
   return RESEARCH_AGENTS[agent]?.tools
