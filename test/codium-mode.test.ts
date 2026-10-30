@@ -191,6 +191,8 @@ function store(input: unknown[]) {
       return 1
     }
     if (script === MODEL_SPEND_SCRIPTS.READ) return [0, 0, 0, 0, 0, 0]
+    // Status's read of today's spend (A18): nothing spent.
+    if (script === MODEL_SPEND_SCRIPTS.DAY) return 0
     if (script === POOL_SCRIPTS.DEBIT) return 1
     if (script === POOL_SCRIPTS.DEBITS) return [...hash(key)].flat()
     if (script === POOL_SCRIPTS.APPLY) return 0
@@ -366,6 +368,13 @@ async function lifecycle(user: { id: string; email: string }) {
   return status
 }
 
+/**
+ * The period start of the month `lifecycle` sold, as its key's name records it. Reading `period()` again instead would
+ * move on a second whenever the lifecycle crosses one.
+ */
+const soldStart = () =>
+  (world.subscriptions[0] as ReturnType<typeof paidSubscription>).items.data[0]!.current_period_start
+
 const kinds = (user: { id: string }) => [
   `account:${user.id}`,
   `lease:${user.id}`,
@@ -504,9 +513,8 @@ describe("test mode", () => {
 
     const created = world.openRouter.filter((call) => call.method === "POST")
     expect(created).toHaveLength(1)
-    const { start } = period()
     expect(JSON.parse(created[0]!.body)).toMatchObject({
-      name: `Vector test ${admin.id} sub_mode ${start}`,
+      name: `Vector test ${admin.id} sub_mode ${soldStart()}`,
       limit: 0.5,
     })
     // Status shares are of what the capped key can spend.
@@ -588,7 +596,7 @@ describe("live mode", () => {
     for (const kind of kinds(buyer)) expect(keys).toContain(`vector:codium:live:${kind}`)
     const created = world.openRouter.filter((call) => call.method === "POST")
     expect(JSON.parse(created[0]!.body)).toMatchObject({
-      name: `Vector ${buyer.id} sub_mode ${period().start}`,
+      name: `Vector ${buyer.id} sub_mode ${soldStart()}`,
       limit: 4,
     })
     expect(created[0]!.headers.get("idempotency-key")).toStartWith("vector-codium-pool-v1-live-")

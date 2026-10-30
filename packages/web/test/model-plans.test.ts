@@ -11,8 +11,11 @@ import {
 } from "../../../api/_lib/model-plan-config"
 import { modelPlanRequest, requireModelPlanContext, streamModelPlanResponse } from "../../../api/_lib/model-plan-chat"
 import { verifyModelPlanWebhook } from "../../../api/_lib/model-plan-stripe"
-import { IncomingMessage, ServerResponse } from "node:http"
-import { Socket } from "node:net"
+import { createServer, IncomingMessage, ServerResponse } from "node:http"
+import { Socket, type AddressInfo } from "node:net"
+import config from "../../../api/model-plans/config"
+import { readModelPlanConfig } from "../src/lib/model-plans"
+import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 
 const names = [
   "MODEL_PLANS_ENABLED",
@@ -179,6 +182,22 @@ describe("subscription configuration", () => {
       process.env.MODEL_PLAN_MODELS_JSON = JSON.stringify([invalid])
       expect(() => configuredPlanModels()).toThrow()
     }
+  })
+})
+
+describe("the public configuration route", () => {
+  test("carries the perks every surface may list, none before A27, and every in-repo decoder still reads it", async () => {
+    names.forEach((name) => delete process.env[name])
+    const server = createServer((request, response) => void config(request, response))
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/model-plans/config`
+    const send = (_url: string, init: RequestInit) => fetch(url, init)
+    const body = await (await fetch(url)).json()
+    expect(body).toEqual({ ...publicModelPlans(), listed: [] })
+    expect(readModelPlanConfig(body)).toMatchObject({ enabled: false, plans: expect.any(Array) })
+    expect(await ModelPlanStatus.fetchOffers(send)).toMatchObject({ enabled: false })
+    expect(await ModelPlanStatus.salesOpen(send)).toBe(false)
+    server.close()
   })
 })
 

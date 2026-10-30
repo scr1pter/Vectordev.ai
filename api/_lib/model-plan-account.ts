@@ -16,6 +16,8 @@ import {
   modelSpendStale,
   modelSpendUnavailable,
   monthlyShortfall,
+  readModelSpendDay,
+  readModelSpendLedger,
 } from "./codium-spend-ledger.js"
 import { readSwitch } from "./codium-switches.js"
 import { syncCodiumCollection } from "./codium-collection.js"
@@ -60,7 +62,6 @@ import {
   DEBITS_KEEP_MS,
   debitHoldTicket,
   dueDebitApplies,
-  EMPTY_LEDGER,
   expectedLimitMicro,
   finishDebitApply,
   holdMember,
@@ -72,6 +73,7 @@ import {
   microToUsd,
   placeHold,
   poolFigures,
+  poolLedger,
   poolShareUsed,
   postponeDebitApply,
   readDebits,
@@ -1601,16 +1603,123 @@ async function subscriptions(customer: string, fetcher: typeof fetch) {
   )
 }
 
+// Plan states whose plan the account's screens show: a paused or frozen plan is still the account's (§4.11).
+const SHOWN_STATES: ReadonlySet<PlanState> = new Set(["active", "renewing", "paused", "frozen"])
+
+/** What `modelPlanStatus` reads. The pool's figures are there only once the period's key exists. */
+export type ModelPlanStatusRead =
+  | { active: false; customer?: true; access: false }
+  | {
+      active: true
+      customer: true
+      access: boolean
+      snapshot: EntitlementSnapshot
+      plan: PlanId
+      periodStart: number
+      periodEnd: number
+      cancelAtPeriodEnd: boolean
+      credits?: number
+      used?: number
+      remaining?: number
+      available?: number
+      idleAvailable?: number
+      shareUsed?: number
+      day?: { usedMicro: number; limitMicro: number }
+    }
+
 /**
- * The account's Codium month for its own screens. There are no top-ups, so access is the paid month alone; the status
- * route still answers `purchased: {bought: false}` for clients up to 1.99.112 (model-plan-status.ts).
+ * The account's Codium month for its own screens, from the entitlement snapshot (M4: a fresh snapshot costs no Stripe
+ * call; a missing or stale one is reconciled by `readEntitlement`'s rules, at most once a minute) and, for the
+ * snapshot's own period key, one OpenRouter key read and the pool's ledger. `given` is a snapshot the caller already
+ * read. An account without a Codium record is never reconciled here. Dollars in the answer never leave the server:
+ * `credits` is the pool's total (credits + carry), `used` what was spent (model spend, never below the committed
+ * floor, plus debits), `remaining` what is left of the month, `available` what a new request could still hold (M3, as
+ * HOLD and ADMIT compute it), `idleAvailable` the same once the model requests still running have ended (abandoned
+ * reservations and nonmodel holds still count; status's `empty`), `shareUsed` the whole-percent share spent, and `day`
+ * today's spend against the daily share as ADMIT counts it, likewise without the model requests still running. A
+ * paused or frozen plan has no figures: nothing can spend from it.
  */
-export async function modelPlanStatus(id: string, fetcher: typeof fetch = fetch, now = Date.now()) {
+export async function modelPlanStatus(
+  id: string,
+  fetcher: typeof fetch = fetch,
+  now = Date.now(),
+  given?: EntitlementSnapshot,
+): Promise<ModelPlanStatusRead> {
   const account = await readModelPlanAccount(id, fetcher)
-  const monthly = await monthlyStatus(id, fetcher, now)
-  if (!account || account.closing) return { ...monthly, access: false }
-  // An open dispute, a fraud warning or a block holds the account whatever Stripe says is paid.
-  return { ...monthly, customer: true, access: monthly.active && !riskState(account) }
+  if (!account) return { active: false, access: false }
+  if (account.closing) return { active: false, customer: true, access: false }
+  const snapshot = given ?? (await readEntitlement(id, fetcher, now))
+  // Only while another request is still writing this account's first snapshot: read again shortly.
+  if (!snapshot) throw modelSpendStale()
+  if (!snapshot.plan || !SHOWN_STATES.has(snapshot.state)) return { active: false, customer: true, access: false }
+  const shown = {
+    active: true as const,
+    customer: true as const,
+    snapshot,
+    plan: snapshot.plan,
+    periodStart: snapshot.periodStart,
+    periodEnd: snapshot.periodEnd,
+    cancelAtPeriodEnd: snapshot.cancelAtPeriodEnd,
+  }
+  if (snapshot.state === "paused" || snapshot.state === "frozen") return { ...shown, access: false }
+  // An open dispute, a fraud warning or a block holds the account before reconcile has written it; a renewing plan
+  // serves its previous period until the grace ends (M11), as the gateway's fence does.
+  const access =
+    !riskState(account) &&
+    now >= snapshot.periodStart &&
+    now < snapshot.periodEnd + (snapshot.state === "renewing" ? renewalGraceMinutes() * 60_000 : 0)
+  const key = account.key
+  const current =
+    key && !key.revoked && key.subscription === snapshot.subscription && key.start * 1000 === snapshot.periodStart
+      ? key
+      : undefined
+  // Until reconcile has made the period's key, nothing about its pool can be verified.
+  if (!current) return { ...shown, access }
+  const data = (await openRouterManagement(`/${encodeURIComponent(current.hash)}`, undefined, fetcher)).data
+  const usage =
+    stripeRecord(data) && typeof data.usage === "number" && Number.isFinite(data.usage) && data.usage >= 0
+      ? usdToMicro(data.usage)
+      : undefined
+  const spend = await readModelSpendLedger(id, current.hash, now, fetcher)
+  const figures = poolFigures(keyPool(current), usage ?? 0, poolLedger(spend))
+  const known = <T>(value: T) => (usage === undefined ? undefined : value)
+  const dailyShare = snapshot.caps.dailyShare
+  return {
+    ...shown,
+    access,
+    credits: microToUsd(figures.totalMicro),
+    used: known(microToUsd(figures.spentMicro)),
+    remaining: known(microToUsd(Math.max(0, figures.remainingMicro))),
+    available: known(microToUsd(Math.max(0, figures.availableMicro))),
+    // Live model reservations settle by their deadline (minutes); abandoned ones count for the rest of the period.
+    idleAvailable: known(microToUsd(Math.max(0, figures.availableMicro + spend.reservedMicro - spend.abandonedMicro))),
+    shareUsed: known(poolShareUsed(figures)),
+    ...(dailyShare === null
+      ? {}
+      : {
+          day: {
+            usedMicro: await readModelSpendDay(id, current.hash, now, fetcher),
+            limitMicro: Math.floor(figures.totalMicro * dailyShare),
+          },
+        }),
+  }
+}
+
+/**
+ * The pool of the snapshot's own period key, for estimates: its total (credits + carry, integer micro-dollars) and
+ * whether its credits are still the pool ramp's share (A10), which ends inside the period and raises the total.
+ * Undefined while that key is not yet the account's (reconcile has not made it, or a replacement is under way). That
+ * key from before the A17 ledger has no trusted credits: final, as at chat, not a retry.
+ */
+export async function snapshotPool(id: string, snapshot: EntitlementSnapshot, fetcher: typeof fetch = fetch) {
+  const key = (await readModelPlanAccount(id, fetcher))?.key
+  if (!key || key.revoked || key.subscription !== snapshot.subscription || key.start * 1000 !== snapshot.periodStart)
+    return undefined
+  if (key.creditsMicro === undefined) throw modelSpendUnavailable()
+  return {
+    totalMicro: key.creditsMicro + (key.carry?.micro ?? 0),
+    ramped: key.fullCreditsMicro !== undefined && key.creditsMicro < key.fullCreditsMicro,
+  }
 }
 
 /**
@@ -1686,63 +1795,6 @@ export async function snapshotPoolCredential(
   if (key.spendGenesis?.state !== "ready" || key.creditsMicro === undefined) throw modelSpendUnavailable()
   const ready = await readyKey(id, key, end, fetcher)
   return ready && { ...ready, accountRecord: String(raw) }
-}
-
-/**
- * The paid month as the account's screens show it, in dollars that never leave the server: `credits` is the pool's
- * total (credits + carry), `used` what was spent (model spend, never below the committed floor, plus debits),
- * `remaining` what is left of the month, `available` what a new request could still hold (M3, as HOLD and ADMIT
- * compute it), and `shareUsed` the whole-percent share spent.
- */
-async function monthlyStatus(id: string, fetcher: typeof fetch = fetch, now = Date.now()) {
-  const account = await readModelPlanAccount(id, fetcher)
-  if (!account) return { active: false as const }
-  if (account.closing) return { active: false as const, customer: true }
-  const listed = await subscriptions(account.customer, fetcher)
-  const governing = governingPaid(listed, id, now)
-  // While a renewal is being collected, the month just ended and its key are still the account's (M11).
-  const renewing = governing ? undefined : renewingPeriod(id, account, listed, now)
-  const paid = governing
-    ? { ...governing, plan: { id: governing.plan.id, credits: governing.plan.credits } }
-    : renewing
-      ? {
-          id: renewing.governing.id,
-          plan: { id: renewing.governing.plan, credits: renewing.key.credits },
-          start: renewing.governing.start,
-          end: renewing.governing.end,
-          cancelAtPeriodEnd: renewing.governing.cancelAtPeriodEnd,
-        }
-      : undefined
-  if (!paid) return { active: false as const, customer: true }
-  const current = account.key?.subscription === paid.id && account.key.start === paid.start ? account.key : undefined
-  const data = current
-    ? (await openRouterManagement(`/${encodeURIComponent(current.hash)}`, undefined, fetcher)).data
-    : undefined
-  const usage =
-    stripeRecord(data) && typeof data.usage === "number" && Number.isFinite(data.usage) && data.usage >= 0
-      ? usdToMicro(data.usage)
-      : current
-        ? undefined
-        : 0
-  // In test mode the key holds less than the plan's credits; the share left is of what the key can spend.
-  const pool = current
-    ? keyPool(current)
-    : { creditsMicro: usdToMicro(codiumKeyLimitUsd(paid.plan.credits)), carryMicro: 0 }
-  const ledger = current ? await readPoolLedger(id, current.hash, now, fetcher) : EMPTY_LEDGER
-  const figures = poolFigures(pool, usage ?? 0, ledger)
-  const known = <T>(value: T) => (usage === undefined ? undefined : value)
-  return {
-    active: true as const,
-    plan: paid.plan.id,
-    credits: microToUsd(figures.totalMicro),
-    used: known(microToUsd(figures.spentMicro)),
-    remaining: known(microToUsd(Math.max(0, figures.remainingMicro))),
-    available: known(microToUsd(Math.max(0, figures.availableMicro))),
-    shareUsed: known(poolShareUsed(figures)),
-    periodStart: paid.start * 1000,
-    periodEnd: paid.end * 1000,
-    cancelAtPeriodEnd: paid.cancelAtPeriodEnd,
-  }
 }
 
 /**

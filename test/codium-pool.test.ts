@@ -1104,9 +1104,12 @@ describe("M3: available is the same figure everywhere", () => {
     // Once usage catches up the figure is the same, not double: model spend is max(usage, committed).
     world.keys.get(HASH)!.usage = 2.5
     expect((await status()).monthly).toMatchObject({ used: 2.5, remaining: 1.5, available: 0 })
+    // The hold takes all that is left, so no request can be admitted: status says empty although 38% is unspent.
+    expect((await status()).balance).toMatchObject({ plan: { left: 0.38 }, empty: true, low: false })
     await hold.release()
     world.keys.get(HASH)!.usage = 3
     expect((await status()).monthly).toMatchObject({ used: 3, remaining: 1, available: 1 })
+    expect((await status()).balance).toMatchObject({ plan: { left: 0.25 }, empty: false, low: false })
     // The provider key's limit is never lowered by the floor (M1).
     await reconcileModelPlanAccount(user.id, fetcher)
     expect(patches()).toEqual([])

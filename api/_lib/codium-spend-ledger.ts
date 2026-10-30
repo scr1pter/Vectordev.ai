@@ -291,7 +291,70 @@ model_spend_compact(value, KEYS[1], KEYS[2])
 return {value.committed,value.reserved,value.abandoned,value.nonmodelHeld,value.applied,value.pending}
 `
 
-export const MODEL_SPEND_SCRIPTS = Object.freeze({ GENESIS, READ })
+/*
+ * DAY. What one pool has spent against today's daily share, counted as ADMIT counts it before adding a request
+ * (model-plan-admit.ts) less the model requests still running: the settled day bucket (KEYS[5]), every open reservation
+ * admitted today (ARGV[4], the UTC date) once past its deadline (abandoned: its outcome is unknown and it counts in
+ * full), every live nonmodel hold (a hold has no admission day, so ADMIT counts each one today) and every debit
+ * recorded today. A live reservation settles within minutes, usually for far less, so status's meter does not jump by
+ * it, as its month's `empty` does not. Read only: status shows it, and ADMIT alone decides. -1 when the ledger cannot
+ * be trusted.
+ */
+const DAY =
+  MODEL_SPEND_LUA +
+  `
+local now = integer(ARGV[1])
+local spend = model_spend_read(KEYS[1], KEYS[2], KEYS[3], KEYS[4], now, ARGV[2], ARGV[3])
+if not spend or not typed(KEYS[5], 'hash') then return -1 end
+local daily = integer(redis.call('HGET', KEYS[5], 'total') or '0')
+if not daily then return -1 end
+for _, record in pairs(spend.records) do
+  if record.state == 'open' and record.day == ARGV[4] and record.deadline <= now then daily = plus(daily, record.micro) end
+  if not daily then return -1 end
+end
+for _, held in ipairs(spend.holds) do
+  daily = plus(daily, held.micro)
+  if not daily then return -1 end
+end
+local dayStart = now - (now % 86400000)
+for _, debit in ipairs(spend.debits) do
+  if debit.at >= dayStart and debit.at < dayStart + 86400000 then daily = plus(daily, debit.micro) end
+  if not daily then return -1 end
+end
+return daily
+`
+
+export const MODEL_SPEND_SCRIPTS = Object.freeze({ GENESIS, READ, DAY })
+
+/**
+ * Today's spend on `pool` against the daily share (DAY), in integer micro-dollars: ADMIT's figure without the model
+ * requests still running.
+ */
+export async function readModelSpendDay(account: string, pool: string, now: number, fetcher: typeof fetch = fetch) {
+  if (!Number.isSafeInteger(now) || now < 0) throw modelSpendUnavailable()
+  const day = new Date(now).toISOString().slice(0, 10)
+  const result = Number(
+    await persistentStore(
+      [
+        "EVAL",
+        DAY,
+        5,
+        modelSpendKeys(pool).ledger,
+        modelSpendKeys(pool).reservations,
+        codiumKey("held", pool),
+        codiumKey("debits", account, pool),
+        codiumKey("day", pool, day),
+        now,
+        account,
+        pool,
+        day,
+      ],
+      fetcher,
+    ),
+  )
+  if (!Number.isSafeInteger(result) || result < 0) throw modelSpendUnavailable()
+  return result
+}
 
 export function modelSpendUnavailable() {
   return new ApiError(503, "MODEL_PLAN_POOL_UNAVAILABLE", "Your Codium usage could not be verified.")

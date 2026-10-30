@@ -86,6 +86,9 @@ const upstream = Bun.serve({
       return Response.json({ result: "OK" })
     }
     if (command[0] === "EVAL" && command[1]?.includes("'INCR'")) return Response.json({ result: [1, 60] })
+    // The catalog reads the owner's switched-off models (A18): none here.
+    if (command[0] === "SMEMBERS" && command[1] === "vector:codium:test:models-off")
+      return Response.json({ result: [] })
     throw new Error("Unexpected caller fixture command")
   },
 })

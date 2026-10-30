@@ -91,12 +91,17 @@ export function requireModelPlanClient(request: Pick<ApiRequest, "headers">) {
   return version
 }
 
-/** Only the paid chat and catalog use this marked/run-token gate; account and billing auth remain separate. */
+/**
+ * Only the paid chat, catalog and estimate use this marked/run-token gate; account and billing auth remain separate.
+ * `unmarked` lets an unmarked account token through as a CLI caller whatever the marked-token switch says: estimate
+ * answers it, since such a token may already read status, which says more (§4.13).
+ */
 export async function requireModelPlanCaller(
   request: Pick<ApiRequest, "headers">,
   fetcher: typeof fetch = fetch,
   now = Date.now(),
   registry = runVerifiers,
+  accepts: { unmarked?: boolean } = {},
 ): Promise<ModelPlanCaller> {
   const authorization = header(request, "authorization")
   if (authorization.length > 8192 || !/^Bearer [A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(authorization))
@@ -112,7 +117,8 @@ export async function requireModelPlanCaller(
     if (error instanceof ApiError && error.statusCode === 401) throw signInRequired()
     throw error
   })
-  if (claims.client !== "desktop" && claims.client !== "cli" && modelPlanRequireMarkedTokens()) throw signInRequired()
+  if (claims.client !== "desktop" && claims.client !== "cli" && !accepts.unmarked && modelPlanRequireMarkedTokens())
+    throw signInRequired()
   const purpose = header(request, "x-vector-purpose")
   return {
     account: { id: claims.id },

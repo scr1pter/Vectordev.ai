@@ -3,10 +3,11 @@ import { MODEL_SPEND_SCRIPTS } from "../../../../api/_lib/codium-spend-ledger"
 
 /*
  * The A17 spend scripts as TypeScript, step for step, for the in-memory stores that run the root `test/` suite without
- * Valkey (test.yml): GENESIS, the ledger's READ and the common pool HOLD, with the shared ledger read and fence they
- * are built from (codium-spend-ledger.ts MODEL_SPEND_LUA). Model ADMIT and SETTLE are deliberately not emulated: their
- * money and race assertions run only on real Lua. test/codium-pool.test.ts runs the same HOLD/READ cases both in
- * memory and on Valkey (VECTOR_TEST_REDIS_URL), which is the check that this emulation and the Lua agree.
+ * Valkey (test.yml): GENESIS, the ledger's READ, status's read-only DAY figure and the common pool HOLD, with the
+ * shared ledger read and fence they are built from (codium-spend-ledger.ts MODEL_SPEND_LUA). Model ADMIT and SETTLE are
+ * deliberately not emulated: their money and race assertions run only on real Lua. test/codium-pool.test.ts runs the
+ * same HOLD/READ cases both in memory and on Valkey (VECTOR_TEST_REDIS_URL), which is the check that this emulation and
+ * the Lua agree; DAY's agreement with ADMIT is checked on real Lua in model-plans-api.test.ts.
  */
 
 export type SpendValue =
@@ -251,6 +252,7 @@ export function spendScripts(store: SpendStore): [string, Script][] {
       debits.push(debit)
     }
     let nonmodelHeld: number | undefined = 0
+    const holds: NonNullable<ReturnType<typeof member>>[] = []
     for (const [raw, score] of scores(heldKey)) {
       const held = member(raw)
       if (!held || integer(score) === undefined) return undefined
@@ -265,6 +267,7 @@ export function spendScripts(store: SpendStore): [string, Script][] {
       } else if (score > now) {
         nonmodelHeld = plus(nonmodelHeld, held.micro)
         if (nonmodelHeld === undefined) return undefined
+        if (!debitHolds.has(raw)) holds.push(held)
       }
     }
     for (const debit of debits) {
@@ -273,7 +276,22 @@ export function spendScripts(store: SpendStore): [string, Script][] {
       const score = integer(value?.kind === "zset" ? value.value.get(String(debit.hold)) : undefined)
       if (score === undefined || score <= now || records.has(member(debit.hold)!.ticket)) return undefined
     }
-    return { genesis, committed, compacted, reserved, abandoned, openCount, nonmodelHeld, applied, pending, records, gc, gcMicro }
+    return {
+      genesis,
+      committed,
+      compacted,
+      reserved,
+      abandoned,
+      openCount,
+      nonmodelHeld,
+      applied,
+      pending,
+      records,
+      debits,
+      holds,
+      gc,
+      gcMicro,
+    }
   }
   type Spend = NonNullable<ReturnType<typeof spendRead>>
 
@@ -452,6 +470,24 @@ export function spendScripts(store: SpendStore): [string, Script][] {
         if (!value) return [-1]
         compact(value, ledgerKey!, reservationsKey!)
         return [value.committed, value.reserved, value.abandoned, value.nonmodelHeld, value.applied, value.pending]
+      },
+    ],
+    [
+      MODEL_SPEND_SCRIPTS.DAY,
+      ([ledgerKey, reservationsKey, heldKey, debitsKey, dayKey], [rawNow, account, pool, day]) => {
+        const now = integer(rawNow)
+        const value = spendRead(ledgerKey!, reservationsKey!, heldKey!, debitsKey!, now, account!, pool!)
+        if (!value || now === undefined || !typed(dayKey!, "hash")) return -1
+        let daily = integer(hget(dayKey!, "total") ?? "0")
+        for (const record of value.records.values())
+          if (record.state === "open" && record.day === day && Number(record.deadline) <= now)
+            daily = plus(daily, Number(record.micro))
+        for (const held of value.holds) daily = plus(daily, held.micro)
+        const dayStart = now - (now % 86_400_000)
+        for (const debit of value.debits)
+          if (Number(debit.at) >= dayStart && Number(debit.at) < dayStart + 86_400_000)
+            daily = plus(daily, Number(debit.micro))
+        return daily ?? -1
       },
     ],
     [

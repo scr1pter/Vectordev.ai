@@ -7,7 +7,7 @@ import type { EntitlementSnapshot } from "../../packages/schema/src/codium-entit
 import { requireModelPlanCaller, requireModelPlanClient, type ModelPlanCaller } from "./model-plan-caller.js"
 import { readModelPlanAccount, snapshotPoolCredential } from "./model-plan-account.js"
 import { admitModelPlan, settleModelPlanDurably, type AdmissionTicket } from "./model-plan-admit.js"
-import { gatewayPlanModels, verifiedGatewayModel } from "./model-plan-catalog-policy.js"
+import { gatewayPlanModels, verifiedGatewayModel, type ModelPlanCatalogOptions } from "./model-plan-catalog-policy.js"
 import { beforeAdmit, afterSettle, type GatewayHookOptions } from "./model-plan-gateway-hooks.js"
 import { requireEntitlement, requireUsableSnapshot, reconcileOnDemand } from "./codium-entitlements.js"
 import { readDisabledSet } from "./codium-switches.js"
@@ -374,13 +374,8 @@ function contextRefused(body: string) {
   return /context[ _-]?(length|window)|maximum context|too many tokens|prompt is too long/i.test(body.slice(0, 8_192))
 }
 
-export type ModelPlanGatewayOptions = GatewayHookOptions & {
-  /** Explicit trusted dependencies for local fakes; production uses the captured active catalog and qualification. */
-  models?: readonly ModelPlanModel[]
-  qualify?: (model: ModelPlanModel) => boolean
-  reservation?: typeof modelPlanReservation
-  runVerifiers?: Parameters<typeof requireModelPlanCaller>[3]
-}
+/** Explicit trusted dependencies for local fakes; production uses the captured active catalog and qualification. */
+export type ModelPlanGatewayOptions = GatewayHookOptions & ModelPlanCatalogOptions
 
 export async function handleModelPlanChat(
   request: ApiRequest,

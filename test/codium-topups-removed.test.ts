@@ -150,6 +150,8 @@ function store(input: unknown[]) {
     return 1
   }
   if (name === "HSCAN") return ["0", [...hash(args[0]!)].flat()]
+  // Status's catalog read (A18): no model is switched off.
+  if (name === "SMEMBERS") return []
   if (name === "ZREM") return 1
   if (name === "EVAL") {
     const [script, , key, token] = args as [string, string, string, string]
@@ -161,6 +163,7 @@ function store(input: unknown[]) {
       return 1
     }
     if (script === MODEL_SPEND_SCRIPTS.READ) return [0, 0, 0, 0, 0, 0]
+    if (script === MODEL_SPEND_SCRIPTS.DAY) return 0
     if (script === POOL_SCRIPTS.DEBIT) return 1
     if (script === POOL_SCRIPTS.DEBITS) return [...hash(key)].flat()
     if (script === POOL_SCRIPTS.APPLY) return 0
@@ -391,6 +394,7 @@ describe("status still says nothing was bought", () => {
       enabled: true,
       active: false,
       access: false,
+      listed: [],
       purchased: { bought: false },
       empty: true,
       low: false,
@@ -403,12 +407,15 @@ describe("status still says nothing was bought", () => {
       active: false,
       customer: true,
       access: false,
+      listed: [],
       purchased: { bought: false },
       empty: true,
       low: false,
     })
-    // With a paid month, access is that month alone.
+    // With a paid month, access is that month alone. Status reads the plan from the snapshot (A18), which a paid
+    // invoice's notification reconciles; the read above cached "no plan" for a minute.
     world.subscriptions = [paidSubscription()]
+    await reconcileModelPlanAccount(user.id, fetcher)
     const active = await status()
     expect(active).toMatchObject({
       enabled: true,
@@ -420,7 +427,9 @@ describe("status still says nothing was bought", () => {
       empty: false,
       low: false,
     })
-    expect(JSON.stringify(active)).not.toMatch(/wallet|state|credits/)
+    // Nothing of the old wallet: no purchased state (available, low or used) and no credits.
+    expect(active.purchased).toEqual({ bought: false })
+    expect(JSON.stringify(active)).not.toMatch(/wallet|credits|"state":"(available|low|used)"/)
     // Without Stripe configured the short answer keeps the field too.
     delete process.env.STRIPE_SECRET_KEY
     expect(await status()).toMatchObject({ active: false, purchased: { bought: false } })

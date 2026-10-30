@@ -496,7 +496,11 @@ export async function readPoolLedger(
   now: number,
   fetcher: typeof fetch = fetch,
 ): Promise<PoolLedger> {
-  const ledger = await readModelSpendLedger(account, keyHash, now, fetcher)
+  return poolLedger(await readModelSpendLedger(account, keyHash, now, fetcher))
+}
+
+/** The pool's view of one key's spend ledger: live model reservations and live nonmodel holds are one held sum. */
+export function poolLedger(ledger: Awaited<ReturnType<typeof readModelSpendLedger>>): PoolLedger {
   return {
     heldMicro: ledger.nonmodelHeldMicro + ledger.reservedMicro - ledger.abandonedMicro,
     abandonedMicro: ledger.abandonedMicro,

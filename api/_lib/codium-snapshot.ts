@@ -129,6 +129,13 @@ const ACTIONS = {
   payment_pending: "update-card",
 } as const
 
+/** Why a paused plan is paused and what fixes it: the same answer the 402 and the status's `plan.action` give. */
+export function pausedPayment(snapshot: Pick<EntitlementSnapshot, "reason">) {
+  const reason =
+    snapshot.reason === "action_required" || snapshot.reason === "payment_pending" ? snapshot.reason : "payment_failed"
+  return { reason, action: ACTIONS[reason] } as const
+}
+
 /**
  * The snapshot when its plan state lets it use Codium now, or `requireEntitlement`'s refusal for that state. Here so a
  * snapshot already in hand (one a reconcile just returned, or the one a pool hold reads) gets the same final answers
@@ -150,13 +157,8 @@ export function requireUsableSnapshot(snapshot: EntitlementSnapshot | undefined,
     })
   }
   if (snapshot.state === "paused") {
-    const reason =
-      snapshot.reason === "action_required" || snapshot.reason === "payment_pending"
-        ? snapshot.reason
-        : "payment_failed"
-    throw new ApiError(402, "MODEL_PLAN_PAYMENT_REQUIRED", PAYMENT_MESSAGES[reason], {
-      detail: { reason, action: ACTIONS[reason] },
-    })
+    const payment = pausedPayment(snapshot)
+    throw new ApiError(402, "MODEL_PLAN_PAYMENT_REQUIRED", PAYMENT_MESSAGES[payment.reason], { detail: payment })
   }
   if (snapshot.state === "frozen")
     throw new ApiError(

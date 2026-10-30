@@ -9,6 +9,7 @@ import { join } from "node:path"
 import { mintCliToken } from "../../../api/_lib/cli-token"
 import {
   cancelModelPlanAccount,
+  holdPool,
   keyExpiresAt,
   modelPlanCheckout,
   modelPlanCredential,
@@ -17,6 +18,7 @@ import {
   paidModelPlan,
   readModelPlanAccount,
   reconcileModelPlanAccount,
+  snapshotPoolCredential,
 } from "../../../api/_lib/model-plan-account"
 import {
   handleModelPlanChange,
@@ -25,13 +27,14 @@ import {
   handleModelTopupRemoved,
 } from "../../../api/_lib/model-plan-billing"
 import { handleModelPlanChat } from "../../../api/_lib/model-plan-chat"
-import { ADMISSION_SCRIPTS } from "../../../api/_lib/model-plan-admit"
+import { ADMISSION_SCRIPTS, admitModelPlan, settleModelPlan } from "../../../api/_lib/model-plan-admit"
+import { readSnapshot } from "../../../api/_lib/codium-snapshot"
 import { drainOutbox, enqueueAction } from "../../../api/_lib/codium-provision"
 import { createRunVerifierRegistry, type ModelPlanCaller } from "../../../api/_lib/model-plan-caller"
 import type { AfterSettleContext, GatewayHook } from "../../../api/_lib/model-plan-gateway-hooks"
 import { ApiError } from "../../../api/_lib/http"
-import { readModelSpendLedger } from "../../../api/_lib/codium-spend-ledger"
-import { verifiedGatewayModel } from "../../../api/_lib/model-plan-catalog-policy"
+import { readModelSpendDay, readModelSpendLedger } from "../../../api/_lib/codium-spend-ledger"
+import { verifiedGatewayModel, type ModelPlanCatalogOptions } from "../../../api/_lib/model-plan-catalog-policy"
 import { CODIUM_MODELS } from "../../../api/_lib/codium-catalog"
 import {
   modelPlanAttempts,
@@ -43,6 +46,7 @@ import { handleModelPlanModels } from "../../../api/_lib/model-plan-models"
 import { handleModelPlanStatus, modelPlanBalance } from "../../../api/_lib/model-plan-status"
 import { ModelPlans } from "@vectordevai/core/model-plans"
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
+import { publicEntitlements } from "../../../packages/schema/src/codium-entitlements"
 
 // External HTTP boundaries are local fixtures; leases and rate-limit Lua run
 // against a real, isolated Redis/Valkey database, just as in free-models-api.
@@ -394,30 +398,36 @@ const fixtureReservation = (selected: ModelPlanModel, plan: Parameters<typeof mo
   const attempts = modelPlanAttempts(plan)
   return { attemptMicro, attempts, requiredMicro: attemptMicro * attempts }
 }
+// Only this local upstream implements the invented fixture model. Planned catalogs must be explicitly supplied by a
+// test; ordinary active-model requests retain the production qualification guard. Chat, /models and status read the
+// same served catalog, as in production.
+const catalogOptions = (): ModelPlanCatalogOptions => ({
+  models: state.gatewayModels,
+  runVerifiers: state.runVerifiers,
+  qualify: (selected) =>
+    state.gatewayModels
+      ? state.gatewayModels.some((model) => model.id === selected.id)
+      : selected.id === model.id || verifiedGatewayModel(selected),
+  reservation: (selected, plan) =>
+    !state.gatewayModels && selected.id !== model.id
+      ? modelPlanReservation(selected, plan)
+      : fixtureReservation(selected, plan),
+})
 const server = createServer((request, response) => {
   // /chat is the gateway as the other tests call it; the /api/model-plans paths are what Vector itself requests.
-  if (request.url === "/api/model-plans/models") return void handleModelPlanModels(request, response, fetcher)
-  if (request.url === "/api/model-plans/status") return void handleModelPlanStatus(request, response, fetcher)
+  if (request.url === "/api/model-plans/models")
+    return void handleModelPlanModels(request, response, fetcher, catalogOptions())
+  if (request.url === "/api/model-plans/status")
+    return void handleModelPlanStatus(request, response, fetcher, catalogOptions())
   if (request.url === "/api/model-plans/change") return void handleModelPlanChange(request, response, fetcher)
   if (request.url === "/api/model-plans/checkout") return void handleModelPlanCheckout(request, response, fetcher)
   if (request.url === "/api/model-plans/topup") return void handleModelTopupRemoved(request, response)
   if (request.url === "/api/model-plans/portal") return void handleModelPlanPortal(request, response, fetcher)
-  // Only this local upstream implements the invented fixture model. Planned catalogs must be explicitly supplied by
-  // a test; ordinary active-model requests retain the production qualification guard.
   void handleModelPlanChat(request, response, state.gatewayFetcher ?? fetcher, {
-    models: state.gatewayModels,
-    runVerifiers: state.runVerifiers,
+    ...catalogOptions(),
     assertHostedSessionLive: state.hostedLive,
     // Scoped service hooks for one test; production registrations are never replaced.
     hooks: state.hooks,
-    qualify: (selected) =>
-      state.gatewayModels
-        ? state.gatewayModels.some((model) => model.id === selected.id)
-        : selected.id === model.id || verifiedGatewayModel(selected),
-    reservation: (selected, plan) =>
-      !state.gatewayModels && selected.id !== model.id
-        ? modelPlanReservation(selected, plan)
-        : fixtureReservation(selected, plan),
   })
 })
 
@@ -562,6 +572,8 @@ async function chat(
   return new Response(await response.arrayBuffer(), { status: response.status, headers: response.headers })
 }
 const mutations = () => calls.filter((call) => call.path.startsWith("/api/v1/keys") && call.method !== "GET")
+/** Drops the account's 30-second status answer, as its lapse would. */
+const forgetStatus = () => redis(["DEL", `vector:codium:test:status:${user.id}`])
 const chats = () => calls.filter((call) => call.path === "/api/v1/chat/completions")
 
 describe("subscription checkout with real billing leases", () => {
@@ -1348,7 +1360,11 @@ describe("model plan HTTP inference", () => {
     }
     expect(chats()).toHaveLength(0)
     // The account's status agrees: too few left for any request, not merely running low.
-    expect(modelPlanBalance(await modelPlanStatus(user.id, fetcher))).toMatchObject({ empty: true, low: false })
+    expect(
+      modelPlanBalance(await modelPlanStatus(user.id, fetcher), {
+        cheapestMicro: fixtureReservation(model, "vector-10").requiredMicro,
+      }),
+    ).toMatchObject({ empty: true, low: false })
     // Just enough for the largest request is served, whatever this request asks for.
     keys.get("hash_fixture1")!.data.usage = 5 - 0.0123
     const served = await chat()
@@ -1536,6 +1552,8 @@ describe("Codium credits used from Vector", () => {
       message: expect.stringContaining(`Buy credits at ${ModelPlanStatus.PURCHASE_URL}`),
     })
     expect(chats()).toHaveLength(1)
+    // Status keeps an answer 30 s (§4.11); this read stands for one after that.
+    await forgetStatus()
     const empty = await ModelPlanStatus.fetchStatus(token, forward)
     expect(empty).toMatchObject({ plan: { left: 0 }, empty: true })
     expect(ModelPlanStatus.notice(empty)?.kind).toBe("empty")
@@ -1561,24 +1579,46 @@ describe("Codium credits used from Vector", () => {
         left: 0.75,
         renewsAt: current.items.data[0]!.current_period_end * 1000,
         cancelAtPeriodEnd: false,
+        state: "active",
+        // Plus may use a quarter of its month a day; nothing was spent today.
+        today: { used: 0, resetsAt: expect.any(Number), reached: false },
       },
+      listed: [],
+      entitlements: publicEntitlements("vector-10", new Set()),
       purchased: { bought: false },
       empty: false,
       low: false,
     })
-    // Neither the allowance (5), what was used nor what is left reaches the app, the CLI or the browser.
-    expect(JSON.stringify(body)).not.toMatch(/credits|used|remaining|wallet|1\.234|3\.766|"5"|:5[,}]/)
+    expect(body.plan.today.resetsAt % 86_400_000).toBe(0)
+    expect(body.plan.today.resetsAt).toBeGreaterThan(Date.now())
+    // Neither the allowance (5), what was used nor what is left reaches the app, the CLI or the browser: every number
+    // is a share in 0..1, a timestamp, or one of the plan's public caps (P1).
+    expect(JSON.stringify(body)).not.toMatch(/credits|remaining|wallet|1\.234|3\.766|"5"|:5[,}]/)
+    const { entitlements: _caps, ...shares } = body
+    const numbers = JSON.stringify(shares).match(/"(\w+)":(-?[\d.]+)/g) ?? []
+    for (const entry of numbers) {
+      const [, key, value] = /"(\w+)":(-?[\d.]+)/.exec(entry)!
+      if (key === "renewsAt" || key === "resetsAt") expect(Number(value)).toBeGreaterThan(1_700_000_000_000)
+      else expect(Number(value) >= 0 && Number(value) <= 1).toBe(true)
+    }
 
     // Running low is a tenth of this month's credits; too few for the catalog's cheapest largest request
-    // ($0.012288 for the fixture model) is empty, the point where the gateway refuses every request.
+    // ($0.012288 for the fixture model) is empty, the point where the gateway refuses every request. Status keeps an
+    // answer 30 s (§4.11); each read below stands for one after that.
     keys.get("hash_fixture1")!.data.usage = 4.51
+    await forgetStatus()
     expect(await read()).toMatchObject({ plan: { left: 0.1 }, empty: false, low: true })
     keys.get("hash_fixture1")!.data.usage = 5 - 0.013
+    await forgetStatus()
     expect(await read()).toMatchObject({ plan: { left: 0 }, empty: false, low: true })
     keys.get("hash_fixture1")!.data.usage = 5 - 0.012
+    // Within the 30 s the earlier answer stands.
+    expect(await read()).toMatchObject({ plan: { left: 0 }, empty: false, low: true })
+    await forgetStatus()
     expect(await read()).toMatchObject({ plan: { left: 0 }, empty: true, low: false })
     // A key whose usage cannot be read leaves the share unknown and raises no flag.
     delete keys.get("hash_fixture1")!.data.usage
+    await forgetStatus()
     const unknown = await read()
     expect(unknown).toMatchObject({ empty: false, low: false })
     expect(unknown.plan).not.toHaveProperty("left")
@@ -1628,6 +1668,20 @@ describe("A17 admission and chat", () => {
     registry.register("vrt_", async (token) => caller(token))
     registry.register("vht_", async (token) => caller(token))
     state.runVerifiers = registry
+  }
+  // A fresh status read: the 30-second answer is dropped first.
+  const status = async () => {
+    await forgetStatus()
+    const response = await fetch(`${state.origin}/api/model-plans/status`, {
+      headers: { authorization: `Bearer ${mintCliToken(user).token}` },
+    })
+    return response.json()
+  }
+  // A model reservation of `micro` admitted at `at`, as the gateway admits a request before dispatching it.
+  const reserve = async (micro: number, at: number) => {
+    const snapshot = (await readSnapshot(user.id, fetcher))!
+    const funding = (await snapshotPoolCredential(user.id, snapshot, fetcher, at))!
+    return admitModelPlan({ snapshot, funding, requiredMicro: micro, purpose: "chat" }, fetcher, at)
   }
   const runCaller = (
     run: string,
@@ -2046,6 +2100,77 @@ describe("A17 admission and chat", () => {
     const midnight = Math.ceil((86_400_000 - (Date.now() % 86_400_000)) / 1000)
     expect(Math.abs(Number(refused.headers.get("retry-after")) - midnight)).toBeLessThanOrEqual(2)
     expect(chats()).toHaveLength(2)
+  })
+
+  test("status's today counts what ADMIT counts: a live pool hold that leaves no room is reached, one micro less is not", async () => {
+    await subscribed()
+    // Plus: a quarter of 5 a day is 1.25 allowed; the fixture model reserves 0.012288 an attempt, one attempt on Plus.
+    // A live nonmodel hold has no admission day, so both count it today; it leaves room for the request or it does not.
+    for (const [usd, reached, answer] of [
+      [1.237713, true, 429],
+      [1.237712, false, 200],
+    ] as const) {
+      const hold = await holdPool(user.id, usd, 60_000, "hosted", { fetcher })
+      expect((await status()).plan.today).toMatchObject({ used: 0.99, reached })
+      const response = await chat()
+      expect(response.status).toBe(answer)
+      if (answer === 429) expect(await response.json()).toMatchObject({ error: { code: "MODEL_PLAN_DAILY_LIMIT" } })
+      else await response.text()
+      await hold.release()
+    }
+  })
+
+  test("status's today leaves running requests out, as empty does; an abandoned reservation counts in full", async () => {
+    await subscribed()
+    // Plus: a quarter of 5 a day is 1.25 allowed; the fixture model reserves 0.012288 an attempt, one attempt on Plus.
+    // A request still running holds 1.24 until it settles, minutes later. ADMIT counts it, so a second request is refused
+    // meanwhile, but the day's meter neither jumps by the reservation nor shows the limit reached (both would then
+    // stay for the 30 seconds the answer is kept).
+    const running = await reserve(1_240_000, Date.now())
+    expect((await status()).plan.today).toMatchObject({ used: 0, reached: false })
+    const refused = await chat()
+    expect(refused.status).toBe(429)
+    expect(await refused.json()).toMatchObject({ error: { code: "MODEL_PLAN_DAILY_LIMIT" } })
+    await settleModelPlan(running, { kind: "cancel" }, fetcher)
+    // Past its deadline a reservation's outcome is unknown, so today counts it in full, as ADMIT does. The day figure
+    // status reads, just before and at the deadline: eleven minutes inside one UTC day and the subscribed hour.
+    const now = Date.now()
+    const at = Math.max(now - 3_000_000, now - (now % 86_400_000) + 1_000)
+    const ticket = await reserve(1_240_000, at)
+    expect(await readModelSpendDay(user.id, "hash_fixture1", at + 659_999, fetcher)).toBe(0)
+    expect(await readModelSpendDay(user.id, "hash_fixture1", at + 660_000, fetcher)).toBe(1_240_000)
+    await settleModelPlan(ticket, { kind: "cancel" }, fetcher)
+  })
+
+  test("status's empty counts what ADMIT counts: an abandoned reservation that leaves no room is empty", async () => {
+    await subscribed()
+    // Plus: 5 of allowance, 4.9 used, so 0.1 is left; the fixture model reserves 0.012288, one attempt on Plus.
+    keys.get("hash_fixture1")!.data.usage = 4.9
+    // A request admitted 661 s ago whose function was killed before its finally settled it: past its deadline its
+    // outcome is unknown, and it counts in full for the rest of the period.
+    const abandoned = () => Date.now() - 661_000
+    for (const [micro, empty, answer] of [
+      [87_713, true, 402],
+      [87_712, false, 200],
+    ] as const) {
+      const ticket = await reserve(micro, abandoned())
+      expect(await status()).toMatchObject({ plan: { left: 0.02 }, empty, low: !empty })
+      const response = await chat()
+      expect(response.status).toBe(answer)
+      if (answer === 402) expect(await response.json()).toMatchObject({ error: { code: "MODEL_PLAN_EXHAUSTED" } })
+      else await response.text()
+      await settleModelPlan(ticket, { kind: "cancel" }, fetcher)
+    }
+    // The served request settles just after its answer ends; wait for that, so only the next reservation is open.
+    for (let tries = 0; tries < 100; tries++) {
+      if (!(await readModelSpendLedger(user.id, "hash_fixture1", Date.now(), fetcher)).reservedMicro) break
+      await Bun.sleep(10)
+    }
+    // A request still running holds the same amount only until it settles, minutes later: ADMIT waits for it, and the
+    // month is not shown as used up meanwhile.
+    const running = await reserve(87_713, Date.now())
+    expect(await status()).toMatchObject({ plan: { left: 0.02 }, empty: false, low: true })
+    await settleModelPlan(running, { kind: "cancel" }, fetcher)
   })
 
   test("Brain requests share a tenth of the period, and the refusal is not a credit code", async () => {

@@ -1,7 +1,58 @@
 import { CodiumPlan } from "../../packages/schema/src/codium-plan.js"
 import { CODIUM_MODELS, CODIUM_TIER_MODELS } from "./codium-catalog.js"
-import { configuredPlanModels, type ModelPlanModel } from "./model-plan-config.js"
+import {
+  configuredPlanModels,
+  effectiveModel,
+  modelAccess,
+  type modelPlanReservation,
+  type ModelPlanModel,
+} from "./model-plan-config.js"
+import type { requireModelPlanCaller } from "./model-plan-caller.js"
 import { CAPTURED_RESERVATIONS, RESERVATION_CAPTURE, ROUTE_ACCEPTANCES } from "./codium-reservations.js"
+import { readDisabledSet } from "./codium-switches.js"
+
+/**
+ * What a catalog read (chat, /models, status and estimate) may take from a local fake instead of production. Production
+ * passes nothing: the captured active catalog, `verifiedGatewayModel` and the captured reservations.
+ */
+export type ModelPlanCatalogOptions = {
+  models?: readonly ModelPlanModel[]
+  qualify?: (model: ModelPlanModel) => boolean
+  reservation?: typeof modelPlanReservation
+  runVerifiers?: Parameters<typeof requireModelPlanCaller>[3]
+}
+
+/**
+ * The models the gateway serves now: the catalog (Pro floors and pinned routes applied) less every model or upstream
+ * the owner switched off and every route without accepted evidence. With ROUTE_ACCEPTANCES empty that is none, which is
+ * exactly what chat answers (503 before any snapshot), so no surface lists a model chat would refuse.
+ */
+export async function servedPlanModels(options: ModelPlanCatalogOptions, fetcher: typeof fetch = fetch) {
+  const catalog = options.models ?? gatewayPlanModels()
+  const qualify = options.qualify ?? verifiedGatewayModel
+  const disabled = await readDisabledSet("models-off", fetcher)
+  return catalog.filter(
+    (model) => !disabled.has(model.id) && !(model.upstream && disabled.has(model.upstream)) && qualify(model),
+  )
+}
+
+/**
+ * How a served model appears on `plan`: whether the plan may use it, the plan its lock names (Ultra while a preview
+ * runs, as chat's 403 says), the routing variant that plan would get (a locked model at its lock plan), and whether that
+ * variant is itself qualified, which chat checks again before reserving anything.
+ */
+export function planView(
+  model: ModelPlanModel,
+  plan: CodiumPlan.PlanId,
+  qualify: (model: ModelPlanModel) => boolean = verifiedGatewayModel,
+  now = Date.now(),
+) {
+  const access = modelAccess(model, plan, now)
+  const preview = model.previewUntil !== undefined && now < model.previewUntil ? model.previewUntil : undefined
+  const lock: CodiumPlan.PlanId = preview !== undefined ? "vector-200" : (model.minPlan ?? "vector-10")
+  const effective = effectiveModel(model, access ? plan : lock)
+  return { access, lock, preview, effective, served: qualify(effective) }
+}
 
 /** Apply approved access tiers to the verified active catalog without activating the staged routes or larger windows. */
 export function gatewayPlanModels(): readonly ModelPlanModel[] {
