@@ -134,10 +134,9 @@ function specialistFocus(permitted?: readonly string[]) {
   if (listed.length === 0) return ""
   return `: ${listed.map(([name, focus]) => `${name} for ${focus}`).join("; ")}`
 }
-// When to delegate, how to launch and how to follow up live here; the parameter rules (owned_paths, depends_on,
-// success_criteria) and the limits live in the task tool's description, so a request carries each rule once. Work and
-// Thorough send the same lines, so the stable block stays cached across sizes. Isolated worktrees are named here only
-// once the task tool takes them.
+// When to delegate, how to launch and how to follow up live here; the parameter rules (owned_paths, isolation,
+// depends_on, success_criteria) and the limits live in the task tool's description, so a request carries each rule
+// once. Work and Thorough send the same lines, so the stable block stays cached across sizes.
 const subagentIntro = (fork: boolean) =>
   `You can hand work to real child agents with the task tool. Each child starts with an empty context${fork ? " unless you fork it" : ""}, works on its own and reports only to you; the user does not see its report.`
 const SUBAGENT_WHEN = [
@@ -148,7 +147,7 @@ const subagentOrchestration = (fork: boolean) => [
   "Put every independent brief you already know about in one task call, in the background. Say in one line what you launched, then keep doing work that does not overlap, or end your turn. Vector notifies you when each one finishes: never poll, sleep or wait in a loop, and do not redo, re-read or re-check what a running child owns.",
   `Brief each child like a capable colleague who has seen none of this conversation: the goal and why, what you already know, files and constraints, whether to edit or only research, how to verify, and what its final report must contain.${fork ? " Fork instead when the work needs this conversation and your provider caches prompts." : ""}`,
   "To correct a running child, use task_manage message; to continue a finished one with its context, call task with its task_id rather than starting a new one; stop children whose work is no longer needed; answer the user's status questions from task_manage list or inspect.",
-  "The task tool's description has the rules for owned_paths, depends_on, success_criteria and limits.",
+  "The task tool's description has the rules for owned_paths, isolation, depends_on, success_criteria and limits.",
 ]
 const SUBAGENT_MODELS =
   "Subagents run on your provider and model, at your effort, unless their agent sets its own model or effort or you set model or effort on a brief. explore runs on the provider's small model only when that model can call tools and is known to cost less than yours, and otherwise on your model without high effort; a learned workflow default can move general subagents to that small model on the same terms."

@@ -88,8 +88,9 @@ export const ReadTool = Tool.define<
     const lsp = yield* LSP.Service
     const scope = yield* Scope.Scope
 
-    const miss = Effect.fn("ReadTool.miss")(function* (filepath: string) {
+    const miss = Effect.fn("ReadTool.miss")(function* (filepath: string, ctx: Tool.Context) {
       const dir = path.dirname(filepath)
+      yield* ctx.assertReadable?.({ files: [dir], recursive: true }) ?? Effect.void
       const base = path.basename(filepath)
       const items = yield* fs.readDirectory(dir).pipe(
         Effect.map((items) =>
@@ -254,6 +255,9 @@ export const ReadTool = Tool.define<
         filepath = FSUtil.normalizePath(filepath)
       }
       const title = path.relative(instance.worktree, filepath)
+      // A guest family may not probe a private task folder, even for whether a file exists. The runtime checks the
+      // read targets again before the output reaches history or the model.
+      yield* ctx.assertReadable?.({ files: [filepath] }) ?? Effect.void
 
       const stat = yield* fs.stat(filepath).pipe(
         Effect.catchIf(
@@ -261,6 +265,8 @@ export const ReadTool = Tool.define<
           () => Effect.succeed(undefined),
         ),
       )
+
+      if (stat?.type === "Directory") yield* ctx.assertReadable?.({ files: [filepath], recursive: true }) ?? Effect.void
 
       yield* assertExternalDirectoryEffect(ctx, filepath, {
         bypass: Boolean(ctx.extra?.["bypassCwdCheck"]),
@@ -273,8 +279,7 @@ export const ReadTool = Tool.define<
         always: ["*"],
         metadata: {},
       })
-
-      if (!stat) return yield* miss(filepath)
+      if (!stat) return yield* miss(filepath, ctx)
 
       if (stat.type === "Directory") {
         const items = yield* list(filepath)

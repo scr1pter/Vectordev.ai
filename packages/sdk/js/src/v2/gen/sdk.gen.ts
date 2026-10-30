@@ -77,10 +77,16 @@ import type {
   ExperimentalTaskBridgeReceiptResponses,
   ExperimentalTaskBridgeRegisterErrors,
   ExperimentalTaskBridgeRegisterResponses,
+  ExperimentalTaskChangesErrors,
+  ExperimentalTaskChangesResponses,
+  ExperimentalTaskDiscardErrors,
+  ExperimentalTaskDiscardResponses,
   ExperimentalTaskInspectErrors,
   ExperimentalTaskInspectResponses,
   ExperimentalTaskListErrors,
   ExperimentalTaskListResponses,
+  ExperimentalTaskMergeErrors,
+  ExperimentalTaskMergeResponses,
   ExperimentalTaskMessageErrors,
   ExperimentalTaskMessageResponses,
   ExperimentalTaskResumeErrors,
@@ -1663,6 +1669,140 @@ export class Task extends HeyApiClient {
       ThrowOnError
     >({
       url: "/experimental/session/{sessionID}/tasks/resume",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Review an isolated task's changes
+   *
+   * Read an isolated child's changed files and, with diff=true, its bounded patch. Only the authenticated owner receives paths and the patch; other viewers receive counts.
+   */
+  public changes<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      taskID: string
+      directory?: string
+      workspace?: string
+      diff?: boolean | "true" | "false"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "taskID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "diff" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      ExperimentalTaskChangesResponses,
+      ExperimentalTaskChangesErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/session/{sessionID}/tasks/{taskID}/changes",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Merge an isolated task
+   *
+   * Owner only. Bring an isolated child's saved changes, or the selected files, into the parent checkout after a checkpoint.
+   */
+  public merge<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      taskID: string
+      directory?: string
+      workspace?: string
+      files?: Array<string>
+      includeStacked?: boolean
+      force?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "taskID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "files" },
+            { in: "body", key: "includeStacked" },
+            { in: "body", key: "force" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      ExperimentalTaskMergeResponses,
+      ExperimentalTaskMergeErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/session/{sessionID}/tasks/{taskID}/merge",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Discard an isolated task
+   *
+   * Owner only. Keep a recovery artifact, then remove an isolated child's checkout and branch.
+   */
+  public discard<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      taskID: string
+      directory?: string
+      workspace?: string
+      reason?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "taskID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "reason" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      ExperimentalTaskDiscardResponses,
+      ExperimentalTaskDiscardErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/session/{sessionID}/tasks/{taskID}/discard",
       ...options,
       ...params,
       headers: {

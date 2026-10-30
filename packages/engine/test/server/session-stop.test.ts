@@ -1,4 +1,5 @@
 import { NodeHttpServer } from "@effect/platform-node"
+import { SessionAudience } from "@vectordevai/core/session/audience"
 import { expect } from "bun:test"
 import { Effect, Layer } from "effect"
 import { HttpClient, HttpClientRequest, HttpRouter, HttpServerRequest } from "effect/unstable/http"
@@ -132,6 +133,13 @@ const it = testEffect(
   ).pipe(
     Layer.provideMerge(NodeHttpServer.layerTest),
     Layer.provideMerge(Layer.effect(BackgroundJob.Service, BackgroundJob.make)),
+    // Handlers read the audience per request. No conversation here is owner-only; the mocked sessions count as known.
+    Layer.provide(
+      Layer.mock(SessionAudience.Service)({
+        knows: () => Effect.succeed(true),
+        isPrivate: () => Effect.succeed(false),
+      }),
+    ),
   ),
 )
 
@@ -186,8 +194,11 @@ it.live("a guest stops or backgrounds only a session it controls", () =>
 
     const controlled = yield* stop({ helpers: true }, { "x-test-guest": sessionID })
     expect(controlled.status).toBe(200)
-    // In control of the session, it sees what the owner sees.
-    expect(((yield* controlled.json) as { tasks: Task.Info[] }).tasks).toEqual([stopped])
+    // Control lets the guest stop the session, but a controlling guest is still a guest: an isolated helper's
+    // directory goes only to the authenticated owner (WP28).
+    expect(((yield* controlled.json) as { tasks: Task.Info[] }).tasks).toEqual([
+      { ...stopped, isolation: { mode: "worktree", state: "active" } },
+    ])
     expect((yield* background(sessionID)).status).toBe(200)
   }),
 )

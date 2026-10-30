@@ -839,3 +839,48 @@ if (process.platform !== "win32") {
     { git: true },
   )
 }
+
+// The guest Git guard (WP28): every git invocation the scan recognizes, read-only ones included, is screened before
+// any permission ask or subprocess, with its own environment assignments; other commands are not.
+it.instance("every recognized git invocation is screened before the command is asked for or run", () =>
+  Effect.gen(function* () {
+    const instance = yield* InstanceState.context
+    const tool = yield* ShellTool
+    const definition = yield* tool.init()
+    const screened: { cwd: string; args?: string[]; env?: Record<string, string> }[] = []
+    const read: (readonly string[])[] = []
+    const asks: string[] = []
+    const run = (command: string, refuse: boolean) =>
+      definition
+        .execute(
+          { command },
+          {
+            ...base,
+            assertReadable: (request) => Effect.sync(() => void read.push(request.files)),
+            assertGitReadable: (request) =>
+              Effect.sync(() => {
+                screened.push(request)
+                if (refuse) throw new Error("refused by the guest Git guard")
+              }),
+            ask: (request) =>
+              Effect.sync(() => {
+                asks.push(request.permission)
+                throw new Error(stop)
+              }),
+          },
+        )
+        .pipe(Effect.exit)
+    const refused = yield* run("GIT_DIR=.git git log --all --oneline && git worktree list", true)
+    expect(Exit.isFailure(refused) ? Cause.pretty(refused.cause) : "").toContain("refused by the guest Git guard")
+    expect(asks).toEqual([])
+    expect(screened[0]).toMatchObject({ cwd: instance.directory, args: ["git", "log", "--all", "--oneline"] })
+    expect(screened[0].env).toEqual({ GIT_DIR: ".git" })
+    // The working directory is screened as a recursive read target too.
+    expect(read[0]).toContain(instance.directory)
+
+    screened.length = 0
+    const plain = yield* run("ls -la && echo done", false)
+    expect(Exit.isFailure(plain) ? Cause.pretty(plain.cause) : "").toContain(stop)
+    expect(screened).toEqual([])
+  }),
+)

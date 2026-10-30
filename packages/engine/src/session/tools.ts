@@ -18,7 +18,7 @@ import type { TaskSizeContext } from "@/tool/escalate"
 import type { TaskLimits } from "@/task/limits"
 import type { TaskSize } from "@vectordevai/core/task-size"
 import { type Tool as AITool, tool, jsonSchema, type ToolExecutionOptions, asSchema } from "ai"
-import { Effect, Option, Result, Schema } from "effect"
+import { Cause, Effect, Option, Result, Schema } from "effect"
 import { MessageV2 } from "./message-v2"
 import { Session } from "./session"
 import { SessionProcessor } from "./processor"
@@ -34,6 +34,9 @@ import { Brain } from "@vectordevai/core/brain/brain"
 import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 import { InstanceState } from "@/effect/instance-state"
 import { Config } from "@/config/config"
+import { Git } from "@/git"
+import { SessionAudience } from "@vectordevai/core/session/audience"
+import { PrivateAccess } from "@/tool/private-access"
 import { PromptTrust } from "@/config/prompt-trust"
 import { Global } from "@vectordevai/core/global"
 import { PromptSource } from "./prompt-source"
@@ -87,6 +90,33 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   const brain = yield* Brain.Service
   // The prompt guard reads what this directory's prompts come from, so every caller must hand it the config.
   const config = yield* Config.Service
+  const audience = yield* SessionAudience.Service
+  const git = yield* Git.Service
+  const instance = yield* InstanceState.context
+  const access = PrivateAccess.make({ sessionID: input.session.id, audience, git, instance })
+  const readTargets = new Map<string, Map<string, boolean>>()
+  const rememberRead = (callID: string, files: readonly string[], recursive = false) => {
+    const targets = readTargets.get(callID) ?? new Map<string, boolean>()
+    for (const file of files) targets.set(file, recursive || targets.get(file) === true)
+    readTargets.set(callID, targets)
+    return access.read(files, { ancestors: recursive }).pipe(Effect.orDie)
+  }
+  // A guest family's finished output is checked again against durable fences, including files the call read, before
+  // plugins, history or the model see it. A fence that landed while the call ran still applies.
+  const checked = Effect.fn("SessionTools.privateOutput")(function* <A>(callID: string, value: A) {
+    const targets = readTargets.get(callID) ?? new Map<string, boolean>()
+    readTargets.delete(callID)
+    for (const [file, recursive] of targets) yield* access.read([file], { ancestors: recursive }).pipe(Effect.orDie)
+    return yield* access.output(value).pipe(Effect.orDie)
+  })
+  // Errors reach history and the model the same way output does, so a guest family's error text is checked too.
+  // The refusal that replaces it carries no path.
+  const guarded = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(
+      Effect.catchCause((cause) =>
+        access.output(Cause.pretty(cause)).pipe(Effect.orDie, Effect.andThen(Effect.failCause(cause))),
+      ),
+    )
   // What a compaction folded away still counts for the rules that ask about outside content, so they read the session's
   // stored messages as well as the window the model sees.
   const history = () =>
@@ -133,33 +163,45 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     ownedPaths: TaskClaims.pathsFor(input.session.id),
     getOwnedPaths: () =>
       Effect.sync(() => TaskClaims.trustedPaths(input.session.id, input.session.parentID !== undefined)),
+    assertReadable: (request) => rememberRead(options.toolCallId, request.files, request.recursive),
+    assertGitReadable: (request) => access.git(request.cwd, request).pipe(Effect.orDie),
+    assertOutput: (value) => access.output(value).pipe(Effect.asVoid, Effect.orDie),
     assertWritable: (request) =>
-      assertWritable(
-        {
-          sessionID: input.session.id,
-          parentID: input.session.parentID,
-          getOwnedPaths: () =>
-            Effect.sync(() => TaskClaims.trustedPaths(input.session.id, input.session.parentID !== undefined)),
-        },
-        request,
+      rememberRead(options.toolCallId, request.files ?? []).pipe(
+        Effect.andThen(
+          assertWritable(
+            {
+              sessionID: input.session.id,
+              parentID: input.session.parentID,
+              getOwnedPaths: () =>
+                Effect.sync(() => TaskClaims.trustedPaths(input.session.id, input.session.parentID !== undefined)),
+            },
+            request,
+          ),
+        ),
       ),
     agent: input.agent.name,
     messages: input.messages,
     history,
     metadata: (val) =>
-      input.processor.updateToolCall(options.toolCallId, (match) => {
-        if (!["running", "pending"].includes(match.state.status)) return match
-        return {
-          ...match,
-          state: {
-            title: val.title,
-            metadata: val.metadata,
-            status: "running",
-            input: args,
-            time: { start: Date.now() },
-          },
-        }
-      }),
+      access.output(val).pipe(
+        Effect.orDie,
+        Effect.andThen(
+          input.processor.updateToolCall(options.toolCallId, (match) => {
+            if (!["running", "pending"].includes(match.state.status)) return match
+            return {
+              ...match,
+              state: {
+                title: val.title,
+                metadata: val.metadata,
+                status: "running",
+                input: args,
+                time: { start: Date.now() },
+              },
+            }
+          }),
+        ),
+      ),
     deniedResources: (req) =>
       Effect.succeed(
         req.patterns.filter(
@@ -180,6 +222,10 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
         }
         if (req.permission === "edit" && !req.metadata?.command) {
           const instance = yield* InstanceState.context
+          yield* rememberRead(
+            options.toolCallId,
+            req.patterns.map((pattern) => path.resolve(instance.worktree, pattern)),
+          )
           yield* assertWritable(
             {
               sessionID: input.session.id,
@@ -266,11 +312,13 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
         return run.promise(
           Effect.gen(function* () {
             const ctx = context(args, options)
+            yield* access.output(args).pipe(Effect.orDie)
             yield* plugin.trigger(
               "tool.execute.before",
               { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID },
               { args },
             )
+            yield* access.output(args).pipe(Effect.orDie)
             const result = yield* item.execute(args, ctx).pipe(
               // The owner approved these changes, so they are not held at the next start.
               Effect.tap(() => PromptTrust.accept(prompted.get(options.toolCallId) ?? [])),
@@ -285,6 +333,8 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
                 messageID: input.processor.message.id,
               })),
             }
+            // Before plugins: an after-hook must not receive a guest family's private raw output.
+            yield* checked(options.toolCallId, output)
             yield* plugin.trigger(
               "tool.execute.after",
               { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID, args },
@@ -294,7 +344,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               yield* input.processor.completeToolCall(options.toolCallId, output)
             }
             return output
-          }),
+          }).pipe(guarded),
         )
       },
     })
@@ -366,6 +416,8 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
                 ),
               )
             const content = JSON.stringify({ resources: filtered.map(formatMcpResource) }, null, 2)
+            // A guest family's private raw text is refused before truncation saves it to a file.
+            yield* access.output(content).pipe(Effect.orDie)
             const truncated = yield* truncate.output(content, {}, input.agent)
             const output = {
               title: parsed.server ? `MCP resources: ${parsed.server}` : "MCP resources",
@@ -387,7 +439,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               yield* input.processor.completeToolCall(opts.toolCallId, output)
             }
             return output
-          }),
+          }).pipe(guarded),
         )
       },
     })
@@ -449,6 +501,8 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
                 ),
               )
             const content = JSON.stringify({ resourceTemplates: filtered.map(formatMcpResourceTemplate) }, null, 2)
+            // A guest family's private raw text is refused before truncation saves it to a file.
+            yield* access.output(content).pipe(Effect.orDie)
             const truncated = yield* truncate.output(content, {}, input.agent)
             const output = {
               title: parsed.server ? `MCP resource templates: ${parsed.server}` : "MCP resource templates",
@@ -470,7 +524,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               yield* input.processor.completeToolCall(opts.toolCallId, output)
             }
             return output
-          }),
+          }).pipe(guarded),
         )
       },
     })
@@ -524,6 +578,8 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             if (!content) throw new Error(`Failed to read MCP resource: ${parsed.server}/${parsed.uri}`)
 
             const formatted = formatMcpResourceContent(parsed.server, parsed.uri, content)
+            // A guest family's private raw text is refused before truncation saves it to a file.
+            yield* access.output(formatted.text).pipe(Effect.orDie)
             const truncated = yield* truncate.output(formatted.text, {}, input.agent)
             const output = {
               title: `MCP resource: ${parsed.uri}`,
@@ -552,7 +608,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               yield* input.processor.completeToolCall(opts.toolCallId, output)
             }
             return output
-          }),
+          }).pipe(guarded),
         )
       },
     })
@@ -570,6 +626,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
       run.promise(
         Effect.gen(function* () {
           const ctx = context(args, opts)
+          yield* access.output(args).pipe(Effect.orDie)
           yield* plugin.trigger(
             "tool.execute.before",
             { tool: key, sessionID: ctx.sessionID, callID: opts.toolCallId },
@@ -607,6 +664,8 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               },
             }),
           )
+          // Before plugins and before truncation saves it: a guest family's private raw output is refused.
+          yield* access.output(result).pipe(Effect.orDie)
           yield* plugin.trigger(
             "tool.execute.after",
             { tool: key, sessionID: ctx.sessionID, callID: opts.toolCallId, args },
@@ -674,7 +733,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             yield* input.processor.completeToolCall(opts.toolCallId, output)
           }
           return output
-        }),
+        }).pipe(guarded),
       )
     tools[key] = item
   }

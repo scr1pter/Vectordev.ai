@@ -166,6 +166,8 @@ const partFn = part
 
 function sanitize(data: SessionArchive.Legacy) {
   return {
+    // The privacy, guest-input and usage markers travel with the archive: an import may only tighten them.
+    ...data,
     info: {
       ...data.info,
       title: redact("session-title", data.info.id, data.info.title),
@@ -292,17 +294,23 @@ const run = Effect.fn("Cli.export.body")(function* (args: {
   }
 
   return yield* Effect.gen(function* () {
-    const local = args.public ? undefined : yield* shares.export({ sessionID: sessionID! })
-    const output =
-      !local || (args.sanitize && "engine" in local)
-        ? yield* shares
-            .preview({ sessionID: sessionID! })
-            .pipe(Effect.map((archive) => (args.sanitize ? sanitizePublic(archive) : archive)))
-        : "engine" in local
-          ? Schema.encodeSync(SessionArchive.Native)(local)
-          : args.sanitize
-            ? sanitize(local)
-            : local
+    const local = yield* shares.export({ sessionID: sessionID! })
+    const portable = args.public || (args.sanitize && "engine" in local)
+    // The portable format has no owner-only marker, and an import treats it as ordinary guest input. A conversation
+    // with isolated work would lose its restriction, so it is exported only in the local format, which keeps it.
+    if (portable && local.privacy === "owner-only")
+      return yield* fail(
+        "This conversation has owner-only isolated work, so it cannot be exported in the portable format. Export it without --public or --sanitize to keep its owner-only marker.",
+      )
+    const output = portable
+      ? yield* shares
+          .preview({ sessionID: sessionID! })
+          .pipe(Effect.map((archive) => (args.sanitize ? sanitizePublic(archive) : archive)))
+      : "engine" in local
+        ? Schema.encodeSync(SessionArchive.Native)(local)
+        : args.sanitize
+          ? sanitize(local)
+          : local
     process.stdout.write(JSON.stringify(output, null, 2))
     process.stdout.write(EOL)
   }).pipe(Effect.catchTag("PublicSessionError", (error) => fail(error.message)))

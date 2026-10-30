@@ -78,7 +78,7 @@ export const Result = Schema.Struct({
 }).annotate({ identifier: "Task.Result" })
 export interface Result extends Schema.Schema.Type<typeof Result> {}
 
-// A helper's own worktree or copy. `directory` is sent only to the owner or a principal with control.
+// A helper's own worktree or copy. Paths and detailed artifacts are sent only to the authenticated owner.
 export const Isolation = Schema.Struct({
   mode: Schema.String, // worktree | copy
   state: Schema.String, // preparing | active | settling | unchanged | changed | merged | discarded | diverged | failed
@@ -288,7 +288,7 @@ export interface ChangedFile extends Schema.Schema.Type<typeof ChangedFile> {}
 export const ChangesResult = Schema.Struct({
   task: Info,
   files: Schema.Array(ChangedFile),
-  patch: optional(Schema.String), // at most 256 KiB, sent only to the owner or a principal with control
+  patch: optional(Schema.String), // at most 256 KiB, sent only to the authenticated owner
   truncated: Schema.Boolean,
   mergeable: Schema.String, // clean | conflict | blocked | unknown
   detail: optional(Schema.String),

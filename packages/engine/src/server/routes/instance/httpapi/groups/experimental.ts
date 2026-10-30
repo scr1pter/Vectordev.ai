@@ -64,6 +64,21 @@ export const TaskResumeInput = Schema.Struct({
   text: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4096))),
 })
 
+export const TaskChangesQuery = Schema.Struct({
+  ...WorkspaceRoutingQueryFields,
+  diff: Schema.optional(QueryBoolean),
+})
+
+export const TaskMergeInput = Schema.Struct({
+  files: Schema.optional(Schema.Array(Schema.String).check(Schema.isMinLength(1), Schema.isMaxLength(500))),
+  includeStacked: Schema.optional(Schema.Boolean),
+  force: Schema.optional(Schema.Boolean),
+})
+
+export const TaskDiscardInput = Schema.Struct({
+  reason: Schema.optional(Schema.String.check(Schema.isMaxLength(1000))),
+})
+
 export const SessionStopInput = Schema.Struct({
   helpers: Schema.Boolean,
   reason: Schema.optional(Schema.String.check(Schema.isMaxLength(1000))),
@@ -152,6 +167,9 @@ export const ExperimentalPaths = {
   taskWait: "/experimental/session/:sessionID/tasks/wait",
   taskBackground: "/experimental/session/:sessionID/tasks/background",
   taskResume: "/experimental/session/:sessionID/tasks/resume",
+  taskChanges: "/experimental/session/:sessionID/tasks/:taskID/changes",
+  taskMerge: "/experimental/session/:sessionID/tasks/:taskID/merge",
+  taskDiscard: "/experimental/session/:sessionID/tasks/:taskID/discard",
   taskBridgeRegister: "/experimental/session/:sessionID/tasks/bridge/register",
   taskBridgePoll: "/experimental/session/:sessionID/tasks/bridge/poll",
   taskBridgeReceipt: "/experimental/session/:sessionID/tasks/bridge/receipt",
@@ -384,6 +402,48 @@ export const ExperimentalApi = HttpApi.make("experimental")
             summary: "Resume session tasks",
             description:
               "Continue the session's stopped, failed or interrupted subagents in the background, each in a new attempt. A completed subagent continues only with text. Nothing resumes on its own.",
+          }),
+        ),
+        HttpApiEndpoint.get("taskChanges", ExperimentalPaths.taskChanges, {
+          params: { sessionID: SessionID, taskID: Schema.String },
+          query: TaskChangesQuery,
+          success: described(Task.ChangesResult, "Isolated task changes"),
+          error: TaskApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "experimental.task.changes",
+            summary: "Review an isolated task's changes",
+            description:
+              "Read an isolated child's changed files and, with diff=true, its bounded patch. Only the authenticated owner receives paths and the patch; other viewers receive counts.",
+          }),
+        ),
+        HttpApiEndpoint.post("taskMerge", ExperimentalPaths.taskMerge, {
+          params: { sessionID: SessionID, taskID: Schema.String },
+          query: WorkspaceRoutingQuery,
+          // No body merges every saved file, as the SDK sends it when no option is given.
+          payload: [HttpApiSchema.NoContent, TaskMergeInput],
+          success: described(Task.MergeResult, "Merged isolated changes"),
+          error: TaskApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "experimental.task.merge",
+            summary: "Merge an isolated task",
+            description:
+              "Owner only. Bring an isolated child's saved changes, or the selected files, into the parent checkout after a checkpoint.",
+          }),
+        ),
+        HttpApiEndpoint.post("taskDiscard", ExperimentalPaths.taskDiscard, {
+          params: { sessionID: SessionID, taskID: Schema.String },
+          query: WorkspaceRoutingQuery,
+          // No body discards without a reason.
+          payload: [HttpApiSchema.NoContent, TaskDiscardInput],
+          success: described(Task.DiscardResult, "Discarded isolated changes"),
+          error: TaskApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "experimental.task.discard",
+            summary: "Discard an isolated task",
+            description: "Owner only. Keep a recovery artifact, then remove an isolated child's checkout and branch.",
           }),
         ),
         HttpApiEndpoint.post("taskBridgeRegister", ExperimentalPaths.taskBridgeRegister, {

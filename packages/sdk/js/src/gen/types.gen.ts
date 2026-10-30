@@ -7105,6 +7105,36 @@ export type TaskResumeResult = {
   tasks: Array<TaskInfo>
 }
 
+export type TaskChangedFile = {
+  path: string
+  status: string
+  additions: number
+  deletions: number
+  binary: boolean
+}
+
+export type TaskChangesResult = {
+  task: TaskInfo
+  files: Array<TaskChangedFile>
+  patch?: string
+  truncated: boolean
+  mergeable: string
+  detail?: string
+}
+
+export type TaskMergeResult = {
+  task: TaskInfo
+  merged: Array<string>
+  remaining: Array<string>
+  conflicts: Array<string>
+  checkpoint?: string
+}
+
+export type TaskDiscardResult = {
+  task: TaskInfo
+  saved?: string
+}
+
 export type TaskBridgeRegisterInput = {
   lease?: string
   tasks: Array<TaskInfo>
@@ -12058,6 +12088,118 @@ export type ExperimentalTaskResumeResponses = {
 }
 
 export type ExperimentalTaskResumeResponse = ExperimentalTaskResumeResponses[keyof ExperimentalTaskResumeResponses]
+
+export type ExperimentalTaskChangesData = {
+  body?: never
+  path: {
+    sessionID: string
+    taskID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+    diff?: boolean | "true" | "false"
+  }
+  url: "/experimental/session/{sessionID}/tasks/{taskID}/changes"
+}
+
+export type ExperimentalTaskChangesErrors = {
+  /**
+   * TaskApiError | InvalidRequestError
+   */
+  400: TaskApiError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type ExperimentalTaskChangesError = ExperimentalTaskChangesErrors[keyof ExperimentalTaskChangesErrors]
+
+export type ExperimentalTaskChangesResponses = {
+  /**
+   * Isolated task changes
+   */
+  200: TaskChangesResult
+}
+
+export type ExperimentalTaskChangesResponse = ExperimentalTaskChangesResponses[keyof ExperimentalTaskChangesResponses]
+
+export type ExperimentalTaskMergeData = {
+  body?: {
+    files?: Array<string>
+    includeStacked?: boolean
+    force?: boolean
+  }
+  path: {
+    sessionID: string
+    taskID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/session/{sessionID}/tasks/{taskID}/merge"
+}
+
+export type ExperimentalTaskMergeErrors = {
+  /**
+   * TaskApiError | InvalidRequestError
+   */
+  400: TaskApiError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type ExperimentalTaskMergeError = ExperimentalTaskMergeErrors[keyof ExperimentalTaskMergeErrors]
+
+export type ExperimentalTaskMergeResponses = {
+  /**
+   * Merged isolated changes
+   */
+  200: TaskMergeResult
+}
+
+export type ExperimentalTaskMergeResponse = ExperimentalTaskMergeResponses[keyof ExperimentalTaskMergeResponses]
+
+export type ExperimentalTaskDiscardData = {
+  body?: {
+    reason?: string
+  }
+  path: {
+    sessionID: string
+    taskID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/session/{sessionID}/tasks/{taskID}/discard"
+}
+
+export type ExperimentalTaskDiscardErrors = {
+  /**
+   * TaskApiError | InvalidRequestError
+   */
+  400: TaskApiError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type ExperimentalTaskDiscardError = ExperimentalTaskDiscardErrors[keyof ExperimentalTaskDiscardErrors]
+
+export type ExperimentalTaskDiscardResponses = {
+  /**
+   * Discarded isolated changes
+   */
+  200: TaskDiscardResult
+}
+
+export type ExperimentalTaskDiscardResponse = ExperimentalTaskDiscardResponses[keyof ExperimentalTaskDiscardResponses]
 
 export type ExperimentalTaskBridgeRegisterData = {
   body?: TaskBridgeRegisterInput

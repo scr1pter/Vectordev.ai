@@ -49,6 +49,27 @@ export default {
         );
       `)
       yield* tx.run(`
+        CREATE TABLE \`session_audience\` (
+          \`session_id\` text PRIMARY KEY,
+          \`owner_only\` integer DEFAULT false NOT NULL,
+          \`guest_input\` integer DEFAULT false NOT NULL
+        );
+      `)
+      yield* tx.run(`
+        CREATE TABLE \`session_lineage\` (
+          \`session_id\` text NOT NULL,
+          \`parent_id\` text NOT NULL,
+          \`fork\` integer DEFAULT false NOT NULL,
+          CONSTRAINT \`session_lineage_pk\` PRIMARY KEY(\`session_id\`, \`parent_id\`)
+        );
+      `)
+      yield* tx.run(`
+        CREATE TABLE \`session_private_directory\` (
+          \`directory\` text PRIMARY KEY,
+          \`session_id\` text NOT NULL
+        );
+      `)
+      yield* tx.run(`
         CREATE TABLE \`public_session_consent\` (
           \`owner\` text PRIMARY KEY,
           \`version\` integer NOT NULL,
@@ -301,6 +322,10 @@ export default {
         `CREATE INDEX \`background_job_status_directory_idx\` ON \`background_job\` (\`status\`,\`directory\`);`,
       )
       yield* tx.run(`CREATE INDEX \`background_job_parent_idx\` ON \`background_job\` (\`parent_session_id\`);`)
+      yield* tx.run(`CREATE INDEX \`session_lineage_parent_idx\` ON \`session_lineage\` (\`parent_id\`);`)
+      yield* tx.run(
+        `CREATE INDEX \`session_private_directory_session_idx\` ON \`session_private_directory\` (\`session_id\`);`,
+      )
       yield* tx.run(`CREATE UNIQUE INDEX \`event_aggregate_seq_idx\` ON \`event\` (\`aggregate_id\`,\`seq\`);`)
       yield* tx.run(`CREATE INDEX \`event_aggregate_type_seq_idx\` ON \`event\` (\`aggregate_id\`,\`type\`,\`seq\`);`)
       yield* tx.run(

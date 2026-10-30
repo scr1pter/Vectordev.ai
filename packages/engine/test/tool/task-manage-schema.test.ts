@@ -54,7 +54,7 @@ describe("task_manage provider schema", () => {
         expect(parameters).toMatchObject({
           type: "object",
           properties: {
-            action: { enum: ["list", "inspect", "message", "stop", "wait", "resume", "report"] },
+            action: { enum: ["list", "inspect", "message", "stop", "wait", "resume", "report", "merge", "discard"] },
             task_id: { type: "string" },
             task_ids: { type: "array", minItems: 1, maxItems: 200 },
             text: { type: "string" },
@@ -64,11 +64,25 @@ describe("task_manage provider schema", () => {
             timeout: { type: "number", minimum: 0, maximum: 60000 },
             siblings: { type: "boolean" },
             wake: { type: "boolean" },
+            diff: { type: "boolean" },
+            files: { type: "array", minItems: 1, maxItems: 500 },
           },
           required: ["action"],
         })
         expect(parameters?.anyOf).toBeUndefined()
       }
+    }),
+  )
+
+  // I22: the description is fixed text, the same on every request, so a provider's prompt cache keeps it.
+  it.instance("the description is stable and names the isolation actions", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const tool = (yield* registry.all()).find((item) => item.id === "task_manage")
+      if (!tool) throw new Error("task_manage was not registered")
+      expect(tool.description).toContain("merge: bring a direct child's reviewed isolated changes")
+      expect(tool.description).toContain("discard:")
+      expect(tool.description).toMatchSnapshot()
     }),
   )
 
@@ -101,6 +115,15 @@ describe("task_manage provider schema", () => {
         { action: "resume", task_ids: Array.from({ length: 9 }, (_, index) => `ses_child_${index}`) },
         { action: "report" },
         { action: "report", text: "Blocked on the schema", wake: "yes" },
+        { action: "merge" },
+        { action: "merge", task_id: "ses_child", files: [] },
+        { action: "merge", task_id: "ses_child", files: Array.from({ length: 501 }, (_, index) => `f${index}.ts`) },
+        // Only the authenticated owner may force a merge or include unmerged dependencies.
+        { action: "merge", task_id: "ses_child", force: true },
+        { action: "merge", task_id: "ses_child", includeStacked: true },
+        { action: "discard" },
+        { action: "discard", task_id: "ses_child", reason: "x".repeat(1001) },
+        { action: "inspect", task_id: "ses_child", diff: "yes" },
       ]) {
         const exit = yield* tool.execute(input, context).pipe(Effect.exit)
         expect(Exit.isFailure(exit)).toBe(true)
@@ -118,6 +141,11 @@ describe("task_manage provider schema", () => {
         { action: "resume", task_ids: ["ses_child"], text: "Also check the parser" },
         { action: "list", siblings: true },
         { action: "report", text: "Blocked on the schema", wake: true },
+        { action: "inspect", task_id: "ses_child", diff: true },
+        { action: "merge", task_id: "ses_child" },
+        { action: "merge", task_id: "ses_child", files: ["src/a.ts"] },
+        { action: "discard", task_id: "ses_child" },
+        { action: "discard", task_id: "ses_child", reason: "Superseded by the parser fix" },
       ]) {
         expect(Schema.decodeUnknownSync(tool.parameters)(input)).toEqual(input)
       }

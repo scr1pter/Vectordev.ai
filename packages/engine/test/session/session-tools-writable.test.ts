@@ -3,11 +3,13 @@ import path from "node:path"
 import { Cause, Effect, Exit, Schema } from "effect"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Brain } from "@vectordevai/core/brain/brain"
+import { SessionAudience } from "@vectordevai/core/session/audience"
 import { ModelV2 } from "@vectordevai/core/model"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import type { SessionV1 } from "@vectordevai/core/v1/session"
 import { Agent } from "@/agent/agent"
 import { Config } from "@/config/config"
+import { Git } from "@/git"
 import { InstanceState } from "@/effect/instance-state"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { MCP } from "@/mcp"
@@ -38,6 +40,8 @@ const it = testEffect(
       Session.node,
       ToolRegistry.node,
       Truncate.node,
+      SessionAudience.node,
+      Git.node,
     ]),
   ),
 )

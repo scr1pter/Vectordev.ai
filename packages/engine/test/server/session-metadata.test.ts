@@ -8,6 +8,7 @@ import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { Database } from "@vectordevai/core/database/database"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
+import { SessionAudience } from "@vectordevai/core/session/audience"
 import { PublicSessionShare } from "@vectordevai/core/public-session-share"
 import { SessionProjector } from "@vectordevai/core/session/projector"
 import { Agent } from "@/agent/agent"
@@ -60,6 +61,7 @@ const services = AppNodeBuilder.build(
     EventV2Bridge.node,
     ShareNext.node,
     Database.node,
+    SessionAudience.node,
   ]),
   [[InstanceStore.bootstrapNode, Layer.succeed(InstanceBootstrap.Service, { run: Effect.void })]],
 )

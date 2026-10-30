@@ -125,6 +125,8 @@ type Scan = {
   reads: Set<string>
   /** Vercel and Supabase CLI calls that act on a cloud account, by permission pattern. */
   cloud: Map<string, CloudCli.Request & { command: string }>
+  /** Every git invocation the scan recognizes, read-only ones included, for the guest Git guard. */
+  gitReads: { cwd: string; args: string[]; env: Record<string, string> }[]
 }
 
 type Chunk = {
@@ -1370,6 +1372,7 @@ export const ShellTool = Tool.define(
         git: [],
         reads: new Set<string>(),
         cloud: new Map(),
+        gitReads: [],
       }
       const shellKind = ShellID.toKind(Shell.name(shell))
       const win = ps || shellKind === "cmd"
@@ -1560,6 +1563,17 @@ export const ShellTool = Tool.define(
           .filter((node): node is Node => node?.type === "variable_assignment")
           .map((node) => shellWord(node.text, cwd, ps, shell))
         const words = [...leading, ...tokens.map((word) => shellWord(word, cwd, ps, shell))]
+        if (cmd && /^git(?:\.exe)?$/i.test(win ? path.win32.basename(cmd) : path.basename(cmd)))
+          scan.gitReads.push({
+            cwd,
+            args: tokens.map((word) => shellWord(word, cwd, ps, shell)),
+            env: Object.fromEntries(
+              leading.flatMap((word) => {
+                const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s.exec(word)
+                return match ? [[match[1], match[2]]] : []
+              }),
+            ),
+          })
         const variables = {
           GIT_DIR: process.env.GIT_DIR,
           GIT_WORK_TREE: process.env.GIT_WORK_TREE,
@@ -1762,6 +1776,7 @@ export const ShellTool = Tool.define(
       const keep = limits.maxBytes * 2
       // The start of the output, kept for the head of a long result; the ring buffer below keeps only the end.
       let start = ""
+      let tail = ""
       let total = 0
       let full = ""
       let last = ""
@@ -1819,64 +1834,71 @@ export const ShellTool = Tool.define(
           )
 
           const output = yield* Effect.forkScoped(
-            Stream.runForEach(Stream.decodeText(handle.all), (chunk) => {
-              const size = Buffer.byteLength(chunk, "utf-8")
-              if (total < limits.maxBytes) start += chunk
-              total += size
-              list.push({ text: chunk, size })
-              used += size
-              while (used > keep) {
-                const item = list[0]
-                if (!item) break
-                cut = true
-                const excess = used - keep
-                if (item.size <= excess) {
-                  list.shift()
-                  used -= item.size
-                  continue
-                }
-                // Trim only the excess: dropping a whole large chunk can discard the entire tail
-                // when a pipe delivers a command's final newline in a separate chunk.
-                const bytes = Buffer.from(item.text, "utf-8")
-                let offset = excess
-                while (offset < bytes.length && (bytes[offset] & 0xc0) === 0x80) offset++
-                list[0] = { text: bytes.subarray(offset).toString("utf-8"), size: bytes.length - offset }
-                used -= offset
-              }
+            Stream.runForEach(Stream.decodeText(handle.all), (chunk) =>
+              // A guest family's private text is refused before any of it is buffered, saved to a file or shown. The
+              // window keeps the end of the last chunk so a path split across two chunks is still seen.
+              (ctx.assertOutput ? ctx.assertOutput(tail + chunk) : Effect.void).pipe(
+                Effect.andThen(() => {
+                  tail = (tail + chunk).slice(-4096)
+                  const size = Buffer.byteLength(chunk, "utf-8")
+                  if (total < limits.maxBytes) start += chunk
+                  total += size
+                  list.push({ text: chunk, size })
+                  used += size
+                  while (used > keep) {
+                    const item = list[0]
+                    if (!item) break
+                    cut = true
+                    const excess = used - keep
+                    if (item.size <= excess) {
+                      list.shift()
+                      used -= item.size
+                      continue
+                    }
+                    // Trim only the excess: dropping a whole large chunk can discard the entire tail
+                    // when a pipe delivers a command's final newline in a separate chunk.
+                    const bytes = Buffer.from(item.text, "utf-8")
+                    let offset = excess
+                    while (offset < bytes.length && (bytes[offset] & 0xc0) === 0x80) offset++
+                    list[0] = { text: bytes.subarray(offset).toString("utf-8"), size: bytes.length - offset }
+                    used -= offset
+                  }
 
-              last = preview(last + chunk)
+                  last = preview(last + chunk)
 
-              if (file) {
-                sink?.write(chunk)
-              } else {
-                full += chunk
-                if (Buffer.byteLength(full, "utf-8") > limits.maxBytes) {
-                  return trunc.write(full).pipe(
-                    Effect.andThen((next) =>
-                      Effect.sync(() => {
-                        file = next
-                        cut = true
-                        sink = createWriteStream(next, { flags: "a" })
-                        full = ""
-                      }),
-                    ),
-                    Effect.andThen(
-                      ctx.metadata({
-                        metadata: {
-                          output: last,
-                        },
-                      }),
-                    ),
-                  )
-                }
-              }
+                  if (file) {
+                    sink?.write(chunk)
+                  } else {
+                    full += chunk
+                    if (Buffer.byteLength(full, "utf-8") > limits.maxBytes) {
+                      return trunc.write(full).pipe(
+                        Effect.andThen((next) =>
+                          Effect.sync(() => {
+                            file = next
+                            cut = true
+                            sink = createWriteStream(next, { flags: "a" })
+                            full = ""
+                          }),
+                        ),
+                        Effect.andThen(
+                          ctx.metadata({
+                            metadata: {
+                              output: last,
+                            },
+                          }),
+                        ),
+                      )
+                    }
+                  }
 
-              return ctx.metadata({
-                metadata: {
-                  output: last,
-                },
-              })
-            }),
+                  return ctx.metadata({
+                    metadata: {
+                      output: last,
+                    },
+                  })
+                }),
+              ),
+            ),
           )
 
           const abort = Effect.callback<void>((resume) => {
@@ -1991,6 +2013,21 @@ export const ShellTool = Tool.define(
                   )
                   const scan = yield* collect(tree.rootNode, cwd, ps, shell, instanceCtx)
                   if (!containsPath(cwd, instanceCtx)) scan.dirs.add(cwd)
+                  // A guest family may not start a command in, or name, a private task folder, nor run git against a
+                  // repository whose history a private task shares. The outside folders the scan resolved count too: a
+                  // private folder reached through `~`, a wildcard or `..` appears only there, and must be refused
+                  // before the owner is asked about it. These cover what the scan detects; a program can still reach
+                  // files the scan never sees, so this is not a filesystem sandbox.
+                  if (ctx.assertReadable)
+                    yield* ctx.assertReadable({
+                      files: [
+                        cwd,
+                        ...scan.dirs,
+                        ...[...scan.reads].map((file) => path.resolve(instanceCtx.worktree, file)),
+                      ],
+                      recursive: true,
+                    })
+                  if (ctx.assertGitReadable) for (const read of scan.gitReads) yield* ctx.assertGitReadable(read)
                   yield* ask(ctx, scan, params)
                   // Admission is brief and takes the same file locks as edit/write/patch. Reserve resolved shell
                   // targets before spawning: another unscoped writer must not pass while this command is running.

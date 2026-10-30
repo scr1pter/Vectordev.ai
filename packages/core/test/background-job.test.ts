@@ -8,6 +8,153 @@ import { it } from "./lib/effect"
 const jobsLayer = LayerNode.compile(BackgroundJob.node)
 
 describe("BackgroundJob", () => {
+  it.live("completion seals all joined runs and holds waiting and same-id reuse outside the registry lock", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const first = yield* Deferred.make<void>()
+      const second = yield* Deferred.make<void>()
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const waited = yield* Deferred.make<void>()
+      const reused = yield* Deferred.make<void>()
+      let calls = 0
+      yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+      const job = yield* jobs.start({
+        id: "completion-reuse",
+        type: "test",
+        run: Deferred.await(first).pipe(Effect.as("first")),
+        onComplete: (info) =>
+          Effect.gen(function* () {
+            calls++
+            expect(info.outputs).toEqual(["first", "second"])
+            yield* Deferred.succeed(entered, undefined)
+            yield* Deferred.await(release)
+          }),
+      })
+      expect(yield* jobs.extend({ id: job.id, run: Deferred.await(second).pipe(Effect.as("second")) })).toBe(true)
+      yield* Deferred.succeed(first, undefined)
+      yield* Effect.yieldNow
+      expect(yield* Deferred.isDone(entered)).toBe(false)
+      yield* Deferred.succeed(second, undefined)
+      yield* Deferred.await(entered)
+      expect(yield* jobs.extend({ id: job.id, run: Effect.die("must not enter a retired checkout") })).toBe(false)
+      const waiter = yield* jobs.wait({ id: job.id }).pipe(
+        Effect.tap(() => Deferred.succeed(waited, undefined)),
+        Effect.forkScoped,
+      )
+      const next = yield* jobs
+        .start({
+          id: job.id,
+          type: "test",
+          run: Deferred.succeed(reused, undefined).pipe(Effect.as("next")),
+        })
+        .pipe(Effect.forkScoped)
+      yield* Effect.yieldNow
+      expect(yield* Deferred.isDone(waited)).toBe(false)
+      expect(yield* Deferred.isDone(reused)).toBe(false)
+      // Registry operations remain available while saving work; completion itself holds no registry lock.
+      expect((yield* jobs.list()).some((entry) => entry.id === job.id)).toBe(true)
+      yield* Deferred.succeed(release, undefined)
+      expect((yield* Fiber.join(waiter)).info?.output).toBe("second")
+      yield* Fiber.join(next)
+      expect((yield* jobs.wait({ id: job.id })).info?.output).toBe("next")
+      expect(calls).toBe(1)
+    }).pipe(Effect.provide(jobsLayer)),
+  )
+
+  it.live("a failed completion callback cannot strand waiting or same-id reuse", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const job = yield* jobs.start({
+        id: "failed-completion",
+        type: "test",
+        run: Effect.succeed("saved result"),
+        onComplete: () => Effect.die("completion failed"),
+      })
+      expect((yield* jobs.wait({ id: job.id })).info?.output).toBe("saved result")
+      yield* jobs.start({ id: job.id, type: "test", run: Effect.succeed("reused") })
+      expect((yield* jobs.wait({ id: job.id })).info?.output).toBe("reused")
+    }).pipe(Effect.provide(jobsLayer)),
+  )
+
+  // A normal end's completion callback is a task's save, which may run Git. A Stop that arrives meanwhile (the parent's
+  // Stop releasing a foreground child that has just returned, say) must not wait for it, since nothing can interrupt it.
+  it.live("cancelling a job that already ended returns without waiting for its completion callback", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+      const job = yield* jobs.start({
+        id: "ended-saving",
+        type: "test",
+        run: Effect.succeed("report"),
+        onComplete: () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))),
+      })
+      yield* Deferred.await(entered)
+      // The job keeps its own outcome; it was not stopped.
+      expect((yield* jobs.cancel(job.id).pipe(Effect.timeout("2 seconds")))?.status).toBe("completed")
+      // Its waiters and a same-ID start still wait for the callback.
+      expect((yield* jobs.wait({ id: job.id, timeout: 0 })).timedOut).toBe(true)
+      const next = yield* jobs.start({ id: job.id, type: "test", run: Effect.succeed("next") }).pipe(Effect.forkScoped)
+      yield* Effect.yieldNow
+      expect((yield* jobs.get(job.id))?.output).toBe("report")
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(next)
+      expect((yield* jobs.wait({ id: job.id })).info?.output).toBe("next")
+    }).pipe(Effect.provide(jobsLayer)),
+  )
+
+  it.live("cancellation completion observes final writes before releasing its waiters", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const wrote = yield* Deferred.make<void>()
+      let status: string | undefined
+      const job = yield* jobs.start({
+        type: "test",
+        run: Effect.never.pipe(Effect.ensuring(Deferred.succeed(wrote, undefined))),
+        onComplete: (info) =>
+          Effect.gen(function* () {
+            expect(yield* Deferred.isDone(wrote)).toBe(true)
+            status = info.status
+          }),
+      })
+      yield* jobs.cancel(job.id)
+      expect(status).toBe("cancelled")
+      expect((yield* jobs.wait({ id: job.id })).info?.status).toBe("cancelled")
+    }).pipe(Effect.provide(jobsLayer)),
+  )
+
+  // The run completes a Deferred whose waiter stops the job in the same synchronous step. Interrupting the job's fiber
+  // there re-entrantly handed the run's own `true` to the callback's first step and shifted every later result by one.
+  it.live("a Stop issued inside the job's own step leaves its completion callback's results its own", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const go = yield* Deferred.make<void>()
+      const running = yield* Deferred.make<void>()
+      const done = yield* Deferred.make<readonly unknown[]>()
+      yield* jobs.start({
+        id: "sync-stop",
+        type: "test",
+        run: Deferred.await(go).pipe(
+          Effect.andThen(Deferred.succeed(running, undefined)),
+          Effect.andThen(Effect.never),
+        ),
+        onComplete: () =>
+          Effect.gen(function* () {
+            const first = yield* Effect.promise(async () => "first")
+            const second = yield* Effect.promise(async () => "second")
+            yield* Deferred.succeed(done, [first, second])
+          }),
+      })
+      const stopper = yield* Deferred.await(running).pipe(Effect.andThen(jobs.cancel("sync-stop")), Effect.forkScoped)
+      yield* Effect.yieldNow
+      yield* Deferred.succeed(go, undefined)
+      expect((yield* Fiber.join(stopper))?.status).toBe("cancelled")
+      expect(yield* Deferred.await(done).pipe(Effect.timeout("2 seconds"))).toEqual(["first", "second"])
+    }).pipe(Effect.provide(jobsLayer)),
+  )
+
   it.live("duplicate cancellation and wait join final writes before releasing the job", () =>
     Effect.gen(function* () {
       const jobs = yield* BackgroundJob.Service
@@ -132,10 +279,19 @@ describe("BackgroundJob", () => {
       const release = yield* Deferred.make<void>()
       const started = yield* Deferred.make<void>()
       yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
-      const job = yield* jobs.start({ type: "test", run: Effect.never.pipe(Effect.ensuring(Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)), Effect.uninterruptible))) })
+      const job = yield* jobs.start({
+        type: "test",
+        run: Effect.never.pipe(
+          Effect.ensuring(
+            Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)), Effect.uninterruptible),
+          ),
+        ),
+      })
       const closing = yield* Scope.close(scope, Exit.void).pipe(Effect.forkScoped)
       yield* Deferred.await(entered)
-      expect(yield* jobs.extend({ id: job.id, run: Deferred.succeed(started, undefined).pipe(Effect.as("must not run")) })).toBe(false)
+      expect(
+        yield* jobs.extend({ id: job.id, run: Deferred.succeed(started, undefined).pipe(Effect.as("must not run")) }),
+      ).toBe(false)
       expect(yield* Deferred.isDone(started)).toBe(false)
       yield* Deferred.succeed(release, undefined)
       yield* Fiber.join(closing)

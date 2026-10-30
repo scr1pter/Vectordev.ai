@@ -85,6 +85,9 @@ import { ownerBlock, scopeOf, scopeQuery } from "@vectordevai/core/review/prompt
 import { Git } from "@/git"
 import { DOCUMENTS as MEMORY_DOCUMENTS } from "@/tool/memory"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
+import { TaskIsolation } from "@/task/isolation"
+import { PrivateAccess } from "@/tool/private-access"
+import { SessionAudience } from "@vectordevai/core/session/audience"
 import { SessionTools } from "./tools"
 import { SessionFork } from "./fork"
 import { TitleUsage } from "./title-usage"
@@ -246,6 +249,11 @@ export interface Interface {
   readonly shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError>
   readonly command: (input: CommandInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
   readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
+  /**
+   * Whether the session may run now. An isolated task, or a descendant of one whose work was retired, runs only
+   * through its parent's validated resume; it is refused before any provider call, spend or write.
+   */
+  readonly admit: (sessionID: SessionID) => Effect.Effect<void, TaskIsolation.IsolationError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@vector/SessionPrompt") {}
@@ -286,6 +294,8 @@ const layer = Layer.effect(
     const brain = yield* Brain.Service
     const knowledge = yield* BrainKnowledge.Service
     const guests = yield* FreeModelGuests.Service
+    const isolation = yield* TaskIsolation.Service
+    const privacy = yield* SessionAudience.Service
     const git = yield* Git.Service
     const researchStore = yield* ResearchStore.Service
     const researchRun = yield* ResearchRun.Service
@@ -386,6 +396,20 @@ const layer = Layer.effect(
         Effect.orDie,
         Effect.andThen(() => TaskPlace.within(sessionID)(effect)),
       )
+    const admit: Interface["admit"] = (sessionID) =>
+      within(
+        sessionID,
+        isolation
+          .admit(sessionID)
+          .pipe(
+            Effect.catch((cause) =>
+              cause instanceof TaskIsolation.IsolationError ? Effect.fail(cause) : Effect.die(cause),
+            ),
+          ),
+      )
+    // HTTP callers admit first for a clear refusal; this repeats the check where the run starts, in its placement.
+    const executing = <A, E, R>(sessionID: SessionID, effect: Effect.Effect<A, E, R>) =>
+      within(sessionID, isolation.admit(sessionID).pipe(Effect.orDie, Effect.andThen(effect)))
 
     const cancel: Interface["cancel"] = (sessionID) =>
       sessions.get(sessionID).pipe(
@@ -1691,6 +1715,13 @@ const layer = Layer.effect(
               // A file the user attached is theirs to share, wherever it lives. A file part written by a model, a
               // subagent brief or a guest goes through the Read tool's workspace boundary and read permission.
               const attachedByUser = options?.userFile?.(part.url) === true
+              // A guest family's attachment passes the same private-folder and output checks as its Read calls.
+              const access = PrivateAccess.make({
+                sessionID: input.sessionID,
+                audience: privacy,
+                git,
+                instance: yield* InstanceState.context,
+              })
               const readContext: Tool.Context = {
                 sessionID: input.sessionID,
                 abort: controller.signal,
@@ -1699,6 +1730,9 @@ const layer = Layer.effect(
                 extra: attachedByUser ? { bypassCwdCheck: true } : undefined,
                 messages: [],
                 metadata: () => Effect.void,
+                assertReadable: (request) =>
+                  access.read(request.files, { ancestors: request.recursive }).pipe(Effect.orDie),
+                assertOutput: (value) => access.output(value).pipe(Effect.asVoid, Effect.orDie),
                 ask: (request) =>
                   attachedByUser
                     ? Effect.void
@@ -1853,6 +1887,7 @@ const layer = Layer.effect(
               // outside-directory and read permission checks run before any byte leaves the disk.
               const bytes = yield* Effect.gen(function* () {
                 const instance = yield* InstanceState.context
+                yield* access.read([filepath]).pipe(Effect.orDie)
                 yield* assertExternalDirectoryEffect(readContext, filepath, { bypass: attachedByUser })
                 yield* readContext.ask({
                   permission: "read",
@@ -1999,7 +2034,7 @@ const layer = Layer.effect(
       return { info, parts }
     }, Effect.scoped)
 
-    const prompt: Interface["prompt"] = (input, options) => within(input.sessionID, promptHere(input, options))
+    const prompt: Interface["prompt"] = (input, options) => executing(input.sessionID, promptHere(input, options))
     const promptHere = Effect.fn("SessionPrompt.prompt")(function* (input: PromptInput, options?: PromptOptions) {
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       // Read before the message exists: a prompt sent while a run is going joins that run.
@@ -2710,6 +2745,8 @@ const layer = Layer.effect(
             Effect.provideService(Truncate.Service, truncate),
             Effect.provideService(Brain.Service, brain),
             Effect.provideService(Config.Service, config),
+            Effect.provideService(SessionAudience.Service, privacy),
+            Effect.provideService(Git.Service, git),
           )
 
           // A request is offered what its size needs (5.A.1). On a caching provider the size here is the session's
@@ -3912,13 +3949,13 @@ const layer = Layer.effect(
       return input.msgs
     })
 
-    const loop: Interface["loop"] = (input) => within(input.sessionID, loopHere(input))
+    const loop: Interface["loop"] = (input) => executing(input.sessionID, loopHere(input))
     const loopHere = Effect.fn("SessionPrompt.loop")(function* (input: LoopInput) {
       return yield* state.ensureRunning(input.sessionID, lastAssistant(input.sessionID), runLoop(input.sessionID))
     })
 
     const resumeFreeModels: Interface["resumeFreeModels"] = (input, options) =>
-      within(input.sessionID, resumeFreeModelsHere(input, options))
+      executing(input.sessionID, resumeFreeModelsHere(input, options))
     const resumeFreeModelsHere = Effect.fn("SessionPrompt.resumeFreeModels")(function* (
       input: ResumeFreeModelsInput,
       options?: Pick<PromptOptions, "refuseTrainingFreeModels">,
@@ -4000,13 +4037,13 @@ const layer = Layer.effect(
       )
     })
 
-    const shell: Interface["shell"] = (input) => within(input.sessionID, shellHere(input))
+    const shell: Interface["shell"] = (input) => executing(input.sessionID, shellHere(input))
     const shellHere = Effect.fn("SessionPrompt.shell")(function* (input: ShellInput) {
       const ready = yield* Latch.make()
       return yield* state.startShell(input.sessionID, lastAssistant(input.sessionID), shellImpl(input, ready), ready)
     })
 
-    const command: Interface["command"] = (input) => within(input.sessionID, commandHere(input))
+    const command: Interface["command"] = (input) => executing(input.sessionID, commandHere(input))
     const commandHere = Effect.fn("SessionPrompt.command")(function* (input: CommandInput) {
       yield* Effect.logInfo("command", {
         "session.id": input.sessionID,
@@ -4197,6 +4234,7 @@ const layer = Layer.effect(
       shell,
       command,
       resolvePromptParts,
+      admit,
     })
   }),
 )
@@ -4795,6 +4833,8 @@ export const node = LayerNode.make({
     Git.node,
     ResearchStore.node,
     ResearchRun.node,
+    TaskIsolation.node,
+    SessionAudience.node,
   ],
 })
 

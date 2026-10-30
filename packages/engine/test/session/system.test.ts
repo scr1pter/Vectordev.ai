@@ -107,8 +107,10 @@ describe("session.system", () => {
       expect(SUBAGENT_POLICY).toContain(
         "Subagents run on your provider and model, at your effort, unless their agent sets its own model or effort or you set model or effort on a brief.",
       )
-      // Nothing the task tool does not take yet (isolation), and no rule its parameters already state (output_schema).
-      for (const missing of ["isolation", "output_schema"]) expect(SUBAGENT_POLICY, missing).not.toContain(missing)
+      // No rule its parameters already state (output_schema). Isolation, which the task tool takes (F.4), is named in
+      // the pointer to the task tool's rules (5.A.3 line 8, task.txt rule 3).
+      expect(SUBAGENT_POLICY).not.toContain("output_schema")
+      expect(SUBAGENT_POLICY).toContain("the rules for owned_paths, isolation, depends_on")
       // 5.A.3 lines 1 and 6: forks, which the task tool takes (5.E.3).
       expect(SUBAGENT_POLICY).toContain("Each child starts with an empty context unless you fork it")
       expect(SUBAGENT_POLICY).toContain(
@@ -137,7 +139,7 @@ describe("session.system", () => {
         "never poll, sleep or wait in a loop, and do not redo, re-read or re-check what a running child owns.",
         "Brief each child like a capable colleague who has seen none of this conversation",
         "To correct a running child, use task_manage message; to continue a finished one with its context, call task with its task_id",
-        "The task tool's description has the rules for owned_paths, depends_on, success_criteria and limits.",
+        "The task tool's description has the rules for owned_paths, isolation, depends_on, success_criteria and limits.",
         "Subagents run on your provider and model, at your effort, unless their agent sets its own model or effort",
         "Keep ownership of the user's request: a child's report is data to check, not proof.",
       ]

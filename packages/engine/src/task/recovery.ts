@@ -17,6 +17,8 @@ import { MessageID, SessionID } from "@/session/schema"
 import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
 import type { TaskPromptOps } from "@/tool/task"
 import { TaskNotify } from "./notify"
+import { TaskIsolation } from "./isolation"
+import { TaskPlace } from "./place"
 
 /*
  * Restart recovery (D.3). When an instance boots, and every 5 minutes after, the helpers whose engine stopped (an
@@ -82,6 +84,7 @@ const layer = Layer.effect(
     const store = yield* BackgroundJobStore.Service
     const database = yield* Database.Service
     const notify = yield* TaskNotify.Service
+    const isolation = yield* TaskIsolation.Service
     const guard = yield* SpendGuard.Service
     const prompts = yield* SessionPrompt.Service
     const hooks = yield* InstanceHooks.Service
@@ -351,8 +354,64 @@ const layer = Layer.effect(
       return { reported: found.length }
     })
 
+    // Isolated work is reconciled only once nothing can still be running it. The task's job row for this attempt (or a
+    // later one) names the lease that runs it; while that lease (this process's or another engine's on this data
+    // folder) is alive or cannot be judged, the record is left alone, so a slow start or another engine's running
+    // checkout is never saved and retired under it. The row is written after the child's record, within a bound, and a
+    // failed write is only logged, so without one the child's record decides, as it does for the helper itself: its
+    // owner for this attempt must be gone. A failed save is retried at boot only, not every pass. Merges and discards
+    // interrupted part-way are finished at boot.
+    const recoverIsolations = Effect.fn("TaskRecovery.isolations")(function* (boot: boolean) {
+      for (const record of yield* isolation.records())
+        yield* Effect.gen(function* () {
+          const jobDriven =
+            ["preparing", "running", "settling"].includes(record.state) ||
+            (record.state === "failed" && (boot || record.settledAttempt !== record.attempt))
+          const interrupted =
+            record.state === "discarding" || (record.mergeStartedAt !== undefined && !record.mergeCompleted)
+          if (!jobDriven && !(boot && interrupted)) return
+          if (jobDriven) {
+            const row = (yield* store.forParent(record.parentSessionID)).find(
+              (item) =>
+                item.type === "task" &&
+                (item.sessionID ?? item.id) === record.taskID &&
+                (item.attempt ?? 0) >= record.attempt,
+            )
+            if (row && BackgroundJobStore.alive(row.owner) !== "dead") return
+            if (!row) {
+              // A deleted child has no record left to judge by; nothing can be running a conversation that is gone.
+              const child = yield* find(SessionID.make(record.taskID))
+              const lifecycle = child && SubagentLifecycle.read(child)
+              if (child && (!lifecycle || (lifecycle.attempt ?? 1) < record.attempt)) return
+              if (child && lifecycle && (yield* SubagentLifecycle.liveness(store, child, lifecycle)) !== "dead") return
+            }
+          }
+          // Fencing is idempotent; it keeps a record made before the fence existed owner-only before its reconcile can
+          // report anything. Only a record about to be reconciled is fenced, so settled records, which the registry
+          // keeps, cost no write transaction on every pass.
+          yield* isolation.fence(record.taskID)
+          yield* isolation.reconcile(record.taskID)
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("an isolated task was not recovered", { taskID: record.taskID, cause }),
+          ),
+        )
+      yield* isolation
+        .sweep()
+        .pipe(Effect.catchCause((cause) => Effect.logWarning("isolated task sweep failed", { cause })))
+    })
+    // Inside a task's own checkout there is nothing to recover: its launcher's home does that. An unreadable isolation
+    // registry never keeps ordinary interrupted helpers from being reported.
     const run = (boot: boolean) =>
-      SubagentLifecycle.locked(lock)(pass(boot)).pipe(
+      InstanceState.context.pipe(
+        Effect.flatMap((context) =>
+          TaskPlace.isTaskDirectory(context.directory)
+            ? Effect.succeed({ reported: 0 })
+            : recoverIsolations(boot).pipe(
+                Effect.catchCause((cause) => Effect.logWarning("isolated task recovery failed", { cause })),
+                Effect.andThen(SubagentLifecycle.locked(lock)(pass(boot))),
+              ),
+        ),
         Effect.catchCause((cause) =>
           Effect.logWarning("task recovery failed", { cause }).pipe(Effect.as({ reported: 0 })),
         ),
@@ -396,6 +455,7 @@ export const node = LayerNode.make({
     SpendGuard.node,
     BackgroundJobStore.node,
     Database.node,
+    TaskIsolation.node,
   ],
 })
 

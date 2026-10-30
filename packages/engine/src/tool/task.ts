@@ -5,6 +5,7 @@ import { SessionV1 } from "@vectordevai/core/v1/session"
 import type { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import { BackgroundJob } from "@/background/job"
 import { TaskPlace } from "@/task/place"
+import { InstanceRef } from "@/effect/instance-ref"
 import { Session } from "@/session/session"
 import { SessionStatus } from "@/session/status"
 import { SessionID, MessageID } from "../session/schema"
@@ -45,8 +46,10 @@ import path from "path"
 import { isFreeModelRef } from "@vectordevai/schema/free-model"
 import { SessionMemory } from "../session/memory"
 import { ResearchRun } from "./research-run"
+import { FileLock } from "./file-lock"
 import { TaskNotify } from "@/task/notify"
 import { TaskClaims } from "@/task/claims"
+import { TaskIsolation } from "@/task/isolation"
 import { TaskLimits } from "@/task/limits"
 import { TaskSize } from "@vectordevai/core/task-size"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
@@ -193,6 +196,10 @@ const BaseParameterFields = {
     description:
       "true: start from your whole conversation instead of a brief, sharing your prompt cache. Background only; no subagent_type, model, effort or context_pack",
   }),
+  isolation: Schema.optional(Schema.Literal("worktree")).annotate({
+    description:
+      "Give this child its own git worktree made from your current files. Removed if it changes nothing; otherwise its changes come back for task_manage merge. For parallel editing; not for read-only agents.",
+  }),
 }
 
 const BaseParameters = Schema.Struct(BaseParameterFields)
@@ -209,13 +216,8 @@ const BatchBrief = Schema.Struct({
   background: Schema.optional(Schema.Never),
 })
 
-// A brief field a later version adds (an isolated worktree). Not advertised yet, and refused when sent: dropped
-// silently, an isolation request would start a child without it.
-const UNRELEASED = {
-  isolation: Schema.optional(Schema.Never),
-}
 // Brief fields a batch takes only inside each entry.
-const PER_BRIEF = ["model", "effort", "output_schema", "fork"] as const
+const PER_BRIEF = ["model", "effort", "output_schema", "fork", "isolation"] as const
 // The quick lane's agents, whose steps send only their own request's messages (prompt.ts `quick`).
 const QUICK_LANE = new Set(["quick", "autocomplete", "distill"])
 
@@ -240,12 +242,9 @@ const BackgroundBatchParameters = Schema.Struct({
 // Explicit forbidden fields prevent the union decoder from silently stripping a
 // hybrid input and launching only one of the two supplied forms.
 export const InputParameters = Schema.Union([
-  Schema.Struct({ ...Parameters.fields, ...UNRELEASED, tasks: Schema.optional(Schema.Never) }),
+  Schema.Struct({ ...Parameters.fields, tasks: Schema.optional(Schema.Never) }),
   Schema.Struct({
-    tasks: Schema.Array(Schema.Struct({ ...BatchBrief.fields, ...UNRELEASED })).check(
-      Schema.isMinLength(1),
-      Schema.isMaxLength(8),
-    ),
+    tasks: Schema.Array(BatchBrief).check(Schema.isMinLength(1), Schema.isMaxLength(8)),
     description: Schema.optional(Schema.Never),
     prompt: Schema.optional(Schema.Never),
     subagent_type: Schema.optional(Schema.Never),
@@ -261,7 +260,7 @@ export const InputParameters = Schema.Union([
     effort: Schema.optional(Schema.Never),
     output_schema: Schema.optional(Schema.Never),
     fork: Schema.optional(Schema.Never),
-    ...UNRELEASED,
+    isolation: Schema.optional(Schema.Never),
   }),
 ])
 
@@ -356,6 +355,7 @@ export const TaskTool = Tool.define(
     const notifier = yield* TaskNotify.Service
     const limits = yield* TaskLimits.Service
     const guests = yield* FreeModelGuests.Service
+    const isolations = yield* Effect.serviceOption(TaskIsolation.Service)
     // Forks need the prefixes the run loop keeps. Without them (a test that builds the task tool on its own) a fork is
     // refused rather than started cold.
     const forks = yield* Effect.serviceOption(SessionFork.Service)
@@ -667,6 +667,40 @@ export const TaskTool = Tool.define(
         )
 
       const instance = yield* InstanceState.context
+      const isolation = Option.getOrUndefined(isolations)
+      const savedIsolation = session && isolation ? yield* isolation.find(session.id) : undefined
+      if (
+        savedIsolation &&
+        (savedIsolation.state === "settling" ||
+          (savedIsolation.state === "running" && (yield* background.get(savedIsolation.taskID))?.status !== "running"))
+      )
+        return yield* Effect.fail(
+          new Error("This isolated task is saving its changes; wait for its saved result before resuming."),
+        )
+      // A resumed child keeps its original assignment; naming worktree for a child that was shared is a mismatch. The
+      // assignment is durable in the child's record from launch, while its checkout is reserved only once its run takes
+      // a slot, so a child stopped while it was queued is still isolated.
+      const assigned =
+        savedIsolation !== undefined ||
+        (session !== undefined && SubagentLifecycle.read(session)?.isolation !== undefined)
+      const isolated = params.isolation === "worktree" || assigned
+      if (session && params.isolation === "worktree" && !assigned)
+        return yield* Effect.fail(new Error("The resumed task's isolation must match its original assignment."))
+      if (isolated && !isolation) return yield* Effect.fail(new Error("Task isolation is unavailable in this engine."))
+      // A dependency still waiting for its slot has no registry record yet; its launch assignment already says it is
+      // isolated.
+      if (!isolated && isolation)
+        for (const dependency of dependencies) {
+          const parsed = Schema.decodeUnknownOption(SessionID)(dependency)
+          const saved = parsed._tag === "Some" ? yield* sessions.get(parsed.value).pipe(Effect.option) : Option.none()
+          if (
+            (yield* isolation.find(dependency)) ||
+            (Option.isSome(saved) && SubagentLifecycle.read(saved.value)?.isolation !== undefined)
+          )
+            return yield* Effect.fail(
+              new Error("A shared task cannot depend on an isolated task. Use isolation: worktree."),
+            )
+        }
       const ownedPaths = yield* Effect.try({
         try: () => {
           // The research agents edit nothing, so they own no path, and a path would reach the lead with its brief
@@ -710,6 +744,7 @@ export const TaskTool = Tool.define(
           taskID: params.task_id,
           title,
           paths: ownedPaths,
+          isolated,
           writes:
             !researchAgents.has(subagentType) && !["explore", "review", "judge", "security"].includes(subagentType),
         })
@@ -732,14 +767,16 @@ export const TaskTool = Tool.define(
         )
       const conflicts = yield* SubagentLifecycle.locked(claimLock)(
         Effect.gen(function* () {
-          const found = TaskClaims.overlaps({
-            tree: instance.worktree,
-            directory: instance.directory,
-            parentSessionID: ctx.sessionID,
-            taskID: params.task_id,
-            paths: ownedPaths,
-            except: new Set(dependencies),
-          })
+          const found = isolated
+            ? []
+            : TaskClaims.overlaps({
+                tree: instance.worktree,
+                directory: instance.directory,
+                parentSessionID: ctx.sessionID,
+                taskID: params.task_id,
+                paths: ownedPaths,
+                except: new Set(dependencies),
+              })
           if (found.length) return found
           const claim = yield* reserveOwnership()
           reserved.push(claim)
@@ -879,6 +916,16 @@ export const TaskTool = Tool.define(
       if (!next) {
         return yield* Effect.fail(new Error(`Unknown agent type: ${subagentType} is not a valid agent type`))
       }
+      const isolationCheck =
+        isolated && isolation
+          ? yield* isolation
+              .check({
+                parentSessionID: ctx.sessionID,
+                agent: next,
+                ...(session ? { resumeID: session.id } : {}),
+              })
+              .pipe(Effect.mapError((cause) => new Error(cause.message)))
+          : undefined
       // The model and effort the child runs with (5.E.1), worked out before the ask and admission, so a refused one asks
       // nothing and takes no slot. The parent's free route holds even if its model became unavailable after the call.
       const freeRoute = isFreeModelRef(msg.info)
@@ -1026,6 +1073,9 @@ export const TaskTool = Tool.define(
       // effect before executing any of them.
       return Effect.gen(function* () {
         if (batch && ctx.abort.aborted) return yield* Effect.interrupt
+        // The whole conversation family becomes owner-only before the child exists or any private brief is written.
+        if (isolated && isolation)
+          yield* isolation.fence(ctx.sessionID).pipe(Effect.mapError((cause) => new Error(cause.message)))
         // tools.ts resets the part's time.start on every metadata write, so the launch time travels as startedAt.
         const startedAt = Date.now()
         let attempt = (session ? (SubagentLifecycle.read(session)?.attempt ?? 0) : 0) + 1
@@ -1064,6 +1114,7 @@ export const TaskTool = Tool.define(
           startedAt,
           // Each run counts its own attempts and says whether its answer matched.
           ...(structured ? { structured: { ...structured, attempts: 0 } } : {}),
+          ...(isolationCheck ? { isolation: { mode: isolationCheck.mode, state: "preparing" } } : {}),
           ...(delegation
             ? {
                 conversationID: delegation.conversationID,
@@ -1146,6 +1197,7 @@ export const TaskTool = Tool.define(
         let queuedReason = record.slotReason
         // The part mirrors the record's structured state as {valid, attempts} (4.6).
         let structuredPart: { valid?: boolean; attempts: number } | undefined = structured && { attempts: 0 }
+        let isolationPart = record.isolation
         // What the child took in, once it settles: a parent whose subagent read the web is held as web, not subagent
         // (RC8), so its memory writes wait for the user for the right reason.
         const held: { [SessionMemory.HOLD]?: BrainSchema.Hold } = {}
@@ -1154,6 +1206,7 @@ export const TaskTool = Tool.define(
           ...outcome,
           ...(queuedReason ? { queuedReason } : {}),
           ...(structuredPart ? { structured: structuredPart } : {}),
+          ...(isolationPart ? { isolation: isolationPart } : {}),
           ...held,
         })
         // Once the call has returned (background launch or promotion), its tool
@@ -1295,11 +1348,12 @@ export const TaskTool = Tool.define(
               }),
             { concurrency: "unbounded" },
           )
-          const work = Effect.gen(function* () {
+          const execute = Effect.gen(function* () {
             // Queued for a prerequisite or a slot until now; running clears the reason.
             if (outcome.status === "queued") yield* transition({ status: "running", slotReason: undefined })
             const brief = [
               assignmentPrompt(briefed, subagentType === ResearchRun.RESEARCHER ? [] : ownedPaths),
+              ...(isolated && isolation ? [TaskIsolation.brief(yield* isolation.get(nextSession.id))] : []),
               ...prerequisites,
             ].join("\n\n")
             const turn = forking && Option.isSome(forks) ? yield* forkTurn(forks.value, brief) : undefined
@@ -1358,6 +1412,40 @@ export const TaskTool = Tool.define(
                 ),
               ),
             )
+          })
+          const work = Effect.gen(function* () {
+            if (isolated && isolation) {
+              // A run joined to one already going belongs to that run's attempt and its live checkout.
+              const runAttempt = joinedAttempt ?? attempt
+              const current = yield* isolation.find(nextSession.id)
+              const place = TaskPlace.get(nextSession.id)
+              const live =
+                current?.state === "running" &&
+                current.attempt === runAttempt &&
+                place !== undefined &&
+                FileLock.key(place.work.directory) === FileLock.key(current.directory)
+              if (!current) {
+                yield* isolation.reserve({
+                  taskID: nextSession.id,
+                  parentSessionID: ctx.sessionID,
+                  agent: next,
+                  title,
+                  attempt: runAttempt,
+                  dependsOn: dependencies,
+                })
+                yield* isolation.start(nextSession.id)
+              }
+              // Any other record, a reservation an earlier attempt left in preparing included, is taken over for this
+              // attempt (as TaskManager.resume does), so the save barrier finds the attempt that ran in it.
+              if (current && !live)
+                yield* isolation.resume({ taskID: nextSession.id, attempt: runAttempt, agent: next })
+              if (!live) {
+                isolationPart = TaskIsolation.info(yield* isolation.get(nextSession.id))
+                yield* SubagentLifecycle.write(sessions, nextSession.id, { isolation: isolationPart }, runAttempt)
+                if (detached) yield* persistPart()
+              }
+            }
+            return yield* TaskPlace.within(nextSession.id)(execute)
           })
           // A fresh fork starts once the response that launched it has finished. One whose launching response failed or
           // was stopped is cancelled quietly, with no turn for the parent (5.E.3).
@@ -1465,6 +1553,22 @@ export const TaskTool = Tool.define(
                 : Effect.fail(failed),
             ),
           )
+        const completeIsolation = (job: BackgroundJob.Info) =>
+          !isolated || !isolation
+            ? Effect.void
+            : TaskIsolation.complete({
+                isolation,
+                taskID: nextSession.id,
+                attempt,
+                status: job.status,
+                scope,
+                mirror: (saved) =>
+                  Effect.gen(function* () {
+                    isolationPart = TaskIsolation.info(saved)
+                    yield* SubagentLifecycle.write(sessions, nextSession.id, { isolation: isolationPart }, attempt)
+                    if (detached) yield* persistPart()
+                  }),
+              }).pipe(Effect.provideService(InstanceRef, instance))
         // The attempt of the run this call joined, when it added a run to one already going.
         let joinedAttempt: number | undefined
         // A message for a background task that is mid-run joins the child's running loop, as a prompt sent to a busy
@@ -1584,6 +1688,16 @@ export const TaskTool = Tool.define(
             // Another resume may have won after extendRun released the lock. Never overwrite its assignment.
             const existing = yield* background.get(nextSession.id)
             if (existing?.status === "running") return existing
+            // The job's runs ended while this call prepared, so its isolated save may be under way. Starting would wait
+            // for that save while holding this lock, which keeps every task control behind Git; refuse as a resume
+            // during a save is refused.
+            if (isolated && isolation) {
+              const current = yield* isolation.find(nextSession.id)
+              if (current?.state === "running" || current?.state === "settling")
+                return yield* Effect.fail(
+                  new Error("This isolated task is saving its changes; wait for its saved result before resuming."),
+                )
+            }
             yield* assertDependencies(nextSession.id, dependencies)
             const prior = session && SubagentLifecycle.read(yield* sessions.get(nextSession.id))
             if (session) {
@@ -1655,6 +1769,7 @@ export const TaskTool = Tool.define(
                 run: guardedRun().pipe(
                   Effect.ensuring(admission ? limits.release(admission, nextSession.id) : Effect.void),
                 ),
+                ...(isolated ? { onComplete: completeIsolation } : {}),
               })
               .pipe(
                 Effect.tap((started) => watchOwnership(started.id)),
@@ -1783,10 +1898,29 @@ export const TaskTool = Tool.define(
                     : (result?.output ?? "")
               // A checked answer is its last run's JSON, whole or as the file holding it (5.E.2).
               const json = structured && state === "completed" ? yield* TaskStructured.shown(truncate, text) : undefined
+              // A child stopped before its slot never reserved a checkout, so it has no record to report. A record that
+              // cannot be read costs the result only its counts (null): the report still reaches the model.
+              const saved =
+                isolated && isolation
+                  ? yield* isolation
+                      .find(nextSession.id)
+                      .pipe(
+                        Effect.catch((error) =>
+                          Effect.logWarning("isolated task record unreadable", { taskID: nextSession.id, error }).pipe(
+                            Effect.as(null),
+                          ),
+                        ),
+                      )
+                  : undefined
               return rendered(title, partMetadata(), {
                 sessionID: nextSession.id,
                 state,
-                ...(busy && admission ? { summary: busyNote(admission.active, admission.limits.running) } : {}),
+                summary: [
+                  ...(busy && admission ? [busyNote(admission.active, admission.limits.running)] : []),
+                  ...(saved ? [TaskIsolation.report(saved)] : saved === null ? [TaskIsolation.UNREADABLE_REPORT] : []),
+                ]
+                  .filter(Boolean)
+                  .join("\n"),
                 text,
                 ...(json ? { json } : {}),
               })
@@ -1825,6 +1959,7 @@ export const TaskTool = Tool.define(
           task.effort,
           task.output_schema,
           task.fork,
+          task.isolation,
         ]),
       )
       if (new Set(briefs).size !== briefs.length)
@@ -2026,10 +2161,6 @@ export const TaskTool = Tool.define(
       jsonSchema: ToolJsonSchema.fromSchema(flags.backgroundSubagents ? BackgroundBatchParameters : BatchParameters),
       formatValidationError: (error: unknown) => {
         const text = String(error)
-        // A brief field a later version adds: say that, not how the array is shaped.
-        const unreleased = Object.keys(UNRELEASED).filter((key) => text.includes(`["${key}"]`))
-        if (unreleased.length > 0)
-          return `${unreleased.join(", ")} ${unreleased.length === 1 ? "is" : "are"} not available in this version of the task tool; leave ${unreleased.length === 1 ? "it" : "them"} out. ${text}`
         // Refused at a batch's top level, the one place either field is never.
         const lines = text.split("\n")
         const outside = PER_BRIEF.filter((key) =>

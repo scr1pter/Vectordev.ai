@@ -8,6 +8,7 @@ import { BackgroundJobStore } from "@vectordevai/core/background-job-store"
 import { Database } from "@vectordevai/core/database/database"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
+import { SessionAudience } from "@vectordevai/core/session/audience"
 import { ModelV2 } from "@vectordevai/core/model"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
@@ -26,6 +27,7 @@ import { Session } from "@/session/session"
 import { SessionPrompt } from "@/session/prompt"
 import { SessionStatus } from "@/session/status"
 import { TaskManager } from "@/task/manager"
+import { TaskIsolation } from "@/task/isolation"
 import { TaskLimits } from "@/task/limits"
 import { TaskNotify } from "@/task/notify"
 import { TaskSignals } from "@/task/signals"
@@ -51,7 +53,7 @@ import { testEffect } from "../lib/effect"
 afterEach(disposeAllInstances)
 
 const jobs = Layer.effect(BackgroundJob.Service, BackgroundJob.make)
-const stored = LayerNode.compile(LayerNode.group([Session.node, Database.node]))
+const stored = LayerNode.compile(LayerNode.group([Session.node, Database.node, SessionAudience.node]))
 const flags = RuntimeFlags.layer({ backgroundSubagents: true })
 // The real TaskManager over this file's job registry; what promoting does not read is stubbed.
 const manager = (
@@ -76,9 +78,12 @@ const manager = (
     | SessionFork.Service
     | Provider.Service
     | Agent.Service
+    | TaskIsolation.Service
   >
 ).pipe(
   Layer.provide([
+    // None of these helpers is isolated.
+    Layer.mock(TaskIsolation.Service)({ find: () => Effect.succeed(undefined) }),
     Layer.mock(SessionFork.Service)({}),
     Layer.mock(Provider.Service)({}),
     Layer.mock(Agent.Service)({}),

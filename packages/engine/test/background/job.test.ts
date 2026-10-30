@@ -172,11 +172,14 @@ describe("background.job", () => {
     }),
   )
 
-  it.instance("ignores stale settlements after restarting a stopped job", () =>
+  // A job started again under its id waits for its stopped runs to wind down, so the stopped job's settlement can never
+  // land on the new one (WP27's same-ID rule: a checkout being retired is never entered by a new run).
+  it.instance("a same-ID restart waits for the stopped job's runs, whose settlement never touches the new one", () =>
     Effect.gen(function* () {
       const jobs = yield* BackgroundJob.Service
       const interrupted = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
+      const restartedRun = yield* Deferred.make<void>()
       const id = "job_test"
       // A failed run leaves the runs added after it to finish, so a run outliving its job's settlement is one still
       // winding down after a stop.
@@ -193,10 +196,27 @@ describe("background.job", () => {
       const stopping = yield* jobs.cancel(id).pipe(Effect.forkChild({ startImmediately: true }))
       yield* Deferred.await(interrupted)
       expect((yield* jobs.get(id))?.status).toBe("cancelled")
-      yield* jobs.start({ id, type: "test", run: Effect.never })
+      const restarting = yield* jobs
+        .start({
+          id,
+          type: "test",
+          run: Deferred.succeed(restartedRun, undefined).pipe(Effect.andThen(Effect.never)),
+        })
+        .pipe(Effect.forkChild({ startImmediately: true }))
+
+      // While the stopped run still winds down, the restart has not begun: its run never started, and the job is the
+      // stopped one.
+      yield* Effect.sleep("50 millis")
+      expect(restarting.pollUnsafe()).toBeUndefined()
+      expect(yield* Deferred.isDone(restartedRun)).toBe(false)
+      expect((yield* jobs.get(id))?.status).toBe("cancelled")
 
       yield* Deferred.succeed(release, undefined)
-      yield* Fiber.join(stopping)
+      expect((yield* Fiber.join(stopping))?.status).toBe("cancelled")
+      expect((yield* Fiber.join(restarting)).status).toBe("running")
+      yield* Deferred.await(restartedRun)
+      // The stopped job settled before the restart, so nothing late overwrites the running one.
+      yield* Effect.sleep("50 millis")
       expect((yield* jobs.get(id))?.status).toBe("running")
       yield* jobs.cancel(id)
     }),

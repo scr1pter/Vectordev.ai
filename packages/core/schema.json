@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "bb669246-6fcd-401a-98a7-b886d1f9b471",
+  "id": "42b5ff7f-ee68-41be-adfc-f0125f1b7bf1",
   "prevIds": [
-    "d2e8c1f9-f50c-4925-9334-86550ed7ceca"
+    "9ac77c90-e175-469f-91fa-1f88f52db1d7"
   ],
   "ddl": [
     {
@@ -16,6 +16,18 @@
     },
     {
       "name": "data_migration",
+      "entityType": "tables"
+    },
+    {
+      "name": "session_audience",
+      "entityType": "tables"
+    },
+    {
+      "name": "session_lineage",
+      "entityType": "tables"
+    },
+    {
+      "name": "session_private_directory",
       "entityType": "tables"
     },
     {
@@ -393,6 +405,86 @@
       "name": "time_completed",
       "entityType": "columns",
       "table": "data_migration"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "session_audience"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "false",
+      "generated": null,
+      "name": "owner_only",
+      "entityType": "columns",
+      "table": "session_audience"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "false",
+      "generated": null,
+      "name": "guest_input",
+      "entityType": "columns",
+      "table": "session_audience"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "session_lineage"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "parent_id",
+      "entityType": "columns",
+      "table": "session_lineage"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "false",
+      "generated": null,
+      "name": "fork",
+      "entityType": "columns",
+      "table": "session_lineage"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "directory",
+      "entityType": "columns",
+      "table": "session_private_directory"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "session_private_directory"
     },
     {
       "type": "text",
@@ -2191,6 +2283,16 @@
     },
     {
       "columns": [
+        "session_id",
+        "parent_id"
+      ],
+      "nameExplicit": false,
+      "name": "session_lineage_pk",
+      "entityType": "pks",
+      "table": "session_lineage"
+    },
+    {
+      "columns": [
         "email",
         "url"
       ],
@@ -2244,6 +2346,24 @@
       "nameExplicit": false,
       "name": "data_migration_pk",
       "table": "data_migration",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "session_id"
+      ],
+      "nameExplicit": false,
+      "name": "session_audience_pk",
+      "table": "session_audience",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "directory"
+      ],
+      "nameExplicit": false,
+      "name": "session_private_directory_pk",
+      "table": "session_private_directory",
       "entityType": "pks"
     },
     {
@@ -2421,6 +2541,34 @@
       "name": "background_job_parent_idx",
       "entityType": "indexes",
       "table": "background_job"
+    },
+    {
+      "columns": [
+        {
+          "value": "parent_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "session_lineage_parent_idx",
+      "entityType": "indexes",
+      "table": "session_lineage"
+    },
+    {
+      "columns": [
+        {
+          "value": "session_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "session_private_directory_session_idx",
+      "entityType": "indexes",
+      "table": "session_private_directory"
     },
     {
       "columns": [

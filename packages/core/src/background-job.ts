@@ -81,6 +81,9 @@ type Active = {
   info: Info
   done: Deferred.Deferred<Info>
   scope: Scope.Closeable
+  // Every run has returned and run its finalizers; released before the completion callback.
+  ran: Deferred.Deferred<void>
+  // `ran`, then the completion callback too.
   drained: Deferred.Deferred<void>
   fibers: number
   token: object
@@ -92,6 +95,7 @@ type Active = {
   tail: Deferred.Deferred<void>
   promoted: Deferred.Deferred<Info>
   onPromote?: Effect.Effect<void>
+  onComplete?: (info: Info) => Effect.Effect<void, unknown>
   promotable: boolean
   durable?: Writes
 }
@@ -104,9 +108,11 @@ type State = {
 type FinishResult = {
   info?: Info
   done?: Deferred.Deferred<Info>
+  ran?: Deferred.Deferred<void>
   drained?: Deferred.Deferred<void>
   scope?: Scope.Closeable
   durable?: Writes
+  onComplete?: (info: Info) => Effect.Effect<void, unknown>
 }
 
 type PromoteResult = {
@@ -138,6 +144,11 @@ export type StartInput = {
   title?: string
   metadata?: Record<string, unknown>
   onPromote?: Effect.Effect<void>
+  /**
+   * Runs once after every joined run has drained, before completion waiters are released. A cancel that stops the job
+   * waits for it; a cancel that reaches a job already ended on its own does not.
+   */
+  onComplete?: (info: Info) => Effect.Effect<void, unknown>
   promotable?: boolean
   /** Keep a row for the job, when the registry has a store and a lease. */
   durable?: Durable
@@ -334,14 +345,38 @@ export const makeWith = Effect.fnUntraced(function* (o: {
     const result = yield* SynchronizedRef.modify(state.jobs, (jobs): readonly [FinishResult, Map<string, Active>] => {
       const job = jobs.get(id)
       if (!job || job.token !== token) return [{}, jobs]
-      const next = { ...job, fibers: job.fibers - 1 }
+      const next = {
+        ...job,
+        fibers: job.fibers - 1,
+        ...(job.fibers === 1 ? { onComplete: undefined } : {}),
+      }
       return [
-        next.fibers === 0 ? { info: snapshot(next), done: next.done, drained: next.drained } : {},
+        next.fibers === 0
+          ? { info: snapshot(next), done: next.done, ran: next.ran, drained: next.drained, onComplete: job.onComplete }
+          : {},
         new Map(jobs).set(id, next),
       ]
     })
-    if (result.info && result.done) yield* Deferred.succeed(result.done, result.info)
-    if (result.drained) yield* Deferred.succeed(result.drained, undefined)
+    if (result.ran) yield* Deferred.succeed(result.ran, undefined)
+    const complete = result.onComplete
+    const info = result.info
+    yield* (
+      info && complete
+        ? Effect.suspend(() => complete(info)).pipe(
+            Effect.catchCause((cause) => Effect.logWarning("background job completion callback failed", { id, cause })),
+          )
+        : Effect.void
+    ).pipe(
+      Effect.ensuring(
+        Effect.all(
+          [
+            result.info && result.done ? Deferred.succeed(result.done, result.info) : Effect.void,
+            result.drained ? Deferred.succeed(result.drained, undefined) : Effect.void,
+          ],
+          { discard: true },
+        ),
+      ),
+    )
   })
 
   const fork = Effect.fn("BackgroundJob.fork")(function* (
@@ -408,6 +443,7 @@ export const makeWith = Effect.fnUntraced(function* (o: {
             const scope = yield* Scope.fork(state.scope, "parallel")
             if (scope.state._tag === "Closed") return yield* Effect.interrupt
             const token = {}
+            const ran = yield* Deferred.make<void>()
             const drained = yield* Deferred.make<void>()
             const job = {
               info: {
@@ -421,6 +457,7 @@ export const makeWith = Effect.fnUntraced(function* (o: {
               },
               done,
               scope,
+              ran,
               drained,
               fibers: 1,
               token,
@@ -430,6 +467,7 @@ export const makeWith = Effect.fnUntraced(function* (o: {
               tail,
               promoted,
               onPromote: input.onPromote,
+              onComplete: input.onComplete,
               promotable: input.promotable !== false,
               // A job started again under its id writes after the writes its previous run left queued.
               durable: row
@@ -561,7 +599,16 @@ export const makeWith = Effect.fnUntraced(function* (o: {
     const result = yield* SynchronizedRef.modify(state.jobs, (jobs): readonly [FinishResult, Map<string, Active>] => {
       const job = jobs.get(id)
       if (!job) return [{}, jobs]
-      if (job.info.status !== "running") return [{ info: snapshot(job), drained: job.drained }, jobs]
+      // A job that ended on its own is not stopped: the caller joins its runs, never its completion callback (a normal
+      // end's save, which may run Git). A job a Stop ended is joined through its callback, which records that stop.
+      if (job.info.status !== "running")
+        return [
+          {
+            info: snapshot(job),
+            drained: job.info.status === "completed" || job.info.status === "error" ? job.ran : job.drained,
+          },
+          jobs,
+        ]
       const next = {
         ...job,
         onPromote: undefined,
@@ -578,7 +625,14 @@ export const makeWith = Effect.fnUntraced(function* (o: {
       ]
     })
     if (result.info && result.durable) yield* detach(settled(result.durable, result.info))
-    if (result.scope) yield* Scope.close(result.scope, Exit.void)
+    if (result.scope) {
+      // A Stop can run synchronously inside one of the job's own steps (its run completed a Deferred whose waiter stops
+      // it). Closing the scope then interrupts that fiber re-entrantly: its finalizers and completion callback start
+      // while the step is still on the stack, and the runtime hands that step's result to the callback's first pending
+      // step. Interrupting from a fresh tick keeps the callback's results its own.
+      yield* Effect.yieldNow
+      yield* Scope.close(result.scope, Exit.void)
+    }
     if (result.drained) yield* Deferred.await(result.drained)
     return result.info
   }, Effect.uninterruptible)

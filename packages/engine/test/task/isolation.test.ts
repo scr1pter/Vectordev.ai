@@ -1,4 +1,6 @@
 import { afterEach, expect } from "bun:test"
+import { Database } from "@vectordevai/core/database/database"
+import { SessionAudience } from "@vectordevai/core/session/audience"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
@@ -43,6 +45,8 @@ const layer = AppNodeBuilder.build(
     Agent.node,
     Config.node,
     CrossSpawnSpawner.node,
+    SessionAudience.node,
+    Database.node,
   ]),
   [
     [InstanceStore.bootstrapNode, bootstrap],
@@ -961,6 +965,34 @@ it.instance(
 )
 
 it.instance(
+  "a dependency discarded after the reservation is not stacked, so the reservation still starts and merges",
+  () =>
+    Effect.gen(function* () {
+      const dependency = yield* fixture
+      const started = yield* dependency.start
+      yield* write(started.work.directory, "dep.txt", "dependency\n")
+      expect((yield* dependency.settle()).state).toBe("changed")
+      const f = yield* fixture
+      const reserved = yield* f.isolation.reserve({
+        taskID: f.child.id,
+        parentSessionID: f.parent.id,
+        title: "Stack",
+        agent: f.agent,
+        dependsOn: [dependency.child.id],
+      })
+      expect(reserved.stacked).toEqual([dependency.child.id])
+      yield* dependency.isolation.discard({ taskID: dependency.child.id, by: { kind: "owner" } })
+      yield* f.isolation.start(f.child.id)
+      expect((yield* f.isolation.get(f.child.id)).stacked).toEqual([])
+      expect(yield* exists(path.join(f.workPath, "dep.txt"))).toBe(false)
+      yield* write(f.workPath, "result.txt", "result\n")
+      yield* f.settle()
+      expect((yield* f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" } })).record.state).toBe("merged")
+    }),
+  { git: true },
+)
+
+it.instance(
   "sweep removes only queued registered tasks and retains their recovery patches",
   () =>
     Effect.gen(function* () {
@@ -973,6 +1005,64 @@ it.instance(
       expect((yield* f.isolation.get(f.child.id)).state).toBe("discarded")
       expect(yield* exists(f.workPath)).toBe(false)
       expect(yield* Effect.promise(() => fs.readdir(path.join(path.dirname(f.recordPath), "patches")))).toHaveLength(1)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "a resumed kept task and a deleted conversation's changes do not count toward max_kept; the latter are swept on the next pass",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      yield* write(started.work.directory, "result.txt", "result\n")
+      expect((yield* f.settle()).state).toBe("changed")
+      // Nineteen other changed tasks wait for review, so with this one the project is at the default cap of 20.
+      const record = JSON.parse(yield* contents(f.recordPath, ""))
+      const others = Array.from({ length: 19 }, (_, index) => `kept_${index}_${f.child.id}`)
+      yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          Promise.all(
+            others.map(async (taskID) => {
+              const registry = path.join(path.dirname(path.dirname(f.recordPath)), taskID)
+              await fs.mkdir(registry, { recursive: true, mode: 0o700 })
+              await fs.writeFile(
+                path.join(registry, "record.json"),
+                JSON.stringify({
+                  ...record,
+                  taskID,
+                  directory: path.join(path.dirname(f.workPath), taskID),
+                  branch: `vector/subagent/${taskID}`,
+                }),
+                { mode: 0o600 },
+              )
+            }),
+          ),
+        ),
+        () =>
+          Effect.promise(() =>
+            Promise.all(
+              others.map((taskID) =>
+                fs.rm(path.join(path.dirname(path.dirname(f.recordPath)), taskID), { recursive: true, force: true }),
+              ),
+            ),
+          ),
+      )
+      // The boot pass has run, so the registry scan is spent for this project in this process.
+      expect(yield* f.isolation.sweep()).toEqual([])
+      yield* failure(f.isolation.check({ parentSessionID: f.parent.id, agent: f.agent }), "kept")
+      // Resuming a task that is one of the kept ones adds none, so it is admitted at the cap.
+      yield* f.isolation.check({ parentSessionID: f.parent.id, agent: f.agent, resumeID: f.child.id })
+      yield* f.sessions.remove(f.child.id)
+      expect((yield* f.isolation.get(f.child.id)).deleted).toBe(true)
+      // Its changes can no longer be reviewed, so they no longer hold a place under the cap.
+      yield* f.isolation.check({ parentSessionID: f.parent.id, agent: f.agent })
+      // The next pass sweeps it; its patch is kept.
+      expect(yield* f.isolation.sweep()).toEqual([f.child.id])
+      expect((yield* f.isolation.get(f.child.id)).state).toBe("discarded")
+      expect(yield* exists(f.workPath)).toBe(false)
+      expect(yield* Effect.promise(() => fs.readdir(path.join(path.dirname(f.recordPath), "patches")))).toHaveLength(1)
+      expect(yield* f.isolation.sweep()).toEqual([])
     }),
   { git: true },
 )
@@ -1133,6 +1223,72 @@ it.instance(
       const discarded = yield* f.isolation.discard({ taskID: f.child.id, by: { kind: "owner" } })
       expect(yield* Effect.promise(() => fs.readFile(discarded.saved!, "utf8"))).toContain("precious partial changes")
       expect(yield* exists(f.workPath)).toBe(false)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "a deleted conversation's failed save is not run again on every sweep; the next start retries it",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      yield* write(f.workPath, "unsaved.txt", "precious partial changes\n")
+      const lock = path.join(started.record.gitDirectory!, "index.lock")
+      yield* Effect.promise(() => fs.writeFile(lock, "fixture lock"))
+      expect((yield* f.settle()).state).toBe("failed")
+      yield* f.sessions.remove(f.child.id)
+      expect((yield* f.isolation.get(f.child.id)).deleted).toBe(true)
+      // Every save writes a new record file (a freed inode number can come back, its write time cannot), so these show
+      // whether a pass saved the record again.
+      const written = Effect.promise(() => fs.stat(f.recordPath, { bigint: true })).pipe(
+        Effect.map((stat) => `${stat.ino}:${stat.mtimeNs}`),
+      )
+      const before = yield* written
+      // The registry scan, then a later pass (every 5 minutes in TaskRecovery).
+      expect(yield* f.isolation.sweep()).toEqual([])
+      expect(yield* f.isolation.sweep()).toEqual([])
+      expect(yield* written).toBe(before)
+      expect((yield* f.isolation.get(f.child.id)).state).toBe("failed")
+      expect(yield* contents(f.workPath, "unsaved.txt")).toBe("precious partial changes\n")
+      // The next start: TaskRecovery's boot pass retries the save, then its sweep scans the registry again.
+      yield* Effect.promise(() => fs.rm(lock, { force: true }))
+      expect((yield* f.isolation.reconcile(f.child.id)).state).toBe("changed")
+      expect(yield* f.isolation.sweep({ force: true })).toEqual([f.child.id])
+      expect(yield* exists(f.workPath)).toBe(false)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "a running task's changes are read without Git, so a Stop's settling mark never waits behind a Changes view",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      yield* write(started.work.directory, "result.txt", "result\n")
+      const real = yield* Git.Service
+      const held = yield* Deferred.make<void>()
+      const gate = { on: false }
+      yield* Effect.addFinalizer(() => Deferred.succeed(held, undefined))
+      // The same registry and per-task lock, with every Git call held while the gate is on.
+      const viewing = yield* TaskIsolation.make.pipe(
+        Effect.provideService(Git.Service, {
+          ...real,
+          run: (args, options) =>
+            gate.on ? Deferred.await(held).pipe(Effect.andThen(real.run(args, options))) : real.run(args, options),
+        }),
+      )
+      gate.on = true
+      const view = yield* viewing
+        .changes({ taskID: f.child.id, diff: true, control: true, review: true })
+        .pipe(Effect.forkScoped({ startImmediately: true }))
+      // A Stop's completion barrier records settling under the same lock.
+      const marked = yield* f.isolation.markSettling(f.child.id, 1).pipe(Effect.timeout("5 seconds"))
+      expect(marked?.state).toBe("settling")
+      const changes = yield* Fiber.join(view).pipe(Effect.timeout("5 seconds"))
+      expect(changes).toMatchObject({ mergeable: "blocked", truncated: false })
+      expect(changes.patch).toBeUndefined()
     }),
   { git: true },
 )

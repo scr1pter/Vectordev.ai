@@ -28,6 +28,17 @@ import { SessionMemory } from "@/session/memory"
 import { SessionFork } from "@/session/fork"
 import { InstanceState } from "@/effect/instance-state"
 import type { Task } from "@vectordevai/schema/task"
+import { TaskIsolation } from "@/task/isolation"
+import { TaskClaims } from "@/task/claims"
+import { TaskPlace } from "@/task/place"
+import { Worktree } from "@/worktree"
+import { InstanceStore } from "@/project/instance-store"
+import { InstanceBootstrap } from "@/project/bootstrap-service"
+import { Git } from "@/git"
+import { Agent } from "@/agent/agent"
+import { Global } from "@vectordevai/core/global"
+import fs from "node:fs/promises"
+import path from "node:path"
 import { disposeAllInstances } from "../fixture/fixture"
 import { pollWithTimeout, testEffect } from "../lib/effect"
 
@@ -1093,4 +1104,131 @@ describe("task management", () => {
     expect((yield* manager.list({ sessionID: root.id })).tasks.find((item) => item.id === task.id)?.inbox).toEqual({ unread: 3 })
     yield* jobs.cancel(task.id)
   }))
+})
+
+// Merge and discard through TaskManager by an agent (F.4 "Who may merge"): only a task's direct parent, approving the
+// edit with its diff, may bring its isolated changes home or discard them. An ancestor that sees the task among its
+// descendants, or a caller naming another session, is refused before anything is asked or written.
+const isolatedIt = testEffect(
+  LayerNode.compile(
+    LayerNode.group([
+      TaskManager.node,
+      Session.node,
+      Database.node,
+      BackgroundJob.node,
+      TaskIsolation.node,
+      Worktree.node,
+      InstanceStore.node,
+      Git.node,
+      Agent.node,
+    ]),
+    [[InstanceStore.bootstrapNode, Layer.succeed(InstanceBootstrap.Service, { run: Effect.void })]],
+  ),
+)
+
+describe("isolated task merge and discard", () => {
+  const git = Effect.fn("TaskManagerTest.git")(function* (cwd: string, args: string[]) {
+    const result = yield* (yield* Git.Service).run(args, { cwd })
+    if (result.exitCode !== 0) throw new Error(result.stderr.toString())
+  })
+  // A launched isolated child of `parentID` whose worktree changed `file`.
+  const isolatedChild = Effect.fn("TaskManagerTest.isolatedChild")(function* (parentID: SessionID, file: string) {
+    const home = yield* InstanceState.context
+    const isolation = yield* TaskIsolation.Service
+    const agent = yield* (yield* Agent.Service).get("general")
+    if (!agent) throw new Error("general agent unavailable")
+    const task = yield* child(parentID, { status: "completed" })
+    const work = path.join(Global.Path.data, "task-worktree", home.project.id, task.id)
+    yield* Effect.addFinalizer(() =>
+      Effect.gen(function* () {
+        yield* (yield* InstanceStore.Service).disposeDirectory(work)
+        const service = yield* Git.Service
+        yield* service.run(["worktree", "remove", "--force", work], { cwd: home.directory })
+        yield* service.run(["branch", "-D", `vector/subagent/${task.id}`], { cwd: home.directory })
+        yield* Effect.promise(async () => {
+          await fs.rm(work, { recursive: true, force: true })
+          await fs.rm(path.join(Global.Path.data, "task-isolation", home.project.id, task.id), { recursive: true, force: true })
+        })
+        TaskClaims.unprotect(task.id)
+        TaskPlace.drop(task.id)
+      }).pipe(Effect.orDie),
+    )
+    yield* isolation.reserve({ taskID: task.id, parentSessionID: parentID, title: "Isolated edit", agent })
+    yield* isolation.start(task.id)
+    yield* Effect.promise(() => fs.writeFile(path.join(work, file), "child change\n"))
+    expect((yield* isolation.settle({ taskID: task.id, attempt: 1 })).state).toBe("changed")
+    return task
+  })
+
+  isolatedIt.instance("an agent merges and discards only its direct children, after approving the diff", () => Effect.gen(function* () {
+    const home = yield* InstanceState.context
+    for (const file of ["merged.txt", "discarded.txt"])
+      yield* Effect.promise(() => fs.writeFile(path.join(home.directory, file), "base\n"))
+    yield* git(home.directory, ["add", "merged.txt", "discarded.txt"])
+    yield* git(home.directory, ["commit", "-m", "base"])
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const isolation = yield* TaskIsolation.Service
+    const root = yield* sessions.create()
+    const lead = yield* child(root.id)
+    // Isolation fences the conversation family owner-only before its first child exists.
+    yield* isolation.fence(root.id)
+    const kept = yield* isolatedChild(lead.id, "merged.txt")
+    const dropped = yield* isolatedChild(lead.id, "discarded.txt")
+    const asked: string[][] = []
+    const by = (sessionID: string) => ({
+      kind: "agent" as const,
+      sessionID,
+      ask: (input: { patterns: string[]; metadata: { diff: string } }) =>
+        Effect.sync(() => {
+          expect(input.metadata.diff).toContain("child change")
+          asked.push(input.patterns)
+        }),
+      assertWritable: () => Effect.void,
+      assertExternalDirectory: () => Effect.void,
+    })
+
+    // The root sees both tasks among its descendants but is not their parent; a caller naming another session is
+    // refused too. Nothing is asked, written or discarded.
+    for (const [sessionID, actor] of [[root.id, root.id], [lead.id, root.id]] as const) {
+      const merge = yield* manager.merge({ sessionID, taskID: kept.id, by: by(actor) }).pipe(Effect.flip)
+      expect(merge.code).toBe("forbidden")
+      const discard = yield* manager.discard({ sessionID, taskID: dropped.id, by: by(actor) }).pipe(Effect.flip)
+      expect(discard.code).toBe("forbidden")
+    }
+    expect(asked).toEqual([])
+    expect((yield* isolation.get(kept.id)).state).toBe("changed")
+    expect((yield* isolation.get(dropped.id)).state).toBe("changed")
+    expect(yield* Effect.promise(() => fs.readFile(path.join(home.directory, "merged.txt"), "utf8"))).toBe("base\n")
+
+    // The direct parent merges after an edit approval that showed the diff.
+    const merged = yield* manager.merge({ sessionID: lead.id, taskID: kept.id, by: by(lead.id) })
+    expect(merged.merged).toEqual(["merged.txt"])
+    expect(merged.task.isolation?.state).toBe("merged")
+    expect(asked).toEqual([["merged.txt"]])
+    expect(yield* Effect.promise(() => fs.readFile(path.join(home.directory, "merged.txt"), "utf8"))).toBe("child change\n")
+
+    // And discards its other child, whose changes never reach the parent's files.
+    const discarded = yield* manager.discard({ sessionID: lead.id, taskID: dropped.id, by: by(lead.id), reason: "Superseded" })
+    expect(discarded.task.isolation?.state).toBe("discarded")
+    expect((yield* isolation.get(dropped.id)).discardReason).toBe("Superseded")
+    expect(yield* Effect.promise(() => fs.readFile(path.join(home.directory, "discarded.txt"), "utf8"))).toBe("base\n")
+  }), { git: true })
+
+  isolatedIt.instance("a shared child has no isolated changes: review, merge and discard answer not found without a registry path", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const root = yield* sessions.create()
+    const shared = yield* child(root.id, { status: "completed" })
+    const refusals = [
+      yield* manager.changes({ sessionID: root.id, taskID: shared.id, diff: true, control: true }).pipe(Effect.flip),
+      yield* manager.counts({ sessionID: root.id, taskID: shared.id }).pipe(Effect.flip),
+      yield* manager.merge({ sessionID: root.id, taskID: shared.id, by: { kind: "owner" } }).pipe(Effect.flip),
+      yield* manager.discard({ sessionID: root.id, taskID: shared.id, by: { kind: "owner" } }).pipe(Effect.flip),
+    ]
+    for (const refusal of refusals) {
+      expect(refusal.code).toBe("not_found")
+      expect(refusal.message).toBe("This task has no isolated changes.")
+    }
+  }), { git: true })
 })

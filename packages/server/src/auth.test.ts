@@ -113,6 +113,15 @@ describe("server authentication", () => {
         expect(ServerAuth.isOwnerOnlyRoute(method!, route!)).toBe(true)
   })
 
+  test("merging or discarding an isolated subagent's changes is the owner's; reviewing their counts is not", () => {
+    expect(ServerAuth.isOwnerOnlyRoute("POST", "/experimental/session/:sessionID/tasks/:taskID/merge")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRoute("POST", "/experimental/session/:sessionID/tasks/:taskID/discard")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRoute("GET", "/experimental/session/:sessionID/tasks/:taskID/changes")).toBe(false)
+    // Neighbouring task routes keep their own rules.
+    expect(ServerAuth.isOwnerOnlyRoute("POST", "/experimental/session/:sessionID/tasks/:taskID/message")).toBe(false)
+    expect(ServerAuth.isOwnerOnlyRoute("POST", "/experimental/session/:sessionID/tasks/stop")).toBe(false)
+  })
+
   test("host commands and permission answers require the server owner", () => {
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/pty")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRoute("GET", "/pty/:ptyID/connect-token")).toBe(true)

@@ -15,6 +15,7 @@ import { SessionFork } from "@/session/fork"
 import { TaskNotify } from "@/task/notify"
 import { TaskLimits } from "@/task/limits"
 import { TaskManageTool } from "./task-manage"
+import { TaskIsolation } from "@/task/isolation"
 import { TaskManager } from "@/task/manager"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { Database } from "@vectordevai/core/database/database"
@@ -209,6 +210,8 @@ const layer = Layer.effect(
                 const output = typeof result === "string" ? result : result.output
                 const metadata = typeof result === "string" ? {} : (result.metadata ?? {})
                 const attachments = typeof result === "string" ? undefined : result.attachments
+                // Private raw output is refused before truncation can save it to a file the model may read later.
+                if (toolCtx.assertOutput) yield* toolCtx.assertOutput(result)
                 const info = yield* agent.get(toolCtx.agent)
                 const out = yield* truncate.output(output, {}, info)
                 return {
@@ -566,6 +569,8 @@ export const node = LayerNode.make({
     LearnedSkill.node,
     // The task tool forks through it (Effect.serviceOption), so it must be built here.
     SessionFork.node,
+    // The task tool isolates through it (Effect.serviceOption); without it every isolation request is refused.
+    TaskIsolation.node,
   ],
 })
 

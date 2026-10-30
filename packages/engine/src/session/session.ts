@@ -12,6 +12,7 @@ import { Decimal } from "decimal.js"
 import type { ProviderMetadata, Usage } from "@vectordevai/llm"
 import { InstallationVersion } from "@vectordevai/core/installation/version"
 import { Database } from "@vectordevai/core/database/database"
+import { SessionAudience } from "@vectordevai/core/session/audience"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@vectordevai/core/event"
 import { EventTable } from "@vectordevai/core/event/sql"
@@ -547,16 +548,19 @@ export interface Interface {
   readonly listGlobal: (input?: GlobalListInput) => Effect.Effect<GlobalInfo[]>
   /** Usage across every project, or only sessions in `directory`. */
   readonly usage: (input?: { directory?: string }) => Effect.Effect<UsageSummary>
-  readonly create: (input?: {
-    parentID?: SessionID
-    internal?: string
-    title?: string
-    agent?: string
-    model?: Schema.Schema.Type<typeof Model>
-    metadata?: typeof Metadata.Type
-    permission?: PermissionV1.Ruleset
-    workspaceID?: WorkspaceV2.ID
-  }) => Effect.Effect<Info>
+  readonly create: (
+    input?: {
+      parentID?: SessionID
+      internal?: string
+      title?: string
+      agent?: string
+      model?: Schema.Schema.Type<typeof Model>
+      metadata?: typeof Metadata.Type
+      permission?: PermissionV1.Ruleset
+      workspaceID?: WorkspaceV2.ID
+    },
+    actor?: SessionAudience.Actor,
+  ) => Effect.Effect<Info>
   readonly fork: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Info, NotFound>
   readonly touch: (sessionID: SessionID) => Effect.Effect<void>
   readonly get: (id: SessionID) => Effect.Effect<Info, NotFound>
@@ -631,6 +635,7 @@ const layer: Layer.Layer<
     const sharing = yield* ShareNext.Service
     const { db } = yield* Database.Service
     const database = yield* Database.Service
+    const audience = SessionAudience.make(database)
     const background = yield* BackgroundJob.Service
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
@@ -641,6 +646,8 @@ const layer: Layer.Layer<
       agent?: string
       model?: Schema.Schema.Type<typeof Model>
       parentID?: SessionID
+      forkOf?: SessionID
+      actor?: SessionAudience.Actor
       internal?: string
       workspaceID?: WorkspaceV2.ID
       directory: string
@@ -650,6 +657,9 @@ const layer: Layer.Layer<
     }) {
       const current = yield* InstanceState.context
       const id = SessionID.descending(input.id)
+      yield* audience
+        .register({ sessionID: id, parentID: input.parentID, forkOf: input.forkOf, actor: input.actor })
+        .pipe(Effect.orDie)
       const inherited = input.parentID ? TaskPlace.inherit(id, input.parentID) : undefined
       const ctx = inherited?.home ?? current
       const result: Info = {
@@ -913,19 +923,23 @@ const layer: Layer.Layer<
       } as SessionV1.Part
     })
 
-    const create = Effect.fn("Session.create")(function* (input?: {
-      parentID?: SessionID
-      internal?: string
-      title?: string
-      agent?: string
-      model?: Schema.Schema.Type<typeof Model>
-      metadata?: typeof Metadata.Type
-      permission?: PermissionV1.Ruleset
-      workspaceID?: WorkspaceV2.ID
-    }) {
+    const create = Effect.fn("Session.create")(function* (
+      input?: {
+        parentID?: SessionID
+        internal?: string
+        title?: string
+        agent?: string
+        model?: Schema.Schema.Type<typeof Model>
+        metadata?: typeof Metadata.Type
+        permission?: PermissionV1.Ruleset
+        workspaceID?: WorkspaceV2.ID
+      },
+      actor: SessionAudience.Actor = "owner",
+    ) {
       const ctx = yield* InstanceState.context
       const workspace = yield* InstanceState.workspaceID
       return yield* createNext({
+        actor,
         parentID: input?.parentID,
         internal: input?.internal,
         directory: ctx.directory,
@@ -949,6 +963,7 @@ const layer: Layer.Layer<
       if (subagent && typeof subagent === "object" && !Array.isArray(subagent) && "fork" in subagent)
         delete (subagent as Record<string, unknown>).fork
       const session = yield* createNext({
+        forkOf: original.id,
         directory: ctx.directory,
         path: sessionPath(ctx.worktree, ctx.directory),
         workspaceID: original.workspaceID,
@@ -1214,9 +1229,8 @@ const cancelBackgroundJobs = Effect.fn("Session.cancelBackgroundJobs")(function*
       if (job.metadata?.sessionId === sessionID) return true
       return job.metadata?.parentSessionId === sessionID
     }),
-    ({ info, place }) => place
-      ? background.cancel(info.id).pipe(Effect.provideService(InstanceRef, place))
-      : background.cancel(info.id),
+    ({ info, place }) =>
+      place ? background.cancel(info.id).pipe(Effect.provideService(InstanceRef, place)) : background.cancel(info.id),
     { concurrency: "unbounded", discard: true },
   )
 })
@@ -1433,18 +1447,9 @@ export function summarizeUsage(
     lifetimeTokens,
     lifetimeCost: activity.reduce((total, day) => total + day.cost, 0),
     ...(unpricedResponses ? { unpricedResponses } : {}),
-    inputTokens: tokens.reduce(
-      (total, tokens) => total + Math.max(0, Math.round(tokens.input)),
-      0,
-    ),
-    outputTokens: tokens.reduce(
-      (total, tokens) => total + Math.max(0, Math.round(tokens.output)),
-      0,
-    ),
-    reasoningTokens: tokens.reduce(
-      (total, tokens) => total + Math.max(0, Math.round(tokens.reasoning)),
-      0,
-    ),
+    inputTokens: tokens.reduce((total, tokens) => total + Math.max(0, Math.round(tokens.input)), 0),
+    outputTokens: tokens.reduce((total, tokens) => total + Math.max(0, Math.round(tokens.output)), 0),
+    reasoningTokens: tokens.reduce((total, tokens) => total + Math.max(0, Math.round(tokens.reasoning)), 0),
     cachedTokens: tokens.reduce(
       (total, tokens) => total + Math.max(0, Math.round(tokens.cache.read + tokens.cache.write)),
       0,

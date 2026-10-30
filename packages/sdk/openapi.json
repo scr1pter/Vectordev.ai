@@ -3296,6 +3296,328 @@
         ]
       }
     },
+    "/experimental/session/{sessionID}/tasks/{taskID}/changes": {
+      "get": {
+        "tags": ["experimental"],
+        "operationId": "experimental.task.changes",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses"
+            },
+            "required": true
+          },
+          {
+            "name": "taskID",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "diff",
+            "in": "query",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "enum": ["true", "false"]
+                }
+              ]
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Isolated task changes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskChangesResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "TaskApiError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TaskApiError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Read an isolated child's changed files and, with diff=true, its bounded patch. Only the authenticated owner receives paths and the patch; other viewers receive counts.",
+        "summary": "Review an isolated task's changes",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.experimental.task.changes({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/experimental/session/{sessionID}/tasks/{taskID}/merge": {
+      "post": {
+        "tags": ["experimental"],
+        "operationId": "experimental.task.merge",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses"
+            },
+            "required": true
+          },
+          {
+            "name": "taskID",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Merged isolated changes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskMergeResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "TaskApiError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TaskApiError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Owner only. Bring an isolated child's saved changes, or the selected files, into the parent checkout after a checkpoint.",
+        "summary": "Merge an isolated task",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "maxItems": 500
+                  },
+                  "includeStacked": {
+                    "type": "boolean"
+                  },
+                  "force": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.experimental.task.merge({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/experimental/session/{sessionID}/tasks/{taskID}/discard": {
+      "post": {
+        "tags": ["experimental"],
+        "operationId": "experimental.task.discard",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses"
+            },
+            "required": true
+          },
+          {
+            "name": "taskID",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Discarded isolated changes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskDiscardResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "TaskApiError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TaskApiError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Owner only. Keep a recovery artifact, then remove an isolated child's checkout and branch.",
+        "summary": "Discard an isolated task",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 1000
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.experimental.task.discard({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/experimental/session/{sessionID}/tasks/bridge/register": {
       "post": {
         "tags": ["experimental"],
@@ -48570,6 +48892,100 @@
           }
         },
         "required": ["tasks"],
+        "additionalProperties": false
+      },
+      "TaskChangedFile": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "additions": {
+            "type": "number"
+          },
+          "deletions": {
+            "type": "number"
+          },
+          "binary": {
+            "type": "boolean"
+          }
+        },
+        "required": ["path", "status", "additions", "deletions", "binary"],
+        "additionalProperties": false
+      },
+      "TaskChangesResult": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "$ref": "#/components/schemas/TaskInfo"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskChangedFile"
+            }
+          },
+          "patch": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "mergeable": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          }
+        },
+        "required": ["task", "files", "truncated", "mergeable"],
+        "additionalProperties": false
+      },
+      "TaskMergeResult": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "$ref": "#/components/schemas/TaskInfo"
+          },
+          "merged": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "remaining": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "conflicts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "checkpoint": {
+            "type": "string"
+          }
+        },
+        "required": ["task", "merged", "remaining", "conflicts"],
+        "additionalProperties": false
+      },
+      "TaskDiscardResult": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "$ref": "#/components/schemas/TaskInfo"
+          },
+          "saved": {
+            "type": "string"
+          }
+        },
+        "required": ["task"],
         "additionalProperties": false
       },
       "TaskBridgeRegisterInput": {

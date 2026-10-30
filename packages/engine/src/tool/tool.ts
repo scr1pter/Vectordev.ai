@@ -56,6 +56,10 @@ export type Context<M extends Metadata = Metadata> = {
   getOwnedPaths?: () => Effect.Effect<readonly string[] | undefined>
   /** Runtime ownership check, repeated inside file locks. */
   assertWritable?(input: WritableInput): Effect.Effect<void>
+  /** Verified guest disclosure checks supplied by the runtime, before filesystem access and before output. */
+  assertReadable?(input: { files: readonly string[]; recursive?: boolean }): Effect.Effect<void>
+  assertGitReadable?(input: { cwd: string; args?: string[]; env?: Record<string, string> }): Effect.Effect<void>
+  assertOutput?(value: unknown): Effect.Effect<void>
   messages: SessionV1.WithParts[]
   /**
    * The whole conversation, with what a compaction folded away: the messages the session stored, then this step's.
@@ -150,6 +154,8 @@ function wrap<Parameters extends Schema.Decoder<unknown>, Result extends Metadat
             ),
           )
           const result = yield* execute(decoded as Schema.Schema.Type<Parameters>, ctx)
+          // Private raw output is refused before truncation can save it to a file the model may read later.
+          if (ctx.assertOutput) yield* ctx.assertOutput(result)
           if (result.metadata.truncated !== undefined) {
             return result
           }

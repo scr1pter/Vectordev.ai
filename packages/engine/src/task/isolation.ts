@@ -19,7 +19,7 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises"
-import { Cause, Context, Effect, Layer, Option, Schema, Stream } from "effect"
+import { Cause, Context, Effect, Layer, Option, Schema, Scope, Stream } from "effect"
 import { createTwoFilesPatch, diffLines } from "diff"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { KeyedMutex } from "@vectordevai/core/effect/keyed-mutex"
@@ -27,6 +27,11 @@ import { Global } from "@vectordevai/core/global"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { IsolationCopy } from "@vectordevai/core/isolation/copy"
 import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
+import { SessionAudience } from "@vectordevai/core/session/audience"
+import { Database } from "@vectordevai/core/database/database"
+import { SessionTable } from "@vectordevai/core/session/sql"
+import { SessionSchema } from "@vectordevai/core/session/schema"
+import { eq } from "drizzle-orm"
 import { FileSystem } from "@vectordevai/core/filesystem"
 import { Watcher } from "@vectordevai/core/filesystem/watcher"
 import { InstanceRef } from "@/effect/instance-ref"
@@ -40,6 +45,10 @@ import { TaskPlace } from "./place"
 import { IsolationBase } from "./isolation-base"
 import type { InstanceContext } from "@/project/instance-context"
 import type { Task } from "@vectordevai/schema/task"
+import { SessionCleanup } from "@/session/cleanup"
+import type { Session } from "@/session/session"
+import type { Worktree } from "@/worktree"
+import type { InstanceStore } from "@/project/instance-store"
 
 export class IsolationError extends Schema.TaggedErrorClass<IsolationError>()("TaskIsolation.Error", {
   code: Schema.String,
@@ -102,6 +111,8 @@ export const Record = Schema.Struct({
   mergeable: Schema.optional(Schema.String),
   mergeKey: Schema.optional(Schema.String),
   deleted: Schema.optional(Schema.Boolean),
+  /** Why the owner or parent discarded the changes. Private: never part of info, report or any projection. */
+  discardReason: Schema.optional(Schema.String),
 })
 export type Record = Schema.Schema.Type<typeof Record>
 const decode = Schema.decodeUnknownSync(Record)
@@ -187,6 +198,50 @@ const resolution = (agent: Expected) => ({
   ...(agent.model ? { model: agent.model } : {}),
   permission: agent.permission,
 })
+
+/** Display data only; filesystem authority always comes from the validated private registry. */
+export function info(record: Record, details = false): Task.Isolation {
+  return {
+    mode: record.mode,
+    state: record.state === "running" ? "active" : record.state,
+    files: record.files.length,
+    additions: record.files.reduce((sum, file) => sum + file.additions, 0),
+    deletions: record.files.reduce((sum, file) => sum + file.deletions, 0),
+    ...(details
+      ? {
+          directory: record.directory,
+          ...(record.branch ? { branch: record.branch } : {}),
+          merged: [...record.merged],
+          skipped: [...record.skipped],
+          ...(record.error ? { error: record.error } : {}),
+        }
+      : {}),
+  }
+}
+
+/** Vector's line for an isolated task whose record cannot be read: the result still arrives, without counts. */
+export const UNREADABLE_REPORT =
+  "Vector: this task worked in its own isolated checkout, but its record could not be read. Its changes are not in your files; saving needs attention."
+
+/** Vector's own line is kept outside the subagent's untrusted report and contains no filenames. */
+export function report(record: Record) {
+  const place = record.mode === "worktree" ? "worktree" : "copy"
+  if (record.state === "unchanged")
+    return `Vector: this task worked in its own ${place} and changed no files, so the ${place} was removed.`
+  if (record.state === "settling")
+    return `Vector: this task's partial changes are being saved${record.branch ? ` on branch ${record.branch}` : " in its isolated copy"}.`
+  if (record.state === "failed")
+    return `Vector: this task worked in its own ${place}. Saving needs attention; its checkout and recoverable changes have been retained.`
+  if (record.state === "diverged")
+    return `Vector: this task worked in its own ${place}. Its history diverged from the saved starting point; review its retained changes before merging.`
+  if (record.state !== "changed") return undefined
+  const counts = info(record)
+  return `Vector: this task worked in its own ${place}. ${counts.files} files changed (+${counts.additions} −${counts.deletions})${record.branch ? ` on branch ${record.branch}` : ""}; they are not in your files yet. Review them with task_manage inspect (diff: true), then task_manage merge, or discard.`
+}
+
+export function brief(record: Record) {
+  return `You work in an isolated copy of the repository at ${record.directory} (${record.mode === "worktree" ? `git worktree on branch ${record.branch}` : "independent file copy"}), made from the parent's files when you started, including their uncommitted changes${record.stacked.length ? `, plus the changes of ${record.stacked.join(", ")}` : ""}. Paths under ${record.parentDirectory} in this conversation are under ${record.directory} for you. Edit and run checks here; nothing reaches the parent's files until the parent merges your work. ${record.mode === "worktree" ? "You may commit on your branch; do not switch branches, stash or push. " : ""}Ignored files such as node_modules are not here${record.links.length ? `; linked: ${record.links.join(", ")}` : ""}${record.skipped.length ? `; left out: ${record.skipped.join(", ")}` : ""}. List the files you changed in your report.`
+}
 const paths = (projectID: string, taskID: string) => {
   if (!safeID(projectID) || !safeID(taskID)) throw err("registry", "Invalid isolation registry identifier.")
   const registry = path.join(Global.Path.data, "task-isolation", projectID, taskID)
@@ -196,6 +251,15 @@ const paths = (projectID: string, taskID: string) => {
     directory: path.join(Global.Path.data, "task-worktree", projectID, taskID),
     branch: `vector/subagent/${taskID}`,
   }
+}
+
+async function present(file: string) {
+  return lstat(file)
+    .then(() => true)
+    .catch((cause) => {
+      if (missing(cause)) return false
+      throw cause
+    })
 }
 
 /** Every registry ancestor is a directory, never a link. The final JSON is a private ordinary file. */
@@ -274,8 +338,47 @@ async function readRecord(ctx: InstanceContext, taskID: string): Promise<Record>
     (record.savedPatch !== undefined && path.dirname(record.savedPatch) !== path.join(expected.registry, "patches"))
   )
     throw err("registry", "Isolation registry does not match the launching project.")
-  return record
+  const tombstone = path.join(expected.registry, "deleted.json")
+  await guarded(tombstone)
+  const deleted = await readFile(tombstone, "utf8")
+    .then((value) => JSON.parse(value) as { sessionID: string; projectID: string })
+    .catch((cause) => {
+      if (missing(cause)) return undefined
+      throw cause
+    })
+  if (deleted && (deleted.sessionID !== taskID || deleted.projectID !== ctx.project.id))
+    throw err("registry", "Isolation deletion marker does not match the launching project.")
+  return deleted ? { ...record, deleted: true } : record
 }
+
+/** Deletion only marks durable sweep work; it needs neither an ambient instance nor Git. */
+export const enqueueDeleted = Effect.fn("TaskIsolation.enqueueDeleted")(function* (session: Session.Info) {
+  if (!safeID(session.id) || !safeID(session.projectID)) return
+  const location = paths(session.projectID, session.id)
+  yield* io(async () => {
+    await guarded(location.file)
+    const record = await readFile(location.file, "utf8")
+      .then((value) => decode(JSON.parse(value)))
+      .catch((cause) => {
+        if (missing(cause)) return undefined
+        throw cause
+      })
+    if (!record) return
+    if (
+      record.taskID !== session.id ||
+      record.projectID !== session.projectID ||
+      record.directory !== location.directory ||
+      FileLock.key(record.homeDirectory) !== FileLock.key(session.directory)
+    )
+      throw err("registry", "Deleted session does not match its isolation registry.")
+    await privateJSON(path.join(location.registry, "deleted.json"), {
+      sessionID: session.id,
+      projectID: session.projectID,
+    })
+    queued.add(session.id)
+  })
+})
+SessionCleanup.register(enqueueDeleted)
 const save = (record: Record) => io(() => privateJSON(paths(record.projectID, record.taskID).file, record))
 function baselinePaths(record: Record) {
   const registry = paths(record.projectID, record.taskID).registry
@@ -302,15 +405,19 @@ const baselineHashes = (record: Record) =>
     return Object.assign(hashes, value)
   })
 
-/** Call-time resolution avoids introducing Worktree/InstanceStore bootstrap cycles. Tests can provide real services. */
-const worktrees = Effect.fn("TaskIsolation.worktrees")(function* () {
+/**
+ * Call-time resolution avoids introducing Worktree/InstanceStore bootstrap cycles. Tests can provide real services.
+ * The explicit return types keep TaskIsolation's inferred interface independent of AppRuntime's layer graph, which
+ * itself contains TaskIsolation.
+ */
+const worktrees = Effect.fn("TaskIsolation.worktrees")(function* (): Effect.fn.Return<Worktree.Interface> {
   const { Worktree } = yield* Effect.promise(() => import("@/worktree"))
   const provided = yield* Effect.serviceOption(Worktree.Service)
   if (Option.isSome(provided)) return provided.value
   const { AppRuntime } = yield* Effect.promise(() => import("@/effect/app-runtime"))
   return yield* Effect.promise(() => AppRuntime.runPromise(Worktree.Service))
 })
-const instances = Effect.fn("TaskIsolation.instances")(function* () {
+const instances = Effect.fn("TaskIsolation.instances")(function* (): Effect.fn.Return<InstanceStore.Interface> {
   const { InstanceStore } = yield* Effect.promise(() => import("@/project/instance-store"))
   const provided = yield* Effect.serviceOption(InstanceStore.Service)
   if (Option.isSome(provided)) return provided.value
@@ -319,7 +426,10 @@ const instances = Effect.fn("TaskIsolation.instances")(function* () {
 })
 
 /** Cancel and join every runner/job sharing this work context BEFORE snapshot, disposal or placement retirement. */
-export const quiesce = Effect.fn("TaskIsolation.quiesce")(function* (taskID: string, work: InstanceContext) {
+export const quiesce = Effect.fn("TaskIsolation.quiesce")(function* (
+  taskID: string,
+  work: InstanceContext,
+): Effect.fn.Return<void> {
   const [{ BackgroundJob }, { SessionRunState }, { SessionID }] = yield* Effect.promise(() =>
     Promise.all([import("@/background/job"), import("@/session/run-state"), import("@/session/schema")]),
   )
@@ -353,6 +463,8 @@ export const quiesce = Effect.fn("TaskIsolation.quiesce")(function* (taskID: str
 export const make = Effect.gen(function* () {
   const git = yield* Git.Service
   const config = yield* Config.Service
+  const audience = yield* SessionAudience.Service
+  const database = yield* Database.Service
   const agents = yield* Agent.Service
   const run = (cwd: string, args: string[], options: Omit<Git.Options, "cwd"> = {}) =>
     git.run(["-c", `core.hooksPath=${os.devNull}`, ...args], {
@@ -385,11 +497,19 @@ export const make = Effect.gen(function* () {
     const ctx = yield* home
     return yield* io(() => readRecord(ctx, taskID))
   })
+  // Whether a task is isolated is asked on every ordinary helper's result, resume and revert. A task with no registry
+  // entry is not isolated, and that answer does not depend on the data folder's link guard, so a linked data folder
+  // breaks only isolation itself. An entry that exists is read under the full guard.
   const optional = (taskID: string) =>
-    get(taskID).pipe(Effect.catch((cause) => (missing(cause) ? Effect.succeed(undefined) : Effect.fail(cause))))
+    Effect.gen(function* () {
+      const ctx = yield* home
+      if (!(yield* io(() => present(paths(ctx.project.id, taskID).registry)))) return undefined
+      return yield* get(taskID)
+    }).pipe(Effect.catch((cause) => (missing(cause) ? Effect.succeed(undefined) : Effect.fail(cause))))
   const records = Effect.fn("TaskIsolation.records")(function* () {
     const ctx = yield* home
     const root = path.join(Global.Path.data, "task-isolation", ctx.project.id)
+    if (!(yield* io(() => present(root)))) return []
     yield* io(() => guarded(root))
     const entries = yield* io(() =>
       readdir(root).catch((cause) => {
@@ -685,6 +805,8 @@ export const make = Effect.gen(function* () {
   const check = Effect.fn("TaskIsolation.check")(function* (input: CheckInput) {
     const limits = yield* Limits
     const ctx = yield* home
+    if (!(yield* audience.canIsolate(input.parentSessionID, "owner")))
+      return yield* err("guest", "Isolation requires an owner conversation without guest input.")
     if (/^(explore|review|judge|security|research)/i.test(input.agent.name))
       return yield* err("readonly", "Read-only agents cannot run in task isolation.")
     for (
@@ -700,13 +822,17 @@ export const make = Effect.gen(function* () {
     }
     const existing = yield* records()
     const max = (yield* config.get()).sizing?.subagents?.isolation?.max_kept ?? 20
-    if (existing.filter((record) => record.state === "changed").length >= max)
+    // A deleted conversation's changes wait only for the sweep, which discards them; they no longer await review. The
+    // task being resumed is not counted: resuming moves its record from changed to running, which adds no kept record.
+    if (
+      existing.filter((record) => record.state === "changed" && !record.deleted && record.taskID !== input.resumeID)
+        .length >= max
+    )
       return yield* err("kept", "Review, merge or discard existing isolated tasks before starting another.")
-    if (input.resumeID) {
-      const resumed = yield* get(input.resumeID)
-      if (resumed.agent.name !== input.agent.name || resumed.parentSessionID !== input.parentSessionID)
-        return yield* err("resume", "The resumed task's isolation does not match this launch.")
-    }
+    // A child stopped before its run took a slot has its assignment but no reservation yet; it is reserved on resume.
+    const resumed = input.resumeID ? yield* optional(input.resumeID) : undefined
+    if (resumed && (resumed.agent.name !== input.agent.name || resumed.parentSessionID !== input.parentSessionID))
+      return yield* err("resume", "The resumed task's isolation does not match this launch.")
     const cwd = ctx.worktree === path.parse(ctx.worktree).root ? ctx.directory : ctx.worktree
     const repository = yield* run(cwd, ["rev-parse", "--is-inside-work-tree"])
     const head = repository.exitCode === 0 ? yield* run(cwd, ["rev-parse", "--verify", "HEAD"]) : undefined
@@ -737,9 +863,16 @@ export const make = Effect.gen(function* () {
     const ctx = yield* home
     const admitted = yield* check(input)
     const location = paths(ctx.project.id, input.taskID)
+    // Only an isolated dependency with saved, unmerged changes is stacked (F.4 start step 2). A shared, unchanged,
+    // discarded or merged one has nothing to stack: its work is already in the parent's files, or not there at all.
+    const stacked = yield* Effect.filter(input.dependsOn ?? [], (id) =>
+      safeID(id) ? optional(id).pipe(Effect.map((record) => record?.state === "changed")) : Effect.succeed(false),
+    )
     return yield* lock(
       input.taskID,
       Effect.gen(function* () {
+        yield* audience.fenceIsolation({ sessionID: input.taskID, actor: "owner", directory: location.directory })
+        yield* audience.fenceIsolation({ sessionID: input.taskID, actor: "owner", directory: location.registry })
         if (
           yield* io(() =>
             lstat(location.file)
@@ -769,7 +902,7 @@ export const make = Effect.gen(function* () {
           links: [],
           skipped: [],
           initialSkipped: [],
-          stacked: [...(input.dependsOn ?? [])],
+          stacked,
           merged: [],
           files: [],
         }
@@ -921,8 +1054,17 @@ export const make = Effect.gen(function* () {
       taskID,
       Effect.gen(function* () {
         const ctx = yield* home
-        const record = yield* get(taskID)
-        if (record.state !== "preparing") return yield* err("state", "Isolation is not waiting to start.")
+        const reserved = yield* get(taskID)
+        if (reserved.state !== "preparing") return yield* err("state", "Isolation is not waiting to start.")
+        // A dependency merged or discarded since the reservation has nothing left to stack: merged work is already in
+        // the parent's files. Without this, a reservation would keep failing to start on every resume.
+        const record = {
+          ...reserved,
+          stacked: yield* Effect.filter(reserved.stacked, (id) =>
+            optional(id).pipe(Effect.map((dependency) => dependency?.state === "changed")),
+          ),
+        }
+        yield* audience.fenceIsolation({ sessionID: taskID, actor: "owner", directory: record.directory })
         return yield* Effect.gen(function* () {
           const service = yield* worktrees()
           const settings = (yield* config.get()).sizing?.subagents?.isolation
@@ -982,6 +1124,7 @@ export const make = Effect.gen(function* () {
                   yield* text(record.directory, ["rev-parse", "--git-common-dir"]),
                 ),
               }
+              yield* audience.fenceIsolation({ sessionID: taskID, actor: "owner", directory: bound.gitDirectory })
               yield* save(bound)
               return bound
             }),
@@ -1179,6 +1322,8 @@ export const make = Effect.gen(function* () {
         const record = yield* get(input.taskID)
         if (record.settledAttempt === input.attempt && !(input.recover && record.state === "failed")) return record
         if (record.attempt !== input.attempt) return record
+        // Recovery never saves work this process is still running; its own finalizer does that.
+        if (input.recover && active.has(record.taskID)) return record
         yield* verify(record)
         yield* save({ ...record, state: "settling" })
         const placed = active.get(record.taskID) ?? TaskPlace.get(record.taskID)?.work
@@ -1267,6 +1412,25 @@ export const make = Effect.gen(function* () {
     )
   })
 
+  const markSettling = Effect.fn("TaskIsolation.markSettling")(function* (taskID: string, attempt: number) {
+    return yield* lock(
+      taskID,
+      Effect.gen(function* () {
+        const record = yield* optional(taskID)
+        if (
+          !record ||
+          record.attempt !== attempt ||
+          record.settledAttempt === attempt ||
+          !["running", "settling"].includes(record.state)
+        )
+          return record
+        const next = { ...record, state: "settling" }
+        yield* save(next)
+        return next
+      }),
+    )
+  })
+
   const patch = Effect.fn("TaskIsolation.patch")(function* (record: Record, selected?: readonly string[]) {
     const limits = yield* Limits
     if (["merged", "discarded"].includes(record.state) && record.savedPatch)
@@ -1352,6 +1516,11 @@ export const make = Effect.gen(function* () {
           }
         if (input.diff && !input.control)
           return yield* err("forbidden", "Only the owner or a task controller may inspect an isolation patch.")
+        // A task still preparing, running or saving has no snapshot of this attempt to show or assess, and cannot merge.
+        // It gets its stored counts without Git or hashing, because a Stop's completion barrier takes this lock to
+        // record `settling`, and a Changes view must not keep that Stop waiting.
+        if (["preparing", "running", "settling"].includes(record.state))
+          return { record, files: remaining, patch: undefined, truncated: false, mergeable: "blocked" }
         const data = input.diff ? yield* patch(record) : undefined
         const limits = yield* Limits
         const status =
@@ -1977,7 +2146,7 @@ export const make = Effect.gen(function* () {
     )
   })
 
-  const discard = Effect.fn("TaskIsolation.discard")(function* (input: { taskID: string; by: By }) {
+  const discard = Effect.fn("TaskIsolation.discard")(function* (input: { taskID: string; by: By; reason?: string }) {
     return yield* lock(
       input.taskID,
       Effect.gen(function* () {
@@ -1997,7 +2166,12 @@ export const make = Effect.gen(function* () {
             yield* verify(record)
             yield* assertCaptured(record)
             const saved = yield* savePatch(record, "discarded")
-            const pending = { ...record, state: "discarding", savedPatch: saved }
+            const pending = {
+              ...record,
+              state: "discarding",
+              savedPatch: saved,
+              ...(input.reason ? { discardReason: input.reason.slice(0, 1000) } : {}),
+            }
             yield* save(pending)
             yield* remove(pending)
             const next = { ...pending, state: "discarded" }
@@ -2169,19 +2343,42 @@ export const make = Effect.gen(function* () {
   })
   const sweep = Effect.fn("TaskIsolation.sweep")(function* (input: { force?: boolean } = {}) {
     const ctx = yield* home
-    if (swept.has(ctx.project.id) && !input.force) return []
+    // The registry is scanned at most once per project per process. Conversations deleted after that are handed over
+    // through `queued`, and each later pass sweeps those, so their checkouts do not wait for a restart.
+    const scan = !swept.has(ctx.project.id) || input.force === true
+    if (!scan && queued.size === 0) return []
     swept.add(ctx.project.id)
+    const candidates = scan
+      ? yield* records()
+      : (yield* Effect.forEach([...queued], (id) => optional(id).pipe(Effect.option))).flatMap((item) =>
+          Option.isSome(item) && item.value ? [item.value] : [],
+        )
     const output: string[] = []
-    for (const record of yield* records()) {
+    for (const record of candidates) {
       if (!record.deleted && !queued.has(record.taskID)) continue
       if (active.has(record.taskID)) continue
-      if (["preparing", "failed", "discarding"].includes(record.state))
+      // A save that already failed for this attempt is not run again here. TaskRecovery's boot pass, which runs before
+      // this sweep, retries it; every pass (each 5 minutes) would rewrite the record and run Git again.
+      const settledFailure = record.state === "failed" && record.settledAttempt === record.attempt
+      if (["preparing", "failed", "discarding"].includes(record.state) && !settledFailure)
         yield* reconcile(record.taskID).pipe(Effect.option)
-      const result = yield* discard({ taskID: record.taskID, by: { kind: "owner" } }).pipe(Effect.option)
-      if (Option.isSome(result)) {
+      const refused = yield* discard({ taskID: record.taskID, by: { kind: "owner" } }).pipe(
+        Effect.as(undefined),
+        Effect.catch((error) => Effect.succeed(error)),
+      )
+      if (!refused) {
         output.push(record.taskID)
         queued.delete(record.taskID)
+        continue
       }
+      // A save still in progress is swept by a later pass. Anything else waits for the next start, whose registry scan
+      // finds the conversation's deletion marker again.
+      if (refused instanceof IsolationError && refused.code === "running") continue
+      queued.delete(record.taskID)
+      yield* Effect.logWarning("a deleted conversation's isolated task was kept until the next start", {
+        taskID: record.taskID,
+        error: refused,
+      })
     }
     return output
   })
@@ -2191,23 +2388,48 @@ export const make = Effect.gen(function* () {
     queued.add(taskID)
     yield* save({ ...record, deleted: true })
   })
-  /** Wire into execution admission in WP28: a retired isolation family must never silently run at home. */
+  /**
+   * Execution admission: a retired isolation family must never silently run at home. Isolation fences its whole
+   * family owner-only before the first child exists, so an unfenced family cannot hold isolation records and is
+   * admitted without walking its ancestors.
+   */
   const admit = Effect.fn("TaskIsolation.admit")(function* (sessionID: string) {
-    for (
-      let id: string | undefined = sessionID, seen = new Set<string>();
-      id && !seen.has(id);
-      id = TaskPlace.parentOf(id)
-    ) {
+    if (!(yield* audience.isPrivate(sessionID))) return
+    const seen = new Set<string>()
+    for (let id: string | undefined = sessionID; id && !seen.has(id); ) {
       seen.add(id)
+      const row: { parentID: string | null } | undefined = yield* database.db
+        .select({ parentID: SessionTable.parent_id })
+        .from(SessionTable)
+        .where(eq(SessionTable.id, SessionSchema.ID.make(id)))
+        .get()
+        .pipe(Effect.orDie)
+      // A missing target is left to the caller's ordinary not-found handling.
+      if (!row && id === sessionID) return
+      if (!row)
+        return yield* err(
+          "retired",
+          "This task's parent no longer exists. Fork it into a new conversation before running it.",
+        )
       const record = yield* optional(id)
-      if (!record) continue
-      const place = TaskPlace.get(id)
-      if (record.state !== "running" || !place || FileLock.key(place.work.directory) !== FileLock.key(record.directory))
-        return yield* err("retired", "Resume this isolated task through its parent before running it or a descendant.")
+      if (record) {
+        const place = TaskPlace.get(id)
+        if (
+          record.state !== "running" ||
+          !place ||
+          FileLock.key(place.work.directory) !== FileLock.key(record.directory)
+        )
+          return yield* err(
+            "retired",
+            "Resume this isolated task through its parent before running it or a descendant.",
+          )
+      }
+      id = row.parentID ?? undefined
     }
   })
   return {
     check,
+    fence: (sessionID: string) => audience.fenceIsolation({ sessionID, actor: "owner" }),
     reserve,
     start,
     settle,
@@ -2218,6 +2440,8 @@ export const make = Effect.gen(function* () {
     reconcile,
     sweep,
     get,
+    find: optional,
+    markSettling,
     records,
     enqueue,
     admit,
@@ -2226,6 +2450,43 @@ export const make = Effect.gen(function* () {
 
 export type Interface = Effect.Success<typeof make>
 export class Service extends Context.Service<Service, Interface>()("@vector/TaskIsolation") {}
+
+/**
+ * The save barrier a task's background job runs once its last run ends (F.4 settle), shared by the task tool and
+ * `TaskManager.resume`. A normal end is saved before the job's waiters are released. A stop or interrupt records
+ * `settling` and forks the save into `scope`, so neither the Stop nor the control lock waits on Git.
+ */
+export const complete = Effect.fn("TaskIsolation.complete")(function* (input: {
+  isolation: Interface
+  taskID: string
+  attempt: number
+  status: string
+  scope: Scope.Scope
+  mirror: (record: Record) => Effect.Effect<void, unknown>
+}) {
+  const current = yield* input.isolation.find(input.taskID)
+  // A run stopped before its slot reserved nothing to save; a later attempt saves its own run.
+  if (!current || current.attempt !== input.attempt) return
+  const saving = yield* input.isolation.markSettling(input.taskID, input.attempt)
+  if (saving) yield* input.mirror(saving)
+  const save = input.isolation
+    .settle({ taskID: input.taskID, attempt: input.attempt })
+    .pipe(Effect.flatMap(input.mirror))
+  if (input.status === "cancelled" || input.status === "interrupted") {
+    yield* save.pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("isolated task save needs recovery", { taskID: input.taskID, cause }),
+      ),
+      Effect.forkIn(input.scope, { startImmediately: true }),
+    )
+    return
+  }
+  yield* save
+})
 export const layer = Layer.effect(Service, make)
-export const node = LayerNode.make({ service: Service, layer, deps: [Git.node, Config.node, Agent.node] })
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [Git.node, Config.node, Agent.node, SessionAudience.node, Database.node],
+})
 export * as TaskIsolation from "./isolation"

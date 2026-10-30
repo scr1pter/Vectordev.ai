@@ -93,12 +93,21 @@ import type {
   ExperimentalTaskBridgeRegisterData,
   ExperimentalTaskBridgeRegisterErrors,
   ExperimentalTaskBridgeRegisterResponses,
+  ExperimentalTaskChangesData,
+  ExperimentalTaskChangesErrors,
+  ExperimentalTaskChangesResponses,
+  ExperimentalTaskDiscardData,
+  ExperimentalTaskDiscardErrors,
+  ExperimentalTaskDiscardResponses,
   ExperimentalTaskInspectData,
   ExperimentalTaskInspectErrors,
   ExperimentalTaskInspectResponses,
   ExperimentalTaskListData,
   ExperimentalTaskListErrors,
   ExperimentalTaskListResponses,
+  ExperimentalTaskMergeData,
+  ExperimentalTaskMergeErrors,
+  ExperimentalTaskMergeResponses,
   ExperimentalTaskMessageData,
   ExperimentalTaskMessageErrors,
   ExperimentalTaskMessageResponses,
@@ -1350,6 +1359,59 @@ export class Task extends HeyApiClient {
       ThrowOnError
     >({
       url: "/experimental/session/{sessionID}/tasks/resume",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+    })
+  }
+
+  /**
+   * Review an isolated task's changes
+   *
+   * Read an isolated child's changed files and, with diff=true, its bounded patch. Only the authenticated owner receives paths and the patch; other viewers receive counts.
+   */
+  public changes<ThrowOnError extends boolean = false>(options: Options<ExperimentalTaskChangesData, ThrowOnError>) {
+    return (options.client ?? this.client).get<
+      ExperimentalTaskChangesResponses,
+      ExperimentalTaskChangesErrors,
+      ThrowOnError
+    >({ url: "/experimental/session/{sessionID}/tasks/{taskID}/changes", ...options })
+  }
+
+  /**
+   * Merge an isolated task
+   *
+   * Owner only. Bring an isolated child's saved changes, or the selected files, into the parent checkout after a checkpoint.
+   */
+  public merge<ThrowOnError extends boolean = false>(options: Options<ExperimentalTaskMergeData, ThrowOnError>) {
+    return (options.client ?? this.client).post<
+      ExperimentalTaskMergeResponses,
+      ExperimentalTaskMergeErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/session/{sessionID}/tasks/{taskID}/merge",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+    })
+  }
+
+  /**
+   * Discard an isolated task
+   *
+   * Owner only. Keep a recovery artifact, then remove an isolated child's checkout and branch.
+   */
+  public discard<ThrowOnError extends boolean = false>(options: Options<ExperimentalTaskDiscardData, ThrowOnError>) {
+    return (options.client ?? this.client).post<
+      ExperimentalTaskDiscardResponses,
+      ExperimentalTaskDiscardErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/session/{sessionID}/tasks/{taskID}/discard",
       ...options,
       headers: {
         "Content-Type": "application/json",

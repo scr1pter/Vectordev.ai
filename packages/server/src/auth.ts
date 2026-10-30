@@ -159,9 +159,16 @@ const guestBootstrapRoutes = new Set([
 // The guest gate judges the route the router matched, never the request path: the router ignores case, repeated
 // and trailing slashes and anything after ';' or '?', and a URL parser reads a leading '//' as a host and resolves
 // '..', so any re-parsed spelling of an owner-only route can differ from the route that actually runs.
-export const ownerOnlyRequest = Effect.gen(function* () {
+// A guest is refused every owner-only route, and so are owner credentials carrying the forwarded-guest marker
+// (`forwarded`), except a warp's steal. There the marker, which engines before WP28 send, says a guest worked in the
+// session on the sending engine, and its handler takes the request as a guest's: it refuses a private session and
+// records guest input before the move. The marker therefore only narrows what the same credentials may do without it,
+// and the replica the warp has already replayed keeps its guest provenance.
+export const refusedRequest = Effect.fnUntraced(function* (guest: boolean, forwarded: boolean) {
+  if (!guest && !forwarded) return false
   const request = yield* HttpServerRequest.HttpServerRequest
   const route = yield* HttpRouter.RouteContext
+  if (!guest && request.method === "POST" && route.route.path === "/sync/steal") return false
   return isOwnerOnlyRoute(request.method, route.route.path)
 })
 
@@ -193,6 +200,8 @@ export function isOwnerOnlyRoute(method: string, route: string) {
   if (route.startsWith("/experimental/worktree")) return method !== "GET" && method !== "HEAD"
   // Committing and switching branches run the repository's git hooks, programs that run as the owner.
   if (route === "/vcs/commit" || route === "/vcs/switch") return true
+  // Merging writes an isolated subagent's changes into the owner's checkout, and discarding deletes its worktree.
+  if (/\/experimental\/session\/[^/]+\/tasks\/[^/]+\/(?:merge|discard)$/.test(route)) return true
   if (
     route.startsWith("/global/") ||
     route === "/experimental/console" ||

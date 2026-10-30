@@ -1,4 +1,5 @@
 import { NodeHttpServer } from "@effect/platform-node"
+import { SessionAudience } from "@vectordevai/core/session/audience"
 import fs from "fs/promises"
 import { connect } from "node:net"
 import path from "path"
@@ -1496,6 +1497,83 @@ test("a guest stops or backgrounds a session's helpers only when it controls tha
   }
 }, 30_000)
 
+// Routes 4–6 (WP28): a guest with view scope may ask for an isolated task's counts, never merge or discard, even in
+// a session it controls; a guest outside the session's scope cannot ask at all.
+test("a guest may review isolated task counts in its own session, and only the owner merges or discards", async () => {
+  await using tmp = await tmpdir({ trusted: true, git: true, config: { formatter: false, lsp: false } })
+  await using elsewhere = await tmpdir({ trusted: true, git: true, config: { formatter: false, lsp: false } })
+  const previousWorkspaceID = Flag.VECTOR_WORKSPACE_ID
+  const keys = [
+    "VECTOR_SERVER_USERNAME",
+    "VECTOR_SERVER_PASSWORD",
+    "VECTOR_SERVER_GUEST_USERNAME",
+    "VECTOR_SERVER_GUEST_PASSWORD",
+    "VECTOR_SERVER_GUEST_WORKSPACES",
+    "VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES",
+    "VECTOR_SERVER_GUEST_SESSIONS",
+    "VECTOR_DISABLE_DEFAULT_PLUGINS",
+  ] as const
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
+  const claimedID = SessionV2.ID.create()
+  Object.assign(process.env, {
+    VECTOR_SERVER_USERNAME: "vector",
+    VECTOR_SERVER_PASSWORD: "owner-secret",
+    VECTOR_SERVER_GUEST_USERNAME: "guest",
+    VECTOR_SERVER_GUEST_PASSWORD: "guest-secret",
+    VECTOR_SERVER_GUEST_WORKSPACES: "wrk_allowed",
+    VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES: JSON.stringify({ wrk_allowed: tmp.path }),
+    VECTOR_SERVER_GUEST_SESSIONS: claimedID,
+    VECTOR_DISABLE_DEFAULT_PLUGINS: "1",
+  })
+  const listener = await Server.listen({ hostname: "127.0.0.1", port: 0 })
+  const owner = { authorization: basic("vector", "owner-secret"), "content-type": "application/json" }
+  const guest = { authorization: basic("guest", "guest-secret"), "content-type": "application/json" }
+  const call = (route: string, init: RequestInit = {}) =>
+    fetch(new URL(route, listener.url), { ...init, keepalive: false })
+  try {
+    Flag.VECTOR_WORKSPACE_ID = "wrk_allowed"
+    // The owner's session in another project, outside the guest's workspace.
+    const ownerSession = (await (
+      await call(`/session?directory=${encodeURIComponent(elsewhere.path)}`, {
+        method: "POST",
+        headers: owner,
+        body: "{}",
+      })
+    ).json()) as { id: string }
+    const claimed = await call("/api/session", {
+      method: "POST",
+      headers: owner,
+      body: JSON.stringify({ id: claimedID, location: { directory: tmp.path, workspaceID: "wrk_allowed" } }),
+    })
+    expect(claimed.status).toBe(200)
+    const task = (id: string, action: string) => `/experimental/session/${id}/tasks/ses_missing/${action}`
+
+    // View scope reaches the task lookup (no such isolated task here); outside it the guest is refused.
+    const counts = await call(`${task(claimedID, "changes")}?diff=true`, { headers: guest })
+    expect(counts.status).toBe(400)
+    expect(await counts.json()).toMatchObject({ code: "not_found" })
+    expect((await call(task(ownerSession.id, "changes"), { headers: guest })).status).toBe(403)
+    for (const action of ["merge", "discard"]) {
+      // Control of the session does not make the guest the owner.
+      expect((await call(task(claimedID, action), { method: "POST", headers: guest, body: "{}" })).status).toBe(403)
+      expect((await call(task(ownerSession.id, action), { method: "POST", headers: guest, body: "{}" })).status).toBe(
+        403,
+      )
+      expect((await call(task(ownerSession.id, action), { method: "POST", headers: owner, body: "{}" })).status).toBe(
+        400,
+      )
+    }
+  } finally {
+    Flag.VECTOR_WORKSPACE_ID = previousWorkspaceID
+    await listener.stop(true)
+    for (const key of keys) {
+      const value = previous[key]
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}, 30_000)
+
 test("a guest reads its repository's trust but is told only the owner can approve it", async () => {
   // Approving trust is owner-only, so the app must not ask an invited guest a question whose answer is refused.
   await using tmp = await tmpdir({
@@ -1742,7 +1820,16 @@ describe("a guest's task resume", () => {
         ]),
       ),
       { disableListenLog: true, disableLogger: true },
-    ).pipe(Layer.provideMerge(NodeHttpServer.layerTest)),
+    ).pipe(
+      Layer.provideMerge(NodeHttpServer.layerTest),
+      // Handlers read the audience per request. No conversation here is owner-only; the mocked sessions count as known.
+      Layer.provide(
+        Layer.mock(SessionAudience.Service)({
+          knows: () => Effect.succeed(true),
+          isPrivate: () => Effect.succeed(false),
+        }),
+      ),
+    ),
   )
   const resume = (taskIDs: string[], headers: Record<string, string>) =>
     HttpClientRequest.post(`/experimental/session/${rootID}/tasks/resume`).pipe(

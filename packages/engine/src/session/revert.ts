@@ -16,6 +16,11 @@ import { BrainWorkflow } from "@vectordevai/core/brain/workflow"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { Instruction } from "./instruction"
 import { FileState } from "@/tool/file-state"
+import { TaskIsolation } from "@/task/isolation"
+
+export class IsolatedError extends Schema.TaggedErrorClass<IsolatedError>()("SessionRevert.IsolatedError", {
+  message: Schema.String,
+}) {}
 
 export const RevertInput = Schema.Struct({
   sessionID: SessionID,
@@ -30,10 +35,10 @@ export interface Interface {
   // reporting a successful undo that restored nothing.
   readonly revert: (
     input: RevertInput,
-  ) => Effect.Effect<Session.Info, Session.BusyError | Snapshot.SnapshotUnavailableError>
+  ) => Effect.Effect<Session.Info, Session.BusyError | Snapshot.SnapshotUnavailableError | IsolatedError>
   readonly unrevert: (input: {
     sessionID: SessionID
-  }) => Effect.Effect<Session.Info, Session.BusyError | Snapshot.SnapshotUnavailableError>
+  }) => Effect.Effect<Session.Info, Session.BusyError | Snapshot.SnapshotUnavailableError | IsolatedError>
   readonly cleanup: (session: Session.Info) => Effect.Effect<void>
 }
 
@@ -54,8 +59,17 @@ const layer = Layer.effect(
     const workflow = yield* BrainWorkflow.Service
     const instruction = yield* Instruction.Service
     const guests = yield* FreeModelGuests.Service
+    const isolation = yield* TaskIsolation.Service
+    const refuseIsolated = Effect.fn("SessionRevert.refuseIsolated")(function* (sessionID: SessionID) {
+      if (yield* isolation.find(sessionID).pipe(Effect.orDie))
+        return yield* new IsolatedError({
+          message:
+            "Review isolated changes with task_manage inspect (diff: true), then merge or discard them; session revert cannot change this checkout.",
+        })
+    })
 
     const revert = Effect.fn("SessionRevert.revert")(function* (input: RevertInput) {
+      yield* refuseIsolated(input.sessionID)
       yield* state.assertNotBusy(input.sessionID)
       const all = yield* sessions.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)
       let lastUser: SessionV1.User | undefined
@@ -110,6 +124,7 @@ const layer = Layer.effect(
     })
 
     const unrevert = Effect.fn("SessionRevert.unrevert")(function* (input: { sessionID: SessionID }) {
+      yield* refuseIsolated(input.sessionID)
       yield* Effect.logInfo("unreverting", { sessionID: input.sessionID })
       yield* state.assertNotBusy(input.sessionID)
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
@@ -206,6 +221,7 @@ export const node = LayerNode.make({
   service: Service,
   layer: layer,
   deps: [
+    TaskIsolation.node,
     Session.node,
     Snapshot.node,
     Storage.node,

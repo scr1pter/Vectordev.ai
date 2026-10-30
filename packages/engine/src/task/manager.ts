@@ -8,6 +8,8 @@ import { PartTable } from "@vectordevai/core/session/sql"
 import { BackgroundJob } from "@/background/job"
 import { TaskJobs } from "./jobs"
 import { TaskPlace } from "./place"
+import { TaskIsolation } from "./isolation"
+import { RequestOwner } from "@vectordevai/server/request-owner"
 import { Session } from "@/session/session"
 import { SessionStatus } from "@/session/status"
 import { SessionID, MessageID } from "@/session/schema"
@@ -28,6 +30,7 @@ import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { Config } from "@/config/config"
 import { BackgroundJobStore } from "@vectordevai/core/background-job-store"
 import { InstanceState } from "@/effect/instance-state"
+import { InstanceRef } from "@/effect/instance-ref"
 import { disposing } from "@/effect/instance-registry"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { DesktopTasks } from "./desktop"
@@ -74,6 +77,20 @@ export interface Interface {
     (input: ListInput): Effect.Effect<Task.ListResult, Error>
   }
   readonly inspect: (input: { sessionID: SessionID; taskID: string }) => Effect.Effect<Task.InspectResult, Error>
+  readonly changes: (input: {
+    sessionID: SessionID
+    taskID: string
+    diff?: boolean
+    control?: boolean
+  }) => Effect.Effect<Task.ChangesResult, Error>
+  readonly counts: (input: { sessionID: SessionID; taskID: string }) => Effect.Effect<Task.ChangesResult, Error>
+  readonly merge: (input: { sessionID: SessionID } & TaskIsolation.MergeInput) => Effect.Effect<Task.MergeResult, Error>
+  readonly discard: (input: {
+    sessionID: SessionID
+    taskID: string
+    by: TaskIsolation.By
+    reason?: string
+  }) => Effect.Effect<Task.DiscardResult, Error>
   readonly message: (
     input: {
       sessionID: SessionID
@@ -194,6 +211,17 @@ const layer = Layer.effect(
     const forks = yield* SessionFork.Service
     const provider = yield* Provider.Service
     const agents = yield* Agent.Service
+    const isolation = yield* TaskIsolation.Service
+    const isolated = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      effect.pipe(
+        Effect.mapError((cause) => {
+          const code =
+            cause instanceof TaskIsolation.IsolationError && ["running", "conflict", "forbidden"].includes(cause.code)
+              ? (cause.code as "running" | "conflict" | "forbidden")
+              : "invalid"
+          return new Error({ code, message: cause instanceof globalThis.Error ? cause.message : String(cause) })
+        }),
+      )
     const bridge = <A>(effect: Effect.Effect<A, DesktopTasks.Error>) =>
       effect.pipe(Effect.mapError((error) => new Error({ code: error.code, message: error.message })))
     const lock = SubagentLifecycle.controlLock
@@ -323,6 +351,17 @@ const layer = Layer.effect(
         .get()
         .pipe(Effect.orDie)
       const tokens = session.tokens ?? { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+      // A registry that cannot be read leaves this task's isolation unreported rather than failing every list.
+      const privateWork = yield* isolation
+        .find(session.id)
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("isolated task record unreadable", { taskID: session.id, cause }).pipe(
+              Effect.as(undefined),
+            ),
+          ),
+        )
+      const owner = yield* RequestOwner.owner
       const completedAt = current.completedAt ?? job?.completed_at
       return {
         id: session.id,
@@ -375,7 +414,14 @@ const layer = Layer.effect(
           message: ACTIVE.has(status) && job?.status === "running" && !SubagentLifecycle.stopping.has(session.id),
           stop: ACTIVE.has(status) && !SubagentLifecycle.stopping.has(session.id),
           ...(yield* offers(session, current, job, status, recent.length > 0)),
+          ...(privateWork
+            ? {
+                merge: privateWork.state === "changed",
+                discard: ["changed", "diverged"].includes(privateWork.state),
+              }
+            : {}),
         },
+        ...(privateWork ? { isolation: TaskIsolation.info(privateWork, owner) } : {}),
         ...(status === "waiting_on_user" && current.waiting
           ? {
               waiting: SubagentLifecycle.defined({
@@ -530,6 +576,112 @@ const layer = Layer.effect(
           omitted.some((task) => DesktopTasks.owns(task.id)),
       }
       return { tasks: tasks.slice(0, limit), truncated: cut.native || cut.desktop, cut }
+    })
+
+    // A task with no isolation record has nothing to review, merge or discard, and the registry path stays private.
+    const requireIsolated = Effect.fn("TaskManager.requireIsolated")(function* (taskID: SessionID) {
+      const record = yield* isolated(isolation.find(taskID))
+      if (!record) return yield* new Error({ code: "not_found", message: "This task has no isolated changes." })
+      return record
+    })
+
+    const counts: Interface["counts"] = Effect.fn("TaskManager.counts")(function* (input) {
+      const session = yield* requireTask(input.sessionID, input.taskID)
+      const record = yield* requireIsolated(session.id)
+      const count = (value: number) => (Number.isFinite(value) && value >= 0 ? value : 0)
+      const display = TaskIsolation.info(record)
+      const state =
+        display.state === "discarding"
+          ? "settling"
+          : [
+                "preparing",
+                "active",
+                "settling",
+                "unchanged",
+                "changed",
+                "merged",
+                "discarded",
+                "diverged",
+                "failed",
+              ].includes(display.state)
+            ? display.state
+            : "failed"
+      const status =
+        state === "preparing"
+          ? "queued"
+          : ["active", "settling"].includes(state)
+            ? "running"
+            : state === "failed" || state === "diverged"
+              ? "failed"
+              : "completed"
+      return {
+        task: {
+          id: session.id,
+          sessionID: session.id,
+          parentSessionID: session.parentID!,
+          source: "subagent",
+          title: "Isolated task",
+          status,
+          startedAt: 0,
+          elapsedMs: 0,
+          ownedPaths: [],
+          dependsOn: [],
+          resultAvailable: false,
+          attempt: 0,
+          controls: { inspect: false, message: false, stop: false },
+          isolation: {
+            mode: record.mode,
+            state,
+            files: count(display.files ?? 0),
+            additions: count(display.additions ?? 0),
+            deletions: count(display.deletions ?? 0),
+          },
+        },
+        files: [],
+        truncated: false,
+        mergeable: "unknown",
+      }
+    })
+
+    const changes: Interface["changes"] = Effect.fn("TaskManager.changes")(function* (input) {
+      const session = yield* requireTask(input.sessionID, input.taskID)
+      yield* requireIsolated(session.id)
+      const result = yield* isolated(
+        isolation.changes({ taskID: session.id, diff: input.diff, control: input.control }),
+      )
+      return {
+        task: yield* observe(session),
+        files: result.files,
+        ...(result.patch !== undefined ? { patch: result.patch } : {}),
+        truncated: result.truncated,
+        mergeable: result.mergeable,
+      }
+    })
+    const merge: Interface["merge"] = Effect.fn("TaskManager.merge")(function* (input) {
+      const session = yield* requireTask(input.sessionID, input.taskID)
+      if (input.by.kind === "agent" && (session.parentID !== input.sessionID || input.by.sessionID !== input.sessionID))
+        return yield* new Error({ code: "forbidden", message: "An agent may merge only its direct children." })
+      if (input.by.kind === "owner" && !(yield* RequestOwner.owner))
+        return yield* new Error({ code: "forbidden", message: "Only the authenticated owner may merge this task." })
+      yield* requireIsolated(session.id)
+      const result = yield* isolated(isolation.merge(input))
+      return {
+        task: yield* observe(session),
+        merged: result.merged,
+        remaining: result.remaining,
+        conflicts: result.conflicts,
+        ...(result.checkpoint ? { checkpoint: result.checkpoint } : {}),
+      }
+    })
+    const discard: Interface["discard"] = Effect.fn("TaskManager.discard")(function* (input) {
+      const session = yield* requireTask(input.sessionID, input.taskID)
+      if (input.by.kind === "agent" && (session.parentID !== input.sessionID || input.by.sessionID !== input.sessionID))
+        return yield* new Error({ code: "forbidden", message: "An agent may discard only its direct children." })
+      if (input.by.kind === "owner" && !(yield* RequestOwner.owner))
+        return yield* new Error({ code: "forbidden", message: "Only the authenticated owner may discard this task." })
+      yield* requireIsolated(session.id)
+      const result = yield* isolated(isolation.discard(input))
+      return { task: yield* observe(session), ...(result.saved ? { saved: result.saved } : {}) }
     })
 
     const inspect: Interface["inspect"] = Effect.fn("TaskManager.inspect")(function* (input) {
@@ -1000,7 +1152,7 @@ const layer = Layer.effect(
             Effect.gen(function* () {
               if (!("session" in entry) || !entry.session) return entry.task
               const session = entry.session
-              yield* jobs.cancel(session.id)
+              const stopped = yield* jobs.cancel(session.id)
               yield* ops.cancel(session.id)
               return yield* SubagentLifecycle.locked(lock)(
                 Effect.gen(function* () {
@@ -1011,6 +1163,10 @@ const layer = Layer.effect(
                   // While Vector goes away, TaskRecovery owns the record (D.3).
                   if (!record || record.attempt !== entry.attempt || disposing(directory))
                     return yield* observe(current)
+                  // A job that ended on its own before the stop reached it was not stopped. The cancel does not wait for
+                  // its completion (an isolated child's save may still be running Git); whoever waits on the job, its
+                  // watcher or the foreground call, settles and reports its real outcome once that is done.
+                  if (stopped?.status === "completed" || stopped?.status === "error") return yield* observe(current)
                   const status = SubagentLifecycle.open(record)
                     ? (yield* SubagentLifecycle.settle(sessions, session.id, { status: "cancelled" })).status
                     : record.status
@@ -1152,6 +1308,15 @@ const layer = Layer.effect(
       const session = yield* get(found.id)
       const record = SubagentLifecycle.read(session)!
       const running = new Error({ code: "running", message: "This task is still running; send it a message instead." })
+      const privateWork = yield* isolated(isolation.find(session.id))
+      if (privateWork && ["running", "settling"].includes(privateWork.state)) return yield* running
+      // The launch assignment is durable in the record; a child stopped before its slot has no checkout yet.
+      const assigned = privateWork !== undefined || record.isolation !== undefined
+      if (assigned) {
+        const resolved = yield* agents.get(record.agent)
+        if (!resolved) return yield* new Error({ code: "invalid", message: "The task's agent is no longer available." })
+        yield* isolated(isolation.check({ parentSessionID: root.id, agent: resolved, resumeID: session.id }))
+      }
       if ((yield* jobs.get(session.id))?.status === "running" || SubagentLifecycle.stopping.has(session.id))
         return yield* running
       if (!SubagentLifecycle.ownedHere(record)) {
@@ -1199,7 +1364,7 @@ const layer = Layer.effect(
         })
       if (origin === "agent" && !(yield* SubagentLifecycle.agentMayResume(sessions, root.id, record)))
         return yield* new Error({ code: "forbidden", message: SubagentLifecycle.HUMAN_FIRST })
-      return { session, record }
+      return { session, record, assigned }
     })
 
     // Resume (D.3): every child is checked, its owned paths are free and its admission taken before any of them starts.
@@ -1244,20 +1409,23 @@ const layer = Layer.effect(
             const resuming = new Set<string>(checked.map((item) => item.session.id))
             const instance = yield* InstanceState.context
             const conflicts = new Set(
-              checked.flatMap(({ record, session }) =>
-                TaskClaims.overlaps({
-                  tree: instance.worktree,
-                  directory,
-                  parentSessionID: root.id,
-                  taskID: session.id,
-                  paths: record.ownedPaths ?? [],
-                  except: resuming,
-                }),
+              checked.flatMap(({ record, session, assigned }) =>
+                assigned
+                  ? []
+                  : TaskClaims.overlaps({
+                      tree: instance.worktree,
+                      directory,
+                      parentSessionID: root.id,
+                      taskID: session.id,
+                      paths: record.ownedPaths ?? [],
+                      except: resuming,
+                    }),
               ),
             )
             // Resuming siblings must not acquire overlapping assignments in the same batch either.
             for (const [index, item] of checked.entries()) {
               for (const other of checked.slice(0, index)) {
+                if (item.assigned || other.assigned) continue
                 for (const owned of item.record.ownedPaths ?? []) {
                   for (const existing of other.record.ownedPaths ?? []) {
                     if (TaskClaims.pathsOverlap(path.resolve(directory, owned), path.resolve(directory, existing)))
@@ -1365,7 +1533,7 @@ const layer = Layer.effect(
                       ]),
                   ...(text ? [TaskMailbox.envelope(text, { sender: root.id, recipient: id, relation: "parent" })] : []),
                 ].join("\n\n")
-                const work = Effect.gen(function* () {
+                const execute = Effect.gen(function* () {
                   // Queued for a slot until now; running clears the reason.
                   if (queued) {
                     queued = false
@@ -1407,6 +1575,41 @@ const layer = Layer.effect(
                     attempt,
                   })).json
                 })
+                const privateWork = yield* isolated(isolation.find(id))
+                const assigned = privateWork !== undefined || record.isolation !== undefined
+                const work = Effect.gen(function* () {
+                  if (assigned) {
+                    const resolved = yield* agents.get(record.agent)
+                    if (!resolved)
+                      return yield* Effect.fail(new globalThis.Error("The task's agent is no longer available."))
+                    // An assigned child that never reached its slot is reserved now, as its first run would have been.
+                    const started = privateWork
+                      ? (yield* isolation.resume({ taskID: id, attempt, agent: resolved })).record
+                      : (yield* isolation
+                          .reserve({
+                            taskID: id,
+                            parentSessionID: root.id,
+                            agent: resolved,
+                            title: record.title,
+                            attempt,
+                            dependsOn: record.dependsOn,
+                          })
+                          .pipe(Effect.andThen(isolation.start(id)))).record
+                    yield* persist(id, { isolation: TaskIsolation.info(started) }, attempt)
+                  }
+                  return yield* TaskPlace.within(id)(execute)
+                })
+                const complete = (job: BackgroundJob.Info) =>
+                  !assigned
+                    ? Effect.void
+                    : TaskIsolation.complete({
+                        isolation,
+                        taskID: id,
+                        attempt,
+                        status: job.status,
+                        scope,
+                        mirror: (saved) => persist(id, { isolation: TaskIsolation.info(saved) }, attempt),
+                      }).pipe(Effect.provideService(InstanceRef, instance))
                 const waiting = Effect.sync(() => {
                   queued = true
                 }).pipe(
@@ -1427,6 +1630,7 @@ const layer = Layer.effect(
                   title: record.title,
                   paths: record.ownedPaths ?? [],
                   writes: !["explore", "review", "judge", "security"].includes(record.agent),
+                  isolated: assigned,
                 })
                 const claim = ownership.claim
                 TaskClaims.bind(claim, id)
@@ -1456,6 +1660,7 @@ const layer = Layer.effect(
                     },
                     // A row in vector.db, so a restart can tell the parent this child was interrupted again.
                     durable: { parentSessionID: root.id, sessionID: id, directory, attempt },
+                    ...(assigned ? { onComplete: complete } : {}),
                     run: limits.run({ conversationID, childID: id, origin: "resume", waiting }, work).pipe(
                       Effect.onInterrupt(() => ops.cancel(id)),
                       Effect.flatMap((ran) =>
@@ -1543,6 +1748,10 @@ const layer = Layer.effect(
     return Service.of({
       list: list as Interface["list"],
       inspect,
+      changes,
+      counts,
+      merge,
+      discard,
       message,
       report,
       stop,
@@ -1576,6 +1785,7 @@ export const node = LayerNode.make({
     SessionFork.node,
     Provider.node,
     Agent.node,
+    TaskIsolation.node,
   ],
 })
 export * as TaskManager from "./manager"

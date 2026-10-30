@@ -60,6 +60,13 @@ function skillNotFound(body: unknown) {
   )
 }
 
+// A task with no isolation record reaches the task manager and is refused as not found. Merge and discard are sent
+// without a body, as the SDK sends them with no option, so a payload refusal cannot pass for this answer.
+function notIsolated(body: unknown) {
+  object(body)
+  check(body.code === "not_found", "a task with no isolated changes should be refused as not found")
+}
+
 function locationData(validate: (value: any) => void) {
   return (body: any) => {
     object(body)
@@ -1252,6 +1259,10 @@ const scenarios: Scenario[] = [
       (body as { taskAttention?: unknown }).taskAttention === true,
       "capabilities should report that tasks say when they wait on the user",
     )
+    check(
+      (body as { taskIsolation?: unknown }).taskIsolation === true,
+      "capabilities should report the routes that review, merge and discard isolated tasks",
+    )
   }),
   http.protected
     .post("/experimental/session/{sessionID}/background", "experimental.session.background")
@@ -1384,6 +1395,39 @@ const scenarios: Scenario[] = [
       body: { taskIDs: ["ses_missing"] },
     }))
     .status(400),
+  http.protected
+    .get("/experimental/session/{sessionID}/tasks/{taskID}/changes", "experimental.task.changes.missing")
+    .seeded((ctx) => ctx.session({ title: "Task changes owner" }))
+    .at((ctx) => ({
+      path: route("/experimental/session/{sessionID}/tasks/{taskID}/changes", {
+        sessionID: ctx.state.id,
+        taskID: "ses_missing",
+      }),
+      headers: ctx.headers(),
+    }))
+    .json(400, notIsolated),
+  http.protected
+    .post("/experimental/session/{sessionID}/tasks/{taskID}/merge", "experimental.task.merge.missing")
+    .seeded((ctx) => ctx.session({ title: "Task merge owner" }))
+    .at((ctx) => ({
+      path: route("/experimental/session/{sessionID}/tasks/{taskID}/merge", {
+        sessionID: ctx.state.id,
+        taskID: "ses_missing",
+      }),
+      headers: ctx.headers(),
+    }))
+    .json(400, notIsolated),
+  http.protected
+    .post("/experimental/session/{sessionID}/tasks/{taskID}/discard", "experimental.task.discard.missing")
+    .seeded((ctx) => ctx.session({ title: "Task discard owner" }))
+    .at((ctx) => ({
+      path: route("/experimental/session/{sessionID}/tasks/{taskID}/discard", {
+        sessionID: ctx.state.id,
+        taskID: "ses_missing",
+      }),
+      headers: ctx.headers(),
+    }))
+    .json(400, notIsolated),
   http.protected
     .post("/experimental/session/{sessionID}/tasks/resume", "experimental.task.resume.invalid")
     .seeded((ctx) => ctx.session({ title: "Task resume owner" }))

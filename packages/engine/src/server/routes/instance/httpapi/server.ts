@@ -1,5 +1,7 @@
 import { registerRuntimeCleanup } from "@/effect/runtime-cleanup"
 import { PublicSessionShare } from "@vectordevai/core/public-session-share"
+import { SessionAudience } from "@vectordevai/core/session/audience"
+import { AppProcess } from "@vectordevai/core/process"
 import { Config as EffectConfig, Context, Effect, Layer } from "effect"
 import { HttpApiBuilder, OpenApi } from "effect/unstable/httpapi"
 import { HttpClient, HttpMiddleware, HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http"
@@ -254,6 +256,9 @@ const app = LayerNode.group([
   ModelCatalog.node,
   FreeModels.node,
   FreeModelGuests.node,
+  SessionAudience.node,
+  // The server package's filesystem routes probe Git metadata before a guest read.
+  AppProcess.node,
   Brain.node,
   BrainKnowledge.node,
   BrainSkill.node,
