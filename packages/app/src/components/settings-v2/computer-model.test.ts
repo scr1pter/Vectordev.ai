@@ -395,16 +395,6 @@ describe("app lists", () => {
 })
 
 describe("stop shortcut", () => {
-  test("labels keep the accelerator's order on each platform", () => {
-    expect(ComputerSettings.chordLabel(Hands.STOP_CHORD.darwin, "macos")).toBe("⌘⇧Esc")
-    expect(ComputerSettings.chordLabel(Hands.STOP_CHORD.win32, "windows")).toBe("Ctrl+Alt+Shift+Esc")
-    expect(ComputerSettings.chordLabel("Control+Shift+K", "macos")).toBe("⌃⇧K")
-    expect(ComputerSettings.chordLabel("Control+Shift+K", "windows")).toBe("Ctrl+Shift+K")
-    expect(ComputerSettings.chordLabel("Command+Option+F5", "macos")).toBe("⌘⌥F5")
-    expect(ComputerSettings.chordLabel("Super+Alt+K", "windows")).toBe("Win+Alt+K")
-    expect(ComputerSettings.chordLabel("Control+‮K", "windows")).toBe("Ctrl+K")
-  })
-
   const press = (
     code: string,
     modifiers: Partial<ComputerSettings.KeyPress> = {},

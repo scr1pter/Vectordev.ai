@@ -8,6 +8,7 @@ import { SelectV2 } from "@vectordevai/ui/v2/select-v2"
 import { Switch } from "@vectordevai/ui/v2/switch-v2"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
+import { ComputerMainCopy } from "@/features/computer/main-copy"
 import { ComputerOnboarding } from "@/features/computer/onboarding-model"
 import { requestComposerPrompt } from "@/utils/composer-handoff"
 import { createComputerSettings, type AppResult } from "./computer-controller"
@@ -387,7 +388,7 @@ export function SettingsComputerV2(props: { computer: Computer.ComputerPlatform 
                     <div class="settings-v2-row-title">{t("computer.settings.stop")}</div>
                     <div class="settings-v2-row-description">
                       {t("computer.settings.stop.description", {
-                        shortcut: ComputerSettings.chordLabel(current().prefs.stopChord, os()),
+                        shortcut: ComputerMainCopy.chord(current().prefs.stopChord, os()),
                       })}
                     </div>
                     <Show when={store.recording}>

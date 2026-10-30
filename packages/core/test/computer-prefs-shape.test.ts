@@ -95,9 +95,17 @@ describe("computer prefs, policy and commands shape", () => {
     expect(Computer.OverlayAction.literals.map(String).sort()).toEqual(
       ["allow", "continue", "deny", "hand-over", "keep-going", "not-now", "resume", "stop", "takeover"].sort(),
     )
-    // The banner never offers Always allow, and only allow, deny and continue answer an ask.
+    // The banner never offers Always allow. Every ask answer, including Keep going, Hand over and Not now, is bound
+    // to the open ask's request id; stop, take over and resume never are.
     expect(Computer.OverlayAction.literals).not.toContain("always")
-    expect([...Computer.OVERLAY_ANSWERS].sort()).toEqual(["allow", "continue", "deny"])
+    expect([...Computer.OVERLAY_ANSWERS].sort()).toEqual([
+      "allow",
+      "continue",
+      "deny",
+      "hand-over",
+      "keep-going",
+      "not-now",
+    ])
     // Locked use is deferred, so no capability can claim it.
     expect(Computer.Capabilities.fields.features.fields.locked.literal).toBe(false)
   })

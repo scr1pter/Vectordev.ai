@@ -1602,8 +1602,18 @@ export const OverlayAction = Schema.Literals([
 ]).annotate({ identifier: "Computer.OverlayAction" })
 export type OverlayAction = typeof OverlayAction.Type
 
-/** Overlay actions that answer an ask: main rejects them unless `requestID` is the open ask. */
-export const OVERLAY_ANSWERS: readonly OverlayAction[] = Object.freeze(["allow", "deny", "continue"])
+/**
+ * Overlay actions that answer an ask: main rejects them unless `requestID` is the open ask. Keep going extends a
+ * check-in and Hand over gives up the real pointer, so they are bound to their request like Allow.
+ */
+export const OVERLAY_ANSWERS: readonly OverlayAction[] = Object.freeze([
+  "allow",
+  "deny",
+  "continue",
+  "keep-going",
+  "hand-over",
+  "not-now",
+])
 
 /** Renderer IPC channels, each behind `assertTrustedRenderer`. */
 export const IPC_CHANNELS = Object.freeze([

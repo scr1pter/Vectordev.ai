@@ -295,49 +295,7 @@ function timestamp(value: unknown): value is number {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// Stop shortcut
-
-const MAC: Record<string, string> = {
-  command: "⌘",
-  cmd: "⌘",
-  commandorcontrol: "⌘",
-  cmdorctrl: "⌘",
-  super: "⌘",
-  meta: "⌘",
-  control: "⌃",
-  ctrl: "⌃",
-  alt: "⌥",
-  option: "⌥",
-  shift: "⇧",
-  escape: "Esc",
-  esc: "Esc",
-}
-const WINDOWS: Record<string, string> = {
-  control: "Ctrl",
-  ctrl: "Ctrl",
-  commandorcontrol: "Ctrl",
-  cmdorctrl: "Ctrl",
-  alt: "Alt",
-  option: "Alt",
-  shift: "Shift",
-  super: "Win",
-  meta: "Win",
-  command: "Win",
-  cmd: "Win",
-  escape: "Esc",
-  esc: "Esc",
-}
-
-/** An Electron accelerator as the platform writes it, in the accelerator's own order: ⌘⇧Esc, or Ctrl+Alt+Shift+Esc. */
-export function chordLabel(accelerator: string, platform: Platform): string {
-  const names = platform === "macos" ? MAC : WINDOWS
-  return accelerator
-    .split("+")
-    .map((token) => token.trim())
-    .filter(Boolean)
-    .map((token) => names[token.toLowerCase()] ?? Computer.clean(token, 16))
-    .join(platform === "macos" ? "" : "+")
-}
+// Stop shortcut (its label is ComputerMainCopy.chord, which the banner shares)
 
 export type KeyPress = Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "altKey" | "shiftKey" | "metaKey">
 export type Recorded =

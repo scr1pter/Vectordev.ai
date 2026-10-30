@@ -1,4 +1,4 @@
-import type { Computer } from "@vectordevai/schema/computer"
+import { Computer } from "@vectordevai/schema/computer"
 import { Hands } from "@vectordevai/schema/hands"
 
 export * as ComputerMainCopy from "./main-copy"
@@ -81,6 +81,48 @@ export function notificationStopped() {
 /** reason must be a short, fixed Vector-built failure description, never the model's explanation. */
 export function notificationFailed(input: { reason: string }) {
   return `${Hands.NAME} couldn't finish: ${input.reason}`
+}
+
+const MAC: Record<string, string> = {
+  command: "⌘",
+  cmd: "⌘",
+  commandorcontrol: "⌘",
+  cmdorctrl: "⌘",
+  super: "⌘",
+  meta: "⌘",
+  control: "⌃",
+  ctrl: "⌃",
+  alt: "⌥",
+  option: "⌥",
+  shift: "⇧",
+  escape: "Esc",
+  esc: "Esc",
+}
+const WINDOWS: Record<string, string> = {
+  control: "Ctrl",
+  ctrl: "Ctrl",
+  commandorcontrol: "Ctrl",
+  cmdorctrl: "Ctrl",
+  alt: "Alt",
+  option: "Alt",
+  shift: "Shift",
+  super: "Win",
+  meta: "Win",
+  command: "Win",
+  cmd: "Win",
+  escape: "Esc",
+  esc: "Esc",
+}
+
+/** An Electron accelerator as the platform writes it, in the accelerator's own order: ⌘⇧Esc, or Ctrl+Alt+Shift+Esc. */
+export function chord(accelerator: string, platform: "macos" | "windows") {
+  const names = platform === "macos" ? MAC : WINDOWS
+  return accelerator
+    .split("+")
+    .map((token) => token.trim())
+    .filter(Boolean)
+    .map((token) => names[token.toLowerCase()] ?? Computer.clean(token, 16))
+    .join(platform === "macos" ? "" : "+")
 }
 
 export function pause(input: { reason: Computer.PauseReason; app?: string }) {

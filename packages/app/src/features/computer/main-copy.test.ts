@@ -36,6 +36,7 @@ const samples = [
     () => ComputerMainCopy.notificationFailed({ reason: "the app closed" }),
     `${Hands.NAME} couldn't finish: the app closed`,
   ],
+  ["chord", () => ComputerMainCopy.chord(Hands.STOP_CHORD.darwin, "macos"), "⌘⇧Esc"],
   ["pause", () => ComputerMainCopy.pause({ reason: "input" }), "Paused — you have control"],
   [
     "secureTypingDetail",
@@ -147,6 +148,16 @@ describe("desktop main copy", () => {
       `${Hands.NAME} has taken 1 step on this task. Keep going?`,
     )
     expect(ComputerMainCopy.queued({ count: 3 })).toBe("+3 waiting")
+  })
+
+  test("stop shortcut labels keep the accelerator's order on each platform", () => {
+    expect(ComputerMainCopy.chord(Hands.STOP_CHORD.darwin, "macos")).toBe("⌘⇧Esc")
+    expect(ComputerMainCopy.chord(Hands.STOP_CHORD.win32, "windows")).toBe("Ctrl+Alt+Shift+Esc")
+    expect(ComputerMainCopy.chord("Control+Shift+K", "macos")).toBe("⌃⇧K")
+    expect(ComputerMainCopy.chord("Control+Shift+K", "windows")).toBe("Ctrl+Shift+K")
+    expect(ComputerMainCopy.chord("Command+Option+F5", "macos")).toBe("⌘⌥F5")
+    expect(ComputerMainCopy.chord("Super+Alt+K", "windows")).toBe("Win+Alt+K")
+    expect(ComputerMainCopy.chord("Control+\u202eK", "windows")).toBe("Ctrl+K")
   })
 
   test("every pause reason has explicit copy", () => {
