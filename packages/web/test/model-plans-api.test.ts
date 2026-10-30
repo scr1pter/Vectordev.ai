@@ -1726,7 +1726,11 @@ describe("A17 admission and chat", () => {
       accountKey,
       JSON.stringify({ ...account, checkout: { ...checkout, expires: Date.now() + 1_200_000 } }),
     ])
-    state.subscriptions = [{ ...subscription(undefined, undefined, 100), status }]
+    // The upgrade keeps the subscribed period's start. A start recomputed after the wall-clock second ticks opens a new
+    // period, which provisions a second key and fails the fake gateway's first-key check.
+    state.subscriptions = [
+      { ...subscription(state.subscriptions[0]!.items.data[0]!.current_period_start, undefined, 100), status },
+    ]
     calls.length = 0
     commands.length = 0
     return chat({ model: "fixture/max-only", messages: [{ role: "user", content: "fixture" }] })
